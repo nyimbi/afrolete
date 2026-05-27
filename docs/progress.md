@@ -369,6 +369,22 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`. Full
     suite/build/screenshot and live provider execution deferred by user
     instruction during low-battery fast delivery.
+- Implemented slice 021 communication inbox, digests, and AI drafting:
+  - Added a person-scoped communications inbox API for athletes, guardians,
+    parents, and members, with self-access for the recipient and manager access
+    for organization operators.
+  - Added digest generation that collects unread inbox items, chooses an
+    in-app/email/SMS channel from notification preferences, creates a digest
+    message, and records a recipient delivery state.
+  - Added deterministic AI-assisted message drafting for selected organization,
+    team, event, or person scopes, including tone, audience, guardian context,
+    model attribution, and mandatory human review.
+  - Extended the operations console with Draft, Digest, inbox review, digest
+    summary, and read-action controls so communication work is not API-only.
+  - Verification: `uv run ruff check .`,
+    `uv run pytest tests/unit/test_communications.py -q` (5/5),
+    `uv run pytest` (44/44), `pnpm --filter @afrolete/frontend typecheck`,
+    `pnpm --filter @afrolete/frontend build`, `git diff --check`.
 
 ## Implementation Slices
 
@@ -387,14 +403,15 @@ athlete-development platform:
 | 010 - Athlete performance metrics and assessments | Partial | Backend tests 31/31; PostgreSQL migration upgrade/downgrade; frontend build | Metric definitions, observations, ALS-style assessments, summaries, and console recording flows are implemented; automated video/audio/wearable ingestion remains. |
 | 011 - Training and coaching plans | Partial | Backend tests 34/34; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Drill library, scoped plans, weekly plan blocks, session load planning, and console workflows are implemented; automatic AI plan generation, readiness check-ins, and post-session feedback loops remain. |
 | 012 - Competition management foundation | Partial | Backend tests 36/36; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Competition records, team registration, fixtures, official assignments, match events, result confirmation, computed standings, and console workflows are implemented; automated fixture generation, bracket visualization, conflict optimization, ticketing, and broadcast operations remain. |
-| 013 - Communications and notifications | Partial | Backend tests 39/39; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Templates, scoped broadcasts, recipient expansion, delivery/read audit records, preferences, quiet hours, emergency override, guardian copy for minors, and console workflows are implemented; live transport adapters, digest jobs, and parent inbox remain. |
+| 013 - Communications and notifications | Partial | Backend tests 39/39; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Templates, scoped broadcasts, recipient expansion, delivery/read audit records, preferences, quiet hours, emergency override, guardian copy for minors, and console workflows are implemented; later slices add delivery adapters, inbox, digests, and drafting. |
 | 014 - Equipment, facilities, and asset operations | Partial | Backend tests 42/42; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Facility profiles, equipment inventory, checkout/return, maintenance work orders, facility bookings, overlap rejection, asset summary metrics, and console workflows are implemented; procurement, supplier scoring, RFID scanning, photo uploads, lease billing, and AI optimization remain. |
 | 015 - Commercial operations fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, commercial summary, and console workflows are implemented; payment gateway settlement, refunds, tax, accounting exports, sponsorship dashboards, and full verification remain. |
 | 016 - Reporting and intelligence fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, and console workflows are implemented; real AI model execution, rendered PDF/Excel generation, charts, benchmark models, and full verification remain. |
 | 017 - SaaS billing and subscription fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, and console workflows are implemented; Stripe/processor webhooks, dunning automation, tax localization, plan-change proration, and full verification remain. |
 | 018 - Frontend Keycloak session handling | Partial | Frontend typecheck; diff check | Browser OIDC authorization-code + PKCE login, bearer-token API attachment, session display, logout URL wiring, and local-mode fallback are implemented; live Keycloak redirect and deployed smoke test remain. |
-| 019 - Communication delivery adapters | Partial | Backend ruff; communications tests 4/4; frontend typecheck | Configurable HTTP webhook dispatch, channel-specific adapter URLs, secured provider delivery callbacks, in-app delivery handling, failure capture, and console dispatch are implemented; real provider credentials, digest jobs, parent inbox, AI drafting, and full verification remain. |
+| 019 - Communication delivery adapters | Partial | Backend ruff; communications tests 4/4; frontend typecheck | Configurable HTTP webhook dispatch, channel-specific adapter URLs, secured provider delivery callbacks, in-app delivery handling, failure capture, and console dispatch are implemented; real provider credentials and background delivery hardening remain. |
 | 020 - Agent task execution fast surface | Partial | Backend ruff; agent tests 2/2; frontend typecheck | Agent tasks can now execute through a deterministic local executor or provider-neutral webhook boundary, produce output refs/review notes, and update console task state; live provider workers, model credential vaulting, run history tables, and governance telemetry remain. |
+| 021 - Communication inbox, digests, and AI drafting | Partial | Backend tests 44/44; frontend typecheck/build | Person inbox, manager/self access, digest generation, notification-preference channel selection, deterministic AI-assisted drafts, console draft/digest/inbox controls, and read actions are implemented; provider-specific credentials, background digest scheduler, and full parent portal remain. |
 
 ## Capability Coverage
 
@@ -415,7 +432,7 @@ Status values:
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, and console workflows are implemented; live provider workers, model credential vaulting, run history tables, and model governance remain. |
 | Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, and console workflows are implemented; automatic AI generation/readiness/feedback loops remain. |
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, and console workflows are implemented; automated fixture generation, bracket visualization, advanced conflict resolution, ticketing, and broadcast operations remain. |
-| Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; digest jobs, parent inbox, provider credentials, and AI drafting remain. |
+| Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, digest generation, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, background digest scheduler, and full parent portal remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, and console workflows are implemented; procurement, supplier scoring, RFID scanning, photo upload, lease billing, and AI utilization optimization remain. |
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, commercial summary, and console workflows are implemented; payment gateway settlement, refunds, tax, accounting exports, sponsorship dashboards, and full verification remain. |
@@ -430,8 +447,8 @@ Status values:
    against the deployed backend auth mode.
 2. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
    SpiceDB key.
-3. Add communication digest jobs, parent inbox, provider-specific credentials,
-   and AI-assisted message drafting.
+3. Add provider-specific communication credentials, background digest scheduler,
+   and full parent portal/inbox experience.
 4. Add procurement, supplier scoring, RFID/barcode scan flows, photo uploads,
    lease billing, and AI utilization recommendations for assets and facilities.
 5. Add payment gateway settlement, refunds, tax handling, accounting exports,

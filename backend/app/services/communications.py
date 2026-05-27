@@ -14,7 +14,9 @@ from app.models.communication import (
     NotificationPreference,
 )
 from app.models.enums import (
+    ChannelPreference,
     CommunicationChannel,
+    CommunicationMessageType,
     CommunicationScopeType,
     MemberSubjectType,
     MessageDeliveryStatus,
@@ -24,7 +26,11 @@ from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.communication import (
+    CommunicationDigestCreate,
+    CommunicationDigestRead,
     CommunicationDispatchSummary,
+    CommunicationDraftRead,
+    CommunicationDraftRequest,
     CommunicationMessageCreate,
     CommunicationTemplateCreate,
     DeliveryWebhookEvent,
@@ -174,6 +180,30 @@ async def list_recipients(
     )
 
 
+async def list_inbox_items(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    person_id: UUID,
+    authz: AuthorizationService,
+) -> list[tuple[MessageRecipient, CommunicationMessage]]:
+    await ensure_view_person_messages(db, identity, organization_id, person_id, authz)
+    rows = (
+        await db.execute(
+            select(MessageRecipient, CommunicationMessage)
+            .join(CommunicationMessage, CommunicationMessage.id == MessageRecipient.message_id)
+            .where(CommunicationMessage.organization_id == organization_id)
+            .where(MessageRecipient.person_id == person_id)
+            .order_by(
+                CommunicationMessage.urgent.desc(),
+                CommunicationMessage.sent_at.desc().nullslast(),
+                CommunicationMessage.created_at.desc(),
+            )
+        )
+    ).all()
+    return list(rows)
+
+
 async def update_recipient_status(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -201,6 +231,110 @@ async def update_recipient_status(
     await db.commit()
     await db.refresh(recipient)
     return recipient
+
+
+async def create_digest(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: CommunicationDigestCreate,
+    authz: AuthorizationService,
+) -> CommunicationDigestRead:
+    await ensure_view_person_messages(db, identity, payload.organization_id, payload.person_id, authz)
+    rows = await list_inbox_items(db, identity, payload.organization_id, payload.person_id, authz)
+    source_rows = [
+        (recipient, message)
+        for recipient, message in rows
+        if recipient.delivery_status != MessageDeliveryStatus.READ
+        and not message.subject.lower().startswith("digest:")
+    ][:20]
+    person = await db.get(Person, payload.person_id)
+    if person is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+    channel = payload.channel or await digest_channel_for_person(db, payload.organization_id, payload.person_id)
+    subject = f"Digest: {payload.frequency.value.replace('_', ' ')}"
+    body = digest_body(person, source_rows)
+    now = datetime.now(UTC)
+
+    message = CommunicationMessage(
+        organization_id=payload.organization_id,
+        template_id=None,
+        created_by_person_id=identity.person_id,
+        message_type=CommunicationMessageType.REPORT,
+        channel=channel,
+        scope_type=CommunicationScopeType.PERSON,
+        scope_id=payload.person_id,
+        subject=subject,
+        body=body,
+        urgent=False,
+        quiet_hours_override=False,
+        scheduled_for=None,
+        sent_at=now,
+        status="sent",
+    )
+    db.add(message)
+    await db.flush()
+
+    recipient = MessageRecipient(
+        message_id=message.id,
+        person_id=payload.person_id,
+        destination=destination_for_channel(person, channel),
+        delivery_status=MessageDeliveryStatus.DELIVERED
+        if channel == CommunicationChannel.IN_APP
+        else initial_delivery_status(person, channel),
+        delivered_at=now if channel == CommunicationChannel.IN_APP else None,
+    )
+    db.add(recipient)
+    await db.commit()
+    await db.refresh(message)
+    await db.refresh(recipient)
+
+    return CommunicationDigestRead(
+        message_id=message.id,
+        recipient_id=recipient.id,
+        person_id=payload.person_id,
+        frequency=payload.frequency,
+        channel=channel,
+        item_count=len(source_rows),
+        subject=message.subject,
+        body=message.body,
+    )
+
+
+async def draft_message(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: CommunicationDraftRequest,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> CommunicationDraftRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_communications(authz, identity, payload.organization_id)
+    await validate_message_scope(db, payload.organization_id, payload.scope_type, payload.scope_id)
+    settings = settings or get_settings()
+    scope_label = await scope_display_name(db, payload.scope_type, payload.scope_id)
+    subject = clamp_text(f"{scope_label}: {payload.intent.strip()}", 240)
+    guardian_line = (
+        "Guardians are copied where safeguarding rules require it. "
+        if payload.include_guardian_context
+        else ""
+    )
+    body = (
+        f"Hello {payload.audience},\n\n"
+        f"{payload.intent.strip()}\n\n"
+        f"Tone: {payload.tone.strip()}. {guardian_line}"
+        "Please review the details, confirm any required action, and contact the organization "
+        "if anything looks incorrect.\n\n"
+        "AfroLete"
+    )
+    return CommunicationDraftRead(
+        subject=subject,
+        body=body[:8000],
+        model_name=settings.agent_default_model,
+        rationale=(
+            "Deterministic AI-assist draft generated from message intent, audience, scope, "
+            "and safeguarding context; human review remains required."
+        ),
+    )
 
 
 async def dispatch_message(
@@ -414,6 +548,59 @@ async def ensure_person_in_organization_context(
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
 
 
+async def ensure_view_person_messages(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    person_id: UUID,
+    authz: AuthorizationService,
+) -> None:
+    await ensure_person_in_organization_context(db, organization_id, person_id)
+    if identity.person_id == person_id:
+        return
+    await ensure_manage_communications(authz, identity, organization_id)
+
+
+async def validate_message_scope(
+    db: AsyncSession,
+    organization_id: UUID,
+    scope_type: CommunicationScopeType,
+    scope_id: UUID,
+) -> None:
+    if scope_type == CommunicationScopeType.ORGANIZATION:
+        await get_organization(db, scope_id)
+        if scope_id != organization_id:
+            raise HTTPException(status_code=422, detail="Organization scope must match organization_id")
+    elif scope_type == CommunicationScopeType.TEAM:
+        team = await db.get(Team, scope_id)
+        if team is None or team.organization_id != organization_id:
+            raise HTTPException(status_code=404, detail="Team not found")
+    elif scope_type == CommunicationScopeType.EVENT:
+        event = await db.get(Event, scope_id)
+        if event is None or event.organization_id != organization_id:
+            raise HTTPException(status_code=404, detail="Event not found")
+    elif scope_type == CommunicationScopeType.PERSON:
+        await ensure_person_in_organization_context(db, organization_id, scope_id)
+
+
+async def scope_display_name(
+    db: AsyncSession,
+    scope_type: CommunicationScopeType,
+    scope_id: UUID,
+) -> str:
+    if scope_type == CommunicationScopeType.ORGANIZATION:
+        organization = await db.get(Organization, scope_id)
+        return organization.name if organization else "Organization"
+    if scope_type == CommunicationScopeType.TEAM:
+        team = await db.get(Team, scope_id)
+        return team.name if team else "Team"
+    if scope_type == CommunicationScopeType.EVENT:
+        event = await db.get(Event, scope_id)
+        return event.title if event else "Event"
+    person = await db.get(Person, scope_id)
+    return person.display_name if person else "Member"
+
+
 async def is_minor(db: AsyncSession, person_id: UUID) -> bool:
     person = await db.get(Person, person_id)
     if person is None or person.date_of_birth is None:
@@ -455,6 +642,51 @@ def initial_delivery_status(person: Person, channel: CommunicationChannel) -> Me
     if destination is None and channel != CommunicationChannel.IN_APP:
         return MessageDeliveryStatus.SUPPRESSED
     return MessageDeliveryStatus.QUEUED
+
+
+async def digest_channel_for_person(
+    db: AsyncSession,
+    organization_id: UUID,
+    person_id: UUID,
+) -> CommunicationChannel:
+    preference = await db.scalar(
+        select(NotificationPreference).where(
+            NotificationPreference.organization_id == organization_id,
+            NotificationPreference.person_id == person_id,
+        )
+    )
+    if preference is None:
+        return CommunicationChannel.IN_APP
+    return {
+        ChannelPreference.EMAIL: CommunicationChannel.EMAIL,
+        ChannelPreference.SMS: CommunicationChannel.SMS,
+        ChannelPreference.APP: CommunicationChannel.IN_APP,
+        ChannelPreference.ALL: CommunicationChannel.IN_APP,
+    }[preference.channel_preference]
+
+
+def digest_body(
+    person: Person,
+    rows: list[tuple[MessageRecipient, CommunicationMessage]],
+) -> str:
+    if not rows:
+        return f"Hello {person.display_name},\n\nNo unread AfroLete updates need action right now."
+
+    lines = [
+        f"Hello {person.display_name},",
+        "",
+        f"You have {len(rows)} AfroLete update{'s' if len(rows) != 1 else ''}:",
+    ]
+    for index, (recipient, message) in enumerate(rows, start=1):
+        status_label = recipient.delivery_status.value.replace("_", " ")
+        urgent = "urgent " if message.urgent else ""
+        lines.append(f"{index}. {urgent}{message.subject} ({message.channel.value}, {status_label})")
+    lines.extend(["", "Open your AfroLete inbox to review details and respond where needed."])
+    return "\n".join(lines)
+
+
+def clamp_text(value: str, max_length: int) -> str:
+    return value if len(value) <= max_length else f"{value[: max_length - 3]}..."
 
 
 async def deliver_recipient(

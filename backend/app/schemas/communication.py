@@ -88,6 +88,22 @@ class MessageRecipientRead(BaseModel):
     failure_reason: str | None
 
 
+class CommunicationInboxItemRead(BaseModel):
+    recipient_id: UUID
+    message_id: UUID
+    organization_id: UUID
+    subject: str
+    body: str
+    message_type: CommunicationMessageType
+    channel: CommunicationChannel
+    urgent: bool
+    delivery_status: MessageDeliveryStatus
+    sent_at: datetime | None
+    delivered_at: datetime | None
+    read_at: datetime | None
+    failure_reason: str | None
+
+
 class MessageRecipientUpdate(BaseModel):
     delivery_status: MessageDeliveryStatus
     failure_reason: str | None = Field(default=None, max_length=2000)
@@ -110,6 +126,44 @@ class DeliveryWebhookEvent(BaseModel):
     failure_reason: str | None = Field(default=None, max_length=2000)
     delivered_at: datetime | None = None
     read_at: datetime | None = None
+
+
+class CommunicationDigestCreate(BaseModel):
+    organization_id: UUID
+    person_id: UUID
+    frequency: NotificationFrequency = NotificationFrequency.DAILY_DIGEST
+    channel: CommunicationChannel | None = None
+
+
+class CommunicationDigestRead(BaseModel):
+    message_id: UUID
+    recipient_id: UUID
+    person_id: UUID
+    frequency: NotificationFrequency
+    channel: CommunicationChannel
+    item_count: int
+    subject: str
+    body: str
+
+
+class CommunicationDraftRequest(BaseModel):
+    organization_id: UUID
+    message_type: CommunicationMessageType = CommunicationMessageType.ANNOUNCEMENT
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    scope_type: CommunicationScopeType
+    scope_id: UUID
+    intent: str = Field(min_length=4, max_length=1000)
+    tone: str = Field(default="clear and supportive", min_length=2, max_length=120)
+    audience: str = Field(default="members and guardians", min_length=2, max_length=180)
+    include_guardian_context: bool = True
+
+
+class CommunicationDraftRead(BaseModel):
+    subject: str
+    body: str
+    model_name: str
+    review_required: bool = True
+    rationale: str
 
 
 class NotificationPreferenceUpsert(BaseModel):

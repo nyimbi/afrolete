@@ -28,7 +28,10 @@ import type {
   BillingPlanRead,
   BillingSummaryRead,
   ChannelPreference,
+  CommunicationDigestRead,
   CommunicationDispatchSummary,
+  CommunicationDraftRead,
+  CommunicationInboxItemRead,
   CommercialSummaryRead,
   CommunicationChannel,
   CommunicationMessageRead,
@@ -154,6 +157,9 @@ export default function HomePage() {
   const [communicationTemplates, setCommunicationTemplates] = useState<CommunicationTemplateRead[]>([]);
   const [communicationMessages, setCommunicationMessages] = useState<CommunicationMessageRead[]>([]);
   const [messageRecipients, setMessageRecipients] = useState<MessageRecipientRead[]>([]);
+  const [inboxItems, setInboxItems] = useState<CommunicationInboxItemRead[]>([]);
+  const [digestSummary, setDigestSummary] = useState<CommunicationDigestRead | null>(null);
+  const [draftPreview, setDraftPreview] = useState<CommunicationDraftRead | null>(null);
   const [notificationPreference, setNotificationPreference] = useState<NotificationPreferenceRead | null>(null);
   const [facilities, setFacilities] = useState<FacilityRead[]>([]);
   const [equipmentItems, setEquipmentItems] = useState<EquipmentItemRead[]>([]);
@@ -551,6 +557,7 @@ export default function HomePage() {
     () => athletes.find((athlete) => athlete.personId === selectedAthleteId) ?? null,
     [athletes, selectedAthleteId]
   );
+  const selectedInboxPersonId = selectedAthlete?.personId ?? athletes[0]?.personId ?? "";
   const selectedTrainingPlan = useMemo(
     () => trainingPlans.find((plan) => plan.id === selectedTrainingPlanId) ?? null,
     [trainingPlans, selectedTrainingPlanId]
@@ -756,6 +763,14 @@ export default function HomePage() {
     );
     setMessageRecipients(data);
   }, []);
+
+  const loadInbox = useCallback(async (organizationId: string, personId: string) => {
+    const data = await apiRequest<CommunicationInboxItemRead[]>(
+      `/communications/inbox?organization_id=${organizationId}&person_id=${personId}`,
+      { identity }
+    );
+    setInboxItems(data);
+  }, [identity]);
 
   const loadAssets = useCallback(async (organizationId: string, facilityId?: string) => {
     const facilityQuery = facilityId ? `&facility_id=${facilityId}` : "";
@@ -974,6 +989,9 @@ export default function HomePage() {
       setCommunicationTemplates([]);
       setCommunicationMessages([]);
       setMessageRecipients([]);
+      setInboxItems([]);
+      setDigestSummary(null);
+      setDraftPreview(null);
       setNotificationPreference(null);
       setFacilities([]);
       setEquipmentItems([]);
@@ -1147,6 +1165,18 @@ export default function HomePage() {
       () => undefined
     );
   }, [selectedMessageId, loadMessageRecipients, runAction]);
+
+  useEffect(() => {
+    if (!selectedOrganizationId || !selectedInboxPersonId) {
+      setInboxItems([]);
+      return;
+    }
+    runAction(
+      "load-communication-inbox",
+      () => loadInbox(selectedOrganizationId, selectedInboxPersonId),
+      () => undefined
+    );
+  }, [selectedInboxPersonId, selectedOrganizationId, loadInbox, runAction]);
 
   const createOrganization = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -2009,6 +2039,19 @@ export default function HomePage() {
           recipient,
           ...current.filter((item) => item.id !== recipient.id)
         ]);
+        setInboxItems((current) =>
+          current.map((item) =>
+            item.recipient_id === recipient.id
+              ? {
+                  ...item,
+                  delivery_status: recipient.delivery_status,
+                  delivered_at: recipient.delivered_at,
+                  read_at: recipient.read_at,
+                  failure_reason: recipient.failure_reason
+                }
+              : item
+          )
+        );
         addLog(`${recipient.person_name} marked ${recipient.delivery_status}`, "good");
       }
     );
@@ -2038,6 +2081,73 @@ export default function HomePage() {
           `Delivery ${summary.transport_mode}: ${summary.sent + summary.delivered} sent, ${summary.failed} failed, ${summary.queued} queued`,
           summary.failed > 0 ? "bad" : "good"
         );
+      }
+    );
+  };
+
+  const draftCommunicationMessage = () => {
+    const scopeId = communicationScopeId();
+    if (!selectedOrganizationId || !scopeId) {
+      addLog("Select the communication scope first", "bad");
+      return;
+    }
+    runAction(
+      "draft-communication-message",
+      () =>
+        apiRequest<CommunicationDraftRead>("/communications/drafts", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            message_type: messageForm.message_type,
+            channel: messageForm.channel,
+            scope_type: messageForm.scope_type,
+            scope_id: scopeId,
+            intent: messageForm.body,
+            tone: messageForm.urgent ? "urgent and direct" : "clear and supportive",
+            audience: messageForm.scope_type === "person" ? "the selected family" : "members and guardians",
+            include_guardian_context: true
+          }
+        }),
+      (draft) => {
+        setDraftPreview(draft);
+        setMessageForm((current) => ({
+          ...current,
+          subject: draft.subject,
+          body: draft.body
+        }));
+        addLog(`Draft prepared by ${draft.model_name}`, "good");
+      }
+    );
+  };
+
+  const createCommunicationDigest = () => {
+    if (!selectedOrganizationId || !selectedInboxPersonId) {
+      addLog("Select an inbox person first", "bad");
+      return;
+    }
+    runAction(
+      "create-communication-digest",
+      async () => {
+        const digest = await apiRequest<CommunicationDigestRead>("/communications/digests", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            person_id: selectedInboxPersonId,
+            frequency: preferenceForm.frequency === "weekly_digest" ? "weekly_digest" : "daily_digest"
+          }
+        });
+        const inbox = await apiRequest<CommunicationInboxItemRead[]>(
+          `/communications/inbox?organization_id=${selectedOrganizationId}&person_id=${selectedInboxPersonId}`,
+          { identity }
+        );
+        return { digest, inbox };
+      },
+      ({ digest, inbox }) => {
+        setDigestSummary(digest);
+        setInboxItems(inbox);
+        addLog(`${digest.subject} created with ${digest.item_count} items`, "good");
       }
     );
   };
@@ -4377,6 +4487,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createCommunicationTemplate} disabled={busyAction !== null}>Template</button>
+                <button type="button" onClick={draftCommunicationMessage} disabled={busyAction !== null}>Draft</button>
                 <button type="button" onClick={sendCommunicationMessage} disabled={busyAction !== null}>Send</button>
               </div>
             </div>
@@ -4436,6 +4547,13 @@ export default function HomePage() {
                 Override quiet hours
               </label>
             </div>
+            {draftPreview ? (
+              <div className="score-summary">
+                <strong>AI</strong>
+                <span>{draftPreview.subject}</span>
+                <small>{draftPreview.model_name} · review required</small>
+              </div>
+            ) : null}
             <div className="selection-list compact">
               {communicationMessages.map((message) => (
                 <button
@@ -4458,12 +4576,13 @@ export default function HomePage() {
                 <h2>Read receipts and preferences</h2>
               </div>
               <div className="event-toolbar">
+                <button type="button" onClick={createCommunicationDigest} disabled={busyAction !== null || !selectedInboxPersonId}>Digest</button>
                 <button type="button" onClick={dispatchSelectedMessage} disabled={busyAction !== null || !selectedMessageId}>Dispatch</button>
                 <button type="button" onClick={saveNotificationPreference} disabled={busyAction !== null}>Preference</button>
               </div>
             </div>
             <div className="score-summary">
-              <strong>{messageRecipients.filter((recipient) => recipient.delivery_status === "read").length}</strong>
+              <strong>{inboxItems.length}</strong>
               <span>{selectedMessage?.subject ?? "No message selected"}</span>
               <small>{messageRecipients.length} recipients · {notificationPreference?.frequency ?? "no preference"}</small>
             </div>
@@ -4495,6 +4614,25 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {digestSummary ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{digestSummary.subject}</strong>
+                    <span>{digestSummary.item_count} items · {digestSummary.channel}</span>
+                  </div>
+                </article>
+              ) : null}
+              {inboxItems.slice(0, 4).map((item) => (
+                <article key={item.recipient_id} className="task-card">
+                  <div>
+                    <strong>{item.subject}</strong>
+                    <span>{item.channel} · {item.delivery_status}{item.urgent ? " · urgent" : ""}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => updateRecipientStatus(item.recipient_id, "read")}>Read</button>
+                  </div>
+                </article>
+              ))}
               {messageRecipients.map((recipient) => (
                 <article key={recipient.id} className="task-card">
                   <div>

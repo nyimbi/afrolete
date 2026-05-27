@@ -143,6 +143,74 @@ def test_record_only_dispatch_and_delivery_callback(client, identity_headers) ->
     assert callback["delivered_at"] is not None
 
 
+def test_inbox_digest_and_ai_assisted_draft(client, identity_headers) -> None:
+    organization, team, member = create_communications_context(client, identity_headers)
+    message = client.post(
+        "/api/v1/communications/messages",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "message_type": "announcement",
+            "channel": "in_app",
+            "scope_type": "team",
+            "scope_id": team["id"],
+            "subject": "Parent update",
+            "body": "Training has moved to pitch two.",
+        },
+    ).json()
+
+    inbox_response = client.get(
+        "/api/v1/communications/inbox",
+        headers=identity_headers,
+        params={
+            "organization_id": organization["id"],
+            "person_id": member["subject_id"],
+        },
+    )
+
+    assert inbox_response.status_code == 200
+    inbox = inbox_response.json()
+    assert inbox[0]["message_id"] == message["id"]
+    assert inbox[0]["subject"] == "Parent update"
+
+    digest_response = client.post(
+        "/api/v1/communications/digests",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "person_id": member["subject_id"],
+            "frequency": "daily_digest",
+        },
+    )
+
+    assert digest_response.status_code == 201
+    digest = digest_response.json()
+    assert digest["item_count"] == 1
+    assert digest["channel"] == "in_app"
+    assert "Parent update" in digest["body"]
+
+    draft_response = client.post(
+        "/api/v1/communications/drafts",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "message_type": "reminder",
+            "channel": "email",
+            "scope_type": "team",
+            "scope_id": team["id"],
+            "intent": "Remind families that the fixture bus leaves at 14:00.",
+            "tone": "firm and warm",
+            "audience": "players and guardians",
+        },
+    )
+
+    assert draft_response.status_code == 200
+    draft = draft_response.json()
+    assert team["name"] in draft["subject"]
+    assert "fixture bus leaves at 14:00" in draft["body"]
+    assert draft["review_required"] is True
+
+
 def test_notification_preferences_and_cross_org_recipient_guard(client, identity_headers) -> None:
     organization, _, member = create_communications_context(client, identity_headers)
     other_organization = client.post(

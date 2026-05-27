@@ -1083,6 +1083,22 @@ export type MessageRecipientRead = {
   failure_reason: string | null;
 };
 
+export type CommunicationInboxItemRead = {
+  recipient_id: UUID;
+  message_id: UUID;
+  organization_id: UUID;
+  subject: string;
+  body: string;
+  message_type: CommunicationMessageType;
+  channel: CommunicationChannel;
+  urgent: boolean;
+  delivery_status: MessageDeliveryStatus;
+  sent_at: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
+  failure_reason: string | null;
+};
+
 export type CommunicationDispatchSummary = {
   message_id: UUID;
   attempted: number;
@@ -1092,6 +1108,25 @@ export type CommunicationDispatchSummary = {
   suppressed: number;
   queued: number;
   transport_mode: string;
+};
+
+export type CommunicationDigestRead = {
+  message_id: UUID;
+  recipient_id: UUID;
+  person_id: UUID;
+  frequency: NotificationFrequency;
+  channel: CommunicationChannel;
+  item_count: number;
+  subject: string;
+  body: string;
+};
+
+export type CommunicationDraftRead = {
+  subject: string;
+  body: string;
+  model_name: string;
+  review_required: boolean;
+  rationale: string;
 };
 
 export type NotificationPreferenceRead = {

@@ -6,7 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas.communication import (
+    CommunicationDigestCreate,
+    CommunicationDigestRead,
     CommunicationDispatchSummary,
+    CommunicationDraftRead,
+    CommunicationDraftRequest,
+    CommunicationInboxItemRead,
     CommunicationMessageCreate,
     CommunicationMessageRead,
     CommunicationTemplateCreate,
@@ -21,9 +26,12 @@ from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.communications import (
+    create_digest,
     create_message,
     create_template,
     dispatch_message,
+    draft_message,
+    list_inbox_items,
     list_messages,
     list_recipients,
     list_templates,
@@ -78,6 +86,24 @@ def to_recipient_read(recipient, person) -> MessageRecipientRead:
         person_name=person.display_name,
         destination=recipient.destination,
         delivery_status=recipient.delivery_status,
+        delivered_at=recipient.delivered_at,
+        read_at=recipient.read_at,
+        failure_reason=recipient.failure_reason,
+    )
+
+
+def to_inbox_item_read(recipient, message) -> CommunicationInboxItemRead:
+    return CommunicationInboxItemRead(
+        recipient_id=recipient.id,
+        message_id=message.id,
+        organization_id=message.organization_id,
+        subject=message.subject,
+        body=message.body,
+        message_type=message.message_type,
+        channel=message.channel,
+        urgent=message.urgent,
+        delivery_status=recipient.delivery_status,
+        sent_at=message.sent_at,
         delivered_at=recipient.delivered_at,
         read_at=recipient.read_at,
         failure_reason=recipient.failure_reason,
@@ -145,6 +171,46 @@ async def list_recipients_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[MessageRecipientRead]:
     return [to_recipient_read(recipient, person) for recipient, person in await list_recipients(db, message_id)]
+
+
+@router.get("/inbox", response_model=list[CommunicationInboxItemRead])
+async def list_inbox_route(
+    organization_id: UUID = Query(),
+    person_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[CommunicationInboxItemRead]:
+    return [
+        to_inbox_item_read(recipient, message)
+        for recipient, message in await list_inbox_items(
+            db,
+            identity,
+            organization_id,
+            person_id,
+            authz,
+        )
+    ]
+
+
+@router.post("/digests", response_model=CommunicationDigestRead, status_code=201)
+async def create_digest_route(
+    payload: CommunicationDigestCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunicationDigestRead:
+    return await create_digest(db, identity, payload, authz)
+
+
+@router.post("/drafts", response_model=CommunicationDraftRead)
+async def draft_message_route(
+    payload: CommunicationDraftRequest,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunicationDraftRead:
+    return await draft_message(db, identity, payload, authz)
 
 
 @router.post("/messages/{message_id}/dispatch", response_model=CommunicationDispatchSummary)
