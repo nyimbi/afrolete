@@ -621,6 +621,16 @@ export type EventTravelExpenseRead = {
   notes: string | null;
 };
 
+export type EventTravelReceiptUploadRead = {
+  expense_id: UUID;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  checksum: string;
+  receipt_url: string;
+  expense: EventTravelExpenseRead;
+};
+
 export type EventTravelCarpoolRideRead = {
   id: UUID;
   organization_id: UUID;

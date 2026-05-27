@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     report_artifact_url_ttl_seconds: int = 900
     equipment_file_dir: str = "data/equipment-files"
     equipment_file_url_prefix: str = "local://equipment-files"
+    travel_receipt_file_dir: str = "data/travel-receipts"
+    travel_receipt_file_url_prefix: str = "local://travel-receipts"
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"

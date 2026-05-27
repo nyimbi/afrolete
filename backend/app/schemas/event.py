@@ -385,6 +385,23 @@ class EventTravelExpenseRead(BaseModel):
     notes: str | None
 
 
+class EventTravelReceiptUploadCreate(BaseModel):
+    filename: str = Field(min_length=1, max_length=240)
+    content_type: str = Field(default="application/octet-stream", max_length=120)
+    content_base64: str = Field(min_length=1)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelReceiptUploadRead(BaseModel):
+    expense_id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
+    checksum: str
+    receipt_url: str
+    expense: EventTravelExpenseRead
+
+
 class EventTravelCarpoolRideCreate(BaseModel):
     ride_type: str = Field(default="request", pattern="^(request|offer)$")
     rider_person_id: UUID | None = None

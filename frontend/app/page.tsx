@@ -84,6 +84,7 @@ import type {
   EventTravelManifestRead,
   EventTravelPlanRead,
   EventTravelReadinessRead,
+  EventTravelReceiptUploadRead,
   EventTravelRouteOptimizationRead,
   EventWeatherAlertRead,
   EventWeatherAssessmentRead,
@@ -364,6 +365,7 @@ export default function HomePage() {
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
+  const [selectedTravelReceiptFile, setSelectedTravelReceiptFile] = useState<File | null>(null);
   const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
   const [travelReadiness, setTravelReadiness] = useState<EventTravelReadinessRead | null>(null);
   const [travelRouteOptimization, setTravelRouteOptimization] = useState<EventTravelRouteOptimizationRead | null>(null);
@@ -2815,6 +2817,37 @@ export default function HomePage() {
           `${updated.category} expense ${updated.reimbursement_status}`,
           updated.reimbursement_status === "rejected" ? "bad" : "good"
         );
+      }
+    );
+  };
+
+  const uploadTravelReceipt = (expense: EventTravelExpenseRead) => {
+    if (!selectedTravelReceiptFile) {
+      addLog("Choose a receipt file first", "bad");
+      return;
+    }
+    runAction(
+      `travel-receipt-${expense.id}`,
+      async () => {
+        const contentBase64 = await fileToBase64(selectedTravelReceiptFile);
+        return apiRequest<EventTravelReceiptUploadRead>(`/events/travel-expenses/${expense.id}/receipt`, {
+          method: "POST",
+          identity,
+          body: {
+            filename: selectedTravelReceiptFile.name,
+            content_type: selectedTravelReceiptFile.type || "application/octet-stream",
+            content_base64: contentBase64,
+            notes: travelForm.expense_notes || expense.notes
+          }
+        });
+      },
+      (upload) => {
+        setTravelExpenses((current) => [
+          upload.expense,
+          ...current.filter((item) => item.id !== upload.expense.id)
+        ]);
+        setSelectedTravelReceiptFile(null);
+        addLog(`${upload.filename} receipt stored (${upload.size_bytes} bytes)`, "good");
       }
     );
   };
@@ -7236,6 +7269,10 @@ export default function HomePage() {
                 <input value={travelForm.expense_receipt_url} onChange={(event) => setTravelForm({ ...travelForm, expense_receipt_url: event.target.value })} />
               </label>
               <label className="wide-field">
+                Receipt file
+                <input type="file" accept="image/*,.pdf" onChange={(event) => setSelectedTravelReceiptFile(event.target.files?.[0] ?? null)} />
+              </label>
+              <label className="wide-field">
                 Emergency and medical
                 <input value={travelForm.medical_access_plan} onChange={(event) => setTravelForm({ ...travelForm, medical_access_plan: event.target.value })} />
               </label>
@@ -7327,6 +7364,7 @@ export default function HomePage() {
                     <span>{expense.receipt_url ?? expense.notes ?? "No receipt evidence"}</span>
                   </div>
                   <div className="event-toolbar">
+                    <button type="button" onClick={() => uploadTravelReceipt(expense)}>Receipt</button>
                     <button type="button" onClick={() => updateTravelExpenseStatus(expense, "approved")}>Approve</button>
                     <button type="button" onClick={() => updateTravelExpenseStatus(expense, "reimbursed")}>Reimburse</button>
                     <button type="button" onClick={() => updateTravelExpenseStatus(expense, "rejected")}>Reject</button>

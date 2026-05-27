@@ -39,6 +39,8 @@ from app.schemas.event import (
     EventTravelPlanRead,
     EventTravelPlanUpdate,
     EventTravelReadinessRead,
+    EventTravelReceiptUploadCreate,
+    EventTravelReceiptUploadRead,
     EventTravelRouteOptimizationCreate,
     EventTravelRouteOptimizationRead,
     EventWeatherAlertCreate,
@@ -84,6 +86,7 @@ from app.services.events import (
     update_travel_checklist_item,
     update_travel_expense,
     update_travel_plan,
+    upload_travel_expense_receipt,
 )
 from app.services.safeguarding import medical_clearance_for_event
 
@@ -565,6 +568,21 @@ async def update_travel_expense_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelExpenseRead:
     return await update_travel_expense(db, identity, expense_id, payload, authz)
+
+
+@router.post(
+    "/travel-expenses/{expense_id}/receipt",
+    response_model=EventTravelReceiptUploadRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_travel_expense_receipt_route(
+    expense_id: UUID,
+    payload: EventTravelReceiptUploadCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelReceiptUploadRead:
+    return await upload_travel_expense_receipt(db, identity, expense_id, payload, authz)
 
 
 @router.get("/travel-plans/{travel_plan_id}/carpools", response_model=list[EventTravelCarpoolRideRead])

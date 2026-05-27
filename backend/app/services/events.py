@@ -1,12 +1,17 @@
+from base64 import b64decode
+from binascii import Error as Base64Error
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
+from pathlib import Path
+from re import sub
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.commercial import FinanceInvoice
 from app.models.enums import (
@@ -73,6 +78,8 @@ from app.schemas.event import (
     EventTravelPlanCreate,
     EventTravelPlanUpdate,
     EventTravelReadinessRead,
+    EventTravelReceiptUploadCreate,
+    EventTravelReceiptUploadRead,
     EventTravelRouteOptimizationCreate,
     EventTravelRouteOptimizationRead,
     EventTravelRouteStopRead,
@@ -89,6 +96,7 @@ from app.services.safeguarding import (
     is_minor_on,
     medical_clearance_for_event,
 )
+from app.services.storage.objects import put_object
 
 
 PARTICIPATION_STATUSES = {AttendanceStatus.CONFIRMED, AttendanceStatus.PRESENT}
@@ -1040,6 +1048,55 @@ async def update_travel_expense(
     return travel_expense_read(expense)
 
 
+async def upload_travel_expense_receipt(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    expense_id: UUID,
+    payload: EventTravelReceiptUploadCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> EventTravelReceiptUploadRead:
+    expense = await db.get(EventTravelExpense, expense_id)
+    if expense is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel expense not found")
+    await ensure_manage_event_scope(authz, expense.organization_id, identity)
+    content = decode_upload_content(payload.content_base64)
+    if not content:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Receipt file is empty")
+    selected_settings = settings or get_settings()
+    checksum = sha256(content).hexdigest()
+    safe_name = safe_upload_filename(payload.filename, fallback="travel-receipt")
+    storage_name = f"{checksum[:16]}-{safe_name}"
+    relative_path = (
+        Path(str(expense.organization_id))
+        / str(expense.travel_plan_id)
+        / str(expense.id)
+        / storage_name
+    ).as_posix()
+    stored = put_object(
+        selected_settings,
+        local_root=selected_settings.travel_receipt_file_dir,
+        local_url_prefix=selected_settings.travel_receipt_file_url_prefix,
+        key=relative_path,
+        content=content,
+        content_type=payload.content_type or "application/octet-stream",
+    )
+    expense.receipt_url = stored.url
+    if payload.notes is not None:
+        expense.notes = payload.notes
+    await db.commit()
+    await db.refresh(expense)
+    return EventTravelReceiptUploadRead(
+        expense_id=expense.id,
+        filename=safe_name,
+        content_type=payload.content_type or "application/octet-stream",
+        size_bytes=len(content),
+        checksum=checksum,
+        receipt_url=stored.url,
+        expense=travel_expense_read(expense),
+    )
+
+
 async def list_travel_carpool_rides(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1429,6 +1486,19 @@ def travel_fee_invoice_number(plan: EventTravelPlan, billed_person_id: UUID, ath
 def travel_fee_checkout_url(base_url: str, invoice: FinanceInvoice, provider: str) -> str:
     token = sha256(f"{invoice.id}:{invoice.invoice_number}:{invoice.amount_due}:{provider}".encode()).hexdigest()[:24]
     return f"{base_url.rstrip('/')}/{invoice.id}?provider={provider}&token={token}"
+
+
+def decode_upload_content(content_base64: str) -> bytes:
+    encoded = content_base64.split(",", 1)[1] if "," in content_base64 else content_base64
+    try:
+        return b64decode(encoded, validate=True)
+    except (Base64Error, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid file encoding") from exc
+
+
+def safe_upload_filename(filename: str, *, fallback: str) -> str:
+    cleaned = sub(r"[^A-Za-z0-9._-]+", "-", Path(filename).name).strip(".-")
+    return cleaned[:180] or fallback
 
 
 def travel_fee_invoice_memo(event: Event, plan: EventTravelPlan) -> str:
