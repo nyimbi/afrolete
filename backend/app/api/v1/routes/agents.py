@@ -806,7 +806,7 @@ async def agent_worker_callback_route(
     x_afrolete_agent_signature: str | None = Header(default=None, alias="X-Afrolete-Agent-Signature"),
     db: AsyncSession = Depends(get_db),
 ) -> AgentWorkerCallbackRead:
-    signature_required, signature_validated = validate_agent_worker_callback_signature(
+    signature_required, signature_validated = await validate_agent_worker_callback_signature(
         await request.body(),
         x_afrolete_agent_timestamp,
         x_afrolete_agent_signature,

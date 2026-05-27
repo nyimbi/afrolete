@@ -46,9 +46,16 @@ class Settings(BaseSettings):
     agent_execution_mode: Literal["deterministic", "webhook"] = "deterministic"
     agent_webhook_url: str = ""
     agent_webhook_key: str = ""
+    agent_webhook_key_secret_path: str = ""
+    agent_webhook_key_secret_field: str = "value"
     agent_default_model: str = "afrolete-local-planner"
     agent_execution_timeout_seconds: float = 10.0
     agent_webhook_tolerance_seconds: int = 300
+
+    openbao_addr: str = "https://vault.lindela.io"
+    openbao_token: str = ""
+    openbao_namespace: str = ""
+    openbao_timeout_seconds: float = 3.0
 
     billing_payment_webhook_signing_key: str = ""
     billing_payment_webhook_tolerance_seconds: int = 300

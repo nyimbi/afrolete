@@ -2471,6 +2471,12 @@ async def execute_with_webhook(
         task.review_notes = "Agent webhook execution mode is enabled but no webhook URL is configured."
         return
 
+    key_resolution = await resolve_agent_webhook_key(settings)
+    if key_resolution["failure_reason"]:
+        task.status = AgentTaskStatus.FAILED
+        task.review_notes = str(key_resolution["failure_reason"])[:600]
+        return
+
     try:
         async with httpx.AsyncClient(timeout=settings.agent_execution_timeout_seconds) as client:
             payload = agent_execution_payload(agent, task, identity, settings)
@@ -2478,7 +2484,7 @@ async def execute_with_webhook(
             response = await client.post(
                 settings.agent_webhook_url,
                 content=body,
-                headers=agent_execution_headers(settings, body),
+                headers=agent_execution_headers(settings, body, str(key_resolution["key"] or "")),
             )
         if not 200 <= response.status_code < 300:
             task.status = AgentTaskStatus.FAILED
@@ -2522,16 +2528,16 @@ def agent_execution_payload(
     }
 
 
-def agent_execution_headers(settings: Settings, body: bytes) -> dict[str, str]:
+def agent_execution_headers(settings: Settings, body: bytes, signing_key: str = "") -> dict[str, str]:
     headers = {
         "User-Agent": "AfroLete-Agent-Executor/1.0",
         "Content-Type": "application/json",
     }
-    if settings.agent_webhook_key:
+    if signing_key:
         timestamp = str(int(time.time()))
-        headers["X-Afrolete-Agent-Key"] = settings.agent_webhook_key
+        headers["X-Afrolete-Agent-Key-Source"] = "openbao" if settings.agent_webhook_key_secret_path else "env"
         headers["X-Afrolete-Agent-Timestamp"] = timestamp
-        headers["X-Afrolete-Agent-Signature"] = agent_execution_signature(settings.agent_webhook_key, timestamp, body)
+        headers["X-Afrolete-Agent-Signature"] = agent_execution_signature(signing_key, timestamp, body)
     return headers
 
 
@@ -2544,14 +2550,20 @@ def agent_execution_signature(signing_key: str, timestamp: str, body: bytes) -> 
     return f"sha256={digest}"
 
 
-def validate_agent_worker_callback_signature(
+async def validate_agent_worker_callback_signature(
     raw_body: bytes,
     timestamp_header: str | None,
     signature_header: str | None,
     settings: Settings | None = None,
 ) -> tuple[bool, bool]:
     selected_settings = settings or get_settings()
-    signing_key = selected_settings.agent_webhook_key
+    key_resolution = await resolve_agent_webhook_key(selected_settings)
+    if key_resolution["failure_reason"]:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agent callback signing key is unavailable",
+        )
+    signing_key = str(key_resolution["key"] or "")
     if not signing_key:
         return False, False
     if not timestamp_header or not signature_header:
@@ -2566,6 +2578,56 @@ def validate_agent_worker_callback_signature(
     if not hmac.compare_digest(expected, signature_header):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent worker callback signature")
     return True, True
+
+
+async def resolve_agent_webhook_key(settings: Settings) -> dict[str, str | None]:
+    if settings.agent_webhook_key:
+        return {"key": settings.agent_webhook_key, "source": "env", "failure_reason": None}
+    if not settings.agent_webhook_key_secret_path:
+        return {"key": None, "source": "unset", "failure_reason": None}
+    if not settings.openbao_addr or not settings.openbao_token:
+        return {
+            "key": None,
+            "source": "openbao",
+            "failure_reason": "Agent webhook key is configured for OpenBao but OpenBao address/token is missing.",
+        }
+    try:
+        secret = await read_openbao_kv_secret(
+            settings,
+            settings.agent_webhook_key_secret_path,
+            settings.agent_webhook_key_secret_field,
+        )
+    except httpx.HTTPError as error:
+        return {
+            "key": None,
+            "source": "openbao",
+            "failure_reason": f"OpenBao agent webhook key fetch failed: {error}",
+        }
+    if not secret:
+        return {
+            "key": None,
+            "source": "openbao",
+            "failure_reason": "OpenBao agent webhook key secret field is empty.",
+        }
+    return {"key": secret, "source": "openbao", "failure_reason": None}
+
+
+async def read_openbao_kv_secret(settings: Settings, path: str, field_name: str) -> str:
+    base_url = settings.openbao_addr.rstrip("/")
+    secret_path = path.lstrip("/")
+    headers = {"X-Vault-Token": settings.openbao_token}
+    if settings.openbao_namespace:
+        headers["X-Vault-Namespace"] = settings.openbao_namespace
+    async with httpx.AsyncClient(timeout=settings.openbao_timeout_seconds) as client:
+        response = await client.get(f"{base_url}/v1/{secret_path}", headers=headers)
+        response.raise_for_status()
+    payload = response.json()
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    if isinstance(data, dict) and isinstance(data.get("data"), dict):
+        data = data["data"]
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get(field_name) or "")
 
 
 def apply_agent_webhook_response(task: AgentTask, response: httpx.Response) -> None:
@@ -2592,11 +2654,14 @@ def count_tasks(tasks: list[AgentTask], status_value: AgentTaskStatus) -> int:
 
 def agent_credential_status(settings: Settings) -> dict[str, object]:
     webhook_configured = bool(settings.agent_webhook_url)
-    webhook_key_configured = bool(settings.agent_webhook_key)
+    webhook_key_configured = bool(settings.agent_webhook_key or settings.agent_webhook_key_secret_path)
+    credential_boundary = agent_credential_boundary(settings)
     if settings.agent_execution_mode == "webhook" and not webhook_configured:
         recommendation = "Configure AGENT_WEBHOOK_URL before enabling live provider execution."
     elif settings.agent_execution_mode == "webhook" and not webhook_key_configured:
-        recommendation = "Add AGENT_WEBHOOK_KEY or OpenBao-injected equivalent before production execution."
+        recommendation = "Add AGENT_WEBHOOK_KEY or AGENT_WEBHOOK_KEY_SECRET_PATH before production execution."
+    elif settings.agent_webhook_key_secret_path and not settings.openbao_token:
+        recommendation = "Configure OPENBAO_TOKEN so the agent webhook key can be fetched at execution time."
     else:
         recommendation = "Execution boundary is usable; keep human review enabled for applied actions."
     return {
@@ -2604,9 +2669,17 @@ def agent_credential_status(settings: Settings) -> dict[str, object]:
         "default_model": settings.agent_default_model,
         "webhook_configured": webhook_configured,
         "webhook_key_configured": webhook_key_configured,
-        "credential_boundary": "openbao/env" if webhook_key_configured else "local-deterministic",
+        "credential_boundary": credential_boundary,
         "recommendation": recommendation,
     }
+
+
+def agent_credential_boundary(settings: Settings) -> str:
+    if settings.agent_webhook_key_secret_path:
+        return "openbao"
+    if settings.agent_webhook_key:
+        return "env"
+    return "local-deterministic"
 
 
 def agent_model_transparency_item(
