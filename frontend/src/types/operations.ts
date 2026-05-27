@@ -598,6 +598,40 @@ export type EventTravelFeeCheckoutBatchRead = {
   checkouts: EventTravelFeeCheckoutItemRead[];
 };
 
+export type EventTravelFeeHostedCheckoutRead = {
+  invoice_id: UUID;
+  invoice_number: string;
+  organization_id: UUID;
+  billed_person_id: UUID | null;
+  title: string;
+  memo: string | null;
+  due_on: string | null;
+  amount_due: string;
+  amount_paid: string;
+  open_amount: string;
+  currency: string;
+  status: string;
+  provider: string;
+  session_id: string;
+  session_status: string;
+  client_reference: string;
+  payment_methods: string[];
+  settlement_endpoint: string;
+  checkout_summary: string;
+};
+
+export type EventTravelFeeCheckoutSettlementRead = {
+  invoice_id: UUID;
+  provider: string;
+  accepted: boolean;
+  payment_id: UUID | null;
+  invoice_status: string;
+  amount_paid: string;
+  open_amount: string;
+  session_status: string;
+  message: string;
+};
+
 export type EventTravelApprovalRead = {
   id: UUID;
   organization_id: UUID;

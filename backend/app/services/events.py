@@ -20,12 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.models.communication import CommunicationMessage, MessageRecipient
-from app.models.commercial import FinanceInvoice
+from app.models.commercial import FinanceInvoice, FinancePayment
 from app.models.enums import (
     AttendanceStatus,
     CommunicationChannel,
     ConsentRequestStatus,
     ConsentScopeType,
+    CommercialStatus,
     CommunicationMessageType,
     CommunicationScopeType,
     MedicalClearanceStatus,
@@ -109,6 +110,9 @@ from app.schemas.event import (
     EventTravelFeeCheckoutBatchRead,
     EventTravelFeeCheckoutCreate,
     EventTravelFeeCheckoutItemRead,
+    EventTravelFeeCheckoutSettlementCreate,
+    EventTravelFeeCheckoutSettlementRead,
+    EventTravelFeeHostedCheckoutRead,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelFeeInvoiceItemRead,
@@ -924,6 +928,85 @@ async def create_travel_fee_checkouts(
         checkout_count=len(checkouts),
         total_open_amount=total_open_amount.quantize(Decimal("0.01")),
         checkouts=checkouts,
+    )
+
+
+async def get_travel_fee_hosted_checkout(
+    db: AsyncSession,
+    session_id: str,
+    invoice_id: UUID,
+    provider: str,
+) -> EventTravelFeeHostedCheckoutRead:
+    invoice = await db.get(FinanceInvoice, invoice_id)
+    if invoice is None or not invoice.invoice_number.startswith("TRAVEL-"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel checkout session not found")
+    expected_session_id = travel_fee_checkout_session_id(invoice, provider)
+    if not hmac.compare_digest(expected_session_id, session_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid checkout session")
+    return travel_fee_hosted_checkout_read(invoice, provider, session_id)
+
+
+async def settle_travel_fee_checkout(
+    db: AsyncSession,
+    session_id: str,
+    payload: EventTravelFeeCheckoutSettlementCreate,
+) -> EventTravelFeeCheckoutSettlementRead:
+    invoice = await db.get(FinanceInvoice, payload.invoice_id)
+    if invoice is None or not invoice.invoice_number.startswith("TRAVEL-"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel checkout session not found")
+    expected_session_id = travel_fee_checkout_session_id(invoice, payload.provider)
+    if not hmac.compare_digest(expected_session_id, session_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid checkout session")
+    if payload.currency is not None and payload.currency.upper() != invoice.currency:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment currency mismatch")
+
+    open_amount = travel_fee_checkout_open_amount(invoice)
+    accepted = payload.status == "succeeded" and open_amount > 0
+    payment: FinancePayment | None = None
+    message = "Checkout event recorded as non-settling."
+    if accepted:
+        amount = (payload.amount or open_amount).quantize(Decimal("0.01"))
+        if amount > open_amount:
+            amount = open_amount
+        external_reference = payload.external_payment_id or f"{payload.provider}:{session_id}"
+        existing_payment = await db.scalar(
+            select(FinancePayment).where(
+                FinancePayment.organization_id == invoice.organization_id,
+                FinancePayment.external_reference == external_reference,
+            )
+        )
+        if existing_payment is not None:
+            payment = existing_payment
+            message = "Payment event was already applied."
+        else:
+            payment = FinancePayment(
+                organization_id=invoice.organization_id,
+                invoice_id=invoice.id,
+                amount=amount,
+                currency=invoice.currency,
+                method=payload.method,
+                external_reference=external_reference,
+                received_at=datetime.now(UTC),
+                notes=payload.raw_reference or f"Travel fee checkout settled via {payload.provider}.",
+            )
+            invoice.amount_paid += amount
+            invoice.status = CommercialStatus.PAID if invoice.amount_paid >= invoice.amount_due else CommercialStatus.PARTIAL
+            db.add(payment)
+            await db.commit()
+            await db.refresh(payment)
+            await db.refresh(invoice)
+            message = "Travel fee payment applied."
+
+    return EventTravelFeeCheckoutSettlementRead(
+        invoice_id=invoice.id,
+        provider=payload.provider,
+        accepted=accepted,
+        payment_id=payment.id if payment is not None else None,
+        invoice_status=invoice.status.value,
+        amount_paid=invoice.amount_paid,
+        open_amount=travel_fee_checkout_open_amount(invoice),
+        session_status=travel_fee_checkout_session_status(invoice),
+        message=message,
     )
 
 
@@ -3096,6 +3179,47 @@ def travel_fee_checkout_session_url(
 ) -> str:
     provider_token = quote(provider, safe="")
     return f"{base_url.rstrip('/')}/{session_id}?invoice_id={invoice.id}&provider={provider_token}"
+
+
+def travel_fee_checkout_open_amount(invoice: FinanceInvoice) -> Decimal:
+    return max(invoice.amount_due - invoice.amount_paid, Decimal("0.00")).quantize(Decimal("0.01"))
+
+
+def travel_fee_checkout_session_status(invoice: FinanceInvoice) -> str:
+    return "paid" if travel_fee_checkout_open_amount(invoice) <= 0 else "ready"
+
+
+def travel_fee_hosted_checkout_read(
+    invoice: FinanceInvoice,
+    provider: str,
+    session_id: str,
+) -> EventTravelFeeHostedCheckoutRead:
+    open_amount = travel_fee_checkout_open_amount(invoice)
+    return EventTravelFeeHostedCheckoutRead(
+        invoice_id=invoice.id,
+        invoice_number=invoice.invoice_number,
+        organization_id=invoice.organization_id,
+        billed_person_id=invoice.person_id,
+        title=invoice.title,
+        memo=invoice.memo,
+        due_on=invoice.due_on,
+        amount_due=invoice.amount_due,
+        amount_paid=invoice.amount_paid,
+        open_amount=open_amount,
+        currency=invoice.currency,
+        status=invoice.status.value,
+        provider=provider,
+        session_id=session_id,
+        session_status=travel_fee_checkout_session_status(invoice),
+        client_reference=f"travel-checkout:{invoice.id}",
+        payment_methods=["card", "mobile_money", "bank_transfer", "cash_office"],
+        settlement_endpoint=f"/api/v1/events/travel-fee-checkout-sessions/{session_id}/settle",
+        checkout_summary=(
+            f"{invoice.title} has {open_amount} {invoice.currency} outstanding."
+            if open_amount > 0
+            else f"{invoice.title} is fully paid."
+        ),
+    )
 
 
 async def pending_event_consent_requests(db: AsyncSession, event: Event) -> list[ConsentRequest]:

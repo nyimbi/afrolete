@@ -326,6 +326,51 @@ class EventTravelFeeCheckoutBatchRead(BaseModel):
     checkouts: list[EventTravelFeeCheckoutItemRead]
 
 
+class EventTravelFeeHostedCheckoutRead(BaseModel):
+    invoice_id: UUID
+    invoice_number: str
+    organization_id: UUID
+    billed_person_id: UUID | None
+    title: str
+    memo: str | None
+    due_on: date | None
+    amount_due: Decimal
+    amount_paid: Decimal
+    open_amount: Decimal
+    currency: str
+    status: str
+    provider: str
+    session_id: str
+    session_status: str
+    client_reference: str
+    payment_methods: list[str]
+    settlement_endpoint: str
+    checkout_summary: str
+
+
+class EventTravelFeeCheckoutSettlementCreate(BaseModel):
+    invoice_id: UUID
+    provider: str = Field(default="manual_gateway", min_length=2, max_length=80)
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    method: str = Field(default="hosted_payment_page", min_length=2, max_length=80)
+    external_payment_id: str | None = Field(default=None, max_length=240)
+    status: str = Field(default="succeeded", pattern="^(succeeded|pending|failed|cancelled)$")
+    raw_reference: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelFeeCheckoutSettlementRead(BaseModel):
+    invoice_id: UUID
+    provider: str
+    accepted: bool
+    payment_id: UUID | None
+    invoice_status: str
+    amount_paid: Decimal
+    open_amount: Decimal
+    session_status: str
+    message: str
+
+
 class EventTravelApprovalCreate(BaseModel):
     approval_level: str = Field(default="school", min_length=2, max_length=80)
     approver_person_id: UUID | None = None

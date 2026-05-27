@@ -56,6 +56,9 @@ from app.schemas.event import (
     EventTravelExpenseUpdate,
     EventTravelFeeCheckoutBatchRead,
     EventTravelFeeCheckoutCreate,
+    EventTravelFeeCheckoutSettlementCreate,
+    EventTravelFeeCheckoutSettlementRead,
+    EventTravelFeeHostedCheckoutRead,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelGeofenceCheckCreate,
@@ -111,6 +114,7 @@ from app.services.events import (
     export_travel_manifest,
     generate_travel_fee_invoices,
     get_event,
+    get_travel_fee_hosted_checkout,
     get_travel_device_fleet_inventory,
     get_travel_driver_marketplace_matches,
     get_travel_driver_rating_summary,
@@ -142,6 +146,7 @@ from app.services.events import (
     seed_attendance_from_team_roster,
     seed_travel_checklist_items,
     send_travel_consent_reminders,
+    settle_travel_fee_checkout,
     update_travel_approval,
     update_travel_backup_driver,
     update_travel_carpool_ride,
@@ -549,6 +554,31 @@ async def create_travel_fee_checkouts_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelFeeCheckoutBatchRead:
     return await create_travel_fee_checkouts(db, identity, travel_plan_id, payload, authz)
+
+
+@router.get(
+    "/travel-fee-checkout-sessions/{session_id}",
+    response_model=EventTravelFeeHostedCheckoutRead,
+)
+async def get_travel_fee_checkout_session_route(
+    session_id: str,
+    invoice_id: UUID = Query(...),
+    provider: str = Query(default="manual_gateway"),
+    db: AsyncSession = Depends(get_db),
+) -> EventTravelFeeHostedCheckoutRead:
+    return await get_travel_fee_hosted_checkout(db, session_id, invoice_id, provider)
+
+
+@router.post(
+    "/travel-fee-checkout-sessions/{session_id}/settle",
+    response_model=EventTravelFeeCheckoutSettlementRead,
+)
+async def settle_travel_fee_checkout_route(
+    session_id: str,
+    payload: EventTravelFeeCheckoutSettlementCreate,
+    db: AsyncSession = Depends(get_db),
+) -> EventTravelFeeCheckoutSettlementRead:
+    return await settle_travel_fee_checkout(db, session_id, payload)
 
 
 @router.get("/travel-plans/{travel_plan_id}/approvals", response_model=list[EventTravelApprovalRead])
