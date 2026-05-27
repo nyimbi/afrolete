@@ -22,6 +22,7 @@ import type {
   AgentRead,
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
+  AgentScorecardAutomationRunRead,
   AgentScorecardArtifactAnomalyAlertRead,
   AgentScorecardArtifactAnomalyAlertRunRead,
   AgentScorecardArtifactAccessRead,
@@ -686,6 +687,8 @@ export default function HomePage() {
   const [agentScorecardReminder, setAgentScorecardReminder] = useState<AgentScorecardPublicationReminderRead | null>(null);
   const [agentScorecardReminderRun, setAgentScorecardReminderRun] =
     useState<AgentScorecardPublicationReminderRunRead | null>(null);
+  const [agentScorecardAutomationRun, setAgentScorecardAutomationRun] =
+    useState<AgentScorecardAutomationRunRead | null>(null);
   const [agentScorecardArtifactLink, setAgentScorecardArtifactLink] =
     useState<AgentScorecardPublicationArtifactLinkRead | null>(null);
   const [agentScorecardArtifactAccesses, setAgentScorecardArtifactAccesses] =
@@ -2064,6 +2067,7 @@ export default function HomePage() {
       setAgentScorecardReadiness(null);
       setAgentScorecardReminder(null);
       setAgentScorecardReminderRun(null);
+      setAgentScorecardAutomationRun(null);
       setAgentScorecardArtifactLink(null);
       setAgentScorecardArtifactAccesses([]);
       setAgentScorecardArtifactAccessSummary(null);
@@ -5272,6 +5276,48 @@ export default function HomePage() {
             ? `AI scorecard reminder run sent ${run.recipient_count} reminders`
             : `AI scorecard reminder run skipped ${run.period_label}`,
           run.sent ? "good" : "neutral"
+        );
+      }
+    );
+  };
+
+  const runAgentScorecardAutomation = () => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "agent-scorecard-automation-run",
+      () =>
+        apiRequest<AgentScorecardAutomationRunRead>("/agents/ethical-scorecard/automation/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_ids: [selectedOrganizationId],
+            channel: "email" as CommunicationChannel,
+            due_within_days: 14,
+            send_messages: true,
+            run_publication_reminders: true,
+            run_artifact_alerts: true
+          }
+        }),
+      (run) => {
+        setAgentScorecardAutomationRun(run);
+        const firstRun = run.runs[0];
+        if (firstRun?.publication_reminder) {
+          setAgentScorecardReminderRun(firstRun.publication_reminder);
+          if (firstRun.publication_reminder.reminder) {
+            setAgentScorecardReminder(firstRun.publication_reminder.reminder);
+          }
+        }
+        if (firstRun?.artifact_alert_run) {
+          setAgentScorecardArtifactAnomalyAlertRun(firstRun.artifact_alert_run);
+          if (firstRun.artifact_alert_run.alert) {
+            setAgentScorecardArtifactAnomalyAlert(firstRun.artifact_alert_run.alert);
+          }
+        }
+        addLog(
+          `AI scorecard automation evaluated ${run.evaluated_count} orgs and sent ${run.sent_count} lanes`,
+          run.sent_count > 0 ? "good" : "neutral"
         );
       }
     );
@@ -12170,6 +12216,24 @@ export default function HomePage() {
                   <div className="event-toolbar">
                     <button type="button" onClick={deliverAgentScorecardReminder}>Send reminder</button>
                     <button type="button" onClick={runAgentScorecardReminderAutomation}>Run due check</button>
+                    <button type="button" onClick={runAgentScorecardAutomation}>Run automation</button>
+                  </div>
+                </article>
+              ) : null}
+              {agentScorecardAutomationRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>
+                      AI scorecard automation · {agentScorecardAutomationRun.sent_count} lanes sent
+                    </strong>
+                    <span>
+                      {agentScorecardAutomationRun.evaluated_count} evaluated · {agentScorecardAutomationRun.skipped_count} skipped · {agentScorecardAutomationRun.message_count} messages
+                    </span>
+                    <span>
+                      {agentScorecardAutomationRun.runs[0]?.skipped_reason ??
+                        agentScorecardAutomationRun.runs[0]?.organization_name ??
+                        "Automation run ready for scheduler execution"}
+                    </span>
                   </div>
                 </article>
               ) : null}

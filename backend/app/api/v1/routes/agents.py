@@ -23,6 +23,8 @@ from app.schemas.agent import (
     AgentMyDecisionAppealCreate,
     AgentRunLedgerVerificationRead,
     AgentRunRecordRead,
+    AgentScorecardAutomationRunCreate,
+    AgentScorecardAutomationRunRead,
     AgentScorecardCommentCreate,
     AgentScorecardCommentModerationRead,
     AgentScorecardCommentRead,
@@ -82,6 +84,7 @@ from app.services.agents import (
     publish_agent_scorecard,
     read_signed_agent_scorecard_publication_artifact,
     record_scorecard_artifact_access,
+    run_agent_scorecard_automation,
     run_agent_scorecard_publication_reminder,
     run_agent_bias_audit,
     run_scorecard_artifact_anomaly_alert,
@@ -544,6 +547,18 @@ async def run_agent_scorecard_publication_reminder_route(
 ) -> AgentScorecardPublicationReminderRunRead:
     return AgentScorecardPublicationReminderRunRead(
         **await run_agent_scorecard_publication_reminder(db, identity, payload, authz)
+    )
+
+
+@router.post("/ethical-scorecard/automation/run", response_model=AgentScorecardAutomationRunRead)
+async def run_agent_scorecard_automation_route(
+    payload: AgentScorecardAutomationRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentScorecardAutomationRunRead:
+    return AgentScorecardAutomationRunRead(
+        **await run_agent_scorecard_automation(db, identity, payload, authz)
     )
 
 

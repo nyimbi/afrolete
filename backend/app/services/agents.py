@@ -47,6 +47,7 @@ from app.schemas.agent import (
     AgentMyDecisionAppealCreate,
     AgentModelRegistryCreate,
     AgentModelRegistryUpdate,
+    AgentScorecardAutomationRunCreate,
     AgentScorecardCommentCreate,
     AgentScorecardCommentUpdate,
     AgentScorecardArtifactAnomalyAlertCreate,
@@ -1650,6 +1651,126 @@ async def run_agent_scorecard_publication_reminder(
         "message_id": reminder["message_id"] if reminder else None,
         "reminder": reminder,
     }
+
+
+async def run_agent_scorecard_automation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentScorecardAutomationRunCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    if not payload.run_publication_reminders and not payload.run_artifact_alerts:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least one scorecard automation lane must be enabled.",
+        )
+    statement = select(Organization).order_by(Organization.name).limit(payload.limit)
+    if payload.organization_ids:
+        statement = statement.where(Organization.id.in_(payload.organization_ids))
+    organizations = list((await db.scalars(statement)).all())
+    runs: list[dict[str, object]] = []
+    skipped_count = 0
+    sent_count = 0
+    message_count = 0
+
+    for organization in organizations:
+        can_manage = await authz.check(
+            resource_type="organization",
+            resource_id=str(organization.id),
+            permission="manage",
+            subject_type="user",
+            subject_id=str(identity.user_id),
+        )
+        if not can_manage:
+            skipped_count += 1
+            runs.append(
+                {
+                    "organization_id": organization.id,
+                    "organization_name": organization.name,
+                    "publication_reminder": None,
+                    "artifact_alert_run": None,
+                    "sent_count": 0,
+                    "message_count": 0,
+                    "skipped_reason": "Current identity cannot manage this organization.",
+                }
+            )
+            continue
+
+        publication_reminder: dict[str, object] | None = None
+        artifact_alert_run: dict[str, object] | None = None
+        organization_sent_count = 0
+        organization_message_count = 0
+        if payload.run_publication_reminders:
+            publication_reminder = await run_agent_scorecard_publication_reminder(
+                db,
+                identity,
+                AgentScorecardPublicationReminderRunCreate(
+                    organization_id=organization.id,
+                    channel=payload.channel,
+                    due_within_days=payload.due_within_days,
+                    send_reminders=payload.send_messages,
+                ),
+                authz,
+            )
+            if publication_reminder["sent"]:
+                organization_sent_count += 1
+            if publication_reminder["message_id"]:
+                organization_message_count += 1
+        if payload.run_artifact_alerts:
+            artifact_alert_run = await run_scorecard_artifact_anomaly_alert(
+                db,
+                identity,
+                AgentScorecardArtifactAnomalyAlertRunCreate(
+                    organization_id=organization.id,
+                    channel=payload.channel,
+                    send_alerts=payload.send_messages,
+                ),
+                authz,
+            )
+            if artifact_alert_run["sent"]:
+                organization_sent_count += 1
+            if artifact_alert_run["message_id"]:
+                organization_message_count += 1
+
+        sent_count += organization_sent_count
+        message_count += organization_message_count
+        runs.append(
+            {
+                "organization_id": organization.id,
+                "organization_name": organization.name,
+                "publication_reminder": publication_reminder,
+                "artifact_alert_run": artifact_alert_run,
+                "sent_count": organization_sent_count,
+                "message_count": organization_message_count,
+                "skipped_reason": scorecard_automation_skipped_reason(
+                    publication_reminder,
+                    artifact_alert_run,
+                ),
+            }
+        )
+
+    return {
+        "channel": payload.channel,
+        "evaluated_count": len(runs) - skipped_count,
+        "skipped_count": skipped_count,
+        "sent_count": sent_count,
+        "message_count": message_count,
+        "runs": runs,
+    }
+
+
+def scorecard_automation_skipped_reason(
+    publication_reminder: dict[str, object] | None,
+    artifact_alert_run: dict[str, object] | None,
+) -> str | None:
+    reasons = [
+        str(result["skipped_reason"])
+        for result in [publication_reminder, artifact_alert_run]
+        if result and result.get("skipped_reason")
+    ]
+    if not reasons:
+        return None
+    return " ".join(reasons)
 
 
 async def publish_agent_scorecard(

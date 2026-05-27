@@ -2806,6 +2806,25 @@ export type AgentScorecardPublicationReminderRunRead = {
   reminder: AgentScorecardPublicationReminderRead | null;
 };
 
+export type AgentScorecardAutomationOrganizationRunRead = {
+  organization_id: UUID;
+  organization_name: string;
+  publication_reminder: AgentScorecardPublicationReminderRunRead | null;
+  artifact_alert_run: AgentScorecardArtifactAnomalyAlertRunRead | null;
+  sent_count: number;
+  message_count: number;
+  skipped_reason: string | null;
+};
+
+export type AgentScorecardAutomationRunRead = {
+  channel: CommunicationChannel;
+  evaluated_count: number;
+  skipped_count: number;
+  sent_count: number;
+  message_count: number;
+  runs: AgentScorecardAutomationOrganizationRunRead[];
+};
+
 export type AgentScorecardPublicationReadinessRead = {
   organization_id: UUID;
   current_period_label: string;

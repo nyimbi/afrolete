@@ -569,6 +569,35 @@ class AgentScorecardPublicationReminderRunRead(BaseModel):
     reminder: AgentScorecardPublicationReminderRead | None
 
 
+class AgentScorecardAutomationRunCreate(BaseModel):
+    organization_ids: list[UUID] = Field(default_factory=list)
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    due_within_days: int = Field(default=14, ge=1, le=120)
+    send_messages: bool = True
+    run_publication_reminders: bool = True
+    run_artifact_alerts: bool = True
+    limit: int = Field(default=50, ge=1, le=250)
+
+
+class AgentScorecardAutomationOrganizationRunRead(BaseModel):
+    organization_id: UUID
+    organization_name: str
+    publication_reminder: AgentScorecardPublicationReminderRunRead | None
+    artifact_alert_run: AgentScorecardArtifactAnomalyAlertRunRead | None
+    sent_count: int
+    message_count: int
+    skipped_reason: str | None
+
+
+class AgentScorecardAutomationRunRead(BaseModel):
+    channel: CommunicationChannel
+    evaluated_count: int
+    skipped_count: int
+    sent_count: int
+    message_count: int
+    runs: list[AgentScorecardAutomationOrganizationRunRead]
+
+
 class AgentScorecardPublicationReadinessRead(BaseModel):
     organization_id: UUID
     current_period_label: str
