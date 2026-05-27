@@ -848,6 +848,38 @@ textarea:focus {
   color: var(--muted);
 }
 
+.family-events {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.family-events article {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+}
+
+.family-events strong,
+.family-events span,
+.family-events small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.family-events span,
+.family-events small {
+  color: var(--muted);
+}
+
+.family-events small {
+  text-align: right;
+}
+
 .family-layout {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
@@ -937,6 +969,14 @@ textarea:focus {
   .family-layout,
   .family-athletes {
     grid-template-columns: 1fr;
+  }
+
+  .family-events article {
+    display: grid;
+  }
+
+  .family-events small {
+    text-align: left;
   }
 }
 

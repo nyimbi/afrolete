@@ -14,13 +14,14 @@ from app.models.enums import (
     ConsentStatus,
     ParticipationClearanceStatus,
 )
-from app.models.event import ActivityConsent, ConsentRequest, Event
+from app.models.event import ActivityConsent, AttendanceRecord, ConsentRequest, Event
 from app.models.identity import Person
-from app.models.team import AthleteProfile, GuardianRelationship
+from app.models.team import AthleteProfile, GuardianRelationship, TeamRosterEntry
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
     ConsentRequestCreate,
     FamilyAthleteSummaryRead,
+    FamilyEventSummaryRead,
     GuardianRelationshipCreate,
     KnownChannelConsentCapture,
     TokenConsentCapture,
@@ -219,6 +220,87 @@ async def list_my_family(
             )
         )
     return summaries
+
+
+async def list_my_family_events(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    limit: int = 50,
+) -> list[FamilyEventSummaryRead]:
+    rows = (
+        await db.execute(
+            select(GuardianRelationship, Person)
+            .join(Person, Person.id == GuardianRelationship.athlete_person_id)
+            .join(AthleteProfile, AthleteProfile.person_id == GuardianRelationship.athlete_person_id)
+            .where(AthleteProfile.organization_id == organization_id)
+            .where(GuardianRelationship.guardian_person_id == identity.person_id)
+            .order_by(Person.display_name)
+        )
+    ).all()
+
+    summaries: list[FamilyEventSummaryRead] = []
+    now = utc_now()
+    for relationship, athlete in rows:
+        events_by_id: dict[UUID, Event] = {}
+        attendance_by_event: dict[UUID, AttendanceRecord] = {}
+        attendance_rows = (
+            await db.execute(
+                select(AttendanceRecord, Event)
+                .join(Event, Event.id == AttendanceRecord.event_id)
+                .where(Event.organization_id == organization_id)
+                .where(Event.starts_at >= now)
+                .where(AttendanceRecord.person_id == relationship.athlete_person_id)
+                .order_by(Event.starts_at)
+            )
+        ).all()
+        for attendance, event in attendance_rows:
+            events_by_id[event.id] = event
+            attendance_by_event[event.id] = attendance
+
+        team_events = (
+            await db.scalars(
+                select(Event)
+                .join(TeamRosterEntry, TeamRosterEntry.team_id == Event.team_id)
+                .join(AthleteProfile, AthleteProfile.id == TeamRosterEntry.athlete_profile_id)
+                .where(Event.organization_id == organization_id)
+                .where(Event.starts_at >= now)
+                .where(AthleteProfile.person_id == relationship.athlete_person_id)
+                .where(AthleteProfile.organization_id == organization_id)
+                .order_by(Event.starts_at)
+            )
+        ).all()
+        for event in team_events:
+            events_by_id[event.id] = event
+
+        for event in events_by_id.values():
+            clearance, _, guardian_required, consent_id, reason = await clearance_for_event(
+                db,
+                event.id,
+                relationship.athlete_person_id,
+            )
+            attendance = attendance_by_event.get(event.id)
+            summaries.append(
+                FamilyEventSummaryRead(
+                    athlete_person_id=relationship.athlete_person_id,
+                    athlete_name=athlete.display_name,
+                    event_id=event.id,
+                    team_id=event.team_id,
+                    event_type=event.event_type,
+                    title=event.title,
+                    starts_at=event.starts_at,
+                    ends_at=event.ends_at,
+                    timezone=event.timezone,
+                    venue_name=event.venue_name,
+                    attendance_status=attendance.status if attendance else None,
+                    clearance_status=clearance,
+                    guardian_required=guardian_required,
+                    consent_id=consent_id,
+                    reason=reason,
+                )
+            )
+
+    return sorted(summaries, key=lambda item: item.starts_at)[:limit]
 
 
 async def consent_destination(db: AsyncSession, payload: ConsentRequestCreate) -> str:

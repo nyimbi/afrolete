@@ -297,6 +297,24 @@ export type FamilyAthleteSummaryRead = {
   latest_consent_signed_at: string | null;
 };
 
+export type FamilyEventSummaryRead = {
+  athlete_person_id: UUID;
+  athlete_name: string;
+  event_id: UUID;
+  team_id: UUID | null;
+  event_type: EventType;
+  title: string;
+  starts_at: string;
+  ends_at: string | null;
+  timezone: string;
+  venue_name: string | null;
+  attendance_status: AttendanceStatus | null;
+  clearance_status: ParticipationClearanceStatus;
+  guardian_required: boolean;
+  consent_id: UUID | null;
+  reason: string;
+};
+
 export type ConsentRequestRead = {
   id: UUID;
   organization_id: UUID;

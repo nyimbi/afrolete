@@ -5,6 +5,7 @@ import { apiRequest } from "@/lib/api";
 import type {
   CommunicationInboxItemRead,
   FamilyAthleteSummaryRead,
+  FamilyEventSummaryRead,
   LocalIdentity,
   MessageRecipientRead
 } from "@/types/operations";
@@ -19,6 +20,7 @@ export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
+  const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
   const [items, setItems] = useState<CommunicationInboxItemRead[]>([]);
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,8 +62,11 @@ export default function FamilyPortalPage() {
     setError("");
     try {
       const organizationQuery = encodeURIComponent(organizationId);
-      const [familyRows, inbox] = await Promise.all([
+      const [familyRows, eventRows, inbox] = await Promise.all([
         apiRequest<FamilyAthleteSummaryRead[]>(`/safeguarding/my-family?organization_id=${organizationQuery}`, {
+          identity
+        }),
+        apiRequest<FamilyEventSummaryRead[]>(`/safeguarding/my-family/events?organization_id=${organizationQuery}`, {
           identity
         }),
         apiRequest<CommunicationInboxItemRead[]>(`/communications/my-inbox?organization_id=${organizationQuery}`, {
@@ -69,6 +74,7 @@ export default function FamilyPortalPage() {
         })
       ]);
       setFamily(familyRows);
+      setEvents(eventRows);
       setItems(inbox);
       setSelectedRecipientId((current) =>
         inbox.some((item) => item.recipient_id === current) ? current : inbox[0]?.recipient_id ?? ""
@@ -170,6 +176,20 @@ export default function FamilyPortalPage() {
               <span>{athlete.relationship} · {athlete.can_sign_consent ? "signer" : "viewer"}</span>
               <small>
                 {athlete.pending_consent_requests} pending · {athlete.latest_consent_status ?? "no consent"}
+              </small>
+            </article>
+          ))}
+        </div>
+
+        <div className="family-events">
+          {events.slice(0, 6).map((event) => (
+            <article key={`${event.athlete_person_id}-${event.event_id}`}>
+              <div>
+                <strong>{event.title}</strong>
+                <span>{event.athlete_name} · {event.event_type} · {formatDate(event.starts_at)}</span>
+              </div>
+              <small>
+                {event.attendance_status ?? "not invited"} · {event.clearance_status}
               </small>
             </article>
           ))}

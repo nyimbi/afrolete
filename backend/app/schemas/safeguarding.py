@@ -4,10 +4,12 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import (
+    AttendanceStatus,
     ConsentCaptureChannel,
     ConsentRequestStatus,
     ConsentScopeType,
     ConsentStatus,
+    EventType,
     GuardianRelationshipKind,
     ParticipationClearanceStatus,
 )
@@ -66,6 +68,24 @@ class FamilyAthleteSummaryRead(BaseModel):
     latest_consent_status: ConsentStatus | None
     latest_consent_scope_type: ConsentScopeType | None
     latest_consent_signed_at: datetime | None
+
+
+class FamilyEventSummaryRead(BaseModel):
+    athlete_person_id: UUID
+    athlete_name: str
+    event_id: UUID
+    team_id: UUID | None
+    event_type: EventType
+    title: str
+    starts_at: datetime
+    ends_at: datetime | None
+    timezone: str
+    venue_name: str | None
+    attendance_status: AttendanceStatus | None
+    clearance_status: ParticipationClearanceStatus
+    guardian_required: bool
+    consent_id: UUID | None
+    reason: str
 
 
 class ActivityConsentCreate(BaseModel):
