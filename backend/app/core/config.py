@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     temporal_address: str = "127.0.0.1:7233"
     temporal_namespace: str = "default"
+    infrastructure_probe_timeout_seconds: float = 1.5
 
     communication_delivery_mode: Literal["record_only", "webhook"] = "record_only"
     communication_webhook_url: str = ""

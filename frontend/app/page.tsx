@@ -10,7 +10,7 @@ import {
   type AuthSession
 } from "@/lib/auth";
 import { afroleteAuthMode, apiBaseUrl, keycloakClientId, keycloakIssuer } from "@/lib/config";
-import type { InfrastructureComponent, InfrastructureStatus } from "@/types/platform";
+import type { InfrastructureComponent, InfrastructureProbeSummary, InfrastructureStatus } from "@/types/platform";
 import type {
   AgentAssignmentRead,
   AgentBiasAuditRead,
@@ -855,6 +855,7 @@ export default function HomePage() {
   const [emergencyAlert, setEmergencyAlert] = useState<EmergencyActivationAlertRead | null>(null);
   const [selectedEquipmentFile, setSelectedEquipmentFile] = useState<File | null>(null);
   const [infrastructureStatus, setInfrastructureStatus] = useState<InfrastructureStatus | null>(null);
+  const [infrastructureProbes, setInfrastructureProbes] = useState<InfrastructureProbeSummary | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -1441,6 +1442,12 @@ export default function HomePage() {
     infrastructureStatus?.components.filter((component) => infrastructureTone(component) === "ready").length ?? 0;
   const infrastructureAttentionCount =
     infrastructureStatus?.components.filter((component) => infrastructureTone(component) === "attention").length ?? 0;
+  const infrastructureProbeFailures =
+    infrastructureProbes?.results.filter((result) => result.reachable === false).length ?? 0;
+  const infrastructureProbeByKey = useMemo(
+    () => new Map((infrastructureProbes?.results ?? []).map((result) => [result.key, result])),
+    [infrastructureProbes]
+  );
 
   const addLog = useCallback((message: string, tone: LogEntry["tone"] = "neutral") => {
     setLogs((current) => [
@@ -1969,9 +1976,13 @@ export default function HomePage() {
   }, []);
 
   const loadInfrastructure = useCallback(async () => {
-    const data = await apiRequest<InfrastructureStatus>("/infrastructure");
-    setInfrastructureStatus(data);
-    return data;
+    const [status, probes] = await Promise.all([
+      apiRequest<InfrastructureStatus>("/infrastructure"),
+      apiRequest<InfrastructureProbeSummary>("/infrastructure/probes")
+    ]);
+    setInfrastructureStatus(status);
+    setInfrastructureProbes(probes);
+    return { status, probes };
   }, []);
 
   useEffect(() => {
@@ -2035,13 +2046,14 @@ export default function HomePage() {
   }, [authSession, keycloakEnabled, loadOrganizations, runAction, addLog]);
 
   useEffect(() => {
-    runAction("load-infrastructure", loadInfrastructure, (status) => {
+    runAction("load-infrastructure", loadInfrastructure, ({ status, probes }) => {
       const attentionCount = status.components.filter((component) => infrastructureTone(component) === "attention").length;
+      const probeFailures = probes.results.filter((result) => result.reachable === false).length;
       addLog(
-        attentionCount > 0
-          ? `${attentionCount} infrastructure dependency needs configuration`
+        attentionCount > 0 || probeFailures > 0
+          ? `${attentionCount} configured dependency issue(s), ${probeFailures} live probe failure(s)`
           : "Infrastructure readiness synchronized",
-        attentionCount > 0 ? "bad" : "good"
+        attentionCount > 0 || probeFailures > 0 ? "bad" : "good"
       );
     });
   }, [loadInfrastructure, runAction, addLog]);
@@ -8475,20 +8487,28 @@ export default function HomePage() {
             </strong>
             <span>
               {infrastructureStatus
-                ? `${infrastructureStatus.environment} · ${infrastructureAttentionCount} attention`
+                ? `${infrastructureStatus.environment} · ${infrastructureAttentionCount} attention · ${infrastructureProbeFailures} probe failures`
                 : "Postgres, Keycloak, SpiceDB, OpenBao, object storage, Redis, Temporal"}
             </span>
           </div>
           <div className="infra-strip">
             {(infrastructureStatus?.components ?? []).map((component) => {
-              const tone = infrastructureTone(component);
+              const probe = infrastructureProbeByKey.get(component.key);
+              const tone = probe?.reachable === false ? "attention" : infrastructureTone(component);
               return (
                 <article className={`infra-chip ${tone}`} key={component.key}>
                   <div>
                     <strong>{component.name}</strong>
-                    <span>{component.mode} · {component.status}</span>
+                    <span>
+                      {component.mode} · {component.status}
+                      {probe ? ` · ${probe.status}` : ""}
+                    </span>
                   </div>
-                  <small>{component.endpoint ?? component.details[0] ?? "not set"}</small>
+                  <small>
+                    {probe?.latency_ms !== null && probe?.latency_ms !== undefined
+                      ? `${probe.latency_ms}ms · ${probe.details[0] ?? component.endpoint ?? "checked"}`
+                      : component.endpoint ?? component.details[0] ?? "not set"}
+                  </small>
                 </article>
               );
             })}
@@ -8505,15 +8525,16 @@ export default function HomePage() {
           <button
             type="button"
             onClick={() =>
-              void runAction("load-infrastructure", loadInfrastructure, (status) => {
+              void runAction("load-infrastructure", loadInfrastructure, ({ status, probes }) => {
                 const attentionCount = status.components.filter(
                   (component) => infrastructureTone(component) === "attention"
                 ).length;
+                const probeFailures = probes.results.filter((result) => result.reachable === false).length;
                 addLog(
-                  attentionCount > 0
-                    ? `${attentionCount} infrastructure dependency needs configuration`
+                  attentionCount > 0 || probeFailures > 0
+                    ? `${attentionCount} configured dependency issue(s), ${probeFailures} live probe failure(s)`
                     : "Infrastructure readiness synchronized",
-                  attentionCount > 0 ? "bad" : "good"
+                  attentionCount > 0 || probeFailures > 0 ? "bad" : "good"
                 );
               })
             }

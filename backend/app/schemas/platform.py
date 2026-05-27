@@ -33,3 +33,19 @@ class InfrastructureComponent(BaseModel):
 class InfrastructureStatus(BaseModel):
     environment: str
     components: list[InfrastructureComponent]
+
+
+class InfrastructureProbeResult(BaseModel):
+    key: str
+    name: str
+    status: str
+    reachable: bool | None = None
+    latency_ms: int | None = None
+    checked_at: str
+    details: list[str] = Field(default_factory=list)
+
+
+class InfrastructureProbeSummary(BaseModel):
+    environment: str
+    timeout_seconds: float
+    results: list[InfrastructureProbeResult]

@@ -1,3 +1,6 @@
+from app.api.v1.routes.platform import _parse_host_port, _safe_url_without_credentials
+
+
 def test_healthz(client) -> None:
     response = client.get("/api/v1/healthz")
 
@@ -25,3 +28,8 @@ def test_infrastructure_status_is_secret_safe(client) -> None:
     assert "spicedb_key" not in serialized
     assert "openbao_token" not in serialized
     assert "secret_key" not in serialized
+
+
+def test_infrastructure_helpers_redact_credentials() -> None:
+    assert _safe_url_without_credentials("redis://:secret@localhost:6379/0") == "redis://localhost:6379/0"
+    assert _parse_host_port("temporal.lindela.io:7233", 7233) == ("temporal.lindela.io", 7233)
