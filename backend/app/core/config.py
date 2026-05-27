@@ -51,6 +51,8 @@ class Settings(BaseSettings):
 
     report_artifact_dir: str = "data/report-artifacts"
     report_artifact_url_prefix: str = "local://reports"
+    report_artifact_signing_key: str = "local-report-artifact-key"
+    report_artifact_url_ttl_seconds: int = 900
 
     @field_validator("database_url", mode="before")
     @classmethod

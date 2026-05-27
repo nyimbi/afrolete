@@ -139,6 +139,19 @@ class RenderedReportRead(BaseModel):
     rendered_at: datetime
 
 
+class ReportArtifactAccessRead(BaseModel):
+    report_id: UUID
+    organization_id: UUID
+    output_format: ReportFormat
+    artifact_url: str
+    signed_url: str
+    expires_at: datetime
+    content_type: str
+    filename: str
+    checksum: str
+    size_bytes: int
+
+
 class ReportVerificationRead(BaseModel):
     report_id: UUID
     organization_id: UUID

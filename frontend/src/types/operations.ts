@@ -783,6 +783,19 @@ export type RenderedReportRead = {
   rendered_at: string;
 };
 
+export type ReportArtifactAccessRead = {
+  report_id: UUID;
+  organization_id: UUID;
+  output_format: ReportFormat;
+  artifact_url: string;
+  signed_url: string;
+  expires_at: string;
+  content_type: string;
+  filename: string;
+  checksum: string;
+  size_bytes: number;
+};
+
 export type ReportVerificationRead = {
   report_id: UUID;
   organization_id: UUID;

@@ -98,6 +98,7 @@ import type {
   PredictiveRiskScoreRead,
   ProcurementRecommendationRead,
   ReportCategory,
+  ReportArtifactAccessRead,
   ReportChartRead,
   ReportDefinitionRead,
   ReportExportJobRead,
@@ -225,6 +226,7 @@ export default function HomePage() {
   const [riskScores, setRiskScores] = useState<PredictiveRiskScoreRead[]>([]);
   const [reportExports, setReportExports] = useState<ReportExportJobRead[]>([]);
   const [renderedReport, setRenderedReport] = useState<RenderedReportRead | null>(null);
+  const [reportArtifactAccess, setReportArtifactAccess] = useState<ReportArtifactAccessRead | null>(null);
   const [reportVerification, setReportVerification] = useState<ReportVerificationRead | null>(null);
   const [reportCharts, setReportCharts] = useState<ReportChartRead[]>([]);
   const [reportingBenchmarks, setReportingBenchmarks] = useState<ReportingBenchmarkRead[]>([]);
@@ -1138,6 +1140,7 @@ export default function HomePage() {
       setRiskScores([]);
       setReportExports([]);
       setRenderedReport(null);
+      setReportArtifactAccess(null);
       setReportVerification(null);
       setReportCharts([]);
       setReportingBenchmarks([]);
@@ -3356,6 +3359,26 @@ export default function HomePage() {
     );
   };
 
+  const shareSelectedReportArtifact = () => {
+    if (!selectedGeneratedReportId) {
+      addLog("Generate or select a report first", "bad");
+      return;
+    }
+    runAction(
+      "share-report-artifact",
+      () =>
+        apiRequest<ReportArtifactAccessRead>(
+          `/reporting/reports/${selectedGeneratedReportId}/share-artifact?output_format=${reportForm.default_format}`,
+          { method: "POST", identity }
+        ),
+      (access) => {
+        setReportArtifactAccess(access);
+        addLog(`${access.output_format} link expires ${new Date(access.expires_at).toLocaleString()}`, "good");
+        void loadReporting(selectedOrganizationId);
+      }
+    );
+  };
+
   const generateReportingInsight = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -4637,6 +4660,7 @@ export default function HomePage() {
                 <button type="button" onClick={renderSelectedReport} disabled={busyAction !== null}>Render</button>
                 <button type="button" onClick={verifySelectedReport} disabled={busyAction !== null}>Verify</button>
                 <button type="button" onClick={downloadSelectedReport} disabled={busyAction !== null}>Download</button>
+                <button type="button" onClick={shareSelectedReportArtifact} disabled={busyAction !== null}>Link</button>
                 <button type="button" onClick={createReportExport} disabled={busyAction !== null}>Export</button>
               </div>
             </div>
@@ -4709,6 +4733,23 @@ export default function HomePage() {
                     <strong>Verification {reportVerification.score}/100 · {reportVerification.passed ? "passed" : "needs work"}</strong>
                     <span>{reportVerification.findings[0]} · {reportVerification.recommendation}</span>
                   </div>
+                </article>
+              ) : null}
+              {reportArtifactAccess ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{reportArtifactAccess.output_format} signed link · {reportArtifactAccess.size_bytes} bytes</strong>
+                    <span>
+                      Expires {new Date(reportArtifactAccess.expires_at).toLocaleString()} · {reportArtifactAccess.content_type}
+                    </span>
+                  </div>
+                  <a
+                    href={`${apiBaseUrl}${reportArtifactAccess.signed_url}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open
+                  </a>
                 </article>
               ) : null}
               {generatedReports.slice(0, 3).map((report) => (

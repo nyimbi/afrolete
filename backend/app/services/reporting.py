@@ -1,10 +1,14 @@
 import csv
+import base64
+import hmac
 import io
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from html import escape as xml_escape
 from pathlib import Path
+from urllib.parse import quote
 from uuid import UUID, uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -344,6 +348,77 @@ async def downloadable_report_artifact(
     return artifact
 
 
+async def signed_report_artifact_access(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    report_id: UUID,
+    output_format: ReportFormat | None,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    report = await get_report(db, report_id)
+    await ensure_manage_reporting(authz, identity, report.organization_id)
+    selected_settings = settings or get_settings()
+    selected_format = output_format or report.output_format
+    artifact = build_report_artifact(report, selected_format)
+    stored = persist_report_artifact(report, artifact, selected_settings)
+    expires_at = datetime.now(UTC) + timedelta(
+        seconds=selected_settings.report_artifact_url_ttl_seconds
+    )
+    signed_url = signed_report_artifact_url(
+        selected_settings,
+        report.organization_id,
+        report.id,
+        stored["storage_name"],
+        expires_at,
+    )
+    report.output_format = selected_format
+    report.artifact_url = stored["artifact_url"]
+    report.status = ReportRunStatus.READY
+    await db.commit()
+    return {
+        "report_id": report.id,
+        "organization_id": report.organization_id,
+        "output_format": selected_format,
+        "artifact_url": stored["artifact_url"],
+        "signed_url": signed_url,
+        "expires_at": expires_at,
+        "content_type": artifact["content_type"],
+        "filename": artifact["filename"],
+        "checksum": artifact["checksum"],
+        "size_bytes": len(artifact["content"]),
+    }
+
+
+def read_signed_report_artifact(
+    organization_id: UUID,
+    report_id: UUID,
+    filename: str,
+    expires: int,
+    signature: str,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    selected_settings = settings or get_settings()
+    if "/" in filename or "\\" in filename or filename in {"", ".", ".."}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid artifact name")
+    if expires < int(time.time()):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Artifact link expired")
+    expected = report_artifact_signature(selected_settings, organization_id, report_id, filename, expires)
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid artifact signature")
+
+    artifact_path = Path(selected_settings.report_artifact_dir) / str(organization_id) / str(report_id) / filename
+    if not artifact_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
+    content = artifact_path.read_bytes()
+    return {
+        "content": content,
+        "content_type": report_content_type_for_filename(filename),
+        "filename": public_artifact_filename(filename),
+        "checksum": sha256(content).hexdigest(),
+    }
+
+
 async def verify_report_artifact(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -674,7 +749,66 @@ def persist_report_artifact(
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(bytes(artifact["content"]))
     artifact_url = f"{settings.report_artifact_url_prefix}/{relative_path.as_posix()}"
-    return {"artifact_url": artifact_url, "storage_path": str(destination)}
+    return {
+        "artifact_url": artifact_url,
+        "storage_path": str(destination),
+        "storage_name": storage_name,
+    }
+
+
+def signed_report_artifact_url(
+    settings: Settings,
+    organization_id: UUID,
+    report_id: UUID,
+    storage_name: str,
+    expires_at: datetime,
+) -> str:
+    expires = int(expires_at.timestamp())
+    signature = report_artifact_signature(settings, organization_id, report_id, storage_name, expires)
+    safe_name = quote(storage_name, safe="")
+    return (
+        f"{settings.api_prefix}/reporting/artifacts/{organization_id}/{report_id}/{safe_name}"
+        f"?expires={expires}&signature={signature}"
+    )
+
+
+def report_artifact_signature(
+    settings: Settings,
+    organization_id: UUID,
+    report_id: UUID,
+    storage_name: str,
+    expires: int,
+) -> str:
+    payload = f"{organization_id}/{report_id}/{storage_name}:{expires}"
+    digest = hmac.new(
+        report_artifact_signing_key(settings),
+        payload.encode(),
+        sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def report_artifact_signing_key(settings: Settings) -> bytes:
+    key = settings.report_artifact_signing_key or settings.agent_webhook_key
+    return (key or "local-report-artifact-key").encode()
+
+
+def public_artifact_filename(storage_name: str) -> str:
+    parts = storage_name.split("-", 1)
+    return parts[1] if len(parts) == 2 else storage_name
+
+
+def report_content_type_for_filename(filename: str) -> str:
+    extension = filename.rsplit(".", 1)[-1].lower()
+    return {
+        "pdf": "application/pdf",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "csv": "text/csv",
+        "json": "application/json",
+        "api": "application/json",
+        "html": "text/html",
+        "online": "text/html",
+    }.get(extension, "application/octet-stream")
 
 
 def build_csv_bytes(report: GeneratedReport) -> bytes:

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.reporting import (
+    ReportArtifactAccessRead,
     GeneratedReportCreate,
     GeneratedReportRead,
     IntelligenceInsightCreate,
@@ -47,6 +48,8 @@ from app.services.reporting import (
     report_charts,
     reporting_benchmarks,
     reporting_summary,
+    read_signed_report_artifact,
+    signed_report_artifact_access,
     update_insight_status,
     verify_report_artifact,
 )
@@ -139,6 +142,44 @@ async def download_report_route(
             "Content-Disposition": f"attachment; filename={artifact['filename']}",
             "X-Afrolete-Report-Checksum": str(artifact["checksum"]),
             "X-Afrolete-Artifact-Url": str(artifact["artifact_url"]),
+        },
+    )
+
+
+@router.post("/reports/{report_id}/share-artifact", response_model=ReportArtifactAccessRead)
+async def share_report_artifact_route(
+    report_id: UUID,
+    output_format: ReportFormat | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ReportArtifactAccessRead:
+    return ReportArtifactAccessRead(
+        **await signed_report_artifact_access(db, identity, report_id, output_format, authz)
+    )
+
+
+@router.get("/artifacts/{organization_id}/{report_id}/{filename}")
+async def read_report_artifact_route(
+    organization_id: UUID,
+    report_id: UUID,
+    filename: str,
+    expires: int = Query(),
+    signature: str = Query(),
+) -> Response:
+    artifact = read_signed_report_artifact(
+        organization_id,
+        report_id,
+        filename,
+        expires,
+        signature,
+    )
+    return Response(
+        content=artifact["content"],
+        media_type=str(artifact["content_type"]),
+        headers={
+            "Content-Disposition": f"inline; filename={artifact['filename']}",
+            "X-Afrolete-Report-Checksum": str(artifact["checksum"]),
         },
     )
 
