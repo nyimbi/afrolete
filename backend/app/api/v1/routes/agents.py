@@ -24,7 +24,9 @@ from app.schemas.agent import (
     AgentRunLedgerVerificationRead,
     AgentRunRecordRead,
     AgentScorecardCommentCreate,
+    AgentScorecardCommentModerationRead,
     AgentScorecardCommentRead,
+    AgentScorecardCommentUpdate,
     AgentCreate,
     AgentRead,
     AgentTaskCreate,
@@ -50,6 +52,7 @@ from app.services.agents import (
     list_agent_decision_appeals,
     list_agent_model_registry,
     list_agent_scorecard_comments,
+    list_agent_scorecard_comments_for_moderation,
     list_agent_tasks,
     list_agents,
     list_my_agent_family_tasks,
@@ -60,6 +63,7 @@ from app.services.agents import (
     submit_my_agent_decision_appeal,
     update_agent_decision_appeal,
     update_agent_model_registry,
+    update_agent_scorecard_comment,
     update_agent_task,
     validate_agent_worker_callback_signature,
     verify_agent_run_ledger,
@@ -184,6 +188,22 @@ def to_scorecard_comment_read(comment) -> AgentScorecardCommentRead:
         status=comment.status,
         consent_to_publish=comment.consent_to_publish,
         submitted_at=comment.submitted_at,
+    )
+
+
+def to_scorecard_comment_moderation_read(comment) -> AgentScorecardCommentModerationRead:
+    return AgentScorecardCommentModerationRead(
+        id=comment.id,
+        organization_id=comment.organization_id,
+        display_name=comment.display_name,
+        affiliation=comment.affiliation,
+        contact_email=comment.contact_email,
+        comment=comment.comment,
+        status=comment.status,
+        consent_to_publish=comment.consent_to_publish,
+        submitted_at=comment.submitted_at,
+        created_at=comment.created_at,
+        updated_at=comment.updated_at,
     )
 
 
@@ -312,6 +332,32 @@ async def create_agent_scorecard_comment_route(
     db: AsyncSession = Depends(get_db),
 ) -> AgentScorecardCommentRead:
     return to_scorecard_comment_read(await create_agent_scorecard_comment(db, payload))
+
+
+@router.get("/ethical-scorecard/comments/moderation", response_model=list[AgentScorecardCommentModerationRead])
+async def list_agent_scorecard_comments_for_moderation_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[AgentScorecardCommentModerationRead]:
+    return [
+        to_scorecard_comment_moderation_read(comment)
+        for comment in await list_agent_scorecard_comments_for_moderation(db, identity, organization_id, authz)
+    ]
+
+
+@router.patch("/ethical-scorecard/comments/{comment_id}", response_model=AgentScorecardCommentModerationRead)
+async def update_agent_scorecard_comment_route(
+    comment_id: UUID,
+    payload: AgentScorecardCommentUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentScorecardCommentModerationRead:
+    return to_scorecard_comment_moderation_read(
+        await update_agent_scorecard_comment(db, identity, comment_id, payload, authz)
+    )
 
 
 @router.post("/model-registry", response_model=AgentModelRegistryRead, status_code=status.HTTP_201_CREATED)

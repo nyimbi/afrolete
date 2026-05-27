@@ -36,6 +36,7 @@ from app.schemas.agent import (
     AgentModelRegistryCreate,
     AgentModelRegistryUpdate,
     AgentScorecardCommentCreate,
+    AgentScorecardCommentUpdate,
     AgentTaskCreate,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
@@ -878,6 +879,51 @@ async def create_agent_scorecard_comment(
         submitted_at=datetime.now(UTC),
     )
     db.add(comment)
+    await db.commit()
+    await db.refresh(comment)
+    return comment
+
+
+async def list_agent_scorecard_comments_for_moderation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> list[AgentScorecardComment]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    return list(
+        (
+            await db.scalars(
+                select(AgentScorecardComment)
+                .where(AgentScorecardComment.organization_id == organization_id)
+                .order_by(
+                    AgentScorecardComment.status,
+                    AgentScorecardComment.submitted_at.desc(),
+                    AgentScorecardComment.created_at.desc(),
+                )
+                .limit(100)
+            )
+        ).all()
+    )
+
+
+async def update_agent_scorecard_comment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    comment_id: UUID,
+    payload: AgentScorecardCommentUpdate,
+    authz: AuthorizationService,
+) -> AgentScorecardComment:
+    comment = await db.get(AgentScorecardComment, comment_id)
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scorecard comment not found")
+    await ensure_manage_organization(authz, identity, comment.organization_id)
+    if payload.status == "published" and not comment.consent_to_publish:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot publish feedback without consent to publish",
+        )
+    comment.status = payload.status
     await db.commit()
     await db.refresh(comment)
     return comment

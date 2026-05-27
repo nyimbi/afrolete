@@ -22,6 +22,7 @@ import type {
   AgentRead,
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
+  AgentScorecardCommentModerationRead,
   AgentTaskRead,
   AgentTaskStatus,
   AgentWorkerCallbackRead,
@@ -586,6 +587,7 @@ export default function HomePage() {
   const [agentBiasAudits, setAgentBiasAudits] = useState<AgentBiasAuditRead[]>([]);
   const [agentDecisionAppeals, setAgentDecisionAppeals] = useState<AgentDecisionAppealRead[]>([]);
   const [agentEthicalScorecard, setAgentEthicalScorecard] = useState<AgentEthicalScorecardRead | null>(null);
+  const [agentScorecardComments, setAgentScorecardComments] = useState<AgentScorecardCommentModerationRead[]>([]);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1469,7 +1471,7 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
@@ -1478,7 +1480,10 @@ export default function HomePage() {
       apiRequest<AgentModelRegistryRead[]>(`/agents/model-registry?organization_id=${organizationId}`),
       apiRequest<AgentBiasAuditRead[]>(`/agents/bias-audits?organization_id=${organizationId}`),
       apiRequest<AgentDecisionAppealRead[]>(`/agents/appeals?organization_id=${organizationId}`),
-      apiRequest<AgentEthicalScorecardRead>(`/agents/ethical-scorecard?organization_id=${organizationId}`)
+      apiRequest<AgentEthicalScorecardRead>(`/agents/ethical-scorecard?organization_id=${organizationId}`),
+      apiRequest<AgentScorecardCommentModerationRead[]>(
+        `/agents/ethical-scorecard/comments/moderation?organization_id=${organizationId}`
+      )
     ]);
     setAgentTasks(tasks);
     setAgentRuns(runs);
@@ -1489,6 +1494,7 @@ export default function HomePage() {
     setAgentBiasAudits(biasAudits);
     setAgentDecisionAppeals(appeals);
     setAgentEthicalScorecard(scorecard);
+    setAgentScorecardComments(comments);
   }, []);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1927,6 +1933,7 @@ export default function HomePage() {
       setAgentBiasAudits([]);
       setAgentDecisionAppeals([]);
       setAgentEthicalScorecard(null);
+      setAgentScorecardComments([]);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -4906,6 +4913,28 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updatedAppeal.id)
         ]);
         addLog(`Appeal ${updatedAppeal.status}`, "good");
+      }
+    );
+  };
+
+  const moderateAgentScorecardComment = (
+    comment: AgentScorecardCommentModerationRead,
+    statusValue: "published" | "hidden" | "flagged" | "private_feedback"
+  ) => {
+    runAction(
+      `scorecard-comment-${comment.id}-${statusValue}`,
+      () =>
+        apiRequest<AgentScorecardCommentModerationRead>(`/agents/ethical-scorecard/comments/${comment.id}`, {
+          method: "PATCH",
+          identity,
+          body: { status: statusValue }
+        }),
+      (updatedComment) => {
+        setAgentScorecardComments((current) => [
+          updatedComment,
+          ...current.filter((item) => item.id !== updatedComment.id)
+        ]);
+        addLog(`Scorecard comment ${updatedComment.status}`, updatedComment.status === "published" ? "good" : "neutral");
       }
     );
   };
@@ -11785,6 +11814,28 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {agentScorecardComments.slice(0, 4).map((comment) => (
+                <article key={comment.id} className="task-card">
+                  <div>
+                    <strong>Scorecard comment · {comment.status}</strong>
+                    <span>{comment.display_name} · {comment.affiliation ?? "community"} · {comment.consent_to_publish ? "publish consent" : "private only"}</span>
+                    <span>{comment.contact_email ?? "no contact"} · {new Date(comment.submitted_at).toLocaleDateString()}</span>
+                    <span>{comment.comment}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button
+                      type="button"
+                      onClick={() => moderateAgentScorecardComment(comment, "published")}
+                      disabled={!comment.consent_to_publish}
+                    >
+                      Publish
+                    </button>
+                    <button type="button" onClick={() => moderateAgentScorecardComment(comment, "hidden")}>Hide</button>
+                    <button type="button" onClick={() => moderateAgentScorecardComment(comment, "flagged")}>Flag</button>
+                    <button type="button" onClick={() => moderateAgentScorecardComment(comment, "private_feedback")}>Private</button>
+                  </div>
+                </article>
+              ))}
               {agentTransparency?.models.slice(0, 3).map((model) => (
                 <article key={model.model_policy} className="task-card">
                   <div>

@@ -2639,6 +2639,12 @@ export type AgentScorecardCommentRead = {
   submitted_at: string;
 };
 
+export type AgentScorecardCommentModerationRead = AgentScorecardCommentRead & {
+  contact_email: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AgentRunRecordRead = {
   id: UUID;
   task_id: UUID;

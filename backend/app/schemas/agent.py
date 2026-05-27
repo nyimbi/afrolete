@@ -362,3 +362,13 @@ class AgentScorecardCommentRead(BaseModel):
     status: str
     consent_to_publish: bool
     submitted_at: datetime
+
+
+class AgentScorecardCommentModerationRead(AgentScorecardCommentRead):
+    contact_email: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentScorecardCommentUpdate(BaseModel):
+    status: str = Field(pattern="^(published|hidden|flagged|private_feedback)$")
