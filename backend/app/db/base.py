@@ -9,6 +9,7 @@ from app.models.agent import (  # noqa: F401,E402
     AgentModelRegistry,
     AgentRunRecord,
     AgentScorecardComment,
+    AgentScorecardPublication,
     AgentTask,
 )
 from app.models.assets import (  # noqa: F401,E402

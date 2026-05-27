@@ -1460,6 +1460,33 @@ textarea:focus {
   padding-top: 8px;
 }
 
+.public-ai-publication {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+  margin-top: 14px;
+  border: 1px solid color-mix(in srgb, var(--site-primary) 26%, var(--line));
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.public-ai-publication h2 {
+  margin: 4px 0 8px;
+}
+
+.public-ai-publication p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.public-ai-publication span {
+  display: block;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .public-ai-comments {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
@@ -1744,6 +1771,7 @@ textarea:focus {
   .public-ai-hero-grid,
   .public-ai-metrics,
   .public-ai-actions,
+  .public-ai-publication,
   .public-ai-comments {
     grid-template-columns: 1fr;
   }

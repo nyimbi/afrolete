@@ -20,6 +20,7 @@ from app.models.agent import (
     AgentModelRegistry,
     AgentRunRecord,
     AgentScorecardComment,
+    AgentScorecardPublication,
     AgentTask,
 )
 from app.models.enums import AgentTaskStatus
@@ -38,6 +39,7 @@ from app.schemas.agent import (
     AgentModelRegistryUpdate,
     AgentScorecardCommentCreate,
     AgentScorecardCommentUpdate,
+    AgentScorecardPublicationCreate,
     AgentTaskCreate,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
@@ -992,6 +994,107 @@ async def update_agent_scorecard_comment(
     await db.commit()
     await db.refresh(comment)
     return comment
+
+
+async def list_agent_scorecard_publications(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[AgentScorecardPublication]:
+    return list(
+        (
+            await db.scalars(
+                select(AgentScorecardPublication)
+                .where(AgentScorecardPublication.organization_id == organization_id)
+                .where(AgentScorecardPublication.status == "published")
+                .order_by(AgentScorecardPublication.published_at.desc())
+                .limit(8)
+            )
+        ).all()
+    )
+
+
+async def publish_agent_scorecard(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentScorecardPublicationCreate,
+    authz: AuthorizationService,
+) -> AgentScorecardPublication:
+    await ensure_manage_organization(authz, identity, payload.organization_id)
+    scorecard = await agent_ethical_scorecard(db, payload.organization_id)
+    published_comments = await db.scalar(
+        select(func.count(AgentScorecardComment.id))
+        .where(AgentScorecardComment.organization_id == payload.organization_id)
+        .where(AgentScorecardComment.status == "published")
+        .where(AgentScorecardComment.consent_to_publish.is_(True))
+    )
+    flagged_comments = await db.scalar(
+        select(func.count(AgentScorecardComment.id))
+        .where(AgentScorecardComment.organization_id == payload.organization_id)
+        .where(AgentScorecardComment.status == "flagged")
+    )
+    published_at = datetime.now(UTC)
+    period_label = payload.period_label or scorecard_period_label(published_at)
+    action_text = json.dumps(scorecard["improvement_actions"], separators=(",", ":"))
+    snapshot_payload = {
+        "period_label": period_label,
+        "score": scorecard["score"],
+        "grade": scorecard["grade"],
+        "total_models": scorecard["total_models"],
+        "approved_models": scorecard["approved_models"],
+        "bias_audits": scorecard["bias_audits"],
+        "pending_appeals": scorecard["pending_appeals"],
+        "ledger_valid": scorecard["ledger_valid"],
+        "public_summary": scorecard["public_summary"],
+        "improvement_actions": scorecard["improvement_actions"],
+        "published_comment_count": published_comments or 0,
+        "flagged_comment_count": flagged_comments or 0,
+    }
+    existing = await db.scalar(
+        select(AgentScorecardPublication)
+        .where(AgentScorecardPublication.organization_id == payload.organization_id)
+        .where(AgentScorecardPublication.period_label == period_label)
+    )
+    publication = existing or AgentScorecardPublication(
+        organization_id=payload.organization_id,
+        period_label=period_label,
+    )
+    publication.status = "published"
+    publication.score = int(scorecard["score"])
+    publication.grade = str(scorecard["grade"])
+    publication.total_models = int(scorecard["total_models"])
+    publication.approved_models = int(scorecard["approved_models"])
+    publication.bias_audits = int(scorecard["bias_audits"])
+    publication.pending_appeals = int(scorecard["pending_appeals"])
+    publication.ledger_valid = bool(scorecard["ledger_valid"])
+    publication.public_summary = str(scorecard["public_summary"])
+    publication.improvement_actions = action_text
+    publication.published_comment_count = int(published_comments or 0)
+    publication.flagged_comment_count = int(flagged_comments or 0)
+    publication.snapshot_hash = hashlib.sha256(
+        json.dumps(snapshot_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    publication.published_by_person_id = identity.person_id
+    publication.published_at = published_at
+    if existing is None:
+        db.add(publication)
+    await db.commit()
+    await db.refresh(publication)
+    return publication
+
+
+def scorecard_period_label(value: datetime) -> str:
+    quarter = ((value.month - 1) // 3) + 1
+    return f"{value.year}-Q{quarter}"
+
+
+def scorecard_publication_actions(publication: AgentScorecardPublication) -> list[str]:
+    try:
+        parsed = json.loads(publication.improvement_actions)
+    except json.JSONDecodeError:
+        return [publication.improvement_actions]
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed]
+    return [str(parsed)]
 
 
 async def update_agent_task(

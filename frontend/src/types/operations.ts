@@ -2647,6 +2647,27 @@ export type AgentScorecardCommentModerationRead = AgentScorecardCommentRead & {
   updated_at: string;
 };
 
+export type AgentScorecardPublicationRead = {
+  id: UUID;
+  organization_id: UUID;
+  period_label: string;
+  status: string;
+  score: number;
+  grade: string;
+  total_models: number;
+  approved_models: number;
+  bias_audits: number;
+  pending_appeals: number;
+  ledger_valid: boolean;
+  public_summary: string;
+  improvement_actions: string[];
+  published_comment_count: number;
+  flagged_comment_count: number;
+  snapshot_hash: string;
+  published_by_person_id: UUID | null;
+  published_at: string;
+};
+
 export type AgentRunRecordRead = {
   id: UUID;
   task_id: UUID;

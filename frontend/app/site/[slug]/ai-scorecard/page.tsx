@@ -6,6 +6,7 @@ import { apiRequest } from "@/lib/api";
 import type {
   AgentEthicalScorecardRead,
   AgentScorecardCommentRead,
+  AgentScorecardPublicationRead,
   OrganizationPublicSiteRead
 } from "@/types/operations";
 
@@ -13,6 +14,7 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
   const [site, setSite] = useState<OrganizationPublicSiteRead | null>(null);
   const [scorecard, setScorecard] = useState<AgentEthicalScorecardRead | null>(null);
   const [comments, setComments] = useState<AgentScorecardCommentRead[]>([]);
+  const [publications, setPublications] = useState<AgentScorecardPublicationRead[]>([]);
   const [commentForm, setCommentForm] = useState({
     display_name: "",
     affiliation: "",
@@ -36,14 +38,18 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
         setError("");
         return Promise.all([
           apiRequest<AgentEthicalScorecardRead>(`/agents/ethical-scorecard?organization_id=${siteData.id}`),
-          apiRequest<AgentScorecardCommentRead[]>(`/agents/ethical-scorecard/comments?organization_id=${siteData.id}`)
+          apiRequest<AgentScorecardCommentRead[]>(`/agents/ethical-scorecard/comments?organization_id=${siteData.id}`),
+          apiRequest<AgentScorecardPublicationRead[]>(
+            `/agents/ethical-scorecard/publications?organization_id=${siteData.id}`
+          )
         ]);
       })
       .then((loaded) => {
         if (!cancelled && loaded) {
-          const [scorecardData, commentRows] = loaded;
+          const [scorecardData, commentRows, publicationRows] = loaded;
           setScorecard(scorecardData);
           setComments(commentRows);
+          setPublications(publicationRows);
         }
       })
       .catch((caught) => {
@@ -65,6 +71,7 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
   );
 
   const displayName = site?.public_name ?? site?.name ?? "AfroLete organization";
+  const latestPublication = publications[0] ?? null;
 
   const submitComment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -192,6 +199,21 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
             ))}
           </div>
         </div>
+
+        {latestPublication ? (
+          <div className="public-ai-publication">
+            <div>
+              <p className="section-label">Published snapshot</p>
+              <h2>{latestPublication.period_label} · {latestPublication.score}/100 · {latestPublication.grade}</h2>
+              <p>{latestPublication.public_summary}</p>
+            </div>
+            <div>
+              <span>Published {formatDate(latestPublication.published_at)}</span>
+              <span>{latestPublication.published_comment_count} public comments · {latestPublication.flagged_comment_count} held for review</span>
+              <span>Snapshot {latestPublication.snapshot_hash.slice(0, 16)}</span>
+            </div>
+          </div>
+        ) : null}
 
         <div className="public-ai-comments">
           <div>

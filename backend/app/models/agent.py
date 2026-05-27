@@ -167,3 +167,28 @@ class AgentScorecardComment(IdMixin, TimestampMixin, Base):
     abuse_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
     abuse_reason: Mapped[str | None] = mapped_column(Text)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class AgentScorecardPublication(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_scorecard_publications"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "period_label", name="uq_agent_scorecard_publications_org_period"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    period_label: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="published", nullable=False, index=True)
+    score: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    grade: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    total_models: Mapped[int] = mapped_column(Integer, nullable=False)
+    approved_models: Mapped[int] = mapped_column(Integer, nullable=False)
+    bias_audits: Mapped[int] = mapped_column(Integer, nullable=False)
+    pending_appeals: Mapped[int] = mapped_column(Integer, nullable=False)
+    ledger_valid: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    public_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    improvement_actions: Mapped[str] = mapped_column(Text, nullable=False)
+    published_comment_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    flagged_comment_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    snapshot_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    published_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

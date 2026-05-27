@@ -23,6 +23,7 @@ import type {
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
   AgentScorecardCommentModerationRead,
+  AgentScorecardPublicationRead,
   AgentTaskRead,
   AgentTaskStatus,
   AgentWorkerCallbackRead,
@@ -588,6 +589,7 @@ export default function HomePage() {
   const [agentDecisionAppeals, setAgentDecisionAppeals] = useState<AgentDecisionAppealRead[]>([]);
   const [agentEthicalScorecard, setAgentEthicalScorecard] = useState<AgentEthicalScorecardRead | null>(null);
   const [agentScorecardComments, setAgentScorecardComments] = useState<AgentScorecardCommentModerationRead[]>([]);
+  const [agentScorecardPublications, setAgentScorecardPublications] = useState<AgentScorecardPublicationRead[]>([]);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1471,7 +1473,7 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
@@ -1483,6 +1485,9 @@ export default function HomePage() {
       apiRequest<AgentEthicalScorecardRead>(`/agents/ethical-scorecard?organization_id=${organizationId}`),
       apiRequest<AgentScorecardCommentModerationRead[]>(
         `/agents/ethical-scorecard/comments/moderation?organization_id=${organizationId}`
+      ),
+      apiRequest<AgentScorecardPublicationRead[]>(
+        `/agents/ethical-scorecard/publications?organization_id=${organizationId}`
       )
     ]);
     setAgentTasks(tasks);
@@ -1495,6 +1500,7 @@ export default function HomePage() {
     setAgentDecisionAppeals(appeals);
     setAgentEthicalScorecard(scorecard);
     setAgentScorecardComments(comments);
+    setAgentScorecardPublications(publications);
   }, []);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1934,6 +1940,7 @@ export default function HomePage() {
       setAgentDecisionAppeals([]);
       setAgentEthicalScorecard(null);
       setAgentScorecardComments([]);
+      setAgentScorecardPublications([]);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -4935,6 +4942,28 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updatedComment.id)
         ]);
         addLog(`Scorecard comment ${updatedComment.status}`, updatedComment.status === "published" ? "good" : "neutral");
+      }
+    );
+  };
+
+  const publishAgentScorecardSnapshot = () => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "agent-scorecard-publication",
+      () =>
+        apiRequest<AgentScorecardPublicationRead>("/agents/ethical-scorecard/publications", {
+          method: "POST",
+          identity,
+          body: { organization_id: selectedOrganizationId }
+        }),
+      (publication) => {
+        setAgentScorecardPublications((current) => [
+          publication,
+          ...current.filter((item) => item.id !== publication.id)
+        ]);
+        addLog(`Published ${publication.period_label} AI scorecard`, "good");
       }
     );
   };
@@ -11812,8 +11841,21 @@ export default function HomePage() {
                     <span>{agentEthicalScorecard.public_summary}</span>
                     <span>{agentEthicalScorecard.improvement_actions[0] ?? "Publish-ready"}</span>
                   </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={publishAgentScorecardSnapshot}>Publish snapshot</button>
+                  </div>
                 </article>
               ) : null}
+              {agentScorecardPublications.slice(0, 2).map((publication) => (
+                <article key={publication.id} className="task-card">
+                  <div>
+                    <strong>{publication.period_label} publication · {publication.score}/100 · {publication.grade}</strong>
+                    <span>{publication.published_comment_count} comments · {publication.flagged_comment_count} held · ledger {publication.ledger_valid ? "valid" : "review"}</span>
+                    <span>{new Date(publication.published_at).toLocaleDateString()} · {publication.snapshot_hash.slice(0, 16)}</span>
+                    <span>{publication.public_summary}</span>
+                  </div>
+                </article>
+              ))}
               {agentScorecardComments.slice(0, 4).map((comment) => (
                 <article key={comment.id} className="task-card">
                   <div>

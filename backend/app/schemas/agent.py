@@ -374,3 +374,29 @@ class AgentScorecardCommentModerationRead(AgentScorecardCommentRead):
 
 class AgentScorecardCommentUpdate(BaseModel):
     status: str = Field(pattern="^(published|hidden|flagged|private_feedback)$")
+
+
+class AgentScorecardPublicationCreate(BaseModel):
+    organization_id: UUID
+    period_label: str | None = Field(default=None, max_length=40)
+
+
+class AgentScorecardPublicationRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    period_label: str
+    status: str
+    score: int
+    grade: str
+    total_models: int
+    approved_models: int
+    bias_audits: int
+    pending_appeals: int
+    ledger_valid: bool
+    public_summary: str
+    improvement_actions: list[str]
+    published_comment_count: int
+    flagged_comment_count: int
+    snapshot_hash: str
+    published_by_person_id: UUID | None
+    published_at: datetime

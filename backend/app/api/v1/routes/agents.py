@@ -27,6 +27,8 @@ from app.schemas.agent import (
     AgentScorecardCommentModerationRead,
     AgentScorecardCommentRead,
     AgentScorecardCommentUpdate,
+    AgentScorecardPublicationCreate,
+    AgentScorecardPublicationRead,
     AgentCreate,
     AgentRead,
     AgentTaskCreate,
@@ -53,11 +55,13 @@ from app.services.agents import (
     list_agent_model_registry,
     list_agent_scorecard_comments,
     list_agent_scorecard_comments_for_moderation,
+    list_agent_scorecard_publications,
     list_agent_tasks,
     list_agents,
     list_my_agent_family_tasks,
     list_my_agent_decision_appeals,
     queue_agent_task,
+    publish_agent_scorecard,
     run_agent_bias_audit,
     submit_agent_decision_appeal,
     submit_my_agent_decision_appeal,
@@ -67,6 +71,7 @@ from app.services.agents import (
     update_agent_task,
     validate_agent_worker_callback_signature,
     verify_agent_run_ledger,
+    scorecard_publication_actions,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -206,6 +211,29 @@ def to_scorecard_comment_moderation_read(comment) -> AgentScorecardCommentModera
         submitted_at=comment.submitted_at,
         created_at=comment.created_at,
         updated_at=comment.updated_at,
+    )
+
+
+def to_scorecard_publication_read(publication) -> AgentScorecardPublicationRead:
+    return AgentScorecardPublicationRead(
+        id=publication.id,
+        organization_id=publication.organization_id,
+        period_label=publication.period_label,
+        status=publication.status,
+        score=publication.score,
+        grade=publication.grade,
+        total_models=publication.total_models,
+        approved_models=publication.approved_models,
+        bias_audits=publication.bias_audits,
+        pending_appeals=publication.pending_appeals,
+        ledger_valid=publication.ledger_valid,
+        public_summary=publication.public_summary,
+        improvement_actions=scorecard_publication_actions(publication),
+        published_comment_count=publication.published_comment_count,
+        flagged_comment_count=publication.flagged_comment_count,
+        snapshot_hash=publication.snapshot_hash,
+        published_by_person_id=publication.published_by_person_id,
+        published_at=publication.published_at,
     )
 
 
@@ -359,6 +387,29 @@ async def update_agent_scorecard_comment_route(
 ) -> AgentScorecardCommentModerationRead:
     return to_scorecard_comment_moderation_read(
         await update_agent_scorecard_comment(db, identity, comment_id, payload, authz)
+    )
+
+
+@router.get("/ethical-scorecard/publications", response_model=list[AgentScorecardPublicationRead])
+async def list_agent_scorecard_publications_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentScorecardPublicationRead]:
+    return [
+        to_scorecard_publication_read(publication)
+        for publication in await list_agent_scorecard_publications(db, organization_id)
+    ]
+
+
+@router.post("/ethical-scorecard/publications", response_model=AgentScorecardPublicationRead, status_code=201)
+async def publish_agent_scorecard_route(
+    payload: AgentScorecardPublicationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentScorecardPublicationRead:
+    return to_scorecard_publication_read(
+        await publish_agent_scorecard(db, identity, payload, authz)
     )
 
 
