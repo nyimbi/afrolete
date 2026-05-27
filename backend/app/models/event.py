@@ -12,6 +12,9 @@ from app.models.enums import (
     ConsentScopeType,
     ConsentStatus,
     EventType,
+    SafeguardingIncidentSeverity,
+    SafeguardingIncidentStatus,
+    SafeguardingIncidentType,
 )
 
 
@@ -125,3 +128,38 @@ class ActivityConsent(IdMixin, TimestampMixin, Base):
     recorded_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"))
     consent_text: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
+
+
+class SafeguardingIncident(IdMixin, TimestampMixin, Base):
+    __tablename__ = "safeguarding_incidents"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    athlete_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reported_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    assigned_to_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    incident_type: Mapped[SafeguardingIncidentType] = mapped_column(
+        enum_type(SafeguardingIncidentType), nullable=False, index=True
+    )
+    severity: Mapped[SafeguardingIncidentSeverity] = mapped_column(
+        enum_type(SafeguardingIncidentSeverity), nullable=False, index=True
+    )
+    status: Mapped[SafeguardingIncidentStatus] = mapped_column(
+        enum_type(SafeguardingIncidentStatus),
+        default=SafeguardingIncidentStatus.OPEN,
+        nullable=False,
+        index=True,
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    location: Mapped[str | None] = mapped_column(String(240))
+    title: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    immediate_action: Mapped[str | None] = mapped_column(Text)
+    parent_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    medical_follow_up_required: Mapped[str] = mapped_column(String(40), default="unknown", index=True)
+    regulatory_report_required: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
+    resolution_notes: Mapped[str | None] = mapped_column(Text)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

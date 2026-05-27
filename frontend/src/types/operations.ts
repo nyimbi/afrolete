@@ -86,6 +86,19 @@ export type AgentTaskStatus =
   | "failed"
   | "cancelled";
 
+export type SafeguardingIncidentType =
+  | "injury"
+  | "medical"
+  | "safeguarding"
+  | "misconduct"
+  | "facility"
+  | "transport"
+  | "weather"
+  | "other";
+
+export type SafeguardingIncidentSeverity = "low" | "medium" | "high" | "critical";
+export type SafeguardingIncidentStatus = "open" | "triaged" | "investigating" | "resolved" | "closed";
+
 export type MetricCategory =
   | "physical"
   | "technical"
@@ -1324,6 +1337,30 @@ export type ParticipationClearanceRead = {
   status: ParticipationClearanceStatus;
   consent_id: UUID | null;
   reason: string;
+};
+
+export type SafeguardingIncidentRead = {
+  id: UUID;
+  organization_id: UUID;
+  event_id: UUID | null;
+  team_id: UUID | null;
+  athlete_person_id: UUID | null;
+  reported_by_person_id: UUID | null;
+  assigned_to_person_id: UUID | null;
+  incident_type: SafeguardingIncidentType;
+  severity: SafeguardingIncidentSeverity;
+  status: SafeguardingIncidentStatus;
+  occurred_at: string;
+  location: string | null;
+  title: string;
+  description: string;
+  immediate_action: string | null;
+  parent_notified_at: string | null;
+  medical_follow_up_required: string;
+  regulatory_report_required: boolean;
+  resolution_notes: string | null;
+  resolved_at: string | null;
+  created_at: string;
 };
 
 export type AgentRead = {

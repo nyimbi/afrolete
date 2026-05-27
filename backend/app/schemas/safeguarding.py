@@ -12,6 +12,9 @@ from app.models.enums import (
     EventType,
     GuardianRelationshipKind,
     ParticipationClearanceStatus,
+    SafeguardingIncidentSeverity,
+    SafeguardingIncidentStatus,
+    SafeguardingIncidentType,
 )
 
 
@@ -235,3 +238,55 @@ class ParticipationClearanceRead(BaseModel):
     status: ParticipationClearanceStatus
     consent_id: UUID | None = None
     reason: str
+
+
+class SafeguardingIncidentCreate(BaseModel):
+    organization_id: UUID
+    event_id: UUID | None = None
+    team_id: UUID | None = None
+    athlete_person_id: UUID | None = None
+    assigned_to_person_id: UUID | None = None
+    incident_type: SafeguardingIncidentType
+    severity: SafeguardingIncidentSeverity = SafeguardingIncidentSeverity.MEDIUM
+    occurred_at: datetime
+    location: str | None = Field(default=None, max_length=240)
+    title: str = Field(min_length=2, max_length=240)
+    description: str = Field(min_length=2, max_length=8000)
+    immediate_action: str | None = Field(default=None, max_length=4000)
+    parent_notified_at: datetime | None = None
+    medical_follow_up_required: str = Field(default="unknown", max_length=40)
+    regulatory_report_required: bool = False
+
+
+class SafeguardingIncidentUpdate(BaseModel):
+    status: SafeguardingIncidentStatus | None = None
+    severity: SafeguardingIncidentSeverity | None = None
+    assigned_to_person_id: UUID | None = None
+    parent_notified_at: datetime | None = None
+    medical_follow_up_required: str | None = Field(default=None, max_length=40)
+    regulatory_report_required: bool | None = None
+    resolution_notes: str | None = Field(default=None, max_length=4000)
+
+
+class SafeguardingIncidentRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    event_id: UUID | None
+    team_id: UUID | None
+    athlete_person_id: UUID | None
+    reported_by_person_id: UUID | None
+    assigned_to_person_id: UUID | None
+    incident_type: SafeguardingIncidentType
+    severity: SafeguardingIncidentSeverity
+    status: SafeguardingIncidentStatus
+    occurred_at: datetime
+    location: str | None
+    title: str
+    description: str
+    immediate_action: str | None
+    parent_notified_at: datetime | None
+    medical_follow_up_required: str
+    regulatory_report_required: bool
+    resolution_notes: str | None
+    resolved_at: datetime | None
+    created_at: datetime

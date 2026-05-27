@@ -130,6 +130,10 @@ import type {
   ReportingSummaryRead,
   SaaSInvoiceRead,
   SaaSPaymentRead,
+  SafeguardingIncidentRead,
+  SafeguardingIncidentSeverity,
+  SafeguardingIncidentStatus,
+  SafeguardingIncidentType,
   ScheduledReportRead,
   SponsorRead,
   SponsorshipAgreementRead,
@@ -418,6 +422,7 @@ export default function HomePage() {
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
   const [clearance, setClearance] = useState<ParticipationClearanceRead | null>(null);
+  const [safeguardingIncidents, setSafeguardingIncidents] = useState<SafeguardingIncidentRead[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
@@ -490,6 +495,17 @@ export default function HomePage() {
     guardian_display_name: "Parent Example",
     guardian_email: "parent@example.com",
     guardian_phone: "+254700000000"
+  });
+  const [incidentForm, setIncidentForm] = useState({
+    title: "Matchday injury report",
+    incident_type: "injury" as SafeguardingIncidentType,
+    severity: "medium" as SafeguardingIncidentSeverity,
+    occurred_at: "2026-05-28T10:15",
+    location: "Main field",
+    description: "Athlete reported ankle pain after a challenge.",
+    immediate_action: "Removed from play, first aid applied, guardian notified.",
+    medical_follow_up_required: "yes",
+    regulatory_report_required: false
   });
   const [agentForm, setAgentForm] = useState({
     name: "Safeguarding Watch",
@@ -922,6 +938,14 @@ export default function HomePage() {
     const data = await apiRequest<AttendanceRecordRead[]>(`/events/${eventId}/attendance`);
     setAttendance(data);
   }, []);
+
+  const loadSafeguardingIncidents = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<SafeguardingIncidentRead[]>(
+      `/safeguarding/incidents?organization_id=${organizationId}`,
+      { identity }
+    );
+    setSafeguardingIncidents(data);
+  }, [identity]);
 
   const loadAgents = useCallback(async (organizationId: string) => {
     const data = await apiRequest<AgentRead[]>(`/agents?organization_id=${organizationId}`);
@@ -1358,6 +1382,7 @@ export default function HomePage() {
       setMatchEvents([]);
       setOfficialAssignments([]);
       setRegistrationInquiries([]);
+      setSafeguardingIncidents([]);
       setCommunicationTemplates([]);
       setCommunicationMessages([]);
       setMessageRecipients([]);
@@ -1434,6 +1459,7 @@ export default function HomePage() {
       await loadTeams(selectedOrganizationId);
       await loadRegistrationInquiries(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
+      await loadSafeguardingIncidents(selectedOrganizationId);
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
@@ -1450,6 +1476,7 @@ export default function HomePage() {
     loadTeams,
     loadRegistrationInquiries,
     loadEvents,
+    loadSafeguardingIncidents,
     loadAgents,
     loadAgentTasks,
     loadMetricDefinitions,
@@ -2034,6 +2061,72 @@ export default function HomePage() {
       (value) => {
         setClearance(value);
         addLog(`Clearance: ${value.status}`, value.status === "cleared" ? "good" : "neutral");
+      }
+    );
+  };
+
+  const createSafeguardingIncident = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-safeguarding-incident",
+      () =>
+        apiRequest<SafeguardingIncidentRead>("/safeguarding/incidents", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            event_id: selectedEventId || null,
+            team_id: selectedTeamId || null,
+            athlete_person_id: selectedAthleteId || null,
+            incident_type: incidentForm.incident_type,
+            severity: incidentForm.severity,
+            occurred_at: new Date(incidentForm.occurred_at).toISOString(),
+            location: incidentForm.location || null,
+            title: incidentForm.title,
+            description: incidentForm.description,
+            immediate_action: incidentForm.immediate_action || null,
+            parent_notified_at: null,
+            medical_follow_up_required: incidentForm.medical_follow_up_required,
+            regulatory_report_required: incidentForm.regulatory_report_required
+          }
+        }),
+      (incident) => {
+        setSafeguardingIncidents((current) => [
+          incident,
+          ...current.filter((item) => item.id !== incident.id)
+        ]);
+        addLog(`${incident.title} incident logged`, incident.severity === "critical" ? "bad" : "good");
+      }
+    );
+  };
+
+  const updateSafeguardingIncident = (
+    incident: SafeguardingIncidentRead,
+    statusValue: SafeguardingIncidentStatus
+  ) => {
+    runAction(
+      `safeguarding-incident-${incident.id}-${statusValue}`,
+      () =>
+        apiRequest<SafeguardingIncidentRead>(`/safeguarding/incidents/${incident.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            resolution_notes:
+              statusValue === "resolved" || statusValue === "closed"
+                ? `Marked ${statusValue} from the operations console.`
+                : null
+          }
+        }),
+      (updated) => {
+        setSafeguardingIncidents((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.title} moved to ${updated.status}`, "good");
       }
     );
   };
@@ -7631,6 +7724,7 @@ export default function HomePage() {
             <div className="event-toolbar">
               <button type="button" onClick={createGuardian} disabled={busyAction !== null}>Link guardian</button>
               <button type="button" onClick={requestConsent} disabled={busyAction !== null}>Request consent</button>
+              <button type="button" onClick={createSafeguardingIncident} disabled={busyAction !== null}>Log incident</button>
             </div>
           </div>
           <div className="form-grid three">
@@ -7645,6 +7739,63 @@ export default function HomePage() {
             <label>
               Phone
               <input value={guardianForm.guardian_phone} onChange={(event) => setGuardianForm({ ...guardianForm, guardian_phone: event.target.value })} />
+            </label>
+          </div>
+          <div className="form-grid three">
+            <label>
+              Incident
+              <input value={incidentForm.title} onChange={(event) => setIncidentForm({ ...incidentForm, title: event.target.value })} />
+            </label>
+            <label>
+              Type
+              <select value={incidentForm.incident_type} onChange={(event) => setIncidentForm({ ...incidentForm, incident_type: event.target.value as SafeguardingIncidentType })}>
+                <option value="injury">Injury</option>
+                <option value="medical">Medical</option>
+                <option value="safeguarding">Safeguarding</option>
+                <option value="misconduct">Misconduct</option>
+                <option value="facility">Facility</option>
+                <option value="transport">Transport</option>
+                <option value="weather">Weather</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>
+              Severity
+              <select value={incidentForm.severity} onChange={(event) => setIncidentForm({ ...incidentForm, severity: event.target.value as SafeguardingIncidentSeverity })}>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </label>
+            <label>
+              Occurred
+              <input type="datetime-local" value={incidentForm.occurred_at} onChange={(event) => setIncidentForm({ ...incidentForm, occurred_at: event.target.value })} />
+            </label>
+            <label>
+              Location
+              <input value={incidentForm.location} onChange={(event) => setIncidentForm({ ...incidentForm, location: event.target.value })} />
+            </label>
+            <label>
+              Medical follow-up
+              <select value={incidentForm.medical_follow_up_required} onChange={(event) => setIncidentForm({ ...incidentForm, medical_follow_up_required: event.target.value })}>
+                <option value="unknown">Unknown</option>
+                <option value="no">No</option>
+                <option value="yes">Yes</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </label>
+            <label className="wide-field">
+              Description
+              <textarea value={incidentForm.description} onChange={(event) => setIncidentForm({ ...incidentForm, description: event.target.value })} />
+            </label>
+            <label className="wide-field">
+              Immediate action
+              <textarea value={incidentForm.immediate_action} onChange={(event) => setIncidentForm({ ...incidentForm, immediate_action: event.target.value })} />
+            </label>
+            <label className="checkbox-label">
+              <input type="checkbox" checked={incidentForm.regulatory_report_required} onChange={(event) => setIncidentForm({ ...incidentForm, regulatory_report_required: event.target.checked })} />
+              Regulatory report
             </label>
           </div>
           <div className="consent-grid">
@@ -7664,6 +7815,23 @@ export default function HomePage() {
               <span className="muted">Guardian link</span>
               {consentUrl ? <a href={consentUrl}>{consentUrl}</a> : <strong>Not issued</strong>}
             </div>
+          </div>
+          <div className="task-list">
+            {safeguardingIncidents.slice(0, 5).map((incident) => (
+              <article key={incident.id} className="task-card">
+                <div>
+                  <strong>{incident.title}</strong>
+                  <span>{incident.incident_type} · {incident.severity} · {incident.status} · {new Date(incident.occurred_at).toLocaleString()}</span>
+                  <span>{incident.description}</span>
+                  {incident.immediate_action ? <span>{incident.immediate_action}</span> : null}
+                </div>
+                <div className="event-toolbar">
+                  <button type="button" onClick={() => updateSafeguardingIncident(incident, "triaged")}>Triage</button>
+                  <button type="button" onClick={() => updateSafeguardingIncident(incident, "investigating")}>Investigate</button>
+                  <button type="button" onClick={() => updateSafeguardingIncident(incident, "resolved")}>Resolve</button>
+                </div>
+              </article>
+            ))}
           </div>
         </section>
       </section>

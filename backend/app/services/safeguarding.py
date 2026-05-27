@@ -14,10 +14,11 @@ from app.models.enums import (
     ConsentScopeType,
     ConsentStatus,
     ParticipationClearanceStatus,
+    SafeguardingIncidentStatus,
 )
-from app.models.event import ActivityConsent, AttendanceRecord, ConsentRequest, Event
+from app.models.event import ActivityConsent, AttendanceRecord, ConsentRequest, Event, SafeguardingIncident
 from app.models.identity import Person
-from app.models.team import AthleteProfile, GuardianRelationship, TeamRosterEntry
+from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
     ConsentRequestCreate,
@@ -28,6 +29,8 @@ from app.schemas.safeguarding import (
     FamilyEventRsvpCreate,
     GuardianRelationshipCreate,
     KnownChannelConsentCapture,
+    SafeguardingIncidentCreate,
+    SafeguardingIncidentUpdate,
     TokenConsentCapture,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -63,6 +66,45 @@ def normalized_scope_id(
     if scope_id is None:
         raise HTTPException(status_code=422, detail="Team and event consents require scope_id")
     return scope_id
+
+
+async def validate_incident_refs(
+    db: AsyncSession,
+    organization_id: UUID,
+    event_id: UUID | None,
+    team_id: UUID | None,
+    athlete_person_id: UUID | None,
+    assigned_to_person_id: UUID | None,
+) -> None:
+    if event_id is not None:
+        event = await db.get(Event, event_id)
+        if event is None or event.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    if team_id is not None:
+        team = await db.get(Team, team_id)
+        if team is None or team.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if athlete_person_id is not None:
+        athlete_profile = await db.scalar(
+            select(AthleteProfile).where(
+                AthleteProfile.organization_id == organization_id,
+                AthleteProfile.person_id == athlete_person_id,
+            )
+        )
+        if athlete_profile is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    if assigned_to_person_id is not None:
+        await validate_person_in_organization(db, organization_id, assigned_to_person_id)
+
+
+async def validate_person_in_organization(
+    db: AsyncSession,
+    organization_id: UUID,
+    person_id: UUID,
+) -> None:
+    person = await db.get(Person, person_id)
+    if person is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
 
 
 async def ensure_org_manage(
@@ -158,6 +200,88 @@ async def create_guardian_relationship(
     await db.commit()
     await db.refresh(relationship)
     return relationship
+
+
+async def create_safeguarding_incident(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SafeguardingIncidentCreate,
+    authz: AuthorizationService,
+) -> SafeguardingIncident:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    await validate_incident_refs(
+        db,
+        payload.organization_id,
+        payload.event_id,
+        payload.team_id,
+        payload.athlete_person_id,
+        payload.assigned_to_person_id,
+    )
+    incident = SafeguardingIncident(
+        reported_by_person_id=identity.person_id,
+        **payload.model_dump(),
+    )
+    db.add(incident)
+    await db.commit()
+    await db.refresh(incident)
+    return incident
+
+
+async def list_safeguarding_incidents(
+    db: AsyncSession,
+    organization_id: UUID,
+    status_filter: SafeguardingIncidentStatus | None = None,
+) -> list[SafeguardingIncident]:
+    statement = select(SafeguardingIncident).where(
+        SafeguardingIncident.organization_id == organization_id
+    )
+    if status_filter is not None:
+        statement = statement.where(SafeguardingIncident.status == status_filter)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    SafeguardingIncident.status,
+                    SafeguardingIncident.occurred_at.desc(),
+                )
+            )
+        ).all()
+    )
+
+
+async def update_safeguarding_incident(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident_id: UUID,
+    payload: SafeguardingIncidentUpdate,
+    authz: AuthorizationService,
+) -> SafeguardingIncident:
+    incident = await db.get(SafeguardingIncident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    await ensure_org_manage(authz, incident.organization_id, identity)
+
+    if payload.assigned_to_person_id is not None:
+        await validate_person_in_organization(db, incident.organization_id, payload.assigned_to_person_id)
+        incident.assigned_to_person_id = payload.assigned_to_person_id
+    if payload.status is not None:
+        incident.status = payload.status
+        if payload.status in {SafeguardingIncidentStatus.RESOLVED, SafeguardingIncidentStatus.CLOSED}:
+            incident.resolved_at = incident.resolved_at or utc_now()
+    if payload.severity is not None:
+        incident.severity = payload.severity
+    if payload.parent_notified_at is not None:
+        incident.parent_notified_at = payload.parent_notified_at
+    if payload.medical_follow_up_required is not None:
+        incident.medical_follow_up_required = payload.medical_follow_up_required
+    if payload.regulatory_report_required is not None:
+        incident.regulatory_report_required = payload.regulatory_report_required
+    if payload.resolution_notes is not None:
+        incident.resolution_notes = payload.resolution_notes
+
+    await db.commit()
+    await db.refresh(incident)
+    return incident
 
 
 async def list_guardians_for_athlete(

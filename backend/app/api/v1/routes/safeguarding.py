@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.enums import SafeguardingIncidentStatus
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
     ActivityConsentRead,
@@ -18,6 +19,9 @@ from app.schemas.safeguarding import (
     GuardianRelationshipRead,
     KnownChannelConsentCapture,
     ParticipationClearanceRead,
+    SafeguardingIncidentCreate,
+    SafeguardingIncidentRead,
+    SafeguardingIncidentUpdate,
     TokenConsentCapture,
 )
 from app.services.auth.dependencies import get_current_identity
@@ -30,12 +34,16 @@ from app.services.safeguarding import (
     create_activity_consent,
     create_consent_request,
     create_guardian_relationship,
+    create_safeguarding_incident,
+    ensure_org_manage,
     list_guardians_for_athlete,
+    list_safeguarding_incidents,
     list_my_family_consent_requests,
     list_my_family,
     list_my_family_events,
     respond_to_family_consent_request,
     respond_to_family_event,
+    update_safeguarding_incident,
 )
 
 router = APIRouter(prefix="/safeguarding", tags=["safeguarding"])
@@ -97,6 +105,32 @@ def to_request_read(request, one_time_token: str | None = None) -> ConsentReques
     )
 
 
+def to_incident_read(incident) -> SafeguardingIncidentRead:
+    return SafeguardingIncidentRead(
+        id=incident.id,
+        organization_id=incident.organization_id,
+        event_id=incident.event_id,
+        team_id=incident.team_id,
+        athlete_person_id=incident.athlete_person_id,
+        reported_by_person_id=incident.reported_by_person_id,
+        assigned_to_person_id=incident.assigned_to_person_id,
+        incident_type=incident.incident_type,
+        severity=incident.severity,
+        status=incident.status,
+        occurred_at=incident.occurred_at,
+        location=incident.location,
+        title=incident.title,
+        description=incident.description,
+        immediate_action=incident.immediate_action,
+        parent_notified_at=incident.parent_notified_at,
+        medical_follow_up_required=incident.medical_follow_up_required,
+        regulatory_report_required=incident.regulatory_report_required,
+        resolution_notes=incident.resolution_notes,
+        resolved_at=incident.resolved_at,
+        created_at=incident.created_at,
+    )
+
+
 @router.post("/guardians", response_model=GuardianRelationshipRead, status_code=201)
 async def create_guardian_route(
     payload: GuardianRelationshipCreate,
@@ -127,6 +161,42 @@ async def list_my_family_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[FamilyAthleteSummaryRead]:
     return await list_my_family(db, identity, organization_id)
+
+
+@router.post("/incidents", response_model=SafeguardingIncidentRead, status_code=201)
+async def create_safeguarding_incident_route(
+    payload: SafeguardingIncidentCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentRead:
+    return to_incident_read(await create_safeguarding_incident(db, identity, payload, authz))
+
+
+@router.get("/incidents", response_model=list[SafeguardingIncidentRead])
+async def list_safeguarding_incidents_route(
+    organization_id: UUID = Query(),
+    status_filter: SafeguardingIncidentStatus | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[SafeguardingIncidentRead]:
+    await ensure_org_manage(authz, organization_id, identity)
+    return [
+        to_incident_read(incident)
+        for incident in await list_safeguarding_incidents(db, organization_id, status_filter)
+    ]
+
+
+@router.patch("/incidents/{incident_id}", response_model=SafeguardingIncidentRead)
+async def update_safeguarding_incident_route(
+    incident_id: UUID,
+    payload: SafeguardingIncidentUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentRead:
+    return to_incident_read(await update_safeguarding_incident(db, identity, incident_id, payload, authz))
 
 
 @router.get("/my-family/events", response_model=list[FamilyEventSummaryRead])

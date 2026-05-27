@@ -159,6 +159,32 @@ class AgentTaskStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class SafeguardingIncidentType(StrEnum):
+    INJURY = "injury"
+    MEDICAL = "medical"
+    SAFEGUARDING = "safeguarding"
+    MISCONDUCT = "misconduct"
+    FACILITY = "facility"
+    TRANSPORT = "transport"
+    WEATHER = "weather"
+    OTHER = "other"
+
+
+class SafeguardingIncidentSeverity(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class SafeguardingIncidentStatus(StrEnum):
+    OPEN = "open"
+    TRIAGED = "triaged"
+    INVESTIGATING = "investigating"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+
+
 class MetricCategory(StrEnum):
     PHYSICAL = "physical"
     TECHNICAL = "technical"

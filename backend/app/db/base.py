@@ -48,7 +48,13 @@ from app.models.competition import (  # noqa: F401,E402
     FixtureMatchEvent,
     FixtureOfficialAssignment,
 )
-from app.models.event import ActivityConsent, AttendanceRecord, ConsentRequest, Event  # noqa: F401,E402
+from app.models.event import (  # noqa: F401,E402
+    ActivityConsent,
+    AttendanceRecord,
+    ConsentRequest,
+    Event,
+    SafeguardingIncident,
+)
 from app.models.identity import AppUser, Person  # noqa: F401,E402
 from app.models.organization import (  # noqa: F401,E402
     Committee,
