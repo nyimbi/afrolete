@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.identity import AppUser, Person
@@ -21,9 +21,7 @@ async def get_or_create_identity(db: AsyncSession, principal: Principal) -> Curr
     changed = False
     user = await db.scalar(select(AppUser).where(AppUser.keycloak_sub == principal.keycloak_sub))
     if user is None:
-        person = Person(display_name=principal.display_name, primary_email=principal.email)
-        db.add(person)
-        await db.flush()
+        person = await person_for_principal(db, principal)
 
         user = AppUser(
             keycloak_sub=principal.keycloak_sub,
@@ -35,19 +33,21 @@ async def get_or_create_identity(db: AsyncSession, principal: Principal) -> Curr
         await db.flush()
         changed = True
     elif user.person_id is None:
-        person = Person(display_name=user.display_name or user.email, primary_email=user.email)
-        db.add(person)
-        await db.flush()
+        person = await person_for_principal(db, principal)
         user.person_id = person.id
         changed = True
     else:
         person = await db.get(Person, user.person_id)
         if person is None:
-            person = Person(display_name=user.display_name or user.email, primary_email=user.email)
-            db.add(person)
-            await db.flush()
+            person = await person_for_principal(db, principal)
             user.person_id = person.id
             changed = True
+    if user.email != principal.email:
+        user.email = principal.email
+        changed = True
+    if principal.display_name and user.display_name != principal.display_name:
+        user.display_name = principal.display_name
+        changed = True
 
     await db.flush()
     if changed:
@@ -64,3 +64,18 @@ async def get_or_create_identity(db: AsyncSession, principal: Principal) -> Curr
         email=user.email,
         display_name=user.display_name or user.email,
     )
+
+
+async def person_for_principal(db: AsyncSession, principal: Principal) -> Person:
+    person = await db.scalar(
+        select(Person).where(func.lower(Person.primary_email) == principal.email.lower())
+    )
+    if person is not None:
+        if not person.display_name and principal.display_name:
+            person.display_name = principal.display_name
+        return person
+
+    person = Person(display_name=principal.display_name, primary_email=principal.email)
+    db.add(person)
+    await db.flush()
+    return person

@@ -590,6 +590,18 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
   - Not tested in this fast slice: full backend test suite, frontend
     production build, browser QA, and live Keycloak guardian-account mapping.
+- Implemented slice 058 guardian account email binding:
+  - Updated the identity bridge so a first login with an email already recorded
+    on a guardian/member `Person` binds the `AppUser` to that existing person
+    instead of creating a duplicate.
+  - Existing app users with missing or broken person links are repaired against
+    the same email-based person lookup before falling back to new person
+    creation.
+  - User email/display name are refreshed from the verified principal during
+    login.
+  - Verification: `uv run ruff check .`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite and live Keycloak
+    guardian-account login.
 
 ## Implementation Slices
 
@@ -653,6 +665,7 @@ athlete-development platform:
 | 055 - Background communication digest scheduler | Partial | Backend ruff; frontend typecheck; diff check | Daily/weekly notification preferences can now be processed in batch through a manager-triggered API and console control, skipping empty inboxes and reusing per-person digest creation; real cron/background worker execution and full verification remain. |
 | 056 - Family inbox portal | Partial | Backend ruff; frontend typecheck; diff check | Authenticated users can now load their own communication inbox, mark messages read, and use a dedicated `/family` portal surface with inbox metrics and message detail; live Keycloak guardian mapping and full verification remain. |
 | 057 - Family athlete consent dashboard | Partial | Backend ruff; frontend typecheck; diff check | Guardian accounts can now retrieve linked athlete summaries with relationship, consent authority, pending consent counts, and latest consent state, with child cards exposed in `/family`; live Keycloak guardian mapping and full verification remain. |
+| 058 - Guardian account email binding | Partial | Backend ruff; diff check | First login now binds an `AppUser` to an existing `Person` with the same verified email, so guardian/member accounts can access their linked family data without duplicate person records; live Keycloak smoke and full verification remain. |
 
 ## Capability Coverage
 
@@ -666,7 +679,7 @@ Status values:
 | Capability Area | Status | Notes |
 | --- | --- | --- |
 | Tenant organizations, clubs, schools, associations | partial | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph; organization branding/contact/subdomain fields support owned public sites. |
-| Person identity and athlete profiles | partial | `Person`, `AppUser`, and `AthleteProfile` models added; Keycloak token claims provision `AppUser` and `Person` identities. |
+| Person identity and athlete profiles | partial | `Person`, `AppUser`, and `AthleteProfile` models added; Keycloak token claims provision `AppUser` identities and bind them to existing `Person` records by verified email before creating new people. |
 | Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
 | Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, provider-neutral evidence ingestion, pending-review observations, human review/correction, and console workflows are implemented. |
