@@ -18,6 +18,7 @@ from app.models.agent import (
     AgentDecisionAppeal,
     AgentModelRegistry,
     AgentRunRecord,
+    AgentScorecardComment,
     AgentTask,
 )
 from app.models.enums import AgentTaskStatus
@@ -34,6 +35,7 @@ from app.schemas.agent import (
     AgentMyDecisionAppealCreate,
     AgentModelRegistryCreate,
     AgentModelRegistryUpdate,
+    AgentScorecardCommentCreate,
     AgentTaskCreate,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
@@ -838,6 +840,47 @@ async def agent_ethical_scorecard(
         "public_summary": agent_ethics_public_summary(score, grade, len(registry), len(audits), pending_appeals),
         "improvement_actions": actions,
     }
+
+
+async def list_agent_scorecard_comments(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[AgentScorecardComment]:
+    return list(
+        (
+            await db.scalars(
+                select(AgentScorecardComment)
+                .where(AgentScorecardComment.organization_id == organization_id)
+                .where(AgentScorecardComment.status == "published")
+                .where(AgentScorecardComment.consent_to_publish.is_(True))
+                .order_by(AgentScorecardComment.submitted_at.desc(), AgentScorecardComment.created_at.desc())
+                .limit(25)
+            )
+        ).all()
+    )
+
+
+async def create_agent_scorecard_comment(
+    db: AsyncSession,
+    payload: AgentScorecardCommentCreate,
+) -> AgentScorecardComment:
+    organization = await db.get(Organization, payload.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    comment = AgentScorecardComment(
+        organization_id=payload.organization_id,
+        display_name=payload.display_name.strip(),
+        affiliation=payload.affiliation.strip() if payload.affiliation else None,
+        contact_email=payload.contact_email.strip().lower() if payload.contact_email else None,
+        comment=payload.comment.strip(),
+        status="published" if payload.consent_to_publish else "private_feedback",
+        consent_to_publish=payload.consent_to_publish,
+        submitted_at=datetime.now(UTC),
+    )
+    db.add(comment)
+    await db.commit()
+    await db.refresh(comment)
+    return comment
 
 
 async def update_agent_task(

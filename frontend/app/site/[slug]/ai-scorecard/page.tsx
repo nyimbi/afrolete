@@ -1,14 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { apiRequest } from "@/lib/api";
-import type { AgentEthicalScorecardRead, OrganizationPublicSiteRead } from "@/types/operations";
+import type {
+  AgentEthicalScorecardRead,
+  AgentScorecardCommentRead,
+  OrganizationPublicSiteRead
+} from "@/types/operations";
 
 export default function PublicAiScorecardPage({ params }: { params: { slug: string } }) {
   const [site, setSite] = useState<OrganizationPublicSiteRead | null>(null);
   const [scorecard, setScorecard] = useState<AgentEthicalScorecardRead | null>(null);
+  const [comments, setComments] = useState<AgentScorecardCommentRead[]>([]);
+  const [commentForm, setCommentForm] = useState({
+    display_name: "",
+    affiliation: "",
+    contact_email: "",
+    comment: "",
+    consent_to_publish: true
+  });
   const [error, setError] = useState("");
+  const [commentError, setCommentError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -19,13 +33,16 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
         }
         setSite(siteData);
         setError("");
-        return apiRequest<AgentEthicalScorecardRead>(
-          `/agents/ethical-scorecard?organization_id=${siteData.id}`
-        );
+        return Promise.all([
+          apiRequest<AgentEthicalScorecardRead>(`/agents/ethical-scorecard?organization_id=${siteData.id}`),
+          apiRequest<AgentScorecardCommentRead[]>(`/agents/ethical-scorecard/comments?organization_id=${siteData.id}`)
+        ]);
       })
-      .then((scorecardData) => {
-        if (!cancelled && scorecardData) {
+      .then((loaded) => {
+        if (!cancelled && loaded) {
+          const [scorecardData, commentRows] = loaded;
           setScorecard(scorecardData);
+          setComments(commentRows);
         }
       })
       .catch((caught) => {
@@ -47,6 +64,42 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
   );
 
   const displayName = site?.public_name ?? site?.name ?? "AfroLete organization";
+
+  const submitComment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!site) {
+      return;
+    }
+    setBusy(true);
+    setCommentError("");
+    try {
+      const created = await apiRequest<AgentScorecardCommentRead>("/agents/ethical-scorecard/comments", {
+        method: "POST",
+        body: {
+          organization_id: site.id,
+          display_name: commentForm.display_name,
+          affiliation: commentForm.affiliation || null,
+          contact_email: commentForm.contact_email || null,
+          comment: commentForm.comment,
+          consent_to_publish: commentForm.consent_to_publish
+        }
+      });
+      if (created.status === "published" && created.consent_to_publish) {
+        setComments((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+      }
+      setCommentForm({
+        display_name: "",
+        affiliation: "",
+        contact_email: "",
+        comment: "",
+        consent_to_publish: true
+      });
+    } catch (caught) {
+      setCommentError(caught instanceof Error ? caught.message : "Scorecard feedback could not be submitted");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (error) {
     return (
@@ -131,6 +184,66 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
               <span key={action}>{action}</span>
             ))}
           </div>
+        </div>
+
+        <div className="public-ai-comments">
+          <div>
+            <p className="section-label">Public comments</p>
+            <h2>Community feedback</h2>
+            <div className="public-ai-comment-list">
+              {comments.map((comment) => (
+                <article key={comment.id}>
+                  <strong>{comment.display_name}</strong>
+                  <span>{comment.affiliation ?? "Community member"} · {formatDate(comment.submitted_at)}</span>
+                  <p>{comment.comment}</p>
+                </article>
+              ))}
+              {comments.length === 0 ? <span>No public comments yet</span> : null}
+            </div>
+          </div>
+          <form onSubmit={submitComment}>
+            <label>
+              Name
+              <input
+                value={commentForm.display_name}
+                onChange={(event) => setCommentForm({ ...commentForm, display_name: event.target.value })}
+                required
+              />
+            </label>
+            <label>
+              Affiliation
+              <input
+                value={commentForm.affiliation}
+                onChange={(event) => setCommentForm({ ...commentForm, affiliation: event.target.value })}
+              />
+            </label>
+            <label>
+              Email
+              <input
+                type="email"
+                value={commentForm.contact_email}
+                onChange={(event) => setCommentForm({ ...commentForm, contact_email: event.target.value })}
+              />
+            </label>
+            <label>
+              Comment
+              <textarea
+                value={commentForm.comment}
+                onChange={(event) => setCommentForm({ ...commentForm, comment: event.target.value })}
+                required
+              />
+            </label>
+            <label className="public-ai-checkbox">
+              <input
+                type="checkbox"
+                checked={commentForm.consent_to_publish}
+                onChange={(event) => setCommentForm({ ...commentForm, consent_to_publish: event.target.checked })}
+              />
+              Publish this comment
+            </label>
+            {commentError ? <p className="form-error">{commentError}</p> : null}
+            <button type="submit" disabled={busy}>{busy ? "Sending" : "Submit feedback"}</button>
+          </form>
         </div>
 
         <div className="public-ai-footer">

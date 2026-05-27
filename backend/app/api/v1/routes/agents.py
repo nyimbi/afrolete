@@ -23,6 +23,8 @@ from app.schemas.agent import (
     AgentMyDecisionAppealCreate,
     AgentRunLedgerVerificationRead,
     AgentRunRecordRead,
+    AgentScorecardCommentCreate,
+    AgentScorecardCommentRead,
     AgentCreate,
     AgentRead,
     AgentTaskCreate,
@@ -40,12 +42,14 @@ from app.services.agents import (
     assign_agent,
     create_agent,
     create_agent_model_registry,
+    create_agent_scorecard_comment,
     execute_agent_task,
     get_my_agent_decision_appeal_form,
     list_agent_assignments,
     list_agent_bias_audits,
     list_agent_decision_appeals,
     list_agent_model_registry,
+    list_agent_scorecard_comments,
     list_agent_tasks,
     list_agents,
     list_my_agent_family_tasks,
@@ -170,6 +174,19 @@ def to_decision_appeal_read(appeal) -> AgentDecisionAppealRead:
     )
 
 
+def to_scorecard_comment_read(comment) -> AgentScorecardCommentRead:
+    return AgentScorecardCommentRead(
+        id=comment.id,
+        organization_id=comment.organization_id,
+        display_name=comment.display_name,
+        affiliation=comment.affiliation,
+        comment=comment.comment,
+        status=comment.status,
+        consent_to_publish=comment.consent_to_publish,
+        submitted_at=comment.submitted_at,
+    )
+
+
 @router.post("", response_model=AgentRead, status_code=status.HTTP_201_CREATED)
 async def create_agent_route(
     payload: AgentCreate,
@@ -276,6 +293,25 @@ async def agent_ethical_scorecard_route(
     db: AsyncSession = Depends(get_db),
 ) -> AgentEthicalScorecardRead:
     return AgentEthicalScorecardRead(**await agent_ethical_scorecard(db, organization_id))
+
+
+@router.get("/ethical-scorecard/comments", response_model=list[AgentScorecardCommentRead])
+async def list_agent_scorecard_comments_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentScorecardCommentRead]:
+    return [
+        to_scorecard_comment_read(comment)
+        for comment in await list_agent_scorecard_comments(db, organization_id)
+    ]
+
+
+@router.post("/ethical-scorecard/comments", response_model=AgentScorecardCommentRead, status_code=201)
+async def create_agent_scorecard_comment_route(
+    payload: AgentScorecardCommentCreate,
+    db: AsyncSession = Depends(get_db),
+) -> AgentScorecardCommentRead:
+    return to_scorecard_comment_read(await create_agent_scorecard_comment(db, payload))
 
 
 @router.post("/model-registry", response_model=AgentModelRegistryRead, status_code=status.HTTP_201_CREATED)

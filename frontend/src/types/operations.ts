@@ -2628,6 +2628,17 @@ export type AgentEthicalScorecardRead = {
   improvement_actions: string[];
 };
 
+export type AgentScorecardCommentRead = {
+  id: UUID;
+  organization_id: UUID;
+  display_name: string;
+  affiliation: string | null;
+  comment: string;
+  status: string;
+  consent_to_publish: boolean;
+  submitted_at: string;
+};
+
 export type AgentRunRecordRead = {
   id: UUID;
   task_id: UUID;

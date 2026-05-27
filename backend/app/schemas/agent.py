@@ -342,3 +342,23 @@ class AgentEthicalScorecardRead(BaseModel):
     ledger_valid: bool
     public_summary: str
     improvement_actions: list[str]
+
+
+class AgentScorecardCommentCreate(BaseModel):
+    organization_id: UUID
+    display_name: str = Field(min_length=2, max_length=160)
+    affiliation: str | None = Field(default=None, max_length=160)
+    contact_email: str | None = Field(default=None, max_length=320)
+    comment: str = Field(min_length=8, max_length=2000)
+    consent_to_publish: bool = True
+
+
+class AgentScorecardCommentRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    display_name: str
+    affiliation: str | None
+    comment: str
+    status: str
+    consent_to_publish: bool
+    submitted_at: datetime

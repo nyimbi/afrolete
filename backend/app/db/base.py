@@ -8,6 +8,7 @@ from app.models.agent import (  # noqa: F401,E402
     AgentDecisionAppeal,
     AgentModelRegistry,
     AgentRunRecord,
+    AgentScorecardComment,
     AgentTask,
 )
 from app.models.assets import (  # noqa: F401,E402

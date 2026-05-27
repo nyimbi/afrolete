@@ -1455,6 +1455,73 @@ textarea:focus {
   padding-top: 8px;
 }
 
+.public-ai-comments {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.public-ai-comments > div,
+.public-ai-comments form {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.public-ai-comments h2 {
+  margin: 4px 0 14px;
+}
+
+.public-ai-comment-list {
+  display: grid;
+  gap: 10px;
+}
+
+.public-ai-comment-list article,
+.public-ai-comment-list > span {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.public-ai-comment-list strong,
+.public-ai-comment-list span,
+.public-ai-comment-list p {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.public-ai-comment-list span,
+.public-ai-comment-list p {
+  color: var(--muted);
+}
+
+.public-ai-comment-list p {
+  margin: 6px 0 0;
+}
+
+.public-ai-comments form {
+  display: grid;
+  gap: 10px;
+}
+
+.public-ai-comments textarea {
+  min-height: 112px;
+}
+
+.public-ai-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.public-ai-checkbox input {
+  width: auto;
+}
+
 .public-ai-footer {
   display: flex;
   justify-content: space-between;
@@ -1671,7 +1738,8 @@ textarea:focus {
   .public-site-inquiry form,
   .public-ai-hero-grid,
   .public-ai-metrics,
-  .public-ai-actions {
+  .public-ai-actions,
+  .public-ai-comments {
     grid-template-columns: 1fr;
   }
 }

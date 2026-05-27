@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -152,3 +152,16 @@ class AgentDecisionAppeal(IdMixin, TimestampMixin, Base):
     resolution_notes: Mapped[str | None] = mapped_column(Text)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AgentScorecardComment(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_scorecard_comments"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    affiliation: Mapped[str | None] = mapped_column(String(160), index=True)
+    contact_email: Mapped[str | None] = mapped_column(String(320))
+    comment: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="published", nullable=False, index=True)
+    consent_to_publish: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
