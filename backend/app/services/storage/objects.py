@@ -11,6 +11,7 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.core.config import Settings
+from app.services.secrets import read_openbao_kv_secret_sync
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,13 @@ class StoredObject:
     url: str
     path: str
     key: str
+
+
+@dataclass(frozen=True)
+class S3Credentials:
+    access_key: str
+    secret_key: str
+    source: str
 
 
 def put_object(
@@ -60,7 +68,7 @@ def put_local_object(local_root: str, local_url_prefix: str, key: str, content: 
 
 
 def put_s3_object(settings: Settings, *, key: str, content: bytes, content_type: str) -> StoredObject:
-    ensure_s3_configured(settings)
+    credentials = ensure_s3_configured(settings)
     url = s3_object_url(settings, key)
     headers = {
         "content-type": content_type,
@@ -70,6 +78,7 @@ def put_s3_object(settings: Settings, *, key: str, content: bytes, content_type:
     }
     headers["authorization"] = s3_authorization(
         settings,
+        credentials,
         method="PUT",
         url=url,
         headers=headers,
@@ -93,7 +102,7 @@ def put_s3_object(settings: Settings, *, key: str, content: bytes, content_type:
 
 
 def get_s3_object(settings: Settings, key: str) -> bytes:
-    ensure_s3_configured(settings)
+    credentials = ensure_s3_configured(settings)
     url = s3_object_url(settings, key)
     payload_hash = "UNSIGNED-PAYLOAD"
     headers = {
@@ -103,6 +112,7 @@ def get_s3_object(settings: Settings, key: str) -> bytes:
     }
     headers["authorization"] = s3_authorization(
         settings,
+        credentials,
         method="GET",
         url=url,
         headers=headers,
@@ -122,12 +132,63 @@ def get_s3_object(settings: Settings, key: str) -> bytes:
     return response.content
 
 
-def ensure_s3_configured(settings: Settings) -> None:
-    if not settings.object_storage_access_key or not settings.object_storage_secret_key:
+def ensure_s3_configured(settings: Settings) -> S3Credentials:
+    credentials = resolve_s3_credentials(settings)
+    if not credentials.access_key or not credentials.secret_key:
         raise HTTPException(
             status_code=500,
             detail="Object storage is set to s3 but access credentials are not configured",
         )
+    return credentials
+
+
+def resolve_s3_credentials(settings: Settings) -> S3Credentials:
+    access_key = settings.object_storage_access_key
+    secret_key = settings.object_storage_secret_key
+    source = "env" if access_key and secret_key else "unset"
+    if settings.object_storage_access_key_secret_path:
+        access_key = resolve_openbao_storage_secret(
+            settings,
+            settings.object_storage_access_key_secret_path,
+            settings.object_storage_access_key_secret_field,
+            "access key",
+        )
+        source = "openbao"
+    if settings.object_storage_secret_key_secret_path:
+        secret_key = resolve_openbao_storage_secret(
+            settings,
+            settings.object_storage_secret_key_secret_path,
+            settings.object_storage_secret_key_secret_field,
+            "secret key",
+        )
+        source = "openbao"
+    return S3Credentials(access_key=access_key, secret_key=secret_key, source=source)
+
+
+def resolve_openbao_storage_secret(
+    settings: Settings,
+    path: str,
+    field_name: str,
+    label: str,
+) -> str:
+    if not settings.openbao_addr or not settings.openbao_token:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Object storage {label} is configured for OpenBao but OpenBao address/token is missing",
+        )
+    try:
+        secret = read_openbao_kv_secret_sync(settings, path, field_name)
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"OpenBao object storage {label} fetch failed: {exc}",
+        ) from exc
+    if not secret:
+        raise HTTPException(
+            status_code=500,
+            detail=f"OpenBao object storage {label} secret field is empty",
+        )
+    return secret
 
 
 def s3_object_url(settings: Settings, key: str) -> str:
@@ -150,6 +211,7 @@ def amz_date() -> str:
 
 def s3_authorization(
     settings: Settings,
+    credentials: S3Credentials,
     *,
     method: str,
     url: str,
@@ -182,14 +244,14 @@ def s3_authorization(
         ]
     )
     signing_key = s3_signing_key(
-        settings.object_storage_secret_key,
+        credentials.secret_key,
         date_stamp,
         settings.object_storage_region,
     )
     signature = hmac.new(signing_key, string_to_sign.encode(), sha256).hexdigest()
     return (
         "AWS4-HMAC-SHA256 "
-        f"Credential={settings.object_storage_access_key}/{credential_scope}, "
+        f"Credential={credentials.access_key}/{credential_scope}, "
         f"SignedHeaders={';'.join(signed_header_names)}, "
         f"Signature={signature}"
     )
