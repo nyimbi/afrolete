@@ -96,6 +96,22 @@ from app.services.authz.service import AuthorizationService, get_authorization_s
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
+def requester_ip(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()[:80]
+    return request.client.host[:80] if request.client else None
+
+
+def request_user_agent(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    user_agent = request.headers.get("user-agent")
+    return user_agent[:500] if user_agent else None
+
+
 def to_agent_read(agent) -> AgentRead:
     return AgentRead(
         id=agent.id,
@@ -266,6 +282,9 @@ def to_scorecard_artifact_access_read(access) -> AgentScorecardArtifactAccessRea
         size_bytes=access.size_bytes,
         signed_url=access.signed_url,
         expires_at=access.expires_at,
+        request_ip=access.request_ip,
+        user_agent=access.user_agent,
+        request_source=access.request_source,
         accessed_at=access.accessed_at,
     )
 
@@ -498,6 +517,7 @@ async def get_agent_scorecard_publication_artifact_route(
 )
 async def create_agent_scorecard_publication_artifact_link_route(
     publication_id: UUID,
+    request: Request,
     artifact_format: str = Query(default="pdf", pattern="^(markdown|pdf)$"),
     ttl_seconds: int | None = Query(default=None, ge=60, le=86400),
     db: AsyncSession = Depends(get_db),
@@ -508,6 +528,9 @@ async def create_agent_scorecard_publication_artifact_link_route(
             publication_id,
             artifact_format,
             ttl_seconds,
+            requester_ip(request),
+            request_user_agent(request),
+            "artifact_link_created",
         )
     )
 
@@ -517,6 +540,7 @@ async def read_agent_scorecard_artifact_route(
     organization_id: UUID,
     publication_id: UUID,
     filename: str,
+    request: Request,
     expires: int = Query(),
     signature: str = Query(),
     db: AsyncSession = Depends(get_db),
@@ -540,6 +564,9 @@ async def read_agent_scorecard_artifact_route(
         size_bytes=len(bytes(artifact["content"])),
         signed_url=None,
         expires_at=None,
+        request_ip=requester_ip(request),
+        user_agent=request_user_agent(request),
+        request_source="signed_artifact_opened",
     )
     return Response(
         content=artifact["content"],

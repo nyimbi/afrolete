@@ -1076,6 +1076,9 @@ async def signed_agent_scorecard_publication_artifact_access(
     publication_id: UUID,
     artifact_format: str = "pdf",
     ttl_seconds: int | None = None,
+    request_ip: str | None = None,
+    user_agent: str | None = None,
+    request_source: str | None = None,
 ) -> dict[str, object]:
     artifact = await get_agent_scorecard_publication_artifact(db, publication_id, artifact_format)
     settings = get_settings()
@@ -1102,6 +1105,9 @@ async def signed_agent_scorecard_publication_artifact_access(
         size_bytes=int(artifact["size_bytes"]),
         signed_url=signed_url,
         expires_at=expires_at,
+        request_ip=request_ip,
+        user_agent=user_agent,
+        request_source=request_source,
     )
     return {
         "publication_id": artifact["publication_id"],
@@ -1167,6 +1173,9 @@ async def record_scorecard_artifact_access(
     size_bytes: int,
     signed_url: str | None = None,
     expires_at: datetime | None = None,
+    request_ip: str | None = None,
+    user_agent: str | None = None,
+    request_source: str | None = None,
 ) -> AgentScorecardArtifactAccess:
     access = AgentScorecardArtifactAccess(
         organization_id=organization_id,
@@ -1179,6 +1188,9 @@ async def record_scorecard_artifact_access(
         size_bytes=size_bytes,
         signed_url=signed_url,
         expires_at=expires_at,
+        request_ip=request_ip,
+        user_agent=user_agent[:500] if user_agent else None,
+        request_source=request_source,
         accessed_at=datetime.now(UTC),
     )
     db.add(access)

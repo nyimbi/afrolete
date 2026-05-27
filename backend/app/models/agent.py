@@ -209,4 +209,7 @@ class AgentScorecardArtifactAccess(IdMixin, TimestampMixin, Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     signed_url: Mapped[str | None] = mapped_column(String(1000))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    request_ip: Mapped[str | None] = mapped_column(String(80), index=True)
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    request_source: Mapped[str | None] = mapped_column(String(80), index=True)
     accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

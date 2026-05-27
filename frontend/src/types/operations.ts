@@ -2710,6 +2710,9 @@ export type AgentScorecardArtifactAccessRead = {
   size_bytes: number;
   signed_url: string | null;
   expires_at: string | null;
+  request_ip: string | null;
+  user_agent: string | null;
+  request_source: string | null;
   accessed_at: string;
 };
 

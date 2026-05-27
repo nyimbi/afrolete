@@ -444,6 +444,9 @@ class AgentScorecardArtifactAccessRead(BaseModel):
     size_bytes: int
     signed_url: str | None
     expires_at: datetime | None
+    request_ip: str | None
+    user_agent: str | None
+    request_source: str | None
     accessed_at: datetime
 
 

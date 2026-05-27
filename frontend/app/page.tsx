@@ -12075,8 +12075,9 @@ export default function HomePage() {
               {agentScorecardArtifactAccesses.slice(0, 3).map((access) => (
                 <article key={access.id} className="task-card">
                   <div>
-                    <strong>{access.event_type.replace("_", " ")} · {access.artifact_format}</strong>
+                    <strong>{(access.request_source ?? access.event_type).replaceAll("_", " ")} · {access.artifact_format}</strong>
                     <span>{new Date(access.accessed_at).toLocaleString()} · {access.size_bytes} bytes · {access.content_type}</span>
+                    <span>{access.request_ip ?? "unknown IP"} · {access.user_agent?.slice(0, 80) ?? "unknown client"}</span>
                     <span>{access.filename} · {access.checksum.slice(0, 16)}</span>
                   </div>
                 </article>
