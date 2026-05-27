@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     env: str = "local"
     api_prefix: str = "/api/v1"
     auth_mode: Literal["local", "keycloak"] = "local"
+    authz_mode: Literal["memory", "spicedb"] = "memory"
     database_url: str = "postgresql+asyncpg:///afrolete"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
@@ -28,6 +29,7 @@ class Settings(BaseSettings):
     spicedb_endpoint: str = "62.84.181.55:50051"
     spicedb_key: str = ""
     spicedb_insecure: bool = True
+    spicedb_request_timeout_seconds: float = 3.0
 
     @field_validator("database_url", mode="before")
     @classmethod

@@ -23,6 +23,10 @@ Local development uses `AFROLETE_AUTH_MODE=local`, which accepts explicit
 `AFROLETE_AUTH_MODE=keycloak` in deployed environments so the API requires a
 Bearer token signed by the configured Keycloak realm and audience.
 
+Local development uses `AFROLETE_AUTHZ_MODE=memory` for fast isolated tests.
+Set `AFROLETE_AUTHZ_MODE=spicedb` and `AFROLETE_SPICEDB_KEY` in deployed
+environments so permission checks and relationship writes go through SpiceDB.
+
 ## Responsibilities
 
 - Domain API and OpenAPI contract.

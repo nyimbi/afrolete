@@ -107,6 +107,16 @@ athlete-development platform:
   - Local development keeps `AFROLETE_AUTH_MODE=local` for trusted local tools
     and unit tests.
   - Verification: `uv run ruff check .`, `uv run pytest`.
+- Implemented slice 007 SpiceDB authorization adapter:
+  - Added `AFROLETE_AUTHZ_MODE=spicedb` so deployed APIs use the shared PJS
+    SpiceDB service instead of the in-memory local authorization set.
+  - Relationship writes now map AfroLete relationships to SpiceDB `TOUCH`
+    updates for idempotent role and membership synchronization.
+  - Permission checks now map resource, permission, and internal app user
+    subject IDs to SpiceDB `CheckPermission` calls.
+  - SpiceDB check failures fail closed; write failures surface instead of
+    silently dropping authorization relationships.
+  - Verification: `uv run ruff check .`, focused SpiceDB unit tests.
 
 ## Implementation Slices
 
@@ -114,11 +124,12 @@ athlete-development platform:
 | --- | --- | --- | --- |
 | 000 - Fresh V2 repository | Complete | Commit `d723d61`; commit `0affab9` | Repo initialized, README charter pushed. |
 | 001 - Executable SaaS foundation | Complete | Slice 001 foundation commit | Backend/frontend/infra starter code added and verified. |
-| 002 - Identity, tenant, and authorization vertical | Partial | Backend tests 22/22 | Tenant graph, authz boundary, Keycloak bearer-token validation, user provisioning, organization APIs, team APIs, and committee APIs implemented; production SpiceDB adapter remains. |
+| 002 - Identity, tenant, and authorization vertical | Partial | Backend tests 22/22 plus SpiceDB adapter tests | Tenant graph, authz boundary, Keycloak bearer-token validation, user provisioning, SpiceDB adapter, organization APIs, team APIs, and committee APIs implemented; live service smoke tests and frontend auth flows remain. |
 | 003 - Database migration baseline | Complete | Alembic upgrade/downgrade; backend tests 11/11 | Baseline revision captures the current schema; production execution against `db.lindela.io` remains a deployment task. |
 | 004 - Safeguarding, consent, and tenant branding | Partial | Local PostgreSQL migration verified; backend tests 14/14 | Backend model/API support for guardians, consent requests, consent capture channels, minor event clearance, and branded organization sites. |
 | 005 - Event scheduling and attendance | Partial | Backend tests 16/16 | Event APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in implemented; frontend event workflows remain. |
 | 006 - Keycloak authentication | Partial | Backend tests 22/22 | Keycloak JWT validation and user provisioning are implemented behind runtime mode; frontend sign-in and live realm smoke test remain. |
+| 007 - SpiceDB authorization adapter | Partial | Adapter tests 4/4 | Official Python gRPC client wired behind runtime mode; live schema/write/check smoke test remains. |
 
 ## Capability Coverage
 
@@ -144,16 +155,16 @@ Status values:
 | Equipment, facilities, assets | not-started | Future slice. |
 | Finance, sponsorship, fundraising, ticketing | not-started | Future slice. |
 | Reports and intelligence | not-started | Future slice. |
-| Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation is implemented; other integrations remain future slices. |
+| Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation and SpiceDB gRPC authorization adapter are implemented; other integrations remain future slices. |
 | SaaS billing/subscriptions | not-started | Future slice. |
 | Beautiful operational UI/UX | foundation | First command-center UI shell added. |
 
 ## Next Actions
 
-1. Commit and push slice 006 Keycloak bearer-token authentication.
-2. Replace in-memory authorization with a live SpiceDB client adapter and
-   relationship writer.
-3. Add frontend flows for organization branding, event scheduling, roster
+1. Run full verification, then commit and push slice 007 SpiceDB authorization.
+2. Add frontend flows for organization branding, event scheduling, roster
    attendance, guardian consent links, and event clearance review.
-4. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
+3. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
+4. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
+   SpiceDB key.
 5. Continue athlete profile workflows into performance metrics and assessments.
