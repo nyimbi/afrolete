@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.commercial import TicketProduct
 from app.models.competition import (
     Competition,
     CompetitionFixture,
@@ -16,6 +17,7 @@ from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.enums import (
     CommunicationMessageType,
     CommunicationScopeType,
+    EventType,
     FixtureStatus,
     MemberSubjectType,
 )
@@ -31,12 +33,13 @@ from app.schemas.competition import (
     CompetitionFixtureGenerateCreate,
     CompetitionParticipantCreate,
     CompetitionScheduleOptimizeCreate,
+    CompetitionTicketingCreate,
     FixtureMatchEventCreate,
     FixtureOfficialAssignmentCreate,
     FixtureResultUpdate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
-from app.services.authz.service import AuthorizationService
+from app.services.authz.service import AuthorizationService, Relationship
 from app.services.communications import destination_for_channel, dispatch_message, initial_delivery_status
 
 
@@ -618,6 +621,77 @@ async def broadcast_competition_update(
     }
 
 
+async def create_competition_ticketing(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    competition_id: UUID,
+    payload: CompetitionTicketingCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    competition = await get_competition(db, competition_id)
+    await ensure_manage_competition(authz, identity, competition.organization_id)
+    fixture = await get_competition_fixture(db, payload.fixture_id, competition_id)
+    event = await ensure_fixture_event(db, identity, competition, fixture, authz)
+    product_name = payload.name or default_ticket_product_name(competition, fixture)
+    existing = await db.scalar(
+        select(TicketProduct).where(
+            TicketProduct.organization_id == competition.organization_id,
+            TicketProduct.event_id == event.id,
+            TicketProduct.name == product_name,
+        )
+    )
+    if existing is not None:
+        if payload.capacity < existing.sold_count:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Ticket capacity cannot be lower than tickets already sold",
+            )
+        existing.price = payload.price
+        existing.currency = payload.currency
+        existing.capacity = payload.capacity
+        existing.access_zone = payload.access_zone or fixture.venue_name
+        fixture.notes = fixture_ticketing_notes(fixture.notes, product_name)
+        await db.commit()
+        await db.refresh(existing)
+        await db.refresh(fixture)
+        return competition_ticketing_row(competition_id, fixture, existing)
+
+    product = TicketProduct(
+        organization_id=competition.organization_id,
+        event_id=event.id,
+        name=product_name,
+        price=payload.price,
+        currency=payload.currency,
+        capacity=payload.capacity,
+        access_zone=payload.access_zone or fixture.venue_name,
+    )
+    db.add(product)
+    fixture.notes = fixture_ticketing_notes(fixture.notes, product_name)
+    await db.commit()
+    await db.refresh(product)
+    await db.refresh(fixture)
+    return competition_ticketing_row(competition_id, fixture, product)
+
+
+async def list_competition_ticketing(
+    db: AsyncSession,
+    competition_id: UUID,
+) -> list[dict[str, object]]:
+    await get_competition(db, competition_id)
+    rows = (
+        await db.execute(
+            select(CompetitionFixture, TicketProduct)
+            .join(TicketProduct, TicketProduct.event_id == CompetitionFixture.event_id)
+            .where(CompetitionFixture.competition_id == competition_id)
+            .order_by(CompetitionFixture.scheduled_at, TicketProduct.created_at.desc())
+        )
+    ).all()
+    return [
+        competition_ticketing_row(competition_id, fixture, product)
+        for fixture, product in rows
+    ]
+
+
 async def update_fixture_result(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -979,6 +1053,118 @@ async def get_fixture(db: AsyncSession, fixture_id: UUID) -> CompetitionFixture:
     if fixture is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fixture not found")
     return fixture
+
+
+async def get_competition_fixture(
+    db: AsyncSession,
+    fixture_id: UUID,
+    competition_id: UUID,
+) -> CompetitionFixture:
+    fixture = await get_fixture(db, fixture_id)
+    if fixture.competition_id != competition_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fixture not found")
+    return fixture
+
+
+async def ensure_fixture_event(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    competition: Competition,
+    fixture: CompetitionFixture,
+    authz: AuthorizationService,
+) -> Event:
+    if fixture.event_id is not None:
+        event = await db.get(Event, fixture.event_id)
+        if event is not None and event.organization_id == competition.organization_id:
+            return event
+
+    event = Event(
+        organization_id=competition.organization_id,
+        team_id=fixture.home_team_id,
+        event_type=EventType.MATCH,
+        title=default_fixture_event_title(competition, fixture),
+        starts_at=fixture.scheduled_at,
+        ends_at=None,
+        timezone="UTC",
+        venue_name=fixture.venue_name,
+        notes=f"Ticketed fixture for {competition.name}.",
+    )
+    db.add(event)
+    await db.flush()
+    fixture.event_id = event.id
+    await authz.touch(
+        Relationship(
+            resource_type="event",
+            resource_id=str(event.id),
+            relation="organizer",
+            subject_type="user",
+            subject_id=str(identity.user_id),
+        )
+    )
+    await authz.touch(
+        Relationship(
+            resource_type="event",
+            resource_id=str(event.id),
+            relation="parent_org",
+            subject_type="organization",
+            subject_id=str(competition.organization_id),
+        )
+    )
+    await authz.touch(
+        Relationship(
+            resource_type="event",
+            resource_id=str(event.id),
+            relation="team",
+            subject_type="team",
+            subject_id=str(fixture.home_team_id),
+        )
+    )
+    return event
+
+
+def competition_ticketing_row(
+    competition_id: UUID,
+    fixture: CompetitionFixture,
+    product: TicketProduct,
+) -> dict[str, object]:
+    return {
+        "competition_id": competition_id,
+        "fixture_id": fixture.id,
+        "event_id": product.event_id,
+        "ticket_product_id": product.id,
+        "name": product.name,
+        "price": product.price,
+        "currency": product.currency,
+        "capacity": product.capacity,
+        "sold_count": product.sold_count,
+        "access_zone": product.access_zone,
+        "status": product.status,
+        "scheduled_at": fixture.scheduled_at,
+        "venue_name": fixture.venue_name,
+    }
+
+
+def default_ticket_product_name(
+    competition: Competition,
+    fixture: CompetitionFixture,
+) -> str:
+    round_label = fixture.round_label or "fixture"
+    return f"{competition.name} {round_label} admission"
+
+
+def default_fixture_event_title(
+    competition: Competition,
+    fixture: CompetitionFixture,
+) -> str:
+    round_label = fixture.round_label or "Fixture"
+    return f"{competition.name} {round_label}"
+
+
+def fixture_ticketing_notes(existing: str | None, product_name: str) -> str:
+    entry = f"Ticket sales opened for {product_name}."
+    if existing and entry not in existing:
+        return f"{existing}\n{entry}"
+    return existing or entry
 
 
 async def get_team_for_organization(db: AsyncSession, team_id: UUID, organization_id: UUID) -> Team:

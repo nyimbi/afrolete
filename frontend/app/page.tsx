@@ -62,6 +62,7 @@ import type {
   CompetitionRead,
   CompetitionScheduleOptimizationRead,
   CompetitionStandingRead,
+  CompetitionTicketingRead,
   CompetitionType,
   ConsentRequestRead,
   DonationRead,
@@ -285,6 +286,7 @@ export default function HomePage() {
   const [scheduleOptimization, setScheduleOptimization] =
     useState<CompetitionScheduleOptimizationRead | null>(null);
   const [competitionBroadcast, setCompetitionBroadcast] = useState<CompetitionBroadcastRead | null>(null);
+  const [competitionTicketing, setCompetitionTicketing] = useState<CompetitionTicketingRead[]>([]);
   const [competitionBracket, setCompetitionBracket] = useState<CompetitionBracketRead | null>(null);
   const [competitionConflicts, setCompetitionConflicts] = useState<CompetitionConflictRead[]>([]);
   const [matchEvents, setMatchEvents] = useState<FixtureMatchEventRead[]>([]);
@@ -903,18 +905,20 @@ export default function HomePage() {
   }, []);
 
   const loadCompetitionWorkspace = useCallback(async (competitionId: string) => {
-    const [participants, fixtures, standings, bracket, conflicts] = await Promise.all([
+    const [participants, fixtures, standings, bracket, conflicts, ticketing] = await Promise.all([
       apiRequest<CompetitionParticipantRead[]>(`/competitions/${competitionId}/participants`),
       apiRequest<CompetitionFixtureRead[]>(`/competitions/${competitionId}/fixtures`),
       apiRequest<CompetitionStandingRead[]>(`/competitions/${competitionId}/standings`),
       apiRequest<CompetitionBracketRead>(`/competitions/${competitionId}/bracket`),
-      apiRequest<CompetitionConflictRead[]>(`/competitions/${competitionId}/conflicts`)
+      apiRequest<CompetitionConflictRead[]>(`/competitions/${competitionId}/conflicts`),
+      apiRequest<CompetitionTicketingRead[]>(`/competitions/${competitionId}/ticketing`)
     ]);
     setCompetitionParticipants(participants);
     setCompetitionFixtures(fixtures);
     setCompetitionStandings(standings);
     setCompetitionBracket(bracket);
     setCompetitionConflicts(conflicts);
+    setCompetitionTicketing(ticketing);
     setSelectedFixtureId((current) =>
       fixtures.some((fixture) => fixture.id === current) ? current : fixtures[0]?.id ?? ""
     );
@@ -2370,6 +2374,43 @@ export default function HomePage() {
         setCompetitionBroadcast(broadcast);
         addLog(`${broadcast.subject} sent to ${broadcast.recipient_count} recipients`, "good");
         void loadCommunications(selectedOrganizationId);
+      }
+    );
+  };
+
+  const openCompetitionTicketing = () => {
+    if (!selectedCompetitionId || !selectedFixtureId) {
+      addLog("Select a competition fixture first", "bad");
+      return;
+    }
+    runAction(
+      "open-competition-ticketing",
+      () =>
+        apiRequest<CompetitionTicketingRead>(
+          `/competitions/${selectedCompetitionId}/ticketing`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              fixture_id: selectedFixtureId,
+              name: ticketForm.name,
+              price: String(ticketForm.price),
+              capacity: ticketForm.capacity,
+              access_zone: ticketForm.access_zone
+            }
+          }
+        ),
+      (ticketing) => {
+        setCompetitionTicketing((current) => [
+          ticketing,
+          ...current.filter((item) => item.ticket_product_id !== ticketing.ticket_product_id)
+        ]);
+        setSelectedTicketProductId(ticketing.ticket_product_id);
+        addLog(`${ticketing.name} opened with ${ticketing.capacity} tickets`, "good");
+        void loadCompetitionWorkspace(selectedCompetitionId);
+        if (selectedOrganizationId) {
+          void loadCommercial(selectedOrganizationId);
+        }
       }
     );
   };
@@ -5671,6 +5712,7 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={reviewCompetitionConflicts} disabled={busyAction !== null}>Conflicts</button>
                 <button type="button" onClick={broadcastCompetitionUpdate} disabled={busyAction !== null}>Broadcast</button>
+                <button type="button" onClick={openCompetitionTicketing} disabled={busyAction !== null}>Ticketing</button>
               </div>
             </div>
             <div className="consent-grid">
@@ -5693,6 +5735,10 @@ export default function HomePage() {
               <div>
                 <span className="muted">Conflicts</span>
                 <strong>{competitionConflicts.length}</strong>
+              </div>
+              <div>
+                <span className="muted">Ticketed</span>
+                <strong>{competitionTicketing.length}</strong>
               </div>
             </div>
             <div className="task-list">
@@ -5722,6 +5768,14 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {competitionTicketing.slice(0, 3).map((ticketing) => (
+                <article key={ticketing.ticket_product_id} className="task-card">
+                  <div>
+                    <strong>{ticketing.name} · {ticketing.sold_count}/{ticketing.capacity} sold</strong>
+                    <span>{ticketing.currency} {ticketing.price} · {ticketing.venue_name ?? ticketing.access_zone ?? "No venue"} · {new Date(ticketing.scheduled_at).toLocaleString()}</span>
+                  </div>
+                </article>
+              ))}
               <article className="task-card">
                 <div>
                   <strong>Fixture integrity</strong>

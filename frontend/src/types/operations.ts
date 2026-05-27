@@ -1374,6 +1374,22 @@ export type CompetitionBroadcastRead = {
   transport_mode: string;
 };
 
+export type CompetitionTicketingRead = {
+  competition_id: UUID;
+  fixture_id: UUID;
+  event_id: UUID;
+  ticket_product_id: UUID;
+  name: string;
+  price: string;
+  currency: string;
+  capacity: number;
+  sold_count: number;
+  access_zone: string | null;
+  status: string;
+  scheduled_at: string;
+  venue_name: string | null;
+};
+
 export type CompetitionBracketMatchRead = {
   round_label: string;
   stage_label: string;

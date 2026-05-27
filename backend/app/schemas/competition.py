@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -186,6 +187,31 @@ class CompetitionBroadcastRead(BaseModel):
     failed: int
     suppressed: int
     transport_mode: str
+
+
+class CompetitionTicketingCreate(BaseModel):
+    fixture_id: UUID
+    name: str | None = Field(default=None, max_length=180)
+    price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    capacity: int = Field(ge=1)
+    access_zone: str | None = Field(default=None, max_length=120)
+
+
+class CompetitionTicketingRead(BaseModel):
+    competition_id: UUID
+    fixture_id: UUID
+    event_id: UUID
+    ticket_product_id: UUID
+    name: str
+    price: Decimal
+    currency: str
+    capacity: int
+    sold_count: int
+    access_zone: str | None
+    status: str
+    scheduled_at: datetime
+    venue_name: str | None
 
 
 class FixtureResultUpdate(BaseModel):

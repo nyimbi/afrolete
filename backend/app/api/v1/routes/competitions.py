@@ -22,6 +22,8 @@ from app.schemas.competition import (
     CompetitionScheduleOptimizationRead,
     CompetitionScheduleOptimizeCreate,
     CompetitionStandingRead,
+    CompetitionTicketingCreate,
+    CompetitionTicketingRead,
     FixtureMatchEventCreate,
     FixtureMatchEventRead,
     FixtureOfficialAssignmentCreate,
@@ -41,9 +43,11 @@ from app.services.competitions import (
     competition_standings,
     create_competition,
     create_competition_fixture,
+    create_competition_ticketing,
     generate_competition_fixtures,
     list_competition_fixtures,
     list_competition_participants,
+    list_competition_ticketing,
     list_competitions,
     list_fixture_match_events,
     optimize_competition_schedule,
@@ -293,6 +297,34 @@ async def broadcast_competition_route(
     return CompetitionBroadcastRead(
         **await broadcast_competition_update(db, identity, competition_id, payload, authz)
     )
+
+
+@router.post(
+    "/{competition_id}/ticketing",
+    response_model=CompetitionTicketingRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_competition_ticketing_route(
+    competition_id: UUID,
+    payload: CompetitionTicketingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CompetitionTicketingRead:
+    return CompetitionTicketingRead(
+        **await create_competition_ticketing(db, identity, competition_id, payload, authz)
+    )
+
+
+@router.get("/{competition_id}/ticketing", response_model=list[CompetitionTicketingRead])
+async def list_competition_ticketing_route(
+    competition_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[CompetitionTicketingRead]:
+    return [
+        CompetitionTicketingRead(**row)
+        for row in await list_competition_ticketing(db, competition_id)
+    ]
 
 
 @router.get("/{competition_id}/fixtures", response_model=list[CompetitionFixtureRead])
