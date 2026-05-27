@@ -99,7 +99,7 @@ from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
 from app.services.communications import create_message
 from app.services.safeguarding import create_safeguarding_incident
-from app.services.secrets import read_openbao_kv_secret
+from app.services.secrets import resolve_secret
 from app.services.storage.objects import get_object, put_object
 
 
@@ -2079,22 +2079,13 @@ async def resolve_supplier_secret(
     field_name: str,
     label: str,
 ) -> str:
-    if env_value:
-        return env_value
-    if not path:
-        return ""
-    if not settings.openbao_addr or not settings.openbao_token:
-        raise HTTPException(
-            status_code=500,
-            detail=f"{label} is configured for OpenBao but OpenBao address/token is missing",
-        )
-    try:
-        secret = await read_openbao_kv_secret(settings, path, field_name)
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"OpenBao {label} fetch failed: {exc}") from exc
-    if not secret:
-        raise HTTPException(status_code=500, detail=f"OpenBao {label} secret field is empty")
-    return secret
+    return await resolve_secret(
+        settings,
+        env_value=env_value,
+        path=path,
+        field_name=field_name,
+        label=label,
+    )
 
 
 def supplier_order_submission_notes(notes: str | None, result: dict) -> str:

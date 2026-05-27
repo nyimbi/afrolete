@@ -15,7 +15,6 @@ from typing import Any
 from urllib.parse import quote
 from uuid import UUID
 
-import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import Integer, cast, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -170,7 +169,7 @@ from app.services.safeguarding import (
     is_minor_on,
     medical_clearance_for_event,
 )
-from app.services.secrets import read_openbao_kv_secret, resolve_secret_sync
+from app.services.secrets import resolve_secret, resolve_secret_sync
 from app.services.storage.objects import get_object, put_object
 
 
@@ -1618,22 +1617,13 @@ async def resolve_travel_secret(
     field_name: str,
     label: str,
 ) -> str:
-    if env_value:
-        return env_value
-    if not path:
-        return ""
-    if not settings.openbao_addr or not settings.openbao_token:
-        raise HTTPException(
-            status_code=500,
-            detail=f"{label} is configured for OpenBao but OpenBao address/token is missing",
-        )
-    try:
-        secret = await read_openbao_kv_secret(settings, path, field_name)
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"OpenBao {label} fetch failed: {exc}") from exc
-    if not secret:
-        raise HTTPException(status_code=500, detail=f"OpenBao {label} secret field is empty")
-    return secret
+    return await resolve_secret(
+        settings,
+        env_value=env_value,
+        path=path,
+        field_name=field_name,
+        label=label,
+    )
 
 
 async def list_travel_approvals(
@@ -2313,8 +2303,6 @@ async def travel_device_ingest_signing_key(
     settings: Settings,
     device: EventTravelDevice | None,
 ) -> str:
-    if device is not None and device.ingest_secret_key:
-        return device.ingest_secret_key
     if device is not None and device.secret_vault_reference:
         return await resolve_travel_secret(
             settings,
@@ -2323,6 +2311,8 @@ async def travel_device_ingest_signing_key(
             field_name=settings.travel_device_secret_vault_field,
             label="travel device ingest secret",
         )
+    if device is not None and device.ingest_secret_key:
+        return device.ingest_secret_key
     return await resolve_travel_secret(
         settings,
         env_value=settings.travel_device_ingest_key,

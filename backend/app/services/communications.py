@@ -44,7 +44,7 @@ from app.schemas.communication import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
-from app.services.secrets import read_openbao_kv_secret
+from app.services.secrets import resolve_secret
 
 
 async def ensure_manage_communications(
@@ -931,35 +931,20 @@ async def delivery_headers(settings: Settings) -> DeliveryHeaderResolution:
 
 
 async def resolve_communication_webhook_key(settings: Settings) -> dict[str, str | None]:
-    if settings.communication_webhook_key:
-        return {"key": settings.communication_webhook_key, "source": "env", "failure_reason": None}
-    if not settings.communication_webhook_key_secret_path:
-        return {"key": None, "source": "unset", "failure_reason": None}
-    if not settings.openbao_addr or not settings.openbao_token:
-        return {
-            "key": None,
-            "source": "openbao",
-            "failure_reason": "Communication webhook key is configured for OpenBao but OpenBao address/token is missing.",
-        }
+    source = "openbao" if settings.communication_webhook_key_secret_path else "env"
     try:
-        secret = await read_openbao_kv_secret(
+        secret = await resolve_secret(
             settings,
-            settings.communication_webhook_key_secret_path,
-            settings.communication_webhook_key_secret_field,
+            env_value=settings.communication_webhook_key,
+            path=settings.communication_webhook_key_secret_path,
+            field_name=settings.communication_webhook_key_secret_field,
+            label="communication webhook key",
         )
-    except httpx.HTTPError as error:
-        return {
-            "key": None,
-            "source": "openbao",
-            "failure_reason": f"OpenBao communication webhook key fetch failed: {error}",
-        }
+    except HTTPException as exc:
+        return {"key": None, "source": "openbao", "failure_reason": str(exc.detail)}
     if not secret:
-        return {
-            "key": None,
-            "source": "openbao",
-            "failure_reason": "OpenBao communication webhook key secret field is empty.",
-        }
-    return {"key": secret, "source": "openbao", "failure_reason": None}
+        return {"key": None, "source": "unset", "failure_reason": None}
+    return {"key": secret, "source": source, "failure_reason": None}
 
 
 def delivery_webhook_url_for(settings: Settings, channel: CommunicationChannel) -> str | None:

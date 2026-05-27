@@ -63,7 +63,7 @@ from app.schemas.communication import CommunicationMessageCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 from app.services.communications import create_message
-from app.services.secrets import read_openbao_kv_secret, resolve_secret_sync
+from app.services.secrets import resolve_secret, resolve_secret_sync
 from app.services.storage.objects import get_object, put_object
 
 ASSIGNABLE_SCOPES = {"organization", "team", "event", "athlete_profile"}
@@ -2589,35 +2589,20 @@ async def validate_agent_worker_callback_signature(
 
 
 async def resolve_agent_webhook_key(settings: Settings) -> dict[str, str | None]:
-    if settings.agent_webhook_key:
-        return {"key": settings.agent_webhook_key, "source": "env", "failure_reason": None}
-    if not settings.agent_webhook_key_secret_path:
-        return {"key": None, "source": "unset", "failure_reason": None}
-    if not settings.openbao_addr or not settings.openbao_token:
-        return {
-            "key": None,
-            "source": "openbao",
-            "failure_reason": "Agent webhook key is configured for OpenBao but OpenBao address/token is missing.",
-        }
+    source = "openbao" if settings.agent_webhook_key_secret_path else "env"
     try:
-        secret = await read_openbao_kv_secret(
+        secret = await resolve_secret(
             settings,
-            settings.agent_webhook_key_secret_path,
-            settings.agent_webhook_key_secret_field,
+            env_value=settings.agent_webhook_key,
+            path=settings.agent_webhook_key_secret_path,
+            field_name=settings.agent_webhook_key_secret_field,
+            label="agent webhook key",
         )
-    except httpx.HTTPError as error:
-        return {
-            "key": None,
-            "source": "openbao",
-            "failure_reason": f"OpenBao agent webhook key fetch failed: {error}",
-        }
+    except HTTPException as exc:
+        return {"key": None, "source": "openbao", "failure_reason": str(exc.detail)}
     if not secret:
-        return {
-            "key": None,
-            "source": "openbao",
-            "failure_reason": "OpenBao agent webhook key secret field is empty.",
-        }
-    return {"key": secret, "source": "openbao", "failure_reason": None}
+        return {"key": None, "source": "unset", "failure_reason": None}
+    return {"key": secret, "source": source, "failure_reason": None}
 
 
 def apply_agent_webhook_response(task: AgentTask, response: httpx.Response) -> None:
