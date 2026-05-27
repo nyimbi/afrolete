@@ -706,6 +706,8 @@ export type EventTravelGeofenceCheckRead = {
   center_longitude: string;
   radius_km: string;
   distance_km: string;
+  boundary_type: string;
+  polygon_vertices: number;
   inside: boolean;
   breached: boolean;
   message_id: UUID | null;
@@ -721,6 +723,10 @@ export type EventTravelGeofenceZoneRead = {
   center_latitude: string;
   center_longitude: string;
   radius_km: string;
+  polygon_coordinates: { latitude: string; longitude: string }[] | null;
+  provider: string | null;
+  provider_zone_id: string | null;
+  provider_revision: string | null;
   alert_on_breach: boolean;
   channel: CommunicationChannel;
   active: boolean;

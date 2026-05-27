@@ -579,16 +579,25 @@ class EventTravelDeviceFleetInventoryRead(BaseModel):
     devices: list[EventTravelDeviceFleetItemRead]
 
 
+class EventTravelGeofencePoint(BaseModel):
+    latitude: Decimal = Field(ge=-90, le=90, max_digits=9, decimal_places=6)
+    longitude: Decimal = Field(ge=-180, le=180, max_digits=9, decimal_places=6)
+
+
 class EventTravelGeofenceCheckCreate(BaseModel):
     center_latitude: Decimal = Field(ge=-90, le=90, max_digits=9, decimal_places=6)
     center_longitude: Decimal = Field(ge=-180, le=180, max_digits=9, decimal_places=6)
     radius_km: Decimal = Field(gt=0, le=20000, max_digits=8, decimal_places=3)
     label: str = Field(default="travel safety zone", min_length=2, max_length=160)
+    polygon_coordinates: list[EventTravelGeofencePoint] | None = None
     alert_on_breach: bool = True
     channel: CommunicationChannel = CommunicationChannel.PUSH
 
 
 class EventTravelGeofenceZoneCreate(EventTravelGeofenceCheckCreate):
+    provider: str | None = Field(default=None, max_length=80)
+    provider_zone_id: str | None = Field(default=None, max_length=180)
+    provider_revision: str | None = Field(default=None, max_length=80)
     active: bool = True
     notes: str | None = Field(default=None, max_length=2000)
 
@@ -598,6 +607,10 @@ class EventTravelGeofenceZoneUpdate(BaseModel):
     center_latitude: Decimal | None = Field(default=None, ge=-90, le=90, max_digits=9, decimal_places=6)
     center_longitude: Decimal | None = Field(default=None, ge=-180, le=180, max_digits=9, decimal_places=6)
     radius_km: Decimal | None = Field(default=None, gt=0, le=20000, max_digits=8, decimal_places=3)
+    polygon_coordinates: list[EventTravelGeofencePoint] | None = None
+    provider: str | None = Field(default=None, max_length=80)
+    provider_zone_id: str | None = Field(default=None, max_length=180)
+    provider_revision: str | None = Field(default=None, max_length=80)
     alert_on_breach: bool | None = None
     channel: CommunicationChannel | None = None
     active: bool | None = None
@@ -621,6 +634,8 @@ class EventTravelGeofenceCheckRead(BaseModel):
     center_longitude: Decimal
     radius_km: Decimal
     distance_km: Decimal
+    boundary_type: str = "radius"
+    polygon_vertices: int = 0
     inside: bool
     breached: bool
     message_id: UUID | None

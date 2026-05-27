@@ -1,5 +1,6 @@
 import hmac
 import io
+import json
 import time
 from base64 import b64decode, urlsafe_b64encode
 from binascii import Error as Base64Error
@@ -111,6 +112,7 @@ from app.schemas.event import (
     EventTravelFeeInvoiceItemRead,
     EventTravelGeofenceCheckCreate,
     EventTravelGeofenceCheckRead,
+    EventTravelGeofencePoint,
     EventTravelGeofenceZoneCreate,
     EventTravelGeofenceZoneRead,
     EventTravelGeofenceZoneUpdate,
@@ -1688,7 +1690,14 @@ async def check_travel_geofence(
         float(latest_update.longitude),
     )
     distance_km = Decimal(str(round(distance_km_value, 3)))
-    breached = distance_km > payload.radius_km
+    polygon = normalized_geofence_polygon(payload.polygon_coordinates)
+    if polygon:
+        inside = travel_point_in_polygon(float(latest_update.latitude), float(latest_update.longitude), polygon)
+        boundary_type = "polygon"
+    else:
+        inside = distance_km <= payload.radius_km
+        boundary_type = "radius"
+    breached = not inside
     message_id: UUID | None = None
     recipient_count = 0
     if breached and payload.alert_on_breach:
@@ -1724,7 +1733,9 @@ async def check_travel_geofence(
         center_longitude=payload.center_longitude,
         radius_km=payload.radius_km,
         distance_km=distance_km,
-        inside=not breached,
+        boundary_type=boundary_type,
+        polygon_vertices=len(polygon),
+        inside=inside,
         breached=breached,
         message_id=message_id,
         recipient_count=recipient_count,
@@ -1777,6 +1788,10 @@ async def create_travel_geofence_zone(
         center_latitude=payload.center_latitude,
         center_longitude=payload.center_longitude,
         radius_km=payload.radius_km,
+        polygon_coordinates=geofence_polygon_json(payload.polygon_coordinates),
+        provider=payload.provider,
+        provider_zone_id=payload.provider_zone_id,
+        provider_revision=payload.provider_revision,
         alert_on_breach=payload.alert_on_breach,
         channel=payload.channel.value,
         active=payload.active,
@@ -1815,6 +1830,14 @@ async def update_travel_geofence_zone(
         zone.center_longitude = payload.center_longitude
     if payload.radius_km is not None:
         zone.radius_km = payload.radius_km
+    if "polygon_coordinates" in payload.model_fields_set:
+        zone.polygon_coordinates = geofence_polygon_json(payload.polygon_coordinates)
+    if "provider" in payload.model_fields_set:
+        zone.provider = payload.provider
+    if "provider_zone_id" in payload.model_fields_set:
+        zone.provider_zone_id = payload.provider_zone_id
+    if "provider_revision" in payload.model_fields_set:
+        zone.provider_revision = payload.provider_revision
     if payload.alert_on_breach is not None:
         zone.alert_on_breach = payload.alert_on_breach
     if payload.channel is not None:
@@ -1843,6 +1866,7 @@ async def check_travel_geofence_zone(
         center_latitude=zone.center_latitude,
         center_longitude=zone.center_longitude,
         radius_km=zone.radius_km,
+        polygon_coordinates=geofence_polygon_from_json(zone.polygon_coordinates),
         label=zone.label,
         alert_on_breach=zone.alert_on_breach,
         channel=CommunicationChannel(zone.channel),
@@ -1859,6 +1883,10 @@ def travel_geofence_zone_read(zone: EventTravelGeofenceZone) -> EventTravelGeofe
         center_latitude=zone.center_latitude,
         center_longitude=zone.center_longitude,
         radius_km=zone.radius_km,
+        polygon_coordinates=geofence_polygon_from_json(zone.polygon_coordinates),
+        provider=zone.provider,
+        provider_zone_id=zone.provider_zone_id,
+        provider_revision=zone.provider_revision,
         alert_on_breach=zone.alert_on_breach,
         channel=CommunicationChannel(zone.channel),
         active=zone.active,
@@ -1866,6 +1894,55 @@ def travel_geofence_zone_read(zone: EventTravelGeofenceZone) -> EventTravelGeofe
         created_at=zone.created_at,
         updated_at=zone.updated_at,
     )
+
+
+def normalized_geofence_polygon(
+    polygon: list[EventTravelGeofencePoint] | None,
+) -> list[tuple[float, float]]:
+    if not polygon:
+        return []
+    if len(polygon) < 3:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Geofence polygon requires at least three vertices",
+        )
+    return [(float(point.latitude), float(point.longitude)) for point in polygon]
+
+
+def geofence_polygon_json(polygon: list[EventTravelGeofencePoint] | None) -> str | None:
+    points = normalized_geofence_polygon(polygon)
+    if not points:
+        return None
+    return json.dumps([{"latitude": latitude, "longitude": longitude} for latitude, longitude in points])
+
+
+def geofence_polygon_from_json(value: str | None) -> list[EventTravelGeofencePoint] | None:
+    if not value:
+        return None
+    try:
+        raw_points = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    points = [
+        EventTravelGeofencePoint(latitude=Decimal(str(point["latitude"])), longitude=Decimal(str(point["longitude"])))
+        for point in raw_points
+        if "latitude" in point and "longitude" in point
+    ]
+    return points or None
+
+
+def travel_point_in_polygon(latitude: float, longitude: float, polygon: list[tuple[float, float]]) -> bool:
+    inside = False
+    previous_latitude, previous_longitude = polygon[-1]
+    for current_latitude, current_longitude in polygon:
+        crosses_longitude = (current_longitude > longitude) != (previous_longitude > longitude)
+        if crosses_longitude:
+            slope_latitude = (previous_latitude - current_latitude) * (longitude - current_longitude)
+            slope_latitude /= previous_longitude - current_longitude
+            if latitude < slope_latitude + current_latitude:
+                inside = not inside
+        previous_latitude, previous_longitude = current_latitude, current_longitude
+    return inside
 
 
 def travel_route_map_markers(

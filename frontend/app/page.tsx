@@ -228,6 +228,21 @@ type TravelManifestOfflineCache = EventTravelManifestRead & {
 
 const travelManifestCacheKey = (travelPlanId: string) => `afrolete:travel-manifest:${travelPlanId}`;
 
+const parseGeofencePolygon = (value: string) => {
+  const points = value
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [latitude, longitude] = entry.split(",").map((part) => Number(part.trim()));
+      return Number.isFinite(latitude) && Number.isFinite(longitude)
+        ? { latitude: String(latitude), longitude: String(longitude) }
+        : null;
+    })
+    .filter((point): point is { latitude: string; longitude: string } => point !== null);
+  return points.length >= 3 ? points : null;
+};
+
 const defaultIdentity: LocalIdentity = {
   sub: "kc-owner-1",
   email: "owner@example.com",
@@ -682,6 +697,10 @@ export default function HomePage() {
     geofence_latitude: -1.2921,
     geofence_longitude: 36.8219,
     geofence_radius_km: 5,
+    geofence_polygon: "-1.292100,36.821900; -1.291400,36.824000; -1.294000,36.824200; -1.294200,36.821400",
+    geofence_provider: "manual_polygon",
+    geofence_provider_zone_id: "route-corridor-001",
+    geofence_provider_revision: "v1",
     geofence_channel: "push" as CommunicationChannel,
     expense_category: "fuel",
     expense_vendor: "Riverside Fuel",
@@ -3321,6 +3340,7 @@ export default function HomePage() {
             center_longitude: String(travelForm.geofence_longitude),
             radius_km: String(travelForm.geofence_radius_km),
             label: travelForm.geofence_label,
+            polygon_coordinates: parseGeofencePolygon(travelForm.geofence_polygon),
             alert_on_breach: true,
             channel: travelForm.geofence_channel
           }
@@ -3381,6 +3401,10 @@ export default function HomePage() {
             center_longitude: String(travelForm.geofence_longitude),
             radius_km: String(travelForm.geofence_radius_km),
             label: travelForm.geofence_label,
+            polygon_coordinates: parseGeofencePolygon(travelForm.geofence_polygon),
+            provider: travelForm.geofence_provider || null,
+            provider_zone_id: travelForm.geofence_provider_zone_id || null,
+            provider_revision: travelForm.geofence_provider_revision || null,
             alert_on_breach: true,
             channel: travelForm.geofence_channel,
             active: true,
@@ -3430,6 +3454,10 @@ export default function HomePage() {
       geofence_latitude: Number(zone.center_latitude),
       geofence_longitude: Number(zone.center_longitude),
       geofence_radius_km: Number(zone.radius_km),
+      geofence_polygon: zone.polygon_coordinates?.map((point) => `${point.latitude},${point.longitude}`).join("; ") ?? "",
+      geofence_provider: zone.provider ?? "",
+      geofence_provider_zone_id: zone.provider_zone_id ?? "",
+      geofence_provider_revision: zone.provider_revision ?? "",
       geofence_channel: zone.channel
     }));
     addLog(`Loaded ${zone.label} into the geofence form`, "neutral");
@@ -3447,6 +3475,10 @@ export default function HomePage() {
             center_longitude: String(travelForm.geofence_longitude),
             radius_km: String(travelForm.geofence_radius_km),
             label: travelForm.geofence_label,
+            polygon_coordinates: parseGeofencePolygon(travelForm.geofence_polygon),
+            provider: travelForm.geofence_provider || null,
+            provider_zone_id: travelForm.geofence_provider_zone_id || null,
+            provider_revision: travelForm.geofence_provider_revision || null,
             alert_on_breach: true,
             channel: travelForm.geofence_channel,
             active: zone.active,
@@ -8108,6 +8140,22 @@ export default function HomePage() {
                 Radius km
                 <input type="number" min="0.1" step="0.1" value={travelForm.geofence_radius_km} onChange={(event) => setTravelForm({ ...travelForm, geofence_radius_km: Number(event.target.value) })} />
               </label>
+              <label className="wide-field">
+                Geofence polygon
+                <input value={travelForm.geofence_polygon} onChange={(event) => setTravelForm({ ...travelForm, geofence_polygon: event.target.value })} />
+              </label>
+              <label>
+                Map provider
+                <input value={travelForm.geofence_provider} onChange={(event) => setTravelForm({ ...travelForm, geofence_provider: event.target.value })} />
+              </label>
+              <label>
+                Provider zone
+                <input value={travelForm.geofence_provider_zone_id} onChange={(event) => setTravelForm({ ...travelForm, geofence_provider_zone_id: event.target.value })} />
+              </label>
+              <label>
+                Provider rev
+                <input value={travelForm.geofence_provider_revision} onChange={(event) => setTravelForm({ ...travelForm, geofence_provider_revision: event.target.value })} />
+              </label>
               <label>
                 Geofence alert
                 <select value={travelForm.geofence_channel} onChange={(event) => setTravelForm({ ...travelForm, geofence_channel: event.target.value as CommunicationChannel })}>
@@ -8351,8 +8399,9 @@ export default function HomePage() {
                   <div>
                     <strong>{travelGeofenceCheck.breached ? "Geofence breached" : "Inside geofence"} · {travelGeofenceCheck.label}</strong>
                     <span>
-                      {travelGeofenceCheck.distance_km} km from center · {travelGeofenceCheck.radius_km} km radius · {travelGeofenceCheck.recipient_count} alerted
+                      {travelGeofenceCheck.boundary_type} · {travelGeofenceCheck.distance_km} km from center · {travelGeofenceCheck.radius_km} km radius · {travelGeofenceCheck.recipient_count} alerted
                     </span>
+                    <span>{travelGeofenceCheck.polygon_vertices ? `${travelGeofenceCheck.polygon_vertices} polygon vertices` : "Circular boundary"}</span>
                     <span>{travelGeofenceCheck.recommendation}</span>
                   </div>
                 </article>
@@ -8362,6 +8411,10 @@ export default function HomePage() {
                   <div>
                     <strong>{zone.label} · {zone.active ? "active" : "inactive"}</strong>
                     <span>{zone.center_latitude}, {zone.center_longitude} · {zone.radius_km} km radius</span>
+                    <span>
+                      {zone.polygon_coordinates?.length ? `${zone.polygon_coordinates.length} polygon vertices` : "Circular boundary"}
+                      {zone.provider ? ` · ${zone.provider}:${zone.provider_zone_id ?? "unlinked"}` : ""}
+                    </span>
                     <span>{zone.channel} alerts · {zone.alert_on_breach ? "alerts on breach" : "monitor only"}</span>
                   </div>
                   <div className="event-toolbar">
