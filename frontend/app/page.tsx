@@ -156,6 +156,72 @@ type AthleteEntry = {
   rosterEntryId?: string;
 };
 
+const chartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--red)", "var(--violet)"];
+
+function ReportingChartCard({ chart }: { chart: ReportChartRead }) {
+  const total = chart.values.reduce((sum, value) => sum + value, 0);
+  const max = Math.max(...chart.values, 1);
+  let cursor = 0;
+  const donutSegments = chart.values.map((value, index) => {
+    const size = total > 0 ? (value / total) * 360 : 0;
+    const segment = `${chartColors[index % chartColors.length]} ${cursor}deg ${cursor + size}deg`;
+    cursor += size;
+    return segment;
+  });
+  const donutBackground = total > 0
+    ? `conic-gradient(${donutSegments.join(", ")})`
+    : "var(--wash-strong)";
+
+  return (
+    <article className="task-card chart-card">
+      <div>
+        <strong>{chart.title}</strong>
+        <span>{chart.chart_type} · {chart.insight}</span>
+      </div>
+      {chart.chart_type === "donut" ? (
+        <div className="chart-donut-row">
+          <div
+            className="chart-donut"
+            style={{ background: donutBackground }}
+          >
+            <span>{Math.round(total)}</span>
+          </div>
+          <div className="chart-legend">
+            {chart.labels.map((label, index) => (
+              <span key={label}>
+                <i style={{ backgroundColor: chartColors[index % chartColors.length] }} />
+                {label}: {chart.values[index] ?? 0}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="chart-bars">
+          {chart.labels.map((label, index) => {
+            const value = chart.values[index] ?? 0;
+            const width = Math.max(4, Math.round((value / max) * 100));
+            return (
+              <div className="chart-bar-row" key={label}>
+                <span>{label}</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{
+                      width: `${width}%`,
+                      backgroundColor: chartColors[index % chartColors.length]
+                    }}
+                  />
+                </div>
+                <strong>{value}</strong>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </article>
+  );
+}
+
 export default function HomePage() {
   const [identity, setIdentity] = useState<LocalIdentity>(defaultIdentity);
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
@@ -4757,7 +4823,10 @@ export default function HomePage() {
                   type="button"
                   key={report.id}
                   className={`task-card ${report.id === selectedGeneratedReportId ? "selected" : ""}`}
-                  onClick={() => setSelectedGeneratedReportId(report.id)}
+                  onClick={() => {
+                    setSelectedGeneratedReportId(report.id);
+                    setReportArtifactAccess(null);
+                  }}
                 >
                   <div>
                     <strong>{report.title}</strong>
@@ -4773,14 +4842,7 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
-              {reportCharts.slice(0, 3).map((chart) => (
-                <article key={chart.chart_key} className="task-card">
-                  <div>
-                    <strong>{chart.title} · {chart.chart_type}</strong>
-                    <span>{chart.labels.map((label, index) => `${label}: ${chart.values[index] ?? 0}`).join(" · ")}</span>
-                  </div>
-                </article>
-              ))}
+              {reportCharts.slice(0, 3).map((chart) => <ReportingChartCard key={chart.chart_key} chart={chart} />)}
             </div>
           </div>
 
