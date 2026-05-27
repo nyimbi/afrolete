@@ -66,12 +66,14 @@ import type {
   CompetitionStandingRead,
   CompetitionTicketingRead,
   CompetitionType,
+  CommercialStatus,
   ConsentCaptureChannel,
   ConsentRequestRead,
   DonationRead,
   EventRead,
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
+  EventTravelFeeInvoiceBatchRead,
   EventTravelManifestRead,
   EventTravelPlanRead,
   EventWeatherAlertRead,
@@ -346,6 +348,7 @@ export default function HomePage() {
   const [travelConsentBatch, setTravelConsentBatch] = useState<EventTravelConsentBatchRead | null>(null);
   const [travelConsentReminder, setTravelConsentReminder] = useState<EventTravelConsentReminderRead | null>(null);
   const [travelManifest, setTravelManifest] = useState<EventTravelManifestRead | null>(null);
+  const [travelFeeBatch, setTravelFeeBatch] = useState<EventTravelFeeInvoiceBatchRead | null>(null);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -1574,6 +1577,7 @@ export default function HomePage() {
       setTravelConsentBatch(null);
       setTravelConsentReminder(null);
       setTravelManifest(null);
+      setTravelFeeBatch(null);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1778,6 +1782,7 @@ export default function HomePage() {
       setTravelConsentBatch(null);
       setTravelConsentReminder(null);
       setTravelManifest(null);
+      setTravelFeeBatch(null);
       return;
     }
     runAction(
@@ -2393,6 +2398,54 @@ export default function HomePage() {
       (manifest) => {
         setTravelManifest(manifest);
         addLog(`Travel manifest loaded for ${manifest.participant_count} participants`, "good");
+      }
+    );
+  };
+
+  const generateTravelFeeInvoices = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-fee-invoices-${plan.id}`,
+      () =>
+        apiRequest<EventTravelFeeInvoiceBatchRead>(`/events/travel-plans/${plan.id}/fee-invoices`, {
+          method: "POST",
+          identity,
+          body: {
+            amount_per_participant: String(travelForm.cost_per_participant),
+            currency: "USD",
+            due_on: travelForm.consent_due_at ? travelForm.consent_due_at.slice(0, 10) : null,
+            bill_guardians_for_minors: true,
+            memo: null
+          }
+        }),
+      (batch) => {
+        setTravelFeeBatch(batch);
+        setInvoices((current) => [
+          ...current,
+          ...batch.invoices
+            .filter((invoice) => !current.some((item) => item.id === invoice.invoice_id))
+            .map((invoice) => ({
+              id: invoice.invoice_id,
+              organization_id: selectedOrganizationId,
+              person_id: invoice.billed_person_id,
+              team_id: selectedTeamId || null,
+              sponsor_id: null,
+              invoice_number: invoice.invoice_number,
+              title: `Travel fee: ${selectedEvent?.title ?? "event"}`,
+              amount_due: invoice.amount_due,
+              amount_paid: "0.00",
+              currency: "USD",
+              due_on: travelForm.consent_due_at ? travelForm.consent_due_at.slice(0, 10) : null,
+              status: invoice.status as CommercialStatus,
+              memo: `Travel fee for ${plan.destination}`
+            }))
+        ]);
+        addLog(
+          `Travel fees: ${batch.created} invoices created, ${batch.existing} existing`,
+          batch.skipped_no_payer > 0 ? "bad" : "good"
+        );
+        if (selectedOrganizationId) {
+          void loadCommercial(selectedOrganizationId);
+        }
       }
     );
   };
@@ -6584,6 +6637,10 @@ export default function HomePage() {
                 <input type="number" min="0" value={travelForm.estimated_cost} onChange={(event) => setTravelForm({ ...travelForm, estimated_cost: Number(event.target.value) })} />
               </label>
               <label>
+                Per participant
+                <input type="number" min="0" value={travelForm.cost_per_participant} onChange={(event) => setTravelForm({ ...travelForm, cost_per_participant: Number(event.target.value) })} />
+              </label>
+              <label>
                 Consent due
                 <input type="datetime-local" value={travelForm.consent_due_at} onChange={(event) => setTravelForm({ ...travelForm, consent_due_at: event.target.value })} />
               </label>
@@ -6649,6 +6706,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelFeeBatch ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Travel fee invoices</strong>
+                    <span>{travelFeeBatch.created} created · {travelFeeBatch.existing} existing · {travelFeeBatch.skipped_no_payer} missing payers</span>
+                    <span>{travelFeeBatch.total_amount_due} total · {travelFeeBatch.invoices[0]?.invoice_number ?? "No invoices"}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelPlans.slice(0, 2).map((plan) => (
                 <article key={plan.id} className="task-card">
                   <div>
@@ -6660,6 +6726,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => requestTravelConsents(plan)}>Consent</button>
                     <button type="button" onClick={() => remindTravelConsents(plan)}>Remind</button>
                     <button type="button" onClick={() => loadTravelManifest(plan)}>Manifest</button>
+                    <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "completed")}>Complete</button>

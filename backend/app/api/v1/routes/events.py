@@ -14,6 +14,8 @@ from app.schemas.event import (
     EventTravelConsentReminderCreate,
     EventTravelConsentReminderRead,
     EventTravelConsentRequestCreate,
+    EventTravelFeeInvoiceBatchRead,
+    EventTravelFeeInvoiceCreate,
     EventTravelManifestRead,
     EventTravelPlanCreate,
     EventTravelPlanRead,
@@ -31,6 +33,7 @@ from app.services.events import (
     create_weather_assessment,
     create_event,
     dispatch_weather_assessment_alert,
+    generate_travel_fee_invoices,
     get_event,
     get_travel_manifest,
     list_attendance,
@@ -328,6 +331,21 @@ async def get_travel_manifest_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelManifestRead:
     return await get_travel_manifest(db, identity, travel_plan_id, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/fee-invoices",
+    response_model=EventTravelFeeInvoiceBatchRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_travel_fee_invoices_route(
+    travel_plan_id: UUID,
+    payload: EventTravelFeeInvoiceCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelFeeInvoiceBatchRead:
+    return await generate_travel_fee_invoices(db, identity, travel_plan_id, payload, authz)
 
 
 @router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])

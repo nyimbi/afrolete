@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -203,6 +204,33 @@ class EventTravelManifestRead(BaseModel):
     emergency_contacts: str | None
     medical_access_plan: str | None
     participants: list[EventTravelManifestParticipantRead]
+
+
+class EventTravelFeeInvoiceCreate(BaseModel):
+    amount_per_participant: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    due_on: date | None = None
+    bill_guardians_for_minors: bool = True
+    memo: str | None = Field(default=None, max_length=4000)
+
+
+class EventTravelFeeInvoiceItemRead(BaseModel):
+    invoice_id: UUID
+    invoice_number: str
+    billed_person_id: UUID
+    athlete_person_id: UUID
+    amount_due: Decimal
+    status: str
+
+
+class EventTravelFeeInvoiceBatchRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    created: int
+    existing: int
+    skipped_no_payer: int
+    total_amount_due: Decimal
+    invoices: list[EventTravelFeeInvoiceItemRead]
 
 
 class AttendanceRecordUpsert(BaseModel):

@@ -1,3 +1,4 @@
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -5,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.communication import CommunicationMessage, MessageRecipient
+from app.models.commercial import FinanceInvoice
 from app.models.enums import (
     AttendanceStatus,
     ConsentRequestStatus,
@@ -30,6 +32,9 @@ from app.schemas.event import (
     EventTravelConsentReminderRead,
     EventTravelConsentRequestCreate,
     EventTravelConsentRequestItemRead,
+    EventTravelFeeInvoiceBatchRead,
+    EventTravelFeeInvoiceCreate,
+    EventTravelFeeInvoiceItemRead,
     EventTravelManifestParticipantRead,
     EventTravelManifestRead,
     EventTravelPlanCreate,
@@ -503,6 +508,84 @@ async def get_travel_manifest(
     )
 
 
+async def generate_travel_fee_invoices(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelFeeInvoiceCreate,
+    authz: AuthorizationService,
+) -> EventTravelFeeInvoiceBatchRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+
+    amount = payload.amount_per_participant or plan.cost_per_participant
+    if amount is None or amount <= 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Travel fee amount required")
+    amount = Decimal(amount).quantize(Decimal("0.01"))
+    due_on = payload.due_on or (plan.consent_due_at.date() if plan.consent_due_at is not None else None)
+
+    created = 0
+    existing = 0
+    skipped_no_payer = 0
+    total_amount_due = Decimal("0")
+    invoice_items: list[EventTravelFeeInvoiceItemRead] = []
+    for athlete_person_id in await event_participant_person_ids(db, event):
+        billed_person_id = await travel_fee_payer_id(db, athlete_person_id, event, payload.bill_guardians_for_minors)
+        if billed_person_id is None:
+            skipped_no_payer += 1
+            continue
+        invoice_number = travel_fee_invoice_number(plan, billed_person_id, athlete_person_id)
+        invoice = await db.scalar(
+            select(FinanceInvoice).where(
+                FinanceInvoice.organization_id == event.organization_id,
+                FinanceInvoice.invoice_number == invoice_number,
+            )
+        )
+        if invoice is None:
+            invoice = FinanceInvoice(
+                organization_id=event.organization_id,
+                person_id=billed_person_id,
+                team_id=event.team_id,
+                sponsor_id=None,
+                invoice_number=invoice_number,
+                title=f"Travel fee: {event.title}",
+                amount_due=amount,
+                currency=payload.currency.upper(),
+                due_on=due_on,
+                memo=payload.memo or travel_fee_invoice_memo(event, plan),
+            )
+            db.add(invoice)
+            await db.flush()
+            created += 1
+        else:
+            existing += 1
+        total_amount_due += invoice.amount_due
+        invoice_items.append(
+            EventTravelFeeInvoiceItemRead(
+                invoice_id=invoice.id,
+                invoice_number=invoice.invoice_number,
+                billed_person_id=billed_person_id,
+                athlete_person_id=athlete_person_id,
+                amount_due=invoice.amount_due,
+                status=invoice.status.value,
+            )
+        )
+    await db.commit()
+
+    return EventTravelFeeInvoiceBatchRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        created=created,
+        existing=existing,
+        skipped_no_payer=skipped_no_payer,
+        total_amount_due=total_amount_due.quantize(Decimal("0.01")),
+        invoices=invoice_items,
+    )
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -614,6 +697,43 @@ def guardian_contacts(rows: list[tuple[GuardianRelationship, Person]]) -> list[s
         if guardian.primary_phone:
             contacts.append(guardian.primary_phone)
     return contacts
+
+
+async def travel_fee_payer_id(
+    db: AsyncSession,
+    athlete_person_id: UUID,
+    event: Event,
+    bill_guardians_for_minors: bool,
+) -> UUID | None:
+    athlete = await db.get(Person, athlete_person_id)
+    if athlete is None:
+        return None
+    minor = is_minor_on(athlete, event.starts_at.date())
+    if bill_guardians_for_minors and minor is not False:
+        guardian = await primary_signing_guardian(db, athlete_person_id)
+        if guardian is None:
+            return None
+        return guardian.guardian_person_id
+    return athlete_person_id
+
+
+def travel_fee_invoice_number(plan: EventTravelPlan, billed_person_id: UUID, athlete_person_id: UUID) -> str:
+    return f"TRAVEL-{str(plan.id)[:8]}-{str(billed_person_id)[:8]}-{str(athlete_person_id)[:8]}".upper()
+
+
+def travel_fee_invoice_memo(event: Event, plan: EventTravelPlan) -> str:
+    parts = [
+        f"Trip fee for {event.title}.",
+        f"Destination: {plan.destination}.",
+        f"Transport: {plan.travel_mode}.",
+    ]
+    if plan.departure_at is not None:
+        parts.append(f"Departure: {plan.departure_at.isoformat()}.")
+    if plan.return_at is not None:
+        parts.append(f"Return: {plan.return_at.isoformat()}.")
+    if plan.route_summary:
+        parts.append(f"Route: {plan.route_summary}")
+    return "\n".join(parts)[:4000]
 
 
 def travel_consent_notes(event: Event, plan: EventTravelPlan) -> str:

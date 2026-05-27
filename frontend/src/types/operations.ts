@@ -512,6 +512,25 @@ export type EventTravelManifestRead = {
   participants: EventTravelManifestParticipantRead[];
 };
 
+export type EventTravelFeeInvoiceItemRead = {
+  invoice_id: UUID;
+  invoice_number: string;
+  billed_person_id: UUID;
+  athlete_person_id: UUID;
+  amount_due: string;
+  status: string;
+};
+
+export type EventTravelFeeInvoiceBatchRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  created: number;
+  existing: number;
+  skipped_no_payer: number;
+  total_amount_due: string;
+  invoices: EventTravelFeeInvoiceItemRead[];
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;
