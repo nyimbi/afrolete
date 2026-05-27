@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     travel_manifest_file_url_prefix: str = "local://travel-manifests"
     travel_manifest_signing_key: str = "local-travel-manifest-key"
     travel_manifest_url_ttl_seconds: int = 900
+    travel_fee_payment_webhook_signing_key: str = ""
+    travel_fee_payment_webhook_tolerance_seconds: int = 300
     travel_device_ingest_key: str = ""
     travel_device_ingest_tolerance_seconds: int = 300
     travel_device_ingest_event_retention_days: int = 30

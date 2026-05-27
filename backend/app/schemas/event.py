@@ -359,10 +359,17 @@ class EventTravelFeeCheckoutSettlementCreate(BaseModel):
     raw_reference: str | None = Field(default=None, max_length=2000)
 
 
+class EventTravelFeePaymentWebhookCreate(EventTravelFeeCheckoutSettlementCreate):
+    session_id: str = Field(min_length=8, max_length=120)
+    event_type: str = Field(default="payment.succeeded", min_length=2, max_length=120)
+
+
 class EventTravelFeeCheckoutSettlementRead(BaseModel):
     invoice_id: UUID
     provider: str
     accepted: bool
+    signature_required: bool = False
+    signature_validated: bool = False
     payment_id: UUID | None
     invoice_status: str
     amount_paid: Decimal

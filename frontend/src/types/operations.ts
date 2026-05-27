@@ -624,6 +624,8 @@ export type EventTravelFeeCheckoutSettlementRead = {
   invoice_id: UUID;
   provider: string;
   accepted: boolean;
+  signature_required: boolean;
+  signature_validated: boolean;
   payment_id: UUID | null;
   invoice_status: string;
   amount_paid: string;

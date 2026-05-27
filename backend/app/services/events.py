@@ -112,6 +112,7 @@ from app.schemas.event import (
     EventTravelFeeCheckoutItemRead,
     EventTravelFeeCheckoutSettlementCreate,
     EventTravelFeeCheckoutSettlementRead,
+    EventTravelFeePaymentWebhookCreate,
     EventTravelFeeHostedCheckoutRead,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
@@ -950,6 +951,8 @@ async def settle_travel_fee_checkout(
     db: AsyncSession,
     session_id: str,
     payload: EventTravelFeeCheckoutSettlementCreate,
+    signature_required: bool = False,
+    signature_validated: bool = False,
 ) -> EventTravelFeeCheckoutSettlementRead:
     invoice = await db.get(FinanceInvoice, payload.invoice_id)
     if invoice is None or not invoice.invoice_number.startswith("TRAVEL-"):
@@ -1001,6 +1004,8 @@ async def settle_travel_fee_checkout(
         invoice_id=invoice.id,
         provider=payload.provider,
         accepted=accepted,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
         payment_id=payment.id if payment is not None else None,
         invoice_status=invoice.status.value,
         amount_paid=invoice.amount_paid,
@@ -1008,6 +1013,61 @@ async def settle_travel_fee_checkout(
         session_status=travel_fee_checkout_session_status(invoice),
         message=message,
     )
+
+
+async def ingest_travel_fee_payment_webhook(
+    db: AsyncSession,
+    payload: EventTravelFeePaymentWebhookCreate,
+    signature_required: bool = False,
+    signature_validated: bool = False,
+) -> EventTravelFeeCheckoutSettlementRead:
+    settlement_payload = EventTravelFeeCheckoutSettlementCreate(
+        invoice_id=payload.invoice_id,
+        provider=payload.provider,
+        amount=payload.amount,
+        currency=payload.currency,
+        method=payload.method,
+        external_payment_id=payload.external_payment_id,
+        status=payload.status if payload.event_type in {"payment.succeeded", "invoice.paid", "charge.succeeded"} else "pending",
+        raw_reference=payload.raw_reference,
+    )
+    return await settle_travel_fee_checkout(
+        db,
+        payload.session_id,
+        settlement_payload,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+    )
+
+
+def validate_travel_fee_payment_webhook_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> tuple[bool, bool]:
+    selected_settings = settings or get_settings()
+    signing_key = selected_settings.travel_fee_payment_webhook_signing_key
+    if not signing_key:
+        return False, False
+    if not timestamp_header or not signature_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing travel fee webhook signature")
+    try:
+        timestamp = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel fee webhook timestamp") from exc
+    age = abs(int(time.time()) - timestamp)
+    if age > selected_settings.travel_fee_payment_webhook_tolerance_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Stale travel fee webhook signature")
+    expected = hmac.new(
+        signing_key.encode(),
+        timestamp_header.encode() + b"." + raw_body,
+        sha256,
+    ).hexdigest()
+    submitted = signature_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, submitted):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel fee webhook signature")
+    return True, True
 
 
 async def list_travel_approvals(

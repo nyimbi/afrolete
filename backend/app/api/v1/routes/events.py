@@ -58,6 +58,7 @@ from app.schemas.event import (
     EventTravelFeeCheckoutCreate,
     EventTravelFeeCheckoutSettlementCreate,
     EventTravelFeeCheckoutSettlementRead,
+    EventTravelFeePaymentWebhookCreate,
     EventTravelFeeHostedCheckoutRead,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
@@ -123,6 +124,7 @@ from app.services.events import (
     get_travel_location_stream_info,
     get_travel_route_map,
     ingest_travel_device_location,
+    ingest_travel_fee_payment_webhook,
     list_attendance,
     list_travel_backup_drivers,
     list_travel_carpool_rides,
@@ -158,6 +160,7 @@ from app.services.events import (
     upload_travel_checklist_evidence,
     upload_travel_expense_receipt,
     validate_travel_device_ingest_signature,
+    validate_travel_fee_payment_webhook_signature,
 )
 from app.services.safeguarding import medical_clearance_for_event
 
@@ -579,6 +582,36 @@ async def settle_travel_fee_checkout_route(
     db: AsyncSession = Depends(get_db),
 ) -> EventTravelFeeCheckoutSettlementRead:
     return await settle_travel_fee_checkout(db, session_id, payload)
+
+
+@router.post(
+    "/travel-fee-payment-webhooks",
+    response_model=EventTravelFeeCheckoutSettlementRead,
+)
+async def travel_fee_payment_webhook_route(
+    request: Request,
+    payload: EventTravelFeePaymentWebhookCreate,
+    x_afrolete_travel_fee_timestamp: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Travel-Fee-Timestamp",
+    ),
+    x_afrolete_travel_fee_signature: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Travel-Fee-Signature",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> EventTravelFeeCheckoutSettlementRead:
+    signature_required, signature_validated = validate_travel_fee_payment_webhook_signature(
+        await request.body(),
+        x_afrolete_travel_fee_timestamp,
+        x_afrolete_travel_fee_signature,
+    )
+    return await ingest_travel_fee_payment_webhook(
+        db,
+        payload,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+    )
 
 
 @router.get("/travel-plans/{travel_plan_id}/approvals", response_model=list[EventTravelApprovalRead])
