@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -109,3 +109,24 @@ class AgentModelRegistry(IdMixin, TimestampMixin, Base):
     owner_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     approved_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AgentBiasAudit(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_bias_audits"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    model_registry_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("agent_model_registry.id"), index=True
+    )
+    model_policy: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    audit_dimension: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    population_slice: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    disparity_score: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    findings: Mapped[str] = mapped_column(Text, nullable=False)
+    recommendation: Mapped[str] = mapped_column(Text, nullable=False)
+    mitigation_status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
+    audited_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    audited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

@@ -7,6 +7,8 @@ from app.db.session import get_db
 from app.schemas.agent import (
     AgentAssignmentCreate,
     AgentAssignmentRead,
+    AgentBiasAuditCreate,
+    AgentBiasAuditRead,
     AgentGovernanceSummaryRead,
     AgentModelRegistryCreate,
     AgentModelRegistryRead,
@@ -32,10 +34,12 @@ from app.services.agents import (
     create_agent_model_registry,
     execute_agent_task,
     list_agent_assignments,
+    list_agent_bias_audits,
     list_agent_model_registry,
     list_agent_tasks,
     list_agents,
     queue_agent_task,
+    run_agent_bias_audit,
     update_agent_model_registry,
     update_agent_task,
     validate_agent_worker_callback_signature,
@@ -108,6 +112,26 @@ def to_model_registry_read(registry) -> AgentModelRegistryRead:
     )
 
 
+def to_bias_audit_read(audit) -> AgentBiasAuditRead:
+    return AgentBiasAuditRead(
+        id=audit.id,
+        organization_id=audit.organization_id,
+        model_registry_id=audit.model_registry_id,
+        model_policy=audit.model_policy,
+        audit_dimension=audit.audit_dimension,
+        population_slice=audit.population_slice,
+        sample_size=audit.sample_size,
+        disparity_score=audit.disparity_score,
+        status=audit.status,
+        severity=audit.severity,
+        findings=audit.findings,
+        recommendation=audit.recommendation,
+        mitigation_status=audit.mitigation_status,
+        audited_by_person_id=audit.audited_by_person_id,
+        audited_at=audit.audited_at,
+    )
+
+
 @router.post("", response_model=AgentRead, status_code=status.HTTP_201_CREATED)
 async def create_agent_route(
     payload: AgentCreate,
@@ -137,6 +161,18 @@ async def list_agent_model_registry_route(
     ]
 
 
+@router.get("/bias-audits", response_model=list[AgentBiasAuditRead])
+async def list_agent_bias_audits_route(
+    organization_id: UUID = Query(),
+    model_registry_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentBiasAuditRead]:
+    return [
+        to_bias_audit_read(audit)
+        for audit in await list_agent_bias_audits(db, organization_id, model_registry_id)
+    ]
+
+
 @router.post("/model-registry", response_model=AgentModelRegistryRead, status_code=status.HTTP_201_CREATED)
 async def create_agent_model_registry_route(
     payload: AgentModelRegistryCreate,
@@ -146,6 +182,23 @@ async def create_agent_model_registry_route(
 ) -> AgentModelRegistryRead:
     return to_model_registry_read(
         await create_agent_model_registry(db, identity, payload, authz)
+    )
+
+
+@router.post(
+    "/model-registry/{registry_id}/bias-audits",
+    response_model=AgentBiasAuditRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def run_agent_bias_audit_route(
+    registry_id: UUID,
+    payload: AgentBiasAuditCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentBiasAuditRead:
+    return to_bias_audit_read(
+        await run_agent_bias_audit(db, identity, registry_id, payload, authz)
     )
 
 

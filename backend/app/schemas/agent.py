@@ -147,6 +147,29 @@ class AgentModelRegistryRead(BaseModel):
     approved_at: datetime | None
 
 
+class AgentBiasAuditCreate(BaseModel):
+    audit_dimension: str = Field(default="age_gender_region_club_school", min_length=2, max_length=120)
+    population_slice: str = Field(default="all-participants", min_length=2, max_length=160)
+
+
+class AgentBiasAuditRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    model_registry_id: UUID
+    model_policy: str
+    audit_dimension: str
+    population_slice: str
+    sample_size: int
+    disparity_score: float
+    status: str
+    severity: str
+    findings: str
+    recommendation: str
+    mitigation_status: str
+    audited_by_person_id: UUID | None
+    audited_at: datetime
+
+
 class AgentRunRecordRead(BaseModel):
     id: UUID
     task_id: UUID

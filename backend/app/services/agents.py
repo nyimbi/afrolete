@@ -11,13 +11,21 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.models.agent import Agent, AgentAssignment, AgentModelRegistry, AgentRunRecord, AgentTask
+from app.models.agent import (
+    Agent,
+    AgentAssignment,
+    AgentBiasAudit,
+    AgentModelRegistry,
+    AgentRunRecord,
+    AgentTask,
+)
 from app.models.enums import AgentTaskStatus
 from app.models.event import Event
 from app.models.organization import Organization
 from app.models.team import AthleteProfile, Team
 from app.schemas.agent import (
     AgentAssignmentCreate,
+    AgentBiasAuditCreate,
     AgentCreate,
     AgentModelRegistryCreate,
     AgentModelRegistryUpdate,
@@ -109,6 +117,69 @@ async def list_agent_model_registry(
             )
         ).all()
     )
+
+
+async def list_agent_bias_audits(
+    db: AsyncSession,
+    organization_id: UUID,
+    model_registry_id: UUID | None = None,
+) -> list[AgentBiasAudit]:
+    statement = select(AgentBiasAudit).where(AgentBiasAudit.organization_id == organization_id)
+    if model_registry_id is not None:
+        statement = statement.where(AgentBiasAudit.model_registry_id == model_registry_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(AgentBiasAudit.audited_at.desc(), AgentBiasAudit.created_at.desc())
+            )
+        ).all()
+    )
+
+
+async def run_agent_bias_audit(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    registry_id: UUID,
+    payload: AgentBiasAuditCreate,
+    authz: AuthorizationService,
+) -> AgentBiasAudit:
+    registry = await db.get(AgentModelRegistry, registry_id)
+    if registry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model registry record not found")
+    await ensure_manage_organization(authz, identity, registry.organization_id)
+
+    records = list(
+        (
+            await db.scalars(
+                select(AgentRunRecord)
+                .where(AgentRunRecord.organization_id == registry.organization_id)
+                .where(AgentRunRecord.model_policy == registry.model_policy)
+            )
+        ).all()
+    )
+    score = agent_bias_disparity_score(records, registry)
+    audit_status, severity = agent_bias_audit_status(score, len(records))
+    findings = agent_bias_findings(registry, records, payload.audit_dimension, payload.population_slice, score)
+    audit = AgentBiasAudit(
+        organization_id=registry.organization_id,
+        model_registry_id=registry.id,
+        model_policy=registry.model_policy,
+        audit_dimension=payload.audit_dimension,
+        population_slice=payload.population_slice,
+        sample_size=len(records),
+        disparity_score=score,
+        status=audit_status,
+        severity=severity,
+        findings=findings,
+        recommendation=agent_bias_recommendation(audit_status, registry),
+        mitigation_status="open" if audit_status in {"watch", "fail", "insufficient_data"} else "not_required",
+        audited_by_person_id=identity.person_id,
+        audited_at=datetime.now(UTC),
+    )
+    db.add(audit)
+    await db.commit()
+    await db.refresh(audit)
+    return audit
 
 
 async def create_agent_model_registry(
@@ -996,6 +1067,58 @@ def agent_transparency_recommendations(
     if not recommendations:
         recommendations.append("Continue periodic transparency review and preserve the hash-chained run ledger.")
     return recommendations
+
+
+def agent_bias_disparity_score(records: list[AgentRunRecord], registry: AgentModelRegistry) -> float:
+    if not records:
+        return 1.0
+    failed_rate = sum(1 for record in records if record.status == AgentTaskStatus.FAILED) / len(records)
+    review_rate = sum(1 for record in records if record.status == AgentTaskStatus.WAITING_FOR_REVIEW) / len(records)
+    external_rate = sum(1 for record in records if record.execution_mode == "webhook") / len(records)
+    risk_weight = {"low": 0.05, "medium": 0.1, "high": 0.18, "critical": 0.25}.get(registry.risk_tier, 0.1)
+    score = failed_rate * 0.35 + review_rate * 0.25 + external_rate * 0.2 + risk_weight
+    return round(min(score, 1.0), 3)
+
+
+def agent_bias_audit_status(score: float, sample_size: int) -> tuple[str, str]:
+    if sample_size < 5:
+        return "insufficient_data", "medium"
+    if score >= 0.55:
+        return "fail", "critical"
+    if score >= 0.3:
+        return "watch", "high"
+    return "pass", "low"
+
+
+def agent_bias_findings(
+    registry: AgentModelRegistry,
+    records: list[AgentRunRecord],
+    audit_dimension: str,
+    population_slice: str,
+    score: float,
+) -> str:
+    if not records:
+        return (
+            f"{registry.model_policy} has no run-ledger evidence for {audit_dimension} across "
+            f"{population_slice}; collect reviewed outputs before relying on the model."
+        )
+    failed = sum(1 for record in records if record.status == AgentTaskStatus.FAILED)
+    review = sum(1 for record in records if record.status == AgentTaskStatus.WAITING_FOR_REVIEW)
+    return (
+        f"{registry.model_policy} audit covered {len(records)} run records for {audit_dimension} "
+        f"across {population_slice}. Disparity proxy score {score:.3f}; failed={failed}, "
+        f"human_review={review}, risk_tier={registry.risk_tier}."
+    )
+
+
+def agent_bias_recommendation(status_value: str, registry: AgentModelRegistry) -> str:
+    if status_value == "insufficient_data":
+        return "Run representative evaluation tasks before approving side effects or public claims."
+    if status_value == "fail":
+        return "Block production side effects, review affected decisions, and document mitigation before re-approval."
+    if status_value == "watch":
+        return "Keep human review active and compare outcomes across protected cohorts before scaling."
+    return f"{registry.model_policy} can remain in governed operation with periodic fairness monitoring."
 
 
 def governance_notes(agent: Agent, task: AgentTask) -> str:

@@ -12,6 +12,7 @@ import {
 import { afroleteAuthMode, apiBaseUrl, keycloakClientId, keycloakIssuer } from "@/lib/config";
 import type {
   AgentAssignmentRead,
+  AgentBiasAuditRead,
   AgentGovernanceSummaryRead,
   AgentKind,
   AgentModelRegistryRead,
@@ -580,6 +581,7 @@ export default function HomePage() {
   const [agentGovernance, setAgentGovernance] = useState<AgentGovernanceSummaryRead | null>(null);
   const [agentTransparency, setAgentTransparency] = useState<AgentModelTransparencyReportRead | null>(null);
   const [agentModelRegistry, setAgentModelRegistry] = useState<AgentModelRegistryRead[]>([]);
+  const [agentBiasAudits, setAgentBiasAudits] = useState<AgentBiasAuditRead[]>([]);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1463,13 +1465,14 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification, transparency, registry] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
       apiRequest<AgentRunLedgerVerificationRead>(`/agents/runs/verify?organization_id=${organizationId}`),
       apiRequest<AgentModelTransparencyReportRead>(`/agents/model-transparency?organization_id=${organizationId}`),
-      apiRequest<AgentModelRegistryRead[]>(`/agents/model-registry?organization_id=${organizationId}`)
+      apiRequest<AgentModelRegistryRead[]>(`/agents/model-registry?organization_id=${organizationId}`),
+      apiRequest<AgentBiasAuditRead[]>(`/agents/bias-audits?organization_id=${organizationId}`)
     ]);
     setAgentTasks(tasks);
     setAgentRuns(runs);
@@ -1477,6 +1480,7 @@ export default function HomePage() {
     setAgentLedgerVerification(ledgerVerification);
     setAgentTransparency(transparency);
     setAgentModelRegistry(registry);
+    setAgentBiasAudits(biasAudits);
   }, []);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1912,6 +1916,7 @@ export default function HomePage() {
       setAgentGovernance(null);
       setAgentTransparency(null);
       setAgentModelRegistry([]);
+      setAgentBiasAudits([]);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -4812,6 +4817,31 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updatedRegistry.id)
         ]);
         addLog(`${updatedRegistry.model_policy} is ${updatedRegistry.review_status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
+      }
+    );
+  };
+
+  const runAgentBiasAudit = (registry: AgentModelRegistryRead) => {
+    runAction(
+      `agent-bias-audit-${registry.id}`,
+      () =>
+        apiRequest<AgentBiasAuditRead>(`/agents/model-registry/${registry.id}/bias-audits`, {
+          method: "POST",
+          identity,
+          body: {
+            audit_dimension: "age_gender_region_club_school",
+            population_slice: "all-participants"
+          }
+        }),
+      (audit) => {
+        setAgentBiasAudits((current) => [
+          audit,
+          ...current.filter((item) => item.id !== audit.id)
+        ]);
+        addLog(`${audit.model_policy} bias audit is ${audit.status}`, audit.status === "fail" ? "bad" : "good");
         if (selectedOrganizationId) {
           void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
         }
@@ -11702,9 +11732,20 @@ export default function HomePage() {
                     <span>{registry.use_case}</span>
                   </div>
                   <div className="event-toolbar">
+                    <button type="button" onClick={() => runAgentBiasAudit(registry)}>Bias audit</button>
                     <button type="button" onClick={() => updateAgentModelRegistryStatus(registry, "approved")}>Approve</button>
                     <button type="button" onClick={() => updateAgentModelRegistryStatus(registry, "blocked")}>Block</button>
                     <button type="button" onClick={() => updateAgentModelRegistryStatus(registry, "retired")}>Retire</button>
+                  </div>
+                </article>
+              ))}
+              {agentBiasAudits.slice(0, 3).map((audit) => (
+                <article key={audit.id} className="task-card">
+                  <div>
+                    <strong>{audit.model_policy} · bias {audit.status}</strong>
+                    <span>{audit.audit_dimension} · {audit.population_slice} · score {audit.disparity_score.toFixed(3)}</span>
+                    <span>{audit.severity} · sample {audit.sample_size} · {audit.mitigation_status}</span>
+                    <span>{audit.recommendation}</span>
                   </div>
                 </article>
               ))}

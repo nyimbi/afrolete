@@ -2477,6 +2477,24 @@ export type AgentModelRegistryRead = {
   approved_at: string | null;
 };
 
+export type AgentBiasAuditRead = {
+  id: UUID;
+  organization_id: UUID;
+  model_registry_id: UUID;
+  model_policy: string;
+  audit_dimension: string;
+  population_slice: string;
+  sample_size: number;
+  disparity_score: number;
+  status: string;
+  severity: string;
+  findings: string;
+  recommendation: string;
+  mitigation_status: string;
+  audited_by_person_id: UUID | null;
+  audited_at: string;
+};
+
 export type AgentCredentialStatusRead = {
   execution_mode: string;
   default_model: string;
