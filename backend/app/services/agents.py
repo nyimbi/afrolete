@@ -239,6 +239,10 @@ async def list_my_agent_family_tasks(
             "review_notes": task.review_notes,
             "athlete_name": athlete_name_for_task_ref(task.input_ref, athlete_names),
             "appeal_status": appeal_status_by_task.get(task.id),
+            "simple_explanation": agent_decision_simple_explanation(agent, task),
+            "data_summary": agent_decision_data_summary(task),
+            "alternative_options": agent_decision_alternative_options(task),
+            "governance_note": governance_notes(agent, task),
         }
         for task, agent in rows
     ]

@@ -2530,6 +2530,10 @@ export type AgentFamilyTaskRead = {
   review_notes: string | null;
   athlete_name: string | null;
   appeal_status: string | null;
+  simple_explanation: string;
+  data_summary: string;
+  alternative_options: string;
+  governance_note: string;
 };
 
 export type AgentDecisionAppealFormRead = {

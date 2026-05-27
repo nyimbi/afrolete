@@ -221,6 +221,10 @@ class AgentFamilyTaskRead(BaseModel):
     review_notes: str | None
     athlete_name: str | None
     appeal_status: str | None
+    simple_explanation: str
+    data_summary: str
+    alternative_options: str
+    governance_note: str
 
 
 class AgentDecisionAppealFormRead(BaseModel):

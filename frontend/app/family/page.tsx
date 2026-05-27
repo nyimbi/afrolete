@@ -419,7 +419,10 @@ export default function FamilyPortalPage() {
               <article key={task.id}>
                 <strong>{task.title} · {task.status}</strong>
                 <span>{task.athlete_name ?? "Linked family"} · {task.agent_name} · {task.task_type}</span>
-                <small>{task.appeal_status ? `Appeal ${task.appeal_status}` : task.review_notes ?? "No appeal opened"}</small>
+                <small>{task.simple_explanation}</small>
+                <small>{task.data_summary}</small>
+                <small>{task.governance_note}</small>
+                <small>{task.appeal_status ? `Appeal ${task.appeal_status}` : "No appeal opened"}</small>
                 <button type="button" onClick={() => downloadAiAppealForm(task.id)} disabled={busy}>
                   Download appeal form
                 </button>
