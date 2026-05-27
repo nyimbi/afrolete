@@ -99,6 +99,7 @@ from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
 from app.services.communications import create_message
 from app.services.safeguarding import create_safeguarding_incident
+from app.services.secrets import read_openbao_kv_secret
 from app.services.storage.objects import get_object, put_object
 
 
@@ -1221,7 +1222,7 @@ async def submit_supplier_order(
                 response = await client.post(
                     selected_settings.supplier_order_webhook_url,
                     json=supplier_order_payload(order, submitted_at),
-                    headers=supplier_order_headers(selected_settings),
+                    headers=await supplier_order_headers(selected_settings),
                 )
             result["provider_status_code"] = response.status_code
             result["delivered"] = 200 <= response.status_code < 300
@@ -1276,7 +1277,7 @@ async def sync_supplier_invoice(
                 response = await client.post(
                     selected_settings.supplier_invoice_webhook_url,
                     json=supplier_invoice_sync_payload(order, synced_at),
-                    headers=supplier_invoice_headers(selected_settings),
+                    headers=await supplier_invoice_headers(selected_settings),
                 )
             result["provider_status_code"] = response.status_code
             result["synced"] = 200 <= response.status_code < 300
@@ -2042,18 +2043,58 @@ def supplier_invoice_sync_payload(order: SupplierOrder, synced_at: datetime) -> 
     }
 
 
-def supplier_order_headers(settings: Settings) -> dict[str, str]:
+async def supplier_order_headers(settings: Settings) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    if settings.supplier_order_webhook_key:
-        headers["X-Afrolete-Supplier-Key"] = settings.supplier_order_webhook_key
+    key = await resolve_supplier_secret(
+        settings,
+        env_value=settings.supplier_order_webhook_key,
+        path=settings.supplier_order_webhook_key_secret_path,
+        field_name=settings.supplier_order_webhook_key_secret_field,
+        label="supplier order webhook key",
+    )
+    if key:
+        headers["X-Afrolete-Supplier-Key"] = key
     return headers
 
 
-def supplier_invoice_headers(settings: Settings) -> dict[str, str]:
+async def supplier_invoice_headers(settings: Settings) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    if settings.supplier_invoice_webhook_key:
-        headers["X-Afrolete-Supplier-Invoice-Key"] = settings.supplier_invoice_webhook_key
+    key = await resolve_supplier_secret(
+        settings,
+        env_value=settings.supplier_invoice_webhook_key,
+        path=settings.supplier_invoice_webhook_key_secret_path,
+        field_name=settings.supplier_invoice_webhook_key_secret_field,
+        label="supplier invoice webhook key",
+    )
+    if key:
+        headers["X-Afrolete-Supplier-Invoice-Key"] = key
     return headers
+
+
+async def resolve_supplier_secret(
+    settings: Settings,
+    *,
+    env_value: str,
+    path: str,
+    field_name: str,
+    label: str,
+) -> str:
+    if env_value:
+        return env_value
+    if not path:
+        return ""
+    if not settings.openbao_addr or not settings.openbao_token:
+        raise HTTPException(
+            status_code=500,
+            detail=f"{label} is configured for OpenBao but OpenBao address/token is missing",
+        )
+    try:
+        secret = await read_openbao_kv_secret(settings, path, field_name)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"OpenBao {label} fetch failed: {exc}") from exc
+    if not secret:
+        raise HTTPException(status_code=500, detail=f"OpenBao {label} secret field is empty")
+    return secret
 
 
 def supplier_order_submission_notes(notes: str | None, result: dict) -> str:

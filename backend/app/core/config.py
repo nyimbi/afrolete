@@ -115,10 +115,14 @@ class Settings(BaseSettings):
     supplier_order_submission_mode: Literal["record_only", "webhook"] = "record_only"
     supplier_order_webhook_url: str = ""
     supplier_order_webhook_key: str = ""
+    supplier_order_webhook_key_secret_path: str = ""
+    supplier_order_webhook_key_secret_field: str = "value"
     supplier_order_submission_timeout_seconds: float = 5.0
     supplier_invoice_sync_mode: Literal["record_only", "webhook"] = "record_only"
     supplier_invoice_webhook_url: str = ""
     supplier_invoice_webhook_key: str = ""
+    supplier_invoice_webhook_key_secret_path: str = ""
+    supplier_invoice_webhook_key_secret_field: str = "value"
     supplier_invoice_sync_timeout_seconds: float = 5.0
 
     @field_validator("database_url", mode="before")
