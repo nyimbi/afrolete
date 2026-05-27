@@ -1218,6 +1218,47 @@ export type CompetitionFixtureRead = {
   notes: string | null;
 };
 
+export type CompetitionFixtureGenerationRead = {
+  competition_id: UUID;
+  created: number;
+  existing: number;
+  rounds: number;
+  fixtures: CompetitionFixtureRead[];
+};
+
+export type CompetitionBracketMatchRead = {
+  round_label: string;
+  stage_label: string;
+  slot: number;
+  home_team_name: string | null;
+  away_team_name: string | null;
+  fixture_id: UUID | null;
+  status: FixtureStatus | null;
+  winner_team_name: string | null;
+};
+
+export type CompetitionBracketRoundRead = {
+  round_label: string;
+  stage_label: string;
+  matches: CompetitionBracketMatchRead[];
+};
+
+export type CompetitionBracketRead = {
+  competition_id: UUID;
+  format: CompetitionFormat;
+  rounds: CompetitionBracketRoundRead[];
+};
+
+export type CompetitionConflictRead = {
+  competition_id: UUID;
+  fixture_id: UUID | null;
+  conflict_key: string;
+  severity: string;
+  title: string;
+  description: string;
+  recommendation: string;
+};
+
 export type FixtureOfficialAssignmentRead = {
   id: UUID;
   fixture_id: UUID;

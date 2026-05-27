@@ -6,7 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.competition import (
     CompetitionCreate,
+    CompetitionBracketRead,
+    CompetitionConflictRead,
     CompetitionFixtureCreate,
+    CompetitionFixtureGenerationRead,
+    CompetitionFixtureGenerateCreate,
     CompetitionFixtureRead,
     CompetitionParticipantCreate,
     CompetitionParticipantRead,
@@ -23,10 +27,13 @@ from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.competitions import (
     add_competition_participant,
+    competition_bracket,
+    competition_conflicts,
     assign_fixture_official,
     competition_standings,
     create_competition,
     create_competition_fixture,
+    generate_competition_fixtures,
     list_competition_fixtures,
     list_competition_participants,
     list_competitions,
@@ -184,12 +191,55 @@ async def create_competition_fixture_route(
     return to_fixture_read(next(row for row in rows if row[0].id == fixture.id))
 
 
+@router.post(
+    "/{competition_id}/fixtures/generate",
+    response_model=CompetitionFixtureGenerationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_competition_fixtures_route(
+    competition_id: UUID,
+    payload: CompetitionFixtureGenerateCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CompetitionFixtureGenerationRead:
+    result = await generate_competition_fixtures(db, identity, competition_id, payload, authz)
+    created_ids = {fixture.id for fixture in result["fixtures"]}
+    rows = await list_competition_fixtures(db, competition_id)
+    return CompetitionFixtureGenerationRead(
+        competition_id=result["competition_id"],
+        created=result["created"],
+        existing=result["existing"],
+        rounds=result["rounds"],
+        fixtures=[to_fixture_read(row) for row in rows if row[0].id in created_ids],
+    )
+
+
 @router.get("/{competition_id}/fixtures", response_model=list[CompetitionFixtureRead])
 async def list_competition_fixtures_route(
     competition_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> list[CompetitionFixtureRead]:
     return [to_fixture_read(row) for row in await list_competition_fixtures(db, competition_id)]
+
+
+@router.get("/{competition_id}/bracket", response_model=CompetitionBracketRead)
+async def competition_bracket_route(
+    competition_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> CompetitionBracketRead:
+    return CompetitionBracketRead(**await competition_bracket(db, competition_id))
+
+
+@router.get("/{competition_id}/conflicts", response_model=list[CompetitionConflictRead])
+async def competition_conflicts_route(
+    competition_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[CompetitionConflictRead]:
+    return [
+        CompetitionConflictRead(**row)
+        for row in await competition_conflicts(db, competition_id)
+    ]
 
 
 @router.patch("/fixtures/{fixture_id}/result", response_model=CompetitionFixtureRead)

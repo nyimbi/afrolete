@@ -45,7 +45,10 @@ import type {
   CommunicationScopeType,
   CommunicationTemplateRead,
   CommercialRefundRead,
+  CompetitionBracketRead,
+  CompetitionConflictRead,
   CompetitionFixtureRead,
+  CompetitionFixtureGenerationRead,
   CompetitionFormat,
   CompetitionParticipantRead,
   CompetitionRead,
@@ -170,6 +173,9 @@ export default function HomePage() {
   const [competitionParticipants, setCompetitionParticipants] = useState<CompetitionParticipantRead[]>([]);
   const [competitionFixtures, setCompetitionFixtures] = useState<CompetitionFixtureRead[]>([]);
   const [competitionStandings, setCompetitionStandings] = useState<CompetitionStandingRead[]>([]);
+  const [fixtureGeneration, setFixtureGeneration] = useState<CompetitionFixtureGenerationRead | null>(null);
+  const [competitionBracket, setCompetitionBracket] = useState<CompetitionBracketRead | null>(null);
+  const [competitionConflicts, setCompetitionConflicts] = useState<CompetitionConflictRead[]>([]);
   const [matchEvents, setMatchEvents] = useState<FixtureMatchEventRead[]>([]);
   const [officialAssignments, setOfficialAssignments] = useState<FixtureOfficialAssignmentRead[]>([]);
   const [communicationTemplates, setCommunicationTemplates] = useState<CommunicationTemplateRead[]>([]);
@@ -767,14 +773,18 @@ export default function HomePage() {
   }, []);
 
   const loadCompetitionWorkspace = useCallback(async (competitionId: string) => {
-    const [participants, fixtures, standings] = await Promise.all([
+    const [participants, fixtures, standings, bracket, conflicts] = await Promise.all([
       apiRequest<CompetitionParticipantRead[]>(`/competitions/${competitionId}/participants`),
       apiRequest<CompetitionFixtureRead[]>(`/competitions/${competitionId}/fixtures`),
-      apiRequest<CompetitionStandingRead[]>(`/competitions/${competitionId}/standings`)
+      apiRequest<CompetitionStandingRead[]>(`/competitions/${competitionId}/standings`),
+      apiRequest<CompetitionBracketRead>(`/competitions/${competitionId}/bracket`),
+      apiRequest<CompetitionConflictRead[]>(`/competitions/${competitionId}/conflicts`)
     ]);
     setCompetitionParticipants(participants);
     setCompetitionFixtures(fixtures);
     setCompetitionStandings(standings);
+    setCompetitionBracket(bracket);
+    setCompetitionConflicts(conflicts);
     setSelectedFixtureId((current) =>
       fixtures.some((fixture) => fixture.id === current) ? current : fixtures[0]?.id ?? ""
     );
@@ -1052,6 +1062,9 @@ export default function HomePage() {
       setCompetitionParticipants([]);
       setCompetitionFixtures([]);
       setCompetitionStandings([]);
+      setFixtureGeneration(null);
+      setCompetitionBracket(null);
+      setCompetitionConflicts([]);
       setMatchEvents([]);
       setOfficialAssignments([]);
       setCommunicationTemplates([]);
@@ -1219,6 +1232,9 @@ export default function HomePage() {
       setCompetitionParticipants([]);
       setCompetitionFixtures([]);
       setCompetitionStandings([]);
+      setFixtureGeneration(null);
+      setCompetitionBracket(null);
+      setCompetitionConflicts([]);
       setMatchEvents([]);
       setOfficialAssignments([]);
       return;
@@ -1934,6 +1950,49 @@ export default function HomePage() {
         setSelectedFixtureId(fixture.id);
         addLog(`${fixture.home_team_name} vs ${fixture.away_team_name} scheduled`, "good");
       }
+    );
+  };
+
+  const generateCompetitionFixtures = () => {
+    if (!selectedCompetitionId || competitionParticipants.length < 2) {
+      addLog("Register at least two teams first", "bad");
+      return;
+    }
+    runAction(
+      "generate-competition-fixtures",
+      () =>
+        apiRequest<CompetitionFixtureGenerationRead>(
+          `/competitions/${selectedCompetitionId}/fixtures/generate`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              starts_at: new Date(fixtureForm.scheduled_at).toISOString(),
+              interval_days: 7,
+              match_spacing_minutes: 120,
+              venue_name: fixtureForm.venue_name,
+              stage_label: fixtureForm.stage_label || "Regular season",
+              double_round_robin: selectedCompetition?.format === "round_robin"
+            }
+          }
+        ),
+      (generation) => {
+        setFixtureGeneration(generation);
+        addLog(`${generation.created} fixtures generated across ${generation.rounds} rounds`, "good");
+        void loadCompetitionWorkspace(selectedCompetitionId);
+      }
+    );
+  };
+
+  const reviewCompetitionConflicts = () => {
+    if (!selectedCompetitionId) {
+      addLog("Select a competition first", "bad");
+      return;
+    }
+    runAction(
+      "review-competition-conflicts",
+      () => loadCompetitionWorkspace(selectedCompetitionId),
+      () => addLog("Competition conflicts refreshed", "good")
     );
   };
 
@@ -4872,6 +4931,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createCompetitionFixture} disabled={busyAction !== null}>Fixture</button>
+                <button type="button" onClick={generateCompetitionFixtures} disabled={busyAction !== null}>Auto fixtures</button>
                 <button type="button" onClick={recordFixtureResult} disabled={busyAction !== null}>Result</button>
               </div>
             </div>
@@ -4907,6 +4967,14 @@ export default function HomePage() {
               </label>
             </div>
             <div className="selection-list compact">
+              {fixtureGeneration ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{fixtureGeneration.created} generated · {fixtureGeneration.rounds} rounds</strong>
+                    <span>{fixtureGeneration.existing} existing fixtures skipped by the planner.</span>
+                  </div>
+                </article>
+              ) : null}
               {competitionFixtures.map((fixture) => (
                 <button
                   type="button"
@@ -5015,6 +5083,9 @@ export default function HomePage() {
                 <p className="section-label">Competition readiness</p>
                 <h2>Operational checks</h2>
               </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={reviewCompetitionConflicts} disabled={busyAction !== null}>Conflicts</button>
+              </div>
             </div>
             <div className="consent-grid">
               <div>
@@ -5033,8 +5104,28 @@ export default function HomePage() {
                 <span className="muted">Officials</span>
                 <strong>{officialAssignments.length}</strong>
               </div>
+              <div>
+                <span className="muted">Conflicts</span>
+                <strong>{competitionConflicts.length}</strong>
+              </div>
             </div>
             <div className="task-list">
+              {competitionBracket?.rounds.slice(0, 2).map((round) => (
+                <article key={`${round.stage_label}-${round.round_label}`} className="task-card">
+                  <div>
+                    <strong>{round.stage_label} · {round.round_label}</strong>
+                    <span>{round.matches.map((match) => `${match.home_team_name ?? "TBD"} vs ${match.away_team_name ?? "BYE"}`).join(" · ")}</span>
+                  </div>
+                </article>
+              ))}
+              {competitionConflicts.slice(0, 3).map((conflict) => (
+                <article key={`${conflict.conflict_key}-${conflict.fixture_id ?? "competition"}`} className="task-card">
+                  <div>
+                    <strong>{conflict.severity} · {conflict.title}</strong>
+                    <span>{conflict.description} · {conflict.recommendation}</span>
+                  </div>
+                </article>
+              ))}
               <article className="task-card">
                 <div>
                   <strong>Fixture integrity</strong>

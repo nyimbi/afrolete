@@ -87,6 +87,15 @@ class CompetitionFixtureCreate(BaseModel):
         return self
 
 
+class CompetitionFixtureGenerateCreate(BaseModel):
+    starts_at: datetime
+    interval_days: int = Field(default=7, ge=1, le=30)
+    match_spacing_minutes: int = Field(default=120, ge=30, le=720)
+    venue_name: str | None = Field(default=None, max_length=200)
+    stage_label: str = Field(default="Regular season", max_length=80)
+    double_round_robin: bool = False
+
+
 class CompetitionFixtureRead(BaseModel):
     id: UUID
     organization_id: UUID
@@ -105,6 +114,14 @@ class CompetitionFixtureRead(BaseModel):
     away_score: int | None
     result_confirmed_at: datetime | None
     notes: str | None
+
+
+class CompetitionFixtureGenerationRead(BaseModel):
+    competition_id: UUID
+    created: int
+    existing: int
+    rounds: int
+    fixtures: list[CompetitionFixtureRead]
 
 
 class FixtureResultUpdate(BaseModel):
@@ -162,3 +179,36 @@ class CompetitionStandingRead(BaseModel):
     goals_against: int
     goal_difference: int
     points: int
+
+
+class CompetitionBracketMatchRead(BaseModel):
+    round_label: str
+    stage_label: str
+    slot: int
+    home_team_name: str | None
+    away_team_name: str | None
+    fixture_id: UUID | None
+    status: FixtureStatus | None
+    winner_team_name: str | None
+
+
+class CompetitionBracketRoundRead(BaseModel):
+    round_label: str
+    stage_label: str
+    matches: list[CompetitionBracketMatchRead]
+
+
+class CompetitionBracketRead(BaseModel):
+    competition_id: UUID
+    format: CompetitionFormat
+    rounds: list[CompetitionBracketRoundRead]
+
+
+class CompetitionConflictRead(BaseModel):
+    competition_id: UUID
+    fixture_id: UUID | None
+    conflict_key: str
+    severity: str
+    title: str
+    description: str
+    recommendation: str

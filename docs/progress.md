@@ -460,6 +460,22 @@ athlete-development platform:
   - Not tested in this fast slice: full backend test suite, frontend production
     build, Playwright screenshots, real Stripe/webhook signature validation,
     external dunning delivery, and jurisdiction-specific filing integrations.
+- Implemented slice 026 competition automation:
+  - Added deterministic round-robin fixture generation from registered
+    competition participants, with configurable start time, interval, match
+    spacing, venue, stage label, and double round-robin support.
+  - Added bracket projections from existing fixtures or seeded participants,
+    including round/stage grouping, slots, fixture links, status, and winner
+    names where results exist.
+  - Added schedule conflict detection for duplicate matchups, missing
+    officials, team rest-window conflicts, and venue overlaps with severity and
+    recommended actions.
+  - Extended the operations console with Auto fixtures and Conflicts controls,
+    generated-fixture summary cards, bracket cards, and conflict cards.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, frontend production
+    build, Playwright screenshots, and complex tournament bracket advancement.
 
 ## Implementation Slices
 
@@ -491,6 +507,7 @@ athlete-development platform:
 | 023 - Commercial finance controls | Partial | Backend tests 46/46; frontend typecheck/build | Tax quote estimates, settlement summaries, ticket refunds, invoice refunds, accounting export rows, sponsorship dashboard metrics, and console controls are implemented; live payment provider webhooks, tax authority filing, accounting API sync, and sponsor-facing dashboards remain. |
 | 024 - Reporting output intelligence | Partial | Backend ruff; frontend typecheck; diff check | Report artifact rendering metadata, verification scoring, chart-ready summaries, benchmark models, deterministic AI review insights, and console controls are implemented; real binary PDF/Excel generation, report file storage, visual chart rendering, and full verification remain. |
 | 025 - SaaS billing operations | Partial | Backend ruff; frontend typecheck; diff check | SaaS tax quotes, plan-change proration quotes, dunning notice preparation, payment webhook intake, invoice status mutation, and console controls are implemented; webhook signature validation, external dunning delivery, tax filing integrations, and full verification remain. |
+| 026 - Competition automation | Partial | Backend ruff; frontend typecheck; diff check | Round-robin fixture generation, bracket projections, conflict detection, and console controls are implemented; advanced tournament advancement, bracket visualization polish, optimization algorithms, and full verification remain. |
 
 ## Capability Coverage
 
@@ -510,7 +527,7 @@ Status values:
 | Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, and console workflows are implemented. |
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, and console workflows are implemented; live provider workers, model credential vaulting, run history tables, and model governance remain. |
 | Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, and console workflows are implemented; automatic AI generation/readiness/feedback loops remain. |
-| Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, and console workflows are implemented; automated fixture generation, bracket visualization, advanced conflict resolution, ticketing, and broadcast operations remain. |
+| Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, round-robin fixture generation, bracket projections, conflict detection, and console workflows are implemented; advanced tournament advancement, bracket visualization polish, optimization algorithms, ticketing, and broadcast operations remain. |
 | Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, digest generation, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, background digest scheduler, and full parent portal remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, scan lookup, photo metadata, procurement recommendations, supplier scorecards, lease quotes, utilization recommendations, and console workflows are implemented; supplier ordering workflows, real file uploads, RFID hardware integration, and accounting lease billing remain. |
@@ -538,8 +555,9 @@ Status values:
 7. Add payment webhook signature validation, external dunning delivery,
    jurisdiction-specific tax filing integrations, plan-change application
    workflows, and full billing verification coverage.
-8. Add automated fixture generation, bracket visualization, and scheduling
-   conflict checks for leagues and tournaments.
+8. Add advanced tournament advancement, bracket visualization polish,
+   scheduling optimization algorithms, ticketing, and broadcast operations for
+   leagues and tournaments.
 9. Add automated training-plan generation from performance trends, readiness,
    upcoming competitions, and availability constraints.
 10. Add automated ingestion pipelines for video, audio narration, text
