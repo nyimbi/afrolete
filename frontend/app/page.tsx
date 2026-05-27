@@ -16,6 +16,7 @@ import type {
   AgentRead,
   AgentTaskRead,
   AgentTaskStatus,
+  AccountingExportRead,
   AssetCondition,
   AssetSummaryRead,
   AssetUtilizationRecommendationRead,
@@ -39,6 +40,7 @@ import type {
   CommunicationMessageType,
   CommunicationScopeType,
   CommunicationTemplateRead,
+  CommercialRefundRead,
   CompetitionFixtureRead,
   CompetitionFormat,
   CompetitionParticipantRead,
@@ -78,6 +80,7 @@ import type {
   OrganizationRead,
   OrganizationType,
   ParticipationClearanceRead,
+  PaymentSettlementRead,
   PerformanceObservationRead,
   NotificationFrequency,
   NotificationPreferenceRead,
@@ -94,9 +97,11 @@ import type {
   ScheduledReportRead,
   SponsorRead,
   SponsorshipAgreementRead,
+  SponsorshipDashboardRead,
   SupplierScoreRead,
   SportFormat,
   SubscriptionRead,
+  TaxQuoteRead,
   TeamRead,
   TeamRosterEntryRead,
   TeamRole,
@@ -186,6 +191,11 @@ export default function HomePage() {
   const [invoices, setInvoices] = useState<FinanceInvoiceRead[]>([]);
   const [payments, setPayments] = useState<FinancePaymentRead[]>([]);
   const [commercialSummary, setCommercialSummary] = useState<CommercialSummaryRead | null>(null);
+  const [taxQuote, setTaxQuote] = useState<TaxQuoteRead | null>(null);
+  const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlementRead | null>(null);
+  const [accountingExport, setAccountingExport] = useState<AccountingExportRead | null>(null);
+  const [commercialRefund, setCommercialRefund] = useState<CommercialRefundRead | null>(null);
+  const [sponsorshipDashboard, setSponsorshipDashboard] = useState<SponsorshipDashboardRead[]>([]);
   const [reportDefinitions, setReportDefinitions] = useState<ReportDefinitionRead[]>([]);
   const [generatedReports, setGeneratedReports] = useState<GeneratedReportRead[]>([]);
   const [scheduledReports, setScheduledReports] = useState<ScheduledReportRead[]>([]);
@@ -843,7 +853,8 @@ export default function HomePage() {
       ticketProductData,
       ticketData,
       invoiceData,
-      summaryData
+      summaryData,
+      dashboardData
     ] = await Promise.all([
       apiRequest<SponsorRead[]>(`/commercial/sponsors?organization_id=${organizationId}`),
       apiRequest<SponsorshipAgreementRead[]>(`/commercial/sponsorships?organization_id=${organizationId}`),
@@ -851,7 +862,10 @@ export default function HomePage() {
       apiRequest<TicketProductRead[]>(`/commercial/tickets/products?organization_id=${organizationId}`),
       apiRequest<TicketRead[]>(`/commercial/tickets?organization_id=${organizationId}`),
       apiRequest<FinanceInvoiceRead[]>(`/commercial/invoices?organization_id=${organizationId}`),
-      apiRequest<CommercialSummaryRead>(`/commercial/summary?organization_id=${organizationId}`)
+      apiRequest<CommercialSummaryRead>(`/commercial/summary?organization_id=${organizationId}`),
+      apiRequest<SponsorshipDashboardRead[]>(
+        `/commercial/sponsorship-dashboard?organization_id=${organizationId}`
+      )
     ]);
     setSponsors(sponsorData);
     setSponsorships(sponsorshipData);
@@ -860,6 +874,7 @@ export default function HomePage() {
     setTickets(ticketData);
     setInvoices(invoiceData);
     setCommercialSummary(summaryData);
+    setSponsorshipDashboard(dashboardData);
     setSelectedSponsorId((current) =>
       sponsorData.some((sponsor) => sponsor.id === current) ? current : sponsorData[0]?.id ?? ""
     );
@@ -1043,6 +1058,11 @@ export default function HomePage() {
       setInvoices([]);
       setPayments([]);
       setCommercialSummary(null);
+      setTaxQuote(null);
+      setPaymentSettlement(null);
+      setAccountingExport(null);
+      setCommercialRefund(null);
+      setSponsorshipDashboard([]);
       setReportDefinitions([]);
       setGeneratedReports([]);
       setScheduledReports([]);
@@ -2708,6 +2728,109 @@ export default function HomePage() {
     );
   };
 
+  const quoteCommercialTax = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "commercial-tax-quote",
+      () =>
+        apiRequest<TaxQuoteRead>(
+          `/commercial/tax-quote?organization_id=${selectedOrganizationId}&subtotal=${invoiceForm.amount_due}&tax_rate=16&jurisdiction=local`
+        ),
+      (quote) => {
+        setTaxQuote(quote);
+        addLog(`Tax quote total ${quote.total}`, "good");
+      }
+    );
+  };
+
+  const settleCommercialPayments = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "commercial-settlement",
+      () =>
+        apiRequest<PaymentSettlementRead>(
+          `/commercial/settlements?organization_id=${selectedOrganizationId}&provider=manual_gateway&fee_rate=2.9&fixed_fee=0.3`
+        ),
+      (settlement) => {
+        setPaymentSettlement(settlement);
+        addLog(`Settlement ${settlement.payout_reference}: ${settlement.net_amount} net`, "good");
+      }
+    );
+  };
+
+  const exportCommercialAccounting = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "commercial-accounting-export",
+      () =>
+        apiRequest<AccountingExportRead>(
+          `/commercial/accounting-export?organization_id=${selectedOrganizationId}&system=generic&basis=cash`
+        ),
+      (exportData) => {
+        setAccountingExport(exportData);
+        addLog(`${exportData.rows.length} accounting rows prepared`, "good");
+      }
+    );
+  };
+
+  const refundSelectedTicket = () => {
+    if (!selectedOrganizationId || !selectedTicketId) {
+      addLog("Select a ticket first", "bad");
+      return;
+    }
+    runAction(
+      "commercial-ticket-refund",
+      () =>
+        apiRequest<CommercialRefundRead>(`/commercial/tickets/${selectedTicketId}/refund`, {
+          method: "POST",
+          identity,
+          body: {
+            reason: "Console refund after buyer request.",
+            external_reference: `REF-${Date.now()}`
+          }
+        }),
+      (refund) => {
+        setCommercialRefund(refund);
+        addLog(`Ticket refund processed: ${refund.amount}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const refundSelectedInvoice = () => {
+    if (!selectedOrganizationId || !selectedInvoiceId) {
+      addLog("Select an invoice first", "bad");
+      return;
+    }
+    runAction(
+      "commercial-invoice-refund",
+      () =>
+        apiRequest<CommercialRefundRead>(`/commercial/invoices/${selectedInvoiceId}/refund`, {
+          method: "POST",
+          identity,
+          body: {
+            amount: String(Math.min(invoiceForm.payment_amount, invoiceForm.amount_due)),
+            reason: "Console credit note adjustment.",
+            external_reference: `CREDIT-${Date.now()}`
+          }
+        }),
+      (refund) => {
+        setCommercialRefund(refund);
+        addLog(`Invoice refund processed: ${refund.amount}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const createReportDefinitionAndRun = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -3880,6 +4003,14 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {sponsorshipDashboard.slice(0, 3).map((dashboard) => (
+                <article key={dashboard.sponsor_id} className="task-card">
+                  <div>
+                    <strong>{dashboard.sponsor_name}</strong>
+                    <span>ROI {dashboard.roi_score} · {dashboard.recommendation}</span>
+                  </div>
+                </article>
+              ))}
               {sponsorships.slice(0, 3).map((agreement) => (
                 <article key={agreement.id} className="task-card">
                   <div>
@@ -3913,7 +4044,12 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createTicketSale} disabled={busyAction !== null}>Ticket</button>
                 <button type="button" onClick={checkInSelectedTicket} disabled={busyAction !== null}>Scan</button>
+                <button type="button" onClick={refundSelectedTicket} disabled={busyAction !== null}>Refund ticket</button>
                 <button type="button" onClick={createInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
+                <button type="button" onClick={refundSelectedInvoice} disabled={busyAction !== null}>Refund invoice</button>
+                <button type="button" onClick={quoteCommercialTax} disabled={busyAction !== null}>Tax</button>
+                <button type="button" onClick={settleCommercialPayments} disabled={busyAction !== null}>Settle</button>
+                <button type="button" onClick={exportCommercialAccounting} disabled={busyAction !== null}>Export</button>
               </div>
             </div>
             <div className="consent-grid">
@@ -3973,6 +4109,38 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {taxQuote ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Tax {taxQuote.jurisdiction}: {taxQuote.tax_amount}</strong>
+                    <span>{taxQuote.subtotal} subtotal · {taxQuote.total} total</span>
+                  </div>
+                </article>
+              ) : null}
+              {paymentSettlement ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{paymentSettlement.payout_reference}</strong>
+                    <span>{paymentSettlement.gross_amount} gross · {paymentSettlement.net_amount} net</span>
+                  </div>
+                </article>
+              ) : null}
+              {accountingExport ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{accountingExport.system} export</strong>
+                    <span>{accountingExport.rows.length} rows · debit {accountingExport.debit_total} · credit {accountingExport.credit_total}</span>
+                  </div>
+                </article>
+              ) : null}
+              {commercialRefund ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{commercialRefund.target_type} refund</strong>
+                    <span>{commercialRefund.amount} · {commercialRefund.status} · {commercialRefund.reason}</span>
+                  </div>
+                </article>
+              ) : null}
               {tickets.slice(0, 3).map((ticket) => (
                 <button
                   type="button"

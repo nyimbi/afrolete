@@ -1,11 +1,15 @@
 from uuid import UUID
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.commercial import (
+    AccountingExportRead,
     CommercialSummaryRead,
+    CommercialRefundCreate,
+    CommercialRefundRead,
     DonationCreate,
     DonationRead,
     FinanceInvoiceCreate,
@@ -14,10 +18,13 @@ from app.schemas.commercial import (
     FinancePaymentRead,
     FundraisingCampaignCreate,
     FundraisingCampaignRead,
+    PaymentSettlementRead,
     SponsorCreate,
     SponsorRead,
+    SponsorshipDashboardRead,
     SponsorshipAgreementCreate,
     SponsorshipAgreementRead,
+    TaxQuoteRead,
     TicketCheckIn,
     TicketOrderCreate,
     TicketOrderRead,
@@ -29,6 +36,7 @@ from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.commercial import (
+    accounting_export,
     check_in_ticket,
     commercial_summary,
     create_campaign,
@@ -43,8 +51,13 @@ from app.services.commercial import (
     list_sponsorships,
     list_ticket_products,
     list_tickets,
+    payment_settlement,
     record_donation,
     record_payment,
+    refund_invoice,
+    refund_ticket,
+    sponsorship_dashboard,
+    tax_quote,
 )
 
 router = APIRouter(prefix="/commercial", tags=["commercial"])
@@ -220,6 +233,17 @@ async def check_in_ticket_route(
     return ticket_read(await check_in_ticket(db, identity, ticket_id, payload, authz))
 
 
+@router.post("/tickets/{ticket_id}/refund", response_model=CommercialRefundRead)
+async def refund_ticket_route(
+    ticket_id: UUID,
+    payload: CommercialRefundCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommercialRefundRead:
+    return await refund_ticket(db, identity, ticket_id, payload, authz)
+
+
 @router.post("/invoices", response_model=FinanceInvoiceRead, status_code=status.HTTP_201_CREATED)
 async def create_invoice_route(
     payload: FinanceInvoiceCreate,
@@ -238,6 +262,17 @@ async def list_invoices_route(
     return [invoice_read(invoice) for invoice in await list_invoices(db, organization_id)]
 
 
+@router.post("/invoices/{invoice_id}/refund", response_model=CommercialRefundRead)
+async def refund_invoice_route(
+    invoice_id: UUID,
+    payload: CommercialRefundCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommercialRefundRead:
+    return await refund_invoice(db, identity, invoice_id, payload, authz)
+
+
 @router.post("/payments", response_model=FinancePaymentRead, status_code=status.HTTP_201_CREATED)
 async def record_payment_route(
     payload: FinancePaymentCreate,
@@ -246,6 +281,47 @@ async def record_payment_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> FinancePaymentRead:
     return payment_read(await record_payment(db, identity, payload, authz))
+
+
+@router.get("/tax-quote", response_model=TaxQuoteRead)
+async def tax_quote_route(
+    organization_id: UUID = Query(),
+    subtotal: Decimal = Query(ge=0),
+    tax_rate: Decimal = Query(default=Decimal("0"), ge=0, le=100),
+    jurisdiction: str = Query(default="local"),
+    reverse_charge: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+) -> TaxQuoteRead:
+    return await tax_quote(db, organization_id, subtotal, tax_rate, jurisdiction, reverse_charge)
+
+
+@router.get("/settlements", response_model=PaymentSettlementRead)
+async def payment_settlement_route(
+    organization_id: UUID = Query(),
+    provider: str = Query(default="manual"),
+    fee_rate: Decimal = Query(default=Decimal("2.90"), ge=0, le=100),
+    fixed_fee: Decimal = Query(default=Decimal("0.30"), ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> PaymentSettlementRead:
+    return await payment_settlement(db, organization_id, provider, fee_rate, fixed_fee)
+
+
+@router.get("/accounting-export", response_model=AccountingExportRead)
+async def accounting_export_route(
+    organization_id: UUID = Query(),
+    system: str = Query(default="generic"),
+    basis: str = Query(default="cash"),
+    db: AsyncSession = Depends(get_db),
+) -> AccountingExportRead:
+    return await accounting_export(db, organization_id, system, basis)
+
+
+@router.get("/sponsorship-dashboard", response_model=list[SponsorshipDashboardRead])
+async def sponsorship_dashboard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[SponsorshipDashboardRead]:
+    return await sponsorship_dashboard(db, organization_id)
 
 
 @router.get("/summary", response_model=CommercialSummaryRead)

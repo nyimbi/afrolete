@@ -597,6 +597,75 @@ export type FinancePaymentRead = {
   notes: string | null;
 };
 
+export type CommercialRefundRead = {
+  refund_id: string;
+  organization_id: UUID;
+  target_type: string;
+  target_id: UUID;
+  amount: string;
+  currency: string;
+  reason: string;
+  status: string;
+  external_reference: string | null;
+};
+
+export type TaxQuoteRead = {
+  organization_id: UUID;
+  jurisdiction: string;
+  subtotal: string;
+  tax_rate: string;
+  tax_amount: string;
+  total: string;
+  reverse_charge: boolean;
+  rationale: string;
+};
+
+export type PaymentSettlementRead = {
+  organization_id: UUID;
+  provider: string;
+  currency: string;
+  gross_ticket_revenue: string;
+  gross_invoice_payments: string;
+  gross_donations: string;
+  gross_amount: string;
+  fee_amount: string;
+  net_amount: string;
+  payout_reference: string;
+  line_count: number;
+};
+
+export type AccountingExportRow = {
+  row_type: string;
+  source_id: UUID;
+  account_code: string;
+  memo: string;
+  debit: string;
+  credit: string;
+  currency: string;
+  external_reference: string | null;
+};
+
+export type AccountingExportRead = {
+  organization_id: UUID;
+  basis: string;
+  system: string;
+  rows: AccountingExportRow[];
+  debit_total: string;
+  credit_total: string;
+};
+
+export type SponsorshipDashboardRead = {
+  sponsor_id: UUID;
+  sponsor_name: string;
+  agreement_count: number;
+  contracted_value: string;
+  active_value: string;
+  deliverable_count: number;
+  activation_count: number;
+  roi_score: number;
+  recommendation: string;
+};
+
 export type CommercialSummaryRead = {
   organization_id: UUID;
   sponsorship_value: string;

@@ -22,13 +22,20 @@ from app.models.event import Event
 from app.models.organization import Organization
 from app.models.team import Team
 from app.schemas.commercial import (
+    AccountingExportRead,
+    AccountingExportRow,
     CommercialSummaryRead,
+    CommercialRefundCreate,
+    CommercialRefundRead,
     DonationCreate,
     FinanceInvoiceCreate,
     FinancePaymentCreate,
     FundraisingCampaignCreate,
+    PaymentSettlementRead,
     SponsorCreate,
+    SponsorshipDashboardRead,
     SponsorshipAgreementCreate,
+    TaxQuoteRead,
     TicketCheckIn,
     TicketOrderCreate,
     TicketProductCreate,
@@ -185,6 +192,44 @@ async def check_in_ticket(db: AsyncSession, identity: CurrentIdentity, ticket_id
     return ticket
 
 
+async def refund_ticket(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    ticket_id: UUID,
+    payload: CommercialRefundCreate,
+    authz: AuthorizationService,
+) -> CommercialRefundRead:
+    ticket = await db.get(Ticket, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    await ensure_manage_commercial(authz, identity, ticket.organization_id)
+    if ticket.status == TicketStatus.REFUNDED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ticket already refunded")
+    order = await db.get(TicketOrder, ticket.ticket_order_id)
+    product = await db.get(TicketProduct, ticket.ticket_product_id)
+    if order is None or product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket order not found")
+
+    refund_amount = payload.amount or product.price
+    ticket.status = TicketStatus.REFUNDED
+    product.sold_count = max(product.sold_count - 1, 0)
+    remaining_issued = await tickets_remaining_in_order(db, order.id, excluding_ticket_id=ticket.id)
+    order.status = CommercialStatus.CANCELLED if remaining_issued == 0 else CommercialStatus.PARTIAL
+    await db.commit()
+    await db.refresh(ticket)
+    return CommercialRefundRead(
+        refund_id=f"refund_{uuid4().hex}",
+        organization_id=ticket.organization_id,
+        target_type="ticket",
+        target_id=ticket.id,
+        amount=refund_amount,
+        currency=order.currency,
+        reason=payload.reason,
+        status="processed",
+        external_reference=payload.external_reference,
+    )
+
+
 async def create_invoice(db: AsyncSession, identity: CurrentIdentity, payload: FinanceInvoiceCreate, authz: AuthorizationService) -> FinanceInvoice:
     await get_organization(db, payload.organization_id)
     await ensure_manage_commercial(authz, identity, payload.organization_id)
@@ -215,6 +260,184 @@ async def record_payment(db: AsyncSession, identity: CurrentIdentity, payload: F
     return payment
 
 
+async def refund_invoice(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    invoice_id: UUID,
+    payload: CommercialRefundCreate,
+    authz: AuthorizationService,
+) -> CommercialRefundRead:
+    invoice = await get_invoice_for_organization_by_id(db, invoice_id)
+    await ensure_manage_commercial(authz, identity, invoice.organization_id)
+    refund_amount = payload.amount or invoice.amount_paid
+    if refund_amount <= 0 or refund_amount > invoice.amount_paid:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid refund amount")
+    invoice.amount_paid -= refund_amount
+    invoice.status = (
+        CommercialStatus.PAID
+        if invoice.amount_paid >= invoice.amount_due
+        else CommercialStatus.PARTIAL
+        if invoice.amount_paid > 0
+        else CommercialStatus.ACTIVE
+    )
+    await db.commit()
+    await db.refresh(invoice)
+    return CommercialRefundRead(
+        refund_id=f"refund_{uuid4().hex}",
+        organization_id=invoice.organization_id,
+        target_type="invoice",
+        target_id=invoice.id,
+        amount=refund_amount,
+        currency=invoice.currency,
+        reason=payload.reason,
+        status="processed",
+        external_reference=payload.external_reference,
+    )
+
+
+async def tax_quote(
+    db: AsyncSession,
+    organization_id: UUID,
+    subtotal: Decimal,
+    tax_rate: Decimal,
+    jurisdiction: str,
+    reverse_charge: bool = False,
+) -> TaxQuoteRead:
+    await get_organization(db, organization_id)
+    effective_rate = Decimal("0") if reverse_charge else tax_rate
+    tax_amount = (subtotal * effective_rate / Decimal("100")).quantize(Decimal("0.01"))
+    return TaxQuoteRead(
+        organization_id=organization_id,
+        jurisdiction=jurisdiction,
+        subtotal=subtotal.quantize(Decimal("0.01")),
+        tax_rate=effective_rate,
+        tax_amount=tax_amount,
+        total=(subtotal + tax_amount).quantize(Decimal("0.01")),
+        reverse_charge=reverse_charge,
+        rationale="Tax estimate for checkout, invoicing, and donation receipt review.",
+    )
+
+
+async def payment_settlement(
+    db: AsyncSession,
+    organization_id: UUID,
+    provider: str,
+    fee_rate: Decimal,
+    fixed_fee: Decimal,
+) -> PaymentSettlementRead:
+    await get_organization(db, organization_id)
+    ticket_products = await list_ticket_products(db, organization_id)
+    payments = await list_payments(db, organization_id)
+    donations = await list_donations(db, organization_id)
+    gross_ticket_revenue = sum((item.price * item.sold_count for item in ticket_products), Decimal("0"))
+    gross_invoice_payments = sum((payment.amount for payment in payments), Decimal("0"))
+    gross_donations = sum((donation.amount for donation in donations), Decimal("0"))
+    gross_amount = gross_ticket_revenue + gross_invoice_payments + gross_donations
+    line_count = len(ticket_products) + len(payments) + len(donations)
+    fee_amount = ((gross_amount * fee_rate / Decimal("100")) + (fixed_fee * line_count)).quantize(Decimal("0.01"))
+    return PaymentSettlementRead(
+        organization_id=organization_id,
+        provider=provider,
+        currency="USD",
+        gross_ticket_revenue=gross_ticket_revenue.quantize(Decimal("0.01")),
+        gross_invoice_payments=gross_invoice_payments.quantize(Decimal("0.01")),
+        gross_donations=gross_donations.quantize(Decimal("0.01")),
+        gross_amount=gross_amount.quantize(Decimal("0.01")),
+        fee_amount=fee_amount,
+        net_amount=(gross_amount - fee_amount).quantize(Decimal("0.01")),
+        payout_reference=f"SETTLE-{datetime.now(UTC).strftime('%Y%m%d')}-{str(organization_id)[:8]}",
+        line_count=line_count,
+    )
+
+
+async def accounting_export(
+    db: AsyncSession,
+    organization_id: UUID,
+    system: str,
+    basis: str,
+) -> AccountingExportRead:
+    await get_organization(db, organization_id)
+    rows: list[AccountingExportRow] = []
+    for payment in await list_payments(db, organization_id):
+        rows.append(
+            AccountingExportRow(
+                row_type="invoice_payment",
+                source_id=payment.id,
+                account_code="1000:cash",
+                memo=payment.notes or payment.method,
+                debit=payment.amount,
+                credit=Decimal("0"),
+                currency=payment.currency,
+                external_reference=payment.external_reference,
+            )
+        )
+        rows.append(
+            AccountingExportRow(
+                row_type="invoice_revenue",
+                source_id=payment.id,
+                account_code="4100:program_revenue",
+                memo=payment.notes or payment.method,
+                debit=Decimal("0"),
+                credit=payment.amount,
+                currency=payment.currency,
+                external_reference=payment.external_reference,
+            )
+        )
+    for donation in await list_donations(db, organization_id):
+        rows.append(
+            AccountingExportRow(
+                row_type="donation_revenue",
+                source_id=donation.id,
+                account_code="4200:donations",
+                memo=donation.message or donation.donor_name,
+                debit=Decimal("0"),
+                credit=donation.amount,
+                currency=donation.currency,
+                external_reference=donation.external_reference,
+            )
+        )
+    debit_total = sum((row.debit for row in rows), Decimal("0"))
+    credit_total = sum((row.credit for row in rows), Decimal("0"))
+    return AccountingExportRead(
+        organization_id=organization_id,
+        basis=basis,
+        system=system,
+        rows=rows,
+        debit_total=debit_total.quantize(Decimal("0.01")),
+        credit_total=credit_total.quantize(Decimal("0.01")),
+    )
+
+
+async def sponsorship_dashboard(db: AsyncSession, organization_id: UUID) -> list[SponsorshipDashboardRead]:
+    sponsors = await list_sponsors(db, organization_id)
+    agreements = await list_sponsorships(db, organization_id)
+    dashboards = []
+    for sponsor in sponsors:
+        sponsor_agreements = [agreement for agreement in agreements if agreement.sponsor_id == sponsor.id]
+        contracted_value = sum((agreement.value_amount for agreement in sponsor_agreements), Decimal("0"))
+        active_value = sum(
+            (agreement.value_amount for agreement in sponsor_agreements if agreement.status == CommercialStatus.ACTIVE),
+            Decimal("0"),
+        )
+        deliverable_count = sum(count_deliverables(agreement.deliverables) for agreement in sponsor_agreements)
+        activation_count = sum(1 for agreement in sponsor_agreements if agreement.activation_notes)
+        roi_score = min(100, int((active_value / contracted_value * 70) if contracted_value else 0) + min(deliverable_count * 5, 20) + min(activation_count * 10, 10))
+        dashboards.append(
+            SponsorshipDashboardRead(
+                sponsor_id=sponsor.id,
+                sponsor_name=sponsor.name,
+                agreement_count=len(sponsor_agreements),
+                contracted_value=contracted_value.quantize(Decimal("0.01")),
+                active_value=active_value.quantize(Decimal("0.01")),
+                deliverable_count=deliverable_count,
+                activation_count=activation_count,
+                roi_score=roi_score,
+                recommendation=sponsorship_recommendation(roi_score),
+            )
+        )
+    return dashboards
+
+
 async def commercial_summary(db: AsyncSession, organization_id: UUID) -> CommercialSummaryRead:
     sponsors = await list_sponsors(db, organization_id)
     sponsorships = await list_sponsorships(db, organization_id)
@@ -233,6 +456,30 @@ async def commercial_summary(db: AsyncSession, organization_id: UUID) -> Commerc
         active_campaigns=sum(1 for item in campaigns if item.status == CommercialStatus.ACTIVE),
         tickets_sold=len(tickets),
         tickets_checked_in=sum(1 for ticket in tickets if ticket.status == TicketStatus.CHECKED_IN),
+    )
+
+
+async def list_donations(db: AsyncSession, organization_id: UUID) -> list[Donation]:
+    return list(
+        (
+            await db.scalars(
+                select(Donation)
+                .where(Donation.organization_id == organization_id)
+                .order_by(Donation.created_at.desc())
+            )
+        ).all()
+    )
+
+
+async def list_payments(db: AsyncSession, organization_id: UUID) -> list[FinancePayment]:
+    return list(
+        (
+            await db.scalars(
+                select(FinancePayment)
+                .where(FinancePayment.organization_id == organization_id)
+                .order_by(FinancePayment.received_at.desc())
+            )
+        ).all()
     )
 
 
@@ -271,6 +518,13 @@ async def get_invoice_for_organization(db: AsyncSession, invoice_id: UUID, organ
     return invoice
 
 
+async def get_invoice_for_organization_by_id(db: AsyncSession, invoice_id: UUID) -> FinanceInvoice:
+    invoice = await db.get(FinanceInvoice, invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    return invoice
+
+
 async def get_team_for_organization(db: AsyncSession, team_id: UUID, organization_id: UUID) -> Team:
     team = await db.get(Team, team_id)
     if team is None or team.organization_id != organization_id:
@@ -283,3 +537,36 @@ async def get_event_for_organization(db: AsyncSession, event_id: UUID, organizat
     if event is None or event.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     return event
+
+
+async def tickets_remaining_in_order(
+    db: AsyncSession,
+    order_id: UUID,
+    excluding_ticket_id: UUID,
+) -> int:
+    tickets = list(
+        (
+            await db.scalars(
+                select(Ticket).where(
+                    Ticket.ticket_order_id == order_id,
+                    Ticket.id != excluding_ticket_id,
+                    Ticket.status != TicketStatus.REFUNDED,
+                )
+            )
+        ).all()
+    )
+    return len(tickets)
+
+
+def count_deliverables(deliverables: str | None) -> int:
+    if not deliverables:
+        return 0
+    return len([part for part in deliverables.replace("\n", ",").split(",") if part.strip()])
+
+
+def sponsorship_recommendation(roi_score: int) -> str:
+    if roi_score >= 85:
+        return "Renew and expand; activation is performing well."
+    if roi_score >= 60:
+        return "Keep active; add measurable deliverables and conversion tracking."
+    return "Needs activation plan and sponsor-facing proof of value."

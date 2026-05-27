@@ -131,6 +131,24 @@ class TicketCheckIn(BaseModel):
     gate: str | None = Field(default=None, max_length=80)
 
 
+class CommercialRefundCreate(BaseModel):
+    amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    reason: str = Field(min_length=2, max_length=500)
+    external_reference: str | None = Field(default=None, max_length=240)
+
+
+class CommercialRefundRead(BaseModel):
+    refund_id: str
+    organization_id: UUID
+    target_type: str
+    target_id: UUID
+    amount: Decimal
+    currency: str
+    reason: str
+    status: str
+    external_reference: str | None
+
+
 class FinanceInvoiceCreate(BaseModel):
     organization_id: UUID
     person_id: UUID | None = None
@@ -163,6 +181,63 @@ class FinancePaymentCreate(BaseModel):
 class FinancePaymentRead(FinancePaymentCreate):
     id: UUID
     received_at: datetime
+
+
+class TaxQuoteRead(BaseModel):
+    organization_id: UUID
+    jurisdiction: str
+    subtotal: Decimal
+    tax_rate: Decimal
+    tax_amount: Decimal
+    total: Decimal
+    reverse_charge: bool = False
+    rationale: str
+
+
+class PaymentSettlementRead(BaseModel):
+    organization_id: UUID
+    provider: str
+    currency: str
+    gross_ticket_revenue: Decimal
+    gross_invoice_payments: Decimal
+    gross_donations: Decimal
+    gross_amount: Decimal
+    fee_amount: Decimal
+    net_amount: Decimal
+    payout_reference: str
+    line_count: int
+
+
+class AccountingExportRow(BaseModel):
+    row_type: str
+    source_id: UUID
+    account_code: str
+    memo: str
+    debit: Decimal
+    credit: Decimal
+    currency: str
+    external_reference: str | None
+
+
+class AccountingExportRead(BaseModel):
+    organization_id: UUID
+    basis: str
+    system: str
+    rows: list[AccountingExportRow]
+    debit_total: Decimal
+    credit_total: Decimal
+
+
+class SponsorshipDashboardRead(BaseModel):
+    sponsor_id: UUID
+    sponsor_name: str
+    agreement_count: int
+    contracted_value: Decimal
+    active_value: Decimal
+    deliverable_count: int
+    activation_count: int
+    roi_score: int
+    recommendation: str
 
 
 class CommercialSummaryRead(BaseModel):
