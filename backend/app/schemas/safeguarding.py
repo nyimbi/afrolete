@@ -15,6 +15,8 @@ from app.models.enums import (
     EventType,
     GuardianRelationshipKind,
     IncidentReportPackageStatus,
+    InsuranceClaimStatus,
+    InsuranceClaimType,
     ParticipationClearanceStatus,
     SafeguardingIncidentSeverity,
     SafeguardingIncidentStatus,
@@ -466,5 +468,69 @@ class IncidentReportPackageRead(BaseModel):
     narrative: str
     checklist_json: str | None
     submission_payload: str | None
+    notes: str | None
+    created_at: datetime
+
+
+class IncidentInsuranceClaimCreate(BaseModel):
+    organization_id: UUID
+    incident_id: UUID
+    claimant_person_id: UUID | None = None
+    claim_type: InsuranceClaimType = InsuranceClaimType.INJURY_MEDICAL
+    provider_name: str = Field(min_length=2, max_length=240)
+    policy_number: str | None = Field(default=None, max_length=160)
+    claim_number: str | None = Field(default=None, max_length=160)
+    claimed_amount_cents: int = Field(default=0, ge=0)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    reserve_amount_cents: int = Field(default=0, ge=0)
+    tracking_url: str | None = Field(default=None, max_length=500)
+    documentation_checklist_json: str | None = Field(default=None, max_length=12000)
+    submission_payload: str | None = Field(default=None, max_length=12000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class IncidentInsuranceClaimUpdate(BaseModel):
+    status: InsuranceClaimStatus | None = None
+    claimant_person_id: UUID | None = None
+    policy_number: str | None = Field(default=None, max_length=160)
+    claim_number: str | None = Field(default=None, max_length=160)
+    coverage_verified_at: datetime | None = None
+    submitted_at: datetime | None = None
+    closed_at: datetime | None = None
+    claimed_amount_cents: int | None = Field(default=None, ge=0)
+    approved_amount_cents: int | None = Field(default=None, ge=0)
+    paid_amount_cents: int | None = Field(default=None, ge=0)
+    reserve_amount_cents: int | None = Field(default=None, ge=0)
+    tracking_url: str | None = Field(default=None, max_length=500)
+    documentation_checklist_json: str | None = Field(default=None, max_length=12000)
+    submission_payload: str | None = Field(default=None, max_length=12000)
+    communication_log: str | None = Field(default=None, max_length=12000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class IncidentInsuranceClaimRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    incident_id: UUID
+    claimant_person_id: UUID | None
+    prepared_by_person_id: UUID | None
+    submitted_by_person_id: UUID | None
+    claim_type: InsuranceClaimType
+    status: InsuranceClaimStatus
+    provider_name: str
+    policy_number: str | None
+    claim_number: str | None
+    coverage_verified_at: datetime | None
+    submitted_at: datetime | None
+    closed_at: datetime | None
+    claimed_amount_cents: int
+    approved_amount_cents: int
+    paid_amount_cents: int
+    currency: str
+    reserve_amount_cents: int
+    tracking_url: str | None
+    documentation_checklist_json: str | None
+    submission_payload: str | None
+    communication_log: str | None
     notes: str | None
     created_at: datetime

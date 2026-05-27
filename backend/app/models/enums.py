@@ -194,6 +194,28 @@ class IncidentReportPackageStatus(StrEnum):
     WITHDRAWN = "withdrawn"
 
 
+class InsuranceClaimType(StrEnum):
+    INJURY_MEDICAL = "injury_medical"
+    LIABILITY = "liability"
+    EQUIPMENT_DAMAGE = "equipment_damage"
+    PROPERTY_DAMAGE = "property_damage"
+    TRAVEL = "travel"
+    OTHER = "other"
+
+
+class InsuranceClaimStatus(StrEnum):
+    DRAFT = "draft"
+    READY = "ready"
+    SUBMITTED = "submitted"
+    ACKNOWLEDGED = "acknowledged"
+    IN_REVIEW = "in_review"
+    APPROVED = "approved"
+    PARTIALLY_PAID = "partially_paid"
+    PAID = "paid"
+    DENIED = "denied"
+    CLOSED = "closed"
+
+
 class BackgroundCheckStatus(StrEnum):
     REQUESTED = "requested"
     IN_PROGRESS = "in_progress"

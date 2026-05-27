@@ -55,6 +55,7 @@ from app.models.event import (  # noqa: F401,E402
     ComplianceCredential,
     ConsentRequest,
     Event,
+    IncidentInsuranceClaim,
     IncidentReportPackage,
     SafeguardingIncident,
 )

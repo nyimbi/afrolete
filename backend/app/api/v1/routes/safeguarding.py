@@ -8,6 +8,7 @@ from app.models.enums import (
     BackgroundCheckStatus,
     ComplianceCredentialStatus,
     IncidentReportPackageStatus,
+    InsuranceClaimStatus,
     SafeguardingIncidentStatus,
 )
 from app.schemas.safeguarding import (
@@ -30,6 +31,9 @@ from app.schemas.safeguarding import (
     FamilyEventRsvpCreate,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
+    IncidentInsuranceClaimCreate,
+    IncidentInsuranceClaimRead,
+    IncidentInsuranceClaimUpdate,
     IncidentReportPackageCreate,
     IncidentReportPackageRead,
     IncidentReportPackageUpdate,
@@ -52,6 +56,7 @@ from app.services.safeguarding import (
     create_compliance_credential,
     create_consent_request,
     create_guardian_relationship,
+    create_incident_insurance_claim,
     create_incident_report_package,
     create_safeguarding_incident,
     ensure_org_manage,
@@ -59,6 +64,7 @@ from app.services.safeguarding import (
     list_background_checks,
     list_compliance_credentials,
     list_guardians_for_athlete,
+    list_incident_insurance_claims,
     list_incident_report_packages,
     list_safeguarding_incidents,
     list_my_family_consent_requests,
@@ -69,6 +75,7 @@ from app.services.safeguarding import (
     reconcile_compliance_statuses,
     update_background_check,
     update_compliance_credential,
+    update_incident_insurance_claim,
     update_incident_report_package,
     update_safeguarding_incident,
 )
@@ -222,6 +229,36 @@ def to_report_package_read(package) -> IncidentReportPackageRead:
     )
 
 
+def to_insurance_claim_read(claim) -> IncidentInsuranceClaimRead:
+    return IncidentInsuranceClaimRead(
+        id=claim.id,
+        organization_id=claim.organization_id,
+        incident_id=claim.incident_id,
+        claimant_person_id=claim.claimant_person_id,
+        prepared_by_person_id=claim.prepared_by_person_id,
+        submitted_by_person_id=claim.submitted_by_person_id,
+        claim_type=claim.claim_type,
+        status=claim.status,
+        provider_name=claim.provider_name,
+        policy_number=claim.policy_number,
+        claim_number=claim.claim_number,
+        coverage_verified_at=claim.coverage_verified_at,
+        submitted_at=claim.submitted_at,
+        closed_at=claim.closed_at,
+        claimed_amount_cents=claim.claimed_amount_cents,
+        approved_amount_cents=claim.approved_amount_cents,
+        paid_amount_cents=claim.paid_amount_cents,
+        currency=claim.currency,
+        reserve_amount_cents=claim.reserve_amount_cents,
+        tracking_url=claim.tracking_url,
+        documentation_checklist_json=claim.documentation_checklist_json,
+        submission_payload=claim.submission_payload,
+        communication_log=claim.communication_log,
+        notes=claim.notes,
+        created_at=claim.created_at,
+    )
+
+
 @router.post("/guardians", response_model=GuardianRelationshipRead, status_code=201)
 async def create_guardian_route(
     payload: GuardianRelationshipCreate,
@@ -325,6 +362,44 @@ async def update_incident_report_package_route(
 ) -> IncidentReportPackageRead:
     return to_report_package_read(
         await update_incident_report_package(db, identity, package_id, payload, authz)
+    )
+
+
+@router.post("/insurance-claims", response_model=IncidentInsuranceClaimRead, status_code=201)
+async def create_incident_insurance_claim_route(
+    payload: IncidentInsuranceClaimCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentInsuranceClaimRead:
+    return to_insurance_claim_read(await create_incident_insurance_claim(db, identity, payload, authz))
+
+
+@router.get("/insurance-claims", response_model=list[IncidentInsuranceClaimRead])
+async def list_incident_insurance_claims_route(
+    organization_id: UUID = Query(),
+    status_filter: InsuranceClaimStatus | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[IncidentInsuranceClaimRead]:
+    await ensure_org_manage(authz, organization_id, identity)
+    return [
+        to_insurance_claim_read(claim)
+        for claim in await list_incident_insurance_claims(db, organization_id, status_filter)
+    ]
+
+
+@router.patch("/insurance-claims/{claim_id}", response_model=IncidentInsuranceClaimRead)
+async def update_incident_insurance_claim_route(
+    claim_id: UUID,
+    payload: IncidentInsuranceClaimUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentInsuranceClaimRead:
+    return to_insurance_claim_read(
+        await update_incident_insurance_claim(db, identity, claim_id, payload, authz)
     )
 
 

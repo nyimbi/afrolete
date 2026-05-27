@@ -16,6 +16,8 @@ from app.models.enums import (
     ConsentStatus,
     EventType,
     IncidentReportPackageStatus,
+    InsuranceClaimStatus,
+    InsuranceClaimType,
     SafeguardingIncidentSeverity,
     SafeguardingIncidentStatus,
     SafeguardingIncidentType,
@@ -195,6 +197,47 @@ class IncidentReportPackage(IdMixin, TimestampMixin, Base):
     narrative: Mapped[str] = mapped_column(Text, nullable=False)
     checklist_json: Mapped[str | None] = mapped_column(Text)
     submission_payload: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class IncidentInsuranceClaim(IdMixin, TimestampMixin, Base):
+    __tablename__ = "incident_insurance_claims"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    incident_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("safeguarding_incidents.id"), index=True
+    )
+    claimant_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    prepared_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    submitted_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    claim_type: Mapped[InsuranceClaimType] = mapped_column(
+        enum_type(InsuranceClaimType),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[InsuranceClaimStatus] = mapped_column(
+        enum_type(InsuranceClaimStatus),
+        default=InsuranceClaimStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    provider_name: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    policy_number: Mapped[str | None] = mapped_column(String(160), index=True)
+    claim_number: Mapped[str | None] = mapped_column(String(160), index=True)
+    coverage_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    claimed_amount_cents: Mapped[int] = mapped_column(default=0, nullable=False)
+    approved_amount_cents: Mapped[int] = mapped_column(default=0, nullable=False)
+    paid_amount_cents: Mapped[int] = mapped_column(default=0, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    reserve_amount_cents: Mapped[int] = mapped_column(default=0, nullable=False)
+    tracking_url: Mapped[str | None] = mapped_column(String(500))
+    documentation_checklist_json: Mapped[str | None] = mapped_column(Text)
+    submission_payload: Mapped[str | None] = mapped_column(Text)
+    communication_log: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

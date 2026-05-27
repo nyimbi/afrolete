@@ -94,11 +94,14 @@ import type {
   BackgroundCheckRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
+  IncidentInsuranceClaimRead,
   IncidentReportPackageRead,
   IncidentReportPackageStatus,
   InsightSeverity,
   InsightStatus,
   IntelligenceInsightRead,
+  InsuranceClaimStatus,
+  InsuranceClaimType,
   LocalIdentity,
   MatchEventType,
   MessageDeliveryStatus,
@@ -436,6 +439,7 @@ export default function HomePage() {
   const [complianceCredentials, setComplianceCredentials] = useState<ComplianceCredentialRead[]>([]);
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummaryRead | null>(null);
   const [incidentReportPackages, setIncidentReportPackages] = useState<IncidentReportPackageRead[]>([]);
+  const [incidentInsuranceClaims, setIncidentInsuranceClaims] = useState<IncidentInsuranceClaimRead[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
@@ -545,6 +549,16 @@ export default function HomePage() {
     due_at: "2026-06-04",
     external_reference: "",
     notes: "Package prepared for statutory or league reporting."
+  });
+  const [insuranceClaimForm, setInsuranceClaimForm] = useState({
+    provider_name: "Athletic Health Insurers",
+    policy_number: "POL-2026-001",
+    claim_type: "injury_medical" as InsuranceClaimType,
+    claimed_amount: "3800",
+    reserve_amount: "5000",
+    currency: "USD",
+    tracking_url: "",
+    notes: "Claim package prepared from incident documentation."
   });
   const [agentForm, setAgentForm] = useState({
     name: "Safeguarding Watch",
@@ -1018,6 +1032,14 @@ export default function HomePage() {
     setIncidentReportPackages(data);
   }, [identity]);
 
+  const loadIncidentInsuranceClaims = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<IncidentInsuranceClaimRead[]>(
+      `/safeguarding/insurance-claims?organization_id=${organizationId}`,
+      { identity }
+    );
+    setIncidentInsuranceClaims(data);
+  }, [identity]);
+
   const loadAgents = useCallback(async (organizationId: string) => {
     const data = await apiRequest<AgentRead[]>(`/agents?organization_id=${organizationId}`);
     setAgents(data);
@@ -1458,6 +1480,7 @@ export default function HomePage() {
       setComplianceCredentials([]);
       setComplianceSummary(null);
       setIncidentReportPackages([]);
+      setIncidentInsuranceClaims([]);
       setCommunicationTemplates([]);
       setCommunicationMessages([]);
       setMessageRecipients([]);
@@ -1539,6 +1562,7 @@ export default function HomePage() {
       await loadComplianceCredentials(selectedOrganizationId);
       await loadComplianceSummary(selectedOrganizationId);
       await loadIncidentReportPackages(selectedOrganizationId);
+      await loadIncidentInsuranceClaims(selectedOrganizationId);
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
@@ -1560,6 +1584,7 @@ export default function HomePage() {
     loadComplianceCredentials,
     loadComplianceSummary,
     loadIncidentReportPackages,
+    loadIncidentInsuranceClaims,
     loadAgents,
     loadAgentTasks,
     loadMetricDefinitions,
@@ -2412,6 +2437,90 @@ export default function HomePage() {
     );
   };
 
+  const claimAmountCents = (value: string) => Math.round((Number(value) || 0) * 100);
+
+  const createIncidentInsuranceClaim = (incident: SafeguardingIncidentRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      `create-insurance-claim-${incident.id}`,
+      () =>
+        apiRequest<IncidentInsuranceClaimRead>("/safeguarding/insurance-claims", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            incident_id: incident.id,
+            claimant_person_id: incident.athlete_person_id,
+            claim_type: insuranceClaimForm.claim_type,
+            provider_name: insuranceClaimForm.provider_name,
+            policy_number: insuranceClaimForm.policy_number || null,
+            claimed_amount_cents: claimAmountCents(insuranceClaimForm.claimed_amount),
+            currency: insuranceClaimForm.currency,
+            reserve_amount_cents: claimAmountCents(insuranceClaimForm.reserve_amount),
+            tracking_url: insuranceClaimForm.tracking_url || null,
+            documentation_checklist_json: JSON.stringify({
+              incident_documentation: true,
+              medical_follow_up: incident.medical_follow_up_required,
+              regulatory_report: incident.regulatory_report_required,
+              guardian_notification: incident.parent_notified_at !== null
+            }),
+            submission_payload: JSON.stringify({
+              incident_id: incident.id,
+              title: incident.title,
+              incident_type: incident.incident_type,
+              severity: incident.severity,
+              occurred_at: incident.occurred_at,
+              claimed_amount: insuranceClaimForm.claimed_amount,
+              currency: insuranceClaimForm.currency
+            }),
+            notes: insuranceClaimForm.notes || null
+          }
+        }),
+      (claim) => {
+        setIncidentInsuranceClaims((current) => [
+          claim,
+          ...current.filter((item) => item.id !== claim.id)
+        ]);
+        addLog(`${claim.provider_name} claim drafted`, "good");
+      }
+    );
+  };
+
+  const updateIncidentInsuranceClaim = (
+    claim: IncidentInsuranceClaimRead,
+    statusValue: InsuranceClaimStatus
+  ) => {
+    runAction(
+      `incident-insurance-claim-${claim.id}-${statusValue}`,
+      () =>
+        apiRequest<IncidentInsuranceClaimRead>(`/safeguarding/insurance-claims/${claim.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            coverage_verified_at: statusValue === "ready" ? new Date().toISOString() : null,
+            claim_number: claim.claim_number || insuranceClaimForm.policy_number || null,
+            approved_amount_cents:
+              statusValue === "approved" || statusValue === "paid"
+                ? claim.claimed_amount_cents
+                : null,
+            paid_amount_cents: statusValue === "paid" ? claim.claimed_amount_cents : null,
+            communication_log: `Marked ${statusValue} from the operations console.`
+          }
+        }),
+      (updated) => {
+        setIncidentInsuranceClaims((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.provider_name} claim moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
   const refreshSafeguardingCompliance = () => {
     if (!selectedOrganizationId) {
       return;
@@ -2421,7 +2530,8 @@ export default function HomePage() {
       loadComplianceCredentials(selectedOrganizationId),
       loadSafeguardingIncidents(selectedOrganizationId),
       loadComplianceSummary(selectedOrganizationId),
-      loadIncidentReportPackages(selectedOrganizationId)
+      loadIncidentReportPackages(selectedOrganizationId),
+      loadIncidentInsuranceClaims(selectedOrganizationId)
     ]);
   };
 
@@ -8241,6 +8351,47 @@ export default function HomePage() {
               <input value={reportPackageForm.notes} onChange={(event) => setReportPackageForm({ ...reportPackageForm, notes: event.target.value })} />
             </label>
           </div>
+          <div className="form-grid three">
+            <label>
+              Insurer
+              <input value={insuranceClaimForm.provider_name} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, provider_name: event.target.value })} />
+            </label>
+            <label>
+              Policy
+              <input value={insuranceClaimForm.policy_number} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, policy_number: event.target.value })} />
+            </label>
+            <label>
+              Claim type
+              <select value={insuranceClaimForm.claim_type} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, claim_type: event.target.value as InsuranceClaimType })}>
+                <option value="injury_medical">Injury medical</option>
+                <option value="liability">Liability</option>
+                <option value="equipment_damage">Equipment damage</option>
+                <option value="property_damage">Property damage</option>
+                <option value="travel">Travel</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>
+              Claimed
+              <input type="number" min="0" value={insuranceClaimForm.claimed_amount} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, claimed_amount: event.target.value })} />
+            </label>
+            <label>
+              Reserve
+              <input type="number" min="0" value={insuranceClaimForm.reserve_amount} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, reserve_amount: event.target.value })} />
+            </label>
+            <label>
+              Currency
+              <input value={insuranceClaimForm.currency} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, currency: event.target.value.toUpperCase().slice(0, 3) })} />
+            </label>
+            <label>
+              Tracking URL
+              <input value={insuranceClaimForm.tracking_url} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, tracking_url: event.target.value })} />
+            </label>
+            <label className="wide-field">
+              Claim notes
+              <input value={insuranceClaimForm.notes} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, notes: event.target.value })} />
+            </label>
+          </div>
           <div className="consent-grid">
             <div>
               <span className="muted">Athlete</span>
@@ -8304,6 +8455,23 @@ export default function HomePage() {
                 </div>
               </article>
             ))}
+            {incidentInsuranceClaims.slice(0, 4).map((claim) => (
+              <article key={claim.id} className="task-card">
+                <div>
+                  <strong>{claim.provider_name}</strong>
+                  <span>{claim.claim_type} · {claim.status} · {claim.currency} {(claim.claimed_amount_cents / 100).toFixed(2)} claimed</span>
+                  <span>{claim.policy_number ?? "No policy"} · {claim.claim_number ?? "No claim number"}</span>
+                  <span>{claim.paid_amount_cents ? `${claim.currency} ${(claim.paid_amount_cents / 100).toFixed(2)} paid` : claim.notes ?? "Awaiting insurer update"}</span>
+                </div>
+                <div className="event-toolbar">
+                  <button type="button" onClick={() => updateIncidentInsuranceClaim(claim, "ready")}>Verify</button>
+                  <button type="button" onClick={() => updateIncidentInsuranceClaim(claim, "submitted")}>Submit</button>
+                  <button type="button" onClick={() => updateIncidentInsuranceClaim(claim, "approved")}>Approve</button>
+                  <button type="button" onClick={() => updateIncidentInsuranceClaim(claim, "paid")}>Paid</button>
+                  <button type="button" onClick={() => updateIncidentInsuranceClaim(claim, "denied")}>Deny</button>
+                </div>
+              </article>
+            ))}
             {backgroundChecks.slice(0, 4).map((check) => (
               <article key={check.id} className="task-card">
                 <div>
@@ -8346,6 +8514,7 @@ export default function HomePage() {
                   <button type="button" onClick={() => updateSafeguardingIncident(incident, "triaged")}>Triage</button>
                   <button type="button" onClick={() => updateSafeguardingIncident(incident, "investigating")}>Investigate</button>
                   <button type="button" onClick={() => createIncidentReportPackage(incident)}>Package</button>
+                  <button type="button" onClick={() => createIncidentInsuranceClaim(incident)}>Claim</button>
                   <button type="button" onClick={() => updateSafeguardingIncident(incident, "resolved")}>Resolve</button>
                 </div>
               </article>

@@ -16,6 +16,7 @@ from app.models.enums import (
     ConsentScopeType,
     ConsentStatus,
     IncidentReportPackageStatus,
+    InsuranceClaimStatus,
     ParticipationClearanceStatus,
     SafeguardingIncidentStatus,
 )
@@ -26,6 +27,7 @@ from app.models.event import (
     ComplianceCredential,
     ConsentRequest,
     Event,
+    IncidentInsuranceClaim,
     IncidentReportPackage,
     SafeguardingIncident,
 )
@@ -47,6 +49,8 @@ from app.schemas.safeguarding import (
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
     GuardianRelationshipCreate,
+    IncidentInsuranceClaimCreate,
+    IncidentInsuranceClaimUpdate,
     IncidentReportPackageCreate,
     IncidentReportPackageUpdate,
     KnownChannelConsentCapture,
@@ -409,6 +413,102 @@ async def update_incident_report_package(
     await db.commit()
     await db.refresh(package)
     return package
+
+
+async def create_incident_insurance_claim(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: IncidentInsuranceClaimCreate,
+    authz: AuthorizationService,
+) -> IncidentInsuranceClaim:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, payload.incident_id)
+    if incident is None or incident.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    if payload.claimant_person_id is not None:
+        await validate_person_in_organization(db, payload.organization_id, payload.claimant_person_id)
+    claim = IncidentInsuranceClaim(
+        prepared_by_person_id=identity.person_id,
+        **payload.model_dump(),
+    )
+    db.add(claim)
+    await db.commit()
+    await db.refresh(claim)
+    return claim
+
+
+async def list_incident_insurance_claims(
+    db: AsyncSession,
+    organization_id: UUID,
+    status_filter: InsuranceClaimStatus | None = None,
+) -> list[IncidentInsuranceClaim]:
+    statement = select(IncidentInsuranceClaim).where(
+        IncidentInsuranceClaim.organization_id == organization_id
+    )
+    if status_filter is not None:
+        statement = statement.where(IncidentInsuranceClaim.status == status_filter)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    IncidentInsuranceClaim.status,
+                    IncidentInsuranceClaim.submitted_at.desc().nulls_last(),
+                    IncidentInsuranceClaim.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+
+
+async def update_incident_insurance_claim(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    claim_id: UUID,
+    payload: IncidentInsuranceClaimUpdate,
+    authz: AuthorizationService,
+) -> IncidentInsuranceClaim:
+    claim = await db.get(IncidentInsuranceClaim, claim_id)
+    if claim is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insurance claim not found")
+    await ensure_org_manage(authz, claim.organization_id, identity)
+
+    if payload.claimant_person_id is not None:
+        await validate_person_in_organization(db, claim.organization_id, payload.claimant_person_id)
+        claim.claimant_person_id = payload.claimant_person_id
+    if payload.status is not None:
+        claim.status = payload.status
+        if payload.status == InsuranceClaimStatus.SUBMITTED:
+            claim.submitted_by_person_id = identity.person_id
+            claim.submitted_at = payload.submitted_at or claim.submitted_at or utc_now()
+        if payload.status in {
+            InsuranceClaimStatus.PAID,
+            InsuranceClaimStatus.DENIED,
+            InsuranceClaimStatus.CLOSED,
+        }:
+            claim.closed_at = payload.closed_at or claim.closed_at or utc_now()
+    for field in [
+        "policy_number",
+        "claim_number",
+        "coverage_verified_at",
+        "submitted_at",
+        "closed_at",
+        "claimed_amount_cents",
+        "approved_amount_cents",
+        "paid_amount_cents",
+        "reserve_amount_cents",
+        "tracking_url",
+        "documentation_checklist_json",
+        "submission_payload",
+        "communication_log",
+        "notes",
+    ]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(claim, field, value)
+
+    await db.commit()
+    await db.refresh(claim)
+    return claim
 
 
 async def create_background_check(

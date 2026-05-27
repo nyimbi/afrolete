@@ -105,6 +105,24 @@ export type IncidentReportPackageStatus =
   | "accepted"
   | "rejected"
   | "withdrawn";
+export type InsuranceClaimType =
+  | "injury_medical"
+  | "liability"
+  | "equipment_damage"
+  | "property_damage"
+  | "travel"
+  | "other";
+export type InsuranceClaimStatus =
+  | "draft"
+  | "ready"
+  | "submitted"
+  | "acknowledged"
+  | "in_review"
+  | "approved"
+  | "partially_paid"
+  | "paid"
+  | "denied"
+  | "closed";
 export type BackgroundCheckStatus =
   | "requested"
   | "in_progress"
@@ -1482,6 +1500,34 @@ export type IncidentReportPackageRead = {
   narrative: string;
   checklist_json: string | null;
   submission_payload: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+export type IncidentInsuranceClaimRead = {
+  id: UUID;
+  organization_id: UUID;
+  incident_id: UUID;
+  claimant_person_id: UUID | null;
+  prepared_by_person_id: UUID | null;
+  submitted_by_person_id: UUID | null;
+  claim_type: InsuranceClaimType;
+  status: InsuranceClaimStatus;
+  provider_name: string;
+  policy_number: string | null;
+  claim_number: string | null;
+  coverage_verified_at: string | null;
+  submitted_at: string | null;
+  closed_at: string | null;
+  claimed_amount_cents: number;
+  approved_amount_cents: number;
+  paid_amount_cents: number;
+  currency: string;
+  reserve_amount_cents: number;
+  tracking_url: string | null;
+  documentation_checklist_json: string | null;
+  submission_payload: string | null;
+  communication_log: string | null;
   notes: string | null;
   created_at: string;
 };
