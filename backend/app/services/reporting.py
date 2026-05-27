@@ -1,6 +1,11 @@
+import csv
+import io
+import json
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from html import escape as xml_escape
 from uuid import UUID, uuid4
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -291,8 +296,8 @@ async def render_report_artifact(
     await ensure_manage_reporting(authz, identity, report.organization_id)
     selected_format = output_format or report.output_format
     now = datetime.now(UTC)
-    body = render_body(report, selected_format)
-    checksum = sha256(body.encode()).hexdigest()
+    artifact = build_report_artifact(report, selected_format)
+    checksum = artifact["checksum"]
     artifact_url = f"artifact://reports/{report.id}/{checksum[:16]}.{selected_format.value}"
     report.output_format = selected_format
     report.artifact_url = artifact_url
@@ -304,14 +309,33 @@ async def render_report_artifact(
         "organization_id": report.organization_id,
         "output_format": selected_format,
         "artifact_url": artifact_url,
-        "content_type": report_content_type(selected_format),
-        "size_bytes": len(body.encode()),
+        "content_type": artifact["content_type"],
+        "size_bytes": len(artifact["content"]),
         "page_count": 1 if selected_format == ReportFormat.PDF else None,
         "sheet_count": 2 if selected_format == ReportFormat.EXCEL else None,
         "checksum": checksum,
-        "body_preview": body[:600],
+        "body_preview": artifact["body_preview"],
         "rendered_at": now,
     }
+
+
+async def downloadable_report_artifact(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    report_id: UUID,
+    output_format: ReportFormat | None,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    report = await get_report(db, report_id)
+    await ensure_manage_reporting(authz, identity, report.organization_id)
+    selected_format = output_format or report.output_format
+    artifact = build_report_artifact(report, selected_format)
+    checksum = artifact["checksum"]
+    report.output_format = selected_format
+    report.artifact_url = f"artifact://reports/{report.id}/{checksum[:16]}.{selected_format.value}"
+    report.status = ReportRunStatus.READY
+    await db.commit()
+    return artifact
 
 
 async def verify_report_artifact(
@@ -594,6 +618,158 @@ def render_body(report: GeneratedReport, output_format: ReportFormat) -> str:
     if output_format == ReportFormat.API:
         return str({key.lower(): value for key, value in fields})
     return "\n\n".join(f"{key}: {value}" for key, value in fields)
+
+
+def report_rows(report: GeneratedReport) -> list[tuple[str, str]]:
+    return [
+        ("Title", report.title),
+        ("Format", report.output_format.value),
+        ("Summary", report.summary),
+        ("Findings", report.findings or ""),
+        ("Recommendations", report.recommendations or ""),
+        ("Period start", str(report.period_start or "open")),
+        ("Period end", str(report.period_end or "open")),
+        ("Status", report.status.value),
+        ("Share token", report.shared_token or ""),
+    ]
+
+
+def build_report_artifact(report: GeneratedReport, output_format: ReportFormat) -> dict[str, object]:
+    text = render_body(report, output_format)
+    if output_format == ReportFormat.PDF:
+        content = build_pdf_bytes(report)
+    elif output_format == ReportFormat.EXCEL:
+        content = build_xlsx_bytes(report)
+    elif output_format == ReportFormat.CSV:
+        content = build_csv_bytes(report)
+    elif output_format == ReportFormat.API:
+        content = json.dumps(dict(report_rows(report)), indent=2, default=str).encode()
+    else:
+        content = build_html_bytes(report)
+    return {
+        "content": content,
+        "content_type": report_content_type(output_format),
+        "filename": report_filename(report, output_format),
+        "checksum": sha256(content).hexdigest(),
+        "body_preview": text[:600],
+    }
+
+
+def build_csv_bytes(report: GeneratedReport) -> bytes:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["field", "value"])
+    writer.writerows(report_rows(report))
+    return buffer.getvalue().encode()
+
+
+def build_html_bytes(report: GeneratedReport) -> bytes:
+    rows = "\n".join(
+        f"<tr><th>{xml_escape(key)}</th><td>{xml_escape(value)}</td></tr>"
+        for key, value in report_rows(report)
+    )
+    html = (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        f"<title>{xml_escape(report.title)}</title></head><body>"
+        f"<h1>{xml_escape(report.title)}</h1><table>{rows}</table></body></html>"
+    )
+    return html.encode()
+
+
+def build_xlsx_bytes(report: GeneratedReport) -> bytes:
+    rows = report_rows(report)
+    sheet_rows = "\n".join(
+        "<row r=\"{index}\"><c r=\"A{index}\" t=\"inlineStr\"><is><t>{key}</t></is></c>"
+        "<c r=\"B{index}\" t=\"inlineStr\"><is><t>{value}</t></is></c></row>".format(
+            index=index,
+            key=xml_escape(key),
+            value=xml_escape(value),
+        )
+        for index, (key, value) in enumerate(rows, start=1)
+    )
+    sheet = (
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+        "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+        f"<sheetData>{sheet_rows}</sheetData></worksheet>"
+    )
+    buffer = io.BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+            "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+            "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+            "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
+            "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+            "</Types>",
+        )
+        archive.writestr(
+            "_rels/.rels",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>"
+            "</Relationships>",
+        )
+        archive.writestr(
+            "xl/workbook.xml",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" "
+            "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+            "<sheets><sheet name=\"Report\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
+            "</Relationships>",
+        )
+        archive.writestr("xl/worksheets/sheet1.xml", sheet)
+    return buffer.getvalue()
+
+
+def build_pdf_bytes(report: GeneratedReport) -> bytes:
+    lines = [report.title, report.summary, report.findings or "", report.recommendations or ""]
+    text_commands = ["BT", "/F1 12 Tf", "72 760 Td"]
+    for index, line in enumerate(lines):
+        if index:
+            text_commands.append("0 -18 Td")
+        text_commands.append(f"({pdf_escape(line[:110])}) Tj")
+    text_commands.append("ET")
+    stream = "\n".join(text_commands).encode()
+    objects = [
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
+        b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n",
+        b"4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n",
+        b"5 0 obj << /Length " + str(len(stream)).encode() + b" >> stream\n" + stream + b"\nendstream endobj\n",
+    ]
+    output = io.BytesIO()
+    output.write(b"%PDF-1.4\n")
+    offsets = [0]
+    for item in objects:
+        offsets.append(output.tell())
+        output.write(item)
+    xref_at = output.tell()
+    output.write(f"xref\n0 {len(objects) + 1}\n".encode())
+    output.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.write(f"{offset:010d} 00000 n \n".encode())
+    output.write(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n".encode()
+    )
+    return output.getvalue()
+
+
+def pdf_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def report_filename(report: GeneratedReport, output_format: ReportFormat) -> str:
+    stem = "".join(character if character.isalnum() else "-" for character in report.title.lower()).strip("-")
+    extension = "xlsx" if output_format == ReportFormat.EXCEL else output_format.value
+    return f"{stem or 'afrolete-report'}.{extension}"
 
 
 def report_content_type(output_format: ReportFormat) -> str:

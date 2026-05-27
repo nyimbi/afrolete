@@ -526,6 +526,22 @@ athlete-development platform:
   - Not tested in this fast slice: full backend test suite, frontend production
     build, Playwright screenshots, live model providers, OpenBao secret fetch,
     persisted run-history tables, and replay/audit immutability.
+- Implemented slice 030 binary report artifacts:
+  - Added authenticated report artifact download responses for PDF, Excel
+    workbook, CSV, JSON/API, and HTML output formats.
+  - Added dependency-free PDF byte generation, valid minimal XLSX workbook
+    generation, CSV generation, HTML rendering, content type selection,
+    checksums, and stable filenames.
+  - Updated render metadata to checksum and size the actual generated artifact
+    bytes rather than only the preview text.
+  - Extended the operations console with a Download control that fetches the
+    selected report artifact, applies local/Keycloak auth headers, saves the
+    returned file, and refreshes reporting state.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, frontend production
+    build, Playwright screenshots, MinIO/object storage persistence, and
+    visual report layout QA.
 
 ## Implementation Slices
 
@@ -561,6 +577,7 @@ athlete-development platform:
 | 027 - AI training plan generation | Partial | Backend ruff; frontend typecheck; diff check | AI-assisted plan generation from readiness, assessments, observations, drills, and upcoming competition fixtures is implemented with generated blocks and console controls; live model generation, availability calendars, post-session feedback, and full verification remain. |
 | 028 - Performance ingestion and review | Partial | Backend ruff; frontend typecheck; diff check | Provider-neutral evidence ingestion, deterministic value extraction, pending-review observations, human review/correction, and console controls are implemented; real provider parsers, model-backed extraction, and full verification remain. |
 | 029 - AI agent governance telemetry | Partial | Backend ruff; frontend typecheck; diff check | Derived run records, governance summary metrics, credential-boundary status, and console telemetry cards are implemented; live model providers, OpenBao secret fetch, persisted run history, audit immutability, and full verification remain. |
+| 030 - Binary report artifacts | Partial | Backend ruff; frontend typecheck; diff check | Authenticated PDF/XLSX/CSV/API/HTML artifact download, byte-level checksums, filenames, render metadata, and console download controls are implemented; object storage persistence, visual report QA, and full verification remain. |
 
 ## Capability Coverage
 
@@ -585,7 +602,7 @@ Status values:
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, scan lookup, photo metadata, procurement recommendations, supplier scorecards, lease quotes, utilization recommendations, and console workflows are implemented; supplier ordering workflows, real file uploads, RFID hardware integration, and accounting lease billing remain. |
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, settlement summaries, refunds, tax quotes, accounting exports, sponsorship dashboards, commercial summary, and console workflows are implemented; live payment provider webhooks, tax authority filing, accounting API sync, and sponsor-facing dashboards remain. |
-| Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, artifact rendering metadata, verification scoring, chart-ready summaries, benchmark models, deterministic AI review insights, and console workflows are implemented; real AI model execution, binary PDF/Excel generation, file storage, visual chart rendering, and full verification remain. |
+| Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, artifact rendering metadata, authenticated PDF/XLSX/CSV/API/HTML artifact download, verification scoring, chart-ready summaries, benchmark models, deterministic AI review insights, and console workflows are implemented; real AI model execution, object storage persistence, visual report QA, chart rendering polish, and full verification remain. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation, frontend PKCE session handling, and SpiceDB gRPC authorization adapter are implemented; live service smoke tests and other integrations remain future slices. |
 | SaaS billing/subscriptions | partial | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, tax quotes, proration quotes, dunning notice preparation, payment webhook intake, and console workflows are implemented; webhook signature validation, external dunning delivery, tax filing integrations, and full verification remain. |
 | Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, commerce, reports, billing, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
@@ -602,9 +619,9 @@ Status values:
    integration, and accounting lease billing for assets and facilities.
 5. Add live payment provider webhooks, tax authority filing, accounting API
    sync, and sponsor-facing dashboard portals.
-6. Replace deterministic report artifact previews with real PDF/Excel file
-   generation, report file storage, chart visualization components, live
-   AI-generated insights, and report verification coverage.
+6. Add MinIO/object-storage persistence for report artifacts, visual report
+   layout QA, chart visualization components, live AI-generated insights, and
+   report verification coverage.
 7. Add payment webhook signature validation, external dunning delivery,
    jurisdiction-specific tax filing integrations, plan-change application
    workflows, and full billing verification coverage.

@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -34,6 +34,7 @@ from app.services.reporting import (
     create_report_definition,
     create_risk_score,
     create_scheduled_report,
+    downloadable_report_artifact,
     generate_live_insight,
     generate_report,
     list_export_jobs,
@@ -120,6 +121,25 @@ async def verify_report_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> ReportVerificationRead:
     return ReportVerificationRead(**await verify_report_artifact(db, identity, report_id, authz))
+
+
+@router.get("/reports/{report_id}/download")
+async def download_report_route(
+    report_id: UUID,
+    output_format: ReportFormat | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> Response:
+    artifact = await downloadable_report_artifact(db, identity, report_id, output_format, authz)
+    return Response(
+        content=artifact["content"],
+        media_type=artifact["content_type"],
+        headers={
+            "Content-Disposition": f"attachment; filename={artifact['filename']}",
+            "X-Afrolete-Report-Checksum": str(artifact["checksum"]),
+        },
+    )
 
 
 @router.post("/schedules", response_model=ScheduledReportRead, status_code=status.HTTP_201_CREATED)

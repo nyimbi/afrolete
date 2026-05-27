@@ -3309,6 +3309,53 @@ export default function HomePage() {
     );
   };
 
+  const downloadSelectedReport = () => {
+    if (!selectedGeneratedReportId) {
+      addLog("Generate or select a report first", "bad");
+      return;
+    }
+    runAction(
+      "download-report-artifact",
+      async () => {
+        const headers = new Headers({ Accept: "*/*" });
+        if (authSession) {
+          headers.set("Authorization", `Bearer ${authSession.accessToken}`);
+        } else {
+          headers.set("X-Afrolete-Sub", identity.sub);
+          headers.set("X-Afrolete-Email", identity.email);
+          headers.set("X-Afrolete-Name", identity.name);
+        }
+        const response = await fetch(
+          `${apiBaseUrl}/api/v1/reporting/reports/${selectedGeneratedReportId}/download?output_format=${reportForm.default_format}`,
+          { headers }
+        );
+        if (!response.ok) {
+          throw new Error(`Report download failed: ${response.status}`);
+        }
+        const blob = await response.blob();
+        const disposition = response.headers.get("Content-Disposition") ?? "";
+        const filename = disposition.match(/filename=([^;]+)/)?.[1] ?? `afrolete-report.${reportForm.default_format}`;
+        const href = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = href;
+        anchor.download = filename.replaceAll("\"", "");
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(href);
+        return {
+          filename,
+          checksum: response.headers.get("X-Afrolete-Report-Checksum") ?? "no-checksum",
+          size: blob.size
+        };
+      },
+      (artifact) => {
+        addLog(`${artifact.filename} ready (${artifact.size} bytes, ${artifact.checksum.slice(0, 8)})`, "good");
+        void loadReporting(selectedOrganizationId);
+      }
+    );
+  };
+
   const generateReportingInsight = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -4589,6 +4636,7 @@ export default function HomePage() {
                 <button type="button" onClick={createScheduledReport} disabled={busyAction !== null}>Schedule</button>
                 <button type="button" onClick={renderSelectedReport} disabled={busyAction !== null}>Render</button>
                 <button type="button" onClick={verifySelectedReport} disabled={busyAction !== null}>Verify</button>
+                <button type="button" onClick={downloadSelectedReport} disabled={busyAction !== null}>Download</button>
                 <button type="button" onClick={createReportExport} disabled={busyAction !== null}>Export</button>
               </div>
             </div>
