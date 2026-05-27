@@ -2721,6 +2721,13 @@ export type AgentScorecardArtifactAccessBucketRead = {
   count: number;
 };
 
+export type AgentScorecardArtifactAccessTrendRead = {
+  date: string;
+  link_created_count: number;
+  artifact_opened_count: number;
+  total_count: number;
+};
+
 export type AgentScorecardArtifactAccessAnomalyRead = {
   severity: string;
   code: string;
@@ -2739,6 +2746,7 @@ export type AgentScorecardArtifactAccessSummaryRead = {
   unique_requester_count: number;
   last_accessed_at: string | null;
   by_source: AgentScorecardArtifactAccessBucketRead[];
+  daily_trend: AgentScorecardArtifactAccessTrendRead[];
   anomalies: AgentScorecardArtifactAccessAnomalyRead[];
 };
 

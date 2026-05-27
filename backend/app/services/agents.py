@@ -1237,9 +1237,20 @@ async def scorecard_artifact_access_summary(
         ).all()
     )
     source_counts: dict[str, int] = {}
+    daily_counts: dict[str, dict[str, int]] = {}
     for access in accesses:
         source = access.request_source or access.event_type
         source_counts[source] = source_counts.get(source, 0) + 1
+        day_key = access.accessed_at.date().isoformat()
+        day_counts = daily_counts.setdefault(
+            day_key,
+            {"link_created_count": 0, "artifact_opened_count": 0, "total_count": 0},
+        )
+        day_counts["total_count"] += 1
+        if access.event_type == "link_created":
+            day_counts["link_created_count"] += 1
+        elif access.event_type == "artifact_opened":
+            day_counts["artifact_opened_count"] += 1
     link_created_count = sum(1 for access in accesses if access.event_type == "link_created")
     artifact_opened_count = sum(1 for access in accesses if access.event_type == "artifact_opened")
     unique_requester_count = len({access.request_ip for access in accesses if access.request_ip})
@@ -1255,6 +1266,15 @@ async def scorecard_artifact_access_summary(
         "by_source": [
             {"label": label, "count": count}
             for label, count in sorted(source_counts.items(), key=lambda item: (-item[1], item[0]))
+        ],
+        "daily_trend": [
+            {
+                "date": day,
+                "link_created_count": counts["link_created_count"],
+                "artifact_opened_count": counts["artifact_opened_count"],
+                "total_count": counts["total_count"],
+            }
+            for day, counts in sorted(daily_counts.items(), reverse=True)[:14]
         ],
         "anomalies": scorecard_artifact_access_anomalies(
             accesses,

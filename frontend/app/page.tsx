@@ -12174,6 +12174,9 @@ export default function HomePage() {
                       {agentScorecardArtifactAccessSummary.by_source.slice(0, 2).map((bucket) => `${bucket.label.replaceAll("_", " ")} ${bucket.count}`).join(" · ") || "No source activity"}
                     </span>
                     <span>
+                      {agentScorecardArtifactAccessSummary.daily_trend.slice(0, 3).map((bucket) => `${bucket.date}: ${bucket.total_count}`).join(" · ") || "No daily access trend"}
+                    </span>
+                    <span>
                       {agentScorecardArtifactAccessSummary.anomalies[0]
                         ? `${agentScorecardArtifactAccessSummary.anomalies[0].severity}: ${agentScorecardArtifactAccessSummary.anomalies[0].title}`
                         : "No artifact access anomalies"}
@@ -12200,6 +12203,14 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {agentScorecardArtifactAccessSummary?.daily_trend.slice(0, 4).map((bucket) => (
+                <article key={bucket.date} className="task-card">
+                  <div>
+                    <strong>{bucket.date} artifact activity · {bucket.total_count} events</strong>
+                    <span>{bucket.link_created_count} links created · {bucket.artifact_opened_count} artifacts opened</span>
+                  </div>
+                </article>
+              ))}
               {agentScorecardArtifactAnomalyAlertRun ? (
                 <article className="task-card">
                   <div>

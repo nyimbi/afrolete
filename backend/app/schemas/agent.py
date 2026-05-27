@@ -455,6 +455,13 @@ class AgentScorecardArtifactAccessBucketRead(BaseModel):
     count: int
 
 
+class AgentScorecardArtifactAccessTrendRead(BaseModel):
+    date: str
+    link_created_count: int
+    artifact_opened_count: int
+    total_count: int
+
+
 class AgentScorecardArtifactAccessAnomalyRead(BaseModel):
     severity: str
     code: str
@@ -473,6 +480,7 @@ class AgentScorecardArtifactAccessSummaryRead(BaseModel):
     unique_requester_count: int
     last_accessed_at: datetime | None
     by_source: list[AgentScorecardArtifactAccessBucketRead]
+    daily_trend: list[AgentScorecardArtifactAccessTrendRead]
     anomalies: list[AgentScorecardArtifactAccessAnomalyRead]
 
 
