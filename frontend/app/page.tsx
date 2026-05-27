@@ -27,6 +27,7 @@ import type {
   AgentScorecardPublicationRead,
   AgentScorecardPublicationReadinessRead,
   AgentScorecardPublicationReminderRead,
+  AgentScorecardPublicationReminderRunRead,
   AgentTaskRead,
   AgentTaskStatus,
   AgentWorkerCallbackRead,
@@ -607,6 +608,8 @@ export default function HomePage() {
   const [agentScorecardPublications, setAgentScorecardPublications] = useState<AgentScorecardPublicationRead[]>([]);
   const [agentScorecardReadiness, setAgentScorecardReadiness] = useState<AgentScorecardPublicationReadinessRead | null>(null);
   const [agentScorecardReminder, setAgentScorecardReminder] = useState<AgentScorecardPublicationReminderRead | null>(null);
+  const [agentScorecardReminderRun, setAgentScorecardReminderRun] =
+    useState<AgentScorecardPublicationReminderRunRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1964,6 +1967,7 @@ export default function HomePage() {
       setAgentScorecardPublications([]);
       setAgentScorecardReadiness(null);
       setAgentScorecardReminder(null);
+      setAgentScorecardReminderRun(null);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -5031,6 +5035,38 @@ export default function HomePage() {
             ? `Sent ${reminder.period_label} scorecard reminder to ${reminder.recipient_count} people`
             : `Prepared ${reminder.period_label} scorecard reminder without recipients`,
           reminder.delivered ? "good" : "neutral"
+        );
+      }
+    );
+  };
+
+  const runAgentScorecardReminderAutomation = () => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "agent-scorecard-reminder-run",
+      () =>
+        apiRequest<AgentScorecardPublicationReminderRunRead>("/agents/ethical-scorecard/publications/reminder-run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            channel: "email" as CommunicationChannel,
+            due_within_days: 14,
+            send_reminders: true
+          }
+        }),
+      (run) => {
+        setAgentScorecardReminderRun(run);
+        if (run.reminder) {
+          setAgentScorecardReminder(run.reminder);
+        }
+        addLog(
+          run.sent
+            ? `AI scorecard reminder run sent ${run.recipient_count} reminders`
+            : `AI scorecard reminder run skipped ${run.period_label}`,
+          run.sent ? "good" : "neutral"
         );
       }
     );
@@ -11928,6 +11964,18 @@ export default function HomePage() {
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={deliverAgentScorecardReminder}>Send reminder</button>
+                    <button type="button" onClick={runAgentScorecardReminderAutomation}>Run due check</button>
+                  </div>
+                </article>
+              ) : null}
+              {agentScorecardReminderRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{agentScorecardReminderRun.period_label} reminder run · {agentScorecardReminderRun.sent ? "sent" : "skipped"}</strong>
+                    <span>
+                      Due by {new Date(agentScorecardReminderRun.due_by).toLocaleDateString()} · {agentScorecardReminderRun.recipient_count} recipients · {agentScorecardReminderRun.readiness_status}
+                    </span>
+                    <span>{agentScorecardReminderRun.skipped_reason ?? "Due-window reminder was delivered."}</span>
                   </div>
                 </article>
               ) : null}

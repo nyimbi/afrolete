@@ -2694,6 +2694,20 @@ export type AgentScorecardPublicationReminderRead = {
   failure_reason: string | null;
 };
 
+export type AgentScorecardPublicationReminderRunRead = {
+  organization_id: UUID;
+  due_by: string;
+  period_label: string;
+  due: boolean;
+  current_period_published: boolean;
+  readiness_status: string;
+  sent: boolean;
+  skipped_reason: string | null;
+  recipient_count: number;
+  message_id: UUID | null;
+  reminder: AgentScorecardPublicationReminderRead | null;
+};
+
 export type AgentScorecardPublicationReadinessRead = {
   organization_id: UUID;
   current_period_label: string;

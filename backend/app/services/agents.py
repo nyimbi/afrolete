@@ -47,6 +47,7 @@ from app.schemas.agent import (
     AgentScorecardCommentUpdate,
     AgentScorecardPublicationCreate,
     AgentScorecardPublicationReminderCreate,
+    AgentScorecardPublicationReminderRunCreate,
     AgentTaskCreate,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
@@ -1161,6 +1162,55 @@ async def deliver_agent_scorecard_publication_reminder(
         "scheduled_for": payload.scheduled_for,
         "delivered": True,
         "failure_reason": None,
+    }
+
+
+async def run_agent_scorecard_publication_reminder(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentScorecardPublicationReminderRunCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, payload.organization_id)
+    now = datetime.now(UTC)
+    due_by = now + timedelta(days=payload.due_within_days)
+    readiness = await agent_scorecard_publication_readiness(db, payload.organization_id)
+    due_at = readiness["next_publication_due_at"]
+    due = (
+        not readiness["current_period_published"]
+        and isinstance(due_at, datetime)
+        and due_at <= due_by
+    )
+    skipped_reason: str | None = None
+    reminder: dict[str, object] | None = None
+    if due and payload.send_reminders:
+        reminder = await deliver_agent_scorecard_publication_reminder(
+            db,
+            identity,
+            AgentScorecardPublicationReminderCreate(
+                organization_id=payload.organization_id,
+                channel=payload.channel,
+                send_to_managers=True,
+            ),
+            authz,
+        )
+    elif not due:
+        skipped_reason = "Current period is already published or outside the configured due window."
+    elif not payload.send_reminders:
+        skipped_reason = "Reminder run was evaluated without sending messages."
+
+    return {
+        "organization_id": payload.organization_id,
+        "due_by": due_by,
+        "period_label": readiness["current_period_label"],
+        "due": due,
+        "current_period_published": readiness["current_period_published"],
+        "readiness_status": readiness["readiness_status"],
+        "sent": bool(reminder and reminder["delivered"]),
+        "skipped_reason": skipped_reason or (reminder["failure_reason"] if reminder else None),
+        "recipient_count": int(reminder["recipient_count"]) if reminder else 0,
+        "message_id": reminder["message_id"] if reminder else None,
+        "reminder": reminder,
     }
 
 

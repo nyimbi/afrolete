@@ -437,6 +437,27 @@ class AgentScorecardPublicationReminderRead(BaseModel):
     failure_reason: str | None
 
 
+class AgentScorecardPublicationReminderRunCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    due_within_days: int = Field(default=14, ge=1, le=120)
+    send_reminders: bool = True
+
+
+class AgentScorecardPublicationReminderRunRead(BaseModel):
+    organization_id: UUID
+    due_by: datetime
+    period_label: str
+    due: bool
+    current_period_published: bool
+    readiness_status: str
+    sent: bool
+    skipped_reason: str | None
+    recipient_count: int
+    message_id: UUID | None
+    reminder: AgentScorecardPublicationReminderRead | None
+
+
 class AgentScorecardPublicationReadinessRead(BaseModel):
     organization_id: UUID
     current_period_label: str
