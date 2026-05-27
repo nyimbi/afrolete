@@ -22,6 +22,8 @@ from app.schemas.event import (
     EventTravelConsentRequestCreate,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
+    EventTravelLocationUpdateCreate,
+    EventTravelLocationUpdateRead,
     EventTravelManifestRead,
     EventTravelPlanCreate,
     EventTravelPlanRead,
@@ -40,11 +42,13 @@ from app.services.events import (
     create_event,
     dispatch_weather_assessment_alert,
     create_travel_approval,
+    create_travel_location_update,
     generate_travel_fee_invoices,
     get_event,
     get_travel_manifest,
     list_attendance,
     list_travel_checklist_items,
+    list_travel_location_updates,
     list_travel_approvals,
     list_events,
     list_travel_plans,
@@ -430,6 +434,31 @@ async def update_travel_checklist_item_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelChecklistItemRead:
     return await update_travel_checklist_item(db, identity, checklist_item_id, payload, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/location-updates", response_model=list[EventTravelLocationUpdateRead])
+async def list_travel_location_updates_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EventTravelLocationUpdateRead]:
+    return await list_travel_location_updates(db, identity, travel_plan_id, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/location-updates",
+    response_model=EventTravelLocationUpdateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_travel_location_update_route(
+    travel_plan_id: UUID,
+    payload: EventTravelLocationUpdateCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelLocationUpdateRead:
+    return await create_travel_location_update(db, identity, travel_plan_id, payload, authz)
 
 
 @router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])

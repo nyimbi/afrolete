@@ -144,6 +144,23 @@ class EventTravelChecklistItem(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class EventTravelLocationUpdate(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_location_updates"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    travel_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("event_travel_plans.id"), index=True)
+    phase: Mapped[str] = mapped_column(String(40), default="en_route", nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(80), default="manual", nullable=False, index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    recorded_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    latitude: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
+    longitude: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
+    speed_kph: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    heading_degrees: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    notification_message_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("communication_messages.id"), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class AttendanceRecord(IdMixin, TimestampMixin, Base):
     __tablename__ = "attendance_records"
     __table_args__ = (UniqueConstraint("event_id", "person_id"),)

@@ -280,6 +280,36 @@ class EventTravelChecklistItemRead(BaseModel):
     notes: str | None
 
 
+class EventTravelLocationUpdateCreate(BaseModel):
+    phase: str = Field(default="en_route", pattern="^(departed|en_route|delayed|arrived|returned)$")
+    source: str = Field(default="manual", min_length=2, max_length=80)
+    recorded_at: datetime | None = None
+    latitude: Decimal = Field(ge=-90, le=90, max_digits=9, decimal_places=6)
+    longitude: Decimal = Field(ge=-180, le=180, max_digits=9, decimal_places=6)
+    speed_kph: Decimal | None = Field(default=None, ge=0, max_digits=6, decimal_places=2)
+    heading_degrees: Decimal | None = Field(default=None, ge=0, le=360, max_digits=6, decimal_places=2)
+    notify_guardians: bool = True
+    channel: CommunicationChannel = CommunicationChannel.PUSH
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelLocationUpdateRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    travel_plan_id: UUID
+    phase: str
+    source: str
+    recorded_at: datetime
+    recorded_by_person_id: UUID | None
+    latitude: Decimal
+    longitude: Decimal
+    speed_kph: Decimal | None
+    heading_degrees: Decimal | None
+    notification_message_id: UUID | None
+    notification_recipient_count: int = 0
+    notes: str | None
+
+
 class AttendanceRecordUpsert(BaseModel):
     person_id: UUID
     status: AttendanceStatus

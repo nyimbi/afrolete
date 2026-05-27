@@ -556,6 +556,23 @@ export type EventTravelChecklistItemRead = {
   notes: string | null;
 };
 
+export type EventTravelLocationUpdateRead = {
+  id: UUID;
+  organization_id: UUID;
+  travel_plan_id: UUID;
+  phase: string;
+  source: string;
+  recorded_at: string;
+  recorded_by_person_id: UUID | null;
+  latitude: string;
+  longitude: string;
+  speed_kph: string | null;
+  heading_degrees: string | null;
+  notification_message_id: UUID | null;
+  notification_recipient_count: number;
+  notes: string | null;
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

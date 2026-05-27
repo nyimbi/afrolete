@@ -76,6 +76,7 @@ import type {
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
   EventTravelFeeInvoiceBatchRead,
+  EventTravelLocationUpdateRead,
   EventTravelManifestRead,
   EventTravelPlanRead,
   EventWeatherAlertRead,
@@ -353,6 +354,7 @@ export default function HomePage() {
   const [travelFeeBatch, setTravelFeeBatch] = useState<EventTravelFeeInvoiceBatchRead | null>(null);
   const [travelApprovals, setTravelApprovals] = useState<EventTravelApprovalRead[]>([]);
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
+  const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -582,6 +584,13 @@ export default function HomePage() {
     reminder_channel: "email" as CommunicationChannel,
     approval_level: "school",
     checklist_type: "pre_trip_inspection",
+    tracking_phase: "departed",
+    tracking_source: "manual GPS",
+    latitude: -1.2921,
+    longitude: 36.8219,
+    speed_kph: 45,
+    heading_degrees: 90,
+    tracking_channel: "push" as CommunicationChannel,
     notes: "Away match travel plan."
   });
   const [guardianForm, setGuardianForm] = useState({
@@ -1586,6 +1595,7 @@ export default function HomePage() {
       setTravelFeeBatch(null);
       setTravelApprovals([]);
       setTravelChecklistItems([]);
+      setTravelLocationUpdates([]);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1793,6 +1803,7 @@ export default function HomePage() {
       setTravelFeeBatch(null);
       setTravelApprovals([]);
       setTravelChecklistItems([]);
+      setTravelLocationUpdates([]);
       return;
     }
     runAction(
@@ -2568,6 +2579,56 @@ export default function HomePage() {
           ...current.filter((entry) => entry.id !== updated.id)
         ]);
         addLog(`${updated.item_label}: ${updated.status}`, updated.status === "completed" ? "good" : "bad");
+      }
+    );
+  };
+
+  const loadTravelLocationUpdates = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-location-updates-${plan.id}`,
+      () => apiRequest<EventTravelLocationUpdateRead[]>(`/events/travel-plans/${plan.id}/location-updates`, { identity }),
+      (updates) => {
+        setTravelLocationUpdates(updates);
+        addLog(`Travel tracking loaded: ${updates.length} updates`, "good");
+      }
+    );
+  };
+
+  const recordTravelLocationUpdate = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-location-update-${plan.id}`,
+      () =>
+        apiRequest<EventTravelLocationUpdateRead>(`/events/travel-plans/${plan.id}/location-updates`, {
+          method: "POST",
+          identity,
+          body: {
+            phase: travelForm.tracking_phase,
+            source: travelForm.tracking_source,
+            recorded_at: new Date().toISOString(),
+            latitude: String(travelForm.latitude),
+            longitude: String(travelForm.longitude),
+            speed_kph: String(travelForm.speed_kph),
+            heading_degrees: String(travelForm.heading_degrees),
+            notify_guardians: true,
+            channel: travelForm.tracking_channel,
+            notes: `Travel ${travelForm.tracking_phase} update for ${plan.destination}.`
+          }
+        }),
+      (update) => {
+        setTravelLocationUpdates((current) => [
+          update,
+          ...current.filter((item) => item.id !== update.id)
+        ]);
+        addLog(
+          `Travel ${update.phase} at ${update.latitude}, ${update.longitude}`,
+          update.notification_recipient_count > 0 ? "good" : "neutral"
+        );
+        if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
+        }
+        if (selectedEventId) {
+          void loadTravelPlans(selectedEventId);
+        }
       }
     );
   };
@@ -6806,6 +6867,39 @@ export default function HomePage() {
                   <option value="emergency">Emergency</option>
                 </select>
               </label>
+              <label>
+                Tracking phase
+                <select value={travelForm.tracking_phase} onChange={(event) => setTravelForm({ ...travelForm, tracking_phase: event.target.value })}>
+                  <option value="departed">Departed</option>
+                  <option value="en_route">En route</option>
+                  <option value="delayed">Delayed</option>
+                  <option value="arrived">Arrived</option>
+                  <option value="returned">Returned</option>
+                </select>
+              </label>
+              <label>
+                Tracking channel
+                <select value={travelForm.tracking_channel} onChange={(event) => setTravelForm({ ...travelForm, tracking_channel: event.target.value as CommunicationChannel })}>
+                  <option value="push">Push</option>
+                  <option value="in_app">In app</option>
+                  <option value="sms">SMS</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="email">Email</option>
+                </select>
+              </label>
+              <label>
+                Latitude
+                <input type="number" step="0.000001" value={travelForm.latitude} onChange={(event) => setTravelForm({ ...travelForm, latitude: Number(event.target.value) })} />
+              </label>
+              <label>
+                Longitude
+                <input type="number" step="0.000001" value={travelForm.longitude} onChange={(event) => setTravelForm({ ...travelForm, longitude: Number(event.target.value) })} />
+              </label>
+              <label>
+                Speed kph
+                <input type="number" min="0" value={travelForm.speed_kph} onChange={(event) => setTravelForm({ ...travelForm, speed_kph: Number(event.target.value) })} />
+              </label>
               <label className="wide-field">
                 Route
                 <input value={travelForm.route_summary} onChange={(event) => setTravelForm({ ...travelForm, route_summary: event.target.value })} />
@@ -6883,6 +6977,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {travelLocationUpdates.slice(0, 3).map((update) => (
+                <article className="task-card" key={update.id}>
+                  <div>
+                    <strong>{update.phase} · {update.source}</strong>
+                    <span>{update.latitude}, {update.longitude} · {update.speed_kph ?? "n/a"} kph</span>
+                    <span>{update.notification_recipient_count} notified · {new Date(update.recorded_at).toLocaleString()}</span>
+                  </div>
+                </article>
+              ))}
               {travelPlans.slice(0, 2).map((plan) => (
                 <article key={plan.id} className="task-card">
                   <div>
@@ -6899,6 +7002,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => loadTravelApprovals(plan)}>Approvals</button>
                     <button type="button" onClick={() => seedTravelChecklist(plan)}>Inspect</button>
                     <button type="button" onClick={() => loadTravelChecklist(plan)}>Checklist</button>
+                    <button type="button" onClick={() => recordTravelLocationUpdate(plan)}>Track</button>
+                    <button type="button" onClick={() => loadTravelLocationUpdates(plan)}>Route</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "completed")}>Complete</button>

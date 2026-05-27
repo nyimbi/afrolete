@@ -16,6 +16,7 @@ from app.models.enums import (
     CommunicationScopeType,
     MedicalClearanceStatus,
     ParticipationClearanceStatus,
+    TravelPlanStatus,
     TravelRiskLevel,
     WeatherAlertLevel,
     WeatherDecision,
@@ -26,6 +27,7 @@ from app.models.event import (
     Event,
     EventTravelApproval,
     EventTravelChecklistItem,
+    EventTravelLocationUpdate,
     EventTravelPlan,
     EventWeatherAssessment,
 )
@@ -50,6 +52,8 @@ from app.schemas.event import (
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelFeeInvoiceItemRead,
+    EventTravelLocationUpdateCreate,
+    EventTravelLocationUpdateRead,
     EventTravelManifestParticipantRead,
     EventTravelManifestRead,
     EventTravelPlanCreate,
@@ -766,6 +770,93 @@ async def update_travel_checklist_item(
     return travel_checklist_item_read(item)
 
 
+async def list_travel_location_updates(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> list[EventTravelLocationUpdateRead]:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    rows = (
+        await db.scalars(
+            select(EventTravelLocationUpdate)
+            .where(EventTravelLocationUpdate.travel_plan_id == plan.id)
+            .order_by(EventTravelLocationUpdate.recorded_at.desc())
+        )
+    ).all()
+    return [await travel_location_update_read(db, item) for item in rows]
+
+
+async def create_travel_location_update(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelLocationUpdateCreate,
+    authz: AuthorizationService,
+) -> EventTravelLocationUpdateRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+
+    update = EventTravelLocationUpdate(
+        organization_id=plan.organization_id,
+        travel_plan_id=plan.id,
+        phase=payload.phase,
+        source=payload.source,
+        recorded_at=payload.recorded_at or datetime.now(UTC),
+        recorded_by_person_id=identity.person_id,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        speed_kph=payload.speed_kph,
+        heading_degrees=payload.heading_degrees,
+        notes=payload.notes,
+    )
+    db.add(update)
+    await db.flush()
+
+    if payload.phase in {"departed", "en_route", "delayed"} and plan.status not in {
+        TravelPlanStatus.COMPLETED,
+        TravelPlanStatus.CANCELLED,
+    }:
+        plan.status = TravelPlanStatus.IN_PROGRESS
+    if payload.phase == "arrived":
+        plan.status = TravelPlanStatus.IN_PROGRESS
+    if payload.phase == "returned":
+        plan.status = TravelPlanStatus.COMPLETED
+
+    if payload.notify_guardians and payload.phase in {"departed", "delayed", "arrived", "returned"}:
+        message = await create_message(
+            db,
+            identity,
+            CommunicationMessageCreate(
+                organization_id=event.organization_id,
+                message_type=CommunicationMessageType.ALERT
+                if payload.phase in {"delayed"}
+                else CommunicationMessageType.REMINDER,
+                channel=payload.channel,
+                scope_type=CommunicationScopeType.EVENT,
+                scope_id=event.id,
+                subject=travel_location_subject(event, plan, payload.phase),
+                body=travel_location_body(event, plan, update),
+                urgent=payload.phase == "delayed",
+                quiet_hours_override=payload.phase == "delayed",
+                copy_guardians_for_minors=True,
+            ),
+            authz,
+        )
+        update.notification_message_id = message.id
+        await db.flush()
+
+    await db.commit()
+    await db.refresh(update)
+    return await travel_location_update_read(db, update)
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -943,6 +1034,63 @@ def travel_checklist_item_read(item: EventTravelChecklistItem) -> EventTravelChe
         evidence_url=item.evidence_url,
         notes=item.notes,
     )
+
+
+async def travel_location_update_read(
+    db: AsyncSession,
+    update: EventTravelLocationUpdate,
+) -> EventTravelLocationUpdateRead:
+    recipient_count = 0
+    if update.notification_message_id is not None:
+        recipient_count = int(
+            await db.scalar(
+                select(func.count(MessageRecipient.id)).where(
+                    MessageRecipient.message_id == update.notification_message_id
+                )
+            )
+            or 0
+        )
+    return EventTravelLocationUpdateRead(
+        id=update.id,
+        organization_id=update.organization_id,
+        travel_plan_id=update.travel_plan_id,
+        phase=update.phase,
+        source=update.source,
+        recorded_at=update.recorded_at,
+        recorded_by_person_id=update.recorded_by_person_id,
+        latitude=update.latitude,
+        longitude=update.longitude,
+        speed_kph=update.speed_kph,
+        heading_degrees=update.heading_degrees,
+        notification_message_id=update.notification_message_id,
+        notification_recipient_count=recipient_count,
+        notes=update.notes,
+    )
+
+
+def travel_location_subject(event: Event, plan: EventTravelPlan, phase: str) -> str:
+    label = {
+        "departed": "departed",
+        "delayed": "delayed",
+        "arrived": "arrived",
+        "returned": "returned",
+    }.get(phase, "updated")
+    return f"{event.title} travel {label}"[:240]
+
+
+def travel_location_body(event: Event, plan: EventTravelPlan, update: EventTravelLocationUpdate) -> str:
+    parts = [
+        f"Travel update for {event.title}.",
+        f"Destination: {plan.destination}.",
+        f"Status: {update.phase}.",
+        f"Location: {update.latitude}, {update.longitude}.",
+        f"Recorded: {update.recorded_at.isoformat()}.",
+    ]
+    if update.speed_kph is not None:
+        parts.append(f"Speed: {update.speed_kph} kph.")
+    if update.notes:
+        parts.append(update.notes)
+    return "\n".join(parts)[:4000]
 
 
 def travel_consent_notes(event: Event, plan: EventTravelPlan) -> str:
