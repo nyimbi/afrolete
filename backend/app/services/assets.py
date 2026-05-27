@@ -29,11 +29,17 @@ from app.schemas.assets import (
     AssetSummaryRead,
     EquipmentCheckoutCreate,
     EquipmentCheckoutReturn,
+    EquipmentLeaseQuoteRead,
+    EquipmentPhotoUpdate,
+    EquipmentScanRead,
     EquipmentItemCreate,
     FacilityBookingCreate,
     FacilityCreate,
     MaintenanceWorkOrderCreate,
     MaintenanceWorkOrderUpdate,
+    ProcurementRecommendationRead,
+    SupplierScoreRead,
+    AssetUtilizationRecommendationRead,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
@@ -126,6 +132,46 @@ async def list_equipment_items(
     if team_id is not None:
         statement = statement.where(EquipmentItem.team_id == team_id)
     return list((await db.scalars(statement.order_by(EquipmentItem.category, EquipmentItem.name))).all())
+
+
+async def scan_equipment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    scanned_code: str,
+    authz: AuthorizationService,
+) -> EquipmentScanRead:
+    await ensure_manage_assets(authz, identity, organization_id)
+    code = scanned_code.strip()
+    item = await db.scalar(
+        select(EquipmentItem)
+        .where(EquipmentItem.organization_id == organization_id)
+        .where((EquipmentItem.tag_code == code) | (EquipmentItem.serial_number == code))
+    )
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipment not found")
+    return EquipmentScanRead(
+        scanned_code=code,
+        match_type="tag_code" if item.tag_code == code else "serial_number",
+        item=equipment_item_read(item),
+    )
+
+
+async def update_equipment_photo(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    equipment_item_id: UUID,
+    payload: EquipmentPhotoUpdate,
+    authz: AuthorizationService,
+) -> EquipmentItem:
+    item = await get_equipment(db, equipment_item_id)
+    await ensure_manage_assets(authz, identity, item.organization_id)
+    item.photo_url = payload.photo_url
+    if payload.notes is not None:
+        item.notes = payload.notes
+    await db.commit()
+    await db.refresh(item)
+    return item
 
 
 async def checkout_equipment(
@@ -354,6 +400,164 @@ async def asset_summary(db: AsyncSession, organization_id: UUID) -> AssetSummary
     )
 
 
+async def procurement_recommendations(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[ProcurementRecommendationRead]:
+    equipment = await list_equipment_items(db, organization_id)
+    recommendations = []
+    for item in equipment:
+        if item.quantity_available > item.reorder_point:
+            continue
+        target_stock = max(item.min_stock_level, item.reorder_point * 2, item.quantity_total)
+        recommended_quantity = max(target_stock - item.quantity_available, 1)
+        unit_value = item.unit_value or Decimal("0")
+        urgency = "critical" if item.quantity_available <= item.min_stock_level else "reorder"
+        recommendations.append(
+            ProcurementRecommendationRead(
+                equipment_item_id=item.id,
+                item_name=item.name,
+                category=item.category,
+                quantity_available=item.quantity_available,
+                reorder_point=item.reorder_point,
+                recommended_quantity=recommended_quantity,
+                estimated_cost=(unit_value * recommended_quantity).quantize(Decimal("0.01")),
+                supplier_hint=item.brand or item.category,
+                urgency=urgency,
+                rationale=(
+                    f"{item.name} has {item.quantity_available} available against reorder point "
+                    f"{item.reorder_point}."
+                ),
+            )
+        )
+    return recommendations
+
+
+async def supplier_scorecard(db: AsyncSession, organization_id: UUID) -> list[SupplierScoreRead]:
+    work_orders = [work_order for work_order in await list_work_orders(db, organization_id) if work_order.vendor]
+    grouped: dict[str, list[MaintenanceWorkOrder]] = {}
+    for work_order in work_orders:
+        grouped.setdefault(work_order.vendor or "Unknown", []).append(work_order)
+
+    scorecards = []
+    for supplier_name, orders in sorted(grouped.items()):
+        estimated = sum((order.estimated_cost or Decimal("0")) for order in orders)
+        actual = sum((order.actual_cost or Decimal("0")) for order in orders)
+        completed = sum(1 for order in orders if order.status == WorkOrderStatus.COMPLETED)
+        safety = sum(1 for order in orders if order.safety_related)
+        variance_penalty = 0
+        if estimated > 0 and actual > estimated:
+            variance_penalty = min(int(((actual - estimated) / estimated) * 100), 35)
+        completion_bonus = int((completed / len(orders)) * 20)
+        score = max(0, min(100, 70 + completion_bonus - variance_penalty))
+        scorecards.append(
+            SupplierScoreRead(
+                supplier_name=supplier_name,
+                work_orders=len(orders),
+                completed_orders=completed,
+                safety_orders=safety,
+                estimated_cost=estimated.quantize(Decimal("0.01")),
+                actual_cost=actual.quantize(Decimal("0.01")),
+                score=score,
+                recommendation=supplier_recommendation(score),
+            )
+        )
+    return scorecards
+
+
+async def equipment_lease_quote(
+    db: AsyncSession,
+    organization_id: UUID,
+    equipment_item_id: UUID,
+    quantity: int,
+    term_months: int,
+) -> EquipmentLeaseQuoteRead:
+    item = await get_equipment_for_organization(db, equipment_item_id, organization_id)
+    unit_value = item.unit_value or Decimal("0")
+    depreciation = item.depreciation_rate or Decimal("20")
+    asset_value = unit_value * quantity
+    monthly_factor = Decimal("0.035") + (depreciation / Decimal("100") / Decimal("24"))
+    monthly_amount = (asset_value * monthly_factor).quantize(Decimal("0.01"))
+    total_amount = (monthly_amount * term_months).quantize(Decimal("0.01"))
+    residual_value = max(asset_value - total_amount, Decimal("0")).quantize(Decimal("0.01"))
+    return EquipmentLeaseQuoteRead(
+        equipment_item_id=item.id,
+        item_name=item.name,
+        quantity=quantity,
+        term_months=term_months,
+        monthly_amount=monthly_amount,
+        total_amount=total_amount,
+        residual_value=residual_value,
+        rationale=(
+            "Lease estimate combines replacement value, expected depreciation, and a platform "
+            "utilization factor for planning."
+        ),
+    )
+
+
+async def utilization_recommendations(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[AssetUtilizationRecommendationRead]:
+    equipment = await list_equipment_items(db, organization_id)
+    checkouts = await list_checkouts(db, organization_id)
+    work_orders = await list_work_orders(db, organization_id)
+    now = datetime.now(UTC)
+    recommendations: list[AssetUtilizationRecommendationRead] = []
+
+    for item in equipment:
+        if item.quantity_available <= item.reorder_point:
+            recommendations.append(
+                AssetUtilizationRecommendationRead(
+                    target_type="equipment",
+                    target_id=item.id,
+                    title=f"Reorder {item.name}",
+                    severity="high",
+                    recommendation="Create a procurement order before the next training cycle.",
+                    expected_impact="Prevents session disruption from low stock.",
+                )
+            )
+        elif item.quantity_available == item.quantity_total and item.quantity_total > 1:
+            recommendations.append(
+                AssetUtilizationRecommendationRead(
+                    target_type="equipment",
+                    target_id=item.id,
+                    title=f"Put {item.name} into circulation",
+                    severity="medium",
+                    recommendation="Assign the surplus to teams or bundle it into checkout kits.",
+                    expected_impact="Improves utilization of already-owned assets.",
+                )
+            )
+
+    for checkout in checkouts:
+        if checkout.status == CheckoutStatus.CHECKED_OUT and is_before_now(checkout.due_at, now):
+            recommendations.append(
+                AssetUtilizationRecommendationRead(
+                    target_type="checkout",
+                    target_id=checkout.id,
+                    title="Recover overdue equipment",
+                    severity="high",
+                    recommendation="Notify the borrower and block further checkout until returned.",
+                    expected_impact="Improves asset availability and accountability.",
+                )
+            )
+
+    for work_order in work_orders:
+        if work_order.safety_related and work_order.status != WorkOrderStatus.COMPLETED:
+            recommendations.append(
+                AssetUtilizationRecommendationRead(
+                    target_type="work_order",
+                    target_id=work_order.id,
+                    title=f"Close safety work: {work_order.title}",
+                    severity="critical",
+                    recommendation="Prioritize this work order before facility or equipment use.",
+                    expected_impact="Reduces safety and compliance risk.",
+                )
+            )
+
+    return recommendations[:20]
+
+
 async def get_organization(db: AsyncSession, organization_id: UUID) -> Organization:
     organization = await db.get(Organization, organization_id)
     if organization is None:
@@ -379,6 +583,13 @@ async def get_equipment_for_organization(
 ) -> EquipmentItem:
     item = await db.get(EquipmentItem, equipment_item_id)
     if item is None or item.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipment not found")
+    return item
+
+
+async def get_equipment(db: AsyncSession, equipment_item_id: UUID) -> EquipmentItem:
+    item = await db.get(EquipmentItem, equipment_item_id)
+    if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipment not found")
     return item
 
@@ -465,6 +676,45 @@ async def ensure_facility_available(
 
 def equipment_status_for_quantity(quantity_available: int) -> EquipmentStatus:
     return EquipmentStatus.AVAILABLE if quantity_available > 0 else EquipmentStatus.CHECKED_OUT
+
+
+def equipment_item_read(item: EquipmentItem):
+    from app.schemas.assets import EquipmentItemRead
+
+    return EquipmentItemRead(
+        id=item.id,
+        organization_id=item.organization_id,
+        facility_id=item.facility_id,
+        team_id=item.team_id,
+        name=item.name,
+        category=item.category,
+        subcategory=item.subcategory,
+        brand=item.brand,
+        model=item.model,
+        tag_code=item.tag_code,
+        serial_number=item.serial_number,
+        quantity_total=item.quantity_total,
+        quantity_available=item.quantity_available,
+        condition=item.condition,
+        status=item.status,
+        storage_location=item.storage_location,
+        min_stock_level=item.min_stock_level,
+        reorder_point=item.reorder_point,
+        unit_value=item.unit_value,
+        depreciation_rate=item.depreciation_rate,
+        warranty_expires_on=item.warranty_expires_on,
+        last_audit_on=item.last_audit_on,
+        photo_url=item.photo_url,
+        notes=item.notes,
+    )
+
+
+def supplier_recommendation(score: int) -> str:
+    if score >= 85:
+        return "Preferred supplier for renewals and urgent work."
+    if score >= 65:
+        return "Usable supplier; monitor cost and completion variance."
+    return "Review supplier before assigning critical work."
 
 
 def is_before_now(value: datetime, now: datetime) -> bool:

@@ -385,6 +385,25 @@ athlete-development platform:
     `uv run pytest tests/unit/test_communications.py -q` (5/5),
     `uv run pytest` (44/44), `pnpm --filter @afrolete/frontend typecheck`,
     `pnpm --filter @afrolete/frontend build`, `git diff --check`.
+- Implemented slice 022 asset procurement, scan, supplier, lease, and
+  utilization intelligence:
+  - Added RFID/barcode-style equipment scan lookup by tag code or serial number
+    with organization scoping and manager authorization.
+  - Added equipment photo metadata updates for audit/photo capture workflows.
+  - Added procurement recommendations from reorder points, minimum stock,
+    available quantity, unit value, and supplier hints.
+  - Added supplier scorecards from maintenance vendor work orders, completion
+    rates, safety work, estimated cost, and actual cost variance.
+  - Added lease quote estimates for equipment planning using replacement value,
+    depreciation, quantity, and term.
+  - Added asset utilization recommendations for low stock, unused stock,
+    overdue checkouts, and open safety work orders.
+  - Extended the operations console with Scan, Photo, Lease, procurement,
+    supplier, and utilization controls.
+  - Verification: `uv run ruff check .`,
+    `uv run pytest tests/unit/test_assets.py -q` (4/4),
+    `uv run pytest` (45/45), `pnpm --filter @afrolete/frontend typecheck`,
+    `pnpm --filter @afrolete/frontend build`, `git diff --check`.
 
 ## Implementation Slices
 
@@ -412,6 +431,7 @@ athlete-development platform:
 | 019 - Communication delivery adapters | Partial | Backend ruff; communications tests 4/4; frontend typecheck | Configurable HTTP webhook dispatch, channel-specific adapter URLs, secured provider delivery callbacks, in-app delivery handling, failure capture, and console dispatch are implemented; real provider credentials and background delivery hardening remain. |
 | 020 - Agent task execution fast surface | Partial | Backend ruff; agent tests 2/2; frontend typecheck | Agent tasks can now execute through a deterministic local executor or provider-neutral webhook boundary, produce output refs/review notes, and update console task state; live provider workers, model credential vaulting, run history tables, and governance telemetry remain. |
 | 021 - Communication inbox, digests, and AI drafting | Partial | Backend tests 44/44; frontend typecheck/build | Person inbox, manager/self access, digest generation, notification-preference channel selection, deterministic AI-assisted drafts, console draft/digest/inbox controls, and read actions are implemented; provider-specific credentials, background digest scheduler, and full parent portal remain. |
+| 022 - Asset procurement and utilization intelligence | Partial | Backend tests 45/45; frontend typecheck/build | Scan lookup, photo metadata updates, procurement recommendations, supplier scorecards, lease quotes, utilization recommendations, and console controls are implemented; supplier ordering workflows, file uploads, RFID hardware integration, and accounting lease billing remain. |
 
 ## Capability Coverage
 
@@ -434,7 +454,7 @@ Status values:
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, and console workflows are implemented; automated fixture generation, bracket visualization, advanced conflict resolution, ticketing, and broadcast operations remain. |
 | Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, digest generation, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, background digest scheduler, and full parent portal remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
-| Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, and console workflows are implemented; procurement, supplier scoring, RFID scanning, photo upload, lease billing, and AI utilization optimization remain. |
+| Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, scan lookup, photo metadata, procurement recommendations, supplier scorecards, lease quotes, utilization recommendations, and console workflows are implemented; supplier ordering workflows, real file uploads, RFID hardware integration, and accounting lease billing remain. |
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, commercial summary, and console workflows are implemented; payment gateway settlement, refunds, tax, accounting exports, sponsorship dashboards, and full verification remain. |
 | Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, and console workflows are implemented; real AI model execution, rendered PDF/Excel generation, charts, benchmark models, and full verification remain. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation, frontend PKCE session handling, and SpiceDB gRPC authorization adapter are implemented; live service smoke tests and other integrations remain future slices. |
@@ -449,8 +469,8 @@ Status values:
    SpiceDB key.
 3. Add provider-specific communication credentials, background digest scheduler,
    and full parent portal/inbox experience.
-4. Add procurement, supplier scoring, RFID/barcode scan flows, photo uploads,
-   lease billing, and AI utilization recommendations for assets and facilities.
+4. Add supplier ordering workflows, real file uploads, RFID hardware
+   integration, and accounting lease billing for assets and facilities.
 5. Add payment gateway settlement, refunds, tax handling, accounting exports,
    sponsorship dashboards, and commercial reporting verification.
 6. Add rendered PDF/Excel report generation, chart visualizations, benchmark

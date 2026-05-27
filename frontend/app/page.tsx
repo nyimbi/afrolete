@@ -18,6 +18,7 @@ import type {
   AgentTaskStatus,
   AssetCondition,
   AssetSummaryRead,
+  AssetUtilizationRecommendationRead,
   AthleteAssessmentRead,
   AthletePerformanceSummaryRead,
   AttendanceRecordRead,
@@ -50,6 +51,8 @@ import type {
   EventType,
   EquipmentCheckoutRead,
   EquipmentItemRead,
+  EquipmentLeaseQuoteRead,
+  EquipmentScanRead,
   FacilityBookingRead,
   FacilityRead,
   FacilityType,
@@ -79,6 +82,7 @@ import type {
   NotificationFrequency,
   NotificationPreferenceRead,
   PredictiveRiskScoreRead,
+  ProcurementRecommendationRead,
   ReportCategory,
   ReportDefinitionRead,
   ReportExportJobRead,
@@ -90,6 +94,7 @@ import type {
   ScheduledReportRead,
   SponsorRead,
   SponsorshipAgreementRead,
+  SupplierScoreRead,
   SportFormat,
   SubscriptionRead,
   TeamRead,
@@ -167,6 +172,10 @@ export default function HomePage() {
   const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [assetSummary, setAssetSummary] = useState<AssetSummaryRead | null>(null);
+  const [procurementRecommendations, setProcurementRecommendations] = useState<ProcurementRecommendationRead[]>([]);
+  const [supplierScores, setSupplierScores] = useState<SupplierScoreRead[]>([]);
+  const [assetUtilization, setAssetUtilization] = useState<AssetUtilizationRecommendationRead[]>([]);
+  const [leaseQuote, setLeaseQuote] = useState<EquipmentLeaseQuoteRead | null>(null);
   const [sponsors, setSponsors] = useState<SponsorRead[]>([]);
   const [sponsorships, setSponsorships] = useState<SponsorshipAgreementRead[]>([]);
   const [campaigns, setCampaigns] = useState<FundraisingCampaignRead[]>([]);
@@ -404,11 +413,13 @@ export default function HomePage() {
     brand: "Nike",
     model: "Premier League Match Ball",
     tag_code: "BALL-SET-001",
+    serial_number: "SER-BALL-001",
     quantity_total: 24,
     min_stock_level: 10,
     reorder_point: 8,
     unit_value: 50,
     depreciation_rate: 20,
+    photo_url: "https://cdn.afrolete.local/assets/ball-set.jpg",
     storage_location: "Equipment Room A, Shelf 3",
     condition: "good" as AssetCondition
   });
@@ -774,21 +785,40 @@ export default function HomePage() {
 
   const loadAssets = useCallback(async (organizationId: string, facilityId?: string) => {
     const facilityQuery = facilityId ? `&facility_id=${facilityId}` : "";
-    const [facilityData, equipmentData, checkoutData, workOrderData, bookingData, summaryData] =
-      await Promise.all([
-        apiRequest<FacilityRead[]>(`/assets/facilities?organization_id=${organizationId}`),
-        apiRequest<EquipmentItemRead[]>(`/assets/equipment?organization_id=${organizationId}${facilityQuery}`),
-        apiRequest<EquipmentCheckoutRead[]>(`/assets/checkouts?organization_id=${organizationId}`),
-        apiRequest<MaintenanceWorkOrderRead[]>(`/assets/work-orders?organization_id=${organizationId}`),
-        apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
-        apiRequest<AssetSummaryRead>(`/assets/summary?organization_id=${organizationId}`)
-      ]);
+    const [
+      facilityData,
+      equipmentData,
+      checkoutData,
+      workOrderData,
+      bookingData,
+      summaryData,
+      procurementData,
+      supplierData,
+      utilizationData
+    ] = await Promise.all([
+      apiRequest<FacilityRead[]>(`/assets/facilities?organization_id=${organizationId}`),
+      apiRequest<EquipmentItemRead[]>(`/assets/equipment?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<EquipmentCheckoutRead[]>(`/assets/checkouts?organization_id=${organizationId}`),
+      apiRequest<MaintenanceWorkOrderRead[]>(`/assets/work-orders?organization_id=${organizationId}`),
+      apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<AssetSummaryRead>(`/assets/summary?organization_id=${organizationId}`),
+      apiRequest<ProcurementRecommendationRead[]>(
+        `/assets/procurement/recommendations?organization_id=${organizationId}`
+      ),
+      apiRequest<SupplierScoreRead[]>(`/assets/suppliers/scorecard?organization_id=${organizationId}`),
+      apiRequest<AssetUtilizationRecommendationRead[]>(
+        `/assets/utilization/recommendations?organization_id=${organizationId}`
+      )
+    ]);
     setFacilities(facilityData);
     setEquipmentItems(equipmentData);
     setEquipmentCheckouts(checkoutData);
     setWorkOrders(workOrderData);
     setFacilityBookings(bookingData);
     setAssetSummary(summaryData);
+    setProcurementRecommendations(procurementData);
+    setSupplierScores(supplierData);
+    setAssetUtilization(utilizationData);
     setSelectedFacilityId((current) =>
       facilityData.some((facility) => facility.id === current) ? current : facilityData[0]?.id ?? ""
     );
@@ -999,6 +1029,10 @@ export default function HomePage() {
       setWorkOrders([]);
       setFacilityBookings([]);
       setAssetSummary(null);
+      setProcurementRecommendations([]);
+      setSupplierScores([]);
+      setAssetUtilization([]);
+      setLeaseQuote(null);
       setSponsors([]);
       setSponsorships([]);
       setCampaigns([]);
@@ -2230,6 +2264,75 @@ export default function HomePage() {
         setSelectedEquipmentId(item.id);
         addLog(`${item.name} added to inventory`, "good");
         void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const scanEquipmentItem = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const code = selectedEquipment?.tag_code ?? equipmentForm.tag_code;
+    if (!code) {
+      addLog("Enter or select a tag code first", "bad");
+      return;
+    }
+    runAction(
+      "scan-equipment",
+      () =>
+        apiRequest<EquipmentScanRead>(
+          `/assets/equipment/scan?organization_id=${selectedOrganizationId}&code=${encodeURIComponent(code)}`,
+          { identity }
+        ),
+      (scan) => {
+        setEquipmentItems((current) => [
+          scan.item,
+          ...current.filter((item) => item.id !== scan.item.id)
+        ]);
+        setSelectedEquipmentId(scan.item.id);
+        addLog(`${scan.match_type} scan matched ${scan.item.name}`, "good");
+      }
+    );
+  };
+
+  const updateSelectedEquipmentPhoto = () => {
+    if (!selectedEquipmentId) {
+      addLog("Select equipment first", "bad");
+      return;
+    }
+    runAction(
+      "update-equipment-photo",
+      () =>
+        apiRequest<EquipmentItemRead>(`/assets/equipment/${selectedEquipmentId}/photo`, {
+          method: "PATCH",
+          identity,
+          body: {
+            photo_url: equipmentForm.photo_url,
+            notes: `Photo metadata updated from console for ${equipmentForm.name}.`
+          }
+        }),
+      (item) => {
+        setEquipmentItems((current) => [item, ...current.filter((value) => value.id !== item.id)]);
+        addLog(`${item.name} photo metadata saved`, "good");
+      }
+    );
+  };
+
+  const quoteSelectedEquipmentLease = () => {
+    if (!selectedOrganizationId || !selectedEquipmentId) {
+      addLog("Select equipment first", "bad");
+      return;
+    }
+    runAction(
+      "equipment-lease-quote",
+      () =>
+        apiRequest<EquipmentLeaseQuoteRead>(
+          `/assets/equipment/${selectedEquipmentId}/lease-quote?organization_id=${selectedOrganizationId}&quantity=${checkoutForm.quantity}&term_months=12`
+        ),
+      (quote) => {
+        setLeaseQuote(quote);
+        addLog(`${quote.item_name} lease quote: $${quote.monthly_amount}/month`, "good");
       }
     );
   };
@@ -3493,6 +3596,9 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createEquipmentItem} disabled={busyAction !== null}>Item</button>
+                <button type="button" onClick={scanEquipmentItem} disabled={busyAction !== null}>Scan</button>
+                <button type="button" onClick={updateSelectedEquipmentPhoto} disabled={busyAction !== null}>Photo</button>
+                <button type="button" onClick={quoteSelectedEquipmentLease} disabled={busyAction !== null}>Lease</button>
                 <button type="button" onClick={checkoutEquipmentItem} disabled={busyAction !== null}>Checkout</button>
                 <button type="button" onClick={returnSelectedCheckout} disabled={busyAction !== null}>Return</button>
               </div>
@@ -3537,6 +3643,14 @@ export default function HomePage() {
                 <input value={equipmentForm.tag_code} onChange={(event) => setEquipmentForm({ ...equipmentForm, tag_code: event.target.value })} />
               </label>
               <label>
+                Serial
+                <input value={equipmentForm.serial_number} onChange={(event) => setEquipmentForm({ ...equipmentForm, serial_number: event.target.value })} />
+              </label>
+              <label>
+                Photo URL
+                <input value={equipmentForm.photo_url} onChange={(event) => setEquipmentForm({ ...equipmentForm, photo_url: event.target.value })} />
+              </label>
+              <label>
                 Location
                 <input value={equipmentForm.storage_location} onChange={(event) => setEquipmentForm({ ...equipmentForm, storage_location: event.target.value })} />
               </label>
@@ -3568,6 +3682,13 @@ export default function HomePage() {
                 <input value={checkoutForm.purpose} onChange={(event) => setCheckoutForm({ ...checkoutForm, purpose: event.target.value })} />
               </label>
             </div>
+            {leaseQuote ? (
+              <div className="score-summary">
+                <strong>{leaseQuote.monthly_amount}</strong>
+                <span>{leaseQuote.item_name} lease estimate</span>
+                <small>{leaseQuote.term_months} months · total ${leaseQuote.total_amount}</small>
+              </div>
+            ) : null}
             <div className="task-list">
               {equipmentCheckouts.slice(0, 3).map((checkout) => (
                 <button
@@ -3657,6 +3778,30 @@ export default function HomePage() {
               </div>
             </div>
             <div className="task-list">
+              {procurementRecommendations.slice(0, 3).map((recommendation) => (
+                <article key={recommendation.equipment_item_id} className="task-card">
+                  <div>
+                    <strong>{recommendation.item_name}</strong>
+                    <span>{recommendation.urgency} · buy {recommendation.recommended_quantity} · ${recommendation.estimated_cost}</span>
+                  </div>
+                </article>
+              ))}
+              {supplierScores.slice(0, 2).map((supplier) => (
+                <article key={supplier.supplier_name} className="task-card">
+                  <div>
+                    <strong>{supplier.supplier_name}</strong>
+                    <span>Score {supplier.score} · {supplier.recommendation}</span>
+                  </div>
+                </article>
+              ))}
+              {assetUtilization.slice(0, 3).map((recommendation) => (
+                <article key={`${recommendation.target_type}-${recommendation.target_id}`} className="task-card">
+                  <div>
+                    <strong>{recommendation.title}</strong>
+                    <span>{recommendation.severity} · {recommendation.expected_impact}</span>
+                  </div>
+                </article>
+              ))}
               <article className="task-card">
                 <div>
                   <strong>Inventory discipline</strong>

@@ -251,6 +251,108 @@ def test_facility_booking_rejects_overlap(client, identity_headers) -> None:
     assert overlap.json()["detail"] == "Facility is already booked"
 
 
+def test_asset_procurement_scan_photo_supplier_lease_and_utilization(
+    client,
+    identity_headers,
+) -> None:
+    organization, team, member, _ = create_assets_context(client, identity_headers, "Procurement Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Equipment Store",
+            "facility_type": "storage",
+        },
+    ).json()
+    equipment = client.post(
+        "/api/v1/assets/equipment",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "team_id": team["id"],
+            "name": "GPS Pods",
+            "category": "wearables",
+            "brand": "TrackCo",
+            "tag_code": "RFID-GPS-001",
+            "serial_number": "SER-GPS-001",
+            "quantity_total": 10,
+            "quantity_available": 2,
+            "min_stock_level": 3,
+            "reorder_point": 4,
+            "unit_value": "150.00",
+            "depreciation_rate": "25.00",
+        },
+    ).json()
+
+    scan = client.get(
+        "/api/v1/assets/equipment/scan",
+        headers=identity_headers,
+        params={"organization_id": organization["id"], "code": "RFID-GPS-001"},
+    )
+    assert scan.status_code == 200
+    assert scan.json()["match_type"] == "tag_code"
+    assert scan.json()["item"]["id"] == equipment["id"]
+
+    photo = client.patch(
+        f"/api/v1/assets/equipment/{equipment['id']}/photo",
+        headers=identity_headers,
+        json={
+            "photo_url": "https://cdn.afrolete.test/assets/gps-pods.jpg",
+            "notes": "Photo captured during May audit.",
+        },
+    )
+    assert photo.status_code == 200
+    assert photo.json()["photo_url"].endswith("gps-pods.jpg")
+
+    procurement = client.get(
+        f"/api/v1/assets/procurement/recommendations?organization_id={organization['id']}"
+    ).json()
+    assert procurement[0]["equipment_item_id"] == equipment["id"]
+    assert procurement[0]["recommended_quantity"] >= 8
+    assert procurement[0]["supplier_hint"] == "TrackCo"
+
+    work_order = client.post(
+        "/api/v1/assets/work-orders",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "equipment_item_id": equipment["id"],
+            "assigned_to_person_id": member["subject_id"],
+            "title": "Calibrate GPS pods",
+            "priority": "medium",
+            "vendor": "TrackCo Service",
+            "estimated_cost": "200.00",
+            "safety_related": False,
+        },
+    ).json()
+    client.patch(
+        f"/api/v1/assets/work-orders/{work_order['id']}",
+        headers=identity_headers,
+        json={"status": "completed", "actual_cost": "190.00"},
+    )
+
+    suppliers = client.get(
+        f"/api/v1/assets/suppliers/scorecard?organization_id={organization['id']}"
+    ).json()
+    assert suppliers[0]["supplier_name"] == "TrackCo Service"
+    assert suppliers[0]["score"] >= 85
+
+    quote = client.get(
+        f"/api/v1/assets/equipment/{equipment['id']}/lease-quote",
+        params={"organization_id": organization["id"], "quantity": 2, "term_months": 12},
+    ).json()
+    assert quote["monthly_amount"] != "0.00"
+    assert quote["term_months"] == 12
+
+    recommendations = client.get(
+        f"/api/v1/assets/utilization/recommendations?organization_id={organization['id']}"
+    ).json()
+    assert any(item["target_id"] == equipment["id"] for item in recommendations)
+
+
 def test_equipment_rejects_facility_from_other_organization(client, identity_headers) -> None:
     organization, team, _, _ = create_assets_context(client, identity_headers, "Home Assets")
     other_organization, _, _, _ = create_assets_context(client, identity_headers, "Other Assets")

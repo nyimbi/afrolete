@@ -99,6 +99,61 @@ class EquipmentItemRead(BaseModel):
     notes: str | None
 
 
+class EquipmentPhotoUpdate(BaseModel):
+    photo_url: str = Field(min_length=4, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EquipmentScanRead(BaseModel):
+    scanned_code: str
+    match_type: str
+    item: EquipmentItemRead
+
+
+class ProcurementRecommendationRead(BaseModel):
+    equipment_item_id: UUID
+    item_name: str
+    category: str
+    quantity_available: int
+    reorder_point: int
+    recommended_quantity: int
+    estimated_cost: Decimal
+    supplier_hint: str
+    urgency: str
+    rationale: str
+
+
+class SupplierScoreRead(BaseModel):
+    supplier_name: str
+    work_orders: int
+    completed_orders: int
+    safety_orders: int
+    estimated_cost: Decimal
+    actual_cost: Decimal
+    score: int
+    recommendation: str
+
+
+class EquipmentLeaseQuoteRead(BaseModel):
+    equipment_item_id: UUID
+    item_name: str
+    quantity: int
+    term_months: int
+    monthly_amount: Decimal
+    total_amount: Decimal
+    residual_value: Decimal
+    rationale: str
+
+
+class AssetUtilizationRecommendationRead(BaseModel):
+    target_type: str
+    target_id: UUID
+    title: str
+    severity: str
+    recommendation: str
+    expected_impact: str
+
+
 class EquipmentCheckoutCreate(BaseModel):
     organization_id: UUID
     equipment_item_id: UUID

@@ -347,6 +347,56 @@ export type EquipmentItemRead = {
   notes: string | null;
 };
 
+export type EquipmentScanRead = {
+  scanned_code: string;
+  match_type: string;
+  item: EquipmentItemRead;
+};
+
+export type ProcurementRecommendationRead = {
+  equipment_item_id: UUID;
+  item_name: string;
+  category: string;
+  quantity_available: number;
+  reorder_point: number;
+  recommended_quantity: number;
+  estimated_cost: string;
+  supplier_hint: string;
+  urgency: string;
+  rationale: string;
+};
+
+export type SupplierScoreRead = {
+  supplier_name: string;
+  work_orders: number;
+  completed_orders: number;
+  safety_orders: number;
+  estimated_cost: string;
+  actual_cost: string;
+  score: number;
+  recommendation: string;
+};
+
+export type EquipmentLeaseQuoteRead = {
+  equipment_item_id: UUID;
+  item_name: string;
+  quantity: number;
+  term_months: number;
+  monthly_amount: string;
+  total_amount: string;
+  residual_value: string;
+  rationale: string;
+};
+
+export type AssetUtilizationRecommendationRead = {
+  target_type: string;
+  target_id: UUID;
+  title: string;
+  severity: string;
+  recommendation: string;
+  expected_impact: string;
+};
+
 export type EquipmentCheckoutRead = {
   id: UUID;
   organization_id: UUID;

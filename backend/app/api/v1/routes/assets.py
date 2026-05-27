@@ -6,11 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.assets import (
     AssetSummaryRead,
+    AssetUtilizationRecommendationRead,
     EquipmentCheckoutCreate,
     EquipmentCheckoutRead,
     EquipmentCheckoutReturn,
     EquipmentItemCreate,
     EquipmentItemRead,
+    EquipmentLeaseQuoteRead,
+    EquipmentPhotoUpdate,
+    EquipmentScanRead,
     FacilityBookingCreate,
     FacilityBookingRead,
     FacilityCreate,
@@ -18,6 +22,8 @@ from app.schemas.assets import (
     MaintenanceWorkOrderCreate,
     MaintenanceWorkOrderRead,
     MaintenanceWorkOrderUpdate,
+    ProcurementRecommendationRead,
+    SupplierScoreRead,
 )
 from app.services.assets import (
     asset_summary,
@@ -26,13 +32,19 @@ from app.services.assets import (
     create_facility,
     create_facility_booking,
     create_work_order,
+    equipment_lease_quote,
     list_checkouts,
     list_equipment_items,
     list_facilities,
     list_facility_bookings,
     list_work_orders,
+    procurement_recommendations,
     return_equipment,
+    scan_equipment,
+    supplier_scorecard,
+    update_equipment_photo,
     update_work_order,
+    utilization_recommendations,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -209,6 +221,39 @@ async def list_equipment_route(
     ]
 
 
+@router.get("/equipment/scan", response_model=EquipmentScanRead)
+async def scan_equipment_route(
+    organization_id: UUID = Query(),
+    code: str = Query(min_length=1),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EquipmentScanRead:
+    return await scan_equipment(db, identity, organization_id, code, authz)
+
+
+@router.patch("/equipment/{equipment_item_id}/photo", response_model=EquipmentItemRead)
+async def update_equipment_photo_route(
+    equipment_item_id: UUID,
+    payload: EquipmentPhotoUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EquipmentItemRead:
+    return to_equipment_read(await update_equipment_photo(db, identity, equipment_item_id, payload, authz))
+
+
+@router.get("/equipment/{equipment_item_id}/lease-quote", response_model=EquipmentLeaseQuoteRead)
+async def equipment_lease_quote_route(
+    equipment_item_id: UUID,
+    organization_id: UUID = Query(),
+    quantity: int = Query(default=1, ge=1),
+    term_months: int = Query(default=12, ge=1, le=120),
+    db: AsyncSession = Depends(get_db),
+) -> EquipmentLeaseQuoteRead:
+    return await equipment_lease_quote(db, organization_id, equipment_item_id, quantity, term_months)
+
+
 @router.post("/checkouts", response_model=EquipmentCheckoutRead, status_code=status.HTTP_201_CREATED)
 async def checkout_equipment_route(
     payload: EquipmentCheckoutCreate,
@@ -307,3 +352,27 @@ async def asset_summary_route(
     db: AsyncSession = Depends(get_db),
 ) -> AssetSummaryRead:
     return await asset_summary(db, organization_id)
+
+
+@router.get("/procurement/recommendations", response_model=list[ProcurementRecommendationRead])
+async def procurement_recommendations_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[ProcurementRecommendationRead]:
+    return await procurement_recommendations(db, organization_id)
+
+
+@router.get("/suppliers/scorecard", response_model=list[SupplierScoreRead])
+async def supplier_scorecard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[SupplierScoreRead]:
+    return await supplier_scorecard(db, organization_id)
+
+
+@router.get("/utilization/recommendations", response_model=list[AssetUtilizationRecommendationRead])
+async def utilization_recommendations_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[AssetUtilizationRecommendationRead]:
+    return await utilization_recommendations(db, organization_id)
