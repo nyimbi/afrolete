@@ -10,6 +10,8 @@ from app.schemas.event import (
     AttendanceSeedRead,
     EventCreate,
     EventRead,
+    EventTravelConsentBatchRead,
+    EventTravelConsentRequestCreate,
     EventTravelPlanCreate,
     EventTravelPlanRead,
     EventTravelPlanUpdate,
@@ -32,6 +34,7 @@ from app.services.events import (
     list_travel_plans,
     list_weather_assessments,
     record_attendance,
+    request_travel_consents,
     seed_attendance_from_team_roster,
     update_travel_plan,
 )
@@ -280,6 +283,21 @@ async def update_travel_plan_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelPlanRead:
     return to_travel_plan_read(await update_travel_plan(db, identity, travel_plan_id, payload, authz))
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/consent-requests",
+    response_model=EventTravelConsentBatchRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def request_travel_consents_route(
+    travel_plan_id: UUID,
+    payload: EventTravelConsentRequestCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelConsentBatchRead:
+    return await request_travel_consents(db, identity, travel_plan_id, payload, authz)
 
 
 @router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])

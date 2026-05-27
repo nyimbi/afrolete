@@ -467,6 +467,24 @@ export type EventTravelPlanRead = {
   notes: string | null;
 };
 
+export type EventTravelConsentRequestItemRead = {
+  request_id: UUID;
+  athlete_person_id: UUID;
+  guardian_person_id: UUID;
+  destination: string;
+  one_time_token: string;
+};
+
+export type EventTravelConsentBatchRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  created: number;
+  existing: number;
+  skipped_no_guardian: number;
+  skipped_not_minor: number;
+  requests: EventTravelConsentRequestItemRead[];
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

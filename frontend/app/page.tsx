@@ -66,9 +66,11 @@ import type {
   CompetitionStandingRead,
   CompetitionTicketingRead,
   CompetitionType,
+  ConsentCaptureChannel,
   ConsentRequestRead,
   DonationRead,
   EventRead,
+  EventTravelConsentBatchRead,
   EventTravelPlanRead,
   EventWeatherAlertRead,
   EventWeatherAssessmentRead,
@@ -339,6 +341,7 @@ export default function HomePage() {
   const [weatherAssessments, setWeatherAssessments] = useState<EventWeatherAssessmentRead[]>([]);
   const [weatherAlert, setWeatherAlert] = useState<EventWeatherAlertRead | null>(null);
   const [travelPlans, setTravelPlans] = useState<EventTravelPlanRead[]>([]);
+  const [travelConsentBatch, setTravelConsentBatch] = useState<EventTravelConsentBatchRead | null>(null);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -564,6 +567,7 @@ export default function HomePage() {
     consent_due_at: "2026-05-27T18:00",
     estimated_cost: 450,
     cost_per_participant: 15,
+    consent_channel: "email" as ConsentCaptureChannel,
     notes: "Away match travel plan."
   });
   const [guardianForm, setGuardianForm] = useState({
@@ -1562,6 +1566,7 @@ export default function HomePage() {
       setWeatherAssessments([]);
       setWeatherAlert(null);
       setTravelPlans([]);
+      setTravelConsentBatch(null);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1763,6 +1768,7 @@ export default function HomePage() {
       setWeatherAssessments([]);
       setWeatherAlert(null);
       setTravelPlans([]);
+      setTravelConsentBatch(null);
       return;
     }
     runAction(
@@ -2313,6 +2319,30 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updated.id)
         ]);
         addLog(`Travel plan moved to ${updated.status} with ${updated.risk_level} risk`, "good");
+      }
+    );
+  };
+
+  const requestTravelConsents = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-consents-${plan.id}`,
+      () =>
+        apiRequest<EventTravelConsentBatchRead>(`/events/travel-plans/${plan.id}/consent-requests`, {
+          method: "POST",
+          identity,
+          body: {
+            channel: travelForm.consent_channel,
+            expires_at: travelForm.consent_due_at ? new Date(travelForm.consent_due_at).toISOString() : null,
+            include_unknown_age: true,
+            notes: null
+          }
+        }),
+      (batch) => {
+        setTravelConsentBatch(batch);
+        addLog(
+          `Travel consents: ${batch.created} created, ${batch.existing} existing`,
+          batch.skipped_no_guardian > 0 ? "bad" : "good"
+        );
       }
     );
   };
@@ -6507,6 +6537,16 @@ export default function HomePage() {
                 Consent due
                 <input type="datetime-local" value={travelForm.consent_due_at} onChange={(event) => setTravelForm({ ...travelForm, consent_due_at: event.target.value })} />
               </label>
+              <label>
+                Consent channel
+                <select value={travelForm.consent_channel} onChange={(event) => setTravelForm({ ...travelForm, consent_channel: event.target.value as ConsentCaptureChannel })}>
+                  <option value="email">Email</option>
+                  <option value="sms">SMS</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="web_link">Web link</option>
+                </select>
+              </label>
               <label className="wide-field">
                 Route
                 <input value={travelForm.route_summary} onChange={(event) => setTravelForm({ ...travelForm, route_summary: event.target.value })} />
@@ -6517,6 +6557,19 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {travelConsentBatch ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Travel consent requests</strong>
+                    <span>
+                      {travelConsentBatch.created} created · {travelConsentBatch.existing} existing · {travelConsentBatch.skipped_no_guardian} missing guardians
+                    </span>
+                    <span>
+                      {travelConsentBatch.skipped_not_minor} not minors · {travelConsentBatch.requests[0]?.destination ?? "No new request destinations"}
+                    </span>
+                  </div>
+                </article>
+              ) : null}
               {travelPlans.slice(0, 2).map((plan) => (
                 <article key={plan.id} className="task-card">
                   <div>
@@ -6525,6 +6578,7 @@ export default function HomePage() {
                     <span>{plan.risk_assessment}</span>
                   </div>
                   <div className="event-toolbar">
+                    <button type="button" onClick={() => requestTravelConsents(plan)}>Consent</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "completed")}>Complete</button>

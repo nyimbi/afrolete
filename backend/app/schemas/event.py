@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import (
     AttendanceStatus,
+    ConsentCaptureChannel,
     CommunicationChannel,
     EventType,
     MedicalClearanceStatus,
@@ -144,6 +145,31 @@ class EventTravelPlanRead(EventTravelPlanCreate):
     status: TravelPlanStatus
     risk_level: TravelRiskLevel
     risk_assessment: str
+
+
+class EventTravelConsentRequestCreate(BaseModel):
+    channel: ConsentCaptureChannel = ConsentCaptureChannel.EMAIL
+    expires_at: datetime | None = None
+    include_unknown_age: bool = True
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelConsentRequestItemRead(BaseModel):
+    request_id: UUID
+    athlete_person_id: UUID
+    guardian_person_id: UUID
+    destination: str
+    one_time_token: str
+
+
+class EventTravelConsentBatchRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    created: int
+    existing: int
+    skipped_no_guardian: int
+    skipped_not_minor: int
+    requests: list[EventTravelConsentRequestItemRead]
 
 
 class AttendanceRecordUpsert(BaseModel):

@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.enums import (
     AttendanceStatus,
+    ConsentRequestStatus,
+    ConsentScopeType,
     CommunicationMessageType,
     CommunicationScopeType,
     MedicalClearanceStatus,
@@ -15,13 +17,17 @@ from app.models.enums import (
     WeatherAlertLevel,
     WeatherDecision,
 )
-from app.models.event import AttendanceRecord, Event, EventTravelPlan, EventWeatherAssessment
+from app.models.event import AttendanceRecord, ConsentRequest, Event, EventTravelPlan, EventWeatherAssessment
 from app.models.identity import Person
 from app.models.organization import Organization
-from app.models.team import AthleteProfile, Team, TeamRosterEntry
+from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.communication import CommunicationMessageCreate
+from app.schemas.safeguarding import ConsentRequestCreate
 from app.schemas.event import (
     EventCreate,
+    EventTravelConsentBatchRead,
+    EventTravelConsentRequestCreate,
+    EventTravelConsentRequestItemRead,
     EventTravelPlanCreate,
     EventTravelPlanUpdate,
     EventWeatherAlertCreate,
@@ -31,7 +37,12 @@ from app.schemas.event import (
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 from app.services.communications import create_message
-from app.services.safeguarding import clearance_for_event, medical_clearance_for_event
+from app.services.safeguarding import (
+    create_consent_request,
+    clearance_for_event,
+    is_minor_on,
+    medical_clearance_for_event,
+)
 
 
 PARTICIPATION_STATUSES = {AttendanceStatus.CONFIRMED, AttendanceStatus.PRESENT}
@@ -305,6 +316,90 @@ async def update_travel_plan(
     return plan
 
 
+async def request_travel_consents(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelConsentRequestCreate,
+    authz: AuthorizationService,
+) -> EventTravelConsentBatchRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+
+    created = 0
+    existing = 0
+    skipped_no_guardian = 0
+    skipped_not_minor = 0
+    request_items: list[EventTravelConsentRequestItemRead] = []
+    for athlete_person_id in await event_participant_person_ids(db, event):
+        athlete = await db.get(Person, athlete_person_id)
+        if athlete is None:
+            continue
+        minor = is_minor_on(athlete, event.starts_at.date())
+        if minor is False or (minor is None and not payload.include_unknown_age):
+            skipped_not_minor += 1
+            continue
+        clearance, _, _, consent_id, _ = await clearance_for_event(db, event.id, athlete_person_id)
+        if clearance == ParticipationClearanceStatus.CLEARED and consent_id is not None:
+            existing += 1
+            continue
+        guardian = await primary_signing_guardian(db, athlete_person_id)
+        if guardian is None:
+            skipped_no_guardian += 1
+            continue
+        existing_request = await db.scalar(
+            select(ConsentRequest).where(
+                ConsentRequest.organization_id == event.organization_id,
+                ConsentRequest.athlete_person_id == athlete_person_id,
+                ConsentRequest.guardian_person_id == guardian.guardian_person_id,
+                ConsentRequest.scope_type == ConsentScopeType.EVENT,
+                ConsentRequest.scope_id == event.id,
+                ConsentRequest.status == ConsentRequestStatus.PENDING,
+            )
+        )
+        if existing_request is not None:
+            existing += 1
+            continue
+        notes = payload.notes or travel_consent_notes(event, plan)
+        request, token = await create_consent_request(
+            db,
+            identity,
+            ConsentRequestCreate(
+                organization_id=event.organization_id,
+                athlete_person_id=athlete_person_id,
+                guardian_person_id=guardian.guardian_person_id,
+                scope_type=ConsentScopeType.EVENT,
+                scope_id=event.id,
+                channel=payload.channel,
+                expires_at=payload.expires_at or plan.consent_due_at,
+                notes=notes,
+            ),
+            authz,
+        )
+        created += 1
+        request_items.append(
+            EventTravelConsentRequestItemRead(
+                request_id=request.id,
+                athlete_person_id=athlete_person_id,
+                guardian_person_id=guardian.guardian_person_id,
+                destination=request.destination,
+                one_time_token=token,
+            )
+        )
+    return EventTravelConsentBatchRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        created=created,
+        existing=existing,
+        skipped_no_guardian=skipped_no_guardian,
+        skipped_not_minor=skipped_not_minor,
+        requests=request_items,
+    )
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -366,6 +461,54 @@ def classify_weather_risk(
     if advisories:
         return WeatherAlertLevel.ADVISORY, WeatherDecision.MONITOR, "\n".join(advisories)
     return WeatherAlertLevel.INFORMATION, WeatherDecision.PROCEED, "Conditions are within normal operating thresholds."
+
+
+async def event_participant_person_ids(db: AsyncSession, event: Event) -> list[UUID]:
+    attendance_rows = (
+        await db.execute(select(AttendanceRecord.person_id).where(AttendanceRecord.event_id == event.id))
+    ).all()
+    if attendance_rows:
+        return [person_id for (person_id,) in attendance_rows]
+    if event.team_id is None:
+        return []
+    roster_rows = (
+        await db.execute(
+            select(AthleteProfile.person_id)
+            .join(TeamRosterEntry, TeamRosterEntry.athlete_profile_id == AthleteProfile.id)
+            .where(TeamRosterEntry.team_id == event.team_id)
+        )
+    ).all()
+    return [person_id for (person_id,) in roster_rows]
+
+
+async def primary_signing_guardian(db: AsyncSession, athlete_person_id: UUID) -> GuardianRelationship | None:
+    return await db.scalar(
+        select(GuardianRelationship)
+        .where(GuardianRelationship.athlete_person_id == athlete_person_id)
+        .where(GuardianRelationship.can_sign_consent.is_(True))
+        .order_by(GuardianRelationship.is_primary.desc(), GuardianRelationship.created_at)
+    )
+
+
+def travel_consent_notes(event: Event, plan: EventTravelPlan) -> str:
+    parts = [
+        f"Travel consent for {event.title}.",
+        f"Destination: {plan.destination}.",
+        f"Transport: {plan.travel_mode}.",
+    ]
+    if plan.departure_at is not None:
+        parts.append(f"Departure: {plan.departure_at.isoformat()}.")
+    if plan.return_at is not None:
+        parts.append(f"Return: {plan.return_at.isoformat()}.")
+    if plan.route_summary:
+        parts.append(f"Route: {plan.route_summary}")
+    if plan.emergency_contacts:
+        parts.append(f"Emergency contacts: {plan.emergency_contacts}")
+    if plan.medical_access_plan:
+        parts.append(f"Medical access: {plan.medical_access_plan}")
+    if plan.cost_per_participant is not None:
+        parts.append(f"Estimated participant cost: {plan.cost_per_participant}.")
+    return "\n".join(parts)[:2000]
 
 
 def classify_travel_risk(payload: EventTravelPlanCreate) -> tuple[TravelRiskLevel, str]:
