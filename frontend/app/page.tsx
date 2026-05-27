@@ -94,6 +94,8 @@ import type {
   BackgroundCheckRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
+  IncidentReportPackageRead,
+  IncidentReportPackageStatus,
   InsightSeverity,
   InsightStatus,
   IntelligenceInsightRead,
@@ -433,6 +435,7 @@ export default function HomePage() {
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
   const [complianceCredentials, setComplianceCredentials] = useState<ComplianceCredentialRead[]>([]);
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummaryRead | null>(null);
+  const [incidentReportPackages, setIncidentReportPackages] = useState<IncidentReportPackageRead[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
@@ -535,6 +538,13 @@ export default function HomePage() {
     renewal_due_at: "2027-04-28",
     verification_url: "",
     notes: "Required before unsupervised athlete activities."
+  });
+  const [reportPackageForm, setReportPackageForm] = useState({
+    agency_name: "County safeguarding office",
+    jurisdiction: "Local",
+    due_at: "2026-06-04",
+    external_reference: "",
+    notes: "Package prepared for statutory or league reporting."
   });
   const [agentForm, setAgentForm] = useState({
     name: "Safeguarding Watch",
@@ -1000,6 +1010,14 @@ export default function HomePage() {
     setComplianceSummary(data);
   }, [identity]);
 
+  const loadIncidentReportPackages = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<IncidentReportPackageRead[]>(
+      `/safeguarding/incident-report-packages?organization_id=${organizationId}`,
+      { identity }
+    );
+    setIncidentReportPackages(data);
+  }, [identity]);
+
   const loadAgents = useCallback(async (organizationId: string) => {
     const data = await apiRequest<AgentRead[]>(`/agents?organization_id=${organizationId}`);
     setAgents(data);
@@ -1439,6 +1457,7 @@ export default function HomePage() {
       setBackgroundChecks([]);
       setComplianceCredentials([]);
       setComplianceSummary(null);
+      setIncidentReportPackages([]);
       setCommunicationTemplates([]);
       setCommunicationMessages([]);
       setMessageRecipients([]);
@@ -1519,6 +1538,7 @@ export default function HomePage() {
       await loadBackgroundChecks(selectedOrganizationId);
       await loadComplianceCredentials(selectedOrganizationId);
       await loadComplianceSummary(selectedOrganizationId);
+      await loadIncidentReportPackages(selectedOrganizationId);
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
@@ -1539,6 +1559,7 @@ export default function HomePage() {
     loadBackgroundChecks,
     loadComplianceCredentials,
     loadComplianceSummary,
+    loadIncidentReportPackages,
     loadAgents,
     loadAgentTasks,
     loadMetricDefinitions,
@@ -2316,6 +2337,81 @@ export default function HomePage() {
     );
   };
 
+  const createIncidentReportPackage = (incident: SafeguardingIncidentRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      `create-incident-report-package-${incident.id}`,
+      () =>
+        apiRequest<IncidentReportPackageRead>("/safeguarding/incident-report-packages", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            incident_id: incident.id,
+            agency_name: reportPackageForm.agency_name,
+            jurisdiction: reportPackageForm.jurisdiction,
+            due_at: reportPackageForm.due_at || null,
+            external_reference: reportPackageForm.external_reference || null,
+            checklist_json: JSON.stringify({
+              incident_report: true,
+              guardian_notification: incident.parent_notified_at !== null,
+              medical_follow_up: incident.medical_follow_up_required,
+              regulatory_report_required: true
+            }),
+            submission_payload: JSON.stringify({
+              incident_id: incident.id,
+              incident_type: incident.incident_type,
+              severity: incident.severity,
+              occurred_at: incident.occurred_at,
+              title: incident.title
+            }),
+            notes: reportPackageForm.notes || null
+          }
+        }),
+      (reportPackage) => {
+        setIncidentReportPackages((current) => [
+          reportPackage,
+          ...current.filter((item) => item.id !== reportPackage.id)
+        ]);
+        refreshSafeguardingCompliance();
+        addLog(`${reportPackage.agency_name} report package drafted`, "good");
+      }
+    );
+  };
+
+  const updateIncidentReportPackage = (
+    reportPackage: IncidentReportPackageRead,
+    statusValue: IncidentReportPackageStatus
+  ) => {
+    runAction(
+      `incident-report-package-${reportPackage.id}-${statusValue}`,
+      () =>
+        apiRequest<IncidentReportPackageRead>(
+          `/safeguarding/incident-report-packages/${reportPackage.id}`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              status: statusValue,
+              external_reference: reportPackage.external_reference || reportPackageForm.external_reference || null,
+              notes: `Marked ${statusValue} from the operations console.`
+            }
+          }
+        ),
+      (updated) => {
+        setIncidentReportPackages((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        refreshSafeguardingCompliance();
+        addLog(`${updated.agency_name} report package moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
   const refreshSafeguardingCompliance = () => {
     if (!selectedOrganizationId) {
       return;
@@ -2324,7 +2420,8 @@ export default function HomePage() {
       loadBackgroundChecks(selectedOrganizationId),
       loadComplianceCredentials(selectedOrganizationId),
       loadSafeguardingIncidents(selectedOrganizationId),
-      loadComplianceSummary(selectedOrganizationId)
+      loadComplianceSummary(selectedOrganizationId),
+      loadIncidentReportPackages(selectedOrganizationId)
     ]);
   };
 
@@ -8122,6 +8219,28 @@ export default function HomePage() {
               <input value={credentialForm.notes} onChange={(event) => setCredentialForm({ ...credentialForm, notes: event.target.value })} />
             </label>
           </div>
+          <div className="form-grid three">
+            <label>
+              Reporting agency
+              <input value={reportPackageForm.agency_name} onChange={(event) => setReportPackageForm({ ...reportPackageForm, agency_name: event.target.value })} />
+            </label>
+            <label>
+              Jurisdiction
+              <input value={reportPackageForm.jurisdiction} onChange={(event) => setReportPackageForm({ ...reportPackageForm, jurisdiction: event.target.value })} />
+            </label>
+            <label>
+              Report due
+              <input type="date" value={reportPackageForm.due_at} onChange={(event) => setReportPackageForm({ ...reportPackageForm, due_at: event.target.value })} />
+            </label>
+            <label>
+              External ref
+              <input value={reportPackageForm.external_reference} onChange={(event) => setReportPackageForm({ ...reportPackageForm, external_reference: event.target.value })} />
+            </label>
+            <label className="wide-field">
+              Package notes
+              <input value={reportPackageForm.notes} onChange={(event) => setReportPackageForm({ ...reportPackageForm, notes: event.target.value })} />
+            </label>
+          </div>
           <div className="consent-grid">
             <div>
               <span className="muted">Athlete</span>
@@ -8169,6 +8288,22 @@ export default function HomePage() {
                 </div>
               </article>
             ))}
+            {incidentReportPackages.slice(0, 4).map((reportPackage) => (
+              <article key={reportPackage.id} className="task-card">
+                <div>
+                  <strong>{reportPackage.agency_name}</strong>
+                  <span>{reportPackage.jurisdiction} · {reportPackage.status} · due {reportPackage.due_at ?? "not set"}</span>
+                  <span>{reportPackage.external_reference ?? "No external reference"} · incident {reportPackage.incident_id.slice(0, 8)}</span>
+                  <span>{reportPackage.notes ?? reportPackage.narrative.slice(0, 160)}</span>
+                </div>
+                <div className="event-toolbar">
+                  <button type="button" onClick={() => updateIncidentReportPackage(reportPackage, "ready")}>Ready</button>
+                  <button type="button" onClick={() => updateIncidentReportPackage(reportPackage, "submitted")}>Submit</button>
+                  <button type="button" onClick={() => updateIncidentReportPackage(reportPackage, "accepted")}>Accept</button>
+                  <button type="button" onClick={() => updateIncidentReportPackage(reportPackage, "rejected")}>Reject</button>
+                </div>
+              </article>
+            ))}
             {backgroundChecks.slice(0, 4).map((check) => (
               <article key={check.id} className="task-card">
                 <div>
@@ -8210,6 +8345,7 @@ export default function HomePage() {
                 <div className="event-toolbar">
                   <button type="button" onClick={() => updateSafeguardingIncident(incident, "triaged")}>Triage</button>
                   <button type="button" onClick={() => updateSafeguardingIncident(incident, "investigating")}>Investigate</button>
+                  <button type="button" onClick={() => createIncidentReportPackage(incident)}>Package</button>
                   <button type="button" onClick={() => updateSafeguardingIncident(incident, "resolved")}>Resolve</button>
                 </div>
               </article>

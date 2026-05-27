@@ -15,6 +15,7 @@ from app.models.enums import (
     ConsentScopeType,
     ConsentStatus,
     EventType,
+    IncidentReportPackageStatus,
     SafeguardingIncidentSeverity,
     SafeguardingIncidentStatus,
     SafeguardingIncidentType,
@@ -166,6 +167,35 @@ class SafeguardingIncident(IdMixin, TimestampMixin, Base):
     regulatory_report_required: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
     resolution_notes: Mapped[str | None] = mapped_column(Text)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class IncidentReportPackage(IdMixin, TimestampMixin, Base):
+    __tablename__ = "incident_report_packages"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    incident_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("safeguarding_incidents.id"), index=True
+    )
+    prepared_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    submitted_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    agency_name: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    jurisdiction: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    status: Mapped[IncidentReportPackageStatus] = mapped_column(
+        enum_type(IncidentReportPackageStatus),
+        default=IncidentReportPackageStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    due_at: Mapped[date | None] = mapped_column(Date, index=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    narrative: Mapped[str] = mapped_column(Text, nullable=False)
+    checklist_json: Mapped[str | None] = mapped_column(Text)
+    submission_payload: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 class BackgroundCheck(IdMixin, TimestampMixin, Base):

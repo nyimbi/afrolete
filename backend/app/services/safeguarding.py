@@ -15,6 +15,7 @@ from app.models.enums import (
     ConsentRequestStatus,
     ConsentScopeType,
     ConsentStatus,
+    IncidentReportPackageStatus,
     ParticipationClearanceStatus,
     SafeguardingIncidentStatus,
 )
@@ -25,6 +26,7 @@ from app.models.event import (
     ComplianceCredential,
     ConsentRequest,
     Event,
+    IncidentReportPackage,
     SafeguardingIncident,
 )
 from app.models.identity import Person
@@ -45,6 +47,8 @@ from app.schemas.safeguarding import (
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
     GuardianRelationshipCreate,
+    IncidentReportPackageCreate,
+    IncidentReportPackageUpdate,
     KnownChannelConsentCapture,
     SafeguardingIncidentCreate,
     SafeguardingIncidentUpdate,
@@ -303,6 +307,108 @@ async def update_safeguarding_incident(
     await db.commit()
     await db.refresh(incident)
     return incident
+
+
+def default_incident_report_narrative(incident: SafeguardingIncident) -> str:
+    parts = [
+        f"Incident: {incident.title}",
+        f"Type: {incident.incident_type.value}",
+        f"Severity: {incident.severity.value}",
+        f"Occurred: {incident.occurred_at.isoformat()}",
+        f"Location: {incident.location or 'not recorded'}",
+        "",
+        incident.description,
+    ]
+    if incident.immediate_action:
+        parts.extend(["", f"Immediate action: {incident.immediate_action}"])
+    if incident.parent_notified_at:
+        parts.append(f"Parent/guardian notified: {incident.parent_notified_at.isoformat()}")
+    if incident.medical_follow_up_required != "unknown":
+        parts.append(f"Medical follow-up: {incident.medical_follow_up_required}")
+    return "\n".join(parts)
+
+
+async def create_incident_report_package(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: IncidentReportPackageCreate,
+    authz: AuthorizationService,
+) -> IncidentReportPackage:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, payload.incident_id)
+    if incident is None or incident.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    incident.regulatory_report_required = True
+    package = IncidentReportPackage(
+        prepared_by_person_id=identity.person_id,
+        narrative=payload.narrative or default_incident_report_narrative(incident),
+        **payload.model_dump(exclude={"narrative"}),
+    )
+    db.add(package)
+    await db.commit()
+    await db.refresh(package)
+    return package
+
+
+async def list_incident_report_packages(
+    db: AsyncSession,
+    organization_id: UUID,
+    status_filter: IncidentReportPackageStatus | None = None,
+) -> list[IncidentReportPackage]:
+    statement = select(IncidentReportPackage).where(
+        IncidentReportPackage.organization_id == organization_id
+    )
+    if status_filter is not None:
+        statement = statement.where(IncidentReportPackage.status == status_filter)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    IncidentReportPackage.status,
+                    IncidentReportPackage.due_at.nulls_last(),
+                    IncidentReportPackage.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+
+
+async def update_incident_report_package(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    package_id: UUID,
+    payload: IncidentReportPackageUpdate,
+    authz: AuthorizationService,
+) -> IncidentReportPackage:
+    package = await db.get(IncidentReportPackage, package_id)
+    if package is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report package not found")
+    await ensure_org_manage(authz, package.organization_id, identity)
+
+    if payload.status is not None:
+        package.status = payload.status
+        if payload.status == IncidentReportPackageStatus.SUBMITTED:
+            package.submitted_by_person_id = identity.person_id
+            package.submitted_at = payload.submitted_at or package.submitted_at or utc_now()
+        if payload.status == IncidentReportPackageStatus.ACCEPTED:
+            package.accepted_at = payload.accepted_at or package.accepted_at or utc_now()
+    for field in [
+        "due_at",
+        "submitted_at",
+        "accepted_at",
+        "external_reference",
+        "narrative",
+        "checklist_json",
+        "submission_payload",
+        "notes",
+    ]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(package, field, value)
+
+    await db.commit()
+    await db.refresh(package)
+    return package
 
 
 async def create_background_check(

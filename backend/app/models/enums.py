@@ -185,6 +185,15 @@ class SafeguardingIncidentStatus(StrEnum):
     CLOSED = "closed"
 
 
+class IncidentReportPackageStatus(StrEnum):
+    DRAFT = "draft"
+    READY = "ready"
+    SUBMITTED = "submitted"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    WITHDRAWN = "withdrawn"
+
+
 class BackgroundCheckStatus(StrEnum):
     REQUESTED = "requested"
     IN_PROGRESS = "in_progress"

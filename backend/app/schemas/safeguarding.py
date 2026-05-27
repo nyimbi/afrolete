@@ -14,6 +14,7 @@ from app.models.enums import (
     ComplianceCredentialType,
     EventType,
     GuardianRelationshipKind,
+    IncidentReportPackageStatus,
     ParticipationClearanceStatus,
     SafeguardingIncidentSeverity,
     SafeguardingIncidentStatus,
@@ -422,3 +423,48 @@ class ComplianceReconciliationRead(BaseModel):
     background_checks_expired: int
     credentials_expired: int
     credentials_expiring_soon: int
+
+
+class IncidentReportPackageCreate(BaseModel):
+    organization_id: UUID
+    incident_id: UUID
+    agency_name: str = Field(min_length=2, max_length=240)
+    jurisdiction: str = Field(min_length=2, max_length=160)
+    due_at: date | None = None
+    external_reference: str | None = Field(default=None, max_length=240)
+    narrative: str | None = Field(default=None, max_length=12000)
+    checklist_json: str | None = Field(default=None, max_length=12000)
+    submission_payload: str | None = Field(default=None, max_length=12000)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class IncidentReportPackageUpdate(BaseModel):
+    status: IncidentReportPackageStatus | None = None
+    due_at: date | None = None
+    submitted_at: datetime | None = None
+    accepted_at: datetime | None = None
+    external_reference: str | None = Field(default=None, max_length=240)
+    narrative: str | None = Field(default=None, max_length=12000)
+    checklist_json: str | None = Field(default=None, max_length=12000)
+    submission_payload: str | None = Field(default=None, max_length=12000)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class IncidentReportPackageRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    incident_id: UUID
+    prepared_by_person_id: UUID | None
+    submitted_by_person_id: UUID | None
+    agency_name: str
+    jurisdiction: str
+    status: IncidentReportPackageStatus
+    due_at: date | None
+    submitted_at: datetime | None
+    accepted_at: datetime | None
+    external_reference: str | None
+    narrative: str
+    checklist_json: str | None
+    submission_payload: str | None
+    notes: str | None
+    created_at: datetime

@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.models.enums import (
     BackgroundCheckStatus,
     ComplianceCredentialStatus,
+    IncidentReportPackageStatus,
     SafeguardingIncidentStatus,
 )
 from app.schemas.safeguarding import (
@@ -29,6 +30,9 @@ from app.schemas.safeguarding import (
     FamilyEventRsvpCreate,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
+    IncidentReportPackageCreate,
+    IncidentReportPackageRead,
+    IncidentReportPackageUpdate,
     KnownChannelConsentCapture,
     ParticipationClearanceRead,
     SafeguardingIncidentCreate,
@@ -48,12 +52,14 @@ from app.services.safeguarding import (
     create_compliance_credential,
     create_consent_request,
     create_guardian_relationship,
+    create_incident_report_package,
     create_safeguarding_incident,
     ensure_org_manage,
     compliance_summary,
     list_background_checks,
     list_compliance_credentials,
     list_guardians_for_athlete,
+    list_incident_report_packages,
     list_safeguarding_incidents,
     list_my_family_consent_requests,
     list_my_family,
@@ -63,6 +69,7 @@ from app.services.safeguarding import (
     reconcile_compliance_statuses,
     update_background_check,
     update_compliance_credential,
+    update_incident_report_package,
     update_safeguarding_incident,
 )
 
@@ -193,6 +200,28 @@ def to_credential_read(credential) -> ComplianceCredentialRead:
     )
 
 
+def to_report_package_read(package) -> IncidentReportPackageRead:
+    return IncidentReportPackageRead(
+        id=package.id,
+        organization_id=package.organization_id,
+        incident_id=package.incident_id,
+        prepared_by_person_id=package.prepared_by_person_id,
+        submitted_by_person_id=package.submitted_by_person_id,
+        agency_name=package.agency_name,
+        jurisdiction=package.jurisdiction,
+        status=package.status,
+        due_at=package.due_at,
+        submitted_at=package.submitted_at,
+        accepted_at=package.accepted_at,
+        external_reference=package.external_reference,
+        narrative=package.narrative,
+        checklist_json=package.checklist_json,
+        submission_payload=package.submission_payload,
+        notes=package.notes,
+        created_at=package.created_at,
+    )
+
+
 @router.post("/guardians", response_model=GuardianRelationshipRead, status_code=201)
 async def create_guardian_route(
     payload: GuardianRelationshipCreate,
@@ -259,6 +288,44 @@ async def update_safeguarding_incident_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> SafeguardingIncidentRead:
     return to_incident_read(await update_safeguarding_incident(db, identity, incident_id, payload, authz))
+
+
+@router.post("/incident-report-packages", response_model=IncidentReportPackageRead, status_code=201)
+async def create_incident_report_package_route(
+    payload: IncidentReportPackageCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentReportPackageRead:
+    return to_report_package_read(await create_incident_report_package(db, identity, payload, authz))
+
+
+@router.get("/incident-report-packages", response_model=list[IncidentReportPackageRead])
+async def list_incident_report_packages_route(
+    organization_id: UUID = Query(),
+    status_filter: IncidentReportPackageStatus | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[IncidentReportPackageRead]:
+    await ensure_org_manage(authz, organization_id, identity)
+    return [
+        to_report_package_read(package)
+        for package in await list_incident_report_packages(db, organization_id, status_filter)
+    ]
+
+
+@router.patch("/incident-report-packages/{package_id}", response_model=IncidentReportPackageRead)
+async def update_incident_report_package_route(
+    package_id: UUID,
+    payload: IncidentReportPackageUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentReportPackageRead:
+    return to_report_package_read(
+        await update_incident_report_package(db, identity, package_id, payload, authz)
+    )
 
 
 @router.post("/background-checks", response_model=BackgroundCheckRead, status_code=201)

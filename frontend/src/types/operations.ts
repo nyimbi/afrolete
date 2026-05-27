@@ -98,6 +98,13 @@ export type SafeguardingIncidentType =
 
 export type SafeguardingIncidentSeverity = "low" | "medium" | "high" | "critical";
 export type SafeguardingIncidentStatus = "open" | "triaged" | "investigating" | "resolved" | "closed";
+export type IncidentReportPackageStatus =
+  | "draft"
+  | "ready"
+  | "submitted"
+  | "accepted"
+  | "rejected"
+  | "withdrawn";
 export type BackgroundCheckStatus =
   | "requested"
   | "in_progress"
@@ -1457,6 +1464,26 @@ export type ComplianceReconciliationRead = {
   background_checks_expired: number;
   credentials_expired: number;
   credentials_expiring_soon: number;
+};
+
+export type IncidentReportPackageRead = {
+  id: UUID;
+  organization_id: UUID;
+  incident_id: UUID;
+  prepared_by_person_id: UUID | null;
+  submitted_by_person_id: UUID | null;
+  agency_name: string;
+  jurisdiction: string;
+  status: IncidentReportPackageStatus;
+  due_at: string | null;
+  submitted_at: string | null;
+  accepted_at: string | null;
+  external_reference: string | null;
+  narrative: string;
+  checklist_json: string | null;
+  submission_payload: string | null;
+  notes: string | null;
+  created_at: string;
 };
 
 export type AgentRead = {

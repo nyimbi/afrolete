@@ -55,6 +55,7 @@ from app.models.event import (  # noqa: F401,E402
     ComplianceCredential,
     ConsentRequest,
     Event,
+    IncidentReportPackage,
     SafeguardingIncident,
 )
 from app.models.identity import AppUser, Person  # noqa: F401,E402
