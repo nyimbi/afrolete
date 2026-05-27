@@ -347,6 +347,19 @@ export type EquipmentItemRead = {
   notes: string | null;
 };
 
+export type EquipmentFileRead = {
+  id: UUID;
+  organization_id: UUID;
+  equipment_item_id: UUID;
+  uploaded_by_person_id: UUID | null;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  checksum: string;
+  storage_url: string;
+  notes: string | null;
+};
+
 export type EquipmentScanRead = {
   scanned_code: string;
   match_type: string;

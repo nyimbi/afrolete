@@ -104,6 +104,27 @@ class EquipmentPhotoUpdate(BaseModel):
     notes: str | None = Field(default=None, max_length=4000)
 
 
+class EquipmentFileUploadCreate(BaseModel):
+    filename: str = Field(min_length=1, max_length=240)
+    content_type: str = Field(default="application/octet-stream", max_length=120)
+    content_base64: str = Field(min_length=1)
+    notes: str | None = Field(default=None, max_length=4000)
+    mark_as_photo: bool = False
+
+
+class EquipmentFileRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    equipment_item_id: UUID
+    uploaded_by_person_id: UUID | None
+    filename: str
+    content_type: str
+    size_bytes: int
+    checksum: str
+    storage_url: str
+    notes: str | None
+
+
 class EquipmentScanRead(BaseModel):
     scanned_code: str
     match_type: str

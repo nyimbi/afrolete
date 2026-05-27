@@ -4,6 +4,7 @@ from app.models.base import Base
 from app.models.agent import Agent, AgentAssignment, AgentTask  # noqa: F401,E402
 from app.models.assets import (  # noqa: F401,E402
     EquipmentCheckout,
+    EquipmentFile,
     EquipmentItem,
     Facility,
     FacilityBooking,

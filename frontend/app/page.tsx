@@ -69,6 +69,7 @@ import type {
   EventRead,
   EventType,
   EquipmentCheckoutRead,
+  EquipmentFileRead,
   EquipmentItemRead,
   EquipmentLeaseQuoteRead,
   EquipmentScanRead,
@@ -168,6 +169,18 @@ type AthleteEntry = {
 };
 
 const chartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--red)", "var(--violet)"];
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      resolve(result.includes(",") ? result.split(",", 2)[1] : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("File read failed"));
+    reader.readAsDataURL(file);
+  });
+}
 
 function ReportingChartCard({ chart }: { chart: ReportChartRead }) {
   const total = chart.values.reduce((sum, value) => sum + value, 0);
@@ -305,6 +318,7 @@ export default function HomePage() {
   const [notificationPreference, setNotificationPreference] = useState<NotificationPreferenceRead | null>(null);
   const [facilities, setFacilities] = useState<FacilityRead[]>([]);
   const [equipmentItems, setEquipmentItems] = useState<EquipmentItemRead[]>([]);
+  const [equipmentFiles, setEquipmentFiles] = useState<EquipmentFileRead[]>([]);
   const [equipmentCheckouts, setEquipmentCheckouts] = useState<EquipmentCheckoutRead[]>([]);
   const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
@@ -389,6 +403,7 @@ export default function HomePage() {
   const [selectedSubscriptionId, setSelectedSubscriptionId] = useState("");
   const [selectedUsageMeterId, setSelectedUsageMeterId] = useState("");
   const [selectedSaasInvoiceId, setSelectedSaasInvoiceId] = useState("");
+  const [selectedEquipmentFile, setSelectedEquipmentFile] = useState<File | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -1047,6 +1062,11 @@ export default function HomePage() {
     );
   }, []);
 
+  const loadEquipmentFiles = useCallback(async (equipmentItemId: string) => {
+    const data = await apiRequest<EquipmentFileRead[]>(`/assets/equipment/${equipmentItemId}/files`);
+    setEquipmentFiles(data);
+  }, []);
+
   const loadCommercial = useCallback(async (organizationId: string) => {
     const [
       sponsorData,
@@ -1265,6 +1285,7 @@ export default function HomePage() {
       setNotificationPreference(null);
       setFacilities([]);
       setEquipmentItems([]);
+      setEquipmentFiles([]);
       setEquipmentCheckouts([]);
       setWorkOrders([]);
       setFacilityBookings([]);
@@ -1374,6 +1395,18 @@ export default function HomePage() {
       () => undefined
     );
   }, [selectedFacilityId, selectedOrganizationId, loadAssets, runAction]);
+
+  useEffect(() => {
+    if (!selectedEquipmentId) {
+      setEquipmentFiles([]);
+      return;
+    }
+    runAction(
+      "load-equipment-files",
+      () => loadEquipmentFiles(selectedEquipmentId),
+      () => undefined
+    );
+  }, [selectedEquipmentId, loadEquipmentFiles, runAction]);
 
   useEffect(() => {
     if (!selectedEventId) {
@@ -2977,6 +3010,41 @@ export default function HomePage() {
       (item) => {
         setEquipmentItems((current) => [item, ...current.filter((value) => value.id !== item.id)]);
         addLog(`${item.name} photo metadata saved`, "good");
+      }
+    );
+  };
+
+  const uploadSelectedEquipmentFile = () => {
+    if (!selectedEquipmentId || !selectedEquipmentFile) {
+      addLog("Select equipment and choose a file first", "bad");
+      return;
+    }
+    runAction(
+      "upload-equipment-file",
+      async () => {
+        const contentBase64 = await fileToBase64(selectedEquipmentFile);
+        return apiRequest<EquipmentFileRead>(`/assets/equipment/${selectedEquipmentId}/files`, {
+          method: "POST",
+          identity,
+          body: {
+            filename: selectedEquipmentFile.name,
+            content_type: selectedEquipmentFile.type || "application/octet-stream",
+            content_base64: contentBase64,
+            notes: `Uploaded from the operations console for ${selectedEquipment?.name ?? "equipment"}.`,
+            mark_as_photo: selectedEquipmentFile.type.startsWith("image/")
+          }
+        });
+      },
+      (fileRecord) => {
+        setEquipmentFiles((current) => [
+          fileRecord,
+          ...current.filter((item) => item.id !== fileRecord.id)
+        ]);
+        addLog(`${fileRecord.filename} uploaded (${fileRecord.size_bytes} bytes)`, "good");
+        setSelectedEquipmentFile(null);
+        if (selectedOrganizationId) {
+          void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+        }
       }
     );
   };
@@ -4723,6 +4791,7 @@ export default function HomePage() {
                 <button type="button" onClick={createEquipmentItem} disabled={busyAction !== null}>Item</button>
                 <button type="button" onClick={scanEquipmentItem} disabled={busyAction !== null}>Scan</button>
                 <button type="button" onClick={updateSelectedEquipmentPhoto} disabled={busyAction !== null}>Photo</button>
+                <button type="button" onClick={uploadSelectedEquipmentFile} disabled={busyAction !== null}>Upload</button>
                 <button type="button" onClick={quoteSelectedEquipmentLease} disabled={busyAction !== null}>Lease</button>
                 <button type="button" onClick={checkoutEquipmentItem} disabled={busyAction !== null}>Checkout</button>
                 <button type="button" onClick={returnSelectedCheckout} disabled={busyAction !== null}>Return</button>
@@ -4779,6 +4848,10 @@ export default function HomePage() {
                 Location
                 <input value={equipmentForm.storage_location} onChange={(event) => setEquipmentForm({ ...equipmentForm, storage_location: event.target.value })} />
               </label>
+              <label className="wide-field">
+                File
+                <input type="file" onChange={(event) => setSelectedEquipmentFile(event.target.files?.[0] ?? null)} />
+              </label>
             </div>
             <div className="selection-list compact">
               {equipmentItems.map((item) => (
@@ -4815,6 +4888,14 @@ export default function HomePage() {
               </div>
             ) : null}
             <div className="task-list">
+              {equipmentFiles.slice(0, 3).map((fileRecord) => (
+                <article key={fileRecord.id} className="task-card">
+                  <div>
+                    <strong>{fileRecord.filename}</strong>
+                    <span>{fileRecord.content_type} · {fileRecord.size_bytes} bytes · {fileRecord.checksum.slice(0, 8)}</span>
+                  </div>
+                </article>
+              ))}
               {equipmentCheckouts.slice(0, 3).map((checkout) => (
                 <button
                   type="button"

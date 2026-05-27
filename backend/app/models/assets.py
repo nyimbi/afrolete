@@ -95,6 +95,25 @@ class EquipmentItem(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class EquipmentFile(IdMixin, TimestampMixin, Base):
+    __tablename__ = "equipment_files"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    equipment_item_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("equipment_items.id"), index=True
+    )
+    uploaded_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"))
+    filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    storage_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(700), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class EquipmentCheckout(IdMixin, TimestampMixin, Base):
     __tablename__ = "equipment_checkouts"
 

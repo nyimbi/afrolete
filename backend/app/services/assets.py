@@ -1,5 +1,10 @@
+from base64 import b64decode
+from binascii import Error as Base64Error
 from datetime import UTC, datetime
 from decimal import Decimal
+from hashlib import sha256
+from pathlib import Path
+from re import sub
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -8,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.assets import (
     EquipmentCheckout,
+    EquipmentFile,
     EquipmentItem,
     Facility,
     FacilityBooking,
@@ -26,11 +32,13 @@ from app.models.event import Event
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.team import Team
+from app.core.config import Settings, get_settings
 from app.schemas.assets import (
     AssetSummaryRead,
     EquipmentCheckoutCreate,
     EquipmentCheckoutReturn,
     EquipmentLeaseQuoteRead,
+    EquipmentFileUploadCreate,
     EquipmentPhotoUpdate,
     EquipmentScanRead,
     EquipmentItemCreate,
@@ -175,6 +183,64 @@ async def update_equipment_photo(
     await db.commit()
     await db.refresh(item)
     return item
+
+
+async def upload_equipment_file(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    equipment_item_id: UUID,
+    payload: EquipmentFileUploadCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> EquipmentFile:
+    item = await get_equipment(db, equipment_item_id)
+    await ensure_manage_assets(authz, identity, item.organization_id)
+    content = decode_upload_content(payload.content_base64)
+    if not content:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="File is empty")
+    selected_settings = settings or get_settings()
+    checksum = sha256(content).hexdigest()
+    safe_name = safe_upload_filename(payload.filename)
+    storage_name = f"{checksum[:16]}-{safe_name}"
+    relative_path = Path(str(item.organization_id)) / str(item.id) / storage_name
+    destination = Path(selected_settings.equipment_file_dir) / relative_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(content)
+    storage_url = f"{selected_settings.equipment_file_url_prefix}/{relative_path.as_posix()}"
+    file_record = EquipmentFile(
+        organization_id=item.organization_id,
+        equipment_item_id=item.id,
+        uploaded_by_person_id=identity.person_id,
+        filename=safe_name,
+        content_type=payload.content_type or "application/octet-stream",
+        size_bytes=len(content),
+        checksum=checksum,
+        storage_url=storage_url,
+        storage_path=str(destination),
+        notes=payload.notes,
+    )
+    if payload.mark_as_photo or payload.content_type.startswith("image/"):
+        item.photo_url = storage_url
+    db.add(file_record)
+    await db.commit()
+    await db.refresh(file_record)
+    return file_record
+
+
+async def list_equipment_files(
+    db: AsyncSession,
+    equipment_item_id: UUID,
+) -> list[EquipmentFile]:
+    await get_equipment(db, equipment_item_id)
+    return list(
+        (
+            await db.scalars(
+                select(EquipmentFile)
+                .where(EquipmentFile.equipment_item_id == equipment_item_id)
+                .order_by(EquipmentFile.created_at.desc())
+            )
+        ).all()
+    )
 
 
 async def checkout_equipment(
@@ -797,6 +863,19 @@ def equipment_item_read(item: EquipmentItem):
         photo_url=item.photo_url,
         notes=item.notes,
     )
+
+
+def decode_upload_content(content_base64: str) -> bytes:
+    encoded = content_base64.split(",", 1)[1] if "," in content_base64 else content_base64
+    try:
+        return b64decode(encoded, validate=True)
+    except (Base64Error, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid file encoding") from exc
+
+
+def safe_upload_filename(filename: str) -> str:
+    cleaned = sub(r"[^A-Za-z0-9._-]+", "-", Path(filename).name).strip(".-")
+    return cleaned[:180] or "equipment-file"
 
 
 def supplier_recommendation(score: int) -> str:

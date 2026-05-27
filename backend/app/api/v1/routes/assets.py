@@ -10,6 +10,8 @@ from app.schemas.assets import (
     EquipmentCheckoutCreate,
     EquipmentCheckoutRead,
     EquipmentCheckoutReturn,
+    EquipmentFileRead,
+    EquipmentFileUploadCreate,
     EquipmentItemCreate,
     EquipmentItemRead,
     EquipmentLeaseQuoteRead,
@@ -37,6 +39,7 @@ from app.services.assets import (
     create_supplier_order,
     create_work_order,
     equipment_lease_quote,
+    list_equipment_files,
     list_checkouts,
     list_equipment_items,
     list_facilities,
@@ -49,6 +52,7 @@ from app.services.assets import (
     scan_equipment,
     supplier_scorecard,
     update_equipment_photo,
+    upload_equipment_file,
     update_work_order,
     utilization_recommendations,
 )
@@ -107,6 +111,21 @@ def to_equipment_read(item) -> EquipmentItemRead:
         last_audit_on=item.last_audit_on,
         photo_url=item.photo_url,
         notes=item.notes,
+    )
+
+
+def to_equipment_file_read(file_record) -> EquipmentFileRead:
+    return EquipmentFileRead(
+        id=file_record.id,
+        organization_id=file_record.organization_id,
+        equipment_item_id=file_record.equipment_item_id,
+        uploaded_by_person_id=file_record.uploaded_by_person_id,
+        filename=file_record.filename,
+        content_type=file_record.content_type,
+        size_bytes=file_record.size_bytes,
+        checksum=file_record.checksum,
+        storage_url=file_record.storage_url,
+        notes=file_record.notes,
     )
 
 
@@ -267,6 +286,34 @@ async def update_equipment_photo_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EquipmentItemRead:
     return to_equipment_read(await update_equipment_photo(db, identity, equipment_item_id, payload, authz))
+
+
+@router.post(
+    "/equipment/{equipment_item_id}/files",
+    response_model=EquipmentFileRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_equipment_file_route(
+    equipment_item_id: UUID,
+    payload: EquipmentFileUploadCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EquipmentFileRead:
+    return to_equipment_file_read(
+        await upload_equipment_file(db, identity, equipment_item_id, payload, authz)
+    )
+
+
+@router.get("/equipment/{equipment_item_id}/files", response_model=list[EquipmentFileRead])
+async def list_equipment_files_route(
+    equipment_item_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[EquipmentFileRead]:
+    return [
+        to_equipment_file_read(file_record)
+        for file_record in await list_equipment_files(db, equipment_item_id)
+    ]
 
 
 @router.get("/equipment/{equipment_item_id}/lease-quote", response_model=EquipmentLeaseQuoteRead)
