@@ -1708,6 +1708,15 @@ export type CommunicationDigestRead = {
   body: string;
 };
 
+export type CommunicationDigestRunRead = {
+  organization_id: UUID;
+  frequency: NotificationFrequency | null;
+  considered: number;
+  created: number;
+  skipped: number;
+  digests: CommunicationDigestRead[];
+};
+
 export type CommunicationDraftRead = {
   subject: string;
   body: string;

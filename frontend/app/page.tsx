@@ -40,6 +40,7 @@ import type {
   BillingTaxQuoteRead,
   ChannelPreference,
   CommunicationDigestRead,
+  CommunicationDigestRunRead,
   CommunicationDispatchSummary,
   CommunicationDraftRead,
   CommunicationInboxItemRead,
@@ -322,6 +323,7 @@ export default function HomePage() {
   const [messageRecipients, setMessageRecipients] = useState<MessageRecipientRead[]>([]);
   const [inboxItems, setInboxItems] = useState<CommunicationInboxItemRead[]>([]);
   const [digestSummary, setDigestSummary] = useState<CommunicationDigestRead | null>(null);
+  const [digestRun, setDigestRun] = useState<CommunicationDigestRunRead | null>(null);
   const [draftPreview, setDraftPreview] = useState<CommunicationDraftRead | null>(null);
   const [notificationPreference, setNotificationPreference] = useState<NotificationPreferenceRead | null>(null);
   const [facilities, setFacilities] = useState<FacilityRead[]>([]);
@@ -1321,6 +1323,7 @@ export default function HomePage() {
       setMessageRecipients([]);
       setInboxItems([]);
       setDigestSummary(null);
+      setDigestRun(null);
       setDraftPreview(null);
       setNotificationPreference(null);
       setFacilities([]);
@@ -2923,8 +2926,35 @@ export default function HomePage() {
       },
       ({ digest, inbox }) => {
         setDigestSummary(digest);
+        setDigestRun(null);
         setInboxItems(inbox);
         addLog(`${digest.subject} created with ${digest.item_count} items`, "good");
+      }
+    );
+  };
+
+  const runCommunicationDigestScheduler = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const frequency = preferenceForm.frequency === "weekly_digest" ? "weekly_digest" : "daily_digest";
+    runAction(
+      "run-communication-digests",
+      () =>
+        apiRequest<CommunicationDigestRunRead>("/communications/digests/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            frequency,
+            limit: 50
+          }
+        }),
+      (run) => {
+        setDigestRun(run);
+        setDigestSummary(run.digests[0] ?? null);
+        addLog(`Digest run created ${run.created} and skipped ${run.skipped}`, "good");
       }
     );
   };
@@ -6675,6 +6705,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createCommunicationDigest} disabled={busyAction !== null || !selectedInboxPersonId}>Digest</button>
+                <button type="button" onClick={runCommunicationDigestScheduler} disabled={busyAction !== null || !selectedOrganizationId}>Run digests</button>
                 <button type="button" onClick={dispatchSelectedMessage} disabled={busyAction !== null || !selectedMessageId}>Dispatch</button>
                 <button type="button" onClick={saveNotificationPreference} disabled={busyAction !== null}>Preference</button>
               </div>
@@ -6712,6 +6743,14 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {digestRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Digest run</strong>
+                    <span>{digestRun.created} created · {digestRun.skipped} skipped · {digestRun.considered} checked</span>
+                  </div>
+                </article>
+              ) : null}
               {digestSummary ? (
                 <article className="task-card">
                   <div>

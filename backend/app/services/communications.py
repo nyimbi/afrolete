@@ -20,6 +20,7 @@ from app.models.enums import (
     CommunicationScopeType,
     MemberSubjectType,
     MessageDeliveryStatus,
+    NotificationFrequency,
 )
 from app.models.event import AttendanceRecord, Event
 from app.models.identity import Person
@@ -28,6 +29,8 @@ from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRost
 from app.schemas.communication import (
     CommunicationDigestCreate,
     CommunicationDigestRead,
+    CommunicationDigestRunCreate,
+    CommunicationDigestRunRead,
     CommunicationDispatchSummary,
     CommunicationDraftRead,
     CommunicationDraftRequest,
@@ -241,12 +244,7 @@ async def create_digest(
 ) -> CommunicationDigestRead:
     await ensure_view_person_messages(db, identity, payload.organization_id, payload.person_id, authz)
     rows = await list_inbox_items(db, identity, payload.organization_id, payload.person_id, authz)
-    source_rows = [
-        (recipient, message)
-        for recipient, message in rows
-        if recipient.delivery_status != MessageDeliveryStatus.READ
-        and not message.subject.lower().startswith("digest:")
-    ][:20]
+    source_rows = digest_source_rows(rows)
     person = await db.get(Person, payload.person_id)
     if person is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
@@ -297,6 +295,60 @@ async def create_digest(
         item_count=len(source_rows),
         subject=message.subject,
         body=message.body,
+    )
+
+
+async def run_digest_scheduler(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: CommunicationDigestRunCreate,
+    authz: AuthorizationService,
+) -> CommunicationDigestRunRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_communications(authz, identity, payload.organization_id)
+    if payload.frequency == NotificationFrequency.IMMEDIATE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Digest scheduler frequency must be daily_digest or weekly_digest",
+        )
+    statement = select(NotificationPreference).where(
+        NotificationPreference.organization_id == payload.organization_id,
+        NotificationPreference.frequency.in_(
+            [NotificationFrequency.DAILY_DIGEST, NotificationFrequency.WEEKLY_DIGEST]
+        ),
+    )
+    if payload.frequency is not None:
+        statement = statement.where(NotificationPreference.frequency == payload.frequency)
+    preferences = list(
+        (await db.scalars(statement.order_by(NotificationPreference.updated_at.desc()).limit(payload.limit))).all()
+    )
+    digests: list[CommunicationDigestRead] = []
+    skipped = 0
+    for preference in preferences:
+        rows = await list_inbox_items(db, identity, payload.organization_id, preference.person_id, authz)
+        source_rows = digest_source_rows(rows)
+        if not source_rows:
+            skipped += 1
+            continue
+        digests.append(
+            await create_digest(
+                db,
+                identity,
+                CommunicationDigestCreate(
+                    organization_id=payload.organization_id,
+                    person_id=preference.person_id,
+                    frequency=preference.frequency,
+                ),
+                authz,
+            )
+        )
+    return CommunicationDigestRunRead(
+        organization_id=payload.organization_id,
+        frequency=payload.frequency,
+        considered=len(preferences),
+        created=len(digests),
+        skipped=skipped,
+        digests=digests,
     )
 
 
@@ -683,6 +735,17 @@ def digest_body(
         lines.append(f"{index}. {urgent}{message.subject} ({message.channel.value}, {status_label})")
     lines.extend(["", "Open your AfroLete inbox to review details and respond where needed."])
     return "\n".join(lines)
+
+
+def digest_source_rows(
+    rows: list[tuple[MessageRecipient, CommunicationMessage]],
+) -> list[tuple[MessageRecipient, CommunicationMessage]]:
+    return [
+        (recipient, message)
+        for recipient, message in rows
+        if recipient.delivery_status != MessageDeliveryStatus.READ
+        and not message.subject.lower().startswith("digest:")
+    ][:20]
 
 
 def clamp_text(value: str, max_length: int) -> str:

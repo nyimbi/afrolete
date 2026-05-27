@@ -8,6 +8,8 @@ from app.db.session import get_db
 from app.schemas.communication import (
     CommunicationDigestCreate,
     CommunicationDigestRead,
+    CommunicationDigestRunCreate,
+    CommunicationDigestRunRead,
     CommunicationDispatchSummary,
     CommunicationDraftRead,
     CommunicationDraftRequest,
@@ -36,6 +38,7 @@ from app.services.communications import (
     list_recipients,
     list_templates,
     record_delivery_event,
+    run_digest_scheduler,
     update_recipient_status,
     upsert_preference,
 )
@@ -201,6 +204,16 @@ async def create_digest_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> CommunicationDigestRead:
     return await create_digest(db, identity, payload, authz)
+
+
+@router.post("/digests/run", response_model=CommunicationDigestRunRead)
+async def run_digest_scheduler_route(
+    payload: CommunicationDigestRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunicationDigestRunRead:
+    return await run_digest_scheduler(db, identity, payload, authz)
 
 
 @router.post("/drafts", response_model=CommunicationDraftRead)

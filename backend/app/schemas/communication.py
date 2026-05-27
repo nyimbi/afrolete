@@ -146,6 +146,21 @@ class CommunicationDigestRead(BaseModel):
     body: str
 
 
+class CommunicationDigestRunCreate(BaseModel):
+    organization_id: UUID
+    frequency: NotificationFrequency | None = None
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class CommunicationDigestRunRead(BaseModel):
+    organization_id: UUID
+    frequency: NotificationFrequency | None
+    considered: int
+    created: int
+    skipped: int
+    digests: list[CommunicationDigestRead]
+
+
 class CommunicationDraftRequest(BaseModel):
     organization_id: UUID
     message_type: CommunicationMessageType = CommunicationMessageType.ANNOUNCEMENT
