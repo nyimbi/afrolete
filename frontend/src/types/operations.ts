@@ -493,6 +493,25 @@ export type EventTravelConsentReminderRead = {
   recipient_count: number;
 };
 
+export type EventTravelConsentReminderRunPlanRead = {
+  travel_plan_id: UUID;
+  destination: string;
+  travel_mode: string;
+  consent_due_at: string | null;
+  status: TravelPlanStatus;
+};
+
+export type EventTravelConsentReminderRunRead = {
+  event_id: UUID;
+  due_by: string;
+  due_plan_count: number;
+  pending_request_count: number;
+  message_id: UUID | null;
+  recipient_count: number;
+  channel: CommunicationChannel;
+  plans: EventTravelConsentReminderRunPlanRead[];
+};
+
 export type EventTravelManifestParticipantRead = {
   person_id: UUID;
   display_name: string;

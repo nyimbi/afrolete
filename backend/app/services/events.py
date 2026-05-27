@@ -50,6 +50,9 @@ from app.schemas.event import (
     EventTravelConsentBatchRead,
     EventTravelConsentReminderCreate,
     EventTravelConsentReminderRead,
+    EventTravelConsentReminderRunCreate,
+    EventTravelConsentReminderRunPlanRead,
+    EventTravelConsentReminderRunRead,
     EventTravelConsentRequestCreate,
     EventTravelConsentRequestItemRead,
     EventTravelApprovalCreate,
@@ -486,18 +489,7 @@ async def send_travel_consent_reminders(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
     event = await get_event(db, plan.event_id)
     await ensure_manage_event_scope(authz, plan.organization_id, identity)
-    pending_requests = list(
-        (
-            await db.scalars(
-                select(ConsentRequest)
-                .where(ConsentRequest.organization_id == event.organization_id)
-                .where(ConsentRequest.scope_type == ConsentScopeType.EVENT)
-                .where(ConsentRequest.scope_id == event.id)
-                .where(ConsentRequest.status == ConsentRequestStatus.PENDING)
-                .order_by(ConsentRequest.sent_at.desc())
-            )
-        ).all()
-    )
+    pending_requests = await pending_event_consent_requests(db, event)
     if not pending_requests:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No pending travel consents")
 
@@ -529,6 +521,79 @@ async def send_travel_consent_reminders(
         message_id=message.id,
         pending_request_count=len(pending_requests),
         recipient_count=int(recipient_count or 0),
+    )
+
+
+async def run_event_travel_consent_reminders(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    event_id: UUID,
+    payload: EventTravelConsentReminderRunCreate,
+    authz: AuthorizationService,
+) -> EventTravelConsentReminderRunRead:
+    event = await get_event(db, event_id)
+    await ensure_manage_event_scope(authz, event.organization_id, identity)
+    now = datetime.now(UTC)
+    due_by = now + timedelta(hours=payload.due_within_hours)
+    due_plans = list(
+        (
+            await db.scalars(
+                select(EventTravelPlan)
+                .where(EventTravelPlan.event_id == event.id)
+                .where(EventTravelPlan.consent_required.is_(True))
+                .where(EventTravelPlan.status.not_in([TravelPlanStatus.COMPLETED, TravelPlanStatus.CANCELLED]))
+                .where(EventTravelPlan.consent_due_at.is_not(None))
+                .where(EventTravelPlan.consent_due_at <= due_by)
+                .order_by(EventTravelPlan.consent_due_at, EventTravelPlan.destination)
+            )
+        ).all()
+    )
+    pending_requests = await pending_event_consent_requests(db, event)
+    guardian_ids = sorted({request.guardian_person_id for request in pending_requests}, key=str)
+    message_id: UUID | None = None
+    recipient_count = 0
+    if payload.send_reminders and due_plans and guardian_ids:
+        message = await create_message(
+            db,
+            identity,
+            CommunicationMessageCreate(
+                organization_id=event.organization_id,
+                message_type=CommunicationMessageType.REMINDER,
+                channel=payload.channel,
+                scope_type=CommunicationScopeType.PERSON,
+                scope_id=guardian_ids[0],
+                recipient_person_ids=guardian_ids,
+                subject=payload.subject or scheduled_travel_consent_reminder_subject(event),
+                body=payload.body or scheduled_travel_consent_reminder_body(event, due_plans, len(pending_requests)),
+                urgent=False,
+                quiet_hours_override=False,
+                copy_guardians_for_minors=False,
+            ),
+            authz,
+        )
+        message_id = message.id
+        recipient_count = int(
+            await db.scalar(select(func.count(MessageRecipient.id)).where(MessageRecipient.message_id == message.id))
+            or 0
+        )
+    return EventTravelConsentReminderRunRead(
+        event_id=event.id,
+        due_by=due_by,
+        due_plan_count=len(due_plans),
+        pending_request_count=len(pending_requests),
+        message_id=message_id,
+        recipient_count=recipient_count,
+        channel=payload.channel,
+        plans=[
+            EventTravelConsentReminderRunPlanRead(
+                travel_plan_id=plan.id,
+                destination=plan.destination,
+                travel_mode=plan.travel_mode,
+                consent_due_at=plan.consent_due_at,
+                status=plan.status,
+            )
+            for plan in due_plans
+        ],
     )
 
 
@@ -1674,6 +1739,21 @@ def travel_fee_checkout_url(base_url: str, invoice: FinanceInvoice, provider: st
     return f"{base_url.rstrip('/')}/{invoice.id}?provider={provider}&token={token}"
 
 
+async def pending_event_consent_requests(db: AsyncSession, event: Event) -> list[ConsentRequest]:
+    return list(
+        (
+            await db.scalars(
+                select(ConsentRequest)
+                .where(ConsentRequest.organization_id == event.organization_id)
+                .where(ConsentRequest.scope_type == ConsentScopeType.EVENT)
+                .where(ConsentRequest.scope_id == event.id)
+                .where(ConsentRequest.status == ConsentRequestStatus.PENDING)
+                .order_by(ConsentRequest.sent_at.desc())
+            )
+        ).all()
+    )
+
+
 def decode_upload_content(content_base64: str) -> bytes:
     encoded = content_base64.split(",", 1)[1] if "," in content_base64 else content_base64
     try:
@@ -2057,6 +2137,28 @@ def travel_consent_reminder_body(event: Event, plan: EventTravelPlan, pending_co
         parts.append(f"Consent due: {plan.consent_due_at.isoformat()}.")
     if plan.emergency_contacts:
         parts.append(f"Emergency contacts: {plan.emergency_contacts}")
+    return "\n".join(parts)[:4000]
+
+
+def scheduled_travel_consent_reminder_subject(event: Event) -> str:
+    return f"Travel consent deadline approaching: {event.title}"[:240]
+
+
+def scheduled_travel_consent_reminder_body(
+    event: Event,
+    due_plans: list[EventTravelPlan],
+    pending_count: int,
+) -> str:
+    parts = [
+        f"Automated travel consent reminder for {event.title}.",
+        f"Pending consent requests: {pending_count}.",
+        "Please open the family portal or the one-use consent link already sent to respond.",
+    ]
+    for plan in due_plans[:5]:
+        due = plan.consent_due_at.isoformat() if plan.consent_due_at is not None else "not set"
+        parts.append(f"- {plan.destination} by {plan.travel_mode}; consent due {due}.")
+    if len(due_plans) > 5:
+        parts.append(f"- {len(due_plans) - 5} additional travel plan(s) are also due soon.")
     return "\n".join(parts)[:4000]
 
 

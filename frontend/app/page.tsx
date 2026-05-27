@@ -78,6 +78,7 @@ import type {
   EventTravelChecklistItemRead,
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
+  EventTravelConsentReminderRunRead,
   EventTravelExpenseRead,
   EventTravelFeeCheckoutBatchRead,
   EventTravelFeeInvoiceBatchRead,
@@ -360,6 +361,8 @@ export default function HomePage() {
   const [travelPlans, setTravelPlans] = useState<EventTravelPlanRead[]>([]);
   const [travelConsentBatch, setTravelConsentBatch] = useState<EventTravelConsentBatchRead | null>(null);
   const [travelConsentReminder, setTravelConsentReminder] = useState<EventTravelConsentReminderRead | null>(null);
+  const [travelConsentReminderRun, setTravelConsentReminderRun] =
+    useState<EventTravelConsentReminderRunRead | null>(null);
   const [travelManifest, setTravelManifest] = useState<EventTravelManifestRead | null>(null);
   const [travelManifestExport, setTravelManifestExport] = useState<EventTravelManifestExportRead | null>(null);
   const [travelFeeBatch, setTravelFeeBatch] = useState<EventTravelFeeInvoiceBatchRead | null>(null);
@@ -1630,6 +1633,7 @@ export default function HomePage() {
       setTravelPlans([]);
       setTravelConsentBatch(null);
       setTravelConsentReminder(null);
+      setTravelConsentReminderRun(null);
       setTravelManifest(null);
       setTravelManifestExport(null);
       setTravelFeeBatch(null);
@@ -1846,6 +1850,7 @@ export default function HomePage() {
       setTravelPlans([]);
       setTravelConsentBatch(null);
       setTravelConsentReminder(null);
+      setTravelConsentReminderRun(null);
       setTravelManifest(null);
       setTravelManifestExport(null);
       setTravelFeeBatch(null);
@@ -2498,6 +2503,41 @@ export default function HomePage() {
         addLog(
           `Travel consent reminder sent to ${reminder.recipient_count} guardians`,
           reminder.recipient_count > 0 ? "good" : "bad"
+        );
+        if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
+        }
+      }
+    );
+  };
+
+  const runTravelConsentReminderAutomation = () => {
+    if (!selectedEventId) {
+      addLog("Select an event first", "bad");
+      return;
+    }
+    runAction(
+      `travel-consent-reminder-run-${selectedEventId}`,
+      () =>
+        apiRequest<EventTravelConsentReminderRunRead>(`/events/${selectedEventId}/travel-consent-reminder-run`, {
+          method: "POST",
+          identity,
+          body: {
+            channel: travelForm.reminder_channel,
+            due_within_hours: 48,
+            send_reminders: true,
+            subject: null,
+            body: null
+          }
+        }),
+      (run) => {
+        setTravelConsentReminderRun(run);
+        if (run.message_id) {
+          setSelectedMessageId(run.message_id);
+        }
+        addLog(
+          `Travel reminder run: ${run.due_plan_count} due plans, ${run.recipient_count} recipients`,
+          run.recipient_count > 0 ? "good" : "neutral"
         );
         if (selectedOrganizationId) {
           void loadCommunications(selectedOrganizationId);
@@ -7123,6 +7163,7 @@ export default function HomePage() {
               <button type="button" onClick={checkClearance} disabled={busyAction !== null}>Clearance</button>
               <button type="button" onClick={assessEventWeather} disabled={busyAction !== null}>Weather check</button>
               <button type="button" onClick={createTravelPlan} disabled={busyAction !== null}>Travel plan</button>
+              <button type="button" onClick={runTravelConsentReminderAutomation} disabled={busyAction !== null}>Auto reminders</button>
             </div>
             <div className="form-grid three">
               <label>
@@ -7436,6 +7477,17 @@ export default function HomePage() {
                     <strong>Travel consent reminder</strong>
                     <span>{travelConsentReminder.recipient_count} recipients · {travelConsentReminder.pending_request_count} pending requests</span>
                     <span>Message {travelConsentReminder.message_id}</span>
+                  </div>
+                </article>
+              ) : null}
+              {travelConsentReminderRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Automated travel reminders · {travelConsentReminderRun.due_plan_count} due plans</strong>
+                    <span>
+                      {travelConsentReminderRun.pending_request_count} pending requests · {travelConsentReminderRun.recipient_count} recipients · due by {new Date(travelConsentReminderRun.due_by).toLocaleString()}
+                    </span>
+                    <span>{travelConsentReminderRun.plans[0]?.destination ?? "No travel consent reminders due"}</span>
                   </div>
                 </article>
               ) : null}

@@ -187,6 +187,33 @@ class EventTravelConsentReminderRead(BaseModel):
     recipient_count: int
 
 
+class EventTravelConsentReminderRunCreate(BaseModel):
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    due_within_hours: int = Field(default=48, ge=1, le=720)
+    send_reminders: bool = True
+    subject: str | None = Field(default=None, max_length=240)
+    body: str | None = Field(default=None, max_length=4000)
+
+
+class EventTravelConsentReminderRunPlanRead(BaseModel):
+    travel_plan_id: UUID
+    destination: str
+    travel_mode: str
+    consent_due_at: datetime | None
+    status: TravelPlanStatus
+
+
+class EventTravelConsentReminderRunRead(BaseModel):
+    event_id: UUID
+    due_by: datetime
+    due_plan_count: int
+    pending_request_count: int
+    message_id: UUID | None
+    recipient_count: int
+    channel: CommunicationChannel
+    plans: list[EventTravelConsentReminderRunPlanRead]
+
+
 class EventTravelManifestParticipantRead(BaseModel):
     person_id: UUID
     display_name: str
