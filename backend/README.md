@@ -12,9 +12,11 @@ uv run uvicorn app.main:app --reload
 uv run pytest
 ```
 
-The default local database URL is `postgresql+asyncpg:///afrolete`, matching the
-production PostgreSQL target shape. Unit tests override persistence to an
-in-memory SQLite database for fast isolated test runs.
+The default local database URL is `postgresql:///afrolete`, matching the
+production PostgreSQL target shape while staying easy to type locally. The app
+normalizes plain PostgreSQL URLs to the async driver required by FastAPI at
+runtime. Unit tests override persistence to an in-memory SQLite database for
+fast isolated test runs.
 
 ## Responsibilities
 
