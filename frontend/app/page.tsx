@@ -221,6 +221,13 @@ import type {
   MaintenanceWorkOrderRead
 } from "@/types/operations";
 
+type TravelManifestOfflineCache = EventTravelManifestRead & {
+  cached_at: string;
+  cache_version: number;
+};
+
+const travelManifestCacheKey = (travelPlanId: string) => `afrolete:travel-manifest:${travelPlanId}`;
+
 const defaultIdentity: LocalIdentity = {
   sub: "kc-owner-1",
   email: "owner@example.com",
@@ -376,6 +383,7 @@ export default function HomePage() {
   const [travelConsentReminderRun, setTravelConsentReminderRun] =
     useState<EventTravelConsentReminderRunRead | null>(null);
   const [travelManifest, setTravelManifest] = useState<EventTravelManifestRead | null>(null);
+  const [travelOfflineManifestCache, setTravelOfflineManifestCache] = useState<TravelManifestOfflineCache | null>(null);
   const [travelManifestExport, setTravelManifestExport] = useState<EventTravelManifestExportRead | null>(null);
   const [travelManifestOfflineLink, setTravelManifestOfflineLink] =
     useState<EventTravelManifestOfflineLinkRead | null>(null);
@@ -1695,6 +1703,7 @@ export default function HomePage() {
       setTravelConsentReminder(null);
       setTravelConsentReminderRun(null);
       setTravelManifest(null);
+      setTravelOfflineManifestCache(null);
       setTravelManifestExport(null);
       setTravelManifestOfflineLink(null);
       setTravelFeeBatch(null);
@@ -1924,6 +1933,7 @@ export default function HomePage() {
       setTravelConsentReminder(null);
       setTravelConsentReminderRun(null);
       setTravelManifest(null);
+      setTravelOfflineManifestCache(null);
       setTravelManifestExport(null);
       setTravelManifestOfflineLink(null);
       setTravelFeeBatch(null);
@@ -2659,6 +2669,51 @@ export default function HomePage() {
         addLog(`Travel manifest loaded for ${manifest.participant_count} participants`, "good");
       }
     );
+  };
+
+  const writeTravelManifestOfflineCache = (manifest: EventTravelManifestRead) => {
+    const cache: TravelManifestOfflineCache = {
+      ...manifest,
+      cached_at: new Date().toISOString(),
+      cache_version: 1
+    };
+    localStorage.setItem(travelManifestCacheKey(manifest.travel_plan_id), JSON.stringify(cache));
+    setTravelManifest(cache);
+    setTravelOfflineManifestCache(cache);
+    return cache;
+  };
+
+  const cacheTravelManifestOffline = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-manifest-offline-cache-${plan.id}`,
+      () =>
+        apiRequest<EventTravelManifestRead>(`/events/travel-plans/${plan.id}/manifest`, {
+          identity
+        }),
+      (manifest) => {
+        const cache = writeTravelManifestOfflineCache(manifest);
+        addLog(`Travel manifest cached offline for ${cache.participant_count} participants`, "good");
+      }
+    );
+  };
+
+  const restoreTravelManifestOffline = (plan: EventTravelPlanRead) => {
+    const cached = localStorage.getItem(travelManifestCacheKey(plan.id));
+    if (!cached) {
+      setTravelOfflineManifestCache(null);
+      addLog(`No offline manifest cache found for ${plan.destination}`, "neutral");
+      return;
+    }
+    try {
+      const parsed = JSON.parse(cached) as TravelManifestOfflineCache;
+      setTravelManifest(parsed);
+      setTravelOfflineManifestCache(parsed);
+      addLog(`Offline manifest restored from ${new Date(parsed.cached_at).toLocaleString()}`, "good");
+    } catch {
+      localStorage.removeItem(travelManifestCacheKey(plan.id));
+      setTravelOfflineManifestCache(null);
+      addLog(`Offline manifest cache for ${plan.destination} was invalid and has been cleared`, "bad");
+    }
   };
 
   const exportTravelManifest = (plan: EventTravelPlanRead) => {
@@ -8221,6 +8276,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelOfflineManifestCache ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Offline manifest cache</strong>
+                    <span>{travelOfflineManifestCache.destination} · {travelOfflineManifestCache.participant_count} participants</span>
+                    <span>Cached {new Date(travelOfflineManifestCache.cached_at).toLocaleString()} · v{travelOfflineManifestCache.cache_version}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelManifestExport ? (
                 <article className="task-card">
                   <div>
@@ -8528,6 +8592,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => requestTravelConsents(plan)}>Consent</button>
                     <button type="button" onClick={() => remindTravelConsents(plan)}>Remind</button>
                     <button type="button" onClick={() => loadTravelManifest(plan)}>Manifest</button>
+                    <button type="button" onClick={() => cacheTravelManifestOffline(plan)}>Cache</button>
+                    <button type="button" onClick={() => restoreTravelManifestOffline(plan)}>Offline</button>
                     <button type="button" onClick={() => exportTravelManifest(plan)}>Export</button>
                     <button type="button" onClick={() => createTravelManifestOfflineLink(plan)}>PDF link</button>
                     <button type="button" onClick={() => checkTravelReadiness(plan)}>Gate</button>
