@@ -85,3 +85,27 @@ class AgentRunRecord(IdMixin, TimestampMixin, Base):
     idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
     previous_record_hash: Mapped[str | None] = mapped_column(String(128))
     record_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+
+
+class AgentModelRegistry(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_model_registry"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "model_policy", name="uq_agent_model_registry_org_policy"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    model_policy: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(120), default="local", nullable=False, index=True)
+    model_family: Mapped[str | None] = mapped_column(String(120), index=True)
+    version: Mapped[str | None] = mapped_column(String(120), index=True)
+    use_case: Mapped[str] = mapped_column(Text, nullable=False)
+    risk_tier: Mapped[str] = mapped_column(String(40), default="medium", nullable=False, index=True)
+    review_status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    documentation_url: Mapped[str | None] = mapped_column(String(500))
+    evaluation_summary: Mapped[str | None] = mapped_column(Text)
+    limitations: Mapped[str | None] = mapped_column(Text)
+    bias_notes: Mapped[str | None] = mapped_column(Text)
+    data_residency: Mapped[str | None] = mapped_column(String(120), index=True)
+    owner_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    approved_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

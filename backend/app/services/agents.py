@@ -11,12 +11,20 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.models.agent import Agent, AgentAssignment, AgentRunRecord, AgentTask
+from app.models.agent import Agent, AgentAssignment, AgentModelRegistry, AgentRunRecord, AgentTask
 from app.models.enums import AgentTaskStatus
 from app.models.event import Event
 from app.models.organization import Organization
 from app.models.team import AthleteProfile, Team
-from app.schemas.agent import AgentAssignmentCreate, AgentCreate, AgentTaskCreate, AgentTaskUpdate, AgentWorkerCallbackCreate
+from app.schemas.agent import (
+    AgentAssignmentCreate,
+    AgentCreate,
+    AgentModelRegistryCreate,
+    AgentModelRegistryUpdate,
+    AgentTaskCreate,
+    AgentTaskUpdate,
+    AgentWorkerCallbackCreate,
+)
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 
@@ -86,6 +94,92 @@ async def list_agents(
             )
         ).all()
     )
+
+
+async def list_agent_model_registry(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[AgentModelRegistry]:
+    return list(
+        (
+            await db.scalars(
+                select(AgentModelRegistry)
+                .where(AgentModelRegistry.organization_id == organization_id)
+                .order_by(AgentModelRegistry.review_status, AgentModelRegistry.model_policy)
+            )
+        ).all()
+    )
+
+
+async def create_agent_model_registry(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentModelRegistryCreate,
+    authz: AuthorizationService,
+) -> AgentModelRegistry:
+    organization = await db.get(Organization, payload.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    await ensure_manage_organization(authz, identity, payload.organization_id)
+
+    existing = await db.scalar(
+        select(AgentModelRegistry).where(
+            AgentModelRegistry.organization_id == payload.organization_id,
+            AgentModelRegistry.model_policy == payload.model_policy,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Model policy is already registered")
+
+    registry = AgentModelRegistry(
+        organization_id=payload.organization_id,
+        model_policy=payload.model_policy,
+        provider=payload.provider,
+        model_family=payload.model_family,
+        version=payload.version,
+        use_case=payload.use_case,
+        risk_tier=payload.risk_tier,
+        review_status=payload.review_status,
+        documentation_url=payload.documentation_url,
+        evaluation_summary=payload.evaluation_summary,
+        limitations=payload.limitations,
+        bias_notes=payload.bias_notes,
+        data_residency=payload.data_residency,
+        owner_person_id=identity.person_id,
+    )
+    if payload.review_status == "approved":
+        registry.approved_by_person_id = identity.person_id
+        registry.approved_at = datetime.now(UTC)
+    db.add(registry)
+    await db.commit()
+    await db.refresh(registry)
+    return registry
+
+
+async def update_agent_model_registry(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    registry_id: UUID,
+    payload: AgentModelRegistryUpdate,
+    authz: AuthorizationService,
+) -> AgentModelRegistry:
+    registry = await db.get(AgentModelRegistry, registry_id)
+    if registry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model registry record not found")
+    await ensure_manage_organization(authz, identity, registry.organization_id)
+
+    changes = payload.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        setattr(registry, field, value)
+    if changes.get("review_status") == "approved":
+        registry.approved_by_person_id = identity.person_id
+        registry.approved_at = datetime.now(UTC)
+    elif changes.get("review_status") in {"draft", "in_review", "blocked"}:
+        registry.approved_by_person_id = None
+        registry.approved_at = None
+    await db.commit()
+    await db.refresh(registry)
+    return registry
 
 
 async def get_agent_for_organization(
@@ -312,6 +406,7 @@ async def agent_model_transparency_report(
 ) -> dict[str, object]:
     settings = settings or get_settings()
     agents = await list_agents(db, organization_id)
+    registry = await list_agent_model_registry(db, organization_id)
     records = list(
         (
             await db.scalars(
@@ -327,10 +422,18 @@ async def agent_model_transparency_report(
         {
             *(agent.model_policy or settings.agent_default_model for agent in agents),
             *(record.model_policy for record in records),
+            *(item.model_policy for item in registry),
         }
     )
+    registry_by_model = {item.model_policy: item for item in registry}
     model_items = [
-        agent_model_transparency_item(model_name, agents, records, settings.agent_default_model)
+        agent_model_transparency_item(
+            model_name,
+            agents,
+            records,
+            settings.agent_default_model,
+            registry_by_model.get(model_name),
+        )
         for model_name in model_names
     ]
     recommendations = agent_transparency_recommendations(model_items, credential_status, bool(ledger["valid"]))
@@ -815,6 +918,7 @@ def agent_model_transparency_item(
     agents: list[Agent],
     records: list[AgentRunRecord],
     default_model: str,
+    registry: AgentModelRegistry | None = None,
 ) -> dict[str, object]:
     model_agents = [agent for agent in agents if (agent.model_policy or default_model) == model_policy]
     model_records = [record for record in records if record.model_policy == model_policy]
@@ -837,6 +941,9 @@ def agent_model_transparency_item(
         "execution_modes": execution_modes,
         "latest_run_at": latest_run_at,
         "risk_band": risk_band,
+        "registry_status": registry.review_status if registry else None,
+        "registered_risk_tier": registry.risk_tier if registry else None,
+        "documentation_url": registry.documentation_url if registry else None,
         "transparency_notes": agent_model_transparency_notes(model_policy, model_records, execution_modes, risk_band),
     }
 
@@ -882,6 +989,8 @@ def agent_transparency_recommendations(
         recommendations.append("Configure an OpenBao-injected agent webhook key before live model execution.")
     if any(item["risk_band"] == "unproven" for item in model_items):
         recommendations.append("Run low-risk evaluation tasks for assigned models that have no ledger evidence.")
+    if any(item["registry_status"] not in {"approved", "retired"} for item in model_items):
+        recommendations.append("Register and approve every active model policy before production side effects.")
     if any(item["human_review_runs"] for item in model_items):
         recommendations.append("Clear human review queues before enabling downstream side effects.")
     if not recommendations:

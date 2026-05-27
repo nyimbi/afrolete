@@ -91,6 +91,62 @@ class AgentWorkerCallbackRead(BaseModel):
     task: AgentTaskRead
 
 
+class AgentModelRegistryCreate(BaseModel):
+    organization_id: UUID
+    model_policy: str = Field(min_length=2, max_length=120)
+    provider: str = Field(default="local", min_length=2, max_length=120)
+    model_family: str | None = Field(default=None, max_length=120)
+    version: str | None = Field(default=None, max_length=120)
+    use_case: str = Field(min_length=8, max_length=4000)
+    risk_tier: str = Field(default="medium", pattern="^(low|medium|high|critical)$")
+    review_status: str = Field(default="draft", pattern="^(draft|in_review|approved|retired|blocked)$")
+    documentation_url: str | None = Field(default=None, max_length=500)
+    evaluation_summary: str | None = Field(default=None, max_length=4000)
+    limitations: str | None = Field(default=None, max_length=4000)
+    bias_notes: str | None = Field(default=None, max_length=4000)
+    data_residency: str | None = Field(default=None, max_length=120)
+
+
+class AgentModelRegistryUpdate(BaseModel):
+    provider: str | None = Field(default=None, min_length=2, max_length=120)
+    model_family: str | None = Field(default=None, max_length=120)
+    version: str | None = Field(default=None, max_length=120)
+    use_case: str | None = Field(default=None, min_length=8, max_length=4000)
+    risk_tier: str | None = Field(default=None, pattern="^(low|medium|high|critical)$")
+    review_status: str | None = Field(default=None, pattern="^(draft|in_review|approved|retired|blocked)$")
+    documentation_url: str | None = Field(default=None, max_length=500)
+    evaluation_summary: str | None = Field(default=None, max_length=4000)
+    limitations: str | None = Field(default=None, max_length=4000)
+    bias_notes: str | None = Field(default=None, max_length=4000)
+    data_residency: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "AgentModelRegistryUpdate":
+        if all(value is None for value in self.model_dump().values()):
+            raise ValueError("at least one model registry field is required")
+        return self
+
+
+class AgentModelRegistryRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    model_policy: str
+    provider: str
+    model_family: str | None
+    version: str | None
+    use_case: str
+    risk_tier: str
+    review_status: str
+    documentation_url: str | None
+    evaluation_summary: str | None
+    limitations: str | None
+    bias_notes: str | None
+    data_residency: str | None
+    owner_person_id: UUID | None
+    approved_by_person_id: UUID | None
+    approved_at: datetime | None
+
+
 class AgentRunRecordRead(BaseModel):
     id: UUID
     task_id: UUID
@@ -157,6 +213,9 @@ class AgentModelTransparencyItemRead(BaseModel):
     execution_modes: list[str]
     latest_run_at: datetime | None
     risk_band: str
+    registry_status: str | None
+    registered_risk_tier: str | None
+    documentation_url: str | None
     transparency_notes: str
 
 

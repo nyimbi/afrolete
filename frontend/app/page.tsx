@@ -14,6 +14,7 @@ import type {
   AgentAssignmentRead,
   AgentGovernanceSummaryRead,
   AgentKind,
+  AgentModelRegistryRead,
   AgentModelTransparencyReportRead,
   AgentRead,
   AgentRunLedgerVerificationRead,
@@ -578,6 +579,7 @@ export default function HomePage() {
     useState<AgentRunLedgerVerificationRead | null>(null);
   const [agentGovernance, setAgentGovernance] = useState<AgentGovernanceSummaryRead | null>(null);
   const [agentTransparency, setAgentTransparency] = useState<AgentModelTransparencyReportRead | null>(null);
+  const [agentModelRegistry, setAgentModelRegistry] = useState<AgentModelRegistryRead[]>([]);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1461,18 +1463,20 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification, transparency] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification, transparency, registry] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
       apiRequest<AgentRunLedgerVerificationRead>(`/agents/runs/verify?organization_id=${organizationId}`),
-      apiRequest<AgentModelTransparencyReportRead>(`/agents/model-transparency?organization_id=${organizationId}`)
+      apiRequest<AgentModelTransparencyReportRead>(`/agents/model-transparency?organization_id=${organizationId}`),
+      apiRequest<AgentModelRegistryRead[]>(`/agents/model-registry?organization_id=${organizationId}`)
     ]);
     setAgentTasks(tasks);
     setAgentRuns(runs);
     setAgentGovernance(governance);
     setAgentLedgerVerification(ledgerVerification);
     setAgentTransparency(transparency);
+    setAgentModelRegistry(registry);
   }, []);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1907,6 +1911,7 @@ export default function HomePage() {
       setAgentLedgerVerification(null);
       setAgentGovernance(null);
       setAgentTransparency(null);
+      setAgentModelRegistry([]);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -4731,6 +4736,55 @@ export default function HomePage() {
           }
         }),
       (assignment) => addLog(`Agent assigned to ${assignment.scope_type}`, "good")
+    );
+  };
+
+  const registerAgentModel = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const modelPolicy =
+      agentForm.model_policy ||
+      selectedAgent?.model_policy ||
+      agentGovernance?.credential_status.default_model ||
+      "afrolete-local-planner";
+    const provider = modelPolicy.toLowerCase().includes("gpt")
+      ? "openai-compatible"
+      : modelPolicy.toLowerCase().includes("webhook")
+        ? "external-worker"
+        : "local";
+    runAction(
+      `register-agent-model-${modelPolicy}`,
+      () =>
+        apiRequest<AgentModelRegistryRead>("/agents/model-registry", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            model_policy: modelPolicy,
+            provider,
+            model_family: selectedAgent?.kind ?? agentForm.kind,
+            version: "v1",
+            use_case: selectedAgent?.purpose ?? agentForm.purpose,
+            risk_tier: ["safeguarding", "analytics"].includes(selectedAgent?.kind ?? agentForm.kind)
+              ? "high"
+              : "medium",
+            review_status: "in_review",
+            evaluation_summary: "Registered from the operations console for governed evaluation tracking.",
+            limitations: "Human review required before recommendations create side effects.",
+            bias_notes: "Monitor model outputs for age, gender, region, school, and club bias.",
+            data_residency: agentGovernance?.credential_status.credential_boundary ?? "local"
+          }
+        }),
+      (registry) => {
+        setAgentModelRegistry((current) => [
+          registry,
+          ...current.filter((item) => item.id !== registry.id)
+        ]);
+        addLog(`${registry.model_policy} registered for ${registry.review_status}`, "good");
+        void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+      }
     );
   };
 
@@ -11510,6 +11564,7 @@ export default function HomePage() {
               <button type="button" onClick={() => assignAgent("organization")} disabled={busyAction !== null}>Assign org</button>
               <button type="button" onClick={() => assignAgent("team")} disabled={busyAction !== null}>Assign team</button>
               <button type="button" onClick={() => assignAgent("event")} disabled={busyAction !== null}>Assign event</button>
+              <button type="button" onClick={registerAgentModel} disabled={busyAction !== null}>Register model</button>
             </div>
             <div className="selection-list compact">
               {agents.map((agent) => (
@@ -11601,9 +11656,19 @@ export default function HomePage() {
               {agentTransparency?.models.slice(0, 3).map((model) => (
                 <article key={model.model_policy} className="task-card">
                   <div>
-                    <strong>{model.model_policy} · {model.risk_band}</strong>
+                    <strong>{model.model_policy} · {model.registry_status ?? model.risk_band}</strong>
                     <span>{model.agent_count} agents · {model.run_count} runs · {model.execution_modes.join(", ") || "not run"}</span>
+                    <span>{model.registered_risk_tier ?? "unregistered"} · {model.documentation_url ?? "no registry docs"}</span>
                     <span>{model.transparency_notes}</span>
+                  </div>
+                </article>
+              ))}
+              {agentModelRegistry.slice(0, 3).map((registry) => (
+                <article key={registry.id} className="task-card">
+                  <div>
+                    <strong>{registry.model_policy} · {registry.review_status}</strong>
+                    <span>{registry.provider} · {registry.risk_tier} · {registry.data_residency ?? "residency unset"}</span>
+                    <span>{registry.use_case}</span>
                   </div>
                 </article>
               ))}

@@ -2457,6 +2457,26 @@ export type AgentWorkerCallbackRead = {
   task: AgentTaskRead;
 };
 
+export type AgentModelRegistryRead = {
+  id: UUID;
+  organization_id: UUID;
+  model_policy: string;
+  provider: string;
+  model_family: string | null;
+  version: string | null;
+  use_case: string;
+  risk_tier: "low" | "medium" | "high" | "critical";
+  review_status: "draft" | "in_review" | "approved" | "retired" | "blocked";
+  documentation_url: string | null;
+  evaluation_summary: string | null;
+  limitations: string | null;
+  bias_notes: string | null;
+  data_residency: string | null;
+  owner_person_id: UUID | null;
+  approved_by_person_id: UUID | null;
+  approved_at: string | null;
+};
+
 export type AgentCredentialStatusRead = {
   execution_mode: string;
   default_model: string;
@@ -2498,6 +2518,9 @@ export type AgentModelTransparencyItemRead = {
   execution_modes: string[];
   latest_run_at: string | null;
   risk_band: string;
+  registry_status: string | null;
+  registered_risk_tier: string | null;
+  documentation_url: string | null;
   transparency_notes: string;
 };
 

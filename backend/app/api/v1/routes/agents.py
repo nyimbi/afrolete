@@ -8,6 +8,9 @@ from app.schemas.agent import (
     AgentAssignmentCreate,
     AgentAssignmentRead,
     AgentGovernanceSummaryRead,
+    AgentModelRegistryCreate,
+    AgentModelRegistryRead,
+    AgentModelRegistryUpdate,
     AgentModelTransparencyReportRead,
     AgentRunLedgerVerificationRead,
     AgentRunRecordRead,
@@ -26,11 +29,14 @@ from app.services.agents import (
     agent_run_records,
     assign_agent,
     create_agent,
+    create_agent_model_registry,
     execute_agent_task,
     list_agent_assignments,
+    list_agent_model_registry,
     list_agent_tasks,
     list_agents,
     queue_agent_task,
+    update_agent_model_registry,
     update_agent_task,
     validate_agent_worker_callback_signature,
     verify_agent_run_ledger,
@@ -80,6 +86,28 @@ def to_task_read(task) -> AgentTaskRead:
     )
 
 
+def to_model_registry_read(registry) -> AgentModelRegistryRead:
+    return AgentModelRegistryRead(
+        id=registry.id,
+        organization_id=registry.organization_id,
+        model_policy=registry.model_policy,
+        provider=registry.provider,
+        model_family=registry.model_family,
+        version=registry.version,
+        use_case=registry.use_case,
+        risk_tier=registry.risk_tier,
+        review_status=registry.review_status,
+        documentation_url=registry.documentation_url,
+        evaluation_summary=registry.evaluation_summary,
+        limitations=registry.limitations,
+        bias_notes=registry.bias_notes,
+        data_residency=registry.data_residency,
+        owner_person_id=registry.owner_person_id,
+        approved_by_person_id=registry.approved_by_person_id,
+        approved_at=registry.approved_at,
+    )
+
+
 @router.post("", response_model=AgentRead, status_code=status.HTTP_201_CREATED)
 async def create_agent_route(
     payload: AgentCreate,
@@ -96,6 +124,42 @@ async def list_agents_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[AgentRead]:
     return [to_agent_read(agent) for agent in await list_agents(db, organization_id)]
+
+
+@router.get("/model-registry", response_model=list[AgentModelRegistryRead])
+async def list_agent_model_registry_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentModelRegistryRead]:
+    return [
+        to_model_registry_read(registry)
+        for registry in await list_agent_model_registry(db, organization_id)
+    ]
+
+
+@router.post("/model-registry", response_model=AgentModelRegistryRead, status_code=status.HTTP_201_CREATED)
+async def create_agent_model_registry_route(
+    payload: AgentModelRegistryCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentModelRegistryRead:
+    return to_model_registry_read(
+        await create_agent_model_registry(db, identity, payload, authz)
+    )
+
+
+@router.patch("/model-registry/{registry_id}", response_model=AgentModelRegistryRead)
+async def update_agent_model_registry_route(
+    registry_id: UUID,
+    payload: AgentModelRegistryUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentModelRegistryRead:
+    return to_model_registry_read(
+        await update_agent_model_registry(db, identity, registry_id, payload, authz)
+    )
 
 
 @router.post("/{agent_id}/assignments", response_model=AgentAssignmentRead, status_code=201)
