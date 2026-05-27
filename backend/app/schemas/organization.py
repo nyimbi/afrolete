@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -47,6 +48,46 @@ class OrganizationRead(BaseModel):
     brand_primary_color: str | None
     brand_secondary_color: str | None
     my_roles: list[MembershipRole] = Field(default_factory=list)
+
+
+class PublicSiteTeamRead(BaseModel):
+    id: UUID
+    name: str
+    sport: str
+    age_group: str | None
+    gender_category: str | None
+    season_label: str | None
+
+
+class PublicSiteEventRead(BaseModel):
+    id: UUID
+    team_id: UUID | None
+    event_type: str
+    title: str
+    starts_at: datetime
+    ends_at: datetime | None
+    timezone: str
+    venue_name: str | None
+
+
+class OrganizationPublicSiteRead(BaseModel):
+    id: UUID
+    name: str
+    slug: str
+    organization_type: OrganizationType
+    country_code: str | None
+    primary_sport: str | None
+    mission: str | None
+    public_name: str | None
+    contact_email: str | None
+    contact_phone: str | None
+    website_url: str | None
+    subdomain: str | None
+    logo_url: str | None
+    brand_primary_color: str | None
+    brand_secondary_color: str | None
+    teams: list[PublicSiteTeamRead]
+    upcoming_events: list[PublicSiteEventRead]
 
 
 class MemberAdd(BaseModel):

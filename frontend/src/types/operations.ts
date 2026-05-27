@@ -207,6 +207,46 @@ export type OrganizationRead = {
   my_roles: MembershipRole[];
 };
 
+export type PublicSiteTeamRead = {
+  id: UUID;
+  name: string;
+  sport: string;
+  age_group: string | null;
+  gender_category: string | null;
+  season_label: string | null;
+};
+
+export type PublicSiteEventRead = {
+  id: UUID;
+  team_id: UUID | null;
+  event_type: string;
+  title: string;
+  starts_at: string;
+  ends_at: string | null;
+  timezone: string;
+  venue_name: string | null;
+};
+
+export type OrganizationPublicSiteRead = {
+  id: UUID;
+  name: string;
+  slug: string;
+  organization_type: OrganizationType;
+  country_code: string | null;
+  primary_sport: string | null;
+  mission: string | null;
+  public_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  website_url: string | null;
+  subdomain: string | null;
+  logo_url: string | null;
+  brand_primary_color: string | null;
+  brand_secondary_color: string | null;
+  teams: PublicSiteTeamRead[];
+  upcoming_events: PublicSiteEventRead[];
+};
+
 export type MembershipRead = {
   id: UUID;
   organization_id: UUID;

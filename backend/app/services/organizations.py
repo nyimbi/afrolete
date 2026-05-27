@@ -1,4 +1,5 @@
 import re
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -6,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import MemberSubjectType, MembershipRole
+from app.models.event import Event
 from app.models.identity import Person
 from app.models.organization import Committee, CommitteeMembership, Membership, Organization
 from app.models.team import Team
@@ -138,6 +140,41 @@ async def get_organization_for_identity(
 
     organization = rows[0][0]
     return organization, [role for _, role in rows]
+
+
+async def get_public_site(
+    db: AsyncSession,
+    site: str,
+) -> tuple[Organization, list[Team], list[Event]]:
+    organization = await db.scalar(
+        select(Organization).where(
+            (Organization.slug == site) | (Organization.subdomain == site)
+        )
+    )
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    teams = list(
+        (
+            await db.scalars(
+                select(Team)
+                .where(Team.organization_id == organization.id)
+                .order_by(Team.sport, Team.name)
+                .limit(12)
+            )
+        ).all()
+    )
+    upcoming_events = list(
+        (
+            await db.scalars(
+                select(Event)
+                .where(Event.organization_id == organization.id)
+                .where(Event.starts_at >= datetime.now(UTC))
+                .order_by(Event.starts_at)
+                .limit(8)
+            )
+        ).all()
+    )
+    return organization, teams, upcoming_events
 
 
 async def add_member(

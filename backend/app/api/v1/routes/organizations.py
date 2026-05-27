@@ -12,7 +12,10 @@ from app.schemas.organization import (
     MemberAdd,
     MembershipRead,
     OrganizationCreate,
+    OrganizationPublicSiteRead,
     OrganizationRead,
+    PublicSiteEventRead,
+    PublicSiteTeamRead,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -23,6 +26,7 @@ from app.services.organizations import (
     create_committee,
     create_organization,
     get_organization_for_identity,
+    get_public_site,
     list_committees,
     list_organizations_for_identity,
 )
@@ -53,6 +57,51 @@ def to_organization_read(item) -> OrganizationRead:
     )
 
 
+def to_public_site_read(item) -> OrganizationPublicSiteRead:
+    organization, teams, events = item
+    return OrganizationPublicSiteRead(
+        id=organization.id,
+        name=organization.name,
+        slug=organization.slug,
+        organization_type=organization.organization_type,
+        country_code=organization.country_code,
+        primary_sport=organization.primary_sport,
+        mission=organization.mission,
+        public_name=organization.public_name,
+        contact_email=organization.contact_email,
+        contact_phone=organization.contact_phone,
+        website_url=organization.website_url,
+        subdomain=organization.subdomain,
+        logo_url=organization.logo_url,
+        brand_primary_color=organization.brand_primary_color,
+        brand_secondary_color=organization.brand_secondary_color,
+        teams=[
+            PublicSiteTeamRead(
+                id=team.id,
+                name=team.name,
+                sport=team.sport,
+                age_group=team.age_group,
+                gender_category=team.gender_category,
+                season_label=team.season_label,
+            )
+            for team in teams
+        ],
+        upcoming_events=[
+            PublicSiteEventRead(
+                id=event.id,
+                team_id=event.team_id,
+                event_type=event.event_type.value,
+                title=event.title,
+                starts_at=event.starts_at,
+                ends_at=event.ends_at,
+                timezone=event.timezone,
+                venue_name=event.venue_name,
+            )
+            for event in events
+        ],
+    )
+
+
 @router.post("", response_model=OrganizationRead, status_code=status.HTTP_201_CREATED)
 async def create_organization_route(
     payload: OrganizationCreate,
@@ -71,6 +120,14 @@ async def list_organizations_route(
     return [
         to_organization_read(item) for item in await list_organizations_for_identity(db, identity)
     ]
+
+
+@router.get("/public/{site}", response_model=OrganizationPublicSiteRead)
+async def get_public_site_route(
+    site: str,
+    db: AsyncSession = Depends(get_db),
+) -> OrganizationPublicSiteRead:
+    return to_public_site_read(await get_public_site(db, site))
 
 
 @router.get("/{organization_id}", response_model=OrganizationRead)

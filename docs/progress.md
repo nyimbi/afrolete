@@ -639,6 +639,16 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
   - Not tested in this fast slice: full backend test suite, frontend
     production build, browser QA, and live guardian account smoke.
+- Implemented slice 062 branded public organization sites:
+  - Added a public organization site API addressable by slug or subdomain,
+    returning brand fields, contact details, teams, and upcoming events without
+    requiring an authenticated session.
+  - Added a branded `/site/[slug]` frontend page that applies tenant colors,
+    logo/public name, mission, contact links, team cards, and schedule cards.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, frontend
+    production build, browser QA, and live subdomain routing.
 
 ## Implementation Slices
 
@@ -706,6 +716,7 @@ athlete-development platform:
 | 059 - Family schedule and clearance view | Partial | Backend ruff; frontend typecheck; diff check | Guardian accounts can now see upcoming linked-athlete events with attendance and safeguarding clearance state in `/family`; live guardian account smoke and full verification remain. |
 | 060 - Family event RSVP | Partial | Backend ruff; frontend typecheck; diff check | Guardians can confirm or decline linked child events from `/family`, with confirmations gated by the same safeguarding clearance logic as operator check-in; live guardian account smoke and full verification remain. |
 | 061 - Family portal consent responses | Partial | Backend ruff; frontend typecheck; diff check | Guardians can now list pending consent requests and grant or deny them from `/family`, fulfilling requests and updating consent records through existing safeguarding flows; live guardian smoke and full verification remain. |
+| 062 - Branded public organization sites | Partial | Backend ruff; frontend typecheck; diff check | Organization slugs/subdomains now expose public branded site profiles and `/site/[slug]` renders tenant colors, logo/name, mission, contact links, teams, and upcoming events; live subdomain routing and full verification remain. |
 
 ## Capability Coverage
 
@@ -718,7 +729,7 @@ Status values:
 
 | Capability Area | Status | Notes |
 | --- | --- | --- |
-| Tenant organizations, clubs, schools, associations | partial | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph; organization branding/contact/subdomain fields support owned public sites. |
+| Tenant organizations, clubs, schools, associations | partial | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph; organization branding/contact/subdomain fields now feed public branded site profiles and `/site/[slug]` pages. |
 | Person identity and athlete profiles | partial | `Person`, `AppUser`, and `AthleteProfile` models added; Keycloak token claims provision `AppUser` identities and bind them to existing `Person` records by verified email before creating new people. |
 | Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
@@ -733,7 +744,7 @@ Status values:
 | Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, artifact rendering metadata, authenticated PDF/XLSX/CSV/API/HTML artifact download, local artifact persistence, stored artifact URLs, short-lived signed artifact links, verification scoring, chart-ready summaries, visual chart cards, benchmark models, deterministic AI review insights, and console workflows are implemented; real AI model execution, MinIO persistence, visual report QA, deeper chart interactions, and full verification remain. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation, frontend PKCE session handling, and SpiceDB gRPC authorization adapter are implemented; live service smoke tests and other integrations remain future slices. |
 | SaaS billing/subscriptions | partial | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, tax quotes, tax filing packages/delivery, proration quotes, plan-change application, dunning notice preparation and webhook delivery, signed payment webhook intake, and console workflows are implemented; full billing verification remains. |
-| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, commerce, reports, billing, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
+| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, commerce, reports, billing, competition, communications, attendance, performance, training, agent, and safeguarding workflows; branded public organization pages and family portal surfaces are also implemented. |
 
 ## Next Actions
 
