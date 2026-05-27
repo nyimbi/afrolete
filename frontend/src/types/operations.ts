@@ -543,6 +543,19 @@ export type EventTravelApprovalRead = {
   notes: string | null;
 };
 
+export type EventTravelChecklistItemRead = {
+  id: UUID;
+  organization_id: UUID;
+  travel_plan_id: UUID;
+  checklist_type: string;
+  item_label: string;
+  status: string;
+  completed_by_person_id: UUID | null;
+  completed_at: string | null;
+  evidence_url: string | null;
+  notes: string | null;
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

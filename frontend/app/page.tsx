@@ -72,6 +72,7 @@ import type {
   DonationRead,
   EventRead,
   EventTravelApprovalRead,
+  EventTravelChecklistItemRead,
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
   EventTravelFeeInvoiceBatchRead,
@@ -351,6 +352,7 @@ export default function HomePage() {
   const [travelManifest, setTravelManifest] = useState<EventTravelManifestRead | null>(null);
   const [travelFeeBatch, setTravelFeeBatch] = useState<EventTravelFeeInvoiceBatchRead | null>(null);
   const [travelApprovals, setTravelApprovals] = useState<EventTravelApprovalRead[]>([]);
+  const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -579,6 +581,7 @@ export default function HomePage() {
     consent_channel: "email" as ConsentCaptureChannel,
     reminder_channel: "email" as CommunicationChannel,
     approval_level: "school",
+    checklist_type: "pre_trip_inspection",
     notes: "Away match travel plan."
   });
   const [guardianForm, setGuardianForm] = useState({
@@ -1582,6 +1585,7 @@ export default function HomePage() {
       setTravelManifest(null);
       setTravelFeeBatch(null);
       setTravelApprovals([]);
+      setTravelChecklistItems([]);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1788,6 +1792,7 @@ export default function HomePage() {
       setTravelManifest(null);
       setTravelFeeBatch(null);
       setTravelApprovals([]);
+      setTravelChecklistItems([]);
       return;
     }
     runAction(
@@ -2507,6 +2512,62 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updated.id)
         ]);
         addLog(`${updated.approval_level} approval ${updated.status}`, updated.status === "approved" ? "good" : "bad");
+      }
+    );
+  };
+
+  const loadTravelChecklist = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-checklist-${plan.id}`,
+      () => apiRequest<EventTravelChecklistItemRead[]>(`/events/travel-plans/${plan.id}/checklist`, { identity }),
+      (items) => {
+        setTravelChecklistItems(items);
+        addLog(`Travel checklist loaded: ${items.length} items`, "good");
+      }
+    );
+  };
+
+  const seedTravelChecklist = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-checklist-seed-${plan.id}`,
+      () =>
+        apiRequest<EventTravelChecklistItemRead[]>(`/events/travel-plans/${plan.id}/checklist`, {
+          method: "POST",
+          identity,
+          body: {
+            checklist_type: travelForm.checklist_type,
+            items: null
+          }
+        }),
+      (items) => {
+        setTravelChecklistItems(items);
+        addLog(`Travel checklist ready: ${items.length} items`, "good");
+      }
+    );
+  };
+
+  const updateTravelChecklistItem = (
+    item: EventTravelChecklistItemRead,
+    statusValue: "completed" | "blocked" | "pending"
+  ) => {
+    runAction(
+      `travel-checklist-item-${item.id}-${statusValue}`,
+      () =>
+        apiRequest<EventTravelChecklistItemRead>(`/events/travel-checklist-items/${item.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            evidence_url: item.evidence_url,
+            notes: statusValue === "blocked" ? "Blocked from operations console." : item.notes
+          }
+        }),
+      (updated) => {
+        setTravelChecklistItems((current) => [
+          updated,
+          ...current.filter((entry) => entry.id !== updated.id)
+        ]);
+        addLog(`${updated.item_label}: ${updated.status}`, updated.status === "completed" ? "good" : "bad");
       }
     );
   };
@@ -6736,6 +6797,15 @@ export default function HomePage() {
                   <option value="finance">Finance</option>
                 </select>
               </label>
+              <label>
+                Checklist
+                <select value={travelForm.checklist_type} onChange={(event) => setTravelForm({ ...travelForm, checklist_type: event.target.value })}>
+                  <option value="pre_trip_inspection">Pre-trip inspection</option>
+                  <option value="departure">Departure</option>
+                  <option value="arrival">Arrival</option>
+                  <option value="emergency">Emergency</option>
+                </select>
+              </label>
               <label className="wide-field">
                 Route
                 <input value={travelForm.route_summary} onChange={(event) => setTravelForm({ ...travelForm, route_summary: event.target.value })} />
@@ -6799,6 +6869,20 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {travelChecklistItems.slice(0, 4).map((item) => (
+                <article className="task-card" key={item.id}>
+                  <div>
+                    <strong>{item.item_label}</strong>
+                    <span>{item.checklist_type} · {item.status} · {item.completed_at ? new Date(item.completed_at).toLocaleString() : "open"}</span>
+                    <span>{item.notes ?? item.evidence_url ?? "No evidence recorded"}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => updateTravelChecklistItem(item, "completed")}>Done</button>
+                    <button type="button" onClick={() => updateTravelChecklistItem(item, "blocked")}>Block</button>
+                    <button type="button" onClick={() => updateTravelChecklistItem(item, "pending")}>Reset</button>
+                  </div>
+                </article>
+              ))}
               {travelPlans.slice(0, 2).map((plan) => (
                 <article key={plan.id} className="task-card">
                   <div>
@@ -6813,6 +6897,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
                     <button type="button" onClick={() => createTravelApproval(plan)}>Require</button>
                     <button type="button" onClick={() => loadTravelApprovals(plan)}>Approvals</button>
+                    <button type="button" onClick={() => seedTravelChecklist(plan)}>Inspect</button>
+                    <button type="button" onClick={() => loadTravelChecklist(plan)}>Checklist</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "completed")}>Complete</button>

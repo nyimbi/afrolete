@@ -256,6 +256,30 @@ class EventTravelApprovalRead(BaseModel):
     notes: str | None
 
 
+class EventTravelChecklistSeedCreate(BaseModel):
+    checklist_type: str = Field(default="pre_trip_inspection", min_length=2, max_length=80)
+    items: list[str] | None = None
+
+
+class EventTravelChecklistItemUpdate(BaseModel):
+    status: str = Field(pattern="^(pending|completed|blocked|not_applicable)$")
+    evidence_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelChecklistItemRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    travel_plan_id: UUID
+    checklist_type: str
+    item_label: str
+    status: str
+    completed_by_person_id: UUID | None
+    completed_at: datetime | None
+    evidence_url: str | None
+    notes: str | None
+
+
 class AttendanceRecordUpsert(BaseModel):
     person_id: UUID
     status: AttendanceStatus

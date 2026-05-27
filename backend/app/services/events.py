@@ -25,6 +25,7 @@ from app.models.event import (
     ConsentRequest,
     Event,
     EventTravelApproval,
+    EventTravelChecklistItem,
     EventTravelPlan,
     EventWeatherAssessment,
 )
@@ -43,6 +44,9 @@ from app.schemas.event import (
     EventTravelApprovalCreate,
     EventTravelApprovalRead,
     EventTravelApprovalUpdate,
+    EventTravelChecklistItemRead,
+    EventTravelChecklistItemUpdate,
+    EventTravelChecklistSeedCreate,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelFeeInvoiceItemRead,
@@ -66,6 +70,14 @@ from app.services.safeguarding import (
 
 
 PARTICIPATION_STATUSES = {AttendanceStatus.CONFIRMED, AttendanceStatus.PRESENT}
+DEFAULT_TRAVEL_CHECKLIST_ITEMS = [
+    "Vehicle exterior and tire inspection complete",
+    "Seatbelts, first-aid kit, and emergency equipment checked",
+    "Driver license, insurance, and certification verified",
+    "Passenger count matches approved manifest",
+    "Emergency contacts and medical access plan available",
+    "Departure and arrival communication plan confirmed",
+]
 AttendanceResult = tuple[
     AttendanceRecord,
     ParticipationClearanceStatus | None,
@@ -673,6 +685,87 @@ async def update_travel_approval(
     return travel_approval_read(approval)
 
 
+async def list_travel_checklist_items(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> list[EventTravelChecklistItemRead]:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    rows = (
+        await db.scalars(
+            select(EventTravelChecklistItem)
+            .where(EventTravelChecklistItem.travel_plan_id == plan.id)
+            .order_by(EventTravelChecklistItem.checklist_type, EventTravelChecklistItem.item_label)
+        )
+    ).all()
+    return [travel_checklist_item_read(item) for item in rows]
+
+
+async def seed_travel_checklist_items(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelChecklistSeedCreate,
+    authz: AuthorizationService,
+) -> list[EventTravelChecklistItemRead]:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    labels = [item.strip() for item in (payload.items or DEFAULT_TRAVEL_CHECKLIST_ITEMS) if item.strip()]
+    if not labels:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Checklist items required")
+    for label in labels:
+        existing = await db.scalar(
+            select(EventTravelChecklistItem).where(
+                EventTravelChecklistItem.travel_plan_id == plan.id,
+                EventTravelChecklistItem.checklist_type == payload.checklist_type,
+                EventTravelChecklistItem.item_label == label[:240],
+            )
+        )
+        if existing is None:
+            db.add(
+                EventTravelChecklistItem(
+                    organization_id=plan.organization_id,
+                    travel_plan_id=plan.id,
+                    checklist_type=payload.checklist_type,
+                    item_label=label[:240],
+                    status="pending",
+                )
+            )
+    await db.commit()
+    return await list_travel_checklist_items(db, identity, travel_plan_id, authz)
+
+
+async def update_travel_checklist_item(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    checklist_item_id: UUID,
+    payload: EventTravelChecklistItemUpdate,
+    authz: AuthorizationService,
+) -> EventTravelChecklistItemRead:
+    item = await db.get(EventTravelChecklistItem, checklist_item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel checklist item not found")
+    await ensure_manage_event_scope(authz, item.organization_id, identity)
+    item.status = payload.status
+    item.evidence_url = payload.evidence_url if payload.evidence_url is not None else item.evidence_url
+    item.notes = payload.notes if payload.notes is not None else item.notes
+    if payload.status in {"completed", "blocked", "not_applicable"}:
+        item.completed_by_person_id = identity.person_id
+        item.completed_at = datetime.now(UTC)
+    elif payload.status == "pending":
+        item.completed_by_person_id = None
+        item.completed_at = None
+    await db.commit()
+    await db.refresh(item)
+    return travel_checklist_item_read(item)
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -834,6 +927,21 @@ def travel_approval_read(approval: EventTravelApproval) -> EventTravelApprovalRe
         decided_by_person_id=approval.decided_by_person_id,
         decided_at=approval.decided_at,
         notes=approval.notes,
+    )
+
+
+def travel_checklist_item_read(item: EventTravelChecklistItem) -> EventTravelChecklistItemRead:
+    return EventTravelChecklistItemRead(
+        id=item.id,
+        organization_id=item.organization_id,
+        travel_plan_id=item.travel_plan_id,
+        checklist_type=item.checklist_type,
+        item_label=item.item_label,
+        status=item.status,
+        completed_by_person_id=item.completed_by_person_id,
+        completed_at=item.completed_at,
+        evidence_url=item.evidence_url,
+        notes=item.notes,
     )
 
 

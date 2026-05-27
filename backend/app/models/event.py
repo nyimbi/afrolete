@@ -129,6 +129,21 @@ class EventTravelApproval(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class EventTravelChecklistItem(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_checklist_items"
+    __table_args__ = (UniqueConstraint("travel_plan_id", "checklist_type", "item_label"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    travel_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("event_travel_plans.id"), index=True)
+    checklist_type: Mapped[str] = mapped_column(String(80), default="pre_trip_inspection", nullable=False, index=True)
+    item_label: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    completed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    evidence_url: Mapped[str | None] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class AttendanceRecord(IdMixin, TimestampMixin, Base):
     __tablename__ = "attendance_records"
     __table_args__ = (UniqueConstraint("event_id", "person_id"),)

@@ -58,6 +58,7 @@ from app.models.event import (  # noqa: F401,E402
     ConsentRequest,
     Event,
     EventTravelApproval,
+    EventTravelChecklistItem,
     EventTravelPlan,
     EventWeatherAssessment,
     IncidentInsuranceClaim,

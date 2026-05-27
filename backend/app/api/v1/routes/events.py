@@ -13,6 +13,9 @@ from app.schemas.event import (
     EventTravelApprovalCreate,
     EventTravelApprovalRead,
     EventTravelApprovalUpdate,
+    EventTravelChecklistItemRead,
+    EventTravelChecklistItemUpdate,
+    EventTravelChecklistSeedCreate,
     EventTravelConsentBatchRead,
     EventTravelConsentReminderCreate,
     EventTravelConsentReminderRead,
@@ -41,6 +44,7 @@ from app.services.events import (
     get_event,
     get_travel_manifest,
     list_attendance,
+    list_travel_checklist_items,
     list_travel_approvals,
     list_events,
     list_travel_plans,
@@ -48,8 +52,10 @@ from app.services.events import (
     record_attendance,
     request_travel_consents,
     seed_attendance_from_team_roster,
+    seed_travel_checklist_items,
     send_travel_consent_reminders,
     update_travel_approval,
+    update_travel_checklist_item,
     update_travel_plan,
 )
 from app.services.safeguarding import medical_clearance_for_event
@@ -388,6 +394,42 @@ async def update_travel_approval_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelApprovalRead:
     return await update_travel_approval(db, identity, approval_id, payload, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/checklist", response_model=list[EventTravelChecklistItemRead])
+async def list_travel_checklist_items_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EventTravelChecklistItemRead]:
+    return await list_travel_checklist_items(db, identity, travel_plan_id, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/checklist",
+    response_model=list[EventTravelChecklistItemRead],
+    status_code=status.HTTP_201_CREATED,
+)
+async def seed_travel_checklist_items_route(
+    travel_plan_id: UUID,
+    payload: EventTravelChecklistSeedCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EventTravelChecklistItemRead]:
+    return await seed_travel_checklist_items(db, identity, travel_plan_id, payload, authz)
+
+
+@router.patch("/travel-checklist-items/{checklist_item_id}", response_model=EventTravelChecklistItemRead)
+async def update_travel_checklist_item_route(
+    checklist_item_id: UUID,
+    payload: EventTravelChecklistItemUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelChecklistItemRead:
+    return await update_travel_checklist_item(db, identity, checklist_item_id, payload, authz)
 
 
 @router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])
