@@ -316,6 +316,22 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`. Full
     test/build/screenshot verification deferred by user instruction during
     low-battery fast delivery.
+- Implemented slice 018 frontend Keycloak session handling:
+  - Added frontend runtime configuration for `NEXT_PUBLIC_AFROLETE_AUTH_MODE`,
+    Keycloak issuer, web client ID, and OIDC scopes.
+  - Added a no-new-dependency browser OIDC authorization-code + PKCE flow for
+    the `afrolete-web` public client, including state verification, token
+    exchange, stored session expiry, claim extraction, and logout URL support.
+  - API calls now automatically attach a stored Keycloak bearer token while
+    preserving local-mode AfroLete identity headers for development.
+  - The operations console now exposes Keycloak sign-in/sign-out controls,
+    displays the active browser session, derives operator identity from token
+    claims, and waits for a session before synchronizing protected data in
+    Keycloak mode.
+  - Verification: `pnpm --filter @afrolete/frontend typecheck`,
+    `git diff --check`. Live Keycloak realm/browser redirect, full build, and
+    screenshot verification deferred by user instruction during low-battery
+    fast delivery.
 
 ## Implementation Slices
 
@@ -323,13 +339,13 @@ athlete-development platform:
 | --- | --- | --- | --- |
 | 000 - Fresh V2 repository | Complete | Commit `d723d61`; commit `0affab9` | Repo initialized, README charter pushed. |
 | 001 - Executable SaaS foundation | Complete | Slice 001 foundation commit | Backend/frontend/infra starter code added and verified. |
-| 002 - Identity, tenant, and authorization vertical | Partial | Backend tests 22/22 plus SpiceDB adapter tests | Tenant graph, authz boundary, Keycloak bearer-token validation, user provisioning, SpiceDB adapter, organization APIs, team APIs, and committee APIs implemented; live service smoke tests and frontend auth flows remain. |
+| 002 - Identity, tenant, and authorization vertical | Partial | Backend tests 22/22 plus SpiceDB adapter tests; frontend typecheck | Tenant graph, authz boundary, Keycloak bearer-token validation, frontend PKCE session handling, user provisioning, SpiceDB adapter, organization APIs, team APIs, and committee APIs implemented; live service smoke tests remain. |
 | 003 - Database migration baseline | Complete | Alembic upgrade/downgrade; backend tests 11/11 | Baseline revision captures the current schema; production execution against `db.lindela.io` remains a deployment task. |
 | 004 - Safeguarding, consent, and tenant branding | Partial | Local PostgreSQL migration verified; backend tests 14/14 | Backend model/API support for guardians, consent requests, consent capture channels, minor event clearance, and branded organization sites. |
 | 005 - Event scheduling and attendance | Partial | Backend tests 16/16 | Event APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in implemented; frontend event workflows remain. |
-| 006 - Keycloak authentication | Partial | Backend tests 22/22 | Keycloak JWT validation and user provisioning are implemented behind runtime mode; frontend sign-in and live realm smoke test remain. |
+| 006 - Keycloak authentication | Partial | Backend tests 22/22; frontend typecheck | Keycloak JWT validation, frontend PKCE sign-in/session handling, bearer API calls, logout wiring, and user provisioning are implemented behind runtime mode; live realm smoke test remains. |
 | 007 - SpiceDB authorization adapter | Partial | Adapter tests 4/4 | Official Python gRPC client wired behind runtime mode; live schema/write/check smoke test remains. |
-| 008 - Operational SaaS console | Partial | Frontend typecheck/build; desktop/mobile screenshots | Console now drives tenant, team, roster, event, attendance, guardian consent, and clearance workflows in local mode; production Keycloak session UX remains. |
+| 008 - Operational SaaS console | Partial | Frontend typecheck/build; desktop/mobile screenshots | Console now drives tenant, team, roster, event, attendance, guardian consent, and clearance workflows, with local-mode identity and production Keycloak session controls; full live deployed UX smoke remains. |
 | 009 - AI agent operations | Partial | Backend tests 29/29; frontend build | Agents can be created, permissioned, assigned to scopes, queued for work, and reviewed from the console; real model execution and AI governance dashboards remain. |
 | 010 - Athlete performance metrics and assessments | Partial | Backend tests 31/31; PostgreSQL migration upgrade/downgrade; frontend build | Metric definitions, observations, ALS-style assessments, summaries, and console recording flows are implemented; automated video/audio/wearable ingestion remains. |
 | 011 - Training and coaching plans | Partial | Backend tests 34/34; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Drill library, scoped plans, weekly plan blocks, session load planning, and console workflows are implemented; automatic AI plan generation, readiness check-ins, and post-session feedback loops remain. |
@@ -339,6 +355,7 @@ athlete-development platform:
 | 015 - Commercial operations fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, commercial summary, and console workflows are implemented; payment gateway settlement, refunds, tax, accounting exports, sponsorship dashboards, and full verification remain. |
 | 016 - Reporting and intelligence fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, and console workflows are implemented; real AI model execution, rendered PDF/Excel generation, charts, benchmark models, and full verification remain. |
 | 017 - SaaS billing and subscription fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, and console workflows are implemented; Stripe/processor webhooks, dunning automation, tax localization, plan-change proration, and full verification remain. |
+| 018 - Frontend Keycloak session handling | Partial | Frontend typecheck; diff check | Browser OIDC authorization-code + PKCE login, bearer-token API attachment, session display, logout URL wiring, and local-mode fallback are implemented; live Keycloak redirect and deployed smoke test remain. |
 
 ## Capability Coverage
 
@@ -364,13 +381,14 @@ Status values:
 | Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, and console workflows are implemented; procurement, supplier scoring, RFID scanning, photo upload, lease billing, and AI utilization optimization remain. |
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, commercial summary, and console workflows are implemented; payment gateway settlement, refunds, tax, accounting exports, sponsorship dashboards, and full verification remain. |
 | Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, and console workflows are implemented; real AI model execution, rendered PDF/Excel generation, charts, benchmark models, and full verification remain. |
-| Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation and SpiceDB gRPC authorization adapter are implemented; other integrations remain future slices. |
+| Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation, frontend PKCE session handling, and SpiceDB gRPC authorization adapter are implemented; live service smoke tests and other integrations remain future slices. |
 | SaaS billing/subscriptions | partial | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, and console workflows are implemented; Stripe/processor webhooks, dunning automation, tax localization, plan-change proration, and full verification remain. |
 | Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, commerce, reports, billing, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
 
 ## Next Actions
 
-1. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
+1. Run a live Keycloak realm redirect/token/API smoke test for `afrolete-web`
+   against the deployed backend auth mode.
 2. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
    SpiceDB key.
 3. Add live communication transport adapters for email, SMS, WhatsApp, push,
@@ -390,5 +408,5 @@ Status values:
    upcoming competitions, and availability constraints.
 10. Add automated ingestion pipelines for video, audio narration, text
    evaluation, wearable feeds, and agent-extracted metric review.
-6. Add real AI execution workers, model/provider configuration, and AI
+11. Add real AI execution workers, model/provider configuration, and AI
    governance telemetry.

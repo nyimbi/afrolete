@@ -1,4 +1,5 @@
 import { apiBaseUrl } from "@/lib/config";
+import { getStoredAuthSession } from "@/lib/auth";
 import type { LocalIdentity } from "@/types/operations";
 
 export class ApiError extends Error {
@@ -24,6 +25,11 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   if (options.body !== undefined) {
     headers.set("Content-Type", "application/json");
+  }
+
+  const session = getStoredAuthSession();
+  if (session) {
+    headers.set("Authorization", `Bearer ${session.accessToken}`);
   }
 
   if (options.identity) {

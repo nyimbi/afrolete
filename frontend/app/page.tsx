@@ -2,7 +2,14 @@
 
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
-import { apiBaseUrl } from "@/lib/config";
+import {
+  clearStoredAuthSession,
+  completeKeycloakCallbackFromUrl,
+  keycloakLogoutUrl,
+  startKeycloakLogin,
+  type AuthSession
+} from "@/lib/auth";
+import { afroleteAuthMode, apiBaseUrl, keycloakClientId, keycloakIssuer } from "@/lib/config";
 import type {
   AgentAssignmentRead,
   AgentKind,
@@ -121,6 +128,7 @@ type AthleteEntry = {
 
 export default function HomePage() {
   const [identity, setIdentity] = useState<LocalIdentity>(defaultIdentity);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [organizations, setOrganizations] = useState<OrganizationRead[]>([]);
   const [teams, setTeams] = useState<TeamRead[]>([]);
   const [events, setEvents] = useState<EventRead[]>([]);
@@ -566,6 +574,8 @@ export default function HomePage() {
     () => equipmentItems.find((item) => item.id === selectedEquipmentId) ?? null,
     [equipmentItems, selectedEquipmentId]
   );
+  const keycloakEnabled = afroleteAuthMode === "keycloak";
+
   const addLog = useCallback((message: string, tone: LogEntry["tone"] = "neutral") => {
     setLogs((current) => [
       { id: crypto.randomUUID(), message, tone },
@@ -587,6 +597,24 @@ export default function HomePage() {
     },
     [addLog]
   );
+
+  const beginKeycloakLogin = useCallback(() => {
+    setBusyAction("keycloak-login");
+    void startKeycloakLogin().catch((error) => {
+      setBusyAction(null);
+      addLog(error instanceof Error ? error.message : "Keycloak sign-in failed", "bad");
+    });
+  }, [addLog]);
+
+  const endKeycloakSession = useCallback(() => {
+    const logoutUrl = keycloakEnabled ? keycloakLogoutUrl(authSession) : null;
+    clearStoredAuthSession();
+    setAuthSession(null);
+    addLog("Keycloak session cleared", "neutral");
+    if (logoutUrl) {
+      window.location.assign(logoutUrl);
+    }
+  }, [addLog, authSession, keycloakEnabled]);
 
   const loadOrganizations = useCallback(async () => {
     const data = await apiRequest<OrganizationRead[]>("/organizations", { identity });
@@ -880,8 +908,53 @@ export default function HomePage() {
   }, [identity]);
 
   useEffect(() => {
+    if (!keycloakEnabled) {
+      return;
+    }
+
+    const hadCallback = new URLSearchParams(window.location.search).has("code");
+    let active = true;
+
+    completeKeycloakCallbackFromUrl()
+      .then((session) => {
+        if (!active) {
+          return;
+        }
+        setAuthSession(session);
+        if (session && hadCallback) {
+          addLog("Keycloak session established", "good");
+        }
+      })
+      .catch((error) => {
+        if (!active) {
+          return;
+        }
+        setAuthSession(null);
+        addLog(error instanceof Error ? error.message : "Keycloak sign-in failed", "bad");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [addLog, keycloakEnabled]);
+
+  useEffect(() => {
+    if (!authSession) {
+      return;
+    }
+    setIdentity((current) => ({
+      sub: authSession.subject ?? current.sub,
+      email: authSession.email ?? current.email,
+      name: authSession.name ?? authSession.email ?? current.name
+    }));
+  }, [authSession]);
+
+  useEffect(() => {
+    if (keycloakEnabled && !authSession) {
+      return;
+    }
     runAction("load-organizations", loadOrganizations, () => addLog("Workspace synchronized", "good"));
-  }, [loadOrganizations, runAction, addLog]);
+  }, [authSession, keycloakEnabled, loadOrganizations, runAction, addLog]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -2781,7 +2854,22 @@ export default function HomePage() {
             <h1>{selectedOrganization?.public_name ?? selectedOrganization?.name ?? "Build an operating tenant"}</h1>
           </div>
           <div className="topbar-actions">
-            <button type="button" onClick={() => void loadOrganizations()} disabled={busyAction !== null}>
+            {keycloakEnabled ? (
+              authSession ? (
+                <button type="button" onClick={endKeycloakSession}>
+                  Sign out
+                </button>
+              ) : (
+                <button type="button" onClick={beginKeycloakLogin} disabled={busyAction !== null}>
+                  Sign in
+                </button>
+              )
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void loadOrganizations()}
+              disabled={busyAction !== null || (keycloakEnabled && !authSession)}
+            >
               Sync
             </button>
           </div>
@@ -2790,6 +2878,34 @@ export default function HomePage() {
         <section className="operator-grid" aria-label="Workspace summary">
           <form className="panel identity-panel" onSubmit={(event) => event.preventDefault()}>
             <p className="section-label">Operator</p>
+            <div className="auth-mode-card">
+              <span>{keycloakEnabled ? "Keycloak" : "Local"} auth</span>
+              <strong>
+                {keycloakEnabled
+                  ? authSession?.email ?? authSession?.name ?? "No browser session"
+                  : "Trusted local headers"}
+              </strong>
+              {keycloakEnabled ? (
+                <small>
+                  {keycloakClientId} at {keycloakIssuer}
+                </small>
+              ) : (
+                <small>Development session</small>
+              )}
+              {keycloakEnabled ? (
+                <div className="auth-actions">
+                  {authSession ? (
+                    <button type="button" onClick={endKeycloakSession}>
+                      Sign out
+                    </button>
+                  ) : (
+                    <button type="button" onClick={beginKeycloakLogin} disabled={busyAction !== null}>
+                      Sign in with Keycloak
+                    </button>
+                  )}
+                </div>
+              ) : null}
+            </div>
             <label>
               Name
               <input value={identity.name} onChange={(event) => setIdentity({ ...identity, name: event.target.value })} />
