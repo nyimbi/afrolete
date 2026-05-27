@@ -159,6 +159,7 @@ export default function PublicOrganizationSitePage({ params }: { params: { slug:
             <div className="public-site-actions">
               {site.contact_email ? <a href={`mailto:${site.contact_email}`}>Contact</a> : null}
               {site.website_url ? <a href={site.website_url}>Website</a> : null}
+              {scorecard ? <a href={`/site/${encodeURIComponent(site.slug)}/ai-scorecard`}>AI scorecard</a> : null}
             </div>
           </div>
         </div>
@@ -226,6 +227,7 @@ export default function PublicOrganizationSitePage({ params }: { params: { slug:
             {scorecard.improvement_actions.slice(0, 3).map((action) => (
               <span key={action}>{action}</span>
             ))}
+            <a href={`/site/${encodeURIComponent(site.slug)}/ai-scorecard`}>Open public scorecard</a>
           </div>
         </section>
       ) : null}
