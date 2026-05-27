@@ -269,6 +269,17 @@ class SupplierOrderSubmissionRead(BaseModel):
     failure_reason: str | None
 
 
+class SupplierInvoiceSyncRead(BaseModel):
+    order: SupplierOrderRead
+    sync_mode: str
+    sync_attempted: bool
+    synced: bool
+    destination: str | None
+    provider_status_code: int | None
+    synced_at: datetime
+    failure_reason: str | None
+
+
 class EquipmentLeaseQuoteRead(BaseModel):
     equipment_item_id: UUID
     item_name: str

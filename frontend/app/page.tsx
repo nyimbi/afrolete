@@ -130,6 +130,7 @@ import type {
   SponsorshipAgreementRead,
   SponsorshipDashboardRead,
   SupplierOrderRead,
+  SupplierInvoiceSyncRead,
   SupplierOrderSubmissionRead,
   SupplierScoreRead,
   SportFormat,
@@ -337,6 +338,7 @@ export default function HomePage() {
   const [supplierOrders, setSupplierOrders] = useState<SupplierOrderRead[]>([]);
   const [supplierScores, setSupplierScores] = useState<SupplierScoreRead[]>([]);
   const [supplierSubmission, setSupplierSubmission] = useState<SupplierOrderSubmissionRead | null>(null);
+  const [supplierInvoiceSync, setSupplierInvoiceSync] = useState<SupplierInvoiceSyncRead | null>(null);
   const [assetUtilization, setAssetUtilization] = useState<AssetUtilizationRecommendationRead[]>([]);
   const [leaseQuote, setLeaseQuote] = useState<EquipmentLeaseQuoteRead | null>(null);
   const [leaseInvoice, setLeaseInvoice] = useState<EquipmentLeaseInvoiceRead | null>(null);
@@ -1335,6 +1337,7 @@ export default function HomePage() {
       setSupplierOrders([]);
       setSupplierScores([]);
       setSupplierSubmission(null);
+      setSupplierInvoiceSync(null);
       setAssetUtilization([]);
       setLeaseQuote(null);
       setLeaseInvoice(null);
@@ -3573,6 +3576,35 @@ export default function HomePage() {
     );
   };
 
+  const syncSupplierInvoice = (supplierOrderId = selectedSupplierOrderId) => {
+    if (!selectedOrganizationId || !supplierOrderId) {
+      addLog("Select a supplier order first", "bad");
+      return;
+    }
+    runAction(
+      "sync-supplier-invoice",
+      () =>
+        apiRequest<SupplierInvoiceSyncRead>(`/assets/suppliers/orders/${supplierOrderId}/invoice-sync`, {
+          method: "POST",
+          identity
+        }),
+      (sync) => {
+        setSupplierInvoiceSync(sync);
+        setSupplierOrders((current) => [
+          sync.order,
+          ...current.filter((item) => item.id !== sync.order.id)
+        ]);
+        setSelectedSupplierOrderId(sync.order.id);
+        addLog(
+          sync.synced
+            ? `${sync.order.item_name} supplier invoice synced`
+            : `${sync.order.item_name} supplier invoice prepared`,
+          sync.synced ? "good" : "neutral"
+        );
+      }
+    );
+  };
+
   const createFacilityBooking = () => {
     if (!selectedOrganizationId || !selectedFacilityId) {
       addLog("Create or select a facility first", "bad");
@@ -5390,6 +5422,7 @@ export default function HomePage() {
                 <button type="button" onClick={() => createSupplierOrder()} disabled={busyAction !== null}>Order</button>
                 <button type="button" onClick={() => submitSupplierOrder()} disabled={busyAction !== null}>Submit</button>
                 <button type="button" onClick={() => receiveSupplierOrder()} disabled={busyAction !== null}>Receive</button>
+                <button type="button" onClick={() => syncSupplierInvoice()} disabled={busyAction !== null}>Sync invoice</button>
               </div>
             </div>
             <div className="task-list">
@@ -5398,6 +5431,14 @@ export default function HomePage() {
                   <div>
                     <strong>{supplierSubmission.delivered ? "Supplier delivered" : "Supplier prepared"}</strong>
                     <span>{supplierSubmission.submission_mode} · {supplierSubmission.provider_status_code ?? "no provider"} · {supplierSubmission.failure_reason ?? "accepted"}</span>
+                  </div>
+                </article>
+              ) : null}
+              {supplierInvoiceSync ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{supplierInvoiceSync.synced ? "Supplier invoice synced" : "Supplier invoice prepared"}</strong>
+                    <span>{supplierInvoiceSync.sync_mode} · {supplierInvoiceSync.provider_status_code ?? "no provider"} · {supplierInvoiceSync.failure_reason ?? "accepted"}</span>
                   </div>
                 </article>
               ) : null}
@@ -5435,6 +5476,13 @@ export default function HomePage() {
                     disabled={order.status === "received"}
                   >
                     Receive
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => syncSupplierInvoice(order.id)}
+                    disabled={order.status === "draft" || order.status === "invoice_synced"}
+                  >
+                    Sync
                   </button>
                 </article>
               ))}

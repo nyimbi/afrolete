@@ -38,6 +38,7 @@ from app.schemas.assets import (
     MaintenanceWorkOrderUpdate,
     ProcurementRecommendationRead,
     SupplierOrderCreate,
+    SupplierInvoiceSyncRead,
     SupplierOrderRead,
     SupplierOrderReceive,
     SupplierOrderSubmissionRead,
@@ -72,6 +73,7 @@ from app.services.assets import (
     return_equipment,
     scan_equipment,
     submit_supplier_order,
+    sync_supplier_invoice,
     supplier_scorecard,
     update_equipment_photo,
     upload_equipment_file,
@@ -625,6 +627,16 @@ async def submit_supplier_order_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> SupplierOrderSubmissionRead:
     return await submit_supplier_order(db, identity, supplier_order_id, authz)
+
+
+@router.post("/suppliers/orders/{supplier_order_id}/invoice-sync", response_model=SupplierInvoiceSyncRead)
+async def sync_supplier_invoice_route(
+    supplier_order_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SupplierInvoiceSyncRead:
+    return await sync_supplier_invoice(db, identity, supplier_order_id, authz)
 
 
 @router.get("/utilization/recommendations", response_model=list[AssetUtilizationRecommendationRead])

@@ -453,6 +453,17 @@ export type SupplierOrderSubmissionRead = {
   failure_reason: string | null;
 };
 
+export type SupplierInvoiceSyncRead = {
+  order: SupplierOrderRead;
+  sync_mode: string;
+  sync_attempted: boolean;
+  synced: boolean;
+  destination: string | null;
+  provider_status_code: number | null;
+  synced_at: string;
+  failure_reason: string | null;
+};
+
 export type EquipmentLeaseQuoteRead = {
   equipment_item_id: UUID;
   item_name: string;

@@ -71,6 +71,7 @@ from app.schemas.assets import (
     MaintenanceWorkOrderUpdate,
     ProcurementRecommendationRead,
     SupplierOrderCreate,
+    SupplierInvoiceSyncRead,
     SupplierOrderReceive,
     SupplierOrderRead,
     SupplierOrderSubmissionRead,
@@ -850,6 +851,59 @@ async def submit_supplier_order(
     return SupplierOrderSubmissionRead(order=supplier_order_read(order), **result)
 
 
+async def sync_supplier_invoice(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    supplier_order_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> SupplierInvoiceSyncRead:
+    order = await get_supplier_order(db, supplier_order_id)
+    await ensure_manage_assets(authz, identity, order.organization_id)
+    if order.status not in {"received", "submitted", "ordered"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Supplier order is not ready for invoice sync")
+    selected_settings = settings or get_settings()
+    synced_at = datetime.now(UTC)
+    result = {
+        "sync_mode": selected_settings.supplier_invoice_sync_mode,
+        "sync_attempted": False,
+        "synced": False,
+        "destination": selected_settings.supplier_invoice_webhook_url or None,
+        "provider_status_code": None,
+        "synced_at": synced_at,
+        "failure_reason": None,
+    }
+    if selected_settings.supplier_invoice_sync_mode == "record_only":
+        order.status = "invoice_sync_pending" if order.status != "received" else "received_invoice_pending"
+        result["failure_reason"] = "Record-only invoice sync mode; supplier invoice prepared for manual entry."
+    elif not selected_settings.supplier_invoice_webhook_url:
+        order.status = "invoice_sync_pending" if order.status != "received" else "received_invoice_pending"
+        result["failure_reason"] = "Supplier invoice webhook mode is enabled but no webhook URL is configured."
+    else:
+        result["sync_attempted"] = True
+        try:
+            async with httpx.AsyncClient(timeout=selected_settings.supplier_invoice_sync_timeout_seconds) as client:
+                response = await client.post(
+                    selected_settings.supplier_invoice_webhook_url,
+                    json=supplier_invoice_sync_payload(order, synced_at),
+                    headers=supplier_invoice_headers(selected_settings),
+                )
+            result["provider_status_code"] = response.status_code
+            result["synced"] = 200 <= response.status_code < 300
+            if result["synced"]:
+                order.status = "invoice_synced"
+            else:
+                order.status = "invoice_sync_failed"
+                result["failure_reason"] = f"Supplier invoice webhook returned {response.status_code}: {response.text[:500]}"
+        except httpx.HTTPError as error:
+            order.status = "invoice_sync_failed"
+            result["failure_reason"] = f"Supplier invoice webhook failed: {error}"
+    order.notes = supplier_invoice_sync_notes(order.notes, result)
+    await db.commit()
+    await db.refresh(order)
+    return SupplierInvoiceSyncRead(order=supplier_order_read(order), **result)
+
+
 async def equipment_lease_quote(
     db: AsyncSession,
     organization_id: UUID,
@@ -1546,10 +1600,37 @@ def supplier_order_payload(order: SupplierOrder, submitted_at: datetime) -> dict
     }
 
 
+def supplier_invoice_sync_payload(order: SupplierOrder, synced_at: datetime) -> dict:
+    return {
+        "event_type": "assets.supplier_invoice",
+        "order_id": str(order.id),
+        "organization_id": str(order.organization_id),
+        "equipment_item_id": str(order.equipment_item_id) if order.equipment_item_id else None,
+        "supplier_name": order.supplier_name,
+        "item_name": order.item_name,
+        "quantity": order.quantity,
+        "unit_cost": str(order.unit_cost),
+        "invoice_total": str(order.total_cost),
+        "currency": order.currency,
+        "external_reference": order.external_reference,
+        "ordered_at": order.ordered_at.isoformat() if order.ordered_at else None,
+        "received_at": order.received_at.isoformat() if order.received_at else None,
+        "synced_at": synced_at.isoformat(),
+        "notes": order.notes,
+    }
+
+
 def supplier_order_headers(settings: Settings) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
     if settings.supplier_order_webhook_key:
         headers["X-Afrolete-Supplier-Key"] = settings.supplier_order_webhook_key
+    return headers
+
+
+def supplier_invoice_headers(settings: Settings) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if settings.supplier_invoice_webhook_key:
+        headers["X-Afrolete-Supplier-Invoice-Key"] = settings.supplier_invoice_webhook_key
     return headers
 
 
@@ -1558,6 +1639,14 @@ def supplier_order_submission_notes(notes: str | None, result: dict) -> str:
     if result["failure_reason"]:
         status_label = f"{status_label}: {result['failure_reason']}"
     line = f"Supplier submission {status_label} at {result['submitted_at'].isoformat()}."
+    return f"{notes}\n{line}" if notes else line
+
+
+def supplier_invoice_sync_notes(notes: str | None, result: dict) -> str:
+    status_label = "synced" if result["synced"] else "prepared"
+    if result["failure_reason"]:
+        status_label = f"{status_label}: {result['failure_reason']}"
+    line = f"Supplier invoice {status_label} at {result['synced_at'].isoformat()}."
     return f"{notes}\n{line}" if notes else line
 
 
