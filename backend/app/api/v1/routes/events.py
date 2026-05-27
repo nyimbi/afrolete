@@ -1,0 +1,112 @@
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.session import get_db
+from app.schemas.event import (
+    AttendanceRecordRead,
+    AttendanceRecordUpsert,
+    AttendanceSeedRead,
+    EventCreate,
+    EventRead,
+)
+from app.services.auth.dependencies import get_current_identity
+from app.services.auth.identity_bridge import CurrentIdentity
+from app.services.authz.service import AuthorizationService, get_authorization_service
+from app.services.events import (
+    create_event,
+    get_event,
+    list_attendance,
+    list_events,
+    record_attendance,
+    seed_attendance_from_team_roster,
+)
+
+router = APIRouter(prefix="/events", tags=["events"])
+
+
+def to_event_read(event) -> EventRead:
+    return EventRead(
+        id=event.id,
+        organization_id=event.organization_id,
+        team_id=event.team_id,
+        event_type=event.event_type,
+        title=event.title,
+        starts_at=event.starts_at,
+        ends_at=event.ends_at,
+        timezone=event.timezone,
+        venue_name=event.venue_name,
+        notes=event.notes,
+    )
+
+
+def to_attendance_read(attendance, clearance_status=None) -> AttendanceRecordRead:
+    return AttendanceRecordRead(
+        id=attendance.id,
+        event_id=attendance.event_id,
+        person_id=attendance.person_id,
+        status=attendance.status,
+        recorded_by_person_id=attendance.recorded_by_person_id,
+        guardian_consent_id=attendance.guardian_consent_id,
+        note=attendance.note,
+        clearance_status=clearance_status,
+    )
+
+
+@router.post("", response_model=EventRead, status_code=status.HTTP_201_CREATED)
+async def create_event_route(
+    payload: EventCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventRead:
+    return to_event_read(await create_event(db, identity, payload, authz))
+
+
+@router.get("", response_model=list[EventRead])
+async def list_events_route(
+    organization_id: UUID = Query(),
+    team_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[EventRead]:
+    return [to_event_read(event) for event in await list_events(db, organization_id, team_id)]
+
+
+@router.get("/{event_id}", response_model=EventRead)
+async def get_event_route(
+    event_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> EventRead:
+    return to_event_read(await get_event(db, event_id))
+
+
+@router.post("/{event_id}/attendance", response_model=AttendanceRecordRead, status_code=201)
+async def record_attendance_route(
+    event_id: UUID,
+    payload: AttendanceRecordUpsert,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AttendanceRecordRead:
+    attendance, clearance_status = await record_attendance(db, identity, event_id, payload, authz)
+    return to_attendance_read(attendance, clearance_status)
+
+
+@router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])
+async def list_attendance_route(
+    event_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[AttendanceRecordRead]:
+    return [to_attendance_read(attendance) for attendance in await list_attendance(db, event_id)]
+
+
+@router.post("/{event_id}/attendance/from-roster", response_model=AttendanceSeedRead)
+async def seed_attendance_from_roster_route(
+    event_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AttendanceSeedRead:
+    created, existing = await seed_attendance_from_team_roster(db, identity, event_id, authz)
+    return AttendanceSeedRead(event_id=event_id, created=created, existing=existing)

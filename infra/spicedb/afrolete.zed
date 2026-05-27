@@ -102,8 +102,8 @@ definition event {
   relation parent_org: organization
   relation team: team
   relation organizer: user
-  relation participant: user
-  relation guardian: user
+  relation participant: user | person
+  relation guardian: user | person
   relation assigned_agent: agent
 
   permission manage = parent_org->manage + team->manage_roster + organizer

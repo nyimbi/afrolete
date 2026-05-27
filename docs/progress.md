@@ -86,6 +86,16 @@ athlete-development platform:
   - Verification: local PostgreSQL `alembic upgrade head`, PostgreSQL
     `alembic downgrade 537570abceee`, PostgreSQL `alembic upgrade head`,
     `uv run ruff check .`, `uv run pytest`.
+- Implemented slice 005 event scheduling and consent-aware attendance:
+  - Added event APIs for creating, listing, and reading organization/team
+    events.
+  - Added attendance APIs for seeding invitations from a team roster, recording
+    RSVP/check-in status, and listing event attendance.
+  - Attendance check-in now reuses safeguarding clearance so minors cannot be
+    marked confirmed or present without a valid guardian consent.
+  - SpiceDB event participant and guardian relations now support `person`
+    subjects, not only application users.
+  - Verification: `uv run ruff check .`, `uv run pytest`.
 
 ## Implementation Slices
 
@@ -96,6 +106,7 @@ athlete-development platform:
 | 002 - Identity, tenant, and authorization vertical | Partial | Backend tests 11/11 | Tenant graph, local identity bridge, authz boundary, organization APIs, team APIs, and committee APIs implemented; production Keycloak/SpiceDB adapters and migrations remain. |
 | 003 - Database migration baseline | Complete | Alembic upgrade/downgrade; backend tests 11/11 | Baseline revision captures the current schema; production execution against `db.lindela.io` remains a deployment task. |
 | 004 - Safeguarding, consent, and tenant branding | Partial | Local PostgreSQL migration verified; backend tests 14/14 | Backend model/API support for guardians, consent requests, consent capture channels, minor event clearance, and branded organization sites. |
+| 005 - Event scheduling and attendance | Partial | Backend tests 16/16 | Event APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in implemented; frontend event workflows remain. |
 
 ## Capability Coverage
 
@@ -111,7 +122,7 @@ Status values:
 | Tenant organizations, clubs, schools, associations | partial | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph; organization branding/contact/subdomain fields support owned public sites. |
 | Person identity and athlete profiles | foundation | `Person`, `AppUser`, and `AthleteProfile` models added. |
 | Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
-| Events, schedules, attendance | foundation | `Event` and `AttendanceRecord` models added. |
+| Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
 | Performance metrics and assessments | not-started | To follow after core operating vertical. |
 | AI-assisted ingestion and analysis | foundation | `Agent`, `AgentAssignment`, `AgentTask`, and SpiceDB `agent` schema added. |
 | Training and coaching plans | not-started | Future slice. |
@@ -127,12 +138,11 @@ Status values:
 
 ## Next Actions
 
-1. Commit and push slice 004 safeguarding, consent, and tenant branding.
+1. Commit and push slice 005 event scheduling and attendance.
 2. Replace local/test identity bridge with Keycloak token validation and user
    provisioning rules.
 3. Replace in-memory authorization with a live SpiceDB client adapter and
    relationship writer.
-4. Continue the operating vertical into event scheduling, attendance, and
-   athlete profile workflows.
-5. Add frontend flows for organization branding, guardian consent links, and
-   event clearance review.
+4. Add frontend flows for organization branding, event scheduling, roster
+   attendance, guardian consent links, and event clearance review.
+5. Continue athlete profile workflows into performance metrics and assessments.
