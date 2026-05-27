@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -19,7 +20,14 @@ from app.models.enums import (
     WeatherAlertLevel,
     WeatherDecision,
 )
-from app.models.event import AttendanceRecord, ConsentRequest, Event, EventTravelPlan, EventWeatherAssessment
+from app.models.event import (
+    AttendanceRecord,
+    ConsentRequest,
+    Event,
+    EventTravelApproval,
+    EventTravelPlan,
+    EventWeatherAssessment,
+)
 from app.models.identity import Person
 from app.models.organization import Organization
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
@@ -32,6 +40,9 @@ from app.schemas.event import (
     EventTravelConsentReminderRead,
     EventTravelConsentRequestCreate,
     EventTravelConsentRequestItemRead,
+    EventTravelApprovalCreate,
+    EventTravelApprovalRead,
+    EventTravelApprovalUpdate,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelFeeInvoiceItemRead,
@@ -586,6 +597,82 @@ async def generate_travel_fee_invoices(
     )
 
 
+async def list_travel_approvals(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> list[EventTravelApprovalRead]:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    rows = (
+        await db.scalars(
+            select(EventTravelApproval)
+            .where(EventTravelApproval.travel_plan_id == plan.id)
+            .order_by(EventTravelApproval.approval_level)
+        )
+    ).all()
+    return [travel_approval_read(item) for item in rows]
+
+
+async def create_travel_approval(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelApprovalCreate,
+    authz: AuthorizationService,
+) -> EventTravelApprovalRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    if payload.approver_person_id is not None and await db.get(Person, payload.approver_person_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approver not found")
+    existing = await db.scalar(
+        select(EventTravelApproval).where(
+            EventTravelApproval.travel_plan_id == plan.id,
+            EventTravelApproval.approval_level == payload.approval_level,
+        )
+    )
+    if existing is not None:
+        return travel_approval_read(existing)
+    approval = EventTravelApproval(
+        organization_id=plan.organization_id,
+        travel_plan_id=plan.id,
+        approval_level=payload.approval_level,
+        status="pending",
+        approver_person_id=payload.approver_person_id,
+        notes=payload.notes,
+    )
+    db.add(approval)
+    await db.commit()
+    await db.refresh(approval)
+    return travel_approval_read(approval)
+
+
+async def update_travel_approval(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    approval_id: UUID,
+    payload: EventTravelApprovalUpdate,
+    authz: AuthorizationService,
+) -> EventTravelApprovalRead:
+    approval = await db.get(EventTravelApproval, approval_id)
+    if approval is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel approval not found")
+    await ensure_manage_event_scope(authz, approval.organization_id, identity)
+    approval.status = payload.status
+    approval.notes = payload.notes if payload.notes is not None else approval.notes
+    if payload.status in {"approved", "rejected", "cancelled"}:
+        approval.decided_by_person_id = identity.person_id
+        approval.decided_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(approval)
+    return travel_approval_read(approval)
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -734,6 +821,20 @@ def travel_fee_invoice_memo(event: Event, plan: EventTravelPlan) -> str:
     if plan.route_summary:
         parts.append(f"Route: {plan.route_summary}")
     return "\n".join(parts)[:4000]
+
+
+def travel_approval_read(approval: EventTravelApproval) -> EventTravelApprovalRead:
+    return EventTravelApprovalRead(
+        id=approval.id,
+        organization_id=approval.organization_id,
+        travel_plan_id=approval.travel_plan_id,
+        approval_level=approval.approval_level,
+        status=approval.status,
+        approver_person_id=approval.approver_person_id,
+        decided_by_person_id=approval.decided_by_person_id,
+        decided_at=approval.decided_at,
+        notes=approval.notes,
+    )
 
 
 def travel_consent_notes(event: Event, plan: EventTravelPlan) -> str:

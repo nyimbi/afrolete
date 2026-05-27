@@ -115,6 +115,20 @@ class EventTravelPlan(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class EventTravelApproval(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_approvals"
+    __table_args__ = (UniqueConstraint("travel_plan_id", "approval_level"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    travel_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("event_travel_plans.id"), index=True)
+    approval_level: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    approver_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    decided_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class AttendanceRecord(IdMixin, TimestampMixin, Base):
     __tablename__ = "attendance_records"
     __table_args__ = (UniqueConstraint("event_id", "person_id"),)

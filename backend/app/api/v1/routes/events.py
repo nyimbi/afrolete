@@ -10,6 +10,9 @@ from app.schemas.event import (
     AttendanceSeedRead,
     EventCreate,
     EventRead,
+    EventTravelApprovalCreate,
+    EventTravelApprovalRead,
+    EventTravelApprovalUpdate,
     EventTravelConsentBatchRead,
     EventTravelConsentReminderCreate,
     EventTravelConsentReminderRead,
@@ -33,10 +36,12 @@ from app.services.events import (
     create_weather_assessment,
     create_event,
     dispatch_weather_assessment_alert,
+    create_travel_approval,
     generate_travel_fee_invoices,
     get_event,
     get_travel_manifest,
     list_attendance,
+    list_travel_approvals,
     list_events,
     list_travel_plans,
     list_weather_assessments,
@@ -44,6 +49,7 @@ from app.services.events import (
     request_travel_consents,
     seed_attendance_from_team_roster,
     send_travel_consent_reminders,
+    update_travel_approval,
     update_travel_plan,
 )
 from app.services.safeguarding import medical_clearance_for_event
@@ -346,6 +352,42 @@ async def generate_travel_fee_invoices_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelFeeInvoiceBatchRead:
     return await generate_travel_fee_invoices(db, identity, travel_plan_id, payload, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/approvals", response_model=list[EventTravelApprovalRead])
+async def list_travel_approvals_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EventTravelApprovalRead]:
+    return await list_travel_approvals(db, identity, travel_plan_id, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/approvals",
+    response_model=EventTravelApprovalRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_travel_approval_route(
+    travel_plan_id: UUID,
+    payload: EventTravelApprovalCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelApprovalRead:
+    return await create_travel_approval(db, identity, travel_plan_id, payload, authz)
+
+
+@router.patch("/travel-approvals/{approval_id}", response_model=EventTravelApprovalRead)
+async def update_travel_approval_route(
+    approval_id: UUID,
+    payload: EventTravelApprovalUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelApprovalRead:
+    return await update_travel_approval(db, identity, approval_id, payload, authz)
 
 
 @router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])

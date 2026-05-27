@@ -71,6 +71,7 @@ import type {
   ConsentRequestRead,
   DonationRead,
   EventRead,
+  EventTravelApprovalRead,
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
   EventTravelFeeInvoiceBatchRead,
@@ -349,6 +350,7 @@ export default function HomePage() {
   const [travelConsentReminder, setTravelConsentReminder] = useState<EventTravelConsentReminderRead | null>(null);
   const [travelManifest, setTravelManifest] = useState<EventTravelManifestRead | null>(null);
   const [travelFeeBatch, setTravelFeeBatch] = useState<EventTravelFeeInvoiceBatchRead | null>(null);
+  const [travelApprovals, setTravelApprovals] = useState<EventTravelApprovalRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -576,6 +578,7 @@ export default function HomePage() {
     cost_per_participant: 15,
     consent_channel: "email" as ConsentCaptureChannel,
     reminder_channel: "email" as CommunicationChannel,
+    approval_level: "school",
     notes: "Away match travel plan."
   });
   const [guardianForm, setGuardianForm] = useState({
@@ -1578,6 +1581,7 @@ export default function HomePage() {
       setTravelConsentReminder(null);
       setTravelManifest(null);
       setTravelFeeBatch(null);
+      setTravelApprovals([]);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1783,6 +1787,7 @@ export default function HomePage() {
       setTravelConsentReminder(null);
       setTravelManifest(null);
       setTravelFeeBatch(null);
+      setTravelApprovals([]);
       return;
     }
     runAction(
@@ -2446,6 +2451,62 @@ export default function HomePage() {
         if (selectedOrganizationId) {
           void loadCommercial(selectedOrganizationId);
         }
+      }
+    );
+  };
+
+  const loadTravelApprovals = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-approvals-${plan.id}`,
+      () => apiRequest<EventTravelApprovalRead[]>(`/events/travel-plans/${plan.id}/approvals`, { identity }),
+      (approvals) => {
+        setTravelApprovals(approvals);
+        addLog(`Travel approvals loaded: ${approvals.length}`, "good");
+      }
+    );
+  };
+
+  const createTravelApproval = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-approval-create-${plan.id}`,
+      () =>
+        apiRequest<EventTravelApprovalRead>(`/events/travel-plans/${plan.id}/approvals`, {
+          method: "POST",
+          identity,
+          body: {
+            approval_level: travelForm.approval_level,
+            approver_person_id: null,
+            notes: `Approval required before ${plan.destination} travel.`
+          }
+        }),
+      (approval) => {
+        setTravelApprovals((current) => [
+          approval,
+          ...current.filter((item) => item.id !== approval.id)
+        ]);
+        addLog(`${approval.approval_level} travel approval opened`, "good");
+      }
+    );
+  };
+
+  const decideTravelApproval = (approval: EventTravelApprovalRead, statusValue: "approved" | "rejected") => {
+    runAction(
+      `travel-approval-${approval.id}-${statusValue}`,
+      () =>
+        apiRequest<EventTravelApprovalRead>(`/events/travel-approvals/${approval.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            notes: `Marked ${statusValue} from the operations console.`
+          }
+        }),
+      (updated) => {
+        setTravelApprovals((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.approval_level} approval ${updated.status}`, updated.status === "approved" ? "good" : "bad");
       }
     );
   };
@@ -6665,6 +6726,16 @@ export default function HomePage() {
                   <option value="in_app">In app</option>
                 </select>
               </label>
+              <label>
+                Approval level
+                <select value={travelForm.approval_level} onChange={(event) => setTravelForm({ ...travelForm, approval_level: event.target.value })}>
+                  <option value="school">School</option>
+                  <option value="association">Association</option>
+                  <option value="operations">Operations</option>
+                  <option value="medical">Medical</option>
+                  <option value="finance">Finance</option>
+                </select>
+              </label>
               <label className="wide-field">
                 Route
                 <input value={travelForm.route_summary} onChange={(event) => setTravelForm({ ...travelForm, route_summary: event.target.value })} />
@@ -6715,6 +6786,19 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelApprovals.slice(0, 3).map((approval) => (
+                <article className="task-card" key={approval.id}>
+                  <div>
+                    <strong>{approval.approval_level} approval</strong>
+                    <span>{approval.status} · {approval.decided_at ? new Date(approval.decided_at).toLocaleString() : "awaiting decision"}</span>
+                    <span>{approval.notes ?? "No approval notes"}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => decideTravelApproval(approval, "approved")}>Approve</button>
+                    <button type="button" onClick={() => decideTravelApproval(approval, "rejected")}>Reject</button>
+                  </div>
+                </article>
+              ))}
               {travelPlans.slice(0, 2).map((plan) => (
                 <article key={plan.id} className="task-card">
                   <div>
@@ -6727,6 +6811,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => remindTravelConsents(plan)}>Remind</button>
                     <button type="button" onClick={() => loadTravelManifest(plan)}>Manifest</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
+                    <button type="button" onClick={() => createTravelApproval(plan)}>Require</button>
+                    <button type="button" onClick={() => loadTravelApprovals(plan)}>Approvals</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "completed")}>Complete</button>

@@ -531,6 +531,18 @@ export type EventTravelFeeInvoiceBatchRead = {
   invoices: EventTravelFeeInvoiceItemRead[];
 };
 
+export type EventTravelApprovalRead = {
+  id: UUID;
+  organization_id: UUID;
+  travel_plan_id: UUID;
+  approval_level: string;
+  status: string;
+  approver_person_id: UUID | null;
+  decided_by_person_id: UUID | null;
+  decided_at: string | null;
+  notes: string | null;
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

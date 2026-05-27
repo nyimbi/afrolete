@@ -233,6 +233,29 @@ class EventTravelFeeInvoiceBatchRead(BaseModel):
     invoices: list[EventTravelFeeInvoiceItemRead]
 
 
+class EventTravelApprovalCreate(BaseModel):
+    approval_level: str = Field(default="school", min_length=2, max_length=80)
+    approver_person_id: UUID | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelApprovalUpdate(BaseModel):
+    status: str = Field(pattern="^(pending|approved|rejected|cancelled)$")
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelApprovalRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    travel_plan_id: UUID
+    approval_level: str
+    status: str
+    approver_person_id: UUID | None
+    decided_by_person_id: UUID | None
+    decided_at: datetime | None
+    notes: str | None
+
+
 class AttendanceRecordUpsert(BaseModel):
     person_id: UUID
     status: AttendanceStatus
