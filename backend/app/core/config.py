@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     agent_default_model: str = "afrolete-local-planner"
     agent_execution_timeout_seconds: float = 10.0
 
+    report_artifact_dir: str = "data/report-artifacts"
+    report_artifact_url_prefix: str = "local://reports"
+
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, value: str) -> str:

@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from html import escape as xml_escape
+from pathlib import Path
 from uuid import UUID, uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -27,6 +28,7 @@ from app.models.reporting import (
     ScheduledReport,
 )
 from app.models.team import AthleteProfile, Team
+from app.core.config import Settings, get_settings
 from app.schemas.reporting import (
     GeneratedReportCreate,
     IntelligenceInsightCreate,
@@ -291,6 +293,7 @@ async def render_report_artifact(
     report_id: UUID,
     output_format: ReportFormat | None,
     authz: AuthorizationService,
+    settings: Settings | None = None,
 ) -> dict:
     report = await get_report(db, report_id)
     await ensure_manage_reporting(authz, identity, report.organization_id)
@@ -298,7 +301,8 @@ async def render_report_artifact(
     now = datetime.now(UTC)
     artifact = build_report_artifact(report, selected_format)
     checksum = artifact["checksum"]
-    artifact_url = f"artifact://reports/{report.id}/{checksum[:16]}.{selected_format.value}"
+    stored = persist_report_artifact(report, artifact, settings or get_settings())
+    artifact_url = stored["artifact_url"]
     report.output_format = selected_format
     report.artifact_url = artifact_url
     report.status = ReportRunStatus.READY
@@ -325,16 +329,18 @@ async def downloadable_report_artifact(
     report_id: UUID,
     output_format: ReportFormat | None,
     authz: AuthorizationService,
+    settings: Settings | None = None,
 ) -> dict[str, object]:
     report = await get_report(db, report_id)
     await ensure_manage_reporting(authz, identity, report.organization_id)
     selected_format = output_format or report.output_format
     artifact = build_report_artifact(report, selected_format)
-    checksum = artifact["checksum"]
+    stored = persist_report_artifact(report, artifact, settings or get_settings())
     report.output_format = selected_format
-    report.artifact_url = f"artifact://reports/{report.id}/{checksum[:16]}.{selected_format.value}"
+    report.artifact_url = stored["artifact_url"]
     report.status = ReportRunStatus.READY
     await db.commit()
+    artifact.update(stored)
     return artifact
 
 
@@ -653,6 +659,22 @@ def build_report_artifact(report: GeneratedReport, output_format: ReportFormat) 
         "checksum": sha256(content).hexdigest(),
         "body_preview": text[:600],
     }
+
+
+def persist_report_artifact(
+    report: GeneratedReport,
+    artifact: dict[str, object],
+    settings: Settings,
+) -> dict[str, str]:
+    checksum = str(artifact["checksum"])
+    filename = str(artifact["filename"])
+    storage_name = f"{checksum[:16]}-{filename}"
+    relative_path = Path(str(report.organization_id)) / str(report.id) / storage_name
+    destination = Path(settings.report_artifact_dir) / relative_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(bytes(artifact["content"]))
+    artifact_url = f"{settings.report_artifact_url_prefix}/{relative_path.as_posix()}"
+    return {"artifact_url": artifact_url, "storage_path": str(destination)}
 
 
 def build_csv_bytes(report: GeneratedReport) -> bytes:

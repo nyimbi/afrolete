@@ -138,6 +138,7 @@ async def download_report_route(
         headers={
             "Content-Disposition": f"attachment; filename={artifact['filename']}",
             "X-Afrolete-Report-Checksum": str(artifact["checksum"]),
+            "X-Afrolete-Artifact-Url": str(artifact["artifact_url"]),
         },
     )
 
