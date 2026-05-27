@@ -9,6 +9,7 @@ from app.schemas.assets import (
     AssetUtilizationRecommendationRead,
     EmergencyActivationAlertCreate,
     EmergencyActivationAlertRead,
+    EmergencyActivationIncidentCreate,
     EmergencyActionPlanCreate,
     EmergencyActionPlanRead,
     EmergencyActionPlanUpdate,
@@ -52,11 +53,13 @@ from app.schemas.assets import (
     SupplierOrderSubmissionRead,
     SupplierScoreRead,
 )
+from app.schemas.safeguarding import SafeguardingIncidentRead
 from app.services.assets import (
     activate_emergency_action_plan,
     asset_summary,
     checkout_equipment,
     create_emergency_action_plan,
+    create_incident_from_emergency_activation,
     create_equipment_item,
     create_facility,
     create_facility_booking,
@@ -183,6 +186,32 @@ def to_emergency_activation_alert_read(message, recipient_count: int, activation
         channel=message.channel,
         subject=message.subject,
         urgent=message.urgent,
+    )
+
+
+def to_safeguarding_incident_read(incident) -> SafeguardingIncidentRead:
+    return SafeguardingIncidentRead(
+        id=incident.id,
+        organization_id=incident.organization_id,
+        event_id=incident.event_id,
+        team_id=incident.team_id,
+        athlete_person_id=incident.athlete_person_id,
+        reported_by_person_id=incident.reported_by_person_id,
+        assigned_to_person_id=incident.assigned_to_person_id,
+        incident_type=incident.incident_type,
+        severity=incident.severity,
+        status=incident.status,
+        occurred_at=incident.occurred_at,
+        location=incident.location,
+        title=incident.title,
+        description=incident.description,
+        immediate_action=incident.immediate_action,
+        parent_notified_at=incident.parent_notified_at,
+        medical_follow_up_required=incident.medical_follow_up_required,
+        regulatory_report_required=incident.regulatory_report_required,
+        resolution_notes=incident.resolution_notes,
+        resolved_at=incident.resolved_at,
+        created_at=incident.created_at,
     )
 
 
@@ -432,6 +461,29 @@ async def dispatch_emergency_activation_alert_route(
         authz,
     )
     return to_emergency_activation_alert_read(message, recipient_count, activation_id)
+
+
+@router.post(
+    "/emergency-activations/{activation_id}/incident",
+    response_model=SafeguardingIncidentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_emergency_activation_incident_route(
+    activation_id: UUID,
+    payload: EmergencyActivationIncidentCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentRead:
+    return to_safeguarding_incident_read(
+        await create_incident_from_emergency_activation(
+            db,
+            identity,
+            activation_id,
+            payload,
+            authz,
+        )
+    )
 
 
 @router.post("/equipment", response_model=EquipmentItemRead, status_code=status.HTTP_201_CREATED)

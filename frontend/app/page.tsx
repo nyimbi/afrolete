@@ -4034,6 +4034,35 @@ export default function HomePage() {
     );
   };
 
+  const createEmergencyIncident = (activation: EmergencyPlanActivationRead) => {
+    runAction(
+      `emergency-incident-${activation.id}`,
+      () =>
+        apiRequest<SafeguardingIncidentRead>(`/assets/emergency-activations/${activation.id}/incident`, {
+          method: "POST",
+          identity,
+          body: {
+            severity: activation.escalation_level >= 4 ? "critical" : activation.escalation_level >= 2 ? "high" : "medium",
+            medical_follow_up_required: activation.emergency_type === "medical" ? "yes" : "unknown",
+            regulatory_report_required: activation.escalation_level >= 4
+          }
+        }),
+      (incident) => {
+        setSafeguardingIncidents((current) => [
+          incident,
+          ...current.filter((item) => item.id !== incident.id)
+        ]);
+        setEmergencyActivations((current) =>
+          current.map((item) =>
+            item.id === activation.id ? { ...item, incident_id: incident.id } : item
+          )
+        );
+        addLog(`${incident.title} incident linked`, incident.severity === "critical" ? "bad" : "good");
+        refreshSafeguardingCompliance();
+      }
+    );
+  };
+
   const createEquipmentItem = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -6391,6 +6420,7 @@ export default function HomePage() {
                   <div className="event-toolbar">
                     <button type="button" onClick={() => dispatchEmergencyAlert(activation)}>Alert</button>
                     <button type="button" onClick={() => updateEmergencyActivation(activation, null, Math.min(5, activation.escalation_level + 1))}>Escalate</button>
+                    <button type="button" onClick={() => createEmergencyIncident(activation)}>{activation.incident_id ? "Incident" : "Log incident"}</button>
                     <button type="button" onClick={() => updateEmergencyActivation(activation, "resolved")}>Resolve</button>
                     <button type="button" onClick={() => updateEmergencyActivation(activation, "reviewed")}>Review</button>
                     <button type="button" onClick={() => updateEmergencyActivation(activation, "cancelled")}>Cancel</button>

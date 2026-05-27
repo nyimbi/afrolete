@@ -41,6 +41,8 @@ from app.models.enums import (
     EmergencyActivationStatus,
     FacilityBookingStatus,
     MemberSubjectType,
+    SafeguardingIncidentSeverity,
+    SafeguardingIncidentType,
     WorkOrderStatus,
 )
 from app.models.enums import CommercialStatus
@@ -52,6 +54,7 @@ from app.core.config import Settings, get_settings
 from app.schemas.assets import (
     AssetSummaryRead,
     EmergencyActivationAlertCreate,
+    EmergencyActivationIncidentCreate,
     EmergencyActionPlanCreate,
     EmergencyActionPlanUpdate,
     EmergencyPlanActivationCreate,
@@ -91,9 +94,11 @@ from app.schemas.assets import (
 )
 from app.schemas.commercial import FinanceInvoiceRead, FinancePaymentRead
 from app.schemas.communication import CommunicationMessageCreate
+from app.schemas.safeguarding import SafeguardingIncidentCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
 from app.services.communications import create_message
+from app.services.safeguarding import create_safeguarding_incident
 from app.services.storage.objects import get_object, put_object
 
 
@@ -359,6 +364,46 @@ async def dispatch_emergency_activation_alert(
     return message, int(recipient_count or 0)
 
 
+async def create_incident_from_emergency_activation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    activation_id: UUID,
+    payload: EmergencyActivationIncidentCreate,
+    authz: AuthorizationService,
+) -> SafeguardingIncident:
+    activation = await db.get(EmergencyPlanActivation, activation_id)
+    if activation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Emergency activation not found")
+    await ensure_manage_assets(authz, identity, activation.organization_id)
+
+    if activation.incident_id is not None:
+        incident = await db.get(SafeguardingIncident, activation.incident_id)
+        if incident is not None:
+            return incident
+
+    incident = await create_safeguarding_incident(
+        db,
+        identity,
+        SafeguardingIncidentCreate(
+            organization_id=activation.organization_id,
+            incident_type=payload.incident_type or incident_type_for_emergency(activation.emergency_type),
+            severity=payload.severity or severity_for_activation(activation),
+            occurred_at=activation.activated_at,
+            location=activation.location_detail,
+            title=payload.title or f"{activation.emergency_type.value.title()} emergency response",
+            description=payload.description or emergency_incident_description(activation),
+            immediate_action=payload.immediate_action or emergency_immediate_action(activation),
+            medical_follow_up_required=payload.medical_follow_up_required,
+            regulatory_report_required=payload.regulatory_report_required,
+        ),
+        authz,
+    )
+    activation.incident_id = incident.id
+    await db.commit()
+    await db.refresh(activation)
+    return incident
+
+
 def emergency_alert_subject(activation: EmergencyPlanActivation) -> str:
     return f"Emergency alert: {activation.emergency_type.value} at {activation.location_detail}"[:240]
 
@@ -399,6 +444,50 @@ def emergency_communication_plan(plan: EmergencyActionPlan) -> str | None:
         f"External agencies: {plan.external_agency_contacts}" if plan.external_agency_contacts else None,
     ]
     return "\n".join(part for part in parts if part) or None
+
+
+def incident_type_for_emergency(emergency_type) -> SafeguardingIncidentType:
+    mapping = {
+        "medical": SafeguardingIncidentType.MEDICAL,
+        "fire": SafeguardingIncidentType.FACILITY,
+        "weather": SafeguardingIncidentType.WEATHER,
+        "security": SafeguardingIncidentType.SAFEGUARDING,
+        "evacuation": SafeguardingIncidentType.FACILITY,
+        "missing_person": SafeguardingIncidentType.SAFEGUARDING,
+        "other": SafeguardingIncidentType.OTHER,
+    }
+    return mapping.get(emergency_type.value, SafeguardingIncidentType.OTHER)
+
+
+def severity_for_activation(activation: EmergencyPlanActivation) -> SafeguardingIncidentSeverity:
+    if activation.escalation_level >= 4:
+        return SafeguardingIncidentSeverity.CRITICAL
+    if activation.escalation_level >= 2:
+        return SafeguardingIncidentSeverity.HIGH
+    return SafeguardingIncidentSeverity.MEDIUM
+
+
+def emergency_incident_description(activation: EmergencyPlanActivation) -> str:
+    lines = [
+        f"Emergency activation {activation.id} was opened for {activation.emergency_type.value}.",
+        f"Location: {activation.location_detail}",
+        f"Escalation level: {activation.escalation_level}",
+        f"Status at report creation: {activation.status.value}",
+    ]
+    if activation.assigned_responders:
+        lines.append(f"Assigned responders: {activation.assigned_responders}")
+    if activation.guidance_steps:
+        lines.append(f"Guidance followed: {activation.guidance_steps}")
+    if activation.communication_log:
+        lines.append(f"Communication log: {activation.communication_log}")
+    if activation.outcome_summary:
+        lines.append(f"Outcome: {activation.outcome_summary}")
+    return "\n".join(lines)[:8000]
+
+
+def emergency_immediate_action(activation: EmergencyPlanActivation) -> str | None:
+    action = activation.guidance_steps or activation.assigned_responders
+    return action[:4000] if action else None
 
 
 async def create_equipment_item(

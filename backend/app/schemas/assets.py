@@ -16,6 +16,8 @@ from app.models.enums import (
     FacilityBookingStatus,
     FacilityStatus,
     FacilityType,
+    SafeguardingIncidentSeverity,
+    SafeguardingIncidentType,
     WorkOrderPriority,
     WorkOrderStatus,
 )
@@ -154,6 +156,16 @@ class EmergencyActivationAlertRead(BaseModel):
     channel: CommunicationChannel
     subject: str
     urgent: bool
+
+
+class EmergencyActivationIncidentCreate(BaseModel):
+    incident_type: SafeguardingIncidentType | None = None
+    severity: SafeguardingIncidentSeverity = SafeguardingIncidentSeverity.HIGH
+    title: str | None = Field(default=None, min_length=2, max_length=240)
+    description: str | None = Field(default=None, min_length=2, max_length=8000)
+    immediate_action: str | None = Field(default=None, max_length=4000)
+    medical_follow_up_required: str = Field(default="unknown", max_length=40)
+    regulatory_report_required: bool = False
 
 
 class EquipmentItemCreate(BaseModel):
