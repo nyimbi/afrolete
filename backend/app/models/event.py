@@ -177,6 +177,27 @@ class EventTravelGeofenceZone(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class EventTravelDevice(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_devices"
+    __table_args__ = (UniqueConstraint("travel_plan_id", "provider", "device_id"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    travel_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("event_travel_plans.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="hardware-gps", nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    assigned_vehicle: Mapped[str | None] = mapped_column(String(180), index=True)
+    installed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_location_update_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("event_travel_location_updates.id"), index=True
+    )
+    last_battery_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    last_accuracy_meters: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class EventTravelExpense(IdMixin, TimestampMixin, Base):
     __tablename__ = "event_travel_expenses"
 

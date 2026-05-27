@@ -686,6 +686,25 @@ export type EventTravelGeofenceZoneRead = {
   updated_at: string;
 };
 
+export type EventTravelDeviceRead = {
+  id: UUID;
+  organization_id: UUID;
+  travel_plan_id: UUID;
+  provider: string;
+  device_id: string;
+  label: string;
+  status: "active" | "standby" | "disabled" | "lost" | "maintenance";
+  assigned_vehicle: string | null;
+  installed_at: string | null;
+  notes: string | null;
+  last_seen_at: string | null;
+  last_location_update_id: UUID | null;
+  last_battery_percent: string | null;
+  last_accuracy_meters: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type EventTravelExpenseRead = {
   id: UUID;
   organization_id: UUID;

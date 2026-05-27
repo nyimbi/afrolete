@@ -31,8 +31,11 @@ from app.schemas.event import (
     EventTravelConsentReminderRunCreate,
     EventTravelConsentReminderRunRead,
     EventTravelConsentRequestCreate,
+    EventTravelDeviceCreate,
     EventTravelDeviceLocationIngestCreate,
     EventTravelDeviceLocationIngestRead,
+    EventTravelDeviceRead,
+    EventTravelDeviceUpdate,
     EventTravelExpenseCreate,
     EventTravelExpenseRead,
     EventTravelExpenseUpdate,
@@ -76,6 +79,7 @@ from app.services.events import (
     create_travel_approval,
     auto_match_travel_carpools,
     create_travel_carpool_ride,
+    create_travel_device,
     create_travel_expense,
     create_travel_fee_checkouts,
     check_travel_geofence,
@@ -92,6 +96,7 @@ from app.services.events import (
     list_attendance,
     list_travel_carpool_rides,
     list_travel_checklist_items,
+    list_travel_devices,
     list_travel_expenses,
     list_travel_geofence_zones,
     list_travel_location_updates,
@@ -111,6 +116,7 @@ from app.services.events import (
     update_travel_approval,
     update_travel_carpool_ride,
     update_travel_checklist_item,
+    update_travel_device,
     update_travel_expense,
     update_travel_geofence_zone,
     update_travel_plan,
@@ -640,6 +646,42 @@ async def create_travel_location_update_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelLocationUpdateRead:
     return await create_travel_location_update(db, identity, travel_plan_id, payload, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/devices", response_model=list[EventTravelDeviceRead])
+async def list_travel_devices_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EventTravelDeviceRead]:
+    return await list_travel_devices(db, identity, travel_plan_id, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/devices",
+    response_model=EventTravelDeviceRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_travel_device_route(
+    travel_plan_id: UUID,
+    payload: EventTravelDeviceCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelDeviceRead:
+    return await create_travel_device(db, identity, travel_plan_id, payload, authz)
+
+
+@router.patch("/travel-devices/{travel_device_id}", response_model=EventTravelDeviceRead)
+async def update_travel_device_route(
+    travel_device_id: UUID,
+    payload: EventTravelDeviceUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelDeviceRead:
+    return await update_travel_device(db, identity, travel_device_id, payload, authz)
 
 
 @router.post(

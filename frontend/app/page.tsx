@@ -80,6 +80,7 @@ import type {
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
   EventTravelConsentReminderRunRead,
+  EventTravelDeviceRead,
   EventTravelExpenseRead,
   EventTravelFeeCheckoutBatchRead,
   EventTravelFeeInvoiceBatchRead,
@@ -377,6 +378,7 @@ export default function HomePage() {
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
   const [selectedTravelChecklistFile, setSelectedTravelChecklistFile] = useState<File | null>(null);
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
+  const [travelDevices, setTravelDevices] = useState<EventTravelDeviceRead[]>([]);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
   const [selectedTravelReceiptFile, setSelectedTravelReceiptFile] = useState<File | null>(null);
   const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
@@ -621,6 +623,11 @@ export default function HomePage() {
     speed_kph: 45,
     heading_degrees: 90,
     tracking_channel: "push" as CommunicationChannel,
+    device_provider: "hardware-gps",
+    device_id: "bus-3-gps",
+    device_label: "Minibus #3 tracker",
+    device_status: "active" as EventTravelDeviceRead["status"],
+    device_vehicle: "Minibus #3",
     geofence_label: "planned route corridor",
     geofence_latitude: -1.2921,
     geofence_longitude: 36.8219,
@@ -1650,6 +1657,7 @@ export default function HomePage() {
       setTravelApprovalRouting(null);
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
+      setTravelDevices([]);
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
       setTravelCarpoolAutoMatch(null);
@@ -1870,6 +1878,7 @@ export default function HomePage() {
       setTravelApprovalRouting(null);
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
+      setTravelDevices([]);
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
       setTravelCarpoolAutoMatch(null);
@@ -2895,6 +2904,64 @@ export default function HomePage() {
         if (selectedEventId) {
           void loadTravelPlans(selectedEventId);
         }
+      }
+    );
+  };
+
+  const loadTravelDevices = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-devices-${plan.id}`,
+      () =>
+        apiRequest<EventTravelDeviceRead[]>(`/events/travel-plans/${plan.id}/devices`, {
+          method: "GET",
+          identity
+        }),
+      (devices) => {
+        setTravelDevices(devices);
+        addLog(`${devices.length} travel devices loaded for ${plan.destination}`, "neutral");
+      }
+    );
+  };
+
+  const createTravelDevice = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-device-create-${plan.id}`,
+      () =>
+        apiRequest<EventTravelDeviceRead>(`/events/travel-plans/${plan.id}/devices`, {
+          method: "POST",
+          identity,
+          body: {
+            provider: travelForm.device_provider,
+            device_id: travelForm.device_id,
+            label: travelForm.device_label,
+            status: travelForm.device_status,
+            assigned_vehicle: travelForm.device_vehicle || null,
+            installed_at: new Date().toISOString(),
+            notes: `Provisioned from operations console for ${plan.destination}.`
+          }
+        }),
+      (device) => {
+        setTravelDevices((current) => [
+          device,
+          ...current.filter((item) => item.id !== device.id)
+        ]);
+        addLog(`Travel device provisioned: ${device.label}`, "good");
+      }
+    );
+  };
+
+  const setTravelDeviceStatus = (device: EventTravelDeviceRead, status: EventTravelDeviceRead["status"]) => {
+    runAction(
+      `travel-device-status-${device.id}-${status}`,
+      () =>
+        apiRequest<EventTravelDeviceRead>(`/events/travel-devices/${device.id}`, {
+          method: "PATCH",
+          identity,
+          body: { status }
+        }),
+      (updatedDevice) => {
+        setTravelDevices((current) => current.map((item) => (item.id === updatedDevice.id ? updatedDevice : item)));
+        addLog(`${updatedDevice.label} marked ${updatedDevice.status}`, updatedDevice.status === "active" ? "good" : "neutral");
       }
     );
   };
@@ -7519,6 +7586,32 @@ export default function HomePage() {
                 <input type="number" min="0" value={travelForm.speed_kph} onChange={(event) => setTravelForm({ ...travelForm, speed_kph: Number(event.target.value) })} />
               </label>
               <label>
+                Device provider
+                <input value={travelForm.device_provider} onChange={(event) => setTravelForm({ ...travelForm, device_provider: event.target.value })} />
+              </label>
+              <label>
+                Device ID
+                <input value={travelForm.device_id} onChange={(event) => setTravelForm({ ...travelForm, device_id: event.target.value })} />
+              </label>
+              <label>
+                Device label
+                <input value={travelForm.device_label} onChange={(event) => setTravelForm({ ...travelForm, device_label: event.target.value })} />
+              </label>
+              <label>
+                Device status
+                <select value={travelForm.device_status} onChange={(event) => setTravelForm({ ...travelForm, device_status: event.target.value as EventTravelDeviceRead["status"] })}>
+                  <option value="active">Active</option>
+                  <option value="standby">Standby</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="disabled">Disabled</option>
+                  <option value="lost">Lost</option>
+                </select>
+              </label>
+              <label>
+                Device vehicle
+                <input value={travelForm.device_vehicle} onChange={(event) => setTravelForm({ ...travelForm, device_vehicle: event.target.value })} />
+              </label>
+              <label>
                 Geofence label
                 <input value={travelForm.geofence_label} onChange={(event) => setTravelForm({ ...travelForm, geofence_label: event.target.value })} />
               </label>
@@ -7748,6 +7841,23 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {travelDevices.slice(0, 3).map((device) => (
+                <article className="task-card" key={device.id}>
+                  <div>
+                    <strong>{device.label} · {device.status}</strong>
+                    <span>{device.provider}:{device.device_id} · {device.assigned_vehicle ?? "No vehicle assigned"}</span>
+                    <span>
+                      {device.last_seen_at ? `Last seen ${new Date(device.last_seen_at).toLocaleString()}` : "No device pings yet"}
+                      {device.last_battery_percent ? ` · ${device.last_battery_percent}% battery` : ""}
+                    </span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => setTravelDeviceStatus(device, "active")}>Activate</button>
+                    <button type="button" onClick={() => setTravelDeviceStatus(device, "maintenance")}>Service</button>
+                    <button type="button" onClick={() => setTravelDeviceStatus(device, "disabled")}>Disable</button>
+                  </div>
+                </article>
+              ))}
               {travelFeeBatch ? (
                 <article className="task-card">
                   <div>
@@ -7873,6 +7983,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => seedTravelChecklist(plan)}>Inspect</button>
                     <button type="button" onClick={() => loadTravelChecklist(plan)}>Checklist</button>
                     <button type="button" onClick={() => recordTravelLocationUpdate(plan)}>Track</button>
+                    <button type="button" onClick={() => createTravelDevice(plan)}>Device</button>
+                    <button type="button" onClick={() => loadTravelDevices(plan)}>Devices</button>
                     <button type="button" onClick={() => checkTravelGeofence(plan)}>Geofence</button>
                     <button type="button" onClick={() => createTravelGeofenceZone(plan)}>Save zone</button>
                     <button type="button" onClick={() => loadTravelGeofenceZones(plan)}>Zones</button>

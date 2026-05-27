@@ -40,6 +40,7 @@ from app.models.event import (
     EventTravelApproval,
     EventTravelCarpoolRide,
     EventTravelChecklistItem,
+    EventTravelDevice,
     EventTravelExpense,
     EventTravelGeofenceZone,
     EventTravelLocationUpdate,
@@ -77,8 +78,11 @@ from app.schemas.event import (
     EventTravelChecklistItemRead,
     EventTravelChecklistItemUpdate,
     EventTravelChecklistSeedCreate,
+    EventTravelDeviceCreate,
     EventTravelDeviceLocationIngestCreate,
     EventTravelDeviceLocationIngestRead,
+    EventTravelDeviceRead,
+    EventTravelDeviceUpdate,
     EventTravelExpenseCreate,
     EventTravelExpenseRead,
     EventTravelExpenseUpdate,
@@ -1230,6 +1234,88 @@ async def create_travel_location_update(
     return await travel_location_update_read(db, update)
 
 
+async def list_travel_devices(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> list[EventTravelDeviceRead]:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    devices = (
+        await db.scalars(
+            select(EventTravelDevice)
+            .where(EventTravelDevice.travel_plan_id == plan.id)
+            .order_by(EventTravelDevice.status, EventTravelDevice.label)
+        )
+    ).all()
+    return [travel_device_read(device) for device in devices]
+
+
+async def create_travel_device(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelDeviceCreate,
+    authz: AuthorizationService,
+) -> EventTravelDeviceRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    existing = await db.scalar(
+        select(EventTravelDevice)
+        .where(EventTravelDevice.travel_plan_id == plan.id)
+        .where(EventTravelDevice.provider == payload.provider)
+        .where(EventTravelDevice.device_id == payload.device_id)
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Travel device already provisioned")
+    device = EventTravelDevice(
+        organization_id=plan.organization_id,
+        travel_plan_id=plan.id,
+        provider=payload.provider,
+        device_id=payload.device_id,
+        label=payload.label,
+        status=payload.status,
+        assigned_vehicle=payload.assigned_vehicle,
+        installed_at=payload.installed_at,
+        notes=payload.notes,
+    )
+    db.add(device)
+    await db.commit()
+    await db.refresh(device)
+    return travel_device_read(device)
+
+
+async def update_travel_device(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_device_id: UUID,
+    payload: EventTravelDeviceUpdate,
+    authz: AuthorizationService,
+) -> EventTravelDeviceRead:
+    device = await db.get(EventTravelDevice, travel_device_id)
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel device not found")
+    await ensure_manage_event_scope(authz, device.organization_id, identity)
+    if payload.label is not None:
+        device.label = payload.label
+    if payload.status is not None:
+        device.status = payload.status
+    if "assigned_vehicle" in payload.model_fields_set:
+        device.assigned_vehicle = payload.assigned_vehicle
+    if "installed_at" in payload.model_fields_set:
+        device.installed_at = payload.installed_at
+    if "notes" in payload.model_fields_set:
+        device.notes = payload.notes
+    await db.commit()
+    await db.refresh(device)
+    return travel_device_read(device)
+
+
 async def ingest_travel_device_location(
     db: AsyncSession,
     travel_plan_id: UUID,
@@ -1241,6 +1327,7 @@ async def ingest_travel_device_location(
     plan = await db.get(EventTravelPlan, travel_plan_id)
     if plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    device = await travel_device_for_ingest(db, plan, payload)
     update = EventTravelLocationUpdate(
         organization_id=plan.organization_id,
         travel_plan_id=plan.id,
@@ -1255,13 +1342,23 @@ async def ingest_travel_device_location(
         notes=travel_device_location_notes(payload, signature_required, signature_validated),
     )
     db.add(update)
+    await db.flush()
+    if device is not None:
+        device.last_seen_at = update.recorded_at
+        device.last_location_update_id = update.id
+        device.last_battery_percent = payload.battery_percent
+        device.last_accuracy_meters = payload.accuracy_meters
     apply_travel_phase_status(plan, payload.phase)
     await db.commit()
     await db.refresh(update)
+    if device is not None:
+        await db.refresh(device)
     return EventTravelDeviceLocationIngestRead(
         travel_plan_id=plan.id,
         device_id=payload.device_id,
         provider=payload.provider,
+        device_registration_id=device.id if device is not None else None,
+        device_status=device.status if device is not None else None,
         signature_required=signature_required,
         signature_validated=signature_validated,
         update=await travel_location_update_read(db, update),
@@ -1296,6 +1393,29 @@ def validate_travel_device_ingest_signature(
     if not hmac.compare_digest(expected, submitted):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel device signature")
     return True, True
+
+
+async def travel_device_for_ingest(
+    db: AsyncSession,
+    plan: EventTravelPlan,
+    payload: EventTravelDeviceLocationIngestCreate,
+) -> EventTravelDevice | None:
+    device = await db.scalar(
+        select(EventTravelDevice)
+        .where(EventTravelDevice.travel_plan_id == plan.id)
+        .where(EventTravelDevice.provider == payload.provider)
+        .where(EventTravelDevice.device_id == payload.device_id)
+    )
+    if device is not None:
+        if device.status != "active":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Travel device is not active")
+        return device
+    provisioned_count = int(
+        await db.scalar(select(func.count(EventTravelDevice.id)).where(EventTravelDevice.travel_plan_id == plan.id)) or 0
+    )
+    if provisioned_count:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel device is not provisioned")
+    return None
 
 
 async def check_travel_geofence(
@@ -2458,6 +2578,27 @@ async def travel_location_update_read(
         notification_message_id=update.notification_message_id,
         notification_recipient_count=recipient_count,
         notes=update.notes,
+    )
+
+
+def travel_device_read(device: EventTravelDevice) -> EventTravelDeviceRead:
+    return EventTravelDeviceRead(
+        id=device.id,
+        organization_id=device.organization_id,
+        travel_plan_id=device.travel_plan_id,
+        provider=device.provider,
+        device_id=device.device_id,
+        label=device.label,
+        status=device.status,
+        assigned_vehicle=device.assigned_vehicle,
+        installed_at=device.installed_at,
+        last_seen_at=device.last_seen_at,
+        last_location_update_id=device.last_location_update_id,
+        last_battery_percent=device.last_battery_percent,
+        last_accuracy_meters=device.last_accuracy_meters,
+        notes=device.notes,
+        created_at=device.created_at,
+        updated_at=device.updated_at,
     )
 
 

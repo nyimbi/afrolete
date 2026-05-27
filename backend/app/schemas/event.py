@@ -450,9 +450,41 @@ class EventTravelDeviceLocationIngestRead(BaseModel):
     travel_plan_id: UUID
     device_id: str
     provider: str
+    device_registration_id: UUID | None = None
+    device_status: str | None = None
     signature_required: bool
     signature_validated: bool
     update: EventTravelLocationUpdateRead
+
+
+class EventTravelDeviceCreate(BaseModel):
+    provider: str = Field(default="hardware-gps", min_length=2, max_length=80)
+    device_id: str = Field(min_length=2, max_length=120)
+    label: str = Field(min_length=2, max_length=160)
+    status: str = Field(default="active", pattern="^(active|standby|disabled|lost|maintenance)$")
+    assigned_vehicle: str | None = Field(default=None, max_length=180)
+    installed_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelDeviceUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=2, max_length=160)
+    status: str | None = Field(default=None, pattern="^(active|standby|disabled|lost|maintenance)$")
+    assigned_vehicle: str | None = Field(default=None, max_length=180)
+    installed_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelDeviceRead(EventTravelDeviceCreate):
+    id: UUID
+    organization_id: UUID
+    travel_plan_id: UUID
+    last_seen_at: datetime | None
+    last_location_update_id: UUID | None
+    last_battery_percent: Decimal | None
+    last_accuracy_meters: Decimal | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class EventTravelGeofenceCheckCreate(BaseModel):
