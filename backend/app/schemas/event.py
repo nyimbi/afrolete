@@ -9,6 +9,8 @@ from app.models.enums import (
     EventType,
     MedicalClearanceStatus,
     ParticipationClearanceStatus,
+    TravelPlanStatus,
+    TravelRiskLevel,
     WeatherAlertLevel,
     WeatherDecision,
 )
@@ -84,6 +86,64 @@ class EventWeatherAlertRead(BaseModel):
     channel: CommunicationChannel
     subject: str
     urgent: bool
+
+
+class EventTravelPlanCreate(BaseModel):
+    destination: str = Field(min_length=2, max_length=240)
+    travel_mode: str = Field(min_length=2, max_length=80)
+    departure_at: datetime | None = None
+    return_at: datetime | None = None
+    route_summary: str | None = Field(default=None, max_length=8000)
+    vehicle_details: str | None = Field(default=None, max_length=8000)
+    driver_details: str | None = Field(default=None, max_length=8000)
+    staff_manifest: str | None = Field(default=None, max_length=8000)
+    passenger_manifest: str | None = Field(default=None, max_length=12000)
+    lodging_details: str | None = Field(default=None, max_length=8000)
+    meal_plan: str | None = Field(default=None, max_length=8000)
+    equipment_manifest: str | None = Field(default=None, max_length=8000)
+    emergency_contacts: str | None = Field(default=None, max_length=8000)
+    medical_access_plan: str | None = Field(default=None, max_length=8000)
+    route_weather_risk: str | None = Field(default=None, max_length=80)
+    driver_certification_status: str | None = Field(default=None, max_length=80)
+    vehicle_inspection_status: str | None = Field(default=None, max_length=80)
+    consent_required: bool = True
+    consent_due_at: datetime | None = None
+    estimated_cost: float | None = Field(default=None, ge=0)
+    cost_per_participant: float | None = Field(default=None, ge=0)
+    notes: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def return_after_departure(self) -> "EventTravelPlanCreate":
+        if self.departure_at is not None and self.return_at is not None and self.return_at <= self.departure_at:
+            raise ValueError("return_at must be after departure_at")
+        return self
+
+
+class EventTravelPlanUpdate(BaseModel):
+    status: TravelPlanStatus | None = None
+    route_summary: str | None = Field(default=None, max_length=8000)
+    vehicle_details: str | None = Field(default=None, max_length=8000)
+    driver_details: str | None = Field(default=None, max_length=8000)
+    staff_manifest: str | None = Field(default=None, max_length=8000)
+    passenger_manifest: str | None = Field(default=None, max_length=12000)
+    lodging_details: str | None = Field(default=None, max_length=8000)
+    meal_plan: str | None = Field(default=None, max_length=8000)
+    equipment_manifest: str | None = Field(default=None, max_length=8000)
+    emergency_contacts: str | None = Field(default=None, max_length=8000)
+    medical_access_plan: str | None = Field(default=None, max_length=8000)
+    route_weather_risk: str | None = Field(default=None, max_length=80)
+    driver_certification_status: str | None = Field(default=None, max_length=80)
+    vehicle_inspection_status: str | None = Field(default=None, max_length=80)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EventTravelPlanRead(EventTravelPlanCreate):
+    id: UUID
+    organization_id: UUID
+    event_id: UUID
+    status: TravelPlanStatus
+    risk_level: TravelRiskLevel
+    risk_assessment: str
 
 
 class AttendanceRecordUpsert(BaseModel):

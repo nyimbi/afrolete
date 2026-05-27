@@ -69,6 +69,7 @@ import type {
   ConsentRequestRead,
   DonationRead,
   EventRead,
+  EventTravelPlanRead,
   EventWeatherAlertRead,
   EventWeatherAssessmentRead,
   EventType,
@@ -170,6 +171,7 @@ import type {
   TeamRead,
   TeamRosterEntryRead,
   TeamRole,
+  TravelPlanStatus,
   TrainingAvailabilityRead,
   TrainingDrillRead,
   TrainingPlanItemRead,
@@ -336,6 +338,7 @@ export default function HomePage() {
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
   const [weatherAssessments, setWeatherAssessments] = useState<EventWeatherAssessmentRead[]>([]);
   const [weatherAlert, setWeatherAlert] = useState<EventWeatherAlertRead | null>(null);
+  const [travelPlans, setTravelPlans] = useState<EventTravelPlanRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -538,6 +541,30 @@ export default function HomePage() {
     precipitation_mm_per_hr: 0,
     alert_channel: "push" as CommunicationChannel,
     notes: "Pre-match venue and weather safety check."
+  });
+  const [travelForm, setTravelForm] = useState({
+    destination: "City Sports Complex",
+    travel_mode: "Club minibus",
+    departure_at: "2026-05-28T07:45",
+    return_at: "2026-05-28T13:30",
+    route_summary: "Meet at main field parking, route via A104, rest stop at Riverside services.",
+    vehicle_details: "Minibus #3, seatbelts, first-aid kit, insurance current.",
+    driver_details: "James Wilson, defensive driving and first aid verified.",
+    staff_manifest: "Coach Maria Garcia; assistant David Chen; medic Amina Yusuf.",
+    passenger_manifest: "U16 match squad and substitutes.",
+    lodging_details: "",
+    meal_plan: "Packed snacks, water, and post-match lunch.",
+    equipment_manifest: "2 kit bags, medical kit, match balls, hydration cooler.",
+    emergency_contacts: "Coach Maria +254700111111; Safety Officer +254700222222.",
+    medical_access_plan: "Nearest hospital: City Clinic, 8 km from destination. Athlete medical notes accessible to staff.",
+    route_weather_risk: "low",
+    driver_certification_status: "verified",
+    vehicle_inspection_status: "passed",
+    consent_required: true,
+    consent_due_at: "2026-05-27T18:00",
+    estimated_cost: 450,
+    cost_per_participant: 15,
+    notes: "Away match travel plan."
   });
   const [guardianForm, setGuardianForm] = useState({
     guardian_display_name: "Parent Example",
@@ -1059,6 +1086,11 @@ export default function HomePage() {
     setWeatherAssessments(data);
   }, []);
 
+  const loadTravelPlans = useCallback(async (eventId: string) => {
+    const data = await apiRequest<EventTravelPlanRead[]>(`/events/${eventId}/travel-plans`);
+    setTravelPlans(data);
+  }, []);
+
   const loadSafeguardingIncidents = useCallback(async (organizationId: string) => {
     const data = await apiRequest<SafeguardingIncidentRead[]>(
       `/safeguarding/incidents?organization_id=${organizationId}`,
@@ -1529,6 +1561,7 @@ export default function HomePage() {
       setEvents([]);
       setWeatherAssessments([]);
       setWeatherAlert(null);
+      setTravelPlans([]);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1729,6 +1762,7 @@ export default function HomePage() {
       setAttendance([]);
       setWeatherAssessments([]);
       setWeatherAlert(null);
+      setTravelPlans([]);
       return;
     }
     runAction(
@@ -1736,10 +1770,11 @@ export default function HomePage() {
       async () => {
         await loadAttendance(selectedEventId);
         await loadWeatherAssessments(selectedEventId);
+        await loadTravelPlans(selectedEventId);
       },
       () => undefined
     );
-  }, [selectedEventId, loadAttendance, loadWeatherAssessments, runAction]);
+  }, [selectedEventId, loadAttendance, loadTravelPlans, loadWeatherAssessments, runAction]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -2210,6 +2245,74 @@ export default function HomePage() {
         if (selectedOrganizationId) {
           void loadCommunications(selectedOrganizationId);
         }
+      }
+    );
+  };
+
+  const createTravelPlan = () => {
+    if (!selectedEventId) {
+      addLog("Select an event first", "bad");
+      return;
+    }
+    runAction(
+      "create-travel-plan",
+      () =>
+        apiRequest<EventTravelPlanRead>(`/events/${selectedEventId}/travel-plans`, {
+          method: "POST",
+          identity,
+          body: {
+            destination: travelForm.destination,
+            travel_mode: travelForm.travel_mode,
+            departure_at: travelForm.departure_at ? new Date(travelForm.departure_at).toISOString() : null,
+            return_at: travelForm.return_at ? new Date(travelForm.return_at).toISOString() : null,
+            route_summary: travelForm.route_summary || null,
+            vehicle_details: travelForm.vehicle_details || null,
+            driver_details: travelForm.driver_details || null,
+            staff_manifest: travelForm.staff_manifest || null,
+            passenger_manifest: travelForm.passenger_manifest || null,
+            lodging_details: travelForm.lodging_details || null,
+            meal_plan: travelForm.meal_plan || null,
+            equipment_manifest: travelForm.equipment_manifest || null,
+            emergency_contacts: travelForm.emergency_contacts || null,
+            medical_access_plan: travelForm.medical_access_plan || null,
+            route_weather_risk: travelForm.route_weather_risk || null,
+            driver_certification_status: travelForm.driver_certification_status || null,
+            vehicle_inspection_status: travelForm.vehicle_inspection_status || null,
+            consent_required: travelForm.consent_required,
+            consent_due_at: travelForm.consent_due_at ? new Date(travelForm.consent_due_at).toISOString() : null,
+            estimated_cost: travelForm.estimated_cost,
+            cost_per_participant: travelForm.cost_per_participant,
+            notes: travelForm.notes || null
+          }
+        }),
+      (plan) => {
+        setTravelPlans((current) => [plan, ...current.filter((item) => item.id !== plan.id)]);
+        addLog(`Travel plan ${plan.risk_level} risk`, plan.risk_level === "critical" || plan.risk_level === "high" ? "bad" : "good");
+      }
+    );
+  };
+
+  const updateTravelPlan = (plan: EventTravelPlanRead, statusValue: TravelPlanStatus) => {
+    runAction(
+      `travel-plan-${plan.id}-${statusValue}`,
+      () =>
+        apiRequest<EventTravelPlanRead>(`/events/travel-plans/${plan.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            route_weather_risk: travelForm.route_weather_risk || null,
+            driver_certification_status: travelForm.driver_certification_status || null,
+            vehicle_inspection_status: travelForm.vehicle_inspection_status || null,
+            notes: `Marked ${statusValue} from the operations console.`
+          }
+        }),
+      (updated) => {
+        setTravelPlans((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`Travel plan moved to ${updated.status} with ${updated.risk_level} risk`, "good");
       }
     );
   };
@@ -6303,6 +6406,7 @@ export default function HomePage() {
               <button type="button" onClick={seedAttendance} disabled={busyAction !== null}>Seed roster</button>
               <button type="button" onClick={checkClearance} disabled={busyAction !== null}>Clearance</button>
               <button type="button" onClick={assessEventWeather} disabled={busyAction !== null}>Weather check</button>
+              <button type="button" onClick={createTravelPlan} disabled={busyAction !== null}>Travel plan</button>
             </div>
             <div className="form-grid three">
               <label>
@@ -6362,6 +6466,69 @@ export default function HomePage() {
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={() => dispatchWeatherAlert(assessment)}>Alert</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <div className="form-grid three">
+              <label>
+                Destination
+                <input value={travelForm.destination} onChange={(event) => setTravelForm({ ...travelForm, destination: event.target.value })} />
+              </label>
+              <label>
+                Mode
+                <input value={travelForm.travel_mode} onChange={(event) => setTravelForm({ ...travelForm, travel_mode: event.target.value })} />
+              </label>
+              <label>
+                Depart
+                <input type="datetime-local" value={travelForm.departure_at} onChange={(event) => setTravelForm({ ...travelForm, departure_at: event.target.value })} />
+              </label>
+              <label>
+                Return
+                <input type="datetime-local" value={travelForm.return_at} onChange={(event) => setTravelForm({ ...travelForm, return_at: event.target.value })} />
+              </label>
+              <label>
+                Weather risk
+                <input value={travelForm.route_weather_risk} onChange={(event) => setTravelForm({ ...travelForm, route_weather_risk: event.target.value })} />
+              </label>
+              <label>
+                Driver
+                <input value={travelForm.driver_certification_status} onChange={(event) => setTravelForm({ ...travelForm, driver_certification_status: event.target.value })} />
+              </label>
+              <label>
+                Vehicle
+                <input value={travelForm.vehicle_inspection_status} onChange={(event) => setTravelForm({ ...travelForm, vehicle_inspection_status: event.target.value })} />
+              </label>
+              <label>
+                Cost
+                <input type="number" min="0" value={travelForm.estimated_cost} onChange={(event) => setTravelForm({ ...travelForm, estimated_cost: Number(event.target.value) })} />
+              </label>
+              <label>
+                Consent due
+                <input type="datetime-local" value={travelForm.consent_due_at} onChange={(event) => setTravelForm({ ...travelForm, consent_due_at: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Route
+                <input value={travelForm.route_summary} onChange={(event) => setTravelForm({ ...travelForm, route_summary: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Emergency and medical
+                <input value={travelForm.medical_access_plan} onChange={(event) => setTravelForm({ ...travelForm, medical_access_plan: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {travelPlans.slice(0, 2).map((plan) => (
+                <article key={plan.id} className="task-card">
+                  <div>
+                    <strong>{plan.destination} · {plan.risk_level}</strong>
+                    <span>{plan.travel_mode} · {plan.status} · depart {plan.departure_at ? new Date(plan.departure_at).toLocaleString() : "not set"}</span>
+                    <span>{plan.risk_assessment}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
+                    <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>
+                    <button type="button" onClick={() => updateTravelPlan(plan, "completed")}>Complete</button>
+                    <button type="button" onClick={() => updateTravelPlan(plan, "cancelled")}>Cancel</button>
                   </div>
                 </article>
               ))}

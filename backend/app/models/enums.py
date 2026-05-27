@@ -150,6 +150,21 @@ class WeatherDecision(StrEnum):
     EVACUATE = "evacuate"
 
 
+class TravelPlanStatus(StrEnum):
+    DRAFT = "draft"
+    READY = "ready"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class TravelRiskLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
 class AttendanceStatus(StrEnum):
     INVITED = "invited"
     CONFIRMED = "confirmed"

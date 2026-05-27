@@ -10,6 +10,9 @@ from app.schemas.event import (
     AttendanceSeedRead,
     EventCreate,
     EventRead,
+    EventTravelPlanCreate,
+    EventTravelPlanRead,
+    EventTravelPlanUpdate,
     EventWeatherAlertCreate,
     EventWeatherAlertRead,
     EventWeatherAssessmentCreate,
@@ -19,15 +22,18 @@ from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.events import (
+    create_travel_plan,
     create_weather_assessment,
     create_event,
     dispatch_weather_assessment_alert,
     get_event,
     list_attendance,
     list_events,
+    list_travel_plans,
     list_weather_assessments,
     record_attendance,
     seed_attendance_from_team_roster,
+    update_travel_plan,
 )
 from app.services.safeguarding import medical_clearance_for_event
 
@@ -85,6 +91,39 @@ def to_weather_alert_read(message, recipient_count: int, event_id: UUID, assessm
         channel=message.channel,
         subject=message.subject,
         urgent=message.urgent,
+    )
+
+
+def to_travel_plan_read(plan) -> EventTravelPlanRead:
+    return EventTravelPlanRead(
+        id=plan.id,
+        organization_id=plan.organization_id,
+        event_id=plan.event_id,
+        status=plan.status,
+        destination=plan.destination,
+        travel_mode=plan.travel_mode,
+        departure_at=plan.departure_at,
+        return_at=plan.return_at,
+        route_summary=plan.route_summary,
+        vehicle_details=plan.vehicle_details,
+        driver_details=plan.driver_details,
+        staff_manifest=plan.staff_manifest,
+        passenger_manifest=plan.passenger_manifest,
+        lodging_details=plan.lodging_details,
+        meal_plan=plan.meal_plan,
+        equipment_manifest=plan.equipment_manifest,
+        emergency_contacts=plan.emergency_contacts,
+        medical_access_plan=plan.medical_access_plan,
+        route_weather_risk=plan.route_weather_risk,
+        driver_certification_status=plan.driver_certification_status,
+        vehicle_inspection_status=plan.vehicle_inspection_status,
+        consent_required=plan.consent_required,
+        consent_due_at=plan.consent_due_at,
+        estimated_cost=float(plan.estimated_cost) if plan.estimated_cost is not None else None,
+        cost_per_participant=float(plan.cost_per_participant) if plan.cost_per_participant is not None else None,
+        risk_level=plan.risk_level,
+        risk_assessment=plan.risk_assessment,
+        notes=plan.notes,
     )
 
 
@@ -211,6 +250,36 @@ async def record_attendance_route(
         medical_clearance_id,
         medical_clearance_reason,
     )
+
+
+@router.post("/{event_id}/travel-plans", response_model=EventTravelPlanRead, status_code=status.HTTP_201_CREATED)
+async def create_travel_plan_route(
+    event_id: UUID,
+    payload: EventTravelPlanCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelPlanRead:
+    return to_travel_plan_read(await create_travel_plan(db, identity, event_id, payload, authz))
+
+
+@router.get("/{event_id}/travel-plans", response_model=list[EventTravelPlanRead])
+async def list_travel_plans_route(
+    event_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[EventTravelPlanRead]:
+    return [to_travel_plan_read(plan) for plan in await list_travel_plans(db, event_id)]
+
+
+@router.patch("/travel-plans/{travel_plan_id}", response_model=EventTravelPlanRead)
+async def update_travel_plan_route(
+    travel_plan_id: UUID,
+    payload: EventTravelPlanUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelPlanRead:
+    return to_travel_plan_read(await update_travel_plan(db, identity, travel_plan_id, payload, authz))
 
 
 @router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])

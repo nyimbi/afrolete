@@ -24,6 +24,8 @@ from app.models.enums import (
     SafeguardingIncidentSeverity,
     SafeguardingIncidentStatus,
     SafeguardingIncidentType,
+    TravelPlanStatus,
+    TravelRiskLevel,
     WeatherAlertLevel,
     WeatherDecision,
 )
@@ -68,6 +70,48 @@ class EventWeatherAssessment(IdMixin, TimestampMixin, Base):
         enum_type(WeatherDecision), nullable=False, index=True
     )
     recommended_actions: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class EventTravelPlan(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_plans"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    event_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    status: Mapped[TravelPlanStatus] = mapped_column(
+        enum_type(TravelPlanStatus),
+        default=TravelPlanStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    destination: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    travel_mode: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    departure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    return_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    route_summary: Mapped[str | None] = mapped_column(Text)
+    vehicle_details: Mapped[str | None] = mapped_column(Text)
+    driver_details: Mapped[str | None] = mapped_column(Text)
+    staff_manifest: Mapped[str | None] = mapped_column(Text)
+    passenger_manifest: Mapped[str | None] = mapped_column(Text)
+    lodging_details: Mapped[str | None] = mapped_column(Text)
+    meal_plan: Mapped[str | None] = mapped_column(Text)
+    equipment_manifest: Mapped[str | None] = mapped_column(Text)
+    emergency_contacts: Mapped[str | None] = mapped_column(Text)
+    medical_access_plan: Mapped[str | None] = mapped_column(Text)
+    route_weather_risk: Mapped[str | None] = mapped_column(String(80), index=True)
+    driver_certification_status: Mapped[str | None] = mapped_column(String(80), index=True)
+    vehicle_inspection_status: Mapped[str | None] = mapped_column(String(80), index=True)
+    consent_required: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    consent_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    cost_per_participant: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    risk_level: Mapped[TravelRiskLevel] = mapped_column(
+        enum_type(TravelRiskLevel),
+        default=TravelRiskLevel.MEDIUM,
+        nullable=False,
+        index=True,
+    )
+    risk_assessment: Mapped[str] = mapped_column(Text, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

@@ -11,16 +11,19 @@ from app.models.enums import (
     CommunicationScopeType,
     MedicalClearanceStatus,
     ParticipationClearanceStatus,
+    TravelRiskLevel,
     WeatherAlertLevel,
     WeatherDecision,
 )
-from app.models.event import AttendanceRecord, Event, EventWeatherAssessment
+from app.models.event import AttendanceRecord, Event, EventTravelPlan, EventWeatherAssessment
 from app.models.identity import Person
 from app.models.organization import Organization
 from app.models.team import AthleteProfile, Team, TeamRosterEntry
 from app.schemas.communication import CommunicationMessageCreate
 from app.schemas.event import (
     EventCreate,
+    EventTravelPlanCreate,
+    EventTravelPlanUpdate,
     EventWeatherAlertCreate,
     EventWeatherAssessmentCreate,
     AttendanceRecordUpsert,
@@ -230,6 +233,78 @@ async def dispatch_weather_assessment_alert(
     return message, int(recipient_count or 0)
 
 
+async def create_travel_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    event_id: UUID,
+    payload: EventTravelPlanCreate,
+    authz: AuthorizationService,
+) -> EventTravelPlan:
+    event = await get_event(db, event_id)
+    await ensure_manage_event_scope(authz, event.organization_id, identity)
+    risk_level, risk_assessment = classify_travel_risk(payload)
+    plan = EventTravelPlan(
+        organization_id=event.organization_id,
+        event_id=event.id,
+        risk_level=risk_level,
+        risk_assessment=risk_assessment,
+        **payload.model_dump(),
+    )
+    db.add(plan)
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
+async def list_travel_plans(db: AsyncSession, event_id: UUID) -> list[EventTravelPlan]:
+    await get_event(db, event_id)
+    rows = await db.scalars(
+        select(EventTravelPlan)
+        .where(EventTravelPlan.event_id == event_id)
+        .order_by(EventTravelPlan.departure_at.nulls_last(), EventTravelPlan.created_at.desc())
+    )
+    return list(rows.all())
+
+
+async def update_travel_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelPlanUpdate,
+    authz: AuthorizationService,
+) -> EventTravelPlan:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    for field in [
+        "status",
+        "route_summary",
+        "vehicle_details",
+        "driver_details",
+        "staff_manifest",
+        "passenger_manifest",
+        "lodging_details",
+        "meal_plan",
+        "equipment_manifest",
+        "emergency_contacts",
+        "medical_access_plan",
+        "route_weather_risk",
+        "driver_certification_status",
+        "vehicle_inspection_status",
+        "notes",
+    ]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(plan, field, value)
+    risk_level, risk_assessment = classify_travel_plan(plan)
+    plan.risk_level = risk_level
+    plan.risk_assessment = risk_assessment
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -291,6 +366,63 @@ def classify_weather_risk(
     if advisories:
         return WeatherAlertLevel.ADVISORY, WeatherDecision.MONITOR, "\n".join(advisories)
     return WeatherAlertLevel.INFORMATION, WeatherDecision.PROCEED, "Conditions are within normal operating thresholds."
+
+
+def classify_travel_risk(payload: EventTravelPlanCreate) -> tuple[TravelRiskLevel, str]:
+    class DraftPlan:
+        route_weather_risk = payload.route_weather_risk
+        driver_certification_status = payload.driver_certification_status
+        vehicle_inspection_status = payload.vehicle_inspection_status
+        lodging_details = payload.lodging_details
+        emergency_contacts = payload.emergency_contacts
+        medical_access_plan = payload.medical_access_plan
+        consent_required = payload.consent_required
+        consent_due_at = payload.consent_due_at
+        departure_at = payload.departure_at
+        travel_mode = payload.travel_mode
+
+    return classify_travel_plan(DraftPlan())
+
+
+def classify_travel_plan(plan) -> tuple[TravelRiskLevel, str]:
+    blockers: list[str] = []
+    warnings: list[str] = []
+    checks: list[str] = []
+
+    if plan.route_weather_risk and plan.route_weather_risk.lower() in {"critical", "severe", "storm", "flood"}:
+        blockers.append("Route weather risk requires reroute, delay, or emergency travel approval.")
+    elif plan.route_weather_risk and plan.route_weather_risk.lower() in {"high", "warning", "moderate"}:
+        warnings.append("Route weather should be monitored with backup stops and parent updates.")
+
+    if not plan.driver_certification_status:
+        warnings.append("Driver certification status is missing.")
+    elif plan.driver_certification_status.lower() not in {"verified", "current", "valid", "cleared"}:
+        blockers.append("Driver certification is not verified as current.")
+
+    if not plan.vehicle_inspection_status:
+        warnings.append("Vehicle inspection status is missing.")
+    elif plan.vehicle_inspection_status.lower() not in {"passed", "current", "valid", "complete"}:
+        blockers.append("Vehicle inspection is not marked current or passed.")
+
+    if plan.consent_required and plan.consent_due_at is None:
+        warnings.append("Travel consent is required but no due time is set.")
+    if plan.travel_mode.lower() in {"bus", "van", "minibus", "carpool"} and not plan.emergency_contacts:
+        warnings.append("Emergency contacts should be attached before departure.")
+    if not plan.medical_access_plan:
+        warnings.append("Medical access plan is missing for the trip.")
+    if plan.departure_at is None:
+        warnings.append("Departure time is missing.")
+    if plan.lodging_details and "chaperone" not in plan.lodging_details.lower():
+        warnings.append("Lodging details should explicitly name chaperone coverage.")
+
+    checks.append("Passenger manifest, staff manifest, route, vehicle, driver, consent, and medical access reviewed.")
+    if blockers:
+        return TravelRiskLevel.CRITICAL, "\n".join(blockers + warnings + checks)
+    if len(warnings) >= 3:
+        return TravelRiskLevel.HIGH, "\n".join(warnings + checks)
+    if warnings:
+        return TravelRiskLevel.MEDIUM, "\n".join(warnings + checks)
+    return TravelRiskLevel.LOW, "\n".join(checks)
 
 
 def weather_alert_subject(event: Event, assessment: EventWeatherAssessment) -> str:

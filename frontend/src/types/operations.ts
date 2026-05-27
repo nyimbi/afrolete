@@ -53,6 +53,8 @@ export type EventType =
 
 export type WeatherAlertLevel = "information" | "advisory" | "warning" | "critical";
 export type WeatherDecision = "proceed" | "monitor" | "modify" | "delay" | "cancel" | "evacuate";
+export type TravelPlanStatus = "draft" | "ready" | "in_progress" | "completed" | "cancelled";
+export type TravelRiskLevel = "low" | "medium" | "high" | "critical";
 
 export type AttendanceStatus =
   | "invited"
@@ -432,6 +434,37 @@ export type EventWeatherAlertRead = {
   channel: CommunicationChannel;
   subject: string;
   urgent: boolean;
+};
+
+export type EventTravelPlanRead = {
+  id: UUID;
+  organization_id: UUID;
+  event_id: UUID;
+  status: TravelPlanStatus;
+  destination: string;
+  travel_mode: string;
+  departure_at: string | null;
+  return_at: string | null;
+  route_summary: string | null;
+  vehicle_details: string | null;
+  driver_details: string | null;
+  staff_manifest: string | null;
+  passenger_manifest: string | null;
+  lodging_details: string | null;
+  meal_plan: string | null;
+  equipment_manifest: string | null;
+  emergency_contacts: string | null;
+  medical_access_plan: string | null;
+  route_weather_risk: string | null;
+  driver_certification_status: string | null;
+  vehicle_inspection_status: string | null;
+  consent_required: boolean;
+  consent_due_at: string | null;
+  estimated_cost: number | null;
+  cost_per_participant: number | null;
+  risk_level: TravelRiskLevel;
+  risk_assessment: string;
+  notes: string | null;
 };
 
 export type AttendanceRecordRead = {
