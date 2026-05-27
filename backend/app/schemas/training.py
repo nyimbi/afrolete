@@ -160,3 +160,37 @@ class TrainingSessionPlanRead(BaseModel):
     load_score: float
     objectives: str | None
     status: TrainingSessionStatus
+
+
+class TrainingSessionFeedbackCreate(BaseModel):
+    athlete_profile_id: UUID | None = None
+    readiness_score: int = Field(ge=0, le=100)
+    soreness_score: int = Field(default=0, ge=0, le=10)
+    sleep_quality: int = Field(default=7, ge=0, le=10)
+    mood_score: int = Field(default=7, ge=0, le=10)
+    actual_rpe: int | None = Field(default=None, ge=1, le=10)
+    actual_duration_minutes: int | None = Field(default=None, ge=1, le=360)
+    completed: bool = False
+    feedback: str | None = Field(default=None, max_length=4000)
+    coach_notes: str | None = Field(default=None, max_length=4000)
+
+
+class TrainingSessionFeedbackRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    session_plan_id: UUID
+    athlete_profile_id: UUID | None
+    recorded_by_person_id: UUID | None
+    readiness_score: int
+    soreness_score: int
+    sleep_quality: int
+    mood_score: int
+    actual_rpe: int | None
+    actual_duration_minutes: int | None
+    completed: bool
+    feedback: str | None
+    coach_notes: str | None
+    recorded_at: datetime
+    readiness_band: str
+    load_delta: float | None
+    recommendation: str

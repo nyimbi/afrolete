@@ -132,6 +132,7 @@ import type {
   TrainingDrillRead,
   TrainingPlanItemRead,
   TrainingPlanRead,
+  TrainingSessionFeedbackRead,
   TrainingSessionPlanRead,
   TicketOrderRead,
   TicketProductRead,
@@ -276,6 +277,7 @@ export default function HomePage() {
   const [trainingPlans, setTrainingPlans] = useState<TrainingPlanRead[]>([]);
   const [trainingPlanItems, setTrainingPlanItems] = useState<TrainingPlanItemRead[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSessionPlanRead[]>([]);
+  const [trainingFeedback, setTrainingFeedback] = useState<TrainingSessionFeedbackRead[]>([]);
   const [generatedTrainingPlan, setGeneratedTrainingPlan] = useState<GeneratedTrainingPlanRead | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionRead[]>([]);
   const [competitionParticipants, setCompetitionParticipants] = useState<CompetitionParticipantRead[]>([]);
@@ -362,6 +364,7 @@ export default function HomePage() {
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
   const [selectedObservationId, setSelectedObservationId] = useState("");
   const [selectedTrainingPlanId, setSelectedTrainingPlanId] = useState("");
+  const [selectedTrainingSessionId, setSelectedTrainingSessionId] = useState("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState("");
   const [selectedFixtureId, setSelectedFixtureId] = useState("");
   const [selectedMessageId, setSelectedMessageId] = useState("");
@@ -495,6 +498,17 @@ export default function HomePage() {
     duration_minutes: 75,
     rpe_target: 7,
     objectives: "Improve scanning before receiving under pressure."
+  });
+  const [trainingFeedbackForm, setTrainingFeedbackForm] = useState({
+    readiness_score: 76,
+    soreness_score: 3,
+    sleep_quality: 8,
+    mood_score: 8,
+    actual_rpe: 7,
+    actual_duration_minutes: 72,
+    completed: true,
+    feedback: "Felt strong after warm-up; slight tightness near the end.",
+    coach_notes: "Keep next session technical if soreness rises tomorrow."
   });
   const [competitionForm, setCompetitionForm] = useState({
     name: "U17 City League",
@@ -731,6 +745,10 @@ export default function HomePage() {
     () => trainingPlans.find((plan) => plan.id === selectedTrainingPlanId) ?? null,
     [trainingPlans, selectedTrainingPlanId]
   );
+  const selectedTrainingSession = useMemo(
+    () => trainingSessions.find((sessionPlan) => sessionPlan.id === selectedTrainingSessionId) ?? null,
+    [trainingSessions, selectedTrainingSessionId]
+  );
   const selectedCompetition = useMemo(
     () => competitions.find((competition) => competition.id === selectedCompetitionId) ?? null,
     [competitions, selectedCompetitionId]
@@ -889,11 +907,21 @@ export default function HomePage() {
     setSelectedTrainingPlanId((current) =>
       plans.some((plan) => plan.id === current) ? current : plans[0]?.id ?? ""
     );
+    setSelectedTrainingSessionId((current) =>
+      sessions.some((sessionPlan) => sessionPlan.id === current) ? current : sessions[0]?.id ?? ""
+    );
   }, []);
 
   const loadTrainingPlanItems = useCallback(async (planId: string) => {
     const data = await apiRequest<TrainingPlanItemRead[]>(`/training/plans/${planId}/items`);
     setTrainingPlanItems(data);
+  }, []);
+
+  const loadTrainingFeedback = useCallback(async (sessionPlanId: string) => {
+    const data = await apiRequest<TrainingSessionFeedbackRead[]>(
+      `/training/sessions/${sessionPlanId}/feedback`
+    );
+    setTrainingFeedback(data);
   }, []);
 
   const loadCompetitions = useCallback(async (organizationId: string) => {
@@ -1201,6 +1229,7 @@ export default function HomePage() {
       setTrainingPlans([]);
       setTrainingSessions([]);
       setTrainingPlanItems([]);
+      setTrainingFeedback([]);
       setGeneratedTrainingPlan(null);
       setCompetitions([]);
       setCompetitionParticipants([]);
@@ -1210,6 +1239,7 @@ export default function HomePage() {
       setCompetitionAdvancement(null);
       setScheduleOptimization(null);
       setCompetitionBroadcast(null);
+      setCompetitionTicketing([]);
       setCompetitionBracket(null);
       setCompetitionConflicts([]);
       setMatchEvents([]);
@@ -1378,6 +1408,18 @@ export default function HomePage() {
   }, [selectedTrainingPlanId, loadTrainingPlanItems, runAction]);
 
   useEffect(() => {
+    if (!selectedTrainingSessionId) {
+      setTrainingFeedback([]);
+      return;
+    }
+    runAction(
+      "load-training-feedback",
+      () => loadTrainingFeedback(selectedTrainingSessionId),
+      () => undefined
+    );
+  }, [selectedTrainingSessionId, loadTrainingFeedback, runAction]);
+
+  useEffect(() => {
     if (!selectedCompetitionId) {
       setCompetitionParticipants([]);
       setCompetitionFixtures([]);
@@ -1386,6 +1428,7 @@ export default function HomePage() {
       setCompetitionAdvancement(null);
       setScheduleOptimization(null);
       setCompetitionBroadcast(null);
+      setCompetitionTicketing([]);
       setCompetitionBracket(null);
       setCompetitionConflicts([]);
       setMatchEvents([]);
@@ -2149,7 +2192,48 @@ export default function HomePage() {
           sessionPlan,
           ...current.filter((item) => item.id !== sessionPlan.id)
         ]);
+        setSelectedTrainingSessionId(sessionPlan.id);
         addLog(`Session load ${sessionPlan.load_score} planned`, "good");
+      }
+    );
+  };
+
+  const recordTrainingFeedback = () => {
+    if (!selectedTrainingSessionId) {
+      addLog("Select a training session first", "bad");
+      return;
+    }
+    runAction(
+      "record-training-feedback",
+      () =>
+        apiRequest<TrainingSessionFeedbackRead>(
+          `/training/sessions/${selectedTrainingSessionId}/feedback`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              athlete_profile_id: selectedAthlete?.athleteProfileId ?? null,
+              readiness_score: trainingFeedbackForm.readiness_score,
+              soreness_score: trainingFeedbackForm.soreness_score,
+              sleep_quality: trainingFeedbackForm.sleep_quality,
+              mood_score: trainingFeedbackForm.mood_score,
+              actual_rpe: trainingFeedbackForm.actual_rpe,
+              actual_duration_minutes: trainingFeedbackForm.actual_duration_minutes,
+              completed: trainingFeedbackForm.completed,
+              feedback: trainingFeedbackForm.feedback,
+              coach_notes: trainingFeedbackForm.coach_notes
+            }
+          }
+        ),
+      (feedback) => {
+        setTrainingFeedback((current) => [
+          feedback,
+          ...current.filter((item) => item.id !== feedback.id)
+        ]);
+        addLog(`${feedback.readiness_band} readiness · ${feedback.recommendation}`, "good");
+        if (selectedOrganizationId) {
+          void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+        }
       }
     );
   };
@@ -6224,12 +6308,15 @@ export default function HomePage() {
                 <p className="section-label">Load management</p>
                 <h2>Session planner</h2>
               </div>
-              <button type="button" onClick={createTrainingSession} disabled={busyAction !== null}>Session</button>
+              <div className="event-toolbar">
+                <button type="button" onClick={createTrainingSession} disabled={busyAction !== null}>Session</button>
+                <button type="button" onClick={recordTrainingFeedback} disabled={busyAction !== null}>Feedback</button>
+              </div>
             </div>
             <div className="score-summary">
-              <strong>{trainingSessionForm.duration_minutes * trainingSessionForm.rpe_target}</strong>
-              <span>Target load</span>
-              <small>{selectedTrainingPlan?.title ?? "No plan selected"}</small>
+              <strong>{trainingFeedback[0]?.readiness_score ?? trainingSessionForm.duration_minutes * trainingSessionForm.rpe_target}</strong>
+              <span>{trainingFeedback[0] ? `${trainingFeedback[0].readiness_band} readiness` : "Target load"}</span>
+              <small>{selectedTrainingSession?.title ?? selectedTrainingPlan?.title ?? "No session selected"}</small>
             </div>
             <div className="form-grid">
               <label>
@@ -6252,13 +6339,45 @@ export default function HomePage() {
                 Objectives
                 <input value={trainingSessionForm.objectives} onChange={(event) => setTrainingSessionForm({ ...trainingSessionForm, objectives: event.target.value })} />
               </label>
+              <label>
+                Readiness
+                <input type="number" min="0" max="100" value={trainingFeedbackForm.readiness_score} onChange={(event) => setTrainingFeedbackForm({ ...trainingFeedbackForm, readiness_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Soreness
+                <input type="number" min="0" max="10" value={trainingFeedbackForm.soreness_score} onChange={(event) => setTrainingFeedbackForm({ ...trainingFeedbackForm, soreness_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Sleep
+                <input type="number" min="0" max="10" value={trainingFeedbackForm.sleep_quality} onChange={(event) => setTrainingFeedbackForm({ ...trainingFeedbackForm, sleep_quality: Number(event.target.value) })} />
+              </label>
+              <label>
+                Actual RPE
+                <input type="number" min="1" max="10" value={trainingFeedbackForm.actual_rpe} onChange={(event) => setTrainingFeedbackForm({ ...trainingFeedbackForm, actual_rpe: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Feedback
+                <input value={trainingFeedbackForm.feedback} onChange={(event) => setTrainingFeedbackForm({ ...trainingFeedbackForm, feedback: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
               {trainingSessions.slice(0, 4).map((sessionPlan) => (
-                <article key={sessionPlan.id} className="task-card">
+                <article
+                  key={sessionPlan.id}
+                  className={`task-card ${sessionPlan.id === selectedTrainingSessionId ? "selected" : ""}`}
+                  onClick={() => setSelectedTrainingSessionId(sessionPlan.id)}
+                >
                   <div>
                     <strong>{sessionPlan.title}</strong>
-                    <span>{new Date(sessionPlan.scheduled_for).toLocaleString()} · load {sessionPlan.load_score}</span>
+                    <span>{sessionPlan.status} · {new Date(sessionPlan.scheduled_for).toLocaleString()} · load {sessionPlan.load_score}</span>
+                  </div>
+                </article>
+              ))}
+              {trainingFeedback.slice(0, 3).map((feedback) => (
+                <article key={feedback.id} className="task-card">
+                  <div>
+                    <strong>{feedback.readiness_band} readiness · RPE {feedback.actual_rpe ?? "pending"}</strong>
+                    <span>{feedback.recommendation}</span>
                   </div>
                 </article>
               ))}

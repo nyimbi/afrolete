@@ -70,6 +70,7 @@ from app.models.training import (  # noqa: F401,E402
     TrainingDrill,
     TrainingPlan,
     TrainingPlanItem,
+    TrainingSessionFeedback,
     TrainingSessionPlan,
 )
 

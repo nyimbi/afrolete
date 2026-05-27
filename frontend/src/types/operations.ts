@@ -1281,6 +1281,27 @@ export type TrainingSessionPlanRead = {
   status: TrainingSessionStatus;
 };
 
+export type TrainingSessionFeedbackRead = {
+  id: UUID;
+  organization_id: UUID;
+  session_plan_id: UUID;
+  athlete_profile_id: UUID | null;
+  recorded_by_person_id: UUID | null;
+  readiness_score: number;
+  soreness_score: number;
+  sleep_quality: number;
+  mood_score: number;
+  actual_rpe: number | null;
+  actual_duration_minutes: number | null;
+  completed: boolean;
+  feedback: string | null;
+  coach_notes: string | null;
+  recorded_at: string;
+  readiness_band: string;
+  load_delta: number | null;
+  recommendation: string;
+};
+
 export type CompetitionRead = {
   id: UUID;
   organization_id: UUID;

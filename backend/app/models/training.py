@@ -95,3 +95,32 @@ class TrainingSessionPlan(IdMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+
+
+class TrainingSessionFeedback(IdMixin, TimestampMixin, Base):
+    __tablename__ = "training_session_feedback"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    session_plan_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("training_session_plans.id"), index=True
+    )
+    athlete_profile_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), index=True
+    )
+    recorded_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"))
+    readiness_score: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    soreness_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    sleep_quality: Mapped[int] = mapped_column(Integer, nullable=False)
+    mood_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    actual_rpe: Mapped[int | None] = mapped_column(Integer)
+    actual_duration_minutes: Mapped[int | None] = mapped_column(Integer)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    feedback: Mapped[str | None] = mapped_column(Text)
+    coach_notes: Mapped[str | None] = mapped_column(Text)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )

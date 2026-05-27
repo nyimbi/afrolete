@@ -13,6 +13,8 @@ from app.schemas.training import (
     TrainingPlanItemCreate,
     TrainingPlanItemRead,
     TrainingPlanRead,
+    TrainingSessionFeedbackCreate,
+    TrainingSessionFeedbackRead,
     TrainingSessionPlanCreate,
     TrainingSessionPlanRead,
 )
@@ -28,7 +30,9 @@ from app.services.training import (
     list_training_drills,
     list_training_plan_items,
     list_training_plans,
+    list_training_session_feedback,
     list_training_session_plans,
+    record_training_session_feedback,
 )
 
 router = APIRouter(prefix="/training", tags=["training"])
@@ -103,6 +107,10 @@ def to_session_plan_read(session_plan) -> TrainingSessionPlanRead:
         objectives=session_plan.objectives,
         status=session_plan.status,
     )
+
+
+def to_session_feedback_read(row: dict[str, object]) -> TrainingSessionFeedbackRead:
+    return TrainingSessionFeedbackRead(**row)
 
 
 @router.post("/drills", response_model=TrainingDrillRead, status_code=status.HTTP_201_CREATED)
@@ -225,4 +233,35 @@ async def list_training_session_plans_route(
     return [
         to_session_plan_read(session_plan)
         for session_plan in await list_training_session_plans(db, organization_id, team_id=team_id)
+    ]
+
+
+@router.post(
+    "/sessions/{session_plan_id}/feedback",
+    response_model=TrainingSessionFeedbackRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_training_session_feedback_route(
+    session_plan_id: UUID,
+    payload: TrainingSessionFeedbackCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TrainingSessionFeedbackRead:
+    return to_session_feedback_read(
+        await record_training_session_feedback(db, identity, session_plan_id, payload, authz)
+    )
+
+
+@router.get(
+    "/sessions/{session_plan_id}/feedback",
+    response_model=list[TrainingSessionFeedbackRead],
+)
+async def list_training_session_feedback_route(
+    session_plan_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[TrainingSessionFeedbackRead]:
+    return [
+        to_session_feedback_read(row)
+        for row in await list_training_session_feedback(db, session_plan_id)
     ]

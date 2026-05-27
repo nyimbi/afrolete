@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.competition import CompetitionFixture
 from app.models.event import Event
+from app.models.enums import TrainingSessionStatus
 from app.models.organization import Organization
 from app.models.performance import AthleteAssessment, AthletePerformanceObservation
 from app.models.team import AthleteProfile, Team
@@ -14,6 +15,7 @@ from app.models.training import (
     TrainingDrill,
     TrainingPlan,
     TrainingPlanItem,
+    TrainingSessionFeedback,
     TrainingSessionPlan,
 )
 from app.schemas.training import (
@@ -21,6 +23,7 @@ from app.schemas.training import (
     TrainingPlanGenerateCreate,
     TrainingPlanCreate,
     TrainingPlanItemCreate,
+    TrainingSessionFeedbackCreate,
     TrainingSessionPlanCreate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -336,6 +339,51 @@ async def list_training_session_plans(
     )
 
 
+async def record_training_session_feedback(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    session_plan_id: UUID,
+    payload: TrainingSessionFeedbackCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    session_plan = await get_training_session_plan(db, session_plan_id)
+    await ensure_manage_training(authz, identity, session_plan.organization_id)
+    if payload.athlete_profile_id is not None:
+        await get_athlete_for_organization(db, payload.athlete_profile_id, session_plan.organization_id)
+
+    feedback = TrainingSessionFeedback(
+        organization_id=session_plan.organization_id,
+        session_plan_id=session_plan.id,
+        recorded_by_person_id=identity.person_id,
+        recorded_at=datetime.now(UTC),
+        **payload.model_dump(),
+    )
+    if payload.completed:
+        session_plan.status = TrainingSessionStatus.COMPLETED
+    elif payload.readiness_score < 45:
+        session_plan.status = TrainingSessionStatus.PLANNED
+    db.add(feedback)
+    await db.commit()
+    await db.refresh(feedback)
+    await db.refresh(session_plan)
+    return training_feedback_read(feedback, session_plan)
+
+
+async def list_training_session_feedback(
+    db: AsyncSession,
+    session_plan_id: UUID,
+) -> list[dict[str, object]]:
+    session_plan = await get_training_session_plan(db, session_plan_id)
+    rows = (
+        await db.scalars(
+            select(TrainingSessionFeedback)
+            .where(TrainingSessionFeedback.session_plan_id == session_plan_id)
+            .order_by(TrainingSessionFeedback.recorded_at.desc())
+        )
+    ).all()
+    return [training_feedback_read(feedback, session_plan) for feedback in rows]
+
+
 async def get_organization(db: AsyncSession, organization_id: UUID) -> Organization:
     organization = await db.get(Organization, organization_id)
     if organization is None:
@@ -381,6 +429,60 @@ async def get_training_plan_for_organization(
     if plan.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     return plan
+
+
+async def get_training_session_plan(db: AsyncSession, session_plan_id: UUID) -> TrainingSessionPlan:
+    session_plan = await db.get(TrainingSessionPlan, session_plan_id)
+    if session_plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session plan not found")
+    return session_plan
+
+
+def training_feedback_read(
+    feedback: TrainingSessionFeedback,
+    session_plan: TrainingSessionPlan,
+) -> dict[str, object]:
+    actual_load = None
+    load_delta = None
+    if feedback.actual_rpe is not None:
+        duration = feedback.actual_duration_minutes or session_plan.duration_minutes
+        actual_load = float(duration * feedback.actual_rpe)
+        load_delta = actual_load - session_plan.load_score
+    return {
+        "id": feedback.id,
+        "organization_id": feedback.organization_id,
+        "session_plan_id": feedback.session_plan_id,
+        "athlete_profile_id": feedback.athlete_profile_id,
+        "recorded_by_person_id": feedback.recorded_by_person_id,
+        "readiness_score": feedback.readiness_score,
+        "soreness_score": feedback.soreness_score,
+        "sleep_quality": feedback.sleep_quality,
+        "mood_score": feedback.mood_score,
+        "actual_rpe": feedback.actual_rpe,
+        "actual_duration_minutes": feedback.actual_duration_minutes,
+        "completed": feedback.completed,
+        "feedback": feedback.feedback,
+        "coach_notes": feedback.coach_notes,
+        "recorded_at": feedback.recorded_at,
+        "readiness_band": readiness_label(feedback.readiness_score),
+        "load_delta": load_delta,
+        "recommendation": training_feedback_recommendation(feedback, load_delta),
+    }
+
+
+def training_feedback_recommendation(
+    feedback: TrainingSessionFeedback,
+    load_delta: float | None,
+) -> str:
+    if feedback.readiness_score < 45 or feedback.soreness_score >= 8:
+        return "Reduce intensity, add recovery work, and consider medical or guardian follow-up before the next load."
+    if feedback.readiness_score < 65 or feedback.sleep_quality <= 4:
+        return "Keep technical work, reduce high-intensity volume, and repeat readiness check before the next session."
+    if load_delta is not None and load_delta > 150:
+        return "Session load exceeded target; schedule recovery and monitor soreness within 24 hours."
+    if feedback.completed:
+        return "Session completed within acceptable readiness range; continue progression if next-day check remains stable."
+    return "Readiness is acceptable; proceed with planned session and capture post-session RPE."
 
 
 def infer_focus_area(assessments: list[AthleteAssessment], readiness_score: int) -> str:
