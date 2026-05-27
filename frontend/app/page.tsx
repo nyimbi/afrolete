@@ -125,6 +125,7 @@ import type {
   SponsorshipAgreementRead,
   SponsorshipDashboardRead,
   SupplierOrderRead,
+  SupplierOrderSubmissionRead,
   SupplierScoreRead,
   SportFormat,
   SubscriptionRead,
@@ -328,6 +329,7 @@ export default function HomePage() {
   const [procurementRecommendations, setProcurementRecommendations] = useState<ProcurementRecommendationRead[]>([]);
   const [supplierOrders, setSupplierOrders] = useState<SupplierOrderRead[]>([]);
   const [supplierScores, setSupplierScores] = useState<SupplierScoreRead[]>([]);
+  const [supplierSubmission, setSupplierSubmission] = useState<SupplierOrderSubmissionRead | null>(null);
   const [assetUtilization, setAssetUtilization] = useState<AssetUtilizationRecommendationRead[]>([]);
   const [leaseQuote, setLeaseQuote] = useState<EquipmentLeaseQuoteRead | null>(null);
   const [sponsors, setSponsors] = useState<SponsorRead[]>([]);
@@ -1300,6 +1302,7 @@ export default function HomePage() {
       setFacilities([]);
       setEquipmentItems([]);
       setEquipmentFiles([]);
+      setEquipmentScanEvents([]);
       setEquipmentCheckouts([]);
       setWorkOrders([]);
       setFacilityBookings([]);
@@ -1307,6 +1310,7 @@ export default function HomePage() {
       setProcurementRecommendations([]);
       setSupplierOrders([]);
       setSupplierScores([]);
+      setSupplierSubmission(null);
       setAssetUtilization([]);
       setLeaseQuote(null);
       setSponsors([]);
@@ -3319,6 +3323,35 @@ export default function HomePage() {
     );
   };
 
+  const submitSupplierOrder = (supplierOrderId = selectedSupplierOrderId) => {
+    if (!selectedOrganizationId || !supplierOrderId) {
+      addLog("Select a supplier order first", "bad");
+      return;
+    }
+    runAction(
+      "submit-supplier-order",
+      () =>
+        apiRequest<SupplierOrderSubmissionRead>(`/assets/suppliers/orders/${supplierOrderId}/submit`, {
+          method: "POST",
+          identity
+        }),
+      (submission) => {
+        setSupplierSubmission(submission);
+        setSupplierOrders((current) => [
+          submission.order,
+          ...current.filter((item) => item.id !== submission.order.id)
+        ]);
+        setSelectedSupplierOrderId(submission.order.id);
+        addLog(
+          submission.delivered
+            ? `${submission.order.item_name} submitted to supplier`
+            : `${submission.order.item_name} prepared for supplier submission`,
+          submission.delivered ? "good" : "neutral"
+        );
+      }
+    );
+  };
+
   const createFacilityBooking = () => {
     if (!selectedOrganizationId || !selectedFacilityId) {
       addLog("Create or select a facility first", "bad");
@@ -5071,10 +5104,19 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={() => createSupplierOrder()} disabled={busyAction !== null}>Order</button>
+                <button type="button" onClick={() => submitSupplierOrder()} disabled={busyAction !== null}>Submit</button>
                 <button type="button" onClick={() => receiveSupplierOrder()} disabled={busyAction !== null}>Receive</button>
               </div>
             </div>
             <div className="task-list">
+              {supplierSubmission ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{supplierSubmission.delivered ? "Supplier delivered" : "Supplier prepared"}</strong>
+                    <span>{supplierSubmission.submission_mode} · {supplierSubmission.provider_status_code ?? "no provider"} · {supplierSubmission.failure_reason ?? "accepted"}</span>
+                  </div>
+                </article>
+              ) : null}
               {procurementRecommendations.slice(0, 3).map((recommendation) => (
                 <article key={recommendation.equipment_item_id} className="task-card">
                   <div>
@@ -5096,6 +5138,13 @@ export default function HomePage() {
                     <strong>{order.item_name} · {order.status}</strong>
                     <span>{order.quantity} from {order.supplier_name} · {order.currency} {order.total_cost}</span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => submitSupplierOrder(order.id)}
+                    disabled={order.status === "submitted" || order.status === "received"}
+                  >
+                    Submit
+                  </button>
                   <button
                     type="button"
                     onClick={() => receiveSupplierOrder(order.id)}

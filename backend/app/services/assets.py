@@ -7,6 +7,7 @@ from pathlib import Path
 from re import sub
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +53,8 @@ from app.schemas.assets import (
     ProcurementRecommendationRead,
     SupplierOrderCreate,
     SupplierOrderReceive,
+    SupplierOrderRead,
+    SupplierOrderSubmissionRead,
     SupplierScoreRead,
     AssetUtilizationRecommendationRead,
 )
@@ -675,6 +678,62 @@ async def receive_supplier_order(
     return order
 
 
+async def submit_supplier_order(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    supplier_order_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> SupplierOrderSubmissionRead:
+    order = await get_supplier_order(db, supplier_order_id)
+    await ensure_manage_assets(authz, identity, order.organization_id)
+    selected_settings = settings or get_settings()
+    submitted_at = datetime.now(UTC)
+    result = {
+        "submission_mode": selected_settings.supplier_order_submission_mode,
+        "delivery_attempted": False,
+        "delivered": False,
+        "destination": selected_settings.supplier_order_webhook_url or None,
+        "provider_status_code": None,
+        "submitted_at": submitted_at,
+        "failure_reason": None,
+    }
+    if order.status == "received":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Received orders cannot be resubmitted")
+
+    if selected_settings.supplier_order_submission_mode == "record_only":
+        order.status = "submission_pending"
+        result["failure_reason"] = "Record-only supplier mode; order prepared for manual submission."
+    elif not selected_settings.supplier_order_webhook_url:
+        order.status = "submission_pending"
+        result["failure_reason"] = "Supplier webhook mode is enabled but no webhook URL is configured."
+    else:
+        result["delivery_attempted"] = True
+        try:
+            async with httpx.AsyncClient(timeout=selected_settings.supplier_order_submission_timeout_seconds) as client:
+                response = await client.post(
+                    selected_settings.supplier_order_webhook_url,
+                    json=supplier_order_payload(order, submitted_at),
+                    headers=supplier_order_headers(selected_settings),
+                )
+            result["provider_status_code"] = response.status_code
+            result["delivered"] = 200 <= response.status_code < 300
+            if result["delivered"]:
+                order.status = "submitted"
+                order.external_reference = order.external_reference or f"SUP-{order.id}"
+            else:
+                order.status = "submission_failed"
+                result["failure_reason"] = f"Supplier webhook returned {response.status_code}: {response.text[:500]}"
+        except httpx.HTTPError as error:
+            order.status = "submission_failed"
+            result["failure_reason"] = f"Supplier webhook failed: {error}"
+
+    order.notes = supplier_order_submission_notes(order.notes, result)
+    await db.commit()
+    await db.refresh(order)
+    return SupplierOrderSubmissionRead(order=supplier_order_read(order), **result)
+
+
 async def equipment_lease_quote(
     db: AsyncSession,
     organization_id: UUID,
@@ -960,6 +1019,26 @@ def equipment_scan_event_read(event: EquipmentScanEvent) -> EquipmentScanEventRe
     )
 
 
+def supplier_order_read(order: SupplierOrder) -> SupplierOrderRead:
+    return SupplierOrderRead(
+        id=order.id,
+        organization_id=order.organization_id,
+        equipment_item_id=order.equipment_item_id,
+        supplier_name=order.supplier_name,
+        item_name=order.item_name,
+        quantity=order.quantity,
+        unit_cost=order.unit_cost,
+        total_cost=order.total_cost,
+        currency=order.currency,
+        status=order.status,
+        external_reference=order.external_reference,
+        ordered_at=order.ordered_at,
+        expected_delivery_at=order.expected_delivery_at,
+        received_at=order.received_at,
+        notes=order.notes,
+    )
+
+
 def decode_upload_content(content_base64: str) -> bytes:
     encoded = content_base64.split(",", 1)[1] if "," in content_base64 else content_base64
     try:
@@ -979,6 +1058,41 @@ def supplier_recommendation(score: int) -> str:
     if score >= 65:
         return "Usable supplier; monitor cost and completion variance."
     return "Review supplier before assigning critical work."
+
+
+def supplier_order_payload(order: SupplierOrder, submitted_at: datetime) -> dict:
+    return {
+        "event_type": "assets.supplier_order",
+        "order_id": str(order.id),
+        "organization_id": str(order.organization_id),
+        "equipment_item_id": str(order.equipment_item_id) if order.equipment_item_id else None,
+        "supplier_name": order.supplier_name,
+        "item_name": order.item_name,
+        "quantity": order.quantity,
+        "unit_cost": str(order.unit_cost),
+        "total_cost": str(order.total_cost),
+        "currency": order.currency,
+        "external_reference": order.external_reference,
+        "ordered_at": order.ordered_at.isoformat() if order.ordered_at else None,
+        "expected_delivery_at": order.expected_delivery_at.isoformat() if order.expected_delivery_at else None,
+        "submitted_at": submitted_at.isoformat(),
+        "notes": order.notes,
+    }
+
+
+def supplier_order_headers(settings: Settings) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if settings.supplier_order_webhook_key:
+        headers["X-Afrolete-Supplier-Key"] = settings.supplier_order_webhook_key
+    return headers
+
+
+def supplier_order_submission_notes(notes: str | None, result: dict) -> str:
+    status_label = "delivered" if result["delivered"] else "prepared"
+    if result["failure_reason"]:
+        status_label = f"{status_label}: {result['failure_reason']}"
+    line = f"Supplier submission {status_label} at {result['submitted_at'].isoformat()}."
+    return f"{notes}\n{line}" if notes else line
 
 
 def is_before_now(value: datetime, now: datetime) -> bool:

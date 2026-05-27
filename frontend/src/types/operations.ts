@@ -425,6 +425,17 @@ export type SupplierOrderRead = {
   notes: string | null;
 };
 
+export type SupplierOrderSubmissionRead = {
+  order: SupplierOrderRead;
+  submission_mode: string;
+  delivery_attempted: boolean;
+  delivered: boolean;
+  destination: string | null;
+  provider_status_code: number | null;
+  submitted_at: string;
+  failure_reason: string | null;
+};
+
 export type EquipmentLeaseQuoteRead = {
   equipment_item_id: UUID;
   item_name: string;

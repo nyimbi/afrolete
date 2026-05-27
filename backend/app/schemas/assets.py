@@ -222,6 +222,17 @@ class SupplierOrderRead(BaseModel):
     notes: str | None
 
 
+class SupplierOrderSubmissionRead(BaseModel):
+    order: SupplierOrderRead
+    submission_mode: str
+    delivery_attempted: bool
+    delivered: bool
+    destination: str | None
+    provider_status_code: int | None
+    submitted_at: datetime
+    failure_reason: str | None
+
+
 class EquipmentLeaseQuoteRead(BaseModel):
     equipment_item_id: UUID
     item_name: str

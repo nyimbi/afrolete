@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     report_artifact_url_ttl_seconds: int = 900
     equipment_file_dir: str = "data/equipment-files"
     equipment_file_url_prefix: str = "local://equipment-files"
+    supplier_order_submission_mode: Literal["record_only", "webhook"] = "record_only"
+    supplier_order_webhook_url: str = ""
+    supplier_order_webhook_key: str = ""
+    supplier_order_submission_timeout_seconds: float = 5.0
 
     @field_validator("database_url", mode="before")
     @classmethod

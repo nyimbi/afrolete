@@ -30,6 +30,7 @@ from app.schemas.assets import (
     SupplierOrderCreate,
     SupplierOrderRead,
     SupplierOrderReceive,
+    SupplierOrderSubmissionRead,
     SupplierScoreRead,
 )
 from app.services.assets import (
@@ -54,6 +55,7 @@ from app.services.assets import (
     record_equipment_scan_event,
     return_equipment,
     scan_equipment,
+    submit_supplier_order,
     supplier_scorecard,
     update_equipment_photo,
     upload_equipment_file,
@@ -511,6 +513,16 @@ async def receive_supplier_order_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> SupplierOrderRead:
     return to_supplier_order_read(await receive_supplier_order(db, identity, supplier_order_id, payload, authz))
+
+
+@router.post("/suppliers/orders/{supplier_order_id}/submit", response_model=SupplierOrderSubmissionRead)
+async def submit_supplier_order_route(
+    supplier_order_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SupplierOrderSubmissionRead:
+    return await submit_supplier_order(db, identity, supplier_order_id, authz)
 
 
 @router.get("/utilization/recommendations", response_model=list[AssetUtilizationRecommendationRead])
