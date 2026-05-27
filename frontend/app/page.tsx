@@ -223,12 +223,141 @@ import type {
   MaintenanceWorkOrderRead
 } from "@/types/operations";
 
-type TravelManifestOfflineCache = EventTravelManifestRead & {
+type TravelManifestLegacyOfflineCache = EventTravelManifestRead & {
   cached_at: string;
   cache_version: number;
+  expires_at?: string;
+  encrypted?: false;
 };
 
+type TravelManifestEncryptedOfflineCache = {
+  event_id: string;
+  travel_plan_id: string;
+  destination: string;
+  participant_count: number;
+  cached_at: string;
+  expires_at: string;
+  cache_version: 2;
+  encrypted: true;
+  encryption: "AES-GCM/PBKDF2-SHA-256";
+  iv_base64: string;
+  payload_base64: string;
+  payload_sha256_base64: string;
+};
+
+type TravelManifestOfflineCache = TravelManifestEncryptedOfflineCache | TravelManifestLegacyOfflineCache;
+
 const travelManifestCacheKey = (travelPlanId: string) => `afrolete:travel-manifest:${travelPlanId}`;
+const travelManifestCacheTtlMs = 7 * 24 * 60 * 60 * 1000;
+const travelManifestCacheSalt = "afrolete-travel-manifest-cache-v2";
+
+const base64FromArrayBuffer = (buffer: ArrayBuffer | Uint8Array) => {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+};
+
+const arrayBufferFromBase64 = (value: string) => {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes.buffer;
+};
+
+const getTravelManifestCacheCrypto = () => {
+  if (typeof window === "undefined" || !window.crypto?.subtle) {
+    throw new Error("Encrypted offline manifest cache requires browser Web Crypto support");
+  }
+  return window.crypto;
+};
+
+const deriveTravelManifestCacheKey = async (identity: LocalIdentity, travelPlanId: string) => {
+  const webCrypto = getTravelManifestCacheCrypto();
+  const encoder = new TextEncoder();
+  const identityMaterial = [identity.sub, identity.email, identity.name, travelPlanId].join(":");
+  const keyMaterial = await webCrypto.subtle.importKey(
+    "raw",
+    encoder.encode(identityMaterial),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return webCrypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: encoder.encode(`${travelManifestCacheSalt}:${travelPlanId}`),
+      iterations: 100_000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+};
+
+const encryptTravelManifestOfflineCache = async (
+  manifest: EventTravelManifestRead,
+  identity: LocalIdentity
+): Promise<TravelManifestEncryptedOfflineCache> => {
+  const webCrypto = getTravelManifestCacheCrypto();
+  const encoder = new TextEncoder();
+  const cachedAt = new Date();
+  const expiresAt = new Date(cachedAt.getTime() + travelManifestCacheTtlMs);
+  const payload = encoder.encode(JSON.stringify(manifest));
+  const iv = webCrypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveTravelManifestCacheKey(identity, manifest.travel_plan_id);
+  const encryptedPayload = await webCrypto.subtle.encrypt({ name: "AES-GCM", iv }, key, payload);
+  const payloadDigest = await webCrypto.subtle.digest("SHA-256", payload);
+
+  return {
+    event_id: manifest.event_id,
+    travel_plan_id: manifest.travel_plan_id,
+    destination: manifest.destination,
+    participant_count: manifest.participant_count,
+    cached_at: cachedAt.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    cache_version: 2,
+    encrypted: true,
+    encryption: "AES-GCM/PBKDF2-SHA-256",
+    iv_base64: base64FromArrayBuffer(iv),
+    payload_base64: base64FromArrayBuffer(encryptedPayload),
+    payload_sha256_base64: base64FromArrayBuffer(payloadDigest)
+  };
+};
+
+const isTravelManifestEncryptedOfflineCache = (
+  cache: TravelManifestOfflineCache
+): cache is TravelManifestEncryptedOfflineCache => cache.encrypted === true;
+
+const getTravelManifestOfflineCacheExpiry = (cache: TravelManifestOfflineCache) =>
+  isTravelManifestEncryptedOfflineCache(cache)
+    ? cache.expires_at
+    : cache.expires_at ?? new Date(new Date(cache.cached_at).getTime() + travelManifestCacheTtlMs).toISOString();
+
+const decryptTravelManifestOfflineCache = async (
+  cache: TravelManifestEncryptedOfflineCache,
+  identity: LocalIdentity
+) => {
+  const webCrypto = getTravelManifestCacheCrypto();
+  const decoder = new TextDecoder();
+  const key = await deriveTravelManifestCacheKey(identity, cache.travel_plan_id);
+  const decryptedPayload = await webCrypto.subtle.decrypt(
+    { name: "AES-GCM", iv: arrayBufferFromBase64(cache.iv_base64) },
+    key,
+    arrayBufferFromBase64(cache.payload_base64)
+  );
+  const payloadDigest = await webCrypto.subtle.digest("SHA-256", decryptedPayload);
+  if (base64FromArrayBuffer(payloadDigest) !== cache.payload_sha256_base64) {
+    throw new Error("Offline manifest cache checksum did not match");
+  }
+  return JSON.parse(decoder.decode(decryptedPayload)) as EventTravelManifestRead;
+};
 
 const parseGeofencePolygon = (value: string) => {
   const points = value
@@ -2703,14 +2832,10 @@ export default function HomePage() {
     );
   };
 
-  const writeTravelManifestOfflineCache = (manifest: EventTravelManifestRead) => {
-    const cache: TravelManifestOfflineCache = {
-      ...manifest,
-      cached_at: new Date().toISOString(),
-      cache_version: 1
-    };
+  const writeTravelManifestOfflineCache = async (manifest: EventTravelManifestRead) => {
+    const cache = await encryptTravelManifestOfflineCache(manifest, identity);
     localStorage.setItem(travelManifestCacheKey(manifest.travel_plan_id), JSON.stringify(cache));
-    setTravelManifest(cache);
+    setTravelManifest(manifest);
     setTravelOfflineManifestCache(cache);
     return cache;
   };
@@ -2718,13 +2843,17 @@ export default function HomePage() {
   const cacheTravelManifestOffline = (plan: EventTravelPlanRead) => {
     runAction(
       `travel-manifest-offline-cache-${plan.id}`,
-      () =>
-        apiRequest<EventTravelManifestRead>(`/events/travel-plans/${plan.id}/manifest`, {
+      async () => {
+        const manifest = await apiRequest<EventTravelManifestRead>(`/events/travel-plans/${plan.id}/manifest`, {
           identity
-        }),
-      (manifest) => {
-        const cache = writeTravelManifestOfflineCache(manifest);
-        addLog(`Travel manifest cached offline for ${cache.participant_count} participants`, "good");
+        });
+        return writeTravelManifestOfflineCache(manifest);
+      },
+      (cache) => {
+        addLog(
+          `Encrypted travel manifest cache saved for ${cache.participant_count} participants until ${new Date(cache.expires_at).toLocaleDateString()}`,
+          "good"
+        );
       }
     );
   };
@@ -2738,9 +2867,28 @@ export default function HomePage() {
     }
     try {
       const parsed = JSON.parse(cached) as TravelManifestOfflineCache;
-      setTravelManifest(parsed);
-      setTravelOfflineManifestCache(parsed);
-      addLog(`Offline manifest restored from ${new Date(parsed.cached_at).toLocaleString()}`, "good");
+      const expiresAt = getTravelManifestOfflineCacheExpiry(parsed);
+      if (new Date(expiresAt).getTime() <= Date.now()) {
+        localStorage.removeItem(travelManifestCacheKey(plan.id));
+        setTravelOfflineManifestCache(null);
+        addLog(`Offline manifest cache for ${plan.destination} expired and has been cleared`, "neutral");
+        return;
+      }
+      runAction(
+        `travel-manifest-offline-restore-${plan.id}`,
+        () =>
+          isTravelManifestEncryptedOfflineCache(parsed)
+            ? decryptTravelManifestOfflineCache(parsed, identity)
+            : Promise.resolve(parsed),
+        (manifest) => {
+          setTravelManifest(manifest);
+          setTravelOfflineManifestCache(parsed);
+          addLog(
+            `Offline manifest restored from ${new Date(parsed.cached_at).toLocaleString()} with cache expiry ${new Date(expiresAt).toLocaleDateString()}`,
+            "good"
+          );
+        }
+      );
     } catch {
       localStorage.removeItem(travelManifestCacheKey(plan.id));
       setTravelOfflineManifestCache(null);
@@ -8395,7 +8543,12 @@ export default function HomePage() {
                   <div>
                     <strong>Offline manifest cache</strong>
                     <span>{travelOfflineManifestCache.destination} · {travelOfflineManifestCache.participant_count} participants</span>
-                    <span>Cached {new Date(travelOfflineManifestCache.cached_at).toLocaleString()} · v{travelOfflineManifestCache.cache_version}</span>
+                    <span>
+                      {travelOfflineManifestCache.encrypted ? "Encrypted" : "Legacy"} · cached{" "}
+                      {new Date(travelOfflineManifestCache.cached_at).toLocaleString()} · expires{" "}
+                      {new Date(getTravelManifestOfflineCacheExpiry(travelOfflineManifestCache)).toLocaleDateString()} ·
+                      v{travelOfflineManifestCache.cache_version}
+                    </span>
                   </div>
                 </article>
               ) : null}
