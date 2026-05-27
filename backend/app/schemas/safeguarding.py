@@ -381,3 +381,44 @@ class ComplianceCredentialRead(BaseModel):
     evidence_object_key: str | None
     notes: str | None
     created_at: datetime
+
+
+class ComplianceQueueItemRead(BaseModel):
+    source: str
+    id: UUID
+    person_id: UUID | None
+    person_name: str | None
+    title: str
+    status: str
+    due_on: date | None
+    severity: str
+    reason: str
+
+
+class ComplianceSummaryRead(BaseModel):
+    organization_id: UUID
+    generated_at: datetime
+    overall_compliance_percent: float
+    total_background_checks: int
+    clear_background_checks: int
+    review_background_checks: int
+    expired_background_checks: int
+    total_credentials: int
+    verified_credentials: int
+    expiring_credentials: int
+    expired_credentials: int
+    revoked_credentials: int
+    open_incidents: int
+    critical_incidents: int
+    regulatory_incidents: int
+    blockers: list[ComplianceQueueItemRead]
+    renewals_due: list[ComplianceQueueItemRead]
+    investigation_queue: list[ComplianceQueueItemRead]
+
+
+class ComplianceReconciliationRead(BaseModel):
+    organization_id: UUID
+    reconciled_at: datetime
+    background_checks_expired: int
+    credentials_expired: int
+    credentials_expiring_soon: int

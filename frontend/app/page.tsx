@@ -139,6 +139,8 @@ import type {
   ComplianceCredentialRead,
   ComplianceCredentialStatus,
   ComplianceCredentialType,
+  ComplianceReconciliationRead,
+  ComplianceSummaryRead,
   ScheduledReportRead,
   SponsorRead,
   SponsorshipAgreementRead,
@@ -430,6 +432,7 @@ export default function HomePage() {
   const [safeguardingIncidents, setSafeguardingIncidents] = useState<SafeguardingIncidentRead[]>([]);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
   const [complianceCredentials, setComplianceCredentials] = useState<ComplianceCredentialRead[]>([]);
+  const [complianceSummary, setComplianceSummary] = useState<ComplianceSummaryRead | null>(null);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
@@ -989,6 +992,14 @@ export default function HomePage() {
     setComplianceCredentials(data);
   }, [identity]);
 
+  const loadComplianceSummary = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<ComplianceSummaryRead>(
+      `/safeguarding/compliance-summary?organization_id=${organizationId}`,
+      { identity }
+    );
+    setComplianceSummary(data);
+  }, [identity]);
+
   const loadAgents = useCallback(async (organizationId: string) => {
     const data = await apiRequest<AgentRead[]>(`/agents?organization_id=${organizationId}`);
     setAgents(data);
@@ -1427,6 +1438,7 @@ export default function HomePage() {
       setSafeguardingIncidents([]);
       setBackgroundChecks([]);
       setComplianceCredentials([]);
+      setComplianceSummary(null);
       setCommunicationTemplates([]);
       setCommunicationMessages([]);
       setMessageRecipients([]);
@@ -1506,6 +1518,7 @@ export default function HomePage() {
       await loadSafeguardingIncidents(selectedOrganizationId);
       await loadBackgroundChecks(selectedOrganizationId);
       await loadComplianceCredentials(selectedOrganizationId);
+      await loadComplianceSummary(selectedOrganizationId);
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
@@ -1525,6 +1538,7 @@ export default function HomePage() {
     loadSafeguardingIncidents,
     loadBackgroundChecks,
     loadComplianceCredentials,
+    loadComplianceSummary,
     loadAgents,
     loadAgentTasks,
     loadMetricDefinitions,
@@ -2147,6 +2161,7 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== incident.id)
         ]);
         addLog(`${incident.title} incident logged`, incident.severity === "critical" ? "bad" : "good");
+        refreshSafeguardingCompliance();
       }
     );
   };
@@ -2175,6 +2190,7 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updated.id)
         ]);
         addLog(`${updated.title} moved to ${updated.status}`, "good");
+        refreshSafeguardingCompliance();
       }
     );
   };
@@ -2207,6 +2223,7 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== check.id)
         ]);
         addLog(`${check.check_type} background check requested`, "good");
+        refreshSafeguardingCompliance();
       }
     );
   };
@@ -2232,6 +2249,7 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updated.id)
         ]);
         addLog(`${updated.check_type} moved to ${updated.status}`, "good");
+        refreshSafeguardingCompliance();
       }
     );
   };
@@ -2267,6 +2285,7 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== credential.id)
         ]);
         addLog(`${credential.title} credential tracked`, "good");
+        refreshSafeguardingCompliance();
       }
     );
   };
@@ -2292,6 +2311,44 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updated.id)
         ]);
         addLog(`${updated.title} credential moved to ${updated.status}`, "good");
+        refreshSafeguardingCompliance();
+      }
+    );
+  };
+
+  const refreshSafeguardingCompliance = () => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    void Promise.all([
+      loadBackgroundChecks(selectedOrganizationId),
+      loadComplianceCredentials(selectedOrganizationId),
+      loadSafeguardingIncidents(selectedOrganizationId),
+      loadComplianceSummary(selectedOrganizationId)
+    ]);
+  };
+
+  const reconcileCompliance = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "reconcile-compliance",
+      () =>
+        apiRequest<ComplianceReconciliationRead>(
+          `/safeguarding/compliance-reconcile?organization_id=${selectedOrganizationId}`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (result) => {
+        refreshSafeguardingCompliance();
+        addLog(
+          `Compliance reconciled: ${result.background_checks_expired} checks expired, ${result.credentials_expired} credentials expired, ${result.credentials_expiring_soon} renewals flagged`,
+          "good"
+        );
       }
     );
   };
@@ -7892,6 +7949,33 @@ export default function HomePage() {
               <button type="button" onClick={createBackgroundCheck} disabled={busyAction !== null}>Request check</button>
               <button type="button" onClick={createComplianceCredential} disabled={busyAction !== null}>Track credential</button>
               <button type="button" onClick={createSafeguardingIncident} disabled={busyAction !== null}>Log incident</button>
+              <button type="button" onClick={reconcileCompliance} disabled={busyAction !== null}>Reconcile</button>
+            </div>
+          </div>
+          <div className="consent-grid">
+            <div>
+              <span className="muted">Compliance</span>
+              <strong>{complianceSummary ? `${complianceSummary.overall_compliance_percent}%` : "Pending"}</strong>
+            </div>
+            <div>
+              <span className="muted">Checks</span>
+              <strong>{complianceSummary ? `${complianceSummary.clear_background_checks}/${complianceSummary.total_background_checks}` : "0/0"}</strong>
+            </div>
+            <div>
+              <span className="muted">Renewals</span>
+              <strong>{complianceSummary?.expiring_credentials ?? 0}</strong>
+            </div>
+            <div>
+              <span className="muted">Open incidents</span>
+              <strong>{complianceSummary?.open_incidents ?? 0}</strong>
+            </div>
+            <div>
+              <span className="muted">Critical</span>
+              <strong>{complianceSummary?.critical_incidents ?? 0}</strong>
+            </div>
+            <div>
+              <span className="muted">Regulatory</span>
+              <strong>{complianceSummary?.regulatory_incidents ?? 0}</strong>
             </div>
           </div>
           <div className="form-grid three">
@@ -8057,6 +8141,34 @@ export default function HomePage() {
             </div>
           </div>
           <div className="task-list">
+            {complianceSummary?.blockers.slice(0, 4).map((item) => (
+              <article key={`blocker-${item.source}-${item.id}`} className="task-card">
+                <div>
+                  <strong>{item.title}</strong>
+                  <span>{item.source} · {item.status} · {item.severity}</span>
+                  <span>{item.person_name ?? "Unassigned person"} · due {item.due_on ?? "not set"}</span>
+                  <span>{item.reason}</span>
+                </div>
+              </article>
+            ))}
+            {complianceSummary?.renewals_due.slice(0, 4).map((item) => (
+              <article key={`renewal-${item.source}-${item.id}`} className="task-card">
+                <div>
+                  <strong>{item.title}</strong>
+                  <span>{item.status} · renewal due {item.due_on ?? "not set"}</span>
+                  <span>{item.person_name ?? "Unassigned person"} · {item.reason}</span>
+                </div>
+              </article>
+            ))}
+            {complianceSummary?.investigation_queue.slice(0, 4).map((item) => (
+              <article key={`investigation-${item.source}-${item.id}`} className="task-card">
+                <div>
+                  <strong>{item.title}</strong>
+                  <span>{item.status} · {item.severity} · occurred {item.due_on ?? "not set"}</span>
+                  <span>{item.person_name ?? "No athlete linked"} · {item.reason}</span>
+                </div>
+              </article>
+            ))}
             {backgroundChecks.slice(0, 4).map((check) => (
               <article key={check.id} className="task-card">
                 <div>

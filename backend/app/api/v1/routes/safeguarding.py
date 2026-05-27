@@ -18,6 +18,8 @@ from app.schemas.safeguarding import (
     ComplianceCredentialCreate,
     ComplianceCredentialRead,
     ComplianceCredentialUpdate,
+    ComplianceReconciliationRead,
+    ComplianceSummaryRead,
     ConsentRequestCreate,
     ConsentRequestRead,
     FamilyAthleteSummaryRead,
@@ -48,6 +50,7 @@ from app.services.safeguarding import (
     create_guardian_relationship,
     create_safeguarding_incident,
     ensure_org_manage,
+    compliance_summary,
     list_background_checks,
     list_compliance_credentials,
     list_guardians_for_athlete,
@@ -57,6 +60,7 @@ from app.services.safeguarding import (
     list_my_family_events,
     respond_to_family_consent_request,
     respond_to_family_event,
+    reconcile_compliance_statuses,
     update_background_check,
     update_compliance_credential,
     update_safeguarding_incident,
@@ -280,6 +284,27 @@ async def list_background_checks_route(
         to_background_check_read(check)
         for check in await list_background_checks(db, organization_id, status_filter)
     ]
+
+
+@router.get("/compliance-summary", response_model=ComplianceSummaryRead)
+async def compliance_summary_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ComplianceSummaryRead:
+    await ensure_org_manage(authz, organization_id, identity)
+    return await compliance_summary(db, organization_id)
+
+
+@router.post("/compliance-reconcile", response_model=ComplianceReconciliationRead)
+async def reconcile_compliance_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ComplianceReconciliationRead:
+    return await reconcile_compliance_statuses(db, identity, organization_id, authz)
 
 
 @router.patch("/background-checks/{check_id}", response_model=BackgroundCheckRead)

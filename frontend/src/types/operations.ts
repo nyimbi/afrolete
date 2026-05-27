@@ -1418,6 +1418,47 @@ export type ComplianceCredentialRead = {
   created_at: string;
 };
 
+export type ComplianceQueueItemRead = {
+  source: string;
+  id: UUID;
+  person_id: UUID | null;
+  person_name: string | null;
+  title: string;
+  status: string;
+  due_on: string | null;
+  severity: string;
+  reason: string;
+};
+
+export type ComplianceSummaryRead = {
+  organization_id: UUID;
+  generated_at: string;
+  overall_compliance_percent: number;
+  total_background_checks: number;
+  clear_background_checks: number;
+  review_background_checks: number;
+  expired_background_checks: number;
+  total_credentials: number;
+  verified_credentials: number;
+  expiring_credentials: number;
+  expired_credentials: number;
+  revoked_credentials: number;
+  open_incidents: number;
+  critical_incidents: number;
+  regulatory_incidents: number;
+  blockers: ComplianceQueueItemRead[];
+  renewals_due: ComplianceQueueItemRead[];
+  investigation_queue: ComplianceQueueItemRead[];
+};
+
+export type ComplianceReconciliationRead = {
+  organization_id: UUID;
+  reconciled_at: string;
+  background_checks_expired: number;
+  credentials_expired: number;
+  credentials_expiring_soon: number;
+};
+
 export type AgentRead = {
   id: UUID;
   organization_id: UUID | null;

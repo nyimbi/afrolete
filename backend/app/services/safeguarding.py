@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
 from uuid import UUID
@@ -33,7 +33,10 @@ from app.schemas.safeguarding import (
     ActivityConsentCreate,
     BackgroundCheckCreate,
     BackgroundCheckUpdate,
+    ComplianceQueueItemRead,
+    ComplianceReconciliationRead,
     ComplianceCredentialCreate,
+    ComplianceSummaryRead,
     ComplianceCredentialUpdate,
     ConsentRequestCreate,
     FamilyAthleteSummaryRead,
@@ -57,6 +60,10 @@ def hash_token(token: str) -> str:
 
 def utc_now() -> datetime:
     return datetime.now(tz=UTC)
+
+
+def today_utc() -> date:
+    return utc_now().date()
 
 
 def is_minor_on(person: Person, on_date: date) -> bool | None:
@@ -442,6 +449,270 @@ async def update_compliance_credential(
     await db.commit()
     await db.refresh(credential)
     return credential
+
+
+async def reconcile_compliance_statuses(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> ComplianceReconciliationRead:
+    await ensure_org_manage(authz, organization_id, identity)
+    now = utc_now()
+    today = now.date()
+    expiring_cutoff = today + timedelta(days=30)
+
+    background_checks_expired = 0
+    credentials_expired = 0
+    credentials_expiring_soon = 0
+
+    checks = list(
+        (
+            await db.scalars(
+                select(BackgroundCheck).where(BackgroundCheck.organization_id == organization_id)
+            )
+        ).all()
+    )
+    for check in checks:
+        if (
+            check.expires_at is not None
+            and check.expires_at < today
+            and check.status != BackgroundCheckStatus.EXPIRED
+        ):
+            check.status = BackgroundCheckStatus.EXPIRED
+            background_checks_expired += 1
+
+    credentials = list(
+        (
+            await db.scalars(
+                select(ComplianceCredential).where(
+                    ComplianceCredential.organization_id == organization_id
+                )
+            )
+        ).all()
+    )
+    for credential in credentials:
+        if credential.status == ComplianceCredentialStatus.REVOKED:
+            continue
+        if (
+            credential.expires_at is not None
+            and credential.expires_at < today
+            and credential.status != ComplianceCredentialStatus.EXPIRED
+        ):
+            credential.status = ComplianceCredentialStatus.EXPIRED
+            credentials_expired += 1
+            continue
+        renewal_due = credential.renewal_due_at is not None and credential.renewal_due_at <= today
+        expiry_near = credential.expires_at is not None and credential.expires_at <= expiring_cutoff
+        if (
+            (renewal_due or expiry_near)
+            and credential.status == ComplianceCredentialStatus.VERIFIED
+        ):
+            credential.status = ComplianceCredentialStatus.EXPIRING_SOON
+            credentials_expiring_soon += 1
+
+    await db.commit()
+    return ComplianceReconciliationRead(
+        organization_id=organization_id,
+        reconciled_at=now,
+        background_checks_expired=background_checks_expired,
+        credentials_expired=credentials_expired,
+        credentials_expiring_soon=credentials_expiring_soon,
+    )
+
+
+async def compliance_summary(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> ComplianceSummaryRead:
+    now = utc_now()
+    checks = list(
+        (
+            await db.scalars(
+                select(BackgroundCheck).where(BackgroundCheck.organization_id == organization_id)
+            )
+        ).all()
+    )
+    credentials = list(
+        (
+            await db.scalars(
+                select(ComplianceCredential).where(
+                    ComplianceCredential.organization_id == organization_id
+                )
+            )
+        ).all()
+    )
+    incidents = list(
+        (
+            await db.scalars(
+                select(SafeguardingIncident).where(
+                    SafeguardingIncident.organization_id == organization_id
+                )
+            )
+        ).all()
+    )
+
+    person_ids = {
+        item.person_id
+        for item in [*checks, *credentials]
+        if item.person_id is not None
+    } | {
+        incident.athlete_person_id
+        for incident in incidents
+        if incident.athlete_person_id is not None
+    }
+    people = {}
+    if person_ids:
+        people = {
+            person.id: person.display_name
+            for person in (
+                await db.scalars(select(Person).where(Person.id.in_(person_ids)))
+            ).all()
+        }
+
+    clear_checks = sum(1 for check in checks if check.status == BackgroundCheckStatus.CLEAR)
+    review_checks = sum(
+        1
+        for check in checks
+        if check.status in {BackgroundCheckStatus.REVIEW_REQUIRED, BackgroundCheckStatus.FAILED}
+    )
+    expired_checks = sum(1 for check in checks if check.status == BackgroundCheckStatus.EXPIRED)
+    verified_credentials = sum(
+        1
+        for credential in credentials
+        if credential.status == ComplianceCredentialStatus.VERIFIED
+    )
+    expiring_credentials = sum(
+        1
+        for credential in credentials
+        if credential.status == ComplianceCredentialStatus.EXPIRING_SOON
+    )
+    expired_credentials = sum(
+        1
+        for credential in credentials
+        if credential.status == ComplianceCredentialStatus.EXPIRED
+    )
+    revoked_credentials = sum(
+        1
+        for credential in credentials
+        if credential.status == ComplianceCredentialStatus.REVOKED
+    )
+    open_incidents = sum(
+        1
+        for incident in incidents
+        if incident.status not in {SafeguardingIncidentStatus.RESOLVED, SafeguardingIncidentStatus.CLOSED}
+    )
+    critical_incidents = sum(
+        1
+        for incident in incidents
+        if incident.severity.value == "critical"
+        and incident.status not in {SafeguardingIncidentStatus.RESOLVED, SafeguardingIncidentStatus.CLOSED}
+    )
+    regulatory_incidents = sum(
+        1
+        for incident in incidents
+        if incident.regulatory_report_required
+        and incident.status not in {SafeguardingIncidentStatus.RESOLVED, SafeguardingIncidentStatus.CLOSED}
+    )
+
+    total_compliance_records = len(checks) + len(credentials)
+    compliant_records = clear_checks + verified_credentials
+    overall_percent = (
+        round((compliant_records / total_compliance_records) * 100, 1)
+        if total_compliance_records
+        else 100.0
+    )
+
+    blockers: list[ComplianceQueueItemRead] = []
+    renewals_due: list[ComplianceQueueItemRead] = []
+    investigation_queue: list[ComplianceQueueItemRead] = []
+
+    for check in checks:
+        if check.status in {
+            BackgroundCheckStatus.REVIEW_REQUIRED,
+            BackgroundCheckStatus.FAILED,
+            BackgroundCheckStatus.EXPIRED,
+        }:
+            blockers.append(
+                ComplianceQueueItemRead(
+                    source="background_check",
+                    id=check.id,
+                    person_id=check.person_id,
+                    person_name=people.get(check.person_id),
+                    title=check.check_type,
+                    status=check.status.value,
+                    due_on=check.expires_at,
+                    severity="high" if check.status != BackgroundCheckStatus.EXPIRED else "critical",
+                    reason=f"{check.provider} check requires compliance action",
+                )
+            )
+    for credential in credentials:
+        if credential.status in {
+            ComplianceCredentialStatus.EXPIRING_SOON,
+            ComplianceCredentialStatus.EXPIRED,
+            ComplianceCredentialStatus.REVOKED,
+        }:
+            item = ComplianceQueueItemRead(
+                source="credential",
+                id=credential.id,
+                person_id=credential.person_id,
+                person_name=people.get(credential.person_id),
+                title=credential.title,
+                status=credential.status.value,
+                due_on=credential.renewal_due_at or credential.expires_at,
+                severity="critical"
+                if credential.status
+                in {ComplianceCredentialStatus.EXPIRED, ComplianceCredentialStatus.REVOKED}
+                else "medium",
+                reason=f"{credential.credential_type.value.replace('_', ' ')} needs renewal or review",
+            )
+            if credential.status == ComplianceCredentialStatus.EXPIRING_SOON:
+                renewals_due.append(item)
+            else:
+                blockers.append(item)
+    for incident in incidents:
+        if incident.status in {
+            SafeguardingIncidentStatus.OPEN,
+            SafeguardingIncidentStatus.TRIAGED,
+            SafeguardingIncidentStatus.INVESTIGATING,
+        }:
+            investigation_queue.append(
+                ComplianceQueueItemRead(
+                    source="incident",
+                    id=incident.id,
+                    person_id=incident.athlete_person_id,
+                    person_name=people.get(incident.athlete_person_id),
+                    title=incident.title,
+                    status=incident.status.value,
+                    due_on=incident.occurred_at.date(),
+                    severity=incident.severity.value,
+                    reason="Open safeguarding incident needs closure evidence",
+                )
+            )
+
+    return ComplianceSummaryRead(
+        organization_id=organization_id,
+        generated_at=now,
+        overall_compliance_percent=overall_percent,
+        total_background_checks=len(checks),
+        clear_background_checks=clear_checks,
+        review_background_checks=review_checks,
+        expired_background_checks=expired_checks,
+        total_credentials=len(credentials),
+        verified_credentials=verified_credentials,
+        expiring_credentials=expiring_credentials,
+        expired_credentials=expired_credentials,
+        revoked_credentials=revoked_credentials,
+        open_incidents=open_incidents,
+        critical_incidents=critical_incidents,
+        regulatory_incidents=regulatory_incidents,
+        blockers=sorted(blockers, key=lambda item: (item.severity, item.due_on or date.max))[:10],
+        renewals_due=sorted(renewals_due, key=lambda item: item.due_on or date.max)[:10],
+        investigation_queue=sorted(
+            investigation_queue,
+            key=lambda item: (item.severity, item.due_on or date.max),
+        )[:10],
+    )
 
 
 async def list_guardians_for_athlete(
