@@ -17,6 +17,7 @@ from app.models.enums import (
     ConsentStatus,
     IncidentReportPackageStatus,
     InsuranceClaimStatus,
+    MedicalClearanceStatus,
     ParticipationClearanceStatus,
     SafeguardingIncidentStatus,
 )
@@ -28,6 +29,7 @@ from app.models.event import (
     ConsentRequest,
     Event,
     IncidentInsuranceClaim,
+    IncidentMedicalClearance,
     IncidentReportPackage,
     SafeguardingIncident,
 )
@@ -51,6 +53,8 @@ from app.schemas.safeguarding import (
     GuardianRelationshipCreate,
     IncidentInsuranceClaimCreate,
     IncidentInsuranceClaimUpdate,
+    IncidentMedicalClearanceCreate,
+    IncidentMedicalClearanceUpdate,
     IncidentReportPackageCreate,
     IncidentReportPackageUpdate,
     KnownChannelConsentCapture,
@@ -509,6 +513,91 @@ async def update_incident_insurance_claim(
     await db.commit()
     await db.refresh(claim)
     return claim
+
+
+async def create_incident_medical_clearance(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: IncidentMedicalClearanceCreate,
+    authz: AuthorizationService,
+) -> IncidentMedicalClearance:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, payload.incident_id)
+    if incident is None or incident.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    athlete_person_id = payload.athlete_person_id or incident.athlete_person_id
+    if athlete_person_id is None:
+        raise HTTPException(status_code=422, detail="Medical clearance requires an athlete")
+    await validate_incident_refs(db, payload.organization_id, None, None, athlete_person_id, None)
+    clearance = IncidentMedicalClearance(
+        athlete_person_id=athlete_person_id,
+        **payload.model_dump(exclude={"athlete_person_id"}),
+    )
+    db.add(clearance)
+    await db.commit()
+    await db.refresh(clearance)
+    return clearance
+
+
+async def list_incident_medical_clearances(
+    db: AsyncSession,
+    organization_id: UUID,
+    status_filter: MedicalClearanceStatus | None = None,
+) -> list[IncidentMedicalClearance]:
+    statement = select(IncidentMedicalClearance).where(
+        IncidentMedicalClearance.organization_id == organization_id
+    )
+    if status_filter is not None:
+        statement = statement.where(IncidentMedicalClearance.status == status_filter)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    IncidentMedicalClearance.status,
+                    IncidentMedicalClearance.valid_until.nulls_last(),
+                    IncidentMedicalClearance.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+
+
+async def update_incident_medical_clearance(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    clearance_id: UUID,
+    payload: IncidentMedicalClearanceUpdate,
+    authz: AuthorizationService,
+) -> IncidentMedicalClearance:
+    clearance = await db.get(IncidentMedicalClearance, clearance_id)
+    if clearance is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical clearance not found")
+    await ensure_org_manage(authz, clearance.organization_id, identity)
+
+    if payload.reviewed_by_person_id is not None:
+        await validate_person_in_organization(db, clearance.organization_id, payload.reviewed_by_person_id)
+        clearance.reviewed_by_person_id = payload.reviewed_by_person_id
+    if payload.status is not None:
+        clearance.status = payload.status
+        if payload.status in {MedicalClearanceStatus.CLEARED, MedicalClearanceStatus.RESTRICTED}:
+            clearance.assessed_at = payload.assessed_at or clearance.assessed_at or utc_now()
+    for field in [
+        "assessed_at",
+        "valid_from",
+        "valid_until",
+        "restrictions",
+        "return_to_play_stage",
+        "provider_name",
+        "documentation_object_key",
+        "notes",
+    ]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(clearance, field, value)
+
+    await db.commit()
+    await db.refresh(clearance)
+    return clearance
 
 
 async def create_background_check(

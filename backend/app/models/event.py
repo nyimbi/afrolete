@@ -18,6 +18,7 @@ from app.models.enums import (
     IncidentReportPackageStatus,
     InsuranceClaimStatus,
     InsuranceClaimType,
+    MedicalClearanceStatus,
     SafeguardingIncidentSeverity,
     SafeguardingIncidentStatus,
     SafeguardingIncidentType,
@@ -238,6 +239,34 @@ class IncidentInsuranceClaim(IdMixin, TimestampMixin, Base):
     documentation_checklist_json: Mapped[str | None] = mapped_column(Text)
     submission_payload: Mapped[str | None] = mapped_column(Text)
     communication_log: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class IncidentMedicalClearance(IdMixin, TimestampMixin, Base):
+    __tablename__ = "incident_medical_clearances"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    incident_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("safeguarding_incidents.id"), index=True
+    )
+    athlete_person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reviewed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    status: Mapped[MedicalClearanceStatus] = mapped_column(
+        enum_type(MedicalClearanceStatus),
+        default=MedicalClearanceStatus.PENDING_REVIEW,
+        nullable=False,
+        index=True,
+    )
+    clearance_type: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    assessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    valid_from: Mapped[date | None] = mapped_column(Date, index=True)
+    valid_until: Mapped[date | None] = mapped_column(Date, index=True)
+    restrictions: Mapped[str | None] = mapped_column(Text)
+    return_to_play_stage: Mapped[str | None] = mapped_column(String(120), index=True)
+    provider_name: Mapped[str | None] = mapped_column(String(240))
+    documentation_object_key: Mapped[str | None] = mapped_column(String(500), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

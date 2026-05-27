@@ -216,6 +216,14 @@ class InsuranceClaimStatus(StrEnum):
     CLOSED = "closed"
 
 
+class MedicalClearanceStatus(StrEnum):
+    PENDING_REVIEW = "pending_review"
+    RESTRICTED = "restricted"
+    CLEARED = "cleared"
+    NOT_CLEARED = "not_cleared"
+    EXPIRED = "expired"
+
+
 class BackgroundCheckStatus(StrEnum):
     REQUESTED = "requested"
     IN_PROGRESS = "in_progress"

@@ -95,6 +95,7 @@ import type {
   BackgroundCheckStatus,
   GuardianRelationshipRead,
   IncidentInsuranceClaimRead,
+  IncidentMedicalClearanceRead,
   IncidentReportPackageRead,
   IncidentReportPackageStatus,
   InsightSeverity,
@@ -104,6 +105,7 @@ import type {
   InsuranceClaimType,
   LocalIdentity,
   MatchEventType,
+  MedicalClearanceStatus,
   MessageDeliveryStatus,
   MessageRecipientRead,
   MembershipRead,
@@ -440,6 +442,7 @@ export default function HomePage() {
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummaryRead | null>(null);
   const [incidentReportPackages, setIncidentReportPackages] = useState<IncidentReportPackageRead[]>([]);
   const [incidentInsuranceClaims, setIncidentInsuranceClaims] = useState<IncidentInsuranceClaimRead[]>([]);
+  const [incidentMedicalClearances, setIncidentMedicalClearances] = useState<IncidentMedicalClearanceRead[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
@@ -559,6 +562,15 @@ export default function HomePage() {
     currency: "USD",
     tracking_url: "",
     notes: "Claim package prepared from incident documentation."
+  });
+  const [medicalClearanceForm, setMedicalClearanceForm] = useState({
+    clearance_type: "return_to_play",
+    valid_from: "2026-05-28",
+    valid_until: "2026-06-28",
+    return_to_play_stage: "graduated_return_stage_1",
+    provider_name: "Club medical officer",
+    restrictions: "No contact drills until reviewed.",
+    notes: "Medical review required before full competition clearance."
   });
   const [agentForm, setAgentForm] = useState({
     name: "Safeguarding Watch",
@@ -1040,6 +1052,14 @@ export default function HomePage() {
     setIncidentInsuranceClaims(data);
   }, [identity]);
 
+  const loadIncidentMedicalClearances = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<IncidentMedicalClearanceRead[]>(
+      `/safeguarding/medical-clearances?organization_id=${organizationId}`,
+      { identity }
+    );
+    setIncidentMedicalClearances(data);
+  }, [identity]);
+
   const loadAgents = useCallback(async (organizationId: string) => {
     const data = await apiRequest<AgentRead[]>(`/agents?organization_id=${organizationId}`);
     setAgents(data);
@@ -1481,6 +1501,7 @@ export default function HomePage() {
       setComplianceSummary(null);
       setIncidentReportPackages([]);
       setIncidentInsuranceClaims([]);
+      setIncidentMedicalClearances([]);
       setCommunicationTemplates([]);
       setCommunicationMessages([]);
       setMessageRecipients([]);
@@ -1563,6 +1584,7 @@ export default function HomePage() {
       await loadComplianceSummary(selectedOrganizationId);
       await loadIncidentReportPackages(selectedOrganizationId);
       await loadIncidentInsuranceClaims(selectedOrganizationId);
+      await loadIncidentMedicalClearances(selectedOrganizationId);
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
@@ -1585,6 +1607,7 @@ export default function HomePage() {
     loadComplianceSummary,
     loadIncidentReportPackages,
     loadIncidentInsuranceClaims,
+    loadIncidentMedicalClearances,
     loadAgents,
     loadAgentTasks,
     loadMetricDefinitions,
@@ -2521,6 +2544,74 @@ export default function HomePage() {
     );
   };
 
+  const createIncidentMedicalClearance = (incident: SafeguardingIncidentRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      `create-medical-clearance-${incident.id}`,
+      () =>
+        apiRequest<IncidentMedicalClearanceRead>("/safeguarding/medical-clearances", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            incident_id: incident.id,
+            athlete_person_id: incident.athlete_person_id,
+            clearance_type: medicalClearanceForm.clearance_type,
+            valid_from: medicalClearanceForm.valid_from || null,
+            valid_until: medicalClearanceForm.valid_until || null,
+            restrictions: medicalClearanceForm.restrictions || null,
+            return_to_play_stage: medicalClearanceForm.return_to_play_stage || null,
+            provider_name: medicalClearanceForm.provider_name || null,
+            notes: medicalClearanceForm.notes || null
+          }
+        }),
+      (clearance) => {
+        setIncidentMedicalClearances((current) => [
+          clearance,
+          ...current.filter((item) => item.id !== clearance.id)
+        ]);
+        addLog(`${clearance.clearance_type} clearance opened`, "good");
+      }
+    );
+  };
+
+  const updateIncidentMedicalClearance = (
+    clearance: IncidentMedicalClearanceRead,
+    statusValue: MedicalClearanceStatus
+  ) => {
+    runAction(
+      `incident-medical-clearance-${clearance.id}-${statusValue}`,
+      () =>
+        apiRequest<IncidentMedicalClearanceRead>(`/safeguarding/medical-clearances/${clearance.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            assessed_at: new Date().toISOString(),
+            restrictions:
+              statusValue === "cleared"
+                ? "Cleared for full participation."
+                : medicalClearanceForm.restrictions || null,
+            return_to_play_stage:
+              statusValue === "cleared"
+                ? "full_return"
+                : medicalClearanceForm.return_to_play_stage || null,
+            notes: `Marked ${statusValue} from the operations console.`
+          }
+        }),
+      (updated) => {
+        setIncidentMedicalClearances((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.clearance_type} moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
   const refreshSafeguardingCompliance = () => {
     if (!selectedOrganizationId) {
       return;
@@ -2531,7 +2622,8 @@ export default function HomePage() {
       loadSafeguardingIncidents(selectedOrganizationId),
       loadComplianceSummary(selectedOrganizationId),
       loadIncidentReportPackages(selectedOrganizationId),
-      loadIncidentInsuranceClaims(selectedOrganizationId)
+      loadIncidentInsuranceClaims(selectedOrganizationId),
+      loadIncidentMedicalClearances(selectedOrganizationId)
     ]);
   };
 
@@ -8392,6 +8484,32 @@ export default function HomePage() {
               <input value={insuranceClaimForm.notes} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, notes: event.target.value })} />
             </label>
           </div>
+          <div className="form-grid three">
+            <label>
+              Clearance type
+              <input value={medicalClearanceForm.clearance_type} onChange={(event) => setMedicalClearanceForm({ ...medicalClearanceForm, clearance_type: event.target.value })} />
+            </label>
+            <label>
+              Valid from
+              <input type="date" value={medicalClearanceForm.valid_from} onChange={(event) => setMedicalClearanceForm({ ...medicalClearanceForm, valid_from: event.target.value })} />
+            </label>
+            <label>
+              Valid until
+              <input type="date" value={medicalClearanceForm.valid_until} onChange={(event) => setMedicalClearanceForm({ ...medicalClearanceForm, valid_until: event.target.value })} />
+            </label>
+            <label>
+              RTP stage
+              <input value={medicalClearanceForm.return_to_play_stage} onChange={(event) => setMedicalClearanceForm({ ...medicalClearanceForm, return_to_play_stage: event.target.value })} />
+            </label>
+            <label>
+              Provider
+              <input value={medicalClearanceForm.provider_name} onChange={(event) => setMedicalClearanceForm({ ...medicalClearanceForm, provider_name: event.target.value })} />
+            </label>
+            <label className="wide-field">
+              Restrictions
+              <input value={medicalClearanceForm.restrictions} onChange={(event) => setMedicalClearanceForm({ ...medicalClearanceForm, restrictions: event.target.value })} />
+            </label>
+          </div>
           <div className="consent-grid">
             <div>
               <span className="muted">Athlete</span>
@@ -8472,6 +8590,22 @@ export default function HomePage() {
                 </div>
               </article>
             ))}
+            {incidentMedicalClearances.slice(0, 4).map((clearance) => (
+              <article key={clearance.id} className="task-card">
+                <div>
+                  <strong>{clearance.clearance_type}</strong>
+                  <span>{clearance.status} · {clearance.return_to_play_stage ?? "stage pending"} · valid {clearance.valid_until ?? "not set"}</span>
+                  <span>{clearance.provider_name ?? "Provider pending"} · athlete {clearance.athlete_person_id.slice(0, 8)}</span>
+                  <span>{clearance.restrictions ?? clearance.notes ?? "No restrictions recorded"}</span>
+                </div>
+                <div className="event-toolbar">
+                  <button type="button" onClick={() => updateIncidentMedicalClearance(clearance, "restricted")}>Restrict</button>
+                  <button type="button" onClick={() => updateIncidentMedicalClearance(clearance, "cleared")}>Clear</button>
+                  <button type="button" onClick={() => updateIncidentMedicalClearance(clearance, "not_cleared")}>Hold</button>
+                  <button type="button" onClick={() => updateIncidentMedicalClearance(clearance, "expired")}>Expire</button>
+                </div>
+              </article>
+            ))}
             {backgroundChecks.slice(0, 4).map((check) => (
               <article key={check.id} className="task-card">
                 <div>
@@ -8515,6 +8649,7 @@ export default function HomePage() {
                   <button type="button" onClick={() => updateSafeguardingIncident(incident, "investigating")}>Investigate</button>
                   <button type="button" onClick={() => createIncidentReportPackage(incident)}>Package</button>
                   <button type="button" onClick={() => createIncidentInsuranceClaim(incident)}>Claim</button>
+                  <button type="button" onClick={() => createIncidentMedicalClearance(incident)}>Clearance</button>
                   <button type="button" onClick={() => updateSafeguardingIncident(incident, "resolved")}>Resolve</button>
                 </div>
               </article>

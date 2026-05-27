@@ -123,6 +123,12 @@ export type InsuranceClaimStatus =
   | "paid"
   | "denied"
   | "closed";
+export type MedicalClearanceStatus =
+  | "pending_review"
+  | "restricted"
+  | "cleared"
+  | "not_cleared"
+  | "expired";
 export type BackgroundCheckStatus =
   | "requested"
   | "in_progress"
@@ -1528,6 +1534,25 @@ export type IncidentInsuranceClaimRead = {
   documentation_checklist_json: string | null;
   submission_payload: string | null;
   communication_log: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+export type IncidentMedicalClearanceRead = {
+  id: UUID;
+  organization_id: UUID;
+  incident_id: UUID;
+  athlete_person_id: UUID;
+  reviewed_by_person_id: UUID | null;
+  status: MedicalClearanceStatus;
+  clearance_type: string;
+  assessed_at: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  restrictions: string | null;
+  return_to_play_stage: string | null;
+  provider_name: string | null;
+  documentation_object_key: string | null;
   notes: string | null;
   created_at: string;
 };

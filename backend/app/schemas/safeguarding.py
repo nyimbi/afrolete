@@ -17,6 +17,7 @@ from app.models.enums import (
     IncidentReportPackageStatus,
     InsuranceClaimStatus,
     InsuranceClaimType,
+    MedicalClearanceStatus,
     ParticipationClearanceStatus,
     SafeguardingIncidentSeverity,
     SafeguardingIncidentStatus,
@@ -532,5 +533,52 @@ class IncidentInsuranceClaimRead(BaseModel):
     documentation_checklist_json: str | None
     submission_payload: str | None
     communication_log: str | None
+    notes: str | None
+    created_at: datetime
+
+
+class IncidentMedicalClearanceCreate(BaseModel):
+    organization_id: UUID
+    incident_id: UUID
+    athlete_person_id: UUID | None = None
+    clearance_type: str = Field(default="return_to_play", min_length=2, max_length=120)
+    assessed_at: datetime | None = None
+    valid_from: date | None = None
+    valid_until: date | None = None
+    restrictions: str | None = Field(default=None, max_length=4000)
+    return_to_play_stage: str | None = Field(default=None, max_length=120)
+    provider_name: str | None = Field(default=None, max_length=240)
+    documentation_object_key: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class IncidentMedicalClearanceUpdate(BaseModel):
+    status: MedicalClearanceStatus | None = None
+    reviewed_by_person_id: UUID | None = None
+    assessed_at: datetime | None = None
+    valid_from: date | None = None
+    valid_until: date | None = None
+    restrictions: str | None = Field(default=None, max_length=4000)
+    return_to_play_stage: str | None = Field(default=None, max_length=120)
+    provider_name: str | None = Field(default=None, max_length=240)
+    documentation_object_key: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class IncidentMedicalClearanceRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    incident_id: UUID
+    athlete_person_id: UUID
+    reviewed_by_person_id: UUID | None
+    status: MedicalClearanceStatus
+    clearance_type: str
+    assessed_at: datetime | None
+    valid_from: date | None
+    valid_until: date | None
+    restrictions: str | None
+    return_to_play_stage: str | None
+    provider_name: str | None
+    documentation_object_key: str | None
     notes: str | None
     created_at: datetime

@@ -9,6 +9,7 @@ from app.models.enums import (
     ComplianceCredentialStatus,
     IncidentReportPackageStatus,
     InsuranceClaimStatus,
+    MedicalClearanceStatus,
     SafeguardingIncidentStatus,
 )
 from app.schemas.safeguarding import (
@@ -34,6 +35,9 @@ from app.schemas.safeguarding import (
     IncidentInsuranceClaimCreate,
     IncidentInsuranceClaimRead,
     IncidentInsuranceClaimUpdate,
+    IncidentMedicalClearanceCreate,
+    IncidentMedicalClearanceRead,
+    IncidentMedicalClearanceUpdate,
     IncidentReportPackageCreate,
     IncidentReportPackageRead,
     IncidentReportPackageUpdate,
@@ -57,6 +61,7 @@ from app.services.safeguarding import (
     create_consent_request,
     create_guardian_relationship,
     create_incident_insurance_claim,
+    create_incident_medical_clearance,
     create_incident_report_package,
     create_safeguarding_incident,
     ensure_org_manage,
@@ -65,6 +70,7 @@ from app.services.safeguarding import (
     list_compliance_credentials,
     list_guardians_for_athlete,
     list_incident_insurance_claims,
+    list_incident_medical_clearances,
     list_incident_report_packages,
     list_safeguarding_incidents,
     list_my_family_consent_requests,
@@ -76,6 +82,7 @@ from app.services.safeguarding import (
     update_background_check,
     update_compliance_credential,
     update_incident_insurance_claim,
+    update_incident_medical_clearance,
     update_incident_report_package,
     update_safeguarding_incident,
 )
@@ -259,6 +266,27 @@ def to_insurance_claim_read(claim) -> IncidentInsuranceClaimRead:
     )
 
 
+def to_medical_clearance_read(clearance) -> IncidentMedicalClearanceRead:
+    return IncidentMedicalClearanceRead(
+        id=clearance.id,
+        organization_id=clearance.organization_id,
+        incident_id=clearance.incident_id,
+        athlete_person_id=clearance.athlete_person_id,
+        reviewed_by_person_id=clearance.reviewed_by_person_id,
+        status=clearance.status,
+        clearance_type=clearance.clearance_type,
+        assessed_at=clearance.assessed_at,
+        valid_from=clearance.valid_from,
+        valid_until=clearance.valid_until,
+        restrictions=clearance.restrictions,
+        return_to_play_stage=clearance.return_to_play_stage,
+        provider_name=clearance.provider_name,
+        documentation_object_key=clearance.documentation_object_key,
+        notes=clearance.notes,
+        created_at=clearance.created_at,
+    )
+
+
 @router.post("/guardians", response_model=GuardianRelationshipRead, status_code=201)
 async def create_guardian_route(
     payload: GuardianRelationshipCreate,
@@ -400,6 +428,44 @@ async def update_incident_insurance_claim_route(
 ) -> IncidentInsuranceClaimRead:
     return to_insurance_claim_read(
         await update_incident_insurance_claim(db, identity, claim_id, payload, authz)
+    )
+
+
+@router.post("/medical-clearances", response_model=IncidentMedicalClearanceRead, status_code=201)
+async def create_incident_medical_clearance_route(
+    payload: IncidentMedicalClearanceCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentMedicalClearanceRead:
+    return to_medical_clearance_read(await create_incident_medical_clearance(db, identity, payload, authz))
+
+
+@router.get("/medical-clearances", response_model=list[IncidentMedicalClearanceRead])
+async def list_incident_medical_clearances_route(
+    organization_id: UUID = Query(),
+    status_filter: MedicalClearanceStatus | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[IncidentMedicalClearanceRead]:
+    await ensure_org_manage(authz, organization_id, identity)
+    return [
+        to_medical_clearance_read(clearance)
+        for clearance in await list_incident_medical_clearances(db, organization_id, status_filter)
+    ]
+
+
+@router.patch("/medical-clearances/{clearance_id}", response_model=IncidentMedicalClearanceRead)
+async def update_incident_medical_clearance_route(
+    clearance_id: UUID,
+    payload: IncidentMedicalClearanceUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentMedicalClearanceRead:
+    return to_medical_clearance_read(
+        await update_incident_medical_clearance(db, identity, clearance_id, payload, authz)
     )
 
 
