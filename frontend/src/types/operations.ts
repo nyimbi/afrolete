@@ -717,6 +717,19 @@ export type EventTravelDeviceSecretRead = {
   secret_rotated_at: string;
 };
 
+export type EventTravelDeviceLocationIngestRead = {
+  travel_plan_id: UUID;
+  device_id: string;
+  provider: string;
+  device_registration_id: UUID | null;
+  device_status: string | null;
+  replay_protected: boolean;
+  external_event_id: string | null;
+  signature_required: boolean;
+  signature_validated: boolean;
+  update: EventTravelLocationUpdateRead;
+};
+
 export type EventTravelExpenseRead = {
   id: UUID;
   organization_id: UUID;

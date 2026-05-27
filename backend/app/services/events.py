@@ -42,6 +42,7 @@ from app.models.event import (
     EventTravelCarpoolRide,
     EventTravelChecklistItem,
     EventTravelDevice,
+    EventTravelDeviceIngestEvent,
     EventTravelExpense,
     EventTravelGeofenceZone,
     EventTravelLocationUpdate,
@@ -1357,6 +1358,7 @@ async def ingest_travel_device_location(
     if plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
     device = await travel_device_for_ingest(db, plan, payload)
+    ingest_event = await register_travel_device_ingest_event(db, plan, device, payload, signature_validated)
     update = EventTravelLocationUpdate(
         organization_id=plan.organization_id,
         travel_plan_id=plan.id,
@@ -1372,6 +1374,8 @@ async def ingest_travel_device_location(
     )
     db.add(update)
     await db.flush()
+    if ingest_event is not None:
+        ingest_event.location_update_id = update.id
     if device is not None:
         device.last_seen_at = update.recorded_at
         device.last_location_update_id = update.id
@@ -1388,6 +1392,8 @@ async def ingest_travel_device_location(
         provider=payload.provider,
         device_registration_id=device.id if device is not None else None,
         device_status=device.status if device is not None else None,
+        replay_protected=ingest_event is not None,
+        external_event_id=payload.external_event_id,
         signature_required=signature_required,
         signature_validated=signature_validated,
         update=await travel_location_update_read(db, update),
@@ -1432,6 +1438,39 @@ async def validate_travel_device_ingest_signature(
     if not hmac.compare_digest(expected, submitted):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel device signature")
     return True, True
+
+
+async def register_travel_device_ingest_event(
+    db: AsyncSession,
+    plan: EventTravelPlan,
+    device: EventTravelDevice | None,
+    payload: EventTravelDeviceLocationIngestCreate,
+    signature_validated: bool,
+) -> EventTravelDeviceIngestEvent | None:
+    if not payload.external_event_id:
+        return None
+    existing = await db.scalar(
+        select(EventTravelDeviceIngestEvent)
+        .where(EventTravelDeviceIngestEvent.travel_plan_id == plan.id)
+        .where(EventTravelDeviceIngestEvent.provider == payload.provider)
+        .where(EventTravelDeviceIngestEvent.device_id == payload.device_id)
+        .where(EventTravelDeviceIngestEvent.external_event_id == payload.external_event_id)
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Travel device ingest event already processed")
+    ingest_event = EventTravelDeviceIngestEvent(
+        organization_id=plan.organization_id,
+        travel_plan_id=plan.id,
+        travel_device_id=device.id if device is not None else None,
+        provider=payload.provider,
+        device_id=payload.device_id,
+        external_event_id=payload.external_event_id,
+        received_at=datetime.now(UTC),
+        signature_validated=signature_validated,
+    )
+    db.add(ingest_event)
+    await db.flush()
+    return ingest_event
 
 
 async def travel_device_for_ingest(

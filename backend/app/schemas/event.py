@@ -452,6 +452,8 @@ class EventTravelDeviceLocationIngestRead(BaseModel):
     provider: str
     device_registration_id: UUID | None = None
     device_status: str | None = None
+    replay_protected: bool = False
+    external_event_id: str | None = None
     signature_required: bool
     signature_validated: bool
     update: EventTravelLocationUpdateRead

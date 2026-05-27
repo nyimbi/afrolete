@@ -200,6 +200,23 @@ class EventTravelDevice(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class EventTravelDeviceIngestEvent(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_device_ingest_events"
+    __table_args__ = (UniqueConstraint("travel_plan_id", "provider", "device_id", "external_event_id"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    travel_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("event_travel_plans.id"), index=True)
+    travel_device_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("event_travel_devices.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    external_event_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    location_update_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("event_travel_location_updates.id"), index=True
+    )
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    signature_validated: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
+
+
 class EventTravelExpense(IdMixin, TimestampMixin, Base):
     __tablename__ = "event_travel_expenses"
 
