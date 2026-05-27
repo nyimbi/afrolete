@@ -2,7 +2,12 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
-import type { CommunicationInboxItemRead, LocalIdentity, MessageRecipientRead } from "@/types/operations";
+import type {
+  CommunicationInboxItemRead,
+  FamilyAthleteSummaryRead,
+  LocalIdentity,
+  MessageRecipientRead
+} from "@/types/operations";
 
 const defaultFamilyIdentity: LocalIdentity = {
   sub: "kc-parent-1",
@@ -13,6 +18,7 @@ const defaultFamilyIdentity: LocalIdentity = {
 export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
+  const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
   const [items, setItems] = useState<CommunicationInboxItemRead[]>([]);
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,8 +48,9 @@ export default function FamilyPortalPage() {
   );
 
   const unreadCount = items.filter((item) => item.delivery_status !== "read").length;
+  const pendingConsentCount = family.reduce((total, athlete) => total + athlete.pending_consent_requests, 0);
 
-  const loadInbox = async (event?: FormEvent<HTMLFormElement>) => {
+  const loadWorkspace = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
     if (!organizationId) {
       setError("Organization id is required");
@@ -52,10 +59,16 @@ export default function FamilyPortalPage() {
     setBusy(true);
     setError("");
     try {
-      const inbox = await apiRequest<CommunicationInboxItemRead[]>(
-        `/communications/my-inbox?organization_id=${encodeURIComponent(organizationId)}`,
-        { identity }
-      );
+      const organizationQuery = encodeURIComponent(organizationId);
+      const [familyRows, inbox] = await Promise.all([
+        apiRequest<FamilyAthleteSummaryRead[]>(`/safeguarding/my-family?organization_id=${organizationQuery}`, {
+          identity
+        }),
+        apiRequest<CommunicationInboxItemRead[]>(`/communications/my-inbox?organization_id=${organizationQuery}`, {
+          identity
+        })
+      ]);
+      setFamily(familyRows);
       setItems(inbox);
       setSelectedRecipientId((current) =>
         inbox.some((item) => item.recipient_id === current) ? current : inbox[0]?.recipient_id ?? ""
@@ -106,7 +119,7 @@ export default function FamilyPortalPage() {
           </div>
         </div>
 
-        <form className="family-toolbar" onSubmit={loadInbox}>
+        <form className="family-toolbar" onSubmit={loadWorkspace}>
           <label>
             Organization
             <input value={organizationId} onChange={(event) => setOrganizationId(event.target.value)} />
@@ -141,9 +154,25 @@ export default function FamilyPortalPage() {
             <strong>{items.length}</strong>
           </div>
           <div>
-            <span>Urgent</span>
-            <strong>{items.filter((item) => item.urgent).length}</strong>
+            <span>Children</span>
+            <strong>{family.length}</strong>
           </div>
+          <div>
+            <span>Consent</span>
+            <strong>{pendingConsentCount}</strong>
+          </div>
+        </div>
+
+        <div className="family-athletes">
+          {family.map((athlete) => (
+            <article key={athlete.athlete_person_id}>
+              <strong>{athlete.athlete_name}</strong>
+              <span>{athlete.relationship} · {athlete.can_sign_consent ? "signer" : "viewer"}</span>
+              <small>
+                {athlete.pending_consent_requests} pending · {athlete.latest_consent_status ?? "no consent"}
+              </small>
+            </article>
+          ))}
         </div>
 
         <div className="family-layout">

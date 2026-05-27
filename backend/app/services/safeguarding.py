@@ -4,7 +4,7 @@ from secrets import token_urlsafe
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import (
@@ -16,10 +16,11 @@ from app.models.enums import (
 )
 from app.models.event import ActivityConsent, ConsentRequest, Event
 from app.models.identity import Person
-from app.models.team import GuardianRelationship
+from app.models.team import AthleteProfile, GuardianRelationship
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
     ConsentRequestCreate,
+    FamilyAthleteSummaryRead,
     GuardianRelationshipCreate,
     KnownChannelConsentCapture,
     TokenConsentCapture,
@@ -167,6 +168,57 @@ async def list_guardians_for_athlete(
             )
         ).all()
     )
+
+
+async def list_my_family(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> list[FamilyAthleteSummaryRead]:
+    rows = (
+        await db.execute(
+            select(GuardianRelationship, Person)
+            .join(Person, Person.id == GuardianRelationship.athlete_person_id)
+            .join(AthleteProfile, AthleteProfile.person_id == GuardianRelationship.athlete_person_id)
+            .where(AthleteProfile.organization_id == organization_id)
+            .where(GuardianRelationship.guardian_person_id == identity.person_id)
+            .order_by(GuardianRelationship.is_primary.desc(), Person.display_name)
+        )
+    ).all()
+
+    summaries: list[FamilyAthleteSummaryRead] = []
+    for relationship, athlete in rows:
+        pending_count = await db.scalar(
+            select(func.count(ConsentRequest.id))
+            .where(ConsentRequest.organization_id == organization_id)
+            .where(ConsentRequest.athlete_person_id == relationship.athlete_person_id)
+            .where(ConsentRequest.guardian_person_id == identity.person_id)
+            .where(ConsentRequest.status == ConsentRequestStatus.PENDING)
+        )
+        latest_consent = await db.scalar(
+            select(ActivityConsent)
+            .where(ActivityConsent.organization_id == organization_id)
+            .where(ActivityConsent.athlete_person_id == relationship.athlete_person_id)
+            .where(ActivityConsent.guardian_person_id == identity.person_id)
+            .order_by(ActivityConsent.created_at.desc())
+            .limit(1)
+        )
+        summaries.append(
+            FamilyAthleteSummaryRead(
+                athlete_person_id=relationship.athlete_person_id,
+                athlete_name=athlete.display_name,
+                relationship=relationship.relationship,
+                relationship_kind=relationship.relationship_kind,
+                can_sign_consent=relationship.can_sign_consent,
+                can_view_medical=relationship.can_view_medical,
+                emergency_contact=relationship.emergency_contact,
+                pending_consent_requests=int(pending_count or 0),
+                latest_consent_status=latest_consent.status if latest_consent else None,
+                latest_consent_scope_type=latest_consent.scope_type if latest_consent else None,
+                latest_consent_signed_at=latest_consent.signed_at if latest_consent else None,
+            )
+        )
+    return summaries
 
 
 async def consent_destination(db: AsyncSession, payload: ConsentRequestCreate) -> str:

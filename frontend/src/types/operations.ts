@@ -283,6 +283,20 @@ export type GuardianRelationshipRead = {
   notes: string | null;
 };
 
+export type FamilyAthleteSummaryRead = {
+  athlete_person_id: UUID;
+  athlete_name: string;
+  relationship: string;
+  relationship_kind: string;
+  can_sign_consent: boolean;
+  can_view_medical: boolean;
+  emergency_contact: boolean;
+  pending_consent_requests: number;
+  latest_consent_status: ConsentStatus | null;
+  latest_consent_scope_type: ConsentScopeType | null;
+  latest_consent_signed_at: string | null;
+};
+
 export type ConsentRequestRead = {
   id: UUID;
   organization_id: UUID;

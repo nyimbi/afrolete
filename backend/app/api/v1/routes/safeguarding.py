@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -9,6 +9,7 @@ from app.schemas.safeguarding import (
     ActivityConsentRead,
     ConsentRequestCreate,
     ConsentRequestRead,
+    FamilyAthleteSummaryRead,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
     KnownChannelConsentCapture,
@@ -26,6 +27,7 @@ from app.services.safeguarding import (
     create_consent_request,
     create_guardian_relationship,
     list_guardians_for_athlete,
+    list_my_family,
 )
 
 router = APIRouter(prefix="/safeguarding", tags=["safeguarding"])
@@ -108,6 +110,15 @@ async def list_guardians_route(
         to_guardian_read(relationship)
         for relationship in await list_guardians_for_athlete(db, athlete_person_id)
     ]
+
+
+@router.get("/my-family", response_model=list[FamilyAthleteSummaryRead])
+async def list_my_family_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> list[FamilyAthleteSummaryRead]:
+    return await list_my_family(db, identity, organization_id)
 
 
 @router.post("/consent-requests", response_model=ConsentRequestRead, status_code=201)

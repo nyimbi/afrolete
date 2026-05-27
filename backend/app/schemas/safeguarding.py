@@ -54,6 +54,20 @@ class GuardianRelationshipRead(BaseModel):
     notes: str | None
 
 
+class FamilyAthleteSummaryRead(BaseModel):
+    athlete_person_id: UUID
+    athlete_name: str
+    relationship: str
+    relationship_kind: GuardianRelationshipKind
+    can_sign_consent: bool
+    can_view_medical: bool
+    emergency_contact: bool
+    pending_consent_requests: int
+    latest_consent_status: ConsentStatus | None
+    latest_consent_scope_type: ConsentScopeType | None
+    latest_consent_signed_at: datetime | None
+
+
 class ActivityConsentCreate(BaseModel):
     organization_id: UUID
     athlete_person_id: UUID
