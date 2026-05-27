@@ -222,6 +222,34 @@ athlete-development platform:
     typecheck`, `pnpm --filter @afrolete/frontend build`, production
     Playwright screenshot at
     `/private/tmp/afrolete-communications-console-v2.png`.
+- Implemented slice 014 equipment, facilities, and asset operations:
+  - Added facility profiles for fields, courts, stadiums, gyms, pools,
+    clubhouses, storage, capacity, surface, amenities, insurance, maintenance
+    budgets, conditions, and inspection dates.
+  - Added equipment inventory with category/subcategory, brand/model, QR/RFID
+    tag codes, serial numbers, total and available quantity, condition,
+    storage location, reorder thresholds, value, depreciation, warranty, audit,
+    and photo metadata.
+  - Added equipment checkout and return workflows that decrement and restore
+    availability, capture borrower/team/event context, due dates, conditions,
+    damage reports, and late fees.
+  - Added facility bookings with overlap rejection, requester details, event and
+    team linkage, attendee counts, rate/deposit, insurance certificates,
+    requirements, and access codes.
+  - Added maintenance work orders with facility/equipment linkage, assignment,
+    priority, due dates, vendor, estimated/actual cost, safety flag, compliance
+    reference, and completion tracking.
+  - Added an asset summary endpoint for facilities, inventory counts, stock
+    alerts, open/overdue checkouts, open/safety work orders, upcoming bookings,
+    booked hours, and projected revenue.
+  - Added the Assets console lane for facility creation, booking, inventory
+    creation, checkout/return, maintenance work orders, and readiness checks.
+  - Verification: `uv run ruff check .`, `uv run pytest`, PostgreSQL
+    `alembic upgrade head`, PostgreSQL `alembic downgrade 001fdd0cead7`,
+    PostgreSQL `alembic upgrade head`, `pnpm --filter @afrolete/frontend
+    typecheck`, `pnpm --filter @afrolete/frontend build`, production
+    Playwright screenshot at
+    `/private/tmp/afrolete-assets-console-viewport.png`.
 
 ## Implementation Slices
 
@@ -241,6 +269,7 @@ athlete-development platform:
 | 011 - Training and coaching plans | Partial | Backend tests 34/34; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Drill library, scoped plans, weekly plan blocks, session load planning, and console workflows are implemented; automatic AI plan generation, readiness check-ins, and post-session feedback loops remain. |
 | 012 - Competition management foundation | Partial | Backend tests 36/36; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Competition records, team registration, fixtures, official assignments, match events, result confirmation, computed standings, and console workflows are implemented; automated fixture generation, bracket visualization, conflict optimization, ticketing, and broadcast operations remain. |
 | 013 - Communications and notifications | Partial | Backend tests 39/39; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Templates, scoped broadcasts, recipient expansion, delivery/read audit records, preferences, quiet hours, emergency override, guardian copy for minors, and console workflows are implemented; live transport adapters, digest jobs, and parent inbox remain. |
+| 014 - Equipment, facilities, and asset operations | Partial | Backend tests 42/42; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Facility profiles, equipment inventory, checkout/return, maintenance work orders, facility bookings, overlap rejection, asset summary metrics, and console workflows are implemented; procurement, supplier scoring, RFID scanning, photo uploads, lease billing, and AI optimization remain. |
 
 ## Capability Coverage
 
@@ -263,12 +292,12 @@ Status values:
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, and console workflows are implemented; automated fixture generation, bracket visualization, advanced conflict resolution, ticketing, and broadcast operations remain. |
 | Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, delivery/read audit records, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; live email/SMS/WhatsApp/push adapters remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
-| Equipment, facilities, assets | not-started | Future slice. |
+| Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, and console workflows are implemented; procurement, supplier scoring, RFID scanning, photo upload, lease billing, and AI utilization optimization remain. |
 | Finance, sponsorship, fundraising, ticketing | not-started | Future slice. |
 | Reports and intelligence | not-started | Future slice. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation and SpiceDB gRPC authorization adapter are implemented; other integrations remain future slices. |
 | SaaS billing/subscriptions | not-started | Future slice. |
-| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
+| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
 
 ## Next Actions
 
@@ -278,11 +307,13 @@ Status values:
 3. Add live communication transport adapters for email, SMS, WhatsApp, push,
    delivery webhooks, digest jobs, parent inbox, and AI-assisted message
    drafting.
-4. Add automated fixture generation, bracket visualization, and scheduling
+4. Add procurement, supplier scoring, RFID/barcode scan flows, photo uploads,
+   lease billing, and AI utilization recommendations for assets and facilities.
+5. Add automated fixture generation, bracket visualization, and scheduling
    conflict checks for leagues and tournaments.
-5. Add automated training-plan generation from performance trends, readiness,
+6. Add automated training-plan generation from performance trends, readiness,
    upcoming competitions, and availability constraints.
-6. Add automated ingestion pipelines for video, audio narration, text
+7. Add automated ingestion pipelines for video, audio narration, text
    evaluation, wearable feeds, and agent-extracted metric review.
 6. Add real AI execution workers, model/provider configuration, and AI
    governance telemetry.

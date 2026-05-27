@@ -1,0 +1,472 @@
+from datetime import UTC, datetime
+from decimal import Decimal
+from uuid import UUID
+
+from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.assets import (
+    EquipmentCheckout,
+    EquipmentItem,
+    Facility,
+    FacilityBooking,
+    MaintenanceWorkOrder,
+)
+from app.models.enums import (
+    AssetCondition,
+    CheckoutStatus,
+    EquipmentStatus,
+    FacilityBookingStatus,
+    MemberSubjectType,
+    WorkOrderStatus,
+)
+from app.models.event import Event
+from app.models.identity import Person
+from app.models.organization import Membership, Organization
+from app.models.team import Team
+from app.schemas.assets import (
+    AssetSummaryRead,
+    EquipmentCheckoutCreate,
+    EquipmentCheckoutReturn,
+    EquipmentItemCreate,
+    FacilityBookingCreate,
+    FacilityCreate,
+    MaintenanceWorkOrderCreate,
+    MaintenanceWorkOrderUpdate,
+)
+from app.services.auth.identity_bridge import CurrentIdentity
+from app.services.authz.service import AuthorizationService
+
+
+async def ensure_manage_assets(
+    authz: AuthorizationService,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> None:
+    allowed = await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage_roster",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    ) or await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+async def create_facility(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityCreate,
+    authz: AuthorizationService,
+) -> Facility:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    facility = Facility(**payload.model_dump())
+    db.add(facility)
+    await db.commit()
+    await db.refresh(facility)
+    return facility
+
+
+async def list_facilities(db: AsyncSession, organization_id: UUID) -> list[Facility]:
+    return list(
+        (
+            await db.scalars(
+                select(Facility)
+                .where(Facility.organization_id == organization_id)
+                .order_by(Facility.name)
+            )
+        ).all()
+    )
+
+
+async def create_equipment_item(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: EquipmentItemCreate,
+    authz: AuthorizationService,
+) -> EquipmentItem:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    if payload.facility_id is not None:
+        await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.team_id is not None:
+        await get_team_for_organization(db, payload.team_id, payload.organization_id)
+
+    data = payload.model_dump()
+    quantity_available = data.pop("quantity_available")
+    item = EquipmentItem(
+        quantity_available=quantity_available,
+        status=equipment_status_for_quantity(quantity_available),
+        **data,
+    )
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+async def list_equipment_items(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+    team_id: UUID | None = None,
+) -> list[EquipmentItem]:
+    statement = select(EquipmentItem).where(EquipmentItem.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(EquipmentItem.facility_id == facility_id)
+    if team_id is not None:
+        statement = statement.where(EquipmentItem.team_id == team_id)
+    return list((await db.scalars(statement.order_by(EquipmentItem.category, EquipmentItem.name))).all())
+
+
+async def checkout_equipment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: EquipmentCheckoutCreate,
+    authz: AuthorizationService,
+) -> EquipmentCheckout:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    item = await get_equipment_for_organization(db, payload.equipment_item_id, payload.organization_id)
+    if payload.team_id is not None:
+        await get_team_for_organization(db, payload.team_id, payload.organization_id)
+    if payload.event_id is not None:
+        await get_event_for_organization(db, payload.event_id, payload.organization_id)
+    if payload.borrower_person_id is not None:
+        await get_person_member_for_organization(db, payload.borrower_person_id, payload.organization_id)
+    if payload.quantity > item.quantity_available:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Insufficient equipment available")
+
+    item.quantity_available -= payload.quantity
+    item.status = equipment_status_for_quantity(item.quantity_available)
+    checkout = EquipmentCheckout(
+        checked_out_by_person_id=identity.person_id,
+        checked_out_at=datetime.now(UTC),
+        **payload.model_dump(),
+    )
+    db.add(checkout)
+    await db.commit()
+    await db.refresh(checkout)
+    return checkout
+
+
+async def return_equipment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    checkout_id: UUID,
+    payload: EquipmentCheckoutReturn,
+    authz: AuthorizationService,
+) -> EquipmentCheckout:
+    checkout = await get_checkout(db, checkout_id)
+    await ensure_manage_assets(authz, identity, checkout.organization_id)
+    item = await get_equipment_for_organization(
+        db,
+        checkout.equipment_item_id,
+        checkout.organization_id,
+    )
+    if checkout.status != CheckoutStatus.CHECKED_OUT:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Checkout is not open")
+
+    returned_at = payload.returned_at or datetime.now(UTC)
+    checkout.returned_at = returned_at
+    checkout.returned_by_person_id = identity.person_id
+    checkout.condition_in = payload.condition_in
+    checkout.damage_report = payload.damage_report
+    checkout.late_fee = payload.late_fee
+    checkout.status = (
+        CheckoutStatus.DAMAGED
+        if payload.condition_in in {AssetCondition.POOR, AssetCondition.UNUSABLE}
+        or bool(payload.damage_report)
+        else CheckoutStatus.RETURNED
+    )
+    item.quantity_available = min(item.quantity_total, item.quantity_available + checkout.quantity)
+    item.condition = payload.condition_in
+    item.status = equipment_status_for_quantity(item.quantity_available)
+    await db.commit()
+    await db.refresh(checkout)
+    return checkout
+
+
+async def list_checkouts(
+    db: AsyncSession,
+    organization_id: UUID,
+    open_only: bool = False,
+) -> list[EquipmentCheckout]:
+    statement = select(EquipmentCheckout).where(EquipmentCheckout.organization_id == organization_id)
+    if open_only:
+        statement = statement.where(EquipmentCheckout.status == CheckoutStatus.CHECKED_OUT)
+    return list((await db.scalars(statement.order_by(EquipmentCheckout.due_at.desc()))).all())
+
+
+async def create_work_order(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: MaintenanceWorkOrderCreate,
+    authz: AuthorizationService,
+) -> MaintenanceWorkOrder:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    if payload.facility_id is not None:
+        await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.equipment_item_id is not None:
+        await get_equipment_for_organization(db, payload.equipment_item_id, payload.organization_id)
+    if payload.assigned_to_person_id is not None:
+        await get_person_member_for_organization(db, payload.assigned_to_person_id, payload.organization_id)
+
+    work_order = MaintenanceWorkOrder(**payload.model_dump())
+    db.add(work_order)
+    await db.commit()
+    await db.refresh(work_order)
+    return work_order
+
+
+async def update_work_order(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    work_order_id: UUID,
+    payload: MaintenanceWorkOrderUpdate,
+    authz: AuthorizationService,
+) -> MaintenanceWorkOrder:
+    work_order = await get_work_order(db, work_order_id)
+    await ensure_manage_assets(authz, identity, work_order.organization_id)
+    work_order.status = payload.status
+    work_order.actual_cost = payload.actual_cost
+    if payload.notes is not None:
+        work_order.notes = payload.notes
+    if payload.status == WorkOrderStatus.COMPLETED:
+        work_order.completed_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(work_order)
+    return work_order
+
+
+async def list_work_orders(
+    db: AsyncSession,
+    organization_id: UUID,
+    open_only: bool = False,
+) -> list[MaintenanceWorkOrder]:
+    statement = select(MaintenanceWorkOrder).where(
+        MaintenanceWorkOrder.organization_id == organization_id
+    )
+    if open_only:
+        statement = statement.where(
+            MaintenanceWorkOrder.status.in_(
+                [WorkOrderStatus.OPEN, WorkOrderStatus.ASSIGNED, WorkOrderStatus.IN_PROGRESS]
+            )
+        )
+    return list(
+        (await db.scalars(statement.order_by(MaintenanceWorkOrder.due_at, MaintenanceWorkOrder.title))).all()
+    )
+
+
+async def create_facility_booking(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityBookingCreate,
+    authz: AuthorizationService,
+) -> FacilityBooking:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.team_id is not None:
+        await get_team_for_organization(db, payload.team_id, payload.organization_id)
+    if payload.event_id is not None:
+        await get_event_for_organization(db, payload.event_id, payload.organization_id)
+    await ensure_facility_available(db, payload.facility_id, payload.starts_at, payload.ends_at)
+
+    booking = FacilityBooking(
+        requested_by_person_id=identity.person_id,
+        status=FacilityBookingStatus.CONFIRMED,
+        **payload.model_dump(),
+    )
+    db.add(booking)
+    await db.commit()
+    await db.refresh(booking)
+    return booking
+
+
+async def list_facility_bookings(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> list[FacilityBooking]:
+    statement = select(FacilityBooking).where(FacilityBooking.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(FacilityBooking.facility_id == facility_id)
+    return list((await db.scalars(statement.order_by(FacilityBooking.starts_at.desc()))).all())
+
+
+async def asset_summary(db: AsyncSession, organization_id: UUID) -> AssetSummaryRead:
+    now = datetime.now(UTC)
+    facilities = await list_facilities(db, organization_id)
+    equipment = await list_equipment_items(db, organization_id)
+    checkouts = await list_checkouts(db, organization_id)
+    work_orders = await list_work_orders(db, organization_id)
+    bookings = await list_facility_bookings(db, organization_id)
+    upcoming_bookings = [
+        booking
+        for booking in bookings
+        if not is_before_now(booking.ends_at, now)
+        and booking.status
+        not in {FacilityBookingStatus.CANCELLED, FacilityBookingStatus.COMPLETED}
+    ]
+    booked_hours = sum(
+        max((booking.ends_at - booking.starts_at).total_seconds() / 3600, 0)
+        for booking in upcoming_bookings
+    )
+    projected_revenue = sum(
+        Decimal(str(max((booking.ends_at - booking.starts_at).total_seconds() / 3600, 0)))
+        * (booking.rate or Decimal("0"))
+        for booking in upcoming_bookings
+    )
+    open_work_orders = [
+        work_order
+        for work_order in work_orders
+        if work_order.status
+        in {WorkOrderStatus.OPEN, WorkOrderStatus.ASSIGNED, WorkOrderStatus.IN_PROGRESS}
+    ]
+
+    return AssetSummaryRead(
+        organization_id=organization_id,
+        facilities=len(facilities),
+        equipment_items=len(equipment),
+        stock_alerts=sum(1 for item in equipment if item.quantity_available <= item.reorder_point),
+        open_checkouts=sum(1 for checkout in checkouts if checkout.status == CheckoutStatus.CHECKED_OUT),
+        overdue_checkouts=sum(
+            1
+            for checkout in checkouts
+            if checkout.status == CheckoutStatus.CHECKED_OUT and is_before_now(checkout.due_at, now)
+        ),
+        open_work_orders=len(open_work_orders),
+        safety_work_orders=sum(1 for work_order in open_work_orders if work_order.safety_related),
+        upcoming_bookings=len(upcoming_bookings),
+        booked_hours=round(booked_hours, 2),
+        projected_booking_revenue=projected_revenue.quantize(Decimal("0.01")),
+    )
+
+
+async def get_organization(db: AsyncSession, organization_id: UUID) -> Organization:
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    return organization
+
+
+async def get_facility_for_organization(
+    db: AsyncSession,
+    facility_id: UUID,
+    organization_id: UUID,
+) -> Facility:
+    facility = await db.get(Facility, facility_id)
+    if facility is None or facility.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility not found")
+    return facility
+
+
+async def get_equipment_for_organization(
+    db: AsyncSession,
+    equipment_item_id: UUID,
+    organization_id: UUID,
+) -> EquipmentItem:
+    item = await db.get(EquipmentItem, equipment_item_id)
+    if item is None or item.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipment not found")
+    return item
+
+
+async def get_team_for_organization(
+    db: AsyncSession,
+    team_id: UUID,
+    organization_id: UUID,
+) -> Team:
+    team = await db.get(Team, team_id)
+    if team is None or team.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    return team
+
+
+async def get_event_for_organization(
+    db: AsyncSession,
+    event_id: UUID,
+    organization_id: UUID,
+) -> Event:
+    event = await db.get(Event, event_id)
+    if event is None or event.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    return event
+
+
+async def get_person_member_for_organization(
+    db: AsyncSession,
+    person_id: UUID,
+    organization_id: UUID,
+) -> Person:
+    person = await db.get(Person, person_id)
+    membership = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == organization_id,
+            Membership.subject_type == MemberSubjectType.PERSON,
+            Membership.subject_id == person_id,
+            Membership.status == "active",
+        )
+    )
+    if person is None or membership is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+    return person
+
+
+async def get_checkout(db: AsyncSession, checkout_id: UUID) -> EquipmentCheckout:
+    checkout = await db.get(EquipmentCheckout, checkout_id)
+    if checkout is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checkout not found")
+    return checkout
+
+
+async def get_work_order(db: AsyncSession, work_order_id: UUID) -> MaintenanceWorkOrder:
+    work_order = await db.get(MaintenanceWorkOrder, work_order_id)
+    if work_order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work order not found")
+    return work_order
+
+
+async def ensure_facility_available(
+    db: AsyncSession,
+    facility_id: UUID,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> None:
+    conflict = await db.scalar(
+        select(FacilityBooking).where(
+            FacilityBooking.facility_id == facility_id,
+            FacilityBooking.status.in_(
+                [
+                    FacilityBookingStatus.REQUESTED,
+                    FacilityBookingStatus.APPROVED,
+                    FacilityBookingStatus.CONFIRMED,
+                    FacilityBookingStatus.CHECKED_IN,
+                ]
+            ),
+            FacilityBooking.starts_at < ends_at,
+            FacilityBooking.ends_at > starts_at,
+        )
+    )
+    if conflict is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Facility is already booked")
+
+
+def equipment_status_for_quantity(quantity_available: int) -> EquipmentStatus:
+    return EquipmentStatus.AVAILABLE if quantity_available > 0 else EquipmentStatus.CHECKED_OUT
+
+
+def is_before_now(value: datetime, now: datetime) -> bool:
+    comparable_now = now.replace(tzinfo=None) if value.tzinfo is None else now
+    return value < comparable_now

@@ -303,3 +303,70 @@ class ChannelPreference(StrEnum):
     EMAIL = "email"
     SMS = "sms"
     ALL = "all"
+
+
+class FacilityType(StrEnum):
+    FIELD = "field"
+    COURT = "court"
+    STADIUM = "stadium"
+    GYM = "gym"
+    POOL = "pool"
+    CLUBHOUSE = "clubhouse"
+    STORAGE = "storage"
+    OTHER = "other"
+
+
+class FacilityStatus(StrEnum):
+    AVAILABLE = "available"
+    BOOKED = "booked"
+    MAINTENANCE = "maintenance"
+    CLOSED = "closed"
+    RETIRED = "retired"
+
+
+class AssetCondition(StrEnum):
+    NEW = "new"
+    GOOD = "good"
+    FAIR = "fair"
+    POOR = "poor"
+    UNUSABLE = "unusable"
+
+
+class EquipmentStatus(StrEnum):
+    AVAILABLE = "available"
+    CHECKED_OUT = "checked_out"
+    MAINTENANCE = "maintenance"
+    LOST = "lost"
+    RETIRED = "retired"
+
+
+class CheckoutStatus(StrEnum):
+    CHECKED_OUT = "checked_out"
+    RETURNED = "returned"
+    OVERDUE = "overdue"
+    LOST = "lost"
+    DAMAGED = "damaged"
+
+
+class WorkOrderPriority(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class WorkOrderStatus(StrEnum):
+    OPEN = "open"
+    ASSIGNED = "assigned"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class FacilityBookingStatus(StrEnum):
+    REQUESTED = "requested"
+    APPROVED = "approved"
+    CONFIRMED = "confirmed"
+    CHECKED_IN = "checked_in"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"

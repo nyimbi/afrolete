@@ -140,6 +140,20 @@ export type CommunicationScopeType = "organization" | "team" | "event" | "person
 export type MessageDeliveryStatus = "queued" | "sent" | "delivered" | "read" | "failed" | "suppressed";
 export type NotificationFrequency = "immediate" | "daily_digest" | "weekly_digest";
 export type ChannelPreference = "app" | "email" | "sms" | "all";
+export type FacilityType = "field" | "court" | "stadium" | "gym" | "pool" | "clubhouse" | "storage" | "other";
+export type FacilityStatus = "available" | "booked" | "maintenance" | "closed" | "retired";
+export type AssetCondition = "new" | "good" | "fair" | "poor" | "unusable";
+export type EquipmentStatus = "available" | "checked_out" | "maintenance" | "lost" | "retired";
+export type CheckoutStatus = "checked_out" | "returned" | "overdue" | "lost" | "damaged";
+export type WorkOrderPriority = "low" | "medium" | "high" | "critical";
+export type WorkOrderStatus = "open" | "assigned" | "in_progress" | "completed" | "cancelled";
+export type FacilityBookingStatus =
+  | "requested"
+  | "approved"
+  | "confirmed"
+  | "checked_in"
+  | "completed"
+  | "cancelled";
 
 export type LocalIdentity = {
   sub: string;
@@ -258,6 +272,129 @@ export type ConsentRequestRead = {
   fulfilled_at: string | null;
   external_message_id: string | null;
   one_time_token: string | null;
+};
+
+export type FacilityRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  facility_type: FacilityType;
+  status: FacilityStatus;
+  sport: string | null;
+  surface: string | null;
+  capacity: number | null;
+  location: string | null;
+  dimensions: string | null;
+  amenities: string | null;
+  hourly_rate: string | null;
+  maintenance_budget: string | null;
+  condition: AssetCondition;
+  insurance_policy_ref: string | null;
+  last_inspection_on: string | null;
+  notes: string | null;
+};
+
+export type EquipmentItemRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID | null;
+  team_id: UUID | null;
+  name: string;
+  category: string;
+  subcategory: string | null;
+  brand: string | null;
+  model: string | null;
+  tag_code: string | null;
+  serial_number: string | null;
+  quantity_total: number;
+  quantity_available: number;
+  condition: AssetCondition;
+  status: EquipmentStatus;
+  storage_location: string | null;
+  min_stock_level: number;
+  reorder_point: number;
+  unit_value: string | null;
+  depreciation_rate: string | null;
+  warranty_expires_on: string | null;
+  last_audit_on: string | null;
+  photo_url: string | null;
+  notes: string | null;
+};
+
+export type EquipmentCheckoutRead = {
+  id: UUID;
+  organization_id: UUID;
+  equipment_item_id: UUID;
+  team_id: UUID | null;
+  event_id: UUID | null;
+  borrower_person_id: UUID | null;
+  checked_out_by_person_id: UUID | null;
+  returned_by_person_id: UUID | null;
+  quantity: number;
+  purpose: string;
+  checked_out_at: string;
+  due_at: string;
+  returned_at: string | null;
+  status: CheckoutStatus;
+  condition_out: AssetCondition;
+  condition_in: AssetCondition | null;
+  condition_notes: string | null;
+  damage_report: string | null;
+  late_fee: string | null;
+};
+
+export type MaintenanceWorkOrderRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID | null;
+  equipment_item_id: UUID | null;
+  assigned_to_person_id: UUID | null;
+  title: string;
+  priority: WorkOrderPriority;
+  status: WorkOrderStatus;
+  due_at: string | null;
+  completed_at: string | null;
+  vendor: string | null;
+  estimated_cost: string | null;
+  actual_cost: string | null;
+  safety_related: boolean;
+  compliance_reference: string | null;
+  notes: string | null;
+};
+
+export type FacilityBookingRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  team_id: UUID | null;
+  event_id: UUID | null;
+  requested_by_person_id: UUID | null;
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  status: FacilityBookingStatus;
+  requester_name: string | null;
+  requester_email: string | null;
+  expected_attendees: number | null;
+  rate: string | null;
+  deposit_required: string | null;
+  insurance_certificate_ref: string | null;
+  special_requirements: string | null;
+  access_code: string | null;
+};
+
+export type AssetSummaryRead = {
+  organization_id: UUID;
+  facilities: number;
+  equipment_items: number;
+  stock_alerts: number;
+  open_checkouts: number;
+  overdue_checkouts: number;
+  open_work_orders: number;
+  safety_work_orders: number;
+  upcoming_bookings: number;
+  booked_hours: number;
+  projected_booking_revenue: string;
 };
 
 export type ActivityConsentRead = {

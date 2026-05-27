@@ -9,6 +9,8 @@ import type {
   AgentRead,
   AgentTaskRead,
   AgentTaskStatus,
+  AssetCondition,
+  AssetSummaryRead,
   AthleteAssessmentRead,
   AthletePerformanceSummaryRead,
   AttendanceRecordRead,
@@ -29,7 +31,12 @@ import type {
   ConsentRequestRead,
   EventRead,
   EventType,
+  EquipmentCheckoutRead,
+  EquipmentItemRead,
   FixtureMatchEventRead,
+  FacilityBookingRead,
+  FacilityRead,
+  FacilityType,
   FixtureOfficialAssignmentRead,
   GuardianRelationshipRead,
   LocalIdentity,
@@ -54,7 +61,10 @@ import type {
   TrainingDrillRead,
   TrainingPlanItemRead,
   TrainingPlanRead,
-  TrainingSessionPlanRead
+  TrainingSessionPlanRead,
+  WorkOrderPriority,
+  WorkOrderStatus,
+  MaintenanceWorkOrderRead
 } from "@/types/operations";
 
 const defaultIdentity: LocalIdentity = {
@@ -104,6 +114,12 @@ export default function HomePage() {
   const [communicationMessages, setCommunicationMessages] = useState<CommunicationMessageRead[]>([]);
   const [messageRecipients, setMessageRecipients] = useState<MessageRecipientRead[]>([]);
   const [notificationPreference, setNotificationPreference] = useState<NotificationPreferenceRead | null>(null);
+  const [facilities, setFacilities] = useState<FacilityRead[]>([]);
+  const [equipmentItems, setEquipmentItems] = useState<EquipmentItemRead[]>([]);
+  const [equipmentCheckouts, setEquipmentCheckouts] = useState<EquipmentCheckoutRead[]>([]);
+  const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
+  const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
+  const [assetSummary, setAssetSummary] = useState<AssetSummaryRead | null>(null);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -117,6 +133,10 @@ export default function HomePage() {
   const [selectedCompetitionId, setSelectedCompetitionId] = useState("");
   const [selectedFixtureId, setSelectedFixtureId] = useState("");
   const [selectedMessageId, setSelectedMessageId] = useState("");
+  const [selectedFacilityId, setSelectedFacilityId] = useState("");
+  const [selectedEquipmentId, setSelectedEquipmentId] = useState("");
+  const [selectedCheckoutId, setSelectedCheckoutId] = useState("");
+  const [selectedWorkOrderId, setSelectedWorkOrderId] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -281,6 +301,61 @@ export default function HomePage() {
     quiet_hours_end: "06:00",
     emergency_override: true
   });
+  const [facilityForm, setFacilityForm] = useState({
+    name: "Main Field",
+    facility_type: "field" as FacilityType,
+    surface: "Natural grass",
+    capacity: 500,
+    location: "Riverside campus",
+    hourly_rate: 120,
+    maintenance_budget: 15000,
+    condition: "good" as AssetCondition,
+    amenities: "Lights, changing rooms, scoreboard, secure storage",
+    insurance_policy_ref: "LIAB-2026"
+  });
+  const [equipmentForm, setEquipmentForm] = useState({
+    name: "Footballs Size 5",
+    category: "training_equipment",
+    subcategory: "balls",
+    brand: "Nike",
+    model: "Premier League Match Ball",
+    tag_code: "BALL-SET-001",
+    quantity_total: 24,
+    min_stock_level: 10,
+    reorder_point: 8,
+    unit_value: 50,
+    depreciation_rate: 20,
+    storage_location: "Equipment Room A, Shelf 3",
+    condition: "good" as AssetCondition
+  });
+  const [checkoutForm, setCheckoutForm] = useState({
+    quantity: 6,
+    purpose: "Saturday match kit",
+    due_at: "2026-06-11T12:00",
+    condition_notes: "Two balls need inflation."
+  });
+  const [workOrderForm, setWorkOrderForm] = useState({
+    title: "Inspect goal nets and ball pressure",
+    priority: "high" as WorkOrderPriority,
+    due_at: "2026-06-09T12:00",
+    vendor: "Grounds Crew",
+    estimated_cost: 150,
+    safety_related: true,
+    compliance_reference: "Monthly equipment inspection",
+    notes: "Pre-match safety check."
+  });
+  const [bookingForm, setBookingForm] = useState({
+    title: "U16 training block",
+    starts_at: "2026-06-12T15:00",
+    duration_hours: 2,
+    requester_name: "Coach Example",
+    requester_email: "coach@example.com",
+    expected_attendees: 28,
+    rate: 120,
+    deposit_required: 50,
+    insurance_certificate_ref: "CERT-2026",
+    special_requirements: "Goals, corner flags, and first-aid kit."
+  });
 
   const selectedOrganization = useMemo(
     () => organizations.find((organization) => organization.id === selectedOrganizationId) ?? null,
@@ -318,7 +393,14 @@ export default function HomePage() {
     () => communicationMessages.find((message) => message.id === selectedMessageId) ?? null,
     [communicationMessages, selectedMessageId]
   );
-
+  const selectedFacility = useMemo(
+    () => facilities.find((facility) => facility.id === selectedFacilityId) ?? null,
+    [facilities, selectedFacilityId]
+  );
+  const selectedEquipment = useMemo(
+    () => equipmentItems.find((item) => item.id === selectedEquipmentId) ?? null,
+    [equipmentItems, selectedEquipmentId]
+  );
   const addLog = useCallback((message: string, tone: LogEntry["tone"] = "neutral") => {
     setLogs((current) => [
       { id: crypto.randomUUID(), message, tone },
@@ -481,6 +563,39 @@ export default function HomePage() {
     setMessageRecipients(data);
   }, []);
 
+  const loadAssets = useCallback(async (organizationId: string, facilityId?: string) => {
+    const facilityQuery = facilityId ? `&facility_id=${facilityId}` : "";
+    const [facilityData, equipmentData, checkoutData, workOrderData, bookingData, summaryData] =
+      await Promise.all([
+        apiRequest<FacilityRead[]>(`/assets/facilities?organization_id=${organizationId}`),
+        apiRequest<EquipmentItemRead[]>(`/assets/equipment?organization_id=${organizationId}${facilityQuery}`),
+        apiRequest<EquipmentCheckoutRead[]>(`/assets/checkouts?organization_id=${organizationId}`),
+        apiRequest<MaintenanceWorkOrderRead[]>(`/assets/work-orders?organization_id=${organizationId}`),
+        apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
+        apiRequest<AssetSummaryRead>(`/assets/summary?organization_id=${organizationId}`)
+      ]);
+    setFacilities(facilityData);
+    setEquipmentItems(equipmentData);
+    setEquipmentCheckouts(checkoutData);
+    setWorkOrders(workOrderData);
+    setFacilityBookings(bookingData);
+    setAssetSummary(summaryData);
+    setSelectedFacilityId((current) =>
+      facilityData.some((facility) => facility.id === current) ? current : facilityData[0]?.id ?? ""
+    );
+    setSelectedEquipmentId((current) =>
+      equipmentData.some((item) => item.id === current) ? current : equipmentData[0]?.id ?? ""
+    );
+    setSelectedCheckoutId((current) =>
+      checkoutData.some((checkout) => checkout.id === current) ? current : checkoutData[0]?.id ?? ""
+    );
+    setSelectedWorkOrderId((current) =>
+      workOrderData.some((workOrder) => workOrder.id === current)
+        ? current
+        : workOrderData[0]?.id ?? ""
+    );
+  }, []);
+
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.localIdentity");
     if (stored) {
@@ -514,6 +629,12 @@ export default function HomePage() {
       setCommunicationMessages([]);
       setMessageRecipients([]);
       setNotificationPreference(null);
+      setFacilities([]);
+      setEquipmentItems([]);
+      setEquipmentCheckouts([]);
+      setWorkOrders([]);
+      setFacilityBookings([]);
+      setAssetSummary(null);
       return;
     }
     runAction("load-tenant-data", async () => {
@@ -525,6 +646,7 @@ export default function HomePage() {
       await loadTraining(selectedOrganizationId);
       await loadCompetitions(selectedOrganizationId);
       await loadCommunications(selectedOrganizationId);
+      await loadAssets(selectedOrganizationId);
     }, () => addLog("Organization workspace loaded", "good"));
   }, [
     selectedOrganizationId,
@@ -536,6 +658,7 @@ export default function HomePage() {
     loadTraining,
     loadCompetitions,
     loadCommunications,
+    loadAssets,
     runAction,
     addLog
   ]);
@@ -553,6 +676,17 @@ export default function HomePage() {
       () => addLog("Team lanes refreshed", "good")
     );
   }, [selectedTeamId, selectedOrganizationId, loadEvents, loadTraining, runAction, addLog]);
+
+  useEffect(() => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "load-assets",
+      () => loadAssets(selectedOrganizationId, selectedFacilityId || undefined),
+      () => undefined
+    );
+  }, [selectedFacilityId, selectedOrganizationId, loadAssets, runAction]);
 
   useEffect(() => {
     if (!selectedEventId) {
@@ -1512,6 +1646,230 @@ export default function HomePage() {
     );
   };
 
+  const createFacility = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-facility",
+      () =>
+        apiRequest<FacilityRead>("/assets/facilities", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sport: selectedTeam?.sport ?? organizationForm.primary_sport,
+            ...facilityForm,
+            hourly_rate: String(facilityForm.hourly_rate),
+            maintenance_budget: String(facilityForm.maintenance_budget)
+          }
+        }),
+      (facility) => {
+        setFacilities((current) => [facility, ...current.filter((item) => item.id !== facility.id)]);
+        setSelectedFacilityId(facility.id);
+        addLog(`${facility.name} facility is available`, "good");
+        void loadAssets(selectedOrganizationId, facility.id);
+      }
+    );
+  };
+
+  const createEquipmentItem = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-equipment",
+      () =>
+        apiRequest<EquipmentItemRead>("/assets/equipment", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId || null,
+            team_id: selectedTeamId || null,
+            ...equipmentForm,
+            quantity_available: equipmentForm.quantity_total,
+            unit_value: String(equipmentForm.unit_value),
+            depreciation_rate: String(equipmentForm.depreciation_rate)
+          }
+        }),
+      (item) => {
+        setEquipmentItems((current) => [item, ...current.filter((value) => value.id !== item.id)]);
+        setSelectedEquipmentId(item.id);
+        addLog(`${item.name} added to inventory`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const checkoutEquipmentItem = () => {
+    if (!selectedOrganizationId || !selectedEquipmentId) {
+      addLog("Create or select equipment first", "bad");
+      return;
+    }
+    runAction(
+      "checkout-equipment",
+      () =>
+        apiRequest<EquipmentCheckoutRead>("/assets/checkouts", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            equipment_item_id: selectedEquipmentId,
+            team_id: selectedTeamId || null,
+            event_id: selectedEventId || null,
+            borrower_person_id: selectedAthleteId || null,
+            quantity: checkoutForm.quantity,
+            purpose: checkoutForm.purpose,
+            due_at: new Date(checkoutForm.due_at).toISOString(),
+            condition_out: selectedEquipment?.condition ?? "good",
+            condition_notes: checkoutForm.condition_notes
+          }
+        }),
+      (checkout) => {
+        setEquipmentCheckouts((current) => [
+          checkout,
+          ...current.filter((item) => item.id !== checkout.id)
+        ]);
+        setSelectedCheckoutId(checkout.id);
+        addLog(`${checkout.quantity} item(s) checked out`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const returnSelectedCheckout = () => {
+    if (!selectedOrganizationId || !selectedCheckoutId) {
+      addLog("Select an open checkout first", "bad");
+      return;
+    }
+    runAction(
+      "return-equipment",
+      () =>
+        apiRequest<EquipmentCheckoutRead>(`/assets/checkouts/${selectedCheckoutId}/return`, {
+          method: "PATCH",
+          identity,
+          body: {
+            condition_in: "fair",
+            late_fee: "0.00",
+            damage_report: null
+          }
+        }),
+      (checkout) => {
+        setEquipmentCheckouts((current) => [
+          checkout,
+          ...current.filter((item) => item.id !== checkout.id)
+        ]);
+        addLog(`Checkout marked ${checkout.status}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const createWorkOrder = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-work-order",
+      () =>
+        apiRequest<MaintenanceWorkOrderRead>("/assets/work-orders", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId || null,
+            equipment_item_id: selectedEquipmentId || null,
+            assigned_to_person_id: selectedAthleteId || null,
+            ...workOrderForm,
+            due_at: new Date(workOrderForm.due_at).toISOString(),
+            estimated_cost: String(workOrderForm.estimated_cost)
+          }
+        }),
+      (workOrder) => {
+        setWorkOrders((current) => [
+          workOrder,
+          ...current.filter((item) => item.id !== workOrder.id)
+        ]);
+        setSelectedWorkOrderId(workOrder.id);
+        addLog(`${workOrder.title} work order opened`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const updateWorkOrderStatus = (workOrderId: string, status: WorkOrderStatus) => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      `work-order-${workOrderId}-${status}`,
+      () =>
+        apiRequest<MaintenanceWorkOrderRead>(`/assets/work-orders/${workOrderId}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            actual_cost: status === "completed" ? "125.00" : null,
+            notes: `Marked ${status} from the operations console.`
+          }
+        }),
+      (workOrder) => {
+        setWorkOrders((current) => [
+          workOrder,
+          ...current.filter((item) => item.id !== workOrder.id)
+        ]);
+        addLog(`Work order moved to ${workOrder.status}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const createFacilityBooking = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Create or select a facility first", "bad");
+      return;
+    }
+    const startsAt = new Date(bookingForm.starts_at);
+    const endsAt = new Date(startsAt.getTime() + bookingForm.duration_hours * 60 * 60_000);
+    runAction(
+      "create-facility-booking",
+      () =>
+        apiRequest<FacilityBookingRead>("/assets/bookings", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            team_id: selectedTeamId || null,
+            event_id: selectedEventId || null,
+            title: bookingForm.title,
+            starts_at: startsAt.toISOString(),
+            ends_at: endsAt.toISOString(),
+            requester_name: bookingForm.requester_name,
+            requester_email: bookingForm.requester_email,
+            expected_attendees: bookingForm.expected_attendees,
+            rate: String(bookingForm.rate),
+            deposit_required: String(bookingForm.deposit_required),
+            insurance_certificate_ref: bookingForm.insurance_certificate_ref,
+            special_requirements: bookingForm.special_requirements,
+            access_code: `${selectedFacility?.name.slice(0, 4).toUpperCase() ?? "SITE"}-${startsAt.getDate()}`
+          }
+        }),
+      (booking) => {
+        setFacilityBookings((current) => [
+          booking,
+          ...current.filter((item) => item.id !== booking.id)
+        ]);
+        addLog(`${booking.title} confirmed for ${selectedFacility?.name ?? "facility"}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -1531,6 +1889,7 @@ export default function HomePage() {
           <a href="#tenant">Tenant</a>
           <a href="#roster">Roster</a>
           <a href="#events">Events</a>
+          <a href="#assets">Assets</a>
           <a href="#competition">Competition</a>
           <a href="#communications">Comms</a>
           <a href="#performance">Performance</a>
@@ -1595,6 +1954,10 @@ export default function HomePage() {
             <div className="stat-row">
               <span>Messages</span>
               <strong>{communicationMessages.length}</strong>
+            </div>
+            <div className="stat-row">
+              <span>Assets</span>
+              <strong>{assetSummary?.equipment_items ?? 0}</strong>
             </div>
             <div className="stat-row">
               <span>Attendance</span>
@@ -1863,6 +2226,304 @@ export default function HomePage() {
               ))}
             </div>
           </form>
+        </section>
+
+        <section className="work-grid" id="assets">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Facilities</p>
+                <h2>Assets, bookings, and inventory</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createFacility} disabled={busyAction !== null}>Facility</button>
+                <button type="button" onClick={createFacilityBooking} disabled={busyAction !== null}>Book</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{assetSummary?.booked_hours ?? 0}</strong>
+              <span>Booked hours</span>
+              <small>{assetSummary ? `$${assetSummary.projected_booking_revenue} projected` : "No asset summary"}</small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Facility
+                <input value={facilityForm.name} onChange={(event) => setFacilityForm({ ...facilityForm, name: event.target.value })} />
+              </label>
+              <label>
+                Type
+                <select value={facilityForm.facility_type} onChange={(event) => setFacilityForm({ ...facilityForm, facility_type: event.target.value as FacilityType })}>
+                  <option value="field">Field</option>
+                  <option value="court">Court</option>
+                  <option value="stadium">Stadium</option>
+                  <option value="gym">Gym</option>
+                  <option value="pool">Pool</option>
+                  <option value="clubhouse">Clubhouse</option>
+                  <option value="storage">Storage</option>
+                </select>
+              </label>
+              <label>
+                Surface
+                <input value={facilityForm.surface} onChange={(event) => setFacilityForm({ ...facilityForm, surface: event.target.value })} />
+              </label>
+              <label>
+                Capacity
+                <input type="number" min="0" value={facilityForm.capacity} onChange={(event) => setFacilityForm({ ...facilityForm, capacity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Rate
+                <input type="number" min="0" value={facilityForm.hourly_rate} onChange={(event) => setFacilityForm({ ...facilityForm, hourly_rate: Number(event.target.value) })} />
+              </label>
+              <label>
+                Condition
+                <select value={facilityForm.condition} onChange={(event) => setFacilityForm({ ...facilityForm, condition: event.target.value as AssetCondition })}>
+                  <option value="new">New</option>
+                  <option value="good">Good</option>
+                  <option value="fair">Fair</option>
+                  <option value="poor">Poor</option>
+                  <option value="unusable">Unusable</option>
+                </select>
+              </label>
+              <label className="wide-field">
+                Amenities
+                <input value={facilityForm.amenities} onChange={(event) => setFacilityForm({ ...facilityForm, amenities: event.target.value })} />
+              </label>
+            </div>
+            <div className="selection-list compact">
+              {facilities.map((facility) => (
+                <button
+                  type="button"
+                  key={facility.id}
+                  className={facility.id === selectedFacilityId ? "selected" : ""}
+                  onClick={() => setSelectedFacilityId(facility.id)}
+                >
+                  <span>{facility.name}</span>
+                  <small>{facility.facility_type} · {facility.status} · {facility.condition}</small>
+                </button>
+              ))}
+            </div>
+            <div className="form-grid">
+              <label>
+                Booking
+                <input value={bookingForm.title} onChange={(event) => setBookingForm({ ...bookingForm, title: event.target.value })} />
+              </label>
+              <label>
+                Starts
+                <input type="datetime-local" value={bookingForm.starts_at} onChange={(event) => setBookingForm({ ...bookingForm, starts_at: event.target.value })} />
+              </label>
+              <label>
+                Hours
+                <input type="number" min="1" value={bookingForm.duration_hours} onChange={(event) => setBookingForm({ ...bookingForm, duration_hours: Number(event.target.value) })} />
+              </label>
+              <label>
+                Attendees
+                <input type="number" min="0" value={bookingForm.expected_attendees} onChange={(event) => setBookingForm({ ...bookingForm, expected_attendees: Number(event.target.value) })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {facilityBookings.slice(0, 3).map((booking) => (
+                <article key={booking.id} className="task-card">
+                  <div>
+                    <strong>{booking.title}</strong>
+                    <span>{booking.status} · {new Date(booking.starts_at).toLocaleString()}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Inventory</p>
+                <h2>Checkout and maintenance</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createEquipmentItem} disabled={busyAction !== null}>Item</button>
+                <button type="button" onClick={checkoutEquipmentItem} disabled={busyAction !== null}>Checkout</button>
+                <button type="button" onClick={returnSelectedCheckout} disabled={busyAction !== null}>Return</button>
+              </div>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Stock alerts</span>
+                <strong>{assetSummary?.stock_alerts ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Open checkouts</span>
+                <strong>{assetSummary?.open_checkouts ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Work orders</span>
+                <strong>{assetSummary?.open_work_orders ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Safety</span>
+                <strong>{assetSummary?.safety_work_orders ?? 0}</strong>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Item
+                <input value={equipmentForm.name} onChange={(event) => setEquipmentForm({ ...equipmentForm, name: event.target.value })} />
+              </label>
+              <label>
+                Category
+                <input value={equipmentForm.category} onChange={(event) => setEquipmentForm({ ...equipmentForm, category: event.target.value })} />
+              </label>
+              <label>
+                Quantity
+                <input type="number" min="1" value={equipmentForm.quantity_total} onChange={(event) => setEquipmentForm({ ...equipmentForm, quantity_total: Number(event.target.value) })} />
+              </label>
+              <label>
+                Reorder
+                <input type="number" min="0" value={equipmentForm.reorder_point} onChange={(event) => setEquipmentForm({ ...equipmentForm, reorder_point: Number(event.target.value) })} />
+              </label>
+              <label>
+                Tag
+                <input value={equipmentForm.tag_code} onChange={(event) => setEquipmentForm({ ...equipmentForm, tag_code: event.target.value })} />
+              </label>
+              <label>
+                Location
+                <input value={equipmentForm.storage_location} onChange={(event) => setEquipmentForm({ ...equipmentForm, storage_location: event.target.value })} />
+              </label>
+            </div>
+            <div className="selection-list compact">
+              {equipmentItems.map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  className={item.id === selectedEquipmentId ? "selected" : ""}
+                  onClick={() => setSelectedEquipmentId(item.id)}
+                >
+                  <span>{item.name}</span>
+                  <small>{item.quantity_available}/{item.quantity_total} · {item.status} · {item.storage_location ?? "No location"}</small>
+                </button>
+              ))}
+            </div>
+            <div className="form-grid">
+              <label>
+                Quantity out
+                <input type="number" min="1" value={checkoutForm.quantity} onChange={(event) => setCheckoutForm({ ...checkoutForm, quantity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Due
+                <input type="datetime-local" value={checkoutForm.due_at} onChange={(event) => setCheckoutForm({ ...checkoutForm, due_at: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Purpose
+                <input value={checkoutForm.purpose} onChange={(event) => setCheckoutForm({ ...checkoutForm, purpose: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {equipmentCheckouts.slice(0, 3).map((checkout) => (
+                <button
+                  type="button"
+                  key={checkout.id}
+                  className={`task-card ${checkout.id === selectedCheckoutId ? "selected" : ""}`}
+                  onClick={() => setSelectedCheckoutId(checkout.id)}
+                >
+                  <div>
+                    <strong>{checkout.quantity} out · {checkout.status}</strong>
+                    <span>{checkout.purpose} · due {new Date(checkout.due_at).toLocaleString()}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Maintenance</p>
+                <h2>Work orders and safety compliance</h2>
+              </div>
+              <button type="button" onClick={createWorkOrder} disabled={busyAction !== null}>Work order</button>
+            </div>
+            <div className="form-grid">
+              <label>
+                Title
+                <input value={workOrderForm.title} onChange={(event) => setWorkOrderForm({ ...workOrderForm, title: event.target.value })} />
+              </label>
+              <label>
+                Priority
+                <select value={workOrderForm.priority} onChange={(event) => setWorkOrderForm({ ...workOrderForm, priority: event.target.value as WorkOrderPriority })}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
+              <label>
+                Due
+                <input type="datetime-local" value={workOrderForm.due_at} onChange={(event) => setWorkOrderForm({ ...workOrderForm, due_at: event.target.value })} />
+              </label>
+              <label>
+                Cost
+                <input type="number" min="0" value={workOrderForm.estimated_cost} onChange={(event) => setWorkOrderForm({ ...workOrderForm, estimated_cost: Number(event.target.value) })} />
+              </label>
+              <label>
+                Compliance
+                <input value={workOrderForm.compliance_reference} onChange={(event) => setWorkOrderForm({ ...workOrderForm, compliance_reference: event.target.value })} />
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={workOrderForm.safety_related} onChange={(event) => setWorkOrderForm({ ...workOrderForm, safety_related: event.target.checked })} />
+                Safety related
+              </label>
+            </div>
+            <div className="task-list">
+              {workOrders.map((workOrder) => (
+                <article
+                  key={workOrder.id}
+                  className={`task-card ${workOrder.id === selectedWorkOrderId ? "selected" : ""}`}
+                  onClick={() => setSelectedWorkOrderId(workOrder.id)}
+                >
+                  <div>
+                    <strong>{workOrder.title}</strong>
+                    <span>{workOrder.priority} · {workOrder.status} · {workOrder.compliance_reference ?? "No standard"}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => updateWorkOrderStatus(workOrder.id, "completed")}
+                    disabled={workOrder.status === "completed"}
+                  >
+                    Done
+                  </button>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Asset readiness</p>
+                <h2>Operational checks</h2>
+              </div>
+            </div>
+            <div className="task-list">
+              <article className="task-card">
+                <div>
+                  <strong>Inventory discipline</strong>
+                  <span>Checkouts reduce available quantity and returns restore stock with condition capture.</span>
+                </div>
+              </article>
+              <article className="task-card">
+                <div>
+                  <strong>Facility availability</strong>
+                  <span>Bookings reject overlapping time windows for confirmed facility reservations.</span>
+                </div>
+              </article>
+              <article className="task-card">
+                <div>
+                  <strong>Safety compliance</strong>
+                  <span>Safety-related work orders stay visible until completed with cost and notes.</span>
+                </div>
+              </article>
+            </div>
+          </div>
         </section>
 
         <section className="work-grid" id="competition">
