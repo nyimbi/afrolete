@@ -219,7 +219,7 @@ async def payment_webhook_route(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> BillingPaymentWebhookRead:
-    signature_required, signature_validated = validate_payment_webhook_signature(
+    signature_required, signature_validated = await validate_payment_webhook_signature(
         await request.body(),
         x_afrolete_billing_timestamp,
         x_afrolete_billing_signature,

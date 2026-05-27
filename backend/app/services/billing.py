@@ -35,6 +35,7 @@ from app.schemas.billing import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.secrets import read_openbao_kv_secret
 
 
 async def ensure_manage_billing(
@@ -296,7 +297,7 @@ async def deliver_tax_filing(
             response = await client.post(
                 selected_settings.billing_tax_filing_webhook_url,
                 json=payload,
-                headers=billing_tax_filing_headers(selected_settings),
+                headers=await billing_tax_filing_headers(selected_settings),
             )
         result["provider_status_code"] = response.status_code
         result["delivered"] = 200 <= response.status_code < 300
@@ -465,7 +466,7 @@ async def deliver_dunning_notice(
         "next_action": notice["next_action"],
         "created_at": result["delivered_at"].isoformat(),
     }
-    headers = billing_dunning_headers(selected_settings)
+    headers = await billing_dunning_headers(selected_settings)
     try:
         async with httpx.AsyncClient(timeout=selected_settings.billing_dunning_timeout_seconds) as client:
             response = await client.post(
@@ -482,17 +483,31 @@ async def deliver_dunning_notice(
     return result
 
 
-def billing_dunning_headers(settings: Settings) -> dict[str, str]:
+async def billing_dunning_headers(settings: Settings) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    if settings.billing_dunning_webhook_key:
-        headers["X-Afrolete-Billing-Dunning-Key"] = settings.billing_dunning_webhook_key
+    key = await resolve_billing_secret(
+        settings,
+        env_value=settings.billing_dunning_webhook_key,
+        path=settings.billing_dunning_webhook_key_secret_path,
+        field_name=settings.billing_dunning_webhook_key_secret_field,
+        label="billing dunning webhook key",
+    )
+    if key:
+        headers["X-Afrolete-Billing-Dunning-Key"] = key
     return headers
 
 
-def billing_tax_filing_headers(settings: Settings) -> dict[str, str]:
+async def billing_tax_filing_headers(settings: Settings) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    if settings.billing_tax_filing_webhook_key:
-        headers["X-Afrolete-Billing-Tax-Filing-Key"] = settings.billing_tax_filing_webhook_key
+    key = await resolve_billing_secret(
+        settings,
+        env_value=settings.billing_tax_filing_webhook_key,
+        path=settings.billing_tax_filing_webhook_key_secret_path,
+        field_name=settings.billing_tax_filing_webhook_key_secret_field,
+        label="billing tax filing webhook key",
+    )
+    if key:
+        headers["X-Afrolete-Billing-Tax-Filing-Key"] = key
     return headers
 
 
@@ -545,14 +560,20 @@ async def ingest_payment_webhook(
     }
 
 
-def validate_payment_webhook_signature(
+async def validate_payment_webhook_signature(
     raw_body: bytes,
     timestamp_header: str | None,
     signature_header: str | None,
     settings: Settings | None = None,
 ) -> tuple[bool, bool]:
     selected_settings = settings or get_settings()
-    signing_key = selected_settings.billing_payment_webhook_signing_key
+    signing_key = await resolve_billing_secret(
+        selected_settings,
+        env_value=selected_settings.billing_payment_webhook_signing_key,
+        path=selected_settings.billing_payment_webhook_signing_key_secret_path,
+        field_name=selected_settings.billing_payment_webhook_signing_key_secret_field,
+        label="billing payment webhook signing key",
+    )
     if not signing_key:
         return False, False
     if not timestamp_header or not signature_header:
@@ -573,6 +594,32 @@ def validate_payment_webhook_signature(
     if not hmac.compare_digest(expected, submitted):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature")
     return True, True
+
+
+async def resolve_billing_secret(
+    settings: Settings,
+    *,
+    env_value: str,
+    path: str,
+    field_name: str,
+    label: str,
+) -> str:
+    if env_value:
+        return env_value
+    if not path:
+        return ""
+    if not settings.openbao_addr or not settings.openbao_token:
+        raise HTTPException(
+            status_code=500,
+            detail=f"{label} is configured for OpenBao but OpenBao address/token is missing",
+        )
+    try:
+        secret = await read_openbao_kv_secret(settings, path, field_name)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"OpenBao {label} fetch failed: {exc}") from exc
+    if not secret:
+        raise HTTPException(status_code=500, detail=f"OpenBao {label} secret field is empty")
+    return secret
 
 
 async def create_entitlement(

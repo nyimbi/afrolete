@@ -60,14 +60,20 @@ class Settings(BaseSettings):
     openbao_timeout_seconds: float = 3.0
 
     billing_payment_webhook_signing_key: str = ""
+    billing_payment_webhook_signing_key_secret_path: str = ""
+    billing_payment_webhook_signing_key_secret_field: str = "value"
     billing_payment_webhook_tolerance_seconds: int = 300
     billing_dunning_delivery_mode: Literal["record_only", "webhook"] = "record_only"
     billing_dunning_webhook_url: str = ""
     billing_dunning_webhook_key: str = ""
+    billing_dunning_webhook_key_secret_path: str = ""
+    billing_dunning_webhook_key_secret_field: str = "value"
     billing_dunning_timeout_seconds: float = 5.0
     billing_tax_filing_delivery_mode: Literal["record_only", "webhook"] = "record_only"
     billing_tax_filing_webhook_url: str = ""
     billing_tax_filing_webhook_key: str = ""
+    billing_tax_filing_webhook_key_secret_path: str = ""
+    billing_tax_filing_webhook_key_secret_field: str = "value"
     billing_tax_filing_timeout_seconds: float = 5.0
 
     report_artifact_dir: str = "data/report-artifacts"
