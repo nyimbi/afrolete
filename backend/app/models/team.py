@@ -4,7 +4,13 @@ from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
-from app.models.enums import CommitteeRole, RosterStatus, SportFormat, TeamRole
+from app.models.enums import (
+    CommitteeRole,
+    GuardianRelationshipKind,
+    RosterStatus,
+    SportFormat,
+    TeamRole,
+)
 
 
 class Team(IdMixin, TimestampMixin, Base):
@@ -68,10 +74,19 @@ class GuardianRelationship(IdMixin, TimestampMixin, Base):
 
     athlete_person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     guardian_person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    relationship_kind: Mapped[GuardianRelationshipKind] = mapped_column(
+        enum_type(GuardianRelationshipKind),
+        default=GuardianRelationshipKind.PARENT,
+        nullable=False,
+        index=True,
+    )
     relationship: Mapped[str] = mapped_column(String(80), nullable=False)
     can_sign_consent: Mapped[bool] = mapped_column(Boolean, default=False)
     can_view_medical: Mapped[bool] = mapped_column(Boolean, default=False)
     emergency_contact: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_pick_up: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 class TeamCommittee(IdMixin, TimestampMixin, Base):

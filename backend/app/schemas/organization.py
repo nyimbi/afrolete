@@ -19,6 +19,14 @@ class OrganizationCreate(BaseModel):
     country_code: str | None = Field(default=None, min_length=2, max_length=2)
     primary_sport: str | None = Field(default=None, max_length=80)
     mission: str | None = Field(default=None, max_length=2000)
+    public_name: str | None = Field(default=None, max_length=240)
+    contact_email: str | None = Field(default=None, max_length=320)
+    contact_phone: str | None = Field(default=None, max_length=64)
+    website_url: str | None = Field(default=None, max_length=500)
+    subdomain: str | None = Field(default=None, max_length=120)
+    logo_url: str | None = Field(default=None, max_length=500)
+    brand_primary_color: str | None = Field(default=None, max_length=16)
+    brand_secondary_color: str | None = Field(default=None, max_length=16)
 
 
 class OrganizationRead(BaseModel):
@@ -30,6 +38,14 @@ class OrganizationRead(BaseModel):
     country_code: str | None
     primary_sport: str | None
     mission: str | None
+    public_name: str | None
+    contact_email: str | None
+    contact_phone: str | None
+    website_url: str | None
+    subdomain: str | None
+    logo_url: str | None
+    brand_primary_color: str | None
+    brand_secondary_color: str | None
     my_roles: list[MembershipRole] = Field(default_factory=list)
 
 

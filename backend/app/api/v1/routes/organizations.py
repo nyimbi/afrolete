@@ -41,6 +41,14 @@ def to_organization_read(item) -> OrganizationRead:
         country_code=organization.country_code,
         primary_sport=organization.primary_sport,
         mission=organization.mission,
+        public_name=organization.public_name,
+        contact_email=organization.contact_email,
+        contact_phone=organization.contact_phone,
+        website_url=organization.website_url,
+        subdomain=organization.subdomain,
+        logo_url=organization.logo_url,
+        brand_primary_color=organization.brand_primary_color,
+        brand_secondary_color=organization.brand_secondary_color,
         my_roles=roles,
     )
 

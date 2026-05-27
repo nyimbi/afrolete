@@ -11,12 +11,23 @@ def test_create_and_list_organization(client, identity_headers) -> None:
             "country_code": "KE",
             "primary_sport": "football",
             "mission": "Build an athlete development pathway.",
+            "public_name": "Nairobi Rising",
+            "contact_email": "hello@rising.example",
+            "contact_phone": "+254711000000",
+            "website_url": "https://rising.example",
+            "subdomain": "nairobi-rising",
+            "logo_url": "https://cdn.example/logo.png",
+            "brand_primary_color": "#0f766e",
+            "brand_secondary_color": "#f59e0b",
         },
     )
 
     assert create_response.status_code == 201
     created = create_response.json()
     assert created["slug"] == "nairobi-rising-fc"
+    assert created["public_name"] == "Nairobi Rising"
+    assert created["subdomain"] == "nairobi-rising"
+    assert created["brand_primary_color"] == "#0f766e"
     assert created["my_roles"] == ["owner"]
 
     list_response = client.get("/api/v1/organizations", headers=identity_headers)

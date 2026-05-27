@@ -42,6 +42,15 @@ async def create_organization(
     existing = await db.scalar(select(Organization).where(Organization.slug == slug))
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Organization slug exists")
+    if payload.subdomain is not None:
+        existing_subdomain = await db.scalar(
+            select(Organization).where(Organization.subdomain == payload.subdomain)
+        )
+        if existing_subdomain is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Organization subdomain exists",
+            )
 
     organization = Organization(
         name=payload.name,
@@ -51,6 +60,14 @@ async def create_organization(
         country_code=payload.country_code,
         primary_sport=payload.primary_sport,
         mission=payload.mission,
+        public_name=payload.public_name,
+        contact_email=payload.contact_email,
+        contact_phone=payload.contact_phone,
+        website_url=payload.website_url,
+        subdomain=payload.subdomain,
+        logo_url=payload.logo_url,
+        brand_primary_color=payload.brand_primary_color,
+        brand_secondary_color=payload.brand_secondary_color,
     )
     db.add(organization)
     await db.flush()

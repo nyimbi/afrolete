@@ -70,6 +70,22 @@ athlete-development platform:
   - Added local SQLite database artifacts to `.gitignore`.
   - Verification: `uv run alembic upgrade head`,
     `uv run alembic downgrade base`, `uv run ruff check .`, `uv run pytest`.
+- Implemented slice 004 safeguarding, consent capture, and tenant branding:
+  - Added organization contact, public name, subdomain, logo, and brand color
+    fields for club/school/association managed sites.
+  - Added guardian relationship details for parent, legal guardian, caregiver,
+    emergency contact, pickup, medical visibility, and consent authority.
+  - Added consent requests and activity consents for organization, team, and
+    event scopes.
+  - Consent can be captured by one-use web links, SMS, WhatsApp, Telegram,
+    email, or manual administrative recording.
+  - Added event participation clearance for minors, including guardian and
+    consent-required states.
+  - Switched the backend default local database to
+    `postgresql+asyncpg:///afrolete`.
+  - Verification: local PostgreSQL `alembic upgrade head`, PostgreSQL
+    `alembic downgrade 537570abceee`, PostgreSQL `alembic upgrade head`,
+    `uv run ruff check .`, `uv run pytest`.
 
 ## Implementation Slices
 
@@ -79,6 +95,7 @@ athlete-development platform:
 | 001 - Executable SaaS foundation | Complete | Slice 001 foundation commit | Backend/frontend/infra starter code added and verified. |
 | 002 - Identity, tenant, and authorization vertical | Partial | Backend tests 11/11 | Tenant graph, local identity bridge, authz boundary, organization APIs, team APIs, and committee APIs implemented; production Keycloak/SpiceDB adapters and migrations remain. |
 | 003 - Database migration baseline | Complete | Alembic upgrade/downgrade; backend tests 11/11 | Baseline revision captures the current schema; production execution against `db.lindela.io` remains a deployment task. |
+| 004 - Safeguarding, consent, and tenant branding | Partial | Local PostgreSQL migration verified; backend tests 14/14 | Backend model/API support for guardians, consent requests, consent capture channels, minor event clearance, and branded organization sites. |
 
 ## Capability Coverage
 
@@ -91,7 +108,7 @@ Status values:
 
 | Capability Area | Status | Notes |
 | --- | --- | --- |
-| Tenant organizations, clubs, schools, associations | foundation | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph. |
+| Tenant organizations, clubs, schools, associations | partial | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph; organization branding/contact/subdomain fields support owned public sites. |
 | Person identity and athlete profiles | foundation | `Person`, `AppUser`, and `AthleteProfile` models added. |
 | Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
 | Events, schedules, attendance | foundation | `Event` and `AttendanceRecord` models added. |
@@ -100,7 +117,7 @@ Status values:
 | Training and coaching plans | not-started | Future slice. |
 | Competition, fixtures, officials, tournaments | not-started | Future slice. |
 | Communications and notifications | foundation | Service boundary exists; workflow pending. |
-| Consent, safeguarding, compliance, incidents | not-started | Future slice. |
+| Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | not-started | Future slice. |
 | Finance, sponsorship, fundraising, ticketing | not-started | Future slice. |
 | Reports and intelligence | not-started | Future slice. |
@@ -110,12 +127,12 @@ Status values:
 
 ## Next Actions
 
-1. Commit and push slice 003 database migration baseline.
+1. Commit and push slice 004 safeguarding, consent, and tenant branding.
 2. Replace local/test identity bridge with Keycloak token validation and user
    provisioning rules.
 3. Replace in-memory authorization with a live SpiceDB client adapter and
    relationship writer.
 4. Continue the operating vertical into event scheduling, attendance, and
    athlete profile workflows.
-5. Create deployment runbooks for creating/applying the `afrolete` database and
-   role on `db.lindela.io`.
+5. Add frontend flows for organization branding, guardian consent links, and
+   event clearance review.

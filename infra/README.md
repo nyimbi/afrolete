@@ -16,10 +16,11 @@ Deployment artifacts for the PJS shared-services environment.
 
 ## Setup Order
 
-1. Create PostgreSQL role/database with `infra/postgres/create-afrolete.sql`.
+1. For local development, create `postgresql:///afrolete` with `createdb
+   afrolete`; for PJS deployment, create the PostgreSQL role/database with
+   `infra/postgres/create-afrolete.sql`.
 2. Apply SpiceDB schema in `infra/spicedb/afrolete.zed`.
 3. Create Keycloak clients described in `infra/keycloak/README.md`.
 4. Create OpenBao policy/agent files from `infra/openbao/`.
 5. Create Temporal namespace and MinIO bucket.
 6. Deploy backend and frontend systemd services.
-

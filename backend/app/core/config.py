@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     env: str = "local"
     api_prefix: str = "/api/v1"
-    database_url: str = "sqlite+aiosqlite:///./afrolete.local.db"
+    database_url: str = "postgresql+asyncpg:///afrolete"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
     keycloak_issuer: AnyHttpUrl = "https://auth.lindela.io/realms/lindela"

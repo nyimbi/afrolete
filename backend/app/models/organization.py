@@ -28,6 +28,14 @@ class Organization(IdMixin, TimestampMixin, Base):
     country_code: Mapped[str | None] = mapped_column(String(2))
     primary_sport: Mapped[str | None] = mapped_column(String(80))
     mission: Mapped[str | None] = mapped_column(Text)
+    public_name: Mapped[str | None] = mapped_column(String(240))
+    contact_email: Mapped[str | None] = mapped_column(String(320))
+    contact_phone: Mapped[str | None] = mapped_column(String(64))
+    website_url: Mapped[str | None] = mapped_column(String(500))
+    subdomain: Mapped[str | None] = mapped_column(String(120), unique=True, index=True)
+    logo_url: Mapped[str | None] = mapped_column(String(500))
+    brand_primary_color: Mapped[str | None] = mapped_column(String(16))
+    brand_secondary_color: Mapped[str | None] = mapped_column(String(16))
 
 
 class Membership(IdMixin, TimestampMixin, Base):

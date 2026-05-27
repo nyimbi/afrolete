@@ -70,6 +70,52 @@ class RosterStatus(StrEnum):
     INACTIVE = "inactive"
 
 
+class GuardianRelationshipKind(StrEnum):
+    PARENT = "parent"
+    LEGAL_GUARDIAN = "legal_guardian"
+    FOSTER_GUARDIAN = "foster_guardian"
+    CAREGIVER = "caregiver"
+    EMERGENCY_CONTACT = "emergency_contact"
+
+
+class ConsentScopeType(StrEnum):
+    ORGANIZATION = "organization"
+    TEAM = "team"
+    EVENT = "event"
+
+
+class ConsentStatus(StrEnum):
+    PENDING = "pending"
+    GRANTED = "granted"
+    DENIED = "denied"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+
+
+class ConsentCaptureChannel(StrEnum):
+    WEB_LINK = "web_link"
+    SMS = "sms"
+    WHATSAPP = "whatsapp"
+    TELEGRAM = "telegram"
+    EMAIL = "email"
+    MANUAL = "manual"
+
+
+class ConsentRequestStatus(StrEnum):
+    PENDING = "pending"
+    FULFILLED = "fulfilled"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
+class ParticipationClearanceStatus(StrEnum):
+    CLEARED = "cleared"
+    MINOR_REQUIRES_CONSENT = "minor_requires_consent"
+    CONSENT_DENIED = "consent_denied"
+    CONSENT_EXPIRED = "consent_expired"
+    NO_GUARDIAN = "no_guardian"
+
+
 class MemberSubjectType(StrEnum):
     PERSON = "person"
     ORGANIZATION = "organization"
