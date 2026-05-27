@@ -26,6 +26,8 @@ from app.schemas.safeguarding import ConsentRequestCreate
 from app.schemas.event import (
     EventCreate,
     EventTravelConsentBatchRead,
+    EventTravelConsentReminderCreate,
+    EventTravelConsentReminderRead,
     EventTravelConsentRequestCreate,
     EventTravelConsentRequestItemRead,
     EventTravelPlanCreate,
@@ -400,6 +402,64 @@ async def request_travel_consents(
     )
 
 
+async def send_travel_consent_reminders(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelConsentReminderCreate,
+    authz: AuthorizationService,
+) -> EventTravelConsentReminderRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    pending_requests = list(
+        (
+            await db.scalars(
+                select(ConsentRequest)
+                .where(ConsentRequest.organization_id == event.organization_id)
+                .where(ConsentRequest.scope_type == ConsentScopeType.EVENT)
+                .where(ConsentRequest.scope_id == event.id)
+                .where(ConsentRequest.status == ConsentRequestStatus.PENDING)
+                .order_by(ConsentRequest.sent_at.desc())
+            )
+        ).all()
+    )
+    if not pending_requests:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No pending travel consents")
+
+    guardian_ids = sorted({request.guardian_person_id for request in pending_requests}, key=str)
+    message = await create_message(
+        db,
+        identity,
+        CommunicationMessageCreate(
+            organization_id=event.organization_id,
+            message_type=CommunicationMessageType.REMINDER,
+            channel=payload.channel,
+            scope_type=CommunicationScopeType.PERSON,
+            scope_id=guardian_ids[0],
+            recipient_person_ids=guardian_ids,
+            subject=payload.subject or travel_consent_reminder_subject(event),
+            body=payload.body or travel_consent_reminder_body(event, plan, len(pending_requests)),
+            urgent=False,
+            quiet_hours_override=False,
+            copy_guardians_for_minors=False,
+        ),
+        authz,
+    )
+    recipient_count = await db.scalar(
+        select(func.count(MessageRecipient.id)).where(MessageRecipient.message_id == message.id)
+    )
+    return EventTravelConsentReminderRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        message_id=message.id,
+        pending_request_count=len(pending_requests),
+        recipient_count=int(recipient_count or 0),
+    )
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -509,6 +569,26 @@ def travel_consent_notes(event: Event, plan: EventTravelPlan) -> str:
     if plan.cost_per_participant is not None:
         parts.append(f"Estimated participant cost: {plan.cost_per_participant}.")
     return "\n".join(parts)[:2000]
+
+
+def travel_consent_reminder_subject(event: Event) -> str:
+    return f"Travel consent needed: {event.title}"[:240]
+
+
+def travel_consent_reminder_body(event: Event, plan: EventTravelPlan, pending_count: int) -> str:
+    parts = [
+        f"Please review the pending travel consent request for {event.title}.",
+        f"Destination: {plan.destination}.",
+        f"Pending requests: {pending_count}.",
+        "Open the family portal or the one-use consent link already sent to respond.",
+    ]
+    if plan.departure_at is not None:
+        parts.append(f"Departure: {plan.departure_at.isoformat()}.")
+    if plan.consent_due_at is not None:
+        parts.append(f"Consent due: {plan.consent_due_at.isoformat()}.")
+    if plan.emergency_contacts:
+        parts.append(f"Emergency contacts: {plan.emergency_contacts}")
+    return "\n".join(parts)[:4000]
 
 
 def classify_travel_risk(payload: EventTravelPlanCreate) -> tuple[TravelRiskLevel, str]:

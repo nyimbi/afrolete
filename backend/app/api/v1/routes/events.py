@@ -11,6 +11,8 @@ from app.schemas.event import (
     EventCreate,
     EventRead,
     EventTravelConsentBatchRead,
+    EventTravelConsentReminderCreate,
+    EventTravelConsentReminderRead,
     EventTravelConsentRequestCreate,
     EventTravelPlanCreate,
     EventTravelPlanRead,
@@ -36,6 +38,7 @@ from app.services.events import (
     record_attendance,
     request_travel_consents,
     seed_attendance_from_team_roster,
+    send_travel_consent_reminders,
     update_travel_plan,
 )
 from app.services.safeguarding import medical_clearance_for_event
@@ -298,6 +301,21 @@ async def request_travel_consents_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelConsentBatchRead:
     return await request_travel_consents(db, identity, travel_plan_id, payload, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/consent-reminders",
+    response_model=EventTravelConsentReminderRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_travel_consent_reminders_route(
+    travel_plan_id: UUID,
+    payload: EventTravelConsentReminderCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelConsentReminderRead:
+    return await send_travel_consent_reminders(db, identity, travel_plan_id, payload, authz)
 
 
 @router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])

@@ -172,6 +172,20 @@ class EventTravelConsentBatchRead(BaseModel):
     requests: list[EventTravelConsentRequestItemRead]
 
 
+class EventTravelConsentReminderCreate(BaseModel):
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    subject: str | None = Field(default=None, max_length=240)
+    body: str | None = Field(default=None, max_length=4000)
+
+
+class EventTravelConsentReminderRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    message_id: UUID
+    pending_request_count: int
+    recipient_count: int
+
+
 class AttendanceRecordUpsert(BaseModel):
     person_id: UUID
     status: AttendanceStatus

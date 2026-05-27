@@ -485,6 +485,14 @@ export type EventTravelConsentBatchRead = {
   requests: EventTravelConsentRequestItemRead[];
 };
 
+export type EventTravelConsentReminderRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  message_id: UUID;
+  pending_request_count: number;
+  recipient_count: number;
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

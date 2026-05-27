@@ -71,6 +71,7 @@ import type {
   DonationRead,
   EventRead,
   EventTravelConsentBatchRead,
+  EventTravelConsentReminderRead,
   EventTravelPlanRead,
   EventWeatherAlertRead,
   EventWeatherAssessmentRead,
@@ -342,6 +343,7 @@ export default function HomePage() {
   const [weatherAlert, setWeatherAlert] = useState<EventWeatherAlertRead | null>(null);
   const [travelPlans, setTravelPlans] = useState<EventTravelPlanRead[]>([]);
   const [travelConsentBatch, setTravelConsentBatch] = useState<EventTravelConsentBatchRead | null>(null);
+  const [travelConsentReminder, setTravelConsentReminder] = useState<EventTravelConsentReminderRead | null>(null);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -568,6 +570,7 @@ export default function HomePage() {
     estimated_cost: 450,
     cost_per_participant: 15,
     consent_channel: "email" as ConsentCaptureChannel,
+    reminder_channel: "email" as CommunicationChannel,
     notes: "Away match travel plan."
   });
   const [guardianForm, setGuardianForm] = useState({
@@ -1567,6 +1570,7 @@ export default function HomePage() {
       setWeatherAlert(null);
       setTravelPlans([]);
       setTravelConsentBatch(null);
+      setTravelConsentReminder(null);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1769,6 +1773,7 @@ export default function HomePage() {
       setWeatherAlert(null);
       setTravelPlans([]);
       setTravelConsentBatch(null);
+      setTravelConsentReminder(null);
       return;
     }
     runAction(
@@ -2343,6 +2348,33 @@ export default function HomePage() {
           `Travel consents: ${batch.created} created, ${batch.existing} existing`,
           batch.skipped_no_guardian > 0 ? "bad" : "good"
         );
+      }
+    );
+  };
+
+  const remindTravelConsents = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-consent-reminders-${plan.id}`,
+      () =>
+        apiRequest<EventTravelConsentReminderRead>(`/events/travel-plans/${plan.id}/consent-reminders`, {
+          method: "POST",
+          identity,
+          body: {
+            channel: travelForm.reminder_channel,
+            subject: null,
+            body: null
+          }
+        }),
+      (reminder) => {
+        setTravelConsentReminder(reminder);
+        setSelectedMessageId(reminder.message_id);
+        addLog(
+          `Travel consent reminder sent to ${reminder.recipient_count} guardians`,
+          reminder.recipient_count > 0 ? "good" : "bad"
+        );
+        if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
+        }
       }
     );
   };
@@ -6547,6 +6579,17 @@ export default function HomePage() {
                   <option value="web_link">Web link</option>
                 </select>
               </label>
+              <label>
+                Reminder channel
+                <select value={travelForm.reminder_channel} onChange={(event) => setTravelForm({ ...travelForm, reminder_channel: event.target.value as CommunicationChannel })}>
+                  <option value="email">Email</option>
+                  <option value="sms">SMS</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="push">Push</option>
+                  <option value="in_app">In app</option>
+                </select>
+              </label>
               <label className="wide-field">
                 Route
                 <input value={travelForm.route_summary} onChange={(event) => setTravelForm({ ...travelForm, route_summary: event.target.value })} />
@@ -6570,6 +6613,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelConsentReminder ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Travel consent reminder</strong>
+                    <span>{travelConsentReminder.recipient_count} recipients · {travelConsentReminder.pending_request_count} pending requests</span>
+                    <span>Message {travelConsentReminder.message_id}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelPlans.slice(0, 2).map((plan) => (
                 <article key={plan.id} className="task-card">
                   <div>
@@ -6579,6 +6631,7 @@ export default function HomePage() {
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={() => requestTravelConsents(plan)}>Consent</button>
+                    <button type="button" onClick={() => remindTravelConsents(plan)}>Remind</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "completed")}>Complete</button>
