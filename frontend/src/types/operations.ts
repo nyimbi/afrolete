@@ -910,6 +910,11 @@ export type EventTravelExpenseRead = {
   payout_status: string | null;
   payout_requested_at: string | null;
   payout_processed_by_person_id: UUID | null;
+  payout_adapter_mode: string | null;
+  payout_destination: string | null;
+  payout_idempotency_key: string | null;
+  payout_provider_status_code: number | null;
+  payout_provider_response: string | null;
   receipt_url: string | null;
   notes: string | null;
 };
@@ -922,6 +927,11 @@ export type EventTravelExpensePayoutRead = {
   amount: string;
   currency: string;
   processed_at: string;
+  adapter_mode: string;
+  destination: string | null;
+  idempotency_key: string;
+  provider_status_code: number | null;
+  provider_response: string | null;
   expense: EventTravelExpenseRead;
 };
 

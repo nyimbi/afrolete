@@ -709,6 +709,9 @@ export default function HomePage() {
     expense_amount: 75,
     expense_receipt_url: "https://receipts.example/travel-fuel.jpg",
     expense_notes: "Fuel and tolls for away match transport.",
+    payout_provider: "mobile_money_gateway",
+    payout_destination: "mpesa:+254700000000",
+    payout_adapter_mode: "mobile_money",
     carpool_type: "request",
     carpool_pickup_location: "123 Main St",
     carpool_pickup_latitude: -1.2921,
@@ -3596,8 +3599,11 @@ export default function HomePage() {
           method: "POST",
           identity,
           body: {
-            provider: "manual_reimbursement",
+            provider: travelForm.payout_provider,
             external_reference: null,
+            destination: travelForm.payout_destination || null,
+            adapter_mode: travelForm.payout_adapter_mode || null,
+            idempotency_key: null,
             mark_reimbursed: true,
             notes: `Payout executed from the operations console for ${expense.category}.`
           }
@@ -3608,7 +3614,7 @@ export default function HomePage() {
           payout.expense,
           ...current.filter((item) => item.id !== payout.expense.id)
         ]);
-        addLog(`Payout ${payout.payout_reference} ${payout.payout_status}`, "good");
+        addLog(`Payout ${payout.payout_reference} ${payout.payout_status} via ${payout.adapter_mode}`, "good");
       }
     );
   };
@@ -8212,6 +8218,22 @@ export default function HomePage() {
                 <input type="number" min="0" value={travelForm.expense_amount} onChange={(event) => setTravelForm({ ...travelForm, expense_amount: Number(event.target.value) })} />
               </label>
               <label>
+                Payout provider
+                <input value={travelForm.payout_provider} onChange={(event) => setTravelForm({ ...travelForm, payout_provider: event.target.value })} />
+              </label>
+              <label>
+                Payout adapter
+                <select value={travelForm.payout_adapter_mode} onChange={(event) => setTravelForm({ ...travelForm, payout_adapter_mode: event.target.value })}>
+                  <option value="mobile_money">Mobile money</option>
+                  <option value="bank_transfer">Bank transfer</option>
+                  <option value="record_only">Record only</option>
+                </select>
+              </label>
+              <label className="wide-field">
+                Payout destination
+                <input value={travelForm.payout_destination} onChange={(event) => setTravelForm({ ...travelForm, payout_destination: event.target.value })} />
+              </label>
+              <label>
                 Carpool type
                 <select value={travelForm.carpool_type} onChange={(event) => setTravelForm({ ...travelForm, carpool_type: event.target.value })}>
                   <option value="request">Request</option>
@@ -8599,6 +8621,7 @@ export default function HomePage() {
                   <div>
                     <strong>{expense.category} · {expense.amount} {expense.currency}</strong>
                     <span>{expense.reimbursement_status} · {expense.vendor ?? "No vendor"} · {new Date(expense.incurred_at).toLocaleString()}</span>
+                    <span>{expense.payout_adapter_mode ?? "No payout adapter"} · {expense.payout_destination ?? "No payout destination"}</span>
                     <span>{expense.payout_reference ?? expense.receipt_url ?? expense.notes ?? "No receipt evidence"}</span>
                   </div>
                   <div className="event-toolbar">
@@ -8614,6 +8637,8 @@ export default function HomePage() {
                   <div>
                     <strong>{travelExpensePayout.payout_reference}</strong>
                     <span>{travelExpensePayout.amount} {travelExpensePayout.currency} · {travelExpensePayout.provider} · {travelExpensePayout.payout_status}</span>
+                    <span>{travelExpensePayout.adapter_mode} · {travelExpensePayout.destination ?? "No destination"} · {travelExpensePayout.provider_status_code ?? "recorded"}</span>
+                    <span>{travelExpensePayout.idempotency_key}</span>
                     <span>{new Date(travelExpensePayout.processed_at).toLocaleString()}</span>
                   </div>
                 </article>

@@ -788,6 +788,11 @@ class EventTravelExpenseRead(BaseModel):
     payout_status: str | None = None
     payout_requested_at: datetime | None = None
     payout_processed_by_person_id: UUID | None = None
+    payout_adapter_mode: str | None = None
+    payout_destination: str | None = None
+    payout_idempotency_key: str | None = None
+    payout_provider_status_code: int | None = None
+    payout_provider_response: str | None = None
     receipt_url: str | None
     notes: str | None
 
@@ -795,6 +800,9 @@ class EventTravelExpenseRead(BaseModel):
 class EventTravelExpensePayoutCreate(BaseModel):
     provider: str = Field(default="manual_reimbursement", min_length=2, max_length=80)
     external_reference: str | None = Field(default=None, max_length=180)
+    destination: str | None = Field(default=None, max_length=240)
+    adapter_mode: str | None = Field(default=None, max_length=80)
+    idempotency_key: str | None = Field(default=None, max_length=180)
     mark_reimbursed: bool = True
     notes: str | None = Field(default=None, max_length=2000)
 
@@ -807,6 +815,11 @@ class EventTravelExpensePayoutRead(BaseModel):
     amount: Decimal
     currency: str
     processed_at: datetime
+    adapter_mode: str
+    destination: str | None
+    idempotency_key: str
+    provider_status_code: int | None
+    provider_response: str | None
     expense: EventTravelExpenseRead
 
 

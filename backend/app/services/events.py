@@ -2387,11 +2387,28 @@ async def execute_travel_expense_payout(
 
     processed_at = datetime.now(UTC)
     payout_reference = payload.external_reference or travel_expense_payout_reference(expense, payload.provider, processed_at)
+    adapter_mode = payload.adapter_mode or travel_expense_payout_adapter_mode(payload.provider)
+    idempotency_key = payload.idempotency_key or travel_expense_payout_idempotency_key(expense, payload.provider)
+    provider_status_code = 202 if not payload.mark_reimbursed else 200
+    provider_response = travel_expense_payout_provider_response(
+        expense,
+        provider=payload.provider,
+        adapter_mode=adapter_mode,
+        destination=payload.destination,
+        payout_reference=payout_reference,
+        idempotency_key=idempotency_key,
+        queued=not payload.mark_reimbursed,
+    )
     expense.payout_provider = payload.provider
     expense.payout_reference = payout_reference
     expense.payout_status = "paid" if payload.mark_reimbursed else "queued"
     expense.payout_requested_at = processed_at
     expense.payout_processed_by_person_id = identity.person_id
+    expense.payout_adapter_mode = adapter_mode
+    expense.payout_destination = payload.destination
+    expense.payout_idempotency_key = idempotency_key
+    expense.payout_provider_status_code = provider_status_code
+    expense.payout_provider_response = provider_response
     if payload.mark_reimbursed:
         expense.reimbursement_status = "reimbursed"
         expense.reimbursed_at = processed_at
@@ -2407,6 +2424,11 @@ async def execute_travel_expense_payout(
         amount=expense.amount,
         currency=expense.currency,
         processed_at=processed_at,
+        adapter_mode=adapter_mode,
+        destination=payload.destination,
+        idempotency_key=idempotency_key,
+        provider_status_code=provider_status_code,
+        provider_response=provider_response,
         expense=travel_expense_read(expense),
     )
 
@@ -2969,6 +2991,47 @@ def travel_expense_payout_reference(
     return f"TRAVEL-PAYOUT-{provider_token}-{processed_at.strftime('%Y%m%d')}-{str(expense.id)[:8]}".upper()
 
 
+def travel_expense_payout_adapter_mode(provider: str) -> str:
+    normalized = provider.lower()
+    if any(token in normalized for token in ["mpesa", "m-pesa", "airtel", "mobile", "momo", "wallet"]):
+        return "mobile_money"
+    if any(token in normalized for token in ["bank", "ach", "sepa", "wire", "rtgs", "eft"]):
+        return "bank_transfer"
+    return "record_only"
+
+
+def travel_expense_payout_idempotency_key(expense: EventTravelExpense, provider: str) -> str:
+    token = sha256(f"travel-payout:{expense.id}:{expense.amount}:{expense.currency}:{provider}".encode()).hexdigest()
+    provider_token = sub(r"[^a-z0-9]+", "-", provider.lower()).strip("-")[:24] or "provider"
+    return f"tep_{provider_token}_{token[:24]}"
+
+
+def travel_expense_payout_provider_response(
+    expense: EventTravelExpense,
+    *,
+    provider: str,
+    adapter_mode: str,
+    destination: str | None,
+    payout_reference: str,
+    idempotency_key: str,
+    queued: bool,
+) -> str:
+    status_value = "queued_for_provider" if queued else "accepted"
+    return json.dumps(
+        {
+            "provider": provider,
+            "adapter_mode": adapter_mode,
+            "destination_configured": bool(destination),
+            "amount": str(expense.amount),
+            "currency": expense.currency,
+            "payout_reference": payout_reference,
+            "idempotency_key": idempotency_key,
+            "status": status_value,
+        },
+        sort_keys=True,
+    )
+
+
 def travel_fee_checkout_url(base_url: str, invoice: FinanceInvoice, provider: str) -> str:
     token = sha256(f"{invoice.id}:{invoice.invoice_number}:{invoice.amount_due}:{provider}".encode()).hexdigest()[:24]
     return f"{base_url.rstrip('/')}/{invoice.id}?provider={provider}&token={token}"
@@ -3140,6 +3203,11 @@ def travel_expense_read(expense: EventTravelExpense) -> EventTravelExpenseRead:
         payout_status=expense.payout_status,
         payout_requested_at=expense.payout_requested_at,
         payout_processed_by_person_id=expense.payout_processed_by_person_id,
+        payout_adapter_mode=expense.payout_adapter_mode,
+        payout_destination=expense.payout_destination,
+        payout_idempotency_key=expense.payout_idempotency_key,
+        payout_provider_status_code=expense.payout_provider_status_code,
+        payout_provider_response=expense.payout_provider_response,
         receipt_url=expense.receipt_url,
         notes=expense.notes,
     )
