@@ -98,6 +98,51 @@ def test_template_team_message_recipients_and_read_receipt(client, identity_head
     assert read_response.json()["read_at"] is not None
 
 
+def test_record_only_dispatch_and_delivery_callback(client, identity_headers) -> None:
+    organization, team, _ = create_communications_context(client, identity_headers)
+    message = client.post(
+        "/api/v1/communications/messages",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "message_type": "reminder",
+            "channel": "email",
+            "scope_type": "team",
+            "scope_id": team["id"],
+            "subject": "Fixture transport",
+            "body": "The bus leaves at 14:00.",
+        },
+    ).json()
+
+    dispatch_response = client.post(
+        f"/api/v1/communications/messages/{message['id']}/dispatch",
+        headers=identity_headers,
+    )
+
+    assert dispatch_response.status_code == 200
+    summary = dispatch_response.json()
+    assert summary["attempted"] == 1
+    assert summary["transport_mode"] == "record_only"
+    assert summary["queued"] == 1
+
+    recipients = client.get(f"/api/v1/communications/messages/{message['id']}/recipients").json()
+    assert recipients[0]["delivery_status"] == "queued"
+    assert "No email delivery webhook configured" in recipients[0]["failure_reason"]
+
+    callback_response = client.post(
+        "/api/v1/communications/delivery-events",
+        json={
+            "recipient_id": recipients[0]["id"],
+            "delivery_status": "delivered",
+        },
+    )
+
+    assert callback_response.status_code == 200
+    callback = callback_response.json()
+    assert callback["delivery_status"] == "delivered"
+    assert callback["delivered_at"] is not None
+
+
 def test_notification_preferences_and_cross_org_recipient_guard(client, identity_headers) -> None:
     organization, _, member = create_communications_context(client, identity_headers)
     other_organization = client.post(

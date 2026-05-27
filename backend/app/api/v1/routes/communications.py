@@ -1,14 +1,17 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas.communication import (
+    CommunicationDispatchSummary,
     CommunicationMessageCreate,
     CommunicationMessageRead,
     CommunicationTemplateCreate,
     CommunicationTemplateRead,
+    DeliveryWebhookEvent,
     MessageRecipientRead,
     MessageRecipientUpdate,
     NotificationPreferenceRead,
@@ -20,9 +23,11 @@ from app.services.authz.service import AuthorizationService, get_authorization_s
 from app.services.communications import (
     create_message,
     create_template,
+    dispatch_message,
     list_messages,
     list_recipients,
     list_templates,
+    record_delivery_event,
     update_recipient_status,
     upsert_preference,
 )
@@ -142,6 +147,16 @@ async def list_recipients_route(
     return [to_recipient_read(recipient, person) for recipient, person in await list_recipients(db, message_id)]
 
 
+@router.post("/messages/{message_id}/dispatch", response_model=CommunicationDispatchSummary)
+async def dispatch_message_route(
+    message_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunicationDispatchSummary:
+    return await dispatch_message(db, identity, message_id, authz)
+
+
 @router.patch("/recipients/{recipient_id}", response_model=MessageRecipientRead)
 async def update_recipient_route(
     recipient_id: UUID,
@@ -151,6 +166,25 @@ async def update_recipient_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> MessageRecipientRead:
     recipient = await update_recipient_status(db, identity, recipient_id, payload, authz)
+    rows = await list_recipients(db, recipient.message_id)
+    _, person = next(row for row in rows if row[0].id == recipient.id)
+    return to_recipient_read(recipient, person)
+
+
+@router.post("/delivery-events", response_model=MessageRecipientRead)
+async def record_delivery_event_route(
+    payload: DeliveryWebhookEvent,
+    x_afrolete_delivery_key: str | None = Header(default=None, alias="X-Afrolete-Delivery-Key"),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> MessageRecipientRead:
+    if settings.communication_webhook_key:
+        if x_afrolete_delivery_key != settings.communication_webhook_key:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    elif settings.env != "local":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    recipient = await record_delivery_event(db, payload)
     rows = await list_recipients(db, recipient.message_id)
     _, person = next(row for row in rows if row[0].id == recipient.id)
     return to_recipient_read(recipient, person)

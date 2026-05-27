@@ -93,6 +93,25 @@ class MessageRecipientUpdate(BaseModel):
     failure_reason: str | None = Field(default=None, max_length=2000)
 
 
+class CommunicationDispatchSummary(BaseModel):
+    message_id: UUID
+    attempted: int
+    sent: int
+    delivered: int
+    failed: int
+    suppressed: int
+    queued: int
+    transport_mode: str
+
+
+class DeliveryWebhookEvent(BaseModel):
+    recipient_id: UUID
+    delivery_status: MessageDeliveryStatus
+    failure_reason: str | None = Field(default=None, max_length=2000)
+    delivered_at: datetime | None = None
+    read_at: datetime | None = None
+
+
 class NotificationPreferenceUpsert(BaseModel):
     organization_id: UUID
     person_id: UUID

@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     spicedb_insecure: bool = True
     spicedb_request_timeout_seconds: float = 3.0
 
+    communication_delivery_mode: Literal["record_only", "webhook"] = "record_only"
+    communication_webhook_url: str = ""
+    communication_email_webhook_url: str = ""
+    communication_sms_webhook_url: str = ""
+    communication_whatsapp_webhook_url: str = ""
+    communication_telegram_webhook_url: str = ""
+    communication_push_webhook_url: str = ""
+    communication_webhook_key: str = ""
+    communication_delivery_timeout_seconds: float = 5.0
+
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, value: str) -> str:

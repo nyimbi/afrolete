@@ -332,6 +332,25 @@ athlete-development platform:
     `git diff --check`. Live Keycloak realm/browser redirect, full build, and
     screenshot verification deferred by user instruction during low-battery
     fast delivery.
+- Implemented slice 019 communication delivery adapter fast surface:
+  - Added backend configuration for record-only vs webhook communication
+    delivery, channel-specific webhook URLs, a shared delivery webhook key, and
+    delivery timeout controls.
+  - Added a dispatch service and API endpoint that sends email, SMS, WhatsApp,
+    Telegram, and push payloads to configured HTTP adapters while preserving
+    queued status when no transport is configured.
+  - In-app messages are marked delivered immediately, suppressed recipients
+    remain suppressed, and failed webhook responses are captured on recipient
+    failure reasons.
+  - Added a provider callback endpoint for delivery/read/failure events guarded
+    by `AFROLETE_COMMUNICATION_WEBHOOK_KEY` outside local mode.
+  - Added a console dispatch action that refreshes recipient delivery state and
+    surfaces sent, failed, and queued counts.
+  - Verification: `uv run ruff check .`,
+    `uv run pytest tests/unit/test_communications.py -q` (4/4),
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`. Full
+    suite/build/screenshot verification deferred by user instruction during
+    low-battery fast delivery.
 
 ## Implementation Slices
 
@@ -356,6 +375,7 @@ athlete-development platform:
 | 016 - Reporting and intelligence fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, and console workflows are implemented; real AI model execution, rendered PDF/Excel generation, charts, benchmark models, and full verification remain. |
 | 017 - SaaS billing and subscription fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, and console workflows are implemented; Stripe/processor webhooks, dunning automation, tax localization, plan-change proration, and full verification remain. |
 | 018 - Frontend Keycloak session handling | Partial | Frontend typecheck; diff check | Browser OIDC authorization-code + PKCE login, bearer-token API attachment, session display, logout URL wiring, and local-mode fallback are implemented; live Keycloak redirect and deployed smoke test remain. |
+| 019 - Communication delivery adapters | Partial | Backend ruff; communications tests 4/4; frontend typecheck | Configurable HTTP webhook dispatch, channel-specific adapter URLs, secured provider delivery callbacks, in-app delivery handling, failure capture, and console dispatch are implemented; real provider credentials, digest jobs, parent inbox, AI drafting, and full verification remain. |
 
 ## Capability Coverage
 
@@ -376,7 +396,7 @@ Status values:
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, task review, and console workflows are implemented; real AI execution pipelines and model governance remain. |
 | Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, and console workflows are implemented; automatic AI generation/readiness/feedback loops remain. |
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, and console workflows are implemented; automated fixture generation, bracket visualization, advanced conflict resolution, ticketing, and broadcast operations remain. |
-| Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, delivery/read audit records, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; live email/SMS/WhatsApp/push adapters remain. |
+| Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; digest jobs, parent inbox, provider credentials, and AI drafting remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, and console workflows are implemented; procurement, supplier scoring, RFID scanning, photo upload, lease billing, and AI utilization optimization remain. |
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, commercial summary, and console workflows are implemented; payment gateway settlement, refunds, tax, accounting exports, sponsorship dashboards, and full verification remain. |
@@ -391,9 +411,8 @@ Status values:
    against the deployed backend auth mode.
 2. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
    SpiceDB key.
-3. Add live communication transport adapters for email, SMS, WhatsApp, push,
-   delivery webhooks, digest jobs, parent inbox, and AI-assisted message
-   drafting.
+3. Add communication digest jobs, parent inbox, provider-specific credentials,
+   and AI-assisted message drafting.
 4. Add procurement, supplier scoring, RFID/barcode scan flows, photo uploads,
    lease billing, and AI utilization recommendations for assets and facilities.
 5. Add payment gateway settlement, refunds, tax handling, accounting exports,

@@ -1083,6 +1083,17 @@ export type MessageRecipientRead = {
   failure_reason: string | null;
 };
 
+export type CommunicationDispatchSummary = {
+  message_id: UUID;
+  attempted: number;
+  sent: number;
+  delivered: number;
+  failed: number;
+  suppressed: number;
+  queued: number;
+  transport_mode: string;
+};
+
 export type NotificationPreferenceRead = {
   id: UUID;
   organization_id: UUID;

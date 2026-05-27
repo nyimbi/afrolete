@@ -28,6 +28,7 @@ import type {
   BillingPlanRead,
   BillingSummaryRead,
   ChannelPreference,
+  CommunicationDispatchSummary,
   CommercialSummaryRead,
   CommunicationChannel,
   CommunicationMessageRead,
@@ -1994,6 +1995,34 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== recipient.id)
         ]);
         addLog(`${recipient.person_name} marked ${recipient.delivery_status}`, "good");
+      }
+    );
+  };
+
+  const dispatchSelectedMessage = () => {
+    if (!selectedMessageId) {
+      addLog("Select a communication first", "bad");
+      return;
+    }
+
+    runAction(
+      "dispatch-communication",
+      async () => {
+        const summary = await apiRequest<CommunicationDispatchSummary>(
+          `/communications/messages/${selectedMessageId}/dispatch`,
+          { method: "POST", identity }
+        );
+        const recipients = await apiRequest<MessageRecipientRead[]>(
+          `/communications/messages/${selectedMessageId}/recipients`
+        );
+        return { summary, recipients };
+      },
+      ({ summary, recipients }) => {
+        setMessageRecipients(recipients);
+        addLog(
+          `Delivery ${summary.transport_mode}: ${summary.sent + summary.delivered} sent, ${summary.failed} failed, ${summary.queued} queued`,
+          summary.failed > 0 ? "bad" : "good"
+        );
       }
     );
   };
@@ -4413,7 +4442,10 @@ export default function HomePage() {
                 <p className="section-label">Delivery</p>
                 <h2>Read receipts and preferences</h2>
               </div>
-              <button type="button" onClick={saveNotificationPreference} disabled={busyAction !== null}>Preference</button>
+              <div className="event-toolbar">
+                <button type="button" onClick={dispatchSelectedMessage} disabled={busyAction !== null || !selectedMessageId}>Dispatch</button>
+                <button type="button" onClick={saveNotificationPreference} disabled={busyAction !== null}>Preference</button>
+              </div>
             </div>
             <div className="score-summary">
               <strong>{messageRecipients.filter((recipient) => recipient.delivery_status === "read").length}</strong>
@@ -4453,6 +4485,7 @@ export default function HomePage() {
                   <div>
                     <strong>{recipient.person_name}</strong>
                     <span>{recipient.destination ?? "no destination"} · {recipient.delivery_status}</span>
+                    {recipient.failure_reason ? <span>{recipient.failure_reason}</span> : null}
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={() => updateRecipientStatus(recipient.id, "delivered")}>Delivered</button>

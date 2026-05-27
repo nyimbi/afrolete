@@ -1,10 +1,12 @@
 from datetime import UTC, date, datetime
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.models.communication import (
     CommunicationMessage,
     CommunicationTemplate,
@@ -22,8 +24,10 @@ from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.communication import (
+    CommunicationDispatchSummary,
     CommunicationMessageCreate,
     CommunicationTemplateCreate,
+    DeliveryWebhookEvent,
     MessageRecipientUpdate,
     NotificationPreferenceUpsert,
 )
@@ -193,6 +197,75 @@ async def update_recipient_status(
         recipient.delivered_at = recipient.delivered_at or now
     if payload.delivery_status == MessageDeliveryStatus.READ:
         recipient.read_at = now
+
+    await db.commit()
+    await db.refresh(recipient)
+    return recipient
+
+
+async def dispatch_message(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    message_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> CommunicationDispatchSummary:
+    message = await get_message(db, message_id)
+    await ensure_manage_communications(authz, identity, message.organization_id)
+    settings = settings or get_settings()
+    rows = await list_recipients(db, message.id)
+    now = datetime.now(UTC)
+
+    async with httpx.AsyncClient(timeout=settings.communication_delivery_timeout_seconds) as client:
+        for recipient, person in rows:
+            if recipient.delivery_status in {
+                MessageDeliveryStatus.DELIVERED,
+                MessageDeliveryStatus.READ,
+                MessageDeliveryStatus.SUPPRESSED,
+            }:
+                continue
+
+            if recipient.destination is None:
+                recipient.delivery_status = MessageDeliveryStatus.SUPPRESSED
+                recipient.failure_reason = "No destination for channel"
+                continue
+
+            if message.channel == CommunicationChannel.IN_APP:
+                recipient.delivery_status = MessageDeliveryStatus.DELIVERED
+                recipient.delivered_at = recipient.delivered_at or now
+                recipient.failure_reason = None
+                continue
+
+            webhook_url = delivery_webhook_url_for(settings, message.channel)
+            if settings.communication_delivery_mode != "webhook" or webhook_url is None:
+                recipient.delivery_status = MessageDeliveryStatus.QUEUED
+                recipient.failure_reason = f"No {message.channel.value} delivery webhook configured"
+                continue
+
+            await deliver_recipient(client, webhook_url, settings, message, recipient, person, now)
+
+    await db.commit()
+    return dispatch_summary(message.id, rows, settings.communication_delivery_mode)
+
+
+async def record_delivery_event(
+    db: AsyncSession,
+    payload: DeliveryWebhookEvent,
+) -> MessageRecipient:
+    recipient = await db.get(MessageRecipient, payload.recipient_id)
+    if recipient is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipient not found")
+
+    now = datetime.now(UTC)
+    recipient.delivery_status = payload.delivery_status
+    recipient.failure_reason = payload.failure_reason
+    if payload.delivery_status in {
+        MessageDeliveryStatus.DELIVERED,
+        MessageDeliveryStatus.READ,
+    }:
+        recipient.delivered_at = payload.delivered_at or recipient.delivered_at or now
+    if payload.delivery_status == MessageDeliveryStatus.READ:
+        recipient.read_at = payload.read_at or now
 
     await db.commit()
     await db.refresh(recipient)
@@ -382,3 +455,107 @@ def initial_delivery_status(person: Person, channel: CommunicationChannel) -> Me
     if destination is None and channel != CommunicationChannel.IN_APP:
         return MessageDeliveryStatus.SUPPRESSED
     return MessageDeliveryStatus.QUEUED
+
+
+async def deliver_recipient(
+    client: httpx.AsyncClient,
+    webhook_url: str,
+    settings: Settings,
+    message: CommunicationMessage,
+    recipient: MessageRecipient,
+    person: Person,
+    now: datetime,
+) -> None:
+    try:
+        response = await client.post(
+            webhook_url,
+            json=delivery_payload(message, recipient, person),
+            headers=delivery_headers(settings),
+        )
+        if 200 <= response.status_code < 300:
+            recipient.delivery_status = MessageDeliveryStatus.SENT
+            recipient.failure_reason = None
+            return
+        recipient.delivery_status = MessageDeliveryStatus.FAILED
+        recipient.failure_reason = f"Webhook returned {response.status_code}: {response.text[:400]}"
+    except httpx.HTTPError as error:
+        recipient.delivery_status = MessageDeliveryStatus.FAILED
+        recipient.failure_reason = str(error)[:400]
+    finally:
+        if recipient.delivery_status == MessageDeliveryStatus.SENT and message.channel == CommunicationChannel.PUSH:
+            recipient.delivered_at = recipient.delivered_at or now
+
+
+def delivery_payload(
+    message: CommunicationMessage,
+    recipient: MessageRecipient,
+    person: Person,
+) -> dict[str, object]:
+    return {
+        "event": "afrolete.communication.dispatch",
+        "channel": message.channel.value,
+        "message": {
+            "id": str(message.id),
+            "organization_id": str(message.organization_id),
+            "type": message.message_type.value,
+            "scope_type": message.scope_type.value,
+            "scope_id": str(message.scope_id),
+            "subject": message.subject,
+            "body": message.body,
+            "urgent": message.urgent,
+            "quiet_hours_override": message.quiet_hours_override,
+        },
+        "recipient": {
+            "id": str(recipient.id),
+            "person_id": str(recipient.person_id),
+            "name": person.display_name,
+            "destination": recipient.destination,
+        },
+    }
+
+
+def delivery_headers(settings: Settings) -> dict[str, str]:
+    headers = {"User-Agent": "AfroLete-Communications/1.0"}
+    if settings.communication_webhook_key:
+        headers["X-Afrolete-Delivery-Key"] = settings.communication_webhook_key
+    return headers
+
+
+def delivery_webhook_url_for(settings: Settings, channel: CommunicationChannel) -> str | None:
+    channel_urls = {
+        CommunicationChannel.EMAIL: settings.communication_email_webhook_url,
+        CommunicationChannel.SMS: settings.communication_sms_webhook_url,
+        CommunicationChannel.WHATSAPP: settings.communication_whatsapp_webhook_url,
+        CommunicationChannel.TELEGRAM: settings.communication_telegram_webhook_url,
+        CommunicationChannel.PUSH: settings.communication_push_webhook_url,
+    }
+    url = channel_urls.get(channel) or settings.communication_webhook_url
+    return url or None
+
+
+def dispatch_summary(
+    message_id: UUID,
+    rows: list[tuple[MessageRecipient, Person]],
+    transport_mode: str,
+) -> CommunicationDispatchSummary:
+    counts = {
+        MessageDeliveryStatus.SENT: 0,
+        MessageDeliveryStatus.DELIVERED: 0,
+        MessageDeliveryStatus.FAILED: 0,
+        MessageDeliveryStatus.SUPPRESSED: 0,
+        MessageDeliveryStatus.QUEUED: 0,
+    }
+    for recipient, _ in rows:
+        if recipient.delivery_status in counts:
+            counts[recipient.delivery_status] += 1
+
+    return CommunicationDispatchSummary(
+        message_id=message_id,
+        attempted=len(rows),
+        sent=counts[MessageDeliveryStatus.SENT],
+        delivered=counts[MessageDeliveryStatus.DELIVERED],
+        failed=counts[MessageDeliveryStatus.FAILED],
+        suppressed=counts[MessageDeliveryStatus.SUPPRESSED],
+        queued=counts[MessageDeliveryStatus.QUEUED],
+        transport_mode=transport_mode,
+    )
