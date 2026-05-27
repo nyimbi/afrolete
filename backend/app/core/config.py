@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     auth_mode: Literal["local", "keycloak"] = "local"
     authz_mode: Literal["memory", "spicedb"] = "memory"
     database_url: str = "postgresql+asyncpg:///afrolete"
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
+    )
 
     keycloak_issuer: AnyHttpUrl = "https://auth.lindela.io/realms/lindela"
     keycloak_audience: str = "afrolete-api"

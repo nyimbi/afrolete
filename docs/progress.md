@@ -117,6 +117,21 @@ athlete-development platform:
   - SpiceDB check failures fail closed; write failures surface instead of
     silently dropping authorization relationships.
   - Verification: `uv run ruff check .`, focused SpiceDB unit tests.
+- Implemented slice 008 operational SaaS console:
+  - Replaced the static first screen with a real Next.js operations console for
+    local-mode organization creation, team creation, athlete intake, roster
+    assignment, event scheduling, roster-based attendance seeding, attendance
+    recording, guardian linking, consent request creation, and event clearance
+    checks.
+  - Added a frontend API client that sends local identity headers in development
+    and surfaces backend validation errors in the activity feed.
+  - Added a public one-use guardian consent page at `/consent/[token]` that
+    captures grant/deny responses through the backend token endpoint.
+  - Fixed default backend CORS to allow the actual Next development origin at
+    `http://127.0.0.1:3000`.
+  - Verification: `pnpm --filter @afrolete/frontend typecheck`,
+    `pnpm --filter @afrolete/frontend build`, production Playwright screenshots
+    at desktop and mobile sizes.
 
 ## Implementation Slices
 
@@ -130,6 +145,7 @@ athlete-development platform:
 | 005 - Event scheduling and attendance | Partial | Backend tests 16/16 | Event APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in implemented; frontend event workflows remain. |
 | 006 - Keycloak authentication | Partial | Backend tests 22/22 | Keycloak JWT validation and user provisioning are implemented behind runtime mode; frontend sign-in and live realm smoke test remain. |
 | 007 - SpiceDB authorization adapter | Partial | Adapter tests 4/4 | Official Python gRPC client wired behind runtime mode; live schema/write/check smoke test remains. |
+| 008 - Operational SaaS console | Partial | Frontend typecheck/build; desktop/mobile screenshots | Console now drives tenant, team, roster, event, attendance, guardian consent, and clearance workflows in local mode; production Keycloak session UX remains. |
 
 ## Capability Coverage
 
@@ -157,14 +173,14 @@ Status values:
 | Reports and intelligence | not-started | Future slice. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation and SpiceDB gRPC authorization adapter are implemented; other integrations remain future slices. |
 | SaaS billing/subscriptions | not-started | Future slice. |
-| Beautiful operational UI/UX | foundation | First command-center UI shell added. |
+| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, attendance, and safeguarding workflows. |
 
 ## Next Actions
 
-1. Run full verification, then commit and push slice 007 SpiceDB authorization.
-2. Add frontend flows for organization branding, event scheduling, roster
-   attendance, guardian consent links, and event clearance review.
-3. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
-4. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
+1. Run full verification, then commit and push slice 008 operational SaaS
+   console.
+2. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
+3. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
    SpiceDB key.
-5. Continue athlete profile workflows into performance metrics and assessments.
+4. Continue athlete profile workflows into performance metrics and assessments.
+5. Add AI agent management APIs and task inbox UI.

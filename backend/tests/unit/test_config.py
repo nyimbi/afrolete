@@ -17,3 +17,10 @@ def test_explicit_database_driver_is_preserved() -> None:
     settings = Settings(database_url="sqlite+aiosqlite://")
 
     assert settings.database_url == "sqlite+aiosqlite://"
+
+
+def test_default_cors_allows_next_dev_hosts() -> None:
+    settings = Settings()
+
+    assert "http://localhost:3000" in settings.cors_origins
+    assert "http://127.0.0.1:3000" in settings.cors_origins
