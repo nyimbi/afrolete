@@ -134,6 +134,12 @@ export type MatchEventType =
   | "substitution"
   | "injury"
   | "note";
+export type CommunicationMessageType = "announcement" | "alert" | "reminder" | "request" | "report";
+export type CommunicationChannel = "in_app" | "push" | "email" | "sms" | "whatsapp" | "telegram";
+export type CommunicationScopeType = "organization" | "team" | "event" | "person";
+export type MessageDeliveryStatus = "queued" | "sent" | "delivered" | "read" | "failed" | "suppressed";
+export type NotificationFrequency = "immediate" | "daily_digest" | "weekly_digest";
+export type ChannelPreference = "app" | "email" | "sms" | "all";
 
 export type LocalIdentity = {
   sub: string;
@@ -516,4 +522,59 @@ export type CompetitionStandingRead = {
   goals_against: number;
   goal_difference: number;
   points: number;
+};
+
+export type CommunicationTemplateRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  message_type: CommunicationMessageType;
+  channel: CommunicationChannel;
+  subject_template: string;
+  body_template: string;
+  variables: string | null;
+  status: string;
+};
+
+export type CommunicationMessageRead = {
+  id: UUID;
+  organization_id: UUID;
+  template_id: UUID | null;
+  created_by_person_id: UUID | null;
+  message_type: CommunicationMessageType;
+  channel: CommunicationChannel;
+  scope_type: CommunicationScopeType;
+  scope_id: UUID;
+  subject: string;
+  body: string;
+  urgent: boolean;
+  quiet_hours_override: boolean;
+  scheduled_for: string | null;
+  sent_at: string | null;
+  status: string;
+  recipient_count: number;
+};
+
+export type MessageRecipientRead = {
+  id: UUID;
+  message_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  destination: string | null;
+  delivery_status: MessageDeliveryStatus;
+  delivered_at: string | null;
+  read_at: string | null;
+  failure_reason: string | null;
+};
+
+export type NotificationPreferenceRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID;
+  frequency: NotificationFrequency;
+  channel_preference: ChannelPreference;
+  language: string;
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+  emergency_override: boolean;
 };

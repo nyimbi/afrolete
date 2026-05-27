@@ -2,6 +2,12 @@ from app.models.base import Base
 
 # Import all models so Alembic can discover metadata.
 from app.models.agent import Agent, AgentAssignment, AgentTask  # noqa: F401,E402
+from app.models.communication import (  # noqa: F401,E402
+    CommunicationMessage,
+    CommunicationTemplate,
+    MessageRecipient,
+    NotificationPreference,
+)
 from app.models.competition import (  # noqa: F401,E402
     Competition,
     CompetitionFixture,

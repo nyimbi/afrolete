@@ -200,6 +200,28 @@ athlete-development platform:
     PostgreSQL `alembic upgrade head`, `pnpm --filter @afrolete/frontend
     typecheck`, `pnpm --filter @afrolete/frontend build`, production
     Playwright screenshot at `/private/tmp/afrolete-competition-console.png`.
+- Implemented slice 013 communications and notifications:
+  - Added reusable communication templates with message type, channel, subject,
+    body, variables, locale, and active state.
+  - Added scoped communication messages for organization, team, event, and
+    person targets, with tenant-safe recipient expansion and urgent/quiet-hours
+    controls.
+  - Added recipient delivery records with channel destination, queued,
+    suppressed, delivered, read, and failed states plus delivery/read
+    timestamps.
+  - Added notification preferences for frequency, preferred channel, language,
+    quiet hours, and emergency override.
+  - Added minor-safe guardian copying so direct person messages to minors can
+    include guardians with consent authority.
+  - Added the Communications console lane for template creation, scoped
+    broadcasts, recipient review, read-receipt updates, and preference
+    management.
+  - Verification: `uv run ruff check .`, `uv run pytest`, PostgreSQL
+    `alembic upgrade head`, PostgreSQL `alembic downgrade 5ae823a88e0f`,
+    PostgreSQL `alembic upgrade head`, `pnpm --filter @afrolete/frontend
+    typecheck`, `pnpm --filter @afrolete/frontend build`, production
+    Playwright screenshot at
+    `/private/tmp/afrolete-communications-console-v2.png`.
 
 ## Implementation Slices
 
@@ -218,6 +240,7 @@ athlete-development platform:
 | 010 - Athlete performance metrics and assessments | Partial | Backend tests 31/31; PostgreSQL migration upgrade/downgrade; frontend build | Metric definitions, observations, ALS-style assessments, summaries, and console recording flows are implemented; automated video/audio/wearable ingestion remains. |
 | 011 - Training and coaching plans | Partial | Backend tests 34/34; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Drill library, scoped plans, weekly plan blocks, session load planning, and console workflows are implemented; automatic AI plan generation, readiness check-ins, and post-session feedback loops remain. |
 | 012 - Competition management foundation | Partial | Backend tests 36/36; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Competition records, team registration, fixtures, official assignments, match events, result confirmation, computed standings, and console workflows are implemented; automated fixture generation, bracket visualization, conflict optimization, ticketing, and broadcast operations remain. |
+| 013 - Communications and notifications | Partial | Backend tests 39/39; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Templates, scoped broadcasts, recipient expansion, delivery/read audit records, preferences, quiet hours, emergency override, guardian copy for minors, and console workflows are implemented; live transport adapters, digest jobs, and parent inbox remain. |
 
 ## Capability Coverage
 
@@ -238,25 +261,28 @@ Status values:
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, task review, and console workflows are implemented; real AI execution pipelines and model governance remain. |
 | Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, and console workflows are implemented; automatic AI generation/readiness/feedback loops remain. |
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, and console workflows are implemented; automated fixture generation, bracket visualization, advanced conflict resolution, ticketing, and broadcast operations remain. |
-| Communications and notifications | foundation | Service boundary exists; workflow pending. |
+| Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, delivery/read audit records, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; live email/SMS/WhatsApp/push adapters remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | not-started | Future slice. |
 | Finance, sponsorship, fundraising, ticketing | not-started | Future slice. |
 | Reports and intelligence | not-started | Future slice. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation and SpiceDB gRPC authorization adapter are implemented; other integrations remain future slices. |
 | SaaS billing/subscriptions | not-started | Future slice. |
-| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, competition, attendance, performance, training, agent, and safeguarding workflows. |
+| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
 
 ## Next Actions
 
 1. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
 2. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
    SpiceDB key.
-3. Add automated fixture generation, bracket visualization, and scheduling
+3. Add live communication transport adapters for email, SMS, WhatsApp, push,
+   delivery webhooks, digest jobs, parent inbox, and AI-assisted message
+   drafting.
+4. Add automated fixture generation, bracket visualization, and scheduling
    conflict checks for leagues and tournaments.
-4. Add automated training-plan generation from performance trends, readiness,
+5. Add automated training-plan generation from performance trends, readiness,
    upcoming competitions, and availability constraints.
-5. Add automated ingestion pipelines for video, audio narration, text
+6. Add automated ingestion pipelines for video, audio narration, text
    evaluation, wearable feeds, and agent-extracted metric review.
 6. Add real AI execution workers, model/provider configuration, and AI
    governance telemetry.

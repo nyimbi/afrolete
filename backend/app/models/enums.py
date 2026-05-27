@@ -257,3 +257,49 @@ class MatchEventType(StrEnum):
     SUBSTITUTION = "substitution"
     INJURY = "injury"
     NOTE = "note"
+
+
+class CommunicationMessageType(StrEnum):
+    ANNOUNCEMENT = "announcement"
+    ALERT = "alert"
+    REMINDER = "reminder"
+    REQUEST = "request"
+    REPORT = "report"
+
+
+class CommunicationChannel(StrEnum):
+    IN_APP = "in_app"
+    PUSH = "push"
+    EMAIL = "email"
+    SMS = "sms"
+    WHATSAPP = "whatsapp"
+    TELEGRAM = "telegram"
+
+
+class CommunicationScopeType(StrEnum):
+    ORGANIZATION = "organization"
+    TEAM = "team"
+    EVENT = "event"
+    PERSON = "person"
+
+
+class MessageDeliveryStatus(StrEnum):
+    QUEUED = "queued"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    READ = "read"
+    FAILED = "failed"
+    SUPPRESSED = "suppressed"
+
+
+class NotificationFrequency(StrEnum):
+    IMMEDIATE = "immediate"
+    DAILY_DIGEST = "daily_digest"
+    WEEKLY_DIGEST = "weekly_digest"
+
+
+class ChannelPreference(StrEnum):
+    APP = "app"
+    EMAIL = "email"
+    SMS = "sms"
+    ALL = "all"

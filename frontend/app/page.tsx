@@ -14,6 +14,12 @@ import type {
   AttendanceRecordRead,
   AttendanceSeedRead,
   AttendanceStatus,
+  ChannelPreference,
+  CommunicationChannel,
+  CommunicationMessageRead,
+  CommunicationMessageType,
+  CommunicationScopeType,
+  CommunicationTemplateRead,
   CompetitionFixtureRead,
   CompetitionFormat,
   CompetitionParticipantRead,
@@ -28,6 +34,8 @@ import type {
   GuardianRelationshipRead,
   LocalIdentity,
   MatchEventType,
+  MessageDeliveryStatus,
+  MessageRecipientRead,
   MembershipRead,
   MetricCategory,
   MetricDefinitionRead,
@@ -37,6 +45,8 @@ import type {
   OrganizationType,
   ParticipationClearanceRead,
   PerformanceObservationRead,
+  NotificationFrequency,
+  NotificationPreferenceRead,
   SportFormat,
   TeamRead,
   TeamRosterEntryRead,
@@ -90,6 +100,10 @@ export default function HomePage() {
   const [competitionStandings, setCompetitionStandings] = useState<CompetitionStandingRead[]>([]);
   const [matchEvents, setMatchEvents] = useState<FixtureMatchEventRead[]>([]);
   const [officialAssignments, setOfficialAssignments] = useState<FixtureOfficialAssignmentRead[]>([]);
+  const [communicationTemplates, setCommunicationTemplates] = useState<CommunicationTemplateRead[]>([]);
+  const [communicationMessages, setCommunicationMessages] = useState<CommunicationMessageRead[]>([]);
+  const [messageRecipients, setMessageRecipients] = useState<MessageRecipientRead[]>([]);
+  const [notificationPreference, setNotificationPreference] = useState<NotificationPreferenceRead | null>(null);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -102,6 +116,7 @@ export default function HomePage() {
   const [selectedTrainingPlanId, setSelectedTrainingPlanId] = useState("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState("");
   const [selectedFixtureId, setSelectedFixtureId] = useState("");
+  const [selectedMessageId, setSelectedMessageId] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -241,6 +256,31 @@ export default function HomePage() {
     role: "referee" as OfficialRole,
     certification_level: "Regional"
   });
+  const [templateForm, setTemplateForm] = useState({
+    name: "Match day reminder",
+    message_type: "reminder" as CommunicationMessageType,
+    channel: "email" as CommunicationChannel,
+    subject_template: "Match day information for {team.name}",
+    body_template: "Please confirm attendance and arrive 45 minutes before kick-off.",
+    variables: "team.name,event.time,venue.name"
+  });
+  const [messageForm, setMessageForm] = useState({
+    message_type: "reminder" as CommunicationMessageType,
+    channel: "email" as CommunicationChannel,
+    scope_type: "team" as CommunicationScopeType,
+    subject: "Match day information",
+    body: "Kick-off is at 09:00. Bring boots, ID, water, and travel consent if required.",
+    urgent: false,
+    quiet_hours_override: false
+  });
+  const [preferenceForm, setPreferenceForm] = useState({
+    frequency: "immediate" as NotificationFrequency,
+    channel_preference: "all" as ChannelPreference,
+    language: "en",
+    quiet_hours_start: "21:00",
+    quiet_hours_end: "06:00",
+    emergency_override: true
+  });
 
   const selectedOrganization = useMemo(
     () => organizations.find((organization) => organization.id === selectedOrganizationId) ?? null,
@@ -273,6 +313,10 @@ export default function HomePage() {
   const selectedFixture = useMemo(
     () => competitionFixtures.find((fixture) => fixture.id === selectedFixtureId) ?? null,
     [competitionFixtures, selectedFixtureId]
+  );
+  const selectedMessage = useMemo(
+    () => communicationMessages.find((message) => message.id === selectedMessageId) ?? null,
+    [communicationMessages, selectedMessageId]
   );
 
   const addLog = useCallback((message: string, tone: LogEntry["tone"] = "neutral") => {
@@ -418,6 +462,25 @@ export default function HomePage() {
     setMatchEvents(data);
   }, []);
 
+  const loadCommunications = useCallback(async (organizationId: string) => {
+    const [templates, messages] = await Promise.all([
+      apiRequest<CommunicationTemplateRead[]>(`/communications/templates?organization_id=${organizationId}`),
+      apiRequest<CommunicationMessageRead[]>(`/communications/messages?organization_id=${organizationId}`)
+    ]);
+    setCommunicationTemplates(templates);
+    setCommunicationMessages(messages);
+    setSelectedMessageId((current) =>
+      messages.some((message) => message.id === current) ? current : messages[0]?.id ?? ""
+    );
+  }, []);
+
+  const loadMessageRecipients = useCallback(async (messageId: string) => {
+    const data = await apiRequest<MessageRecipientRead[]>(
+      `/communications/messages/${messageId}/recipients`
+    );
+    setMessageRecipients(data);
+  }, []);
+
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.localIdentity");
     if (stored) {
@@ -447,6 +510,10 @@ export default function HomePage() {
       setCompetitionStandings([]);
       setMatchEvents([]);
       setOfficialAssignments([]);
+      setCommunicationTemplates([]);
+      setCommunicationMessages([]);
+      setMessageRecipients([]);
+      setNotificationPreference(null);
       return;
     }
     runAction("load-tenant-data", async () => {
@@ -457,6 +524,7 @@ export default function HomePage() {
       await loadMetricDefinitions(selectedOrganizationId);
       await loadTraining(selectedOrganizationId);
       await loadCompetitions(selectedOrganizationId);
+      await loadCommunications(selectedOrganizationId);
     }, () => addLog("Organization workspace loaded", "good"));
   }, [
     selectedOrganizationId,
@@ -467,6 +535,7 @@ export default function HomePage() {
     loadMetricDefinitions,
     loadTraining,
     loadCompetitions,
+    loadCommunications,
     runAction,
     addLog
   ]);
@@ -555,6 +624,18 @@ export default function HomePage() {
     }
     runAction("load-fixture-events", () => loadFixtureEvents(selectedFixtureId), () => undefined);
   }, [selectedFixtureId, loadFixtureEvents, runAction]);
+
+  useEffect(() => {
+    if (!selectedMessageId) {
+      setMessageRecipients([]);
+      return;
+    }
+    runAction(
+      "load-message-recipients",
+      () => loadMessageRecipients(selectedMessageId),
+      () => undefined
+    );
+  }, [selectedMessageId, loadMessageRecipients, runAction]);
 
   const createOrganization = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1318,6 +1399,119 @@ export default function HomePage() {
     );
   };
 
+  const createCommunicationTemplate = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-communication-template",
+      () =>
+        apiRequest<CommunicationTemplateRead>("/communications/templates", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            ...templateForm
+          }
+        }),
+      (template) => {
+        setCommunicationTemplates((current) => [
+          template,
+          ...current.filter((item) => item.id !== template.id)
+        ]);
+        addLog(`${template.name} template is ready`, "good");
+      }
+    );
+  };
+
+  const communicationScopeId = () => {
+    if (messageForm.scope_type === "organization") {
+      return selectedOrganizationId;
+    }
+    if (messageForm.scope_type === "team") {
+      return selectedTeamId;
+    }
+    if (messageForm.scope_type === "event") {
+      return selectedEventId;
+    }
+    return selectedAthleteId;
+  };
+
+  const sendCommunicationMessage = () => {
+    const scopeId = communicationScopeId();
+    if (!selectedOrganizationId || !scopeId) {
+      addLog("Select the communication scope first", "bad");
+      return;
+    }
+    runAction(
+      "send-communication-message",
+      () =>
+        apiRequest<CommunicationMessageRead>("/communications/messages", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            template_id: communicationTemplates[0]?.id ?? null,
+            ...messageForm,
+            scope_id: scopeId,
+            quiet_hours_override: messageForm.urgent && messageForm.quiet_hours_override
+          }
+        }),
+      (message) => {
+        setCommunicationMessages((current) => [
+          message,
+          ...current.filter((item) => item.id !== message.id)
+        ]);
+        setSelectedMessageId(message.id);
+        addLog(`${message.subject} sent to ${message.recipient_count} recipients`, "good");
+      }
+    );
+  };
+
+  const updateRecipientStatus = (recipientId: string, delivery_status: MessageDeliveryStatus) => {
+    runAction(
+      `message-recipient-${recipientId}-${delivery_status}`,
+      () =>
+        apiRequest<MessageRecipientRead>(`/communications/recipients/${recipientId}`, {
+          method: "PATCH",
+          identity,
+          body: { delivery_status }
+        }),
+      (recipient) => {
+        setMessageRecipients((current) => [
+          recipient,
+          ...current.filter((item) => item.id !== recipient.id)
+        ]);
+        addLog(`${recipient.person_name} marked ${recipient.delivery_status}`, "good");
+      }
+    );
+  };
+
+  const saveNotificationPreference = () => {
+    if (!selectedOrganizationId || !selectedAthleteId) {
+      addLog("Select an athlete first", "bad");
+      return;
+    }
+    runAction(
+      "save-notification-preference",
+      () =>
+        apiRequest<NotificationPreferenceRead>("/communications/preferences", {
+          method: "PUT",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            person_id: selectedAthleteId,
+            ...preferenceForm
+          }
+        }),
+      (preference) => {
+        setNotificationPreference(preference);
+        addLog(`Preference saved for selected athlete`, "good");
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -1338,6 +1532,7 @@ export default function HomePage() {
           <a href="#roster">Roster</a>
           <a href="#events">Events</a>
           <a href="#competition">Competition</a>
+          <a href="#communications">Comms</a>
           <a href="#performance">Performance</a>
           <a href="#training">Training</a>
           <a href="#agents">Agents</a>
@@ -1396,6 +1591,10 @@ export default function HomePage() {
             <div className="stat-row">
               <span>Competitions</span>
               <strong>{competitions.length}</strong>
+            </div>
+            <div className="stat-row">
+              <span>Messages</span>
+              <strong>{communicationMessages.length}</strong>
             </div>
             <div className="stat-row">
               <span>Attendance</span>
@@ -1928,6 +2127,154 @@ export default function HomePage() {
                   <span>Confirmed final scores immediately recalculate points and goal difference.</span>
                 </div>
               </article>
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid" id="communications">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Communications</p>
+                <h2>Templates and broadcast</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createCommunicationTemplate} disabled={busyAction !== null}>Template</button>
+                <button type="button" onClick={sendCommunicationMessage} disabled={busyAction !== null}>Send</button>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Template
+                <input value={templateForm.name} onChange={(event) => setTemplateForm({ ...templateForm, name: event.target.value })} />
+              </label>
+              <label>
+                Message type
+                <select value={templateForm.message_type} onChange={(event) => setTemplateForm({ ...templateForm, message_type: event.target.value as CommunicationMessageType })}>
+                  <option value="announcement">Announcement</option>
+                  <option value="alert">Alert</option>
+                  <option value="reminder">Reminder</option>
+                  <option value="request">Request</option>
+                  <option value="report">Report</option>
+                </select>
+              </label>
+              <label>
+                Channel
+                <select value={templateForm.channel} onChange={(event) => {
+                  const channel = event.target.value as CommunicationChannel;
+                  setTemplateForm({ ...templateForm, channel });
+                  setMessageForm({ ...messageForm, channel });
+                }}>
+                  <option value="in_app">In-app</option>
+                  <option value="push">Push</option>
+                  <option value="email">Email</option>
+                  <option value="sms">SMS</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telegram">Telegram</option>
+                </select>
+              </label>
+              <label>
+                Scope
+                <select value={messageForm.scope_type} onChange={(event) => setMessageForm({ ...messageForm, scope_type: event.target.value as CommunicationScopeType })}>
+                  <option value="organization">Organization</option>
+                  <option value="team">Team</option>
+                  <option value="event">Event</option>
+                  <option value="person">Selected athlete</option>
+                </select>
+              </label>
+              <label className="wide-field">
+                Subject
+                <input value={messageForm.subject} onChange={(event) => setMessageForm({ ...messageForm, subject: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Body
+                <textarea value={messageForm.body} onChange={(event) => setMessageForm({ ...messageForm, body: event.target.value })} />
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={messageForm.urgent} onChange={(event) => setMessageForm({ ...messageForm, urgent: event.target.checked })} />
+                Urgent
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={messageForm.quiet_hours_override} onChange={(event) => setMessageForm({ ...messageForm, quiet_hours_override: event.target.checked })} />
+                Override quiet hours
+              </label>
+            </div>
+            <div className="selection-list compact">
+              {communicationMessages.map((message) => (
+                <button
+                  type="button"
+                  key={message.id}
+                  className={message.id === selectedMessageId ? "selected" : ""}
+                  onClick={() => setSelectedMessageId(message.id)}
+                >
+                  <span>{message.subject}</span>
+                  <small>{message.message_type} · {message.channel} · {message.recipient_count} recipients</small>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Delivery</p>
+                <h2>Read receipts and preferences</h2>
+              </div>
+              <button type="button" onClick={saveNotificationPreference} disabled={busyAction !== null}>Preference</button>
+            </div>
+            <div className="score-summary">
+              <strong>{messageRecipients.filter((recipient) => recipient.delivery_status === "read").length}</strong>
+              <span>{selectedMessage?.subject ?? "No message selected"}</span>
+              <small>{messageRecipients.length} recipients · {notificationPreference?.frequency ?? "no preference"}</small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Frequency
+                <select value={preferenceForm.frequency} onChange={(event) => setPreferenceForm({ ...preferenceForm, frequency: event.target.value as NotificationFrequency })}>
+                  <option value="immediate">Immediate</option>
+                  <option value="daily_digest">Daily digest</option>
+                  <option value="weekly_digest">Weekly digest</option>
+                </select>
+              </label>
+              <label>
+                Channel preference
+                <select value={preferenceForm.channel_preference} onChange={(event) => setPreferenceForm({ ...preferenceForm, channel_preference: event.target.value as ChannelPreference })}>
+                  <option value="all">All</option>
+                  <option value="app">App</option>
+                  <option value="email">Email</option>
+                  <option value="sms">SMS</option>
+                </select>
+              </label>
+              <label>
+                Quiet start
+                <input value={preferenceForm.quiet_hours_start} onChange={(event) => setPreferenceForm({ ...preferenceForm, quiet_hours_start: event.target.value })} />
+              </label>
+              <label>
+                Quiet end
+                <input value={preferenceForm.quiet_hours_end} onChange={(event) => setPreferenceForm({ ...preferenceForm, quiet_hours_end: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {messageRecipients.map((recipient) => (
+                <article key={recipient.id} className="task-card">
+                  <div>
+                    <strong>{recipient.person_name}</strong>
+                    <span>{recipient.destination ?? "no destination"} · {recipient.delivery_status}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => updateRecipientStatus(recipient.id, "delivered")}>Delivered</button>
+                    <button type="button" onClick={() => updateRecipientStatus(recipient.id, "read")}>Read</button>
+                  </div>
+                </article>
+              ))}
+              {communicationTemplates.slice(0, 3).map((template) => (
+                <article key={template.id} className="task-card">
+                  <div>
+                    <strong>{template.name}</strong>
+                    <span>{template.message_type} · {template.channel}</span>
+                  </div>
+                </article>
+              ))}
             </div>
           </div>
         </section>
