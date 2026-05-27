@@ -657,7 +657,7 @@ async def travel_fee_payment_webhook_route(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> EventTravelFeeCheckoutSettlementRead:
-    signature_required, signature_validated = validate_travel_fee_payment_webhook_signature(
+    signature_required, signature_validated = await validate_travel_fee_payment_webhook_signature(
         await request.body(),
         x_afrolete_travel_fee_timestamp,
         x_afrolete_travel_fee_signature,
@@ -1150,7 +1150,7 @@ async def travel_expense_payout_callback_route(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> EventTravelExpensePayoutCallbackRead:
-    signature_required, signature_validated = validate_travel_expense_payout_callback_signature(
+    signature_required, signature_validated = await validate_travel_expense_payout_callback_signature(
         await request.body(),
         x_afrolete_travel_payout_timestamp,
         x_afrolete_travel_payout_signature,

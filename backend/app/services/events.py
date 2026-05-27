@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import quote
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import Integer, cast, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -169,6 +170,7 @@ from app.services.safeguarding import (
     is_minor_on,
     medical_clearance_for_event,
 )
+from app.services.secrets import read_openbao_kv_secret
 from app.services.storage.objects import get_object, put_object
 
 
@@ -1536,14 +1538,20 @@ def decimal_minor_units(value: Any) -> Decimal | None:
     return (amount / Decimal("100")).quantize(Decimal("0.01"))
 
 
-def validate_travel_fee_payment_webhook_signature(
+async def validate_travel_fee_payment_webhook_signature(
     raw_body: bytes,
     timestamp_header: str | None,
     signature_header: str | None,
     settings: Settings | None = None,
 ) -> tuple[bool, bool]:
     selected_settings = settings or get_settings()
-    signing_key = selected_settings.travel_fee_payment_webhook_signing_key
+    signing_key = await resolve_travel_secret(
+        selected_settings,
+        env_value=selected_settings.travel_fee_payment_webhook_signing_key,
+        path=selected_settings.travel_fee_payment_webhook_signing_key_secret_path,
+        field_name=selected_settings.travel_fee_payment_webhook_signing_key_secret_field,
+        label="travel fee payment webhook signing key",
+    )
     if not signing_key:
         return False, False
     if not timestamp_header or not signature_header:
@@ -1566,14 +1574,20 @@ def validate_travel_fee_payment_webhook_signature(
     return True, True
 
 
-def validate_travel_expense_payout_callback_signature(
+async def validate_travel_expense_payout_callback_signature(
     raw_body: bytes,
     timestamp_header: str | None,
     signature_header: str | None,
     settings: Settings | None = None,
 ) -> tuple[bool, bool]:
     selected_settings = settings or get_settings()
-    signing_key = selected_settings.travel_expense_payout_callback_signing_key
+    signing_key = await resolve_travel_secret(
+        selected_settings,
+        env_value=selected_settings.travel_expense_payout_callback_signing_key,
+        path=selected_settings.travel_expense_payout_callback_signing_key_secret_path,
+        field_name=selected_settings.travel_expense_payout_callback_signing_key_secret_field,
+        label="travel expense payout callback signing key",
+    )
     if not signing_key:
         return False, False
     if not timestamp_header or not signature_header:
@@ -1594,6 +1608,32 @@ def validate_travel_expense_payout_callback_signature(
     if not hmac.compare_digest(expected, submitted):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel payout callback signature")
     return True, True
+
+
+async def resolve_travel_secret(
+    settings: Settings,
+    *,
+    env_value: str,
+    path: str,
+    field_name: str,
+    label: str,
+) -> str:
+    if env_value:
+        return env_value
+    if not path:
+        return ""
+    if not settings.openbao_addr or not settings.openbao_token:
+        raise HTTPException(
+            status_code=500,
+            detail=f"{label} is configured for OpenBao but OpenBao address/token is missing",
+        )
+    try:
+        secret = await read_openbao_kv_secret(settings, path, field_name)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"OpenBao {label} fetch failed: {exc}") from exc
+    if not secret:
+        raise HTTPException(status_code=500, detail=f"OpenBao {label} secret field is empty")
+    return secret
 
 
 async def list_travel_approvals(
@@ -2246,8 +2286,7 @@ async def validate_travel_device_ingest_signature(
         .where(EventTravelDevice.provider == payload.provider)
         .where(EventTravelDevice.device_id == payload.device_id)
     )
-    signing_key = device.ingest_secret_key if device is not None and device.ingest_secret_key else None
-    signing_key = signing_key or selected_settings.travel_device_ingest_key
+    signing_key = await travel_device_ingest_signing_key(selected_settings, device)
     if not signing_key:
         return False, False
     if not timestamp_header or not signature_header:
@@ -2268,6 +2307,29 @@ async def validate_travel_device_ingest_signature(
     if not hmac.compare_digest(expected, submitted):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel device signature")
     return True, True
+
+
+async def travel_device_ingest_signing_key(
+    settings: Settings,
+    device: EventTravelDevice | None,
+) -> str:
+    if device is not None and device.ingest_secret_key:
+        return device.ingest_secret_key
+    if device is not None and device.secret_vault_reference:
+        return await resolve_travel_secret(
+            settings,
+            env_value="",
+            path=device.secret_vault_reference,
+            field_name=settings.travel_device_secret_vault_field,
+            label="travel device ingest secret",
+        )
+    return await resolve_travel_secret(
+        settings,
+        env_value=settings.travel_device_ingest_key,
+        path=settings.travel_device_ingest_key_secret_path,
+        field_name=settings.travel_device_ingest_key_secret_field,
+        label="travel device global ingest key",
+    )
 
 
 async def register_travel_device_ingest_event(

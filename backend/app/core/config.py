@@ -91,16 +91,23 @@ class Settings(BaseSettings):
     travel_manifest_signing_key: str = "local-travel-manifest-key"
     travel_manifest_url_ttl_seconds: int = 900
     travel_fee_payment_webhook_signing_key: str = ""
+    travel_fee_payment_webhook_signing_key_secret_path: str = ""
+    travel_fee_payment_webhook_signing_key_secret_field: str = "value"
     travel_fee_payment_webhook_tolerance_seconds: int = 300
     travel_expense_payout_callback_signing_key: str = ""
+    travel_expense_payout_callback_signing_key_secret_path: str = ""
+    travel_expense_payout_callback_signing_key_secret_field: str = "value"
     travel_expense_payout_callback_tolerance_seconds: int = 300
     travel_device_ingest_key: str = ""
+    travel_device_ingest_key_secret_path: str = ""
+    travel_device_ingest_key_secret_field: str = "value"
     travel_device_ingest_tolerance_seconds: int = 300
     travel_device_ingest_event_retention_days: int = 30
     travel_device_provider_idempotency_days: dict[str, int] = Field(default_factory=dict)
     travel_device_secret_storage_mode: Literal["database", "database_with_vault_reference"] = "database"
     travel_device_secret_vault_provider: str = "openbao"
     travel_device_secret_vault_path_prefix: str = "secret/data/afrolete/travel-devices"
+    travel_device_secret_vault_field: str = "value"
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"
