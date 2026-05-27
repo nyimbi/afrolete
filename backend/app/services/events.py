@@ -2377,7 +2377,11 @@ async def create_travel_carpool_ride(
         rider_person_id=payload.rider_person_id,
         driver_person_id=payload.driver_person_id,
         pickup_location=payload.pickup_location,
+        pickup_latitude=payload.pickup_latitude,
+        pickup_longitude=payload.pickup_longitude,
         dropoff_location=payload.dropoff_location,
+        dropoff_latitude=payload.dropoff_latitude,
+        dropoff_longitude=payload.dropoff_longitude,
         seats_requested=payload.seats_requested,
         seats_available=payload.seats_available,
         departure_window_start=payload.departure_window_start,
@@ -2449,6 +2453,18 @@ async def auto_match_travel_carpools(
                 request_id=request.id,
                 offer_id=offer.id,
                 score=score,
+                pickup_distance_km=carpool_coordinate_distance_km(
+                    request.pickup_latitude,
+                    request.pickup_longitude,
+                    offer.pickup_latitude,
+                    offer.pickup_longitude,
+                ),
+                dropoff_distance_km=carpool_coordinate_distance_km(
+                    request.dropoff_latitude,
+                    request.dropoff_longitude,
+                    offer.dropoff_latitude,
+                    offer.dropoff_longitude,
+                ),
                 seats_requested=request.seats_requested,
                 seats_available=offer.seats_available,
                 pickup_match=location_match_summary(request, offer),
@@ -2976,7 +2992,11 @@ def travel_carpool_ride_read(ride: EventTravelCarpoolRide) -> EventTravelCarpool
         rider_person_id=ride.rider_person_id,
         driver_person_id=ride.driver_person_id,
         pickup_location=ride.pickup_location,
+        pickup_latitude=ride.pickup_latitude,
+        pickup_longitude=ride.pickup_longitude,
         dropoff_location=ride.dropoff_location,
+        dropoff_latitude=ride.dropoff_latitude,
+        dropoff_longitude=ride.dropoff_longitude,
         seats_requested=ride.seats_requested,
         seats_available=ride.seats_available,
         departure_window_start=ride.departure_window_start,
@@ -2988,8 +3008,22 @@ def travel_carpool_ride_read(ride: EventTravelCarpoolRide) -> EventTravelCarpool
 
 
 def travel_carpool_match_score(request: EventTravelCarpoolRide, offer: EventTravelCarpoolRide) -> Decimal:
-    pickup_score = token_overlap_score(request.pickup_location, offer.pickup_location)
-    dropoff_score = token_overlap_score(request.dropoff_location or "", offer.dropoff_location or "")
+    pickup_score = carpool_location_score(
+        request.pickup_location,
+        offer.pickup_location,
+        request.pickup_latitude,
+        request.pickup_longitude,
+        offer.pickup_latitude,
+        offer.pickup_longitude,
+    )
+    dropoff_score = carpool_location_score(
+        request.dropoff_location or "",
+        offer.dropoff_location or "",
+        request.dropoff_latitude,
+        request.dropoff_longitude,
+        offer.dropoff_latitude,
+        offer.dropoff_longitude,
+    )
     if not request.dropoff_location or not offer.dropoff_location:
         dropoff_score = Decimal("0.50")
     location_score = (pickup_score * Decimal("0.75")) + (dropoff_score * Decimal("0.25"))
@@ -3001,6 +3035,47 @@ def travel_carpool_match_score(request: EventTravelCarpoolRide, offer: EventTrav
         + seats_score * Decimal("15")
     )
     return score.quantize(Decimal("0.01"))
+
+
+def carpool_location_score(
+    left: str,
+    right: str,
+    left_latitude: Decimal | None,
+    left_longitude: Decimal | None,
+    right_latitude: Decimal | None,
+    right_longitude: Decimal | None,
+) -> Decimal:
+    distance_km = carpool_coordinate_distance_km(left_latitude, left_longitude, right_latitude, right_longitude)
+    if distance_km is None:
+        return token_overlap_score(left, right)
+    if distance_km <= Decimal("1.00"):
+        return Decimal("1.00")
+    if distance_km <= Decimal("3.00"):
+        return Decimal("0.85")
+    if distance_km <= Decimal("5.00"):
+        return Decimal("0.70")
+    if distance_km <= Decimal("10.00"):
+        return Decimal("0.45")
+    if distance_km <= Decimal("20.00"):
+        return Decimal("0.20")
+    return Decimal("0.05")
+
+
+def carpool_coordinate_distance_km(
+    left_latitude: Decimal | None,
+    left_longitude: Decimal | None,
+    right_latitude: Decimal | None,
+    right_longitude: Decimal | None,
+) -> Decimal | None:
+    if any(value is None for value in (left_latitude, left_longitude, right_latitude, right_longitude)):
+        return None
+    distance = travel_distance_km(
+        float(left_latitude),
+        float(left_longitude),
+        float(right_latitude),
+        float(right_longitude),
+    )
+    return Decimal(str(round(distance, 3)))
 
 
 def token_overlap_score(left: str, right: str) -> Decimal:
@@ -3043,6 +3118,14 @@ def carpool_window_score(request: EventTravelCarpoolRide, offer: EventTravelCarp
 
 
 def location_match_summary(request: EventTravelCarpoolRide, offer: EventTravelCarpoolRide) -> str:
+    distance_km = carpool_coordinate_distance_km(
+        request.pickup_latitude,
+        request.pickup_longitude,
+        offer.pickup_latitude,
+        offer.pickup_longitude,
+    )
+    if distance_km is not None:
+        return f"Pickup points are {distance_km} km apart."
     overlap = location_tokens(request.pickup_location) & location_tokens(offer.pickup_location)
     if overlap:
         return f"Shared pickup terms: {', '.join(sorted(overlap))}"

@@ -912,7 +912,11 @@ export type EventTravelCarpoolRideRead = {
   rider_person_id: UUID | null;
   driver_person_id: UUID | null;
   pickup_location: string;
+  pickup_latitude: string | null;
+  pickup_longitude: string | null;
   dropoff_location: string | null;
+  dropoff_latitude: string | null;
+  dropoff_longitude: string | null;
   seats_requested: number;
   seats_available: number;
   departure_window_start: string | null;
@@ -926,6 +930,8 @@ export type EventTravelCarpoolAutoMatchPairRead = {
   request_id: UUID;
   offer_id: UUID;
   score: string;
+  pickup_distance_km: string | null;
+  dropoff_distance_km: string | null;
   seats_requested: number;
   seats_available: number;
   pickup_match: string;

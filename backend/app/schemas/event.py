@@ -788,7 +788,11 @@ class EventTravelCarpoolRideCreate(BaseModel):
     rider_person_id: UUID | None = None
     driver_person_id: UUID | None = None
     pickup_location: str = Field(min_length=2, max_length=240)
+    pickup_latitude: Decimal | None = Field(default=None, ge=-90, le=90, max_digits=9, decimal_places=6)
+    pickup_longitude: Decimal | None = Field(default=None, ge=-180, le=180, max_digits=9, decimal_places=6)
     dropoff_location: str | None = Field(default=None, max_length=240)
+    dropoff_latitude: Decimal | None = Field(default=None, ge=-90, le=90, max_digits=9, decimal_places=6)
+    dropoff_longitude: Decimal | None = Field(default=None, ge=-180, le=180, max_digits=9, decimal_places=6)
     seats_requested: int = Field(default=1, ge=1, le=20)
     seats_available: int = Field(default=0, ge=0, le=20)
     departure_window_start: datetime | None = None
@@ -823,7 +827,11 @@ class EventTravelCarpoolRideRead(BaseModel):
     rider_person_id: UUID | None
     driver_person_id: UUID | None
     pickup_location: str
+    pickup_latitude: Decimal | None
+    pickup_longitude: Decimal | None
     dropoff_location: str | None
+    dropoff_latitude: Decimal | None
+    dropoff_longitude: Decimal | None
     seats_requested: int
     seats_available: int
     departure_window_start: datetime | None
@@ -842,6 +850,8 @@ class EventTravelCarpoolAutoMatchPairRead(BaseModel):
     request_id: UUID
     offer_id: UUID
     score: Decimal
+    pickup_distance_km: Decimal | None = None
+    dropoff_distance_km: Decimal | None = None
     seats_requested: int
     seats_available: int
     pickup_match: str

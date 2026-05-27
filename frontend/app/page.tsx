@@ -682,7 +682,11 @@ export default function HomePage() {
     expense_notes: "Fuel and tolls for away match transport.",
     carpool_type: "request",
     carpool_pickup_location: "123 Main St",
+    carpool_pickup_latitude: -1.2921,
+    carpool_pickup_longitude: 36.8219,
     carpool_dropoff_location: "City Sports Complex",
+    carpool_dropoff_latitude: -1.3021,
+    carpool_dropoff_longitude: 36.8236,
     carpool_seats_requested: 1,
     carpool_seats_available: 3,
     carpool_window_start: "2026-05-28T07:00",
@@ -3550,7 +3554,11 @@ export default function HomePage() {
             rider_person_id: travelForm.carpool_type === "request" ? selectedAthleteId || null : null,
             driver_person_id: null,
             pickup_location: travelForm.carpool_pickup_location,
+            pickup_latitude: String(travelForm.carpool_pickup_latitude),
+            pickup_longitude: String(travelForm.carpool_pickup_longitude),
             dropoff_location: travelForm.carpool_dropoff_location || null,
+            dropoff_latitude: travelForm.carpool_dropoff_location ? String(travelForm.carpool_dropoff_latitude) : null,
+            dropoff_longitude: travelForm.carpool_dropoff_location ? String(travelForm.carpool_dropoff_longitude) : null,
             seats_requested: travelForm.carpool_seats_requested,
             seats_available: travelForm.carpool_type === "offer" ? travelForm.carpool_seats_available : 0,
             departure_window_start: travelForm.carpool_window_start
@@ -8086,6 +8094,14 @@ export default function HomePage() {
                 <input value={travelForm.carpool_pickup_location} onChange={(event) => setTravelForm({ ...travelForm, carpool_pickup_location: event.target.value })} />
               </label>
               <label>
+                Pickup lat
+                <input type="number" step="0.000001" value={travelForm.carpool_pickup_latitude} onChange={(event) => setTravelForm({ ...travelForm, carpool_pickup_latitude: Number(event.target.value) })} />
+              </label>
+              <label>
+                Pickup lon
+                <input type="number" step="0.000001" value={travelForm.carpool_pickup_longitude} onChange={(event) => setTravelForm({ ...travelForm, carpool_pickup_longitude: Number(event.target.value) })} />
+              </label>
+              <label>
                 Carpool seats
                 <input
                   type="number"
@@ -8124,6 +8140,14 @@ export default function HomePage() {
               <label className="wide-field">
                 Carpool dropoff
                 <input value={travelForm.carpool_dropoff_location} onChange={(event) => setTravelForm({ ...travelForm, carpool_dropoff_location: event.target.value })} />
+              </label>
+              <label>
+                Dropoff lat
+                <input type="number" step="0.000001" value={travelForm.carpool_dropoff_latitude} onChange={(event) => setTravelForm({ ...travelForm, carpool_dropoff_latitude: Number(event.target.value) })} />
+              </label>
+              <label>
+                Dropoff lon
+                <input type="number" step="0.000001" value={travelForm.carpool_dropoff_longitude} onChange={(event) => setTravelForm({ ...travelForm, carpool_dropoff_longitude: Number(event.target.value) })} />
               </label>
               <label className="wide-field">
                 Driver notes
@@ -8430,6 +8454,10 @@ export default function HomePage() {
                   <div>
                     <strong>{ride.ride_type} carpool · {ride.status}</strong>
                     <span>{ride.pickup_location} to {ride.dropoff_location ?? "destination"} · {ride.seats_available || ride.seats_requested} seats</span>
+                    <span>
+                      {ride.pickup_latitude && ride.pickup_longitude ? `${ride.pickup_latitude}, ${ride.pickup_longitude}` : "No pickup coordinates"}
+                      {ride.dropoff_latitude && ride.dropoff_longitude ? ` · drop ${ride.dropoff_latitude}, ${ride.dropoff_longitude}` : ""}
+                    </span>
                     <span>{ride.match_score ? `${ride.match_score}% match` : ride.notes ?? "No match score yet"}</span>
                   </div>
                   <div className="event-toolbar">
@@ -8444,7 +8472,11 @@ export default function HomePage() {
                   <div>
                     <strong>Carpool auto-match · {travelCarpoolAutoMatch.matched_count} matched</strong>
                     <span>{travelCarpoolAutoMatch.request_count} requests · {travelCarpoolAutoMatch.offer_count} offers</span>
-                    <span>{travelCarpoolAutoMatch.pairs[0]?.pickup_match ?? "No automatic matches above threshold"}</span>
+                    <span>
+                      {travelCarpoolAutoMatch.pairs[0]?.pickup_distance_km
+                        ? `${travelCarpoolAutoMatch.pairs[0].pickup_distance_km} km pickup distance`
+                        : travelCarpoolAutoMatch.pairs[0]?.pickup_match ?? "No automatic matches above threshold"}
+                    </span>
                   </div>
                 </article>
               ) : null}
