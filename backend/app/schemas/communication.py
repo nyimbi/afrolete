@@ -120,6 +120,26 @@ class CommunicationDispatchSummary(BaseModel):
     transport_mode: str
 
 
+class CommunicationEscalationRunCreate(BaseModel):
+    channel: CommunicationChannel | None = None
+    escalation_level: int = Field(default=2, ge=1, le=5)
+    failed_only: bool = False
+    subject: str | None = Field(default=None, min_length=2, max_length=240)
+    body: str | None = Field(default=None, min_length=2, max_length=8000)
+
+
+class CommunicationEscalationRunRead(BaseModel):
+    original_message_id: UUID
+    escalation_message_id: UUID | None
+    channel: CommunicationChannel
+    escalation_level: int
+    target_count: int
+    skipped_count: int
+    recipient_count: int
+    subject: str
+    message: str
+
+
 class DeliveryWebhookEvent(BaseModel):
     recipient_id: UUID
     delivery_status: MessageDeliveryStatus

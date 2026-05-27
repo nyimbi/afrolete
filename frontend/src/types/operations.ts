@@ -2925,6 +2925,18 @@ export type CommunicationDispatchSummary = {
   transport_mode: string;
 };
 
+export type CommunicationEscalationRunRead = {
+  original_message_id: UUID;
+  escalation_message_id: UUID | null;
+  channel: CommunicationChannel;
+  escalation_level: number;
+  target_count: number;
+  skipped_count: number;
+  recipient_count: number;
+  subject: string;
+  message: string;
+};
+
 export type CommunicationDigestRead = {
   message_id: UUID;
   recipient_id: UUID;

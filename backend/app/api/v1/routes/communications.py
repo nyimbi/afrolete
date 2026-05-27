@@ -13,6 +13,8 @@ from app.schemas.communication import (
     CommunicationDispatchSummary,
     CommunicationDraftRead,
     CommunicationDraftRequest,
+    CommunicationEscalationRunCreate,
+    CommunicationEscalationRunRead,
     CommunicationInboxItemRead,
     CommunicationMessageCreate,
     CommunicationMessageRead,
@@ -39,6 +41,7 @@ from app.services.communications import (
     list_templates,
     mark_inbox_item_read,
     record_delivery_event,
+    run_message_escalation,
     run_digest_scheduler,
     update_recipient_status,
     upsert_preference,
@@ -267,6 +270,17 @@ async def dispatch_message_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> CommunicationDispatchSummary:
     return await dispatch_message(db, identity, message_id, authz)
+
+
+@router.post("/messages/{message_id}/escalate", response_model=CommunicationEscalationRunRead)
+async def escalate_message_route(
+    message_id: UUID,
+    payload: CommunicationEscalationRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunicationEscalationRunRead:
+    return await run_message_escalation(db, identity, message_id, payload, authz)
 
 
 @router.patch("/recipients/{recipient_id}", response_model=MessageRecipientRead)

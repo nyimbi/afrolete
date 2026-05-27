@@ -34,6 +34,8 @@ from app.schemas.communication import (
     CommunicationDispatchSummary,
     CommunicationDraftRead,
     CommunicationDraftRequest,
+    CommunicationEscalationRunCreate,
+    CommunicationEscalationRunRead,
     CommunicationMessageCreate,
     CommunicationTemplateCreate,
     DeliveryWebhookEvent,
@@ -458,6 +460,78 @@ async def dispatch_message(
     return dispatch_summary(message.id, rows, settings.communication_delivery_mode)
 
 
+async def run_message_escalation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    message_id: UUID,
+    payload: CommunicationEscalationRunCreate,
+    authz: AuthorizationService,
+) -> CommunicationEscalationRunRead:
+    message = await get_message(db, message_id)
+    await ensure_manage_communications(authz, identity, message.organization_id)
+    if not message.urgent:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only urgent messages can be escalated")
+    rows = await list_recipients(db, message.id)
+    pending_statuses = (
+        {MessageDeliveryStatus.FAILED}
+        if payload.failed_only
+        else {
+            MessageDeliveryStatus.QUEUED,
+            MessageDeliveryStatus.FAILED,
+            MessageDeliveryStatus.SUPPRESSED,
+        }
+    )
+    targets = [recipient for recipient, _person in rows if recipient.delivery_status in pending_statuses]
+    skipped_count = len(rows) - len(targets)
+    channel = payload.channel or escalation_channel(message.channel)
+    subject = payload.subject or f"Escalation L{payload.escalation_level}: {message.subject}"[:240]
+    body = payload.body or escalation_body(message, targets, payload.escalation_level)
+    if not targets:
+        return CommunicationEscalationRunRead(
+            original_message_id=message.id,
+            escalation_message_id=None,
+            channel=channel,
+            escalation_level=payload.escalation_level,
+            target_count=0,
+            skipped_count=skipped_count,
+            recipient_count=0,
+            subject=subject,
+            message="No unresolved urgent recipients need escalation.",
+        )
+
+    target_ids = [recipient.person_id for recipient in targets]
+    escalation = await create_message(
+        db,
+        identity,
+        CommunicationMessageCreate(
+            organization_id=message.organization_id,
+            message_type=message.message_type,
+            channel=channel,
+            scope_type=CommunicationScopeType.PERSON,
+            scope_id=target_ids[0],
+            recipient_person_ids=target_ids,
+            subject=subject,
+            body=body,
+            urgent=True,
+            quiet_hours_override=True,
+            copy_guardians_for_minors=False,
+        ),
+        authz,
+    )
+    recipients = await list_recipients(db, escalation.id)
+    return CommunicationEscalationRunRead(
+        original_message_id=message.id,
+        escalation_message_id=escalation.id,
+        channel=channel,
+        escalation_level=payload.escalation_level,
+        target_count=len(targets),
+        skipped_count=skipped_count,
+        recipient_count=len(recipients),
+        subject=subject,
+        message=f"Escalated urgent message to {len(recipients)} unresolved recipients.",
+    )
+
+
 async def record_delivery_event(
     db: AsyncSession,
     payload: DeliveryWebhookEvent,
@@ -850,6 +924,27 @@ def delivery_webhook_url_for(settings: Settings, channel: CommunicationChannel) 
     }
     url = channel_urls.get(channel) or settings.communication_webhook_url
     return url or None
+
+
+def escalation_channel(channel: CommunicationChannel) -> CommunicationChannel:
+    if channel in {CommunicationChannel.PUSH, CommunicationChannel.IN_APP, CommunicationChannel.EMAIL}:
+        return CommunicationChannel.SMS
+    if channel == CommunicationChannel.SMS:
+        return CommunicationChannel.WHATSAPP
+    if channel == CommunicationChannel.WHATSAPP:
+        return CommunicationChannel.TELEGRAM
+    return CommunicationChannel.SMS
+
+
+def escalation_body(message: CommunicationMessage, targets: list[MessageRecipient], escalation_level: int) -> str:
+    lines = [
+        f"Escalation level: {escalation_level}",
+        f"Original message: {message.subject}",
+        f"Unresolved recipients: {len(targets)}",
+        "",
+        message.body,
+    ]
+    return "\n".join(lines)[:8000]
 
 
 def dispatch_summary(

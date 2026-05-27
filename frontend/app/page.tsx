@@ -44,6 +44,7 @@ import type {
   CommunicationDigestRunRead,
   CommunicationDispatchSummary,
   CommunicationDraftRead,
+  CommunicationEscalationRunRead,
   CommunicationInboxItemRead,
   CommercialSummaryRead,
   CommunicationChannel,
@@ -608,6 +609,7 @@ export default function HomePage() {
   const [digestSummary, setDigestSummary] = useState<CommunicationDigestRead | null>(null);
   const [digestRun, setDigestRun] = useState<CommunicationDigestRunRead | null>(null);
   const [draftPreview, setDraftPreview] = useState<CommunicationDraftRead | null>(null);
+  const [escalationRun, setEscalationRun] = useState<CommunicationEscalationRunRead | null>(null);
   const [notificationPreference, setNotificationPreference] = useState<NotificationPreferenceRead | null>(null);
   const [facilities, setFacilities] = useState<FacilityRead[]>([]);
   const [emergencyPlans, setEmergencyPlans] = useState<EmergencyActionPlanRead[]>([]);
@@ -1939,6 +1941,7 @@ export default function HomePage() {
       setDigestSummary(null);
       setDigestRun(null);
       setDraftPreview(null);
+      setEscalationRun(null);
       setNotificationPreference(null);
       setFacilities([]);
       setEquipmentItems([]);
@@ -5706,6 +5709,37 @@ export default function HomePage() {
           `Delivery ${summary.transport_mode}: ${summary.sent + summary.delivered} sent, ${summary.failed} failed, ${summary.queued} queued`,
           summary.failed > 0 ? "bad" : "good"
         );
+      }
+    );
+  };
+
+  const escalateSelectedMessage = () => {
+    if (!selectedMessageId) {
+      addLog("Select an urgent communication first", "bad");
+      return;
+    }
+
+    runAction(
+      "escalate-communication",
+      () =>
+        apiRequest<CommunicationEscalationRunRead>(`/communications/messages/${selectedMessageId}/escalate`, {
+          method: "POST",
+          identity,
+          body: {
+            channel: messageForm.channel === "sms" ? "whatsapp" : "sms",
+            escalation_level: 2,
+            failed_only: false
+          }
+        }),
+      (escalation) => {
+        setEscalationRun(escalation);
+        if (escalation.escalation_message_id) {
+          setSelectedMessageId(escalation.escalation_message_id);
+        }
+        addLog(escalation.message, escalation.target_count > 0 ? "bad" : "neutral");
+        if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
+        }
       }
     );
   };
@@ -10964,6 +10998,7 @@ export default function HomePage() {
                 <button type="button" onClick={createCommunicationDigest} disabled={busyAction !== null || !selectedInboxPersonId}>Digest</button>
                 <button type="button" onClick={runCommunicationDigestScheduler} disabled={busyAction !== null || !selectedOrganizationId}>Run digests</button>
                 <button type="button" onClick={dispatchSelectedMessage} disabled={busyAction !== null || !selectedMessageId}>Dispatch</button>
+                <button type="button" onClick={escalateSelectedMessage} disabled={busyAction !== null || !selectedMessageId}>Escalate</button>
                 <button type="button" onClick={saveNotificationPreference} disabled={busyAction !== null}>Preference</button>
               </div>
             </div>
@@ -11000,6 +11035,15 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {escalationRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{escalationRun.subject}</strong>
+                    <span>Level {escalationRun.escalation_level} · {escalationRun.channel} · {escalationRun.recipient_count} recipients</span>
+                    <span>{escalationRun.message}</span>
+                  </div>
+                </article>
+              ) : null}
               {digestRun ? (
                 <article className="task-card">
                   <div>
