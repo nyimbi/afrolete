@@ -511,6 +511,60 @@ function ReportingChartCard({ chart }: { chart: ReportChartRead }) {
   );
 }
 
+function ArtifactAccessTrendCard({ summary }: { summary: AgentScorecardArtifactAccessSummaryRead }) {
+  const buckets = [...summary.daily_trend].reverse();
+  const max = Math.max(...buckets.map((bucket) => bucket.total_count), 1);
+  if (buckets.length === 0) {
+    return null;
+  }
+
+  return (
+    <article className="task-card chart-card">
+      <div>
+        <strong>Artifact access trend · {buckets.length} days</strong>
+        <span>Daily signed scorecard link creation and artifact opens</span>
+      </div>
+      <div className="chart-bars artifact-trend-bars">
+        {buckets.map((bucket) => {
+          const width = Math.max(4, Math.round((bucket.total_count / max) * 100));
+          const linkShare = bucket.total_count > 0
+            ? Math.round((bucket.link_created_count / bucket.total_count) * 100)
+            : 0;
+          const openShare = bucket.total_count > 0
+            ? Math.max(0, 100 - linkShare)
+            : 0;
+          return (
+            <div className="chart-bar-row artifact-trend-row" key={bucket.date}>
+              <span>{bucket.date.slice(5)}</span>
+              <div className="chart-track artifact-trend-track">
+                <div className="artifact-trend-stack" style={{ width: `${width}%` }}>
+                  {bucket.link_created_count > 0 ? (
+                    <i
+                      className="artifact-trend-link"
+                      style={{ width: `${Math.max(8, linkShare)}%` }}
+                    />
+                  ) : null}
+                  {bucket.artifact_opened_count > 0 ? (
+                    <i
+                      className="artifact-trend-open"
+                      style={{ width: `${Math.max(8, openShare)}%` }}
+                    />
+                  ) : null}
+                </div>
+              </div>
+              <strong>{bucket.total_count}</strong>
+            </div>
+          );
+        })}
+      </div>
+      <div className="chart-legend artifact-trend-legend">
+        <span><i className="artifact-trend-link" />Links</span>
+        <span><i className="artifact-trend-open" />Opens</span>
+      </div>
+    </article>
+  );
+}
+
 function downloadTextArtifact(content: string, contentType: string, filename: string) {
   const blob = new Blob([content], { type: contentType });
   const url = window.URL.createObjectURL(blob);
@@ -12211,6 +12265,9 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {agentScorecardArtifactAccessSummary ? (
+                <ArtifactAccessTrendCard summary={agentScorecardArtifactAccessSummary} />
+              ) : null}
               {agentScorecardArtifactAnomalyAlertRun ? (
                 <article className="task-card">
                   <div>

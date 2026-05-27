@@ -548,6 +548,59 @@ textarea:focus {
   border-radius: inherit;
 }
 
+.artifact-trend-bars {
+  gap: 9px;
+}
+
+.artifact-trend-row {
+  grid-template-columns: 48px minmax(0, 1fr) minmax(28px, auto);
+}
+
+.artifact-trend-track {
+  height: 12px;
+}
+
+.artifact-trend-stack {
+  display: flex;
+  height: 100%;
+  min-width: 4px;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.artifact-trend-stack i,
+.artifact-trend-legend i {
+  display: block;
+}
+
+.artifact-trend-link {
+  background: var(--teal);
+}
+
+.artifact-trend-open {
+  background: var(--amber);
+}
+
+.artifact-trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.artifact-trend-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 0;
+}
+
+.artifact-trend-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
 .chart-donut-row {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
