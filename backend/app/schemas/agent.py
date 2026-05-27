@@ -223,6 +223,15 @@ class AgentFamilyTaskRead(BaseModel):
     appeal_status: str | None
 
 
+class AgentDecisionAppealFormRead(BaseModel):
+    organization_id: UUID
+    task_id: UUID
+    generated_at: datetime
+    download_filename: str
+    content_type: str
+    content: str
+
+
 class AgentRunRecordRead(BaseModel):
     id: UUID
     task_id: UUID

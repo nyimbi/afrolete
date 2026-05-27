@@ -2532,6 +2532,15 @@ export type AgentFamilyTaskRead = {
   appeal_status: string | null;
 };
 
+export type AgentDecisionAppealFormRead = {
+  organization_id: UUID;
+  task_id: UUID;
+  generated_at: string;
+  download_filename: string;
+  content_type: string;
+  content: string;
+};
+
 export type AgentCredentialStatusRead = {
   execution_mode: string;
   default_model: string;

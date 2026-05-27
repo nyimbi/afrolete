@@ -244,6 +244,56 @@ async def list_my_agent_family_tasks(
     ]
 
 
+async def get_my_agent_decision_appeal_form(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    task_id: UUID,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    task = await db.get(AgentTask, task_id)
+    if task is None or task.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+
+    visible_tasks = await list_my_agent_family_tasks(db, identity, organization_id)
+    visible_task = next((item for item in visible_tasks if item["id"] == task_id), None)
+    if visible_task is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Agent task is not linked to this family")
+
+    agent = await db.get(Agent, task.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    latest_appeal = await db.scalar(
+        select(AgentDecisionAppeal)
+        .where(AgentDecisionAppeal.submitted_by_person_id == identity.person_id)
+        .where(AgentDecisionAppeal.task_id == task.id)
+        .order_by(AgentDecisionAppeal.created_at.desc())
+    )
+    settings = settings or get_settings()
+    generated_at = datetime.now(UTC)
+    athlete_name = visible_task.get("athlete_name") or "Linked family athlete"
+    filename_name = slug_for_filename(str(athlete_name))
+    content = render_agent_decision_appeal_form(
+        identity=identity,
+        agent=agent,
+        task=task,
+        visible_task=visible_task,
+        latest_appeal=latest_appeal,
+        generated_at=generated_at,
+        model_policy=agent.model_policy or settings.agent_default_model,
+        settings=settings,
+    )
+    return {
+        "organization_id": organization_id,
+        "task_id": task.id,
+        "generated_at": generated_at,
+        "download_filename": f"afrolete-ai-appeal-{filename_name}-{str(task.id)[:8]}.md",
+        "content_type": "text/markdown; charset=utf-8",
+        "content": content,
+    }
+
+
 async def submit_agent_decision_appeal(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1452,6 +1502,73 @@ def athlete_name_for_task_ref(input_ref: str | None, athlete_names: dict[str, st
     if input_ref is None:
         return None
     return athlete_names.get(input_ref)
+
+
+def slug_for_filename(value: str) -> str:
+    normalized = "".join(character.lower() if character.isalnum() else "-" for character in value)
+    parts = [part for part in normalized.split("-") if part]
+    return "-".join(parts[:6]) or "family"
+
+
+def render_agent_decision_appeal_form(
+    identity: CurrentIdentity,
+    agent: Agent,
+    task: AgentTask,
+    visible_task: dict[str, object],
+    latest_appeal: AgentDecisionAppeal | None,
+    generated_at: datetime,
+    model_policy: str,
+    settings: Settings,
+) -> str:
+    existing_appeal_status = latest_appeal.status if latest_appeal is not None else "not submitted"
+    existing_appeal_due = latest_appeal.due_at.isoformat() if latest_appeal is not None else "not assigned"
+    athlete_name = visible_task.get("athlete_name") or "Linked family athlete"
+    return "\n".join(
+        [
+            "# AfroLete AI Decision Appeal Form",
+            "",
+            f"Generated: {generated_at.isoformat()}",
+            f"Family account: {identity.display_name} <{identity.email}>",
+            f"Athlete: {athlete_name}",
+            "",
+            "## AI Recommendation",
+            "",
+            f"Task: {task.title}",
+            f"Task ID: {task.id}",
+            f"Task type: {task.task_type}",
+            f"Status: {task.status.value}",
+            f"Agent: {agent.name} ({agent.kind.value})",
+            f"Model policy: {model_policy}",
+            f"Execution mode: {settings.agent_execution_mode}",
+            f"Input reference: {task.input_ref or 'not recorded'}",
+            f"Output reference: {task.output_ref or 'not recorded'}",
+            f"Review notes: {task.review_notes or 'not recorded'}",
+            "",
+            "## Existing Appeal",
+            "",
+            f"Status: {existing_appeal_status}",
+            f"Due date: {existing_appeal_due}",
+            "",
+            "## What We Need Reviewed",
+            "",
+            "Question or concern:",
+            "",
+            "Data that may be missing, wrong, or outdated:",
+            "",
+            "Family context the reviewer should consider:",
+            "",
+            "Preferred outcome:",
+            "",
+            "Supporting evidence references or attachments:",
+            "",
+            "## Review Rights",
+            "",
+            "A human reviewer should explain the recommendation in plain language, check the source data, "
+            "compare reasonable alternatives, and record whether the AI decision is upheld, modified, or overturned.",
+            "",
+            "Submit this form through the AfroLete family portal or attach it to the relevant support message.",
+        ]
+    )
 
 
 def agent_bias_disparity_score(records: list[AgentRunRecord], registry: AgentModelRegistry) -> float:

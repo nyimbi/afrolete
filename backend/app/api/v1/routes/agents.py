@@ -10,6 +10,7 @@ from app.schemas.agent import (
     AgentBiasAuditCreate,
     AgentBiasAuditRead,
     AgentDecisionAppealCreate,
+    AgentDecisionAppealFormRead,
     AgentDecisionAppealRead,
     AgentDecisionAppealUpdate,
     AgentEthicalScorecardRead,
@@ -40,6 +41,7 @@ from app.services.agents import (
     create_agent,
     create_agent_model_registry,
     execute_agent_task,
+    get_my_agent_decision_appeal_form,
     list_agent_assignments,
     list_agent_bias_audits,
     list_agent_decision_appeals,
@@ -243,6 +245,18 @@ async def list_my_agent_family_tasks_route(
         AgentFamilyTaskRead(**task)
         for task in await list_my_agent_family_tasks(db, identity, organization_id)
     ]
+
+
+@router.get("/my-family-tasks/{task_id}/appeal-form", response_model=AgentDecisionAppealFormRead)
+async def get_my_agent_decision_appeal_form_route(
+    task_id: UUID,
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> AgentDecisionAppealFormRead:
+    return AgentDecisionAppealFormRead(
+        **await get_my_agent_decision_appeal_form(db, identity, organization_id, task_id)
+    )
 
 
 @router.post("/my-appeals", response_model=AgentDecisionAppealRead, status_code=status.HTTP_201_CREATED)

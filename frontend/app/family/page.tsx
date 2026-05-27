@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import type {
   ActivityConsentRead,
+  AgentDecisionAppealFormRead,
   AgentDecisionAppealRead,
   AgentFamilyTaskRead,
   AttendanceStatus,
@@ -242,6 +243,34 @@ export default function FamilyPortalPage() {
     }
   };
 
+  const downloadAiAppealForm = async (taskId: string) => {
+    if (!organizationId) {
+      setError("Organization id is required");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const form = await apiRequest<AgentDecisionAppealFormRead>(
+        `/agents/my-family-tasks/${taskId}/appeal-form?organization_id=${encodeURIComponent(organizationId)}`,
+        { identity }
+      );
+      const blob = new Blob([form.content], { type: form.content_type });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = form.download_filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "AI appeal form could not be downloaded");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="consent-page family-page">
       <section className="consent-shell family-shell">
@@ -391,6 +420,9 @@ export default function FamilyPortalPage() {
                 <strong>{task.title} · {task.status}</strong>
                 <span>{task.athlete_name ?? "Linked family"} · {task.agent_name} · {task.task_type}</span>
                 <small>{task.appeal_status ? `Appeal ${task.appeal_status}` : task.review_notes ?? "No appeal opened"}</small>
+                <button type="button" onClick={() => downloadAiAppealForm(task.id)} disabled={busy}>
+                  Download appeal form
+                </button>
               </article>
             ))}
             {aiTasks.length === 0 ? <span>No linked AI recommendations yet</span> : null}
