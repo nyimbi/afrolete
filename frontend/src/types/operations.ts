@@ -493,6 +493,25 @@ export type EventTravelConsentReminderRead = {
   recipient_count: number;
 };
 
+export type EventTravelManifestParticipantRead = {
+  person_id: UUID;
+  display_name: string;
+  guardian_names: string[];
+  guardian_contacts: string[];
+  medical_clearance_status: MedicalClearanceStatus | null;
+  medical_clearance_reason: string;
+};
+
+export type EventTravelManifestRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  destination: string;
+  participant_count: number;
+  emergency_contacts: string | null;
+  medical_access_plan: string | null;
+  participants: EventTravelManifestParticipantRead[];
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

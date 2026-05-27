@@ -72,6 +72,7 @@ import type {
   EventRead,
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
+  EventTravelManifestRead,
   EventTravelPlanRead,
   EventWeatherAlertRead,
   EventWeatherAssessmentRead,
@@ -344,6 +345,7 @@ export default function HomePage() {
   const [travelPlans, setTravelPlans] = useState<EventTravelPlanRead[]>([]);
   const [travelConsentBatch, setTravelConsentBatch] = useState<EventTravelConsentBatchRead | null>(null);
   const [travelConsentReminder, setTravelConsentReminder] = useState<EventTravelConsentReminderRead | null>(null);
+  const [travelManifest, setTravelManifest] = useState<EventTravelManifestRead | null>(null);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -1571,6 +1573,7 @@ export default function HomePage() {
       setTravelPlans([]);
       setTravelConsentBatch(null);
       setTravelConsentReminder(null);
+      setTravelManifest(null);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1774,6 +1777,7 @@ export default function HomePage() {
       setTravelPlans([]);
       setTravelConsentBatch(null);
       setTravelConsentReminder(null);
+      setTravelManifest(null);
       return;
     }
     runAction(
@@ -2375,6 +2379,20 @@ export default function HomePage() {
         if (selectedOrganizationId) {
           void loadCommunications(selectedOrganizationId);
         }
+      }
+    );
+  };
+
+  const loadTravelManifest = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-manifest-${plan.id}`,
+      () =>
+        apiRequest<EventTravelManifestRead>(`/events/travel-plans/${plan.id}/manifest`, {
+          identity
+        }),
+      (manifest) => {
+        setTravelManifest(manifest);
+        addLog(`Travel manifest loaded for ${manifest.participant_count} participants`, "good");
       }
     );
   };
@@ -6622,6 +6640,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelManifest ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelManifest.destination} manifest</strong>
+                    <span>{travelManifest.participant_count} participants · {travelManifest.medical_access_plan ?? "Medical access plan not set"}</span>
+                    <span>{travelManifest.participants[0]?.display_name ?? "No participants loaded"}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelPlans.slice(0, 2).map((plan) => (
                 <article key={plan.id} className="task-card">
                   <div>
@@ -6632,6 +6659,7 @@ export default function HomePage() {
                   <div className="event-toolbar">
                     <button type="button" onClick={() => requestTravelConsents(plan)}>Consent</button>
                     <button type="button" onClick={() => remindTravelConsents(plan)}>Remind</button>
+                    <button type="button" onClick={() => loadTravelManifest(plan)}>Manifest</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "completed")}>Complete</button>

@@ -30,6 +30,8 @@ from app.schemas.event import (
     EventTravelConsentReminderRead,
     EventTravelConsentRequestCreate,
     EventTravelConsentRequestItemRead,
+    EventTravelManifestParticipantRead,
+    EventTravelManifestRead,
     EventTravelPlanCreate,
     EventTravelPlanUpdate,
     EventWeatherAlertCreate,
@@ -460,6 +462,47 @@ async def send_travel_consent_reminders(
     )
 
 
+async def get_travel_manifest(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> EventTravelManifestRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+
+    participants: list[EventTravelManifestParticipantRead] = []
+    for athlete_person_id in await event_participant_person_ids(db, event):
+        athlete = await db.get(Person, athlete_person_id)
+        if athlete is None:
+            continue
+        guardian_rows = await guardian_contact_rows(db, athlete_person_id)
+        _, medical_status, _, medical_reason = await medical_clearance_for_event(db, event.id, athlete_person_id)
+        participants.append(
+            EventTravelManifestParticipantRead(
+                person_id=athlete.id,
+                display_name=athlete.display_name,
+                guardian_names=[guardian.display_name for _, guardian in guardian_rows],
+                guardian_contacts=guardian_contacts(guardian_rows),
+                medical_clearance_status=medical_status,
+                medical_clearance_reason=medical_reason,
+            )
+        )
+
+    return EventTravelManifestRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        destination=plan.destination,
+        participant_count=len(participants),
+        emergency_contacts=plan.emergency_contacts,
+        medical_access_plan=plan.medical_access_plan,
+        participants=participants,
+    )
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -548,6 +591,29 @@ async def primary_signing_guardian(db: AsyncSession, athlete_person_id: UUID) ->
         .where(GuardianRelationship.can_sign_consent.is_(True))
         .order_by(GuardianRelationship.is_primary.desc(), GuardianRelationship.created_at)
     )
+
+
+async def guardian_contact_rows(db: AsyncSession, athlete_person_id: UUID) -> list[tuple[GuardianRelationship, Person]]:
+    return list(
+        (
+            await db.execute(
+                select(GuardianRelationship, Person)
+                .join(Person, Person.id == GuardianRelationship.guardian_person_id)
+                .where(GuardianRelationship.athlete_person_id == athlete_person_id)
+                .order_by(GuardianRelationship.is_primary.desc(), Person.display_name)
+            )
+        ).all()
+    )
+
+
+def guardian_contacts(rows: list[tuple[GuardianRelationship, Person]]) -> list[str]:
+    contacts: list[str] = []
+    for _, guardian in rows:
+        if guardian.primary_email:
+            contacts.append(guardian.primary_email)
+        if guardian.primary_phone:
+            contacts.append(guardian.primary_phone)
+    return contacts
 
 
 def travel_consent_notes(event: Event, plan: EventTravelPlan) -> str:

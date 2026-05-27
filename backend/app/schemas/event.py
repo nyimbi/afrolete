@@ -186,6 +186,25 @@ class EventTravelConsentReminderRead(BaseModel):
     recipient_count: int
 
 
+class EventTravelManifestParticipantRead(BaseModel):
+    person_id: UUID
+    display_name: str
+    guardian_names: list[str]
+    guardian_contacts: list[str]
+    medical_clearance_status: MedicalClearanceStatus | None
+    medical_clearance_reason: str
+
+
+class EventTravelManifestRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    destination: str
+    participant_count: int
+    emergency_contacts: str | None
+    medical_access_plan: str | None
+    participants: list[EventTravelManifestParticipantRead]
+
+
 class AttendanceRecordUpsert(BaseModel):
     person_id: UUID
     status: AttendanceStatus

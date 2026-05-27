@@ -14,6 +14,7 @@ from app.schemas.event import (
     EventTravelConsentReminderCreate,
     EventTravelConsentReminderRead,
     EventTravelConsentRequestCreate,
+    EventTravelManifestRead,
     EventTravelPlanCreate,
     EventTravelPlanRead,
     EventTravelPlanUpdate,
@@ -31,6 +32,7 @@ from app.services.events import (
     create_event,
     dispatch_weather_assessment_alert,
     get_event,
+    get_travel_manifest,
     list_attendance,
     list_events,
     list_travel_plans,
@@ -316,6 +318,16 @@ async def send_travel_consent_reminders_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelConsentReminderRead:
     return await send_travel_consent_reminders(db, identity, travel_plan_id, payload, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/manifest", response_model=EventTravelManifestRead)
+async def get_travel_manifest_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelManifestRead:
+    return await get_travel_manifest(db, identity, travel_plan_id, authz)
 
 
 @router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])
