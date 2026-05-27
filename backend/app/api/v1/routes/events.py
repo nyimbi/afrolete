@@ -62,6 +62,7 @@ from app.schemas.event import (
     EventTravelFeeHostedCheckoutRead,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
+    EventTravelFeeReconciliationRead,
     EventTravelGeofenceCheckCreate,
     EventTravelGeofenceCheckRead,
     EventTravelGeofenceZoneCreate,
@@ -116,6 +117,7 @@ from app.services.events import (
     generate_travel_fee_invoices,
     get_event,
     get_travel_fee_hosted_checkout,
+    get_travel_fee_reconciliation,
     get_travel_device_fleet_inventory,
     get_travel_driver_marketplace_matches,
     get_travel_driver_rating_summary,
@@ -557,6 +559,20 @@ async def create_travel_fee_checkouts_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelFeeCheckoutBatchRead:
     return await create_travel_fee_checkouts(db, identity, travel_plan_id, payload, authz)
+
+
+@router.get(
+    "/travel-plans/{travel_plan_id}/fee-reconciliation",
+    response_model=EventTravelFeeReconciliationRead,
+)
+async def get_travel_fee_reconciliation_route(
+    travel_plan_id: UUID,
+    provider: str = Query(default="manual_gateway"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelFeeReconciliationRead:
+    return await get_travel_fee_reconciliation(db, identity, travel_plan_id, provider, authz)
 
 
 @router.get(

@@ -92,6 +92,7 @@ import type {
   EventTravelExpenseRead,
   EventTravelFeeCheckoutBatchRead,
   EventTravelFeeInvoiceBatchRead,
+  EventTravelFeeReconciliationRead,
   EventTravelGeofenceCheckRead,
   EventTravelGeofenceZoneRead,
   EventTravelLocationUpdateRead,
@@ -535,6 +536,8 @@ export default function HomePage() {
     useState<EventTravelManifestOfflineLinkRead | null>(null);
   const [travelFeeBatch, setTravelFeeBatch] = useState<EventTravelFeeInvoiceBatchRead | null>(null);
   const [travelFeeCheckoutBatch, setTravelFeeCheckoutBatch] = useState<EventTravelFeeCheckoutBatchRead | null>(null);
+  const [travelFeeReconciliation, setTravelFeeReconciliation] =
+    useState<EventTravelFeeReconciliationRead | null>(null);
   const [travelApprovals, setTravelApprovals] = useState<EventTravelApprovalRead[]>([]);
   const [travelApprovalRouting, setTravelApprovalRouting] = useState<EventTravelApprovalRoutingRead | null>(null);
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
@@ -1863,6 +1866,7 @@ export default function HomePage() {
       setTravelManifestOfflineLink(null);
       setTravelFeeBatch(null);
       setTravelFeeCheckoutBatch(null);
+      setTravelFeeReconciliation(null);
       setTravelApprovals([]);
       setTravelApprovalRouting(null);
       setTravelChecklistItems([]);
@@ -2095,6 +2099,7 @@ export default function HomePage() {
       setTravelManifestOfflineLink(null);
       setTravelFeeBatch(null);
       setTravelFeeCheckoutBatch(null);
+      setTravelFeeReconciliation(null);
       setTravelApprovals([]);
       setTravelApprovalRouting(null);
       setTravelChecklistItems([]);
@@ -3000,6 +3005,24 @@ export default function HomePage() {
       (batch) => {
         setTravelFeeCheckoutBatch(batch);
         addLog(`Travel payment links ready: ${batch.checkout_count}`, batch.checkout_count > 0 ? "good" : "bad");
+      }
+    );
+  };
+
+  const reconcileTravelFeePayments = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-fee-reconciliation-${plan.id}`,
+      () =>
+        apiRequest<EventTravelFeeReconciliationRead>(
+          `/events/travel-plans/${plan.id}/fee-reconciliation?provider=manual_gateway`,
+          { identity }
+        ),
+      (reconciliation) => {
+        setTravelFeeReconciliation(reconciliation);
+        addLog(
+          `Travel fee reconciliation: ${reconciliation.paid_count} paid, ${reconciliation.total_open} open`,
+          Number(reconciliation.total_open) > 0 ? "neutral" : "good"
+        );
       }
     );
   };
@@ -8798,6 +8821,22 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelFeeReconciliation ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Travel fee reconciliation · {travelFeeReconciliation.provider}</strong>
+                    <span>
+                      {travelFeeReconciliation.paid_count} paid · {travelFeeReconciliation.partial_count} partial · {travelFeeReconciliation.unpaid_count} unpaid
+                    </span>
+                    <span>
+                      {travelFeeReconciliation.total_paid} paid · {travelFeeReconciliation.total_open} open · {travelFeeReconciliation.invoice_count} invoices
+                    </span>
+                    <span>
+                      {travelFeeReconciliation.items[0]?.last_payment_reference ?? travelFeeReconciliation.items[0]?.session_id ?? "No travel payments reconciled yet"}
+                    </span>
+                  </div>
+                </article>
+              ) : null}
               {travelApprovalRouting ? (
                 <article className="task-card">
                   <div>
@@ -8923,6 +8962,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => loadTravelTelemetryStream(plan)}>Stream</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
                     <button type="button" onClick={() => createTravelFeeCheckouts(plan)}>Pay links</button>
+                    <button type="button" onClick={() => reconcileTravelFeePayments(plan)}>Payments</button>
                     <button type="button" onClick={() => routeTravelApprovals(plan)}>Route approvals</button>
                     <button type="button" onClick={() => createTravelApproval(plan)}>Require</button>
                     <button type="button" onClick={() => loadTravelApprovals(plan)}>Approvals</button>

@@ -327,6 +327,46 @@ class EventTravelFeeCheckoutBatchRead(BaseModel):
     checkouts: list[EventTravelFeeCheckoutItemRead]
 
 
+class EventTravelFeeReconciliationPaymentRead(BaseModel):
+    payment_id: UUID
+    amount: Decimal
+    currency: str
+    method: str
+    external_reference: str | None
+    received_at: datetime
+
+
+class EventTravelFeeReconciliationItemRead(BaseModel):
+    invoice_id: UUID
+    invoice_number: str
+    billed_person_id: UUID | None
+    amount_due: Decimal
+    amount_paid: Decimal
+    open_amount: Decimal
+    currency: str
+    status: str
+    session_id: str
+    session_status: str
+    payment_count: int
+    last_payment_reference: str | None
+    payments: list[EventTravelFeeReconciliationPaymentRead]
+
+
+class EventTravelFeeReconciliationRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    provider: str
+    invoice_count: int
+    paid_count: int
+    partial_count: int
+    unpaid_count: int
+    total_due: Decimal
+    total_paid: Decimal
+    total_open: Decimal
+    reconciled_at: datetime
+    items: list[EventTravelFeeReconciliationItemRead]
+
+
 class EventTravelFeeHostedCheckoutRead(BaseModel):
     invoice_id: UUID
     invoice_number: str

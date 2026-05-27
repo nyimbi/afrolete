@@ -118,6 +118,9 @@ from app.schemas.event import (
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelFeeInvoiceItemRead,
+    EventTravelFeeReconciliationItemRead,
+    EventTravelFeeReconciliationPaymentRead,
+    EventTravelFeeReconciliationRead,
     EventTravelGeofenceCheckCreate,
     EventTravelGeofenceCheckRead,
     EventTravelGeofencePoint,
@@ -881,17 +884,7 @@ async def create_travel_fee_checkouts(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
     event = await get_event(db, plan.event_id)
     await ensure_manage_event_scope(authz, plan.organization_id, identity)
-    invoice_prefix = f"TRAVEL-{str(plan.id)[:8]}".upper()
-    invoices = (
-        await db.scalars(
-            select(FinanceInvoice)
-            .where(
-                FinanceInvoice.organization_id == plan.organization_id,
-                FinanceInvoice.invoice_number.like(f"{invoice_prefix}-%"),
-            )
-            .order_by(FinanceInvoice.due_on, FinanceInvoice.invoice_number)
-        )
-    ).all()
+    invoices = await travel_fee_invoices_for_plan(db, plan)
     if not invoices:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel fee invoices not found")
 
@@ -930,6 +923,87 @@ async def create_travel_fee_checkouts(
         checkout_count=len(checkouts),
         total_open_amount=total_open_amount.quantize(Decimal("0.01")),
         checkouts=checkouts,
+    )
+
+
+async def get_travel_fee_reconciliation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    provider: str,
+    authz: AuthorizationService,
+) -> EventTravelFeeReconciliationRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    invoices = await travel_fee_invoices_for_plan(db, plan)
+    if not invoices:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel fee invoices not found")
+    payments = (
+        await db.scalars(
+            select(FinancePayment)
+            .where(FinancePayment.organization_id == plan.organization_id)
+            .where(FinancePayment.invoice_id.in_([invoice.id for invoice in invoices]))
+            .order_by(FinancePayment.received_at.desc())
+        )
+    ).all()
+    payments_by_invoice: dict[UUID, list[FinancePayment]] = {}
+    for payment in payments:
+        payments_by_invoice.setdefault(payment.invoice_id, []).append(payment)
+
+    items: list[EventTravelFeeReconciliationItemRead] = []
+    total_due = Decimal("0.00")
+    total_paid = Decimal("0.00")
+    total_open = Decimal("0.00")
+    for invoice in invoices:
+        invoice_payments = payments_by_invoice.get(invoice.id, [])
+        open_amount = travel_fee_checkout_open_amount(invoice)
+        total_due += invoice.amount_due
+        total_paid += invoice.amount_paid
+        total_open += open_amount
+        items.append(
+            EventTravelFeeReconciliationItemRead(
+                invoice_id=invoice.id,
+                invoice_number=invoice.invoice_number,
+                billed_person_id=invoice.person_id,
+                amount_due=invoice.amount_due,
+                amount_paid=invoice.amount_paid,
+                open_amount=open_amount,
+                currency=invoice.currency,
+                status=invoice.status.value,
+                session_id=travel_fee_checkout_session_id(invoice, provider),
+                session_status=travel_fee_checkout_session_status(invoice),
+                payment_count=len(invoice_payments),
+                last_payment_reference=invoice_payments[0].external_reference if invoice_payments else None,
+                payments=[
+                    EventTravelFeeReconciliationPaymentRead(
+                        payment_id=payment.id,
+                        amount=payment.amount,
+                        currency=payment.currency,
+                        method=payment.method,
+                        external_reference=payment.external_reference,
+                        received_at=payment.received_at,
+                    )
+                    for payment in invoice_payments
+                ],
+            )
+        )
+
+    return EventTravelFeeReconciliationRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        provider=provider,
+        invoice_count=len(items),
+        paid_count=sum(1 for item in items if item.open_amount <= 0),
+        partial_count=sum(1 for item in items if item.amount_paid > 0 and item.open_amount > 0),
+        unpaid_count=sum(1 for item in items if item.amount_paid <= 0),
+        total_due=total_due.quantize(Decimal("0.01")),
+        total_paid=total_paid.quantize(Decimal("0.01")),
+        total_open=total_open.quantize(Decimal("0.01")),
+        reconciled_at=datetime.now(UTC),
+        items=items,
     )
 
 
@@ -3401,6 +3475,22 @@ def travel_expense_payout_provider_response(
 def travel_fee_checkout_url(base_url: str, invoice: FinanceInvoice, provider: str) -> str:
     token = sha256(f"{invoice.id}:{invoice.invoice_number}:{invoice.amount_due}:{provider}".encode()).hexdigest()[:24]
     return f"{base_url.rstrip('/')}/{invoice.id}?provider={provider}&token={token}"
+
+
+async def travel_fee_invoices_for_plan(db: AsyncSession, plan: EventTravelPlan) -> list[FinanceInvoice]:
+    invoice_prefix = f"TRAVEL-{str(plan.id)[:8]}".upper()
+    return list(
+        (
+            await db.scalars(
+                select(FinanceInvoice)
+                .where(
+                    FinanceInvoice.organization_id == plan.organization_id,
+                    FinanceInvoice.invoice_number.like(f"{invoice_prefix}-%"),
+                )
+                .order_by(FinanceInvoice.due_on, FinanceInvoice.invoice_number)
+            )
+        ).all()
+    )
 
 
 def travel_fee_checkout_session_id(invoice: FinanceInvoice, provider: str) -> str:
