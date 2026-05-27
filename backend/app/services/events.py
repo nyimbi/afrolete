@@ -889,6 +889,7 @@ async def create_travel_fee_checkouts(
     for invoice in invoices:
         open_amount = max(invoice.amount_due - invoice.amount_paid, Decimal("0.00")).quantize(Decimal("0.01"))
         total_open_amount += open_amount
+        session_id = travel_fee_checkout_session_id(invoice, payload.provider)
         checkouts.append(
             EventTravelFeeCheckoutItemRead(
                 invoice_id=invoice.id,
@@ -901,6 +902,12 @@ async def create_travel_fee_checkouts(
                 status=invoice.status.value,
                 provider=payload.provider,
                 checkout_url=travel_fee_checkout_url(payload.checkout_base_url, invoice, payload.provider),
+                session_id=session_id,
+                session_url=travel_fee_checkout_session_url(payload.session_base_url, session_id, invoice, payload.provider),
+                session_status="ready" if open_amount > 0 else "paid",
+                client_reference=f"travel:{plan.id}:{invoice.id}",
+                success_url=payload.success_url,
+                cancel_url=payload.cancel_url,
                 expires_at=payload.expires_at,
             )
         )
@@ -2825,6 +2832,22 @@ def travel_expense_payout_reference(
 def travel_fee_checkout_url(base_url: str, invoice: FinanceInvoice, provider: str) -> str:
     token = sha256(f"{invoice.id}:{invoice.invoice_number}:{invoice.amount_due}:{provider}".encode()).hexdigest()[:24]
     return f"{base_url.rstrip('/')}/{invoice.id}?provider={provider}&token={token}"
+
+
+def travel_fee_checkout_session_id(invoice: FinanceInvoice, provider: str) -> str:
+    token = sha256(f"session:{invoice.id}:{invoice.invoice_number}:{invoice.amount_due}:{provider}".encode()).hexdigest()
+    provider_token = sub(r"[^a-z0-9]+", "-", provider.lower()).strip("-")[:24] or "processor"
+    return f"tfcs_{provider_token}_{token[:24]}"
+
+
+def travel_fee_checkout_session_url(
+    base_url: str,
+    session_id: str,
+    invoice: FinanceInvoice,
+    provider: str,
+) -> str:
+    provider_token = quote(provider, safe="")
+    return f"{base_url.rstrip('/')}/{session_id}?invoice_id={invoice.id}&provider={provider_token}"
 
 
 async def pending_event_consent_requests(db: AsyncSession, event: Event) -> list[ConsentRequest]:

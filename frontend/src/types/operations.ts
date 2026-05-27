@@ -580,6 +580,12 @@ export type EventTravelFeeCheckoutItemRead = {
   status: string;
   provider: string;
   checkout_url: string;
+  session_id: string;
+  session_url: string;
+  session_status: string;
+  client_reference: string;
+  success_url: string | null;
+  cancel_url: string | null;
   expires_at: string | null;
 };
 

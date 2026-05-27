@@ -291,6 +291,9 @@ class EventTravelFeeInvoiceBatchRead(BaseModel):
 class EventTravelFeeCheckoutCreate(BaseModel):
     provider: str = Field(default="manual_gateway", min_length=2, max_length=80)
     checkout_base_url: str = Field(default="/pay/invoices", min_length=2, max_length=500)
+    session_base_url: str = Field(default="/pay/sessions", min_length=2, max_length=500)
+    success_url: str | None = Field(default=None, max_length=500)
+    cancel_url: str | None = Field(default=None, max_length=500)
     expires_at: datetime | None = None
 
 
@@ -305,6 +308,12 @@ class EventTravelFeeCheckoutItemRead(BaseModel):
     status: str
     provider: str
     checkout_url: str
+    session_id: str
+    session_url: str
+    session_status: str
+    client_reference: str
+    success_url: str | None
+    cancel_url: str | None
     expires_at: datetime | None
 
 

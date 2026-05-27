@@ -2811,6 +2811,9 @@ export default function HomePage() {
           body: {
             provider: "manual_gateway",
             checkout_base_url: "/pay/invoices",
+            session_base_url: "/pay/sessions",
+            success_url: "/pay/travel/success",
+            cancel_url: "/pay/travel/cancelled",
             expires_at: travelForm.consent_due_at ? new Date(travelForm.consent_due_at).toISOString() : null
           }
         }),
@@ -8474,9 +8477,13 @@ export default function HomePage() {
               {travelFeeCheckoutBatch ? (
                 <article className="task-card">
                   <div>
-                    <strong>{travelFeeCheckoutBatch.checkout_count} travel payment links</strong>
+                    <strong>{travelFeeCheckoutBatch.checkout_count} travel payment sessions</strong>
                     <span>{travelFeeCheckoutBatch.total_open_amount} open · {travelFeeCheckoutBatch.provider}</span>
-                    <span>{travelFeeCheckoutBatch.checkouts[0]?.checkout_url ?? "No checkout links"}</span>
+                    <span>
+                      {travelFeeCheckoutBatch.checkouts[0]?.session_id ?? "No checkout sessions"}
+                      {travelFeeCheckoutBatch.checkouts[0]?.session_status ? ` · ${travelFeeCheckoutBatch.checkouts[0].session_status}` : ""}
+                    </span>
+                    <span>{travelFeeCheckoutBatch.checkouts[0]?.session_url ?? travelFeeCheckoutBatch.checkouts[0]?.checkout_url ?? "No checkout URL"}</span>
                   </div>
                 </article>
               ) : null}
