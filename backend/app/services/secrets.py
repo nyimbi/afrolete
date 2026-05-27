@@ -1,4 +1,5 @@
 import httpx
+from fastapi import HTTPException
 
 from app.core.config import Settings
 
@@ -37,3 +38,29 @@ def read_openbao_kv_secret_sync(settings: Settings, path: str, field_name: str) 
     if not isinstance(data, dict):
         return ""
     return str(data.get(field_name) or "")
+
+
+def resolve_secret_sync(
+    settings: Settings,
+    *,
+    env_value: str,
+    path: str,
+    field_name: str,
+    label: str,
+) -> str:
+    if env_value:
+        return env_value
+    if not path:
+        return ""
+    if not settings.openbao_addr or not settings.openbao_token:
+        raise HTTPException(
+            status_code=500,
+            detail=f"{label} is configured for OpenBao but OpenBao address/token is missing",
+        )
+    try:
+        secret = read_openbao_kv_secret_sync(settings, path, field_name)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"OpenBao {label} fetch failed: {exc}") from exc
+    if not secret:
+        raise HTTPException(status_code=500, detail=f"OpenBao {label} secret field is empty")
+    return secret

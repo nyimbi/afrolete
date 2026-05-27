@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     report_artifact_dir: str = "data/report-artifacts"
     report_artifact_url_prefix: str = "local://reports"
     report_artifact_signing_key: str = "local-report-artifact-key"
+    report_artifact_signing_key_secret_path: str = ""
+    report_artifact_signing_key_secret_field: str = "value"
     report_artifact_url_ttl_seconds: int = 900
     equipment_file_dir: str = "data/equipment-files"
     equipment_file_url_prefix: str = "local://equipment-files"
@@ -89,6 +91,8 @@ class Settings(BaseSettings):
     travel_manifest_file_dir: str = "data/travel-manifests"
     travel_manifest_file_url_prefix: str = "local://travel-manifests"
     travel_manifest_signing_key: str = "local-travel-manifest-key"
+    travel_manifest_signing_key_secret_path: str = ""
+    travel_manifest_signing_key_secret_field: str = "value"
     travel_manifest_url_ttl_seconds: int = 900
     travel_fee_payment_webhook_signing_key: str = ""
     travel_fee_payment_webhook_signing_key_secret_path: str = ""

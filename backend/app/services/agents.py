@@ -63,7 +63,7 @@ from app.schemas.communication import CommunicationMessageCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 from app.services.communications import create_message
-from app.services.secrets import read_openbao_kv_secret
+from app.services.secrets import read_openbao_kv_secret, resolve_secret_sync
 from app.services.storage.objects import get_object, put_object
 
 ASSIGNABLE_SCOPES = {"organization", "team", "event", "athlete_profile"}
@@ -1949,7 +1949,14 @@ def scorecard_artifact_signature(
 
 
 def scorecard_artifact_signing_key(settings: Settings) -> bytes:
-    key = settings.report_artifact_signing_key or settings.agent_webhook_key
+    key = resolve_secret_sync(
+        settings,
+        env_value=settings.report_artifact_signing_key,
+        path=settings.report_artifact_signing_key_secret_path,
+        field_name=settings.report_artifact_signing_key_secret_field,
+        label="scorecard artifact signing key",
+    )
+    key = key or settings.agent_webhook_key
     return (key or "local-scorecard-artifact-key").encode()
 
 

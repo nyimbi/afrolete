@@ -44,6 +44,7 @@ from app.schemas.reporting import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.secrets import resolve_secret_sync
 from app.services.storage.objects import get_object, put_object
 
 
@@ -795,7 +796,14 @@ def report_artifact_signature(
 
 
 def report_artifact_signing_key(settings: Settings) -> bytes:
-    key = settings.report_artifact_signing_key or settings.agent_webhook_key
+    key = resolve_secret_sync(
+        settings,
+        env_value=settings.report_artifact_signing_key,
+        path=settings.report_artifact_signing_key_secret_path,
+        field_name=settings.report_artifact_signing_key_secret_field,
+        label="report artifact signing key",
+    )
+    key = key or settings.agent_webhook_key
     return (key or "local-report-artifact-key").encode()
 
 

@@ -170,7 +170,7 @@ from app.services.safeguarding import (
     is_minor_on,
     medical_clearance_for_event,
 )
-from app.services.secrets import read_openbao_kv_secret
+from app.services.secrets import read_openbao_kv_secret, resolve_secret_sync
 from app.services.storage.objects import get_object, put_object
 
 
@@ -5185,7 +5185,14 @@ def travel_manifest_signature(
 
 
 def travel_manifest_signing_key(settings: Settings) -> bytes:
-    key = settings.travel_manifest_signing_key or settings.report_artifact_signing_key or settings.agent_webhook_key
+    key = resolve_secret_sync(
+        settings,
+        env_value=settings.travel_manifest_signing_key,
+        path=settings.travel_manifest_signing_key_secret_path,
+        field_name=settings.travel_manifest_signing_key_secret_field,
+        label="travel manifest signing key",
+    )
+    key = key or settings.report_artifact_signing_key or settings.agent_webhook_key
     return (key or "local-travel-manifest-key").encode()
 
 
