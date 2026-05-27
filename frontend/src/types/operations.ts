@@ -377,6 +377,24 @@ export type SupplierScoreRead = {
   recommendation: string;
 };
 
+export type SupplierOrderRead = {
+  id: UUID;
+  organization_id: UUID;
+  equipment_item_id: UUID | null;
+  supplier_name: string;
+  item_name: string;
+  quantity: number;
+  unit_cost: string;
+  total_cost: string;
+  currency: string;
+  status: string;
+  external_reference: string | null;
+  ordered_at: string | null;
+  expected_delivery_at: string | null;
+  received_at: string | null;
+  notes: string | null;
+};
+
 export type EquipmentLeaseQuoteRead = {
   equipment_item_id: UUID;
   item_name: string;

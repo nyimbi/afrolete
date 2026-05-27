@@ -23,6 +23,9 @@ from app.schemas.assets import (
     MaintenanceWorkOrderRead,
     MaintenanceWorkOrderUpdate,
     ProcurementRecommendationRead,
+    SupplierOrderCreate,
+    SupplierOrderRead,
+    SupplierOrderReceive,
     SupplierScoreRead,
 )
 from app.services.assets import (
@@ -31,14 +34,17 @@ from app.services.assets import (
     create_equipment_item,
     create_facility,
     create_facility_booking,
+    create_supplier_order,
     create_work_order,
     equipment_lease_quote,
     list_checkouts,
     list_equipment_items,
     list_facilities,
     list_facility_bookings,
+    list_supplier_orders,
     list_work_orders,
     procurement_recommendations,
+    receive_supplier_order,
     return_equipment,
     scan_equipment,
     supplier_scorecard,
@@ -169,6 +175,26 @@ def to_booking_read(booking) -> FacilityBookingRead:
         insurance_certificate_ref=booking.insurance_certificate_ref,
         special_requirements=booking.special_requirements,
         access_code=booking.access_code,
+    )
+
+
+def to_supplier_order_read(order) -> SupplierOrderRead:
+    return SupplierOrderRead(
+        id=order.id,
+        organization_id=order.organization_id,
+        equipment_item_id=order.equipment_item_id,
+        supplier_name=order.supplier_name,
+        item_name=order.item_name,
+        quantity=order.quantity,
+        unit_cost=order.unit_cost,
+        total_cost=order.total_cost,
+        currency=order.currency,
+        status=order.status,
+        external_reference=order.external_reference,
+        ordered_at=order.ordered_at,
+        expected_delivery_at=order.expected_delivery_at,
+        received_at=order.received_at,
+        notes=order.notes,
     )
 
 
@@ -368,6 +394,39 @@ async def supplier_scorecard_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[SupplierScoreRead]:
     return await supplier_scorecard(db, organization_id)
+
+
+@router.post("/suppliers/orders", response_model=SupplierOrderRead, status_code=status.HTTP_201_CREATED)
+async def create_supplier_order_route(
+    payload: SupplierOrderCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SupplierOrderRead:
+    return to_supplier_order_read(await create_supplier_order(db, identity, payload, authz))
+
+
+@router.get("/suppliers/orders", response_model=list[SupplierOrderRead])
+async def list_supplier_orders_route(
+    organization_id: UUID = Query(),
+    open_only: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+) -> list[SupplierOrderRead]:
+    return [
+        to_supplier_order_read(order)
+        for order in await list_supplier_orders(db, organization_id, open_only=open_only)
+    ]
+
+
+@router.patch("/suppliers/orders/{supplier_order_id}/receive", response_model=SupplierOrderRead)
+async def receive_supplier_order_route(
+    supplier_order_id: UUID,
+    payload: SupplierOrderReceive,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SupplierOrderRead:
+    return to_supplier_order_read(await receive_supplier_order(db, identity, supplier_order_id, payload, authz))
 
 
 @router.get("/utilization/recommendations", response_model=list[AssetUtilizationRecommendationRead])

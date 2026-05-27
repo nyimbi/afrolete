@@ -122,6 +122,7 @@ import type {
   SponsorRead,
   SponsorshipAgreementRead,
   SponsorshipDashboardRead,
+  SupplierOrderRead,
   SupplierScoreRead,
   SportFormat,
   SubscriptionRead,
@@ -309,6 +310,7 @@ export default function HomePage() {
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [assetSummary, setAssetSummary] = useState<AssetSummaryRead | null>(null);
   const [procurementRecommendations, setProcurementRecommendations] = useState<ProcurementRecommendationRead[]>([]);
+  const [supplierOrders, setSupplierOrders] = useState<SupplierOrderRead[]>([]);
   const [supplierScores, setSupplierScores] = useState<SupplierScoreRead[]>([]);
   const [assetUtilization, setAssetUtilization] = useState<AssetUtilizationRecommendationRead[]>([]);
   const [leaseQuote, setLeaseQuote] = useState<EquipmentLeaseQuoteRead | null>(null);
@@ -374,6 +376,7 @@ export default function HomePage() {
   const [selectedEquipmentId, setSelectedEquipmentId] = useState("");
   const [selectedCheckoutId, setSelectedCheckoutId] = useState("");
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState("");
+  const [selectedSupplierOrderId, setSelectedSupplierOrderId] = useState("");
   const [selectedSponsorId, setSelectedSponsorId] = useState("");
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [selectedTicketProductId, setSelectedTicketProductId] = useState("");
@@ -996,6 +999,7 @@ export default function HomePage() {
       bookingData,
       summaryData,
       procurementData,
+      supplierOrderData,
       supplierData,
       utilizationData
     ] = await Promise.all([
@@ -1008,6 +1012,7 @@ export default function HomePage() {
       apiRequest<ProcurementRecommendationRead[]>(
         `/assets/procurement/recommendations?organization_id=${organizationId}`
       ),
+      apiRequest<SupplierOrderRead[]>(`/assets/suppliers/orders?organization_id=${organizationId}`),
       apiRequest<SupplierScoreRead[]>(`/assets/suppliers/scorecard?organization_id=${organizationId}`),
       apiRequest<AssetUtilizationRecommendationRead[]>(
         `/assets/utilization/recommendations?organization_id=${organizationId}`
@@ -1020,6 +1025,7 @@ export default function HomePage() {
     setFacilityBookings(bookingData);
     setAssetSummary(summaryData);
     setProcurementRecommendations(procurementData);
+    setSupplierOrders(supplierOrderData);
     setSupplierScores(supplierData);
     setAssetUtilization(utilizationData);
     setSelectedFacilityId((current) =>
@@ -1035,6 +1041,9 @@ export default function HomePage() {
       workOrderData.some((workOrder) => workOrder.id === current)
         ? current
         : workOrderData[0]?.id ?? ""
+    );
+    setSelectedSupplierOrderId((current) =>
+      supplierOrderData.some((order) => order.id === current) ? current : supplierOrderData[0]?.id ?? ""
     );
   }, []);
 
@@ -1261,6 +1270,7 @@ export default function HomePage() {
       setFacilityBookings([]);
       setAssetSummary(null);
       setProcurementRecommendations([]);
+      setSupplierOrders([]);
       setSupplierScores([]);
       setAssetUtilization([]);
       setLeaseQuote(null);
@@ -3113,6 +3123,77 @@ export default function HomePage() {
     );
   };
 
+  const createSupplierOrder = (recommendation?: ProcurementRecommendationRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const equipment = recommendation
+      ? equipmentItems.find((item) => item.id === recommendation.equipment_item_id)
+      : selectedEquipment;
+    if (!equipment && !recommendation) {
+      addLog("Select equipment or a recommendation first", "bad");
+      return;
+    }
+    const quantity = recommendation?.recommended_quantity ?? Math.max(checkoutForm.quantity, 1);
+    const unitCost = equipment?.unit_value ?? "0.00";
+    runAction(
+      "create-supplier-order",
+      () =>
+        apiRequest<SupplierOrderRead>("/assets/suppliers/orders", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            equipment_item_id: recommendation?.equipment_item_id ?? equipment?.id ?? null,
+            supplier_name: recommendation?.supplier_hint ?? equipment?.brand ?? "Preferred supplier",
+            item_name: recommendation?.item_name ?? equipment?.name ?? equipmentForm.name,
+            quantity,
+            unit_cost: String(unitCost),
+            currency: "USD",
+            external_reference: `PO-${Date.now()}`,
+            expected_delivery_at: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
+            notes: recommendation?.rationale ?? "Supplier order created from the operations console.",
+            submit: true
+          }
+        }),
+      (order) => {
+        setSupplierOrders((current) => [order, ...current.filter((item) => item.id !== order.id)]);
+        setSelectedSupplierOrderId(order.id);
+        addLog(`${order.item_name} supplier order opened`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const receiveSupplierOrder = (supplierOrderId = selectedSupplierOrderId) => {
+    if (!selectedOrganizationId || !supplierOrderId) {
+      addLog("Select a supplier order first", "bad");
+      return;
+    }
+    const order = supplierOrders.find((item) => item.id === supplierOrderId);
+    runAction(
+      "receive-supplier-order",
+      () =>
+        apiRequest<SupplierOrderRead>(`/assets/suppliers/orders/${supplierOrderId}/receive`, {
+          method: "PATCH",
+          identity,
+          body: {
+            quantity_received: order?.quantity ?? null,
+            notes: "Received from the operations console and applied to inventory."
+          }
+        }),
+      (received) => {
+        setSupplierOrders((current) => [
+          received,
+          ...current.filter((item) => item.id !== received.id)
+        ]);
+        addLog(`${received.item_name} order marked ${received.status}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
   const createFacilityBooking = () => {
     if (!selectedOrganizationId || !selectedFacilityId) {
       addLog("Create or select a facility first", "bad");
@@ -4820,6 +4901,10 @@ export default function HomePage() {
                 <p className="section-label">Asset readiness</p>
                 <h2>Operational checks</h2>
               </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={() => createSupplierOrder()} disabled={busyAction !== null}>Order</button>
+                <button type="button" onClick={() => receiveSupplierOrder()} disabled={busyAction !== null}>Receive</button>
+              </div>
             </div>
             <div className="task-list">
               {procurementRecommendations.slice(0, 3).map((recommendation) => (
@@ -4828,6 +4913,28 @@ export default function HomePage() {
                     <strong>{recommendation.item_name}</strong>
                     <span>{recommendation.urgency} · buy {recommendation.recommended_quantity} · ${recommendation.estimated_cost}</span>
                   </div>
+                  <button type="button" onClick={() => createSupplierOrder(recommendation)}>
+                    Order
+                  </button>
+                </article>
+              ))}
+              {supplierOrders.slice(0, 3).map((order) => (
+                <article
+                  key={order.id}
+                  className={`task-card ${order.id === selectedSupplierOrderId ? "selected" : ""}`}
+                  onClick={() => setSelectedSupplierOrderId(order.id)}
+                >
+                  <div>
+                    <strong>{order.item_name} · {order.status}</strong>
+                    <span>{order.quantity} from {order.supplier_name} · {order.currency} {order.total_cost}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => receiveSupplierOrder(order.id)}
+                    disabled={order.status === "received"}
+                  >
+                    Receive
+                  </button>
                 </article>
               ))}
               {supplierScores.slice(0, 2).map((supplier) => (

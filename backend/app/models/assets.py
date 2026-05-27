@@ -202,3 +202,26 @@ class FacilityBooking(IdMixin, TimestampMixin, Base):
     insurance_certificate_ref: Mapped[str | None] = mapped_column(String(240))
     special_requirements: Mapped[str | None] = mapped_column(Text)
     access_code: Mapped[str | None] = mapped_column(String(80))
+
+
+class SupplierOrder(IdMixin, TimestampMixin, Base):
+    __tablename__ = "supplier_orders"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    equipment_item_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("equipment_items.id"), index=True
+    )
+    supplier_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    item_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    ordered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    expected_delivery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)

@@ -134,6 +134,44 @@ class SupplierScoreRead(BaseModel):
     recommendation: str
 
 
+class SupplierOrderCreate(BaseModel):
+    organization_id: UUID
+    equipment_item_id: UUID | None = None
+    supplier_name: str = Field(min_length=2, max_length=180)
+    item_name: str = Field(min_length=2, max_length=180)
+    quantity: int = Field(ge=1)
+    unit_cost: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    external_reference: str | None = Field(default=None, max_length=240)
+    expected_delivery_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+    submit: bool = True
+
+
+class SupplierOrderReceive(BaseModel):
+    quantity_received: int | None = Field(default=None, ge=1)
+    received_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class SupplierOrderRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    equipment_item_id: UUID | None
+    supplier_name: str
+    item_name: str
+    quantity: int
+    unit_cost: Decimal
+    total_cost: Decimal
+    currency: str
+    status: str
+    external_reference: str | None
+    ordered_at: datetime | None
+    expected_delivery_at: datetime | None
+    received_at: datetime | None
+    notes: str | None
+
+
 class EquipmentLeaseQuoteRead(BaseModel):
     equipment_item_id: UUID
     item_name: str

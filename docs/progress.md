@@ -607,6 +607,7 @@ athlete-development platform:
 | 042 - Competition ticketing integration | Partial | Backend ruff; frontend typecheck; diff check | League and tournament fixtures can now open ticket sales through the existing commercial ticket product system, auto-create linked match events when needed, show ticket capacity/sales in the competition console, and feed the commerce summary/check-in/refund workflows; full competition verification remains. |
 | 043 - Training readiness and feedback loops | Partial | Backend ruff; frontend typecheck; diff check | Training sessions now collect readiness, soreness, sleep, mood, actual RPE, duration, completion, athlete feedback, coach notes, load deltas, and recommendations from the console; live model generation, availability calendars, and full verification remain. |
 | 044 - Training availability suggestions | Partial | Backend ruff; frontend typecheck; diff check | Coaches can now request ranked training slots that account for existing events, training sessions, competition fixtures, and facility bookings, then apply the best slot to the session planner; live calendar sync and full verification remain. |
+| 045 - Supplier ordering workflow | Partial | Backend ruff; frontend typecheck; diff check | Procurement recommendations can now become supplier orders, open orders are visible in the asset console, and receiving an order updates equipment total/available quantities; real supplier API submission, invoice sync, and full verification remain. |
 
 ## Capability Coverage
 
@@ -629,7 +630,7 @@ Status values:
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, round-robin fixture generation, bracket projections, source-round winner advancement, visual bracket lanes, schedule optimization, competition broadcasts, fixture ticketing, conflict detection, and console workflows are implemented; full verification remains. |
 | Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, digest generation, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, background digest scheduler, and full parent portal remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
-| Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, scan lookup, photo metadata, procurement recommendations, supplier scorecards, lease quotes, utilization recommendations, and console workflows are implemented; supplier ordering workflows, real file uploads, RFID hardware integration, and accounting lease billing remain. |
+| Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, scan lookup, photo metadata, procurement recommendations, supplier scorecards, supplier orders/receiving, lease quotes, utilization recommendations, and console workflows are implemented; real file uploads, RFID hardware integration, supplier API submission, and accounting lease billing remain. |
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, settlement summaries, refunds, tax quotes, accounting exports, sponsorship dashboards, commercial summary, and console workflows are implemented; live payment provider webhooks, tax authority filing, accounting API sync, and sponsor-facing dashboards remain. |
 | Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, artifact rendering metadata, authenticated PDF/XLSX/CSV/API/HTML artifact download, local artifact persistence, stored artifact URLs, short-lived signed artifact links, verification scoring, chart-ready summaries, visual chart cards, benchmark models, deterministic AI review insights, and console workflows are implemented; real AI model execution, MinIO persistence, visual report QA, deeper chart interactions, and full verification remain. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation, frontend PKCE session handling, and SpiceDB gRPC authorization adapter are implemented; live service smoke tests and other integrations remain future slices. |
@@ -644,8 +645,8 @@ Status values:
    SpiceDB key.
 3. Add provider-specific communication credentials, background digest scheduler,
    and full parent portal/inbox experience.
-4. Add supplier ordering workflows, real file uploads, RFID hardware
-   integration, and accounting lease billing for assets and facilities.
+4. Add real file uploads, RFID hardware integration, supplier API submission,
+   and accounting lease billing for assets and facilities.
 5. Add live payment provider webhooks, tax authority filing, accounting API
    sync, and sponsor-facing dashboard portals.
 6. Add MinIO object persistence, lifecycle policy, visual report layout QA,

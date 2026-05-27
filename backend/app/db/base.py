@@ -8,6 +8,7 @@ from app.models.assets import (  # noqa: F401,E402
     Facility,
     FacilityBooking,
     MaintenanceWorkOrder,
+    SupplierOrder,
 )
 from app.models.billing import (  # noqa: F401,E402
     BillingEntitlement,

@@ -12,6 +12,7 @@ from app.models.assets import (
     Facility,
     FacilityBooking,
     MaintenanceWorkOrder,
+    SupplierOrder,
 )
 from app.models.enums import (
     AssetCondition,
@@ -38,6 +39,8 @@ from app.schemas.assets import (
     MaintenanceWorkOrderCreate,
     MaintenanceWorkOrderUpdate,
     ProcurementRecommendationRead,
+    SupplierOrderCreate,
+    SupplierOrderReceive,
     SupplierScoreRead,
     AssetUtilizationRecommendationRead,
 )
@@ -465,6 +468,86 @@ async def supplier_scorecard(db: AsyncSession, organization_id: UUID) -> list[Su
     return scorecards
 
 
+async def create_supplier_order(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SupplierOrderCreate,
+    authz: AuthorizationService,
+) -> SupplierOrder:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    if payload.equipment_item_id is not None:
+        await get_equipment_for_organization(db, payload.equipment_item_id, payload.organization_id)
+    total_cost = (payload.unit_cost * payload.quantity).quantize(Decimal("0.01"))
+    order = SupplierOrder(
+        organization_id=payload.organization_id,
+        equipment_item_id=payload.equipment_item_id,
+        supplier_name=payload.supplier_name,
+        item_name=payload.item_name,
+        quantity=payload.quantity,
+        unit_cost=payload.unit_cost,
+        total_cost=total_cost,
+        currency=payload.currency,
+        status="ordered" if payload.submit else "draft",
+        external_reference=payload.external_reference,
+        ordered_at=datetime.now(UTC) if payload.submit else None,
+        expected_delivery_at=payload.expected_delivery_at,
+        notes=payload.notes,
+    )
+    db.add(order)
+    await db.commit()
+    await db.refresh(order)
+    return order
+
+
+async def list_supplier_orders(
+    db: AsyncSession,
+    organization_id: UUID,
+    open_only: bool = False,
+) -> list[SupplierOrder]:
+    statement = select(SupplierOrder).where(SupplierOrder.organization_id == organization_id)
+    if open_only:
+        statement = statement.where(SupplierOrder.status.in_(["draft", "ordered", "partial"]))
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(SupplierOrder.expected_delivery_at.nullslast(), SupplierOrder.created_at.desc())
+            )
+        ).all()
+    )
+
+
+async def receive_supplier_order(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    supplier_order_id: UUID,
+    payload: SupplierOrderReceive,
+    authz: AuthorizationService,
+) -> SupplierOrder:
+    order = await get_supplier_order(db, supplier_order_id)
+    await ensure_manage_assets(authz, identity, order.organization_id)
+    if order.status == "received":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Supplier order already received")
+    quantity_received = payload.quantity_received or order.quantity
+    if quantity_received != order.quantity:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Partial receiving requires split orders",
+        )
+    order.received_at = payload.received_at or datetime.now(UTC)
+    order.status = "received"
+    if payload.notes is not None:
+        order.notes = payload.notes
+    if order.equipment_item_id is not None:
+        item = await get_equipment_for_organization(db, order.equipment_item_id, order.organization_id)
+        item.quantity_total += quantity_received
+        item.quantity_available += quantity_received
+        item.status = equipment_status_for_quantity(item.quantity_available)
+    await db.commit()
+    await db.refresh(order)
+    return order
+
+
 async def equipment_lease_quote(
     db: AsyncSession,
     organization_id: UUID,
@@ -647,6 +730,13 @@ async def get_work_order(db: AsyncSession, work_order_id: UUID) -> MaintenanceWo
     if work_order is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work order not found")
     return work_order
+
+
+async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> SupplierOrder:
+    order = await db.get(SupplierOrder, supplier_order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supplier order not found")
+    return order
 
 
 async def ensure_facility_available(
