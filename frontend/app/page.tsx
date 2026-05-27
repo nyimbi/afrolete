@@ -81,6 +81,7 @@ import type {
   EventTravelConsentReminderRead,
   EventTravelConsentReminderRunRead,
   EventTravelDeviceRead,
+  EventTravelDeviceSecretRead,
   EventTravelExpenseRead,
   EventTravelFeeCheckoutBatchRead,
   EventTravelFeeInvoiceBatchRead,
@@ -379,6 +380,7 @@ export default function HomePage() {
   const [selectedTravelChecklistFile, setSelectedTravelChecklistFile] = useState<File | null>(null);
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
   const [travelDevices, setTravelDevices] = useState<EventTravelDeviceRead[]>([]);
+  const [travelDeviceSecret, setTravelDeviceSecret] = useState<EventTravelDeviceSecretRead | null>(null);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
   const [selectedTravelReceiptFile, setSelectedTravelReceiptFile] = useState<File | null>(null);
   const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
@@ -1658,6 +1660,7 @@ export default function HomePage() {
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
       setTravelDevices([]);
+      setTravelDeviceSecret(null);
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
       setTravelCarpoolAutoMatch(null);
@@ -1879,6 +1882,7 @@ export default function HomePage() {
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
       setTravelDevices([]);
+      setTravelDeviceSecret(null);
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
       setTravelCarpoolAutoMatch(null);
@@ -2962,6 +2966,32 @@ export default function HomePage() {
       (updatedDevice) => {
         setTravelDevices((current) => current.map((item) => (item.id === updatedDevice.id ? updatedDevice : item)));
         addLog(`${updatedDevice.label} marked ${updatedDevice.status}`, updatedDevice.status === "active" ? "good" : "neutral");
+      }
+    );
+  };
+
+  const rotateTravelDeviceSecret = (device: EventTravelDeviceRead) => {
+    runAction(
+      `travel-device-secret-${device.id}`,
+      () =>
+        apiRequest<EventTravelDeviceSecretRead>(`/events/travel-devices/${device.id}/rotate-secret`, {
+          method: "POST",
+          identity
+        }),
+      (secret) => {
+        setTravelDeviceSecret(secret);
+        setTravelDevices((current) =>
+          current.map((item) =>
+            item.id === secret.id
+              ? {
+                  ...item,
+                  secret_configured: true,
+                  secret_rotated_at: secret.secret_rotated_at
+                }
+              : item
+          )
+        );
+        addLog(`Rotated ingest secret for ${secret.label}`, "good");
       }
     );
   };
@@ -7846,6 +7876,7 @@ export default function HomePage() {
                   <div>
                     <strong>{device.label} · {device.status}</strong>
                     <span>{device.provider}:{device.device_id} · {device.assigned_vehicle ?? "No vehicle assigned"}</span>
+                    <span>{device.secret_configured ? `Secret rotated ${device.secret_rotated_at ? new Date(device.secret_rotated_at).toLocaleString() : "recently"}` : "Using global ingest key fallback"}</span>
                     <span>
                       {device.last_seen_at ? `Last seen ${new Date(device.last_seen_at).toLocaleString()}` : "No device pings yet"}
                       {device.last_battery_percent ? ` · ${device.last_battery_percent}% battery` : ""}
@@ -7855,9 +7886,19 @@ export default function HomePage() {
                     <button type="button" onClick={() => setTravelDeviceStatus(device, "active")}>Activate</button>
                     <button type="button" onClick={() => setTravelDeviceStatus(device, "maintenance")}>Service</button>
                     <button type="button" onClick={() => setTravelDeviceStatus(device, "disabled")}>Disable</button>
+                    <button type="button" onClick={() => rotateTravelDeviceSecret(device)}>Rotate secret</button>
                   </div>
                 </article>
               ))}
+              {travelDeviceSecret ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelDeviceSecret.label} ingest secret</strong>
+                    <span>{travelDeviceSecret.provider}:{travelDeviceSecret.device_id} · rotated {new Date(travelDeviceSecret.secret_rotated_at).toLocaleString()}</span>
+                    <span>{travelDeviceSecret.ingest_secret}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelFeeBatch ? (
                 <article className="task-card">
                   <div>

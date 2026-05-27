@@ -701,8 +701,20 @@ export type EventTravelDeviceRead = {
   last_location_update_id: UUID | null;
   last_battery_percent: string | null;
   last_accuracy_meters: string | null;
+  secret_configured: boolean;
+  secret_rotated_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type EventTravelDeviceSecretRead = {
+  id: UUID;
+  travel_plan_id: UUID;
+  provider: string;
+  device_id: string;
+  label: string;
+  ingest_secret: string;
+  secret_rotated_at: string;
 };
 
 export type EventTravelExpenseRead = {

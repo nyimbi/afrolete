@@ -9,6 +9,7 @@ from hashlib import sha256
 from math import asin, cos, radians, sin, sqrt
 from pathlib import Path
 from re import sub
+from secrets import token_urlsafe
 from urllib.parse import quote
 from uuid import UUID
 
@@ -82,6 +83,7 @@ from app.schemas.event import (
     EventTravelDeviceLocationIngestCreate,
     EventTravelDeviceLocationIngestRead,
     EventTravelDeviceRead,
+    EventTravelDeviceSecretRead,
     EventTravelDeviceUpdate,
     EventTravelExpenseCreate,
     EventTravelExpenseRead,
@@ -1316,6 +1318,33 @@ async def update_travel_device(
     return travel_device_read(device)
 
 
+async def rotate_travel_device_secret(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_device_id: UUID,
+    authz: AuthorizationService,
+) -> EventTravelDeviceSecretRead:
+    device = await db.get(EventTravelDevice, travel_device_id)
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel device not found")
+    await ensure_manage_event_scope(authz, device.organization_id, identity)
+    secret = token_urlsafe(32)
+    rotated_at = datetime.now(UTC)
+    device.ingest_secret_key = secret
+    device.secret_rotated_at = rotated_at
+    await db.commit()
+    await db.refresh(device)
+    return EventTravelDeviceSecretRead(
+        id=device.id,
+        travel_plan_id=device.travel_plan_id,
+        provider=device.provider,
+        device_id=device.device_id,
+        label=device.label,
+        ingest_secret=secret,
+        secret_rotated_at=rotated_at,
+    )
+
+
 async def ingest_travel_device_location(
     db: AsyncSession,
     travel_plan_id: UUID,
@@ -1365,14 +1394,24 @@ async def ingest_travel_device_location(
     )
 
 
-def validate_travel_device_ingest_signature(
+async def validate_travel_device_ingest_signature(
+    db: AsyncSession,
+    travel_plan_id: UUID,
+    payload: EventTravelDeviceLocationIngestCreate,
     raw_body: bytes,
     timestamp_header: str | None,
     signature_header: str | None,
     settings: Settings | None = None,
 ) -> tuple[bool, bool]:
     selected_settings = settings or get_settings()
-    signing_key = selected_settings.travel_device_ingest_key
+    device = await db.scalar(
+        select(EventTravelDevice)
+        .where(EventTravelDevice.travel_plan_id == travel_plan_id)
+        .where(EventTravelDevice.provider == payload.provider)
+        .where(EventTravelDevice.device_id == payload.device_id)
+    )
+    signing_key = device.ingest_secret_key if device is not None and device.ingest_secret_key else None
+    signing_key = signing_key or selected_settings.travel_device_ingest_key
     if not signing_key:
         return False, False
     if not timestamp_header or not signature_header:
@@ -2596,6 +2635,8 @@ def travel_device_read(device: EventTravelDevice) -> EventTravelDeviceRead:
         last_location_update_id=device.last_location_update_id,
         last_battery_percent=device.last_battery_percent,
         last_accuracy_meters=device.last_accuracy_meters,
+        secret_configured=bool(device.ingest_secret_key),
+        secret_rotated_at=device.secret_rotated_at,
         notes=device.notes,
         created_at=device.created_at,
         updated_at=device.updated_at,

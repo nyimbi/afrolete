@@ -483,8 +483,20 @@ class EventTravelDeviceRead(EventTravelDeviceCreate):
     last_location_update_id: UUID | None
     last_battery_percent: Decimal | None
     last_accuracy_meters: Decimal | None
+    secret_configured: bool = False
+    secret_rotated_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class EventTravelDeviceSecretRead(BaseModel):
+    id: UUID
+    travel_plan_id: UUID
+    provider: str
+    device_id: str
+    label: str
+    ingest_secret: str
+    secret_rotated_at: datetime
 
 
 class EventTravelGeofenceCheckCreate(BaseModel):

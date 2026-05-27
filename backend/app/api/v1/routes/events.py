@@ -35,6 +35,7 @@ from app.schemas.event import (
     EventTravelDeviceLocationIngestCreate,
     EventTravelDeviceLocationIngestRead,
     EventTravelDeviceRead,
+    EventTravelDeviceSecretRead,
     EventTravelDeviceUpdate,
     EventTravelExpenseCreate,
     EventTravelExpenseRead,
@@ -108,6 +109,7 @@ from app.services.events import (
     record_attendance,
     request_travel_consents,
     read_signed_travel_manifest,
+    rotate_travel_device_secret,
     route_travel_approvals,
     run_event_travel_consent_reminders,
     seed_attendance_from_team_roster,
@@ -684,6 +686,16 @@ async def update_travel_device_route(
     return await update_travel_device(db, identity, travel_device_id, payload, authz)
 
 
+@router.post("/travel-devices/{travel_device_id}/rotate-secret", response_model=EventTravelDeviceSecretRead)
+async def rotate_travel_device_secret_route(
+    travel_device_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelDeviceSecretRead:
+    return await rotate_travel_device_secret(db, identity, travel_device_id, authz)
+
+
 @router.post(
     "/travel-plans/{travel_plan_id}/location-ingest",
     response_model=EventTravelDeviceLocationIngestRead,
@@ -697,7 +709,10 @@ async def ingest_travel_device_location_route(
     x_afrolete_travel_signature: str | None = Header(default=None, alias="X-Afrolete-Travel-Signature"),
     db: AsyncSession = Depends(get_db),
 ) -> EventTravelDeviceLocationIngestRead:
-    signature_required, signature_validated = validate_travel_device_ingest_signature(
+    signature_required, signature_validated = await validate_travel_device_ingest_signature(
+        db,
+        travel_plan_id,
+        payload,
         await request.body(),
         x_afrolete_travel_timestamp,
         x_afrolete_travel_signature,
