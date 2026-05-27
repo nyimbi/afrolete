@@ -1051,6 +1051,18 @@ export type EventTravelExpensePayoutRead = {
   expense: EventTravelExpenseRead;
 };
 
+export type EventTravelExpensePayoutCallbackRead = {
+  accepted: boolean;
+  signature_required: boolean;
+  signature_validated: boolean;
+  matched_by: string;
+  payout_reference: string | null;
+  payout_status: string;
+  reimbursement_status: string;
+  message: string;
+  expense: EventTravelExpenseRead;
+};
+
 export type EventTravelReceiptUploadRead = {
   expense_id: UUID;
   filename: string;

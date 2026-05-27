@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     travel_manifest_url_ttl_seconds: int = 900
     travel_fee_payment_webhook_signing_key: str = ""
     travel_fee_payment_webhook_tolerance_seconds: int = 300
+    travel_expense_payout_callback_signing_key: str = ""
+    travel_expense_payout_callback_tolerance_seconds: int = 300
     travel_device_ingest_key: str = ""
     travel_device_ingest_tolerance_seconds: int = 300
     travel_device_ingest_event_retention_days: int = 30

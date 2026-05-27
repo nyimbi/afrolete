@@ -16,7 +16,7 @@ from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import Integer, cast, delete, func, select
+from sqlalchemy import Integer, cast, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -104,6 +104,8 @@ from app.schemas.event import (
     EventTravelDriverRatingRead,
     EventTravelDriverRatingSummaryRead,
     EventTravelExpenseCreate,
+    EventTravelExpensePayoutCallbackCreate,
+    EventTravelExpensePayoutCallbackRead,
     EventTravelExpensePayoutCreate,
     EventTravelExpensePayoutRead,
     EventTravelExpenseRead,
@@ -1472,6 +1474,36 @@ def validate_travel_fee_payment_webhook_signature(
     submitted = signature_header.removeprefix("sha256=")
     if not hmac.compare_digest(expected, submitted):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel fee webhook signature")
+    return True, True
+
+
+def validate_travel_expense_payout_callback_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> tuple[bool, bool]:
+    selected_settings = settings or get_settings()
+    signing_key = selected_settings.travel_expense_payout_callback_signing_key
+    if not signing_key:
+        return False, False
+    if not timestamp_header or not signature_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing travel payout callback signature")
+    try:
+        timestamp = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel payout callback timestamp") from exc
+    age = abs(int(time.time()) - timestamp)
+    if age > selected_settings.travel_expense_payout_callback_tolerance_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Stale travel payout callback signature")
+    expected = hmac.new(
+        signing_key.encode(),
+        timestamp_header.encode() + b"." + raw_body,
+        sha256,
+    ).hexdigest()
+    submitted = signature_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, submitted):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel payout callback signature")
     return True, True
 
 
@@ -3026,6 +3058,70 @@ async def execute_travel_expense_payout(
     )
 
 
+async def reconcile_travel_expense_payout_callback(
+    db: AsyncSession,
+    payload: EventTravelExpensePayoutCallbackCreate,
+    *,
+    signature_required: bool = False,
+    signature_validated: bool = False,
+) -> EventTravelExpensePayoutCallbackRead:
+    if payload.payout_reference is None and payload.idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Payout reference or idempotency key required",
+        )
+
+    filters = []
+    if payload.payout_reference is not None:
+        filters.append(EventTravelExpense.payout_reference == payload.payout_reference)
+    if payload.idempotency_key is not None:
+        filters.append(EventTravelExpense.payout_idempotency_key == payload.idempotency_key)
+    expense = (
+        await db.scalars(
+            select(EventTravelExpense)
+            .where(EventTravelExpense.payout_provider == payload.provider)
+            .where(or_(*filters))
+        )
+    ).first()
+    if expense is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel expense payout not found")
+
+    matched_by = "payout_reference" if payload.payout_reference and expense.payout_reference == payload.payout_reference else "idempotency_key"
+    payout_status = normalize_travel_expense_payout_status(payload.status)
+    reconciled_at = datetime.now(UTC)
+    expense.payout_status = payout_status
+    expense.payout_provider_status_code = payload.provider_status_code
+    expense.payout_provider_response = travel_expense_payout_callback_response(
+        payload,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        matched_by=matched_by,
+        reconciled_at=reconciled_at,
+    )
+    if payout_status == "paid":
+        expense.reimbursement_status = "reimbursed"
+        expense.reimbursed_at = reconciled_at
+    elif payout_status in {"failed", "cancelled", "returned"} and expense.reimbursement_status == "reimbursed":
+        expense.reimbursement_status = "approved"
+        expense.reimbursed_at = None
+    if payload.notes:
+        expense.notes = append_note(expense.notes, payload.notes)
+
+    await db.commit()
+    await db.refresh(expense)
+    return EventTravelExpensePayoutCallbackRead(
+        accepted=True,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        matched_by=matched_by,
+        payout_reference=expense.payout_reference,
+        payout_status=expense.payout_status or payout_status,
+        reimbursement_status=expense.reimbursement_status,
+        message=f"Travel expense payout callback reconciled as {expense.payout_status}.",
+        expense=travel_expense_read(expense),
+    )
+
+
 async def upload_travel_expense_receipt(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3620,6 +3716,47 @@ def travel_expense_payout_provider_response(
             "payout_reference": payout_reference,
             "idempotency_key": idempotency_key,
             "status": status_value,
+        },
+        sort_keys=True,
+    )
+
+
+def normalize_travel_expense_payout_status(status_value: str) -> str:
+    normalized = status_value.strip().lower().replace("-", "_")
+    if normalized in {"paid", "succeeded", "success", "completed", "complete", "settled"}:
+        return "paid"
+    if normalized in {"queued", "pending", "processing", "submitted", "accepted"}:
+        return "queued"
+    if normalized in {"failed", "failure", "rejected", "declined", "error"}:
+        return "failed"
+    if normalized in {"cancelled", "canceled", "voided"}:
+        return "cancelled"
+    if normalized in {"returned", "reversed", "refunded", "chargeback"}:
+        return "returned"
+    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported travel payout callback status")
+
+
+def travel_expense_payout_callback_response(
+    payload: EventTravelExpensePayoutCallbackCreate,
+    *,
+    signature_required: bool,
+    signature_validated: bool,
+    matched_by: str,
+    reconciled_at: datetime,
+) -> str:
+    return json.dumps(
+        {
+            "provider": payload.provider,
+            "payout_reference": payload.payout_reference,
+            "idempotency_key": payload.idempotency_key,
+            "status": payload.status,
+            "external_event_id": payload.external_event_id,
+            "provider_status_code": payload.provider_status_code,
+            "matched_by": matched_by,
+            "signature_required": signature_required,
+            "signature_validated": signature_validated,
+            "reconciled_at": reconciled_at.isoformat(),
+            "raw_payload": payload.raw_payload,
         },
         sort_keys=True,
     )

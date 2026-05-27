@@ -979,6 +979,29 @@ class EventTravelExpensePayoutRead(BaseModel):
     expense: EventTravelExpenseRead
 
 
+class EventTravelExpensePayoutCallbackCreate(BaseModel):
+    provider: str = Field(default="manual_reimbursement", min_length=2, max_length=80)
+    payout_reference: str | None = Field(default=None, max_length=180)
+    idempotency_key: str | None = Field(default=None, max_length=180)
+    status: str = Field(default="paid", min_length=2, max_length=80)
+    provider_status_code: int | None = Field(default=None, ge=100, le=599)
+    external_event_id: str | None = Field(default=None, max_length=180)
+    raw_payload: dict[str, Any] | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelExpensePayoutCallbackRead(BaseModel):
+    accepted: bool
+    signature_required: bool = False
+    signature_validated: bool = False
+    matched_by: str
+    payout_reference: str | None
+    payout_status: str
+    reimbursement_status: str
+    message: str
+    expense: EventTravelExpenseRead
+
+
 class EventTravelReceiptUploadCreate(BaseModel):
     filename: str = Field(min_length=1, max_length=240)
     content_type: str = Field(default="application/octet-stream", max_length=120)

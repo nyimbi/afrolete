@@ -51,6 +51,8 @@ from app.schemas.event import (
     EventTravelDriverRatingRead,
     EventTravelDriverRatingSummaryRead,
     EventTravelExpenseCreate,
+    EventTravelExpensePayoutCallbackCreate,
+    EventTravelExpensePayoutCallbackRead,
     EventTravelExpensePayoutCreate,
     EventTravelExpensePayoutRead,
     EventTravelExpenseRead,
@@ -146,6 +148,7 @@ from app.services.events import (
     record_attendance,
     request_travel_consents,
     read_signed_travel_manifest,
+    reconcile_travel_expense_payout_callback,
     rotate_travel_device_secret,
     resolve_travel_fee_reconciliation_exception,
     route_travel_approvals,
@@ -165,6 +168,7 @@ from app.services.events import (
     upload_travel_checklist_evidence,
     upload_travel_expense_receipt,
     validate_travel_device_ingest_signature,
+    validate_travel_expense_payout_callback_signature,
     validate_travel_fee_payment_webhook_signature,
 )
 from app.services.safeguarding import medical_clearance_for_event
@@ -1110,6 +1114,36 @@ async def execute_travel_expense_payout_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelExpensePayoutRead:
     return await execute_travel_expense_payout(db, identity, expense_id, payload, authz)
+
+
+@router.post(
+    "/travel-expense-payout-callbacks",
+    response_model=EventTravelExpensePayoutCallbackRead,
+)
+async def travel_expense_payout_callback_route(
+    request: Request,
+    payload: EventTravelExpensePayoutCallbackCreate,
+    x_afrolete_travel_payout_timestamp: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Travel-Payout-Timestamp",
+    ),
+    x_afrolete_travel_payout_signature: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Travel-Payout-Signature",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> EventTravelExpensePayoutCallbackRead:
+    signature_required, signature_validated = validate_travel_expense_payout_callback_signature(
+        await request.body(),
+        x_afrolete_travel_payout_timestamp,
+        x_afrolete_travel_payout_signature,
+    )
+    return await reconcile_travel_expense_payout_callback(
+        db,
+        payload,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+    )
 
 
 @router.post(

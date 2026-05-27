@@ -88,6 +88,7 @@ import type {
   EventTravelDriverMarketplaceRead,
   EventTravelDriverRatingRead,
   EventTravelDriverRatingSummaryRead,
+  EventTravelExpensePayoutCallbackRead,
   EventTravelExpensePayoutRead,
   EventTravelExpenseRead,
   EventTravelFeeCheckoutBatchRead,
@@ -3884,6 +3885,41 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== payout.expense.id)
         ]);
         addLog(`Payout ${payout.payout_reference} ${payout.payout_status} via ${payout.adapter_mode}`, "good");
+      }
+    );
+  };
+
+  const reconcileTravelExpensePayoutCallback = (expense: EventTravelExpenseRead, statusValue: "paid" | "failed") => {
+    if (!expense.payout_reference && !expense.payout_idempotency_key) {
+      addLog("Execute or queue the payout before reconciling a callback", "neutral");
+      return;
+    }
+    runAction(
+      `travel-expense-payout-callback-${expense.id}-${statusValue}`,
+      () =>
+        apiRequest<EventTravelExpensePayoutCallbackRead>("/events/travel-expense-payout-callbacks", {
+          method: "POST",
+          body: {
+            provider: expense.payout_provider ?? travelForm.payout_provider,
+            payout_reference: expense.payout_reference,
+            idempotency_key: expense.payout_idempotency_key,
+            status: statusValue,
+            provider_status_code: statusValue === "paid" ? 200 : 422,
+            external_event_id: `travel-payout-${statusValue}-${Date.now()}`,
+            raw_payload: {
+              source: "operations_console",
+              expense_id: expense.id,
+              callback_status: statusValue
+            },
+            notes: `Payout callback reconciled from operations console as ${statusValue}.`
+          }
+        }),
+      (callback) => {
+        setTravelExpenses((current) => [
+          callback.expense,
+          ...current.filter((item) => item.id !== callback.expense.id)
+        ]);
+        addLog(callback.message, callback.payout_status === "paid" ? "good" : "bad");
       }
     );
   };
@@ -8941,6 +8977,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => uploadTravelReceipt(expense)}>Receipt</button>
                     <button type="button" onClick={() => updateTravelExpenseStatus(expense, "approved")}>Approve</button>
                     <button type="button" onClick={() => executeTravelExpensePayout(expense)}>Payout</button>
+                    <button type="button" onClick={() => reconcileTravelExpensePayoutCallback(expense, "paid")}>Callback paid</button>
+                    <button type="button" onClick={() => reconcileTravelExpensePayoutCallback(expense, "failed")}>Callback fail</button>
                     <button type="button" onClick={() => updateTravelExpenseStatus(expense, "rejected")}>Reject</button>
                   </div>
                 </article>
