@@ -717,6 +717,35 @@ export type EventTravelDeviceSecretRead = {
   secret_rotated_at: string;
 };
 
+export type EventTravelDeviceFleetItemRead = {
+  id: UUID;
+  organization_id: UUID;
+  travel_plan_id: UUID;
+  event_id: UUID;
+  destination: string;
+  provider: string;
+  device_id: string;
+  label: string;
+  status: string;
+  assigned_vehicle: string | null;
+  last_seen_at: string | null;
+  last_battery_percent: string | null;
+  last_accuracy_meters: string | null;
+  secret_configured: boolean;
+};
+
+export type EventTravelDeviceFleetInventoryRead = {
+  organization_id: UUID;
+  total_devices: number;
+  active_devices: number;
+  maintenance_devices: number;
+  disabled_devices: number;
+  lost_devices: number;
+  stale_devices: number;
+  low_battery_devices: number;
+  devices: EventTravelDeviceFleetItemRead[];
+};
+
 export type EventTravelDeviceLocationIngestRead = {
   travel_plan_id: UUID;
   device_id: string;

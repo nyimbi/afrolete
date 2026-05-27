@@ -88,6 +88,8 @@ from app.schemas.event import (
     EventTravelChecklistItemUpdate,
     EventTravelChecklistSeedCreate,
     EventTravelDeviceCreate,
+    EventTravelDeviceFleetInventoryRead,
+    EventTravelDeviceFleetItemRead,
     EventTravelDeviceLocationIngestCreate,
     EventTravelDeviceLocationIngestRead,
     EventTravelDeviceRead,
@@ -1265,6 +1267,44 @@ async def list_travel_devices(
         )
     ).all()
     return [travel_device_read(device) for device in devices]
+
+
+async def get_travel_device_fleet_inventory(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> EventTravelDeviceFleetInventoryRead:
+    await ensure_manage_event_scope(authz, organization_id, identity)
+    rows = (
+        await db.execute(
+            select(EventTravelDevice, EventTravelPlan)
+            .join(EventTravelPlan, EventTravelPlan.id == EventTravelDevice.travel_plan_id)
+            .where(EventTravelDevice.organization_id == organization_id)
+            .order_by(EventTravelDevice.status, EventTravelDevice.last_seen_at.desc().nulls_last(), EventTravelDevice.label)
+        )
+    ).all()
+    now = datetime.now(UTC)
+    devices = [travel_device_fleet_item_read(device, plan) for device, plan in rows]
+    return EventTravelDeviceFleetInventoryRead(
+        organization_id=organization_id,
+        total_devices=len(devices),
+        active_devices=sum(1 for item in devices if item.status == "active"),
+        maintenance_devices=sum(1 for item in devices if item.status == "maintenance"),
+        disabled_devices=sum(1 for item in devices if item.status == "disabled"),
+        lost_devices=sum(1 for item in devices if item.status == "lost"),
+        stale_devices=sum(
+            1
+            for item in devices
+            if item.last_seen_at is None or now - item.last_seen_at > timedelta(hours=24)
+        ),
+        low_battery_devices=sum(
+            1
+            for item in devices
+            if item.last_battery_percent is not None and item.last_battery_percent <= Decimal("20")
+        ),
+        devices=devices,
+    )
 
 
 async def create_travel_device(
@@ -2958,6 +2998,28 @@ def travel_device_read(device: EventTravelDevice) -> EventTravelDeviceRead:
         notes=device.notes,
         created_at=device.created_at,
         updated_at=device.updated_at,
+    )
+
+
+def travel_device_fleet_item_read(
+    device: EventTravelDevice,
+    plan: EventTravelPlan,
+) -> EventTravelDeviceFleetItemRead:
+    return EventTravelDeviceFleetItemRead(
+        id=device.id,
+        organization_id=device.organization_id,
+        travel_plan_id=device.travel_plan_id,
+        event_id=plan.event_id,
+        destination=plan.destination,
+        provider=device.provider,
+        device_id=device.device_id,
+        label=device.label,
+        status=device.status,
+        assigned_vehicle=device.assigned_vehicle,
+        last_seen_at=device.last_seen_at,
+        last_battery_percent=device.last_battery_percent,
+        last_accuracy_meters=device.last_accuracy_meters,
+        secret_configured=bool(device.ingest_secret_key),
     )
 
 

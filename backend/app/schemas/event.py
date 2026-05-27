@@ -503,6 +503,35 @@ class EventTravelDeviceSecretRead(BaseModel):
     secret_rotated_at: datetime
 
 
+class EventTravelDeviceFleetItemRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    travel_plan_id: UUID
+    event_id: UUID
+    destination: str
+    provider: str
+    device_id: str
+    label: str
+    status: str
+    assigned_vehicle: str | None
+    last_seen_at: datetime | None
+    last_battery_percent: Decimal | None
+    last_accuracy_meters: Decimal | None
+    secret_configured: bool = False
+
+
+class EventTravelDeviceFleetInventoryRead(BaseModel):
+    organization_id: UUID
+    total_devices: int
+    active_devices: int
+    maintenance_devices: int
+    disabled_devices: int
+    lost_devices: int
+    stale_devices: int
+    low_battery_devices: int
+    devices: list[EventTravelDeviceFleetItemRead]
+
+
 class EventTravelGeofenceCheckCreate(BaseModel):
     center_latitude: Decimal = Field(ge=-90, le=90, max_digits=9, decimal_places=6)
     center_longitude: Decimal = Field(ge=-180, le=180, max_digits=9, decimal_places=6)

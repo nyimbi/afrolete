@@ -84,6 +84,7 @@ import type {
   EventTravelConsentReminderRunRead,
   EventTravelDeviceRead,
   EventTravelDeviceSecretRead,
+  EventTravelDeviceFleetInventoryRead,
   EventTravelDriverRatingRead,
   EventTravelDriverRatingSummaryRead,
   EventTravelExpenseRead,
@@ -385,6 +386,8 @@ export default function HomePage() {
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
   const [travelDevices, setTravelDevices] = useState<EventTravelDeviceRead[]>([]);
   const [travelDeviceSecret, setTravelDeviceSecret] = useState<EventTravelDeviceSecretRead | null>(null);
+  const [travelDeviceFleetInventory, setTravelDeviceFleetInventory] =
+    useState<EventTravelDeviceFleetInventoryRead | null>(null);
   const [travelBackupDrivers, setTravelBackupDrivers] = useState<EventTravelBackupDriverRead[]>([]);
   const [travelBackupDriverDispatch, setTravelBackupDriverDispatch] =
     useState<EventTravelBackupDriverDispatchRead | null>(null);
@@ -1694,6 +1697,7 @@ export default function HomePage() {
       setTravelLocationUpdates([]);
       setTravelDevices([]);
       setTravelDeviceSecret(null);
+      setTravelDeviceFleetInventory(null);
       setTravelBackupDrivers([]);
       setTravelBackupDriverDispatch(null);
       setTravelDriverRatings([]);
@@ -1920,6 +1924,7 @@ export default function HomePage() {
       setTravelLocationUpdates([]);
       setTravelDevices([]);
       setTravelDeviceSecret(null);
+      setTravelDeviceFleetInventory(null);
       setTravelBackupDrivers([]);
       setTravelBackupDriverDispatch(null);
       setTravelDriverRatings([]);
@@ -2964,6 +2969,28 @@ export default function HomePage() {
       (devices) => {
         setTravelDevices(devices);
         addLog(`${devices.length} travel devices loaded for ${plan.destination}`, "neutral");
+      }
+    );
+  };
+
+  const loadTravelDeviceFleetInventory = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      `travel-device-fleet-${selectedOrganizationId}`,
+      () =>
+        apiRequest<EventTravelDeviceFleetInventoryRead>(
+          `/events/travel-devices/fleet-inventory?organization_id=${selectedOrganizationId}`,
+          { identity }
+        ),
+      (inventory) => {
+        setTravelDeviceFleetInventory(inventory);
+        addLog(
+          `Travel GPS fleet: ${inventory.total_devices} devices, ${inventory.stale_devices} stale`,
+          inventory.stale_devices > 0 || inventory.low_battery_devices > 0 ? "bad" : "good"
+        );
       }
     );
   };
@@ -7637,6 +7664,7 @@ export default function HomePage() {
               <button type="button" onClick={assessEventWeather} disabled={busyAction !== null}>Weather check</button>
               <button type="button" onClick={createTravelPlan} disabled={busyAction !== null}>Travel plan</button>
               <button type="button" onClick={runTravelConsentReminderAutomation} disabled={busyAction !== null}>Auto reminders</button>
+              <button type="button" onClick={loadTravelDeviceFleetInventory} disabled={busyAction !== null}>GPS fleet</button>
             </div>
             <div className="form-grid three">
               <label>
@@ -8215,6 +8243,19 @@ export default function HomePage() {
                     <strong>{travelDeviceSecret.label} ingest secret</strong>
                     <span>{travelDeviceSecret.provider}:{travelDeviceSecret.device_id} · rotated {new Date(travelDeviceSecret.secret_rotated_at).toLocaleString()}</span>
                     <span>{travelDeviceSecret.ingest_secret}</span>
+                  </div>
+                </article>
+              ) : null}
+              {travelDeviceFleetInventory ? (
+                <article className="task-card">
+                  <div>
+                    <strong>GPS fleet · {travelDeviceFleetInventory.total_devices} devices</strong>
+                    <span>
+                      {travelDeviceFleetInventory.active_devices} active · {travelDeviceFleetInventory.maintenance_devices} maintenance · {travelDeviceFleetInventory.disabled_devices} disabled
+                    </span>
+                    <span>
+                      {travelDeviceFleetInventory.stale_devices} stale · {travelDeviceFleetInventory.low_battery_devices} low battery · {travelDeviceFleetInventory.devices[0]?.label ?? "No devices provisioned"}
+                    </span>
                   </div>
                 </article>
               ) : null}

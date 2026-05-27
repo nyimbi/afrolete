@@ -37,6 +37,7 @@ from app.schemas.event import (
     EventTravelConsentReminderRunRead,
     EventTravelConsentRequestCreate,
     EventTravelDeviceCreate,
+    EventTravelDeviceFleetInventoryRead,
     EventTravelDeviceLocationIngestCreate,
     EventTravelDeviceLocationIngestRead,
     EventTravelDeviceRead,
@@ -102,6 +103,7 @@ from app.services.events import (
     export_travel_manifest,
     generate_travel_fee_invoices,
     get_event,
+    get_travel_device_fleet_inventory,
     get_travel_driver_rating_summary,
     get_travel_manifest,
     get_travel_readiness,
@@ -673,6 +675,16 @@ async def list_travel_devices_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> list[EventTravelDeviceRead]:
     return await list_travel_devices(db, identity, travel_plan_id, authz)
+
+
+@router.get("/travel-devices/fleet-inventory", response_model=EventTravelDeviceFleetInventoryRead)
+async def get_travel_device_fleet_inventory_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelDeviceFleetInventoryRead:
+    return await get_travel_device_fleet_inventory(db, identity, organization_id, authz)
 
 
 @router.post(
