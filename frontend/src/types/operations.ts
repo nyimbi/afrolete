@@ -604,6 +604,22 @@ export type EventTravelLocationUpdateRead = {
   notes: string | null;
 };
 
+export type EventTravelGeofenceCheckRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  latest_update_id: UUID;
+  label: string;
+  center_latitude: string;
+  center_longitude: string;
+  radius_km: string;
+  distance_km: string;
+  inside: boolean;
+  breached: boolean;
+  message_id: UUID | null;
+  recipient_count: number;
+  recommendation: string;
+};
+
 export type EventTravelExpenseRead = {
   id: UUID;
   organization_id: UUID;

@@ -351,6 +351,31 @@ class EventTravelLocationUpdateRead(BaseModel):
     notes: str | None
 
 
+class EventTravelGeofenceCheckCreate(BaseModel):
+    center_latitude: Decimal = Field(ge=-90, le=90, max_digits=9, decimal_places=6)
+    center_longitude: Decimal = Field(ge=-180, le=180, max_digits=9, decimal_places=6)
+    radius_km: Decimal = Field(gt=0, le=20000, max_digits=8, decimal_places=3)
+    label: str = Field(default="travel safety zone", min_length=2, max_length=160)
+    alert_on_breach: bool = True
+    channel: CommunicationChannel = CommunicationChannel.PUSH
+
+
+class EventTravelGeofenceCheckRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    latest_update_id: UUID
+    label: str
+    center_latitude: Decimal
+    center_longitude: Decimal
+    radius_km: Decimal
+    distance_km: Decimal
+    inside: bool
+    breached: bool
+    message_id: UUID | None
+    recipient_count: int
+    recommendation: str
+
+
 class EventTravelExpenseCreate(BaseModel):
     category: str = Field(default="fuel", min_length=2, max_length=80)
     vendor: str | None = Field(default=None, max_length=180)

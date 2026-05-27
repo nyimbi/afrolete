@@ -3,6 +3,7 @@ from binascii import Error as Base64Error
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
+from math import asin, cos, radians, sin, sqrt
 from pathlib import Path
 from re import sub
 from uuid import UUID
@@ -69,6 +70,8 @@ from app.schemas.event import (
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelFeeInvoiceItemRead,
+    EventTravelGeofenceCheckCreate,
+    EventTravelGeofenceCheckRead,
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
     EventTravelManifestExportCreate,
@@ -970,6 +973,81 @@ async def create_travel_location_update(
     return await travel_location_update_read(db, update)
 
 
+async def check_travel_geofence(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelGeofenceCheckCreate,
+    authz: AuthorizationService,
+) -> EventTravelGeofenceCheckRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+
+    latest_update = await db.scalar(
+        select(EventTravelLocationUpdate)
+        .where(EventTravelLocationUpdate.travel_plan_id == plan.id)
+        .order_by(EventTravelLocationUpdate.recorded_at.desc())
+    )
+    if latest_update is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Record a travel location update before checking geofence status",
+        )
+
+    distance_km_value = travel_distance_km(
+        float(payload.center_latitude),
+        float(payload.center_longitude),
+        float(latest_update.latitude),
+        float(latest_update.longitude),
+    )
+    distance_km = Decimal(str(round(distance_km_value, 3)))
+    breached = distance_km > payload.radius_km
+    message_id: UUID | None = None
+    recipient_count = 0
+    if breached and payload.alert_on_breach:
+        message = await create_message(
+            db,
+            identity,
+            CommunicationMessageCreate(
+                organization_id=event.organization_id,
+                message_type=CommunicationMessageType.ALERT,
+                channel=payload.channel,
+                scope_type=CommunicationScopeType.EVENT,
+                scope_id=event.id,
+                subject=travel_geofence_subject(event, plan, payload.label),
+                body=travel_geofence_body(event, plan, latest_update, payload, distance_km),
+                urgent=True,
+                quiet_hours_override=True,
+                copy_guardians_for_minors=True,
+            ),
+            authz,
+        )
+        message_id = message.id
+        recipient_count = int(
+            await db.scalar(select(func.count(MessageRecipient.id)).where(MessageRecipient.message_id == message.id))
+            or 0
+        )
+
+    return EventTravelGeofenceCheckRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        latest_update_id=latest_update.id,
+        label=payload.label,
+        center_latitude=payload.center_latitude,
+        center_longitude=payload.center_longitude,
+        radius_km=payload.radius_km,
+        distance_km=distance_km,
+        inside=not breached,
+        breached=breached,
+        message_id=message_id,
+        recipient_count=recipient_count,
+        recommendation=travel_geofence_recommendation(breached, payload.radius_km, distance_km),
+    )
+
+
 async def list_travel_expenses(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1695,6 +1773,24 @@ async def travel_location_update_read(
     )
 
 
+def travel_distance_km(
+    latitude_a: float,
+    longitude_a: float,
+    latitude_b: float,
+    longitude_b: float,
+) -> float:
+    radius_km = 6371.0
+    d_latitude = radians(latitude_b - latitude_a)
+    d_longitude = radians(longitude_b - longitude_a)
+    start_latitude = radians(latitude_a)
+    end_latitude = radians(latitude_b)
+    haversine = (
+        sin(d_latitude / 2) ** 2
+        + cos(start_latitude) * cos(end_latitude) * sin(d_longitude / 2) ** 2
+    )
+    return 2 * radius_km * asin(min(1.0, sqrt(haversine)))
+
+
 def travel_location_subject(event: Event, plan: EventTravelPlan, phase: str) -> str:
     label = {
         "departed": "departed",
@@ -1718,6 +1814,42 @@ def travel_location_body(event: Event, plan: EventTravelPlan, update: EventTrave
     if update.notes:
         parts.append(update.notes)
     return "\n".join(parts)[:4000]
+
+
+def travel_geofence_subject(event: Event, plan: EventTravelPlan, label: str) -> str:
+    return f"{event.title} travel outside {label}: {plan.destination}"[:240]
+
+
+def travel_geofence_body(
+    event: Event,
+    plan: EventTravelPlan,
+    update: EventTravelLocationUpdate,
+    payload: EventTravelGeofenceCheckCreate,
+    distance_km: Decimal,
+) -> str:
+    parts = [
+        f"Travel geofence alert for {event.title}.",
+        f"Destination: {plan.destination}.",
+        f"Zone: {payload.label}.",
+        f"Latest location: {update.latitude}, {update.longitude}.",
+        f"Zone center: {payload.center_latitude}, {payload.center_longitude}.",
+        f"Distance from center: {distance_km} km; allowed radius: {payload.radius_km} km.",
+        f"Recorded: {update.recorded_at.isoformat()}.",
+        "Recommended action: contact the driver, verify passenger safety, and update guardians if routing changed.",
+    ]
+    if update.notes:
+        parts.append(update.notes)
+    return "\n".join(parts)[:4000]
+
+
+def travel_geofence_recommendation(breached: bool, radius_km: Decimal, distance_km: Decimal) -> str:
+    if breached:
+        overage = max(distance_km - radius_km, Decimal("0"))
+        return (
+            f"Outside the configured zone by {overage} km. "
+            "Confirm route, driver status, and whether emergency escalation is needed."
+        )
+    return "Latest travel position is inside the configured geofence. Continue normal monitoring."
 
 
 def travel_consent_notes(event: Event, plan: EventTravelPlan) -> str:

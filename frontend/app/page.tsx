@@ -79,6 +79,7 @@ import type {
   EventTravelExpenseRead,
   EventTravelFeeCheckoutBatchRead,
   EventTravelFeeInvoiceBatchRead,
+  EventTravelGeofenceCheckRead,
   EventTravelLocationUpdateRead,
   EventTravelManifestExportRead,
   EventTravelManifestRead,
@@ -369,6 +370,7 @@ export default function HomePage() {
   const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
   const [travelReadiness, setTravelReadiness] = useState<EventTravelReadinessRead | null>(null);
   const [travelRouteOptimization, setTravelRouteOptimization] = useState<EventTravelRouteOptimizationRead | null>(null);
+  const [travelGeofenceCheck, setTravelGeofenceCheck] = useState<EventTravelGeofenceCheckRead | null>(null);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -605,6 +607,11 @@ export default function HomePage() {
     speed_kph: 45,
     heading_degrees: 90,
     tracking_channel: "push" as CommunicationChannel,
+    geofence_label: "planned route corridor",
+    geofence_latitude: -1.2921,
+    geofence_longitude: 36.8219,
+    geofence_radius_km: 5,
+    geofence_channel: "push" as CommunicationChannel,
     expense_category: "fuel",
     expense_vendor: "Riverside Fuel",
     expense_amount: 75,
@@ -1630,6 +1637,7 @@ export default function HomePage() {
       setTravelCarpoolRides([]);
       setTravelReadiness(null);
       setTravelRouteOptimization(null);
+      setTravelGeofenceCheck(null);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1844,6 +1852,7 @@ export default function HomePage() {
       setTravelCarpoolRides([]);
       setTravelReadiness(null);
       setTravelRouteOptimization(null);
+      setTravelGeofenceCheck(null);
       return;
     }
     runAction(
@@ -2748,6 +2757,40 @@ export default function HomePage() {
         }
         if (selectedEventId) {
           void loadTravelPlans(selectedEventId);
+        }
+      }
+    );
+  };
+
+  const checkTravelGeofence = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-geofence-${plan.id}`,
+      () =>
+        apiRequest<EventTravelGeofenceCheckRead>(`/events/travel-plans/${plan.id}/geofence-check`, {
+          method: "POST",
+          identity,
+          body: {
+            center_latitude: String(travelForm.geofence_latitude),
+            center_longitude: String(travelForm.geofence_longitude),
+            radius_km: String(travelForm.geofence_radius_km),
+            label: travelForm.geofence_label,
+            alert_on_breach: true,
+            channel: travelForm.geofence_channel
+          }
+        }),
+      (check) => {
+        setTravelGeofenceCheck(check);
+        addLog(
+          check.breached
+            ? `Geofence breached by latest ${plan.destination} update`
+            : `${plan.destination} is inside geofence`,
+          check.breached ? "bad" : "good"
+        );
+        if (check.message_id) {
+          setSelectedMessageId(check.message_id);
+        }
+        if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
         }
       }
     );
@@ -7193,6 +7236,33 @@ export default function HomePage() {
                 <input type="number" min="0" value={travelForm.speed_kph} onChange={(event) => setTravelForm({ ...travelForm, speed_kph: Number(event.target.value) })} />
               </label>
               <label>
+                Geofence label
+                <input value={travelForm.geofence_label} onChange={(event) => setTravelForm({ ...travelForm, geofence_label: event.target.value })} />
+              </label>
+              <label>
+                Geofence lat
+                <input type="number" step="0.000001" value={travelForm.geofence_latitude} onChange={(event) => setTravelForm({ ...travelForm, geofence_latitude: Number(event.target.value) })} />
+              </label>
+              <label>
+                Geofence lon
+                <input type="number" step="0.000001" value={travelForm.geofence_longitude} onChange={(event) => setTravelForm({ ...travelForm, geofence_longitude: Number(event.target.value) })} />
+              </label>
+              <label>
+                Radius km
+                <input type="number" min="0.1" step="0.1" value={travelForm.geofence_radius_km} onChange={(event) => setTravelForm({ ...travelForm, geofence_radius_km: Number(event.target.value) })} />
+              </label>
+              <label>
+                Geofence alert
+                <select value={travelForm.geofence_channel} onChange={(event) => setTravelForm({ ...travelForm, geofence_channel: event.target.value as CommunicationChannel })}>
+                  <option value="push">Push</option>
+                  <option value="in_app">In app</option>
+                  <option value="sms">SMS</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="email">Email</option>
+                </select>
+              </label>
+              <label>
                 Expense
                 <select value={travelForm.expense_category} onChange={(event) => setTravelForm({ ...travelForm, expense_category: event.target.value })}>
                   <option value="fuel">Fuel</option>
@@ -7338,6 +7408,17 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelGeofenceCheck ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelGeofenceCheck.breached ? "Geofence breached" : "Inside geofence"} · {travelGeofenceCheck.label}</strong>
+                    <span>
+                      {travelGeofenceCheck.distance_km} km from center · {travelGeofenceCheck.radius_km} km radius · {travelGeofenceCheck.recipient_count} alerted
+                    </span>
+                    <span>{travelGeofenceCheck.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelFeeBatch ? (
                 <article className="task-card">
                   <div>
@@ -7442,6 +7523,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => seedTravelChecklist(plan)}>Inspect</button>
                     <button type="button" onClick={() => loadTravelChecklist(plan)}>Checklist</button>
                     <button type="button" onClick={() => recordTravelLocationUpdate(plan)}>Track</button>
+                    <button type="button" onClick={() => checkTravelGeofence(plan)}>Geofence</button>
                     <button type="button" onClick={() => loadTravelLocationUpdates(plan)}>Route</button>
                     <button type="button" onClick={() => createTravelExpense(plan)}>Expense</button>
                     <button type="button" onClick={() => loadTravelExpenses(plan)}>Expenses</button>

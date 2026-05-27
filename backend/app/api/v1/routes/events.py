@@ -30,6 +30,8 @@ from app.schemas.event import (
     EventTravelFeeCheckoutCreate,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
+    EventTravelGeofenceCheckCreate,
+    EventTravelGeofenceCheckRead,
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
     EventTravelManifestExportCreate,
@@ -60,6 +62,7 @@ from app.services.events import (
     create_travel_carpool_ride,
     create_travel_expense,
     create_travel_fee_checkouts,
+    check_travel_geofence,
     create_travel_location_update,
     export_travel_manifest,
     generate_travel_fee_invoices,
@@ -532,6 +535,17 @@ async def create_travel_location_update_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelLocationUpdateRead:
     return await create_travel_location_update(db, identity, travel_plan_id, payload, authz)
+
+
+@router.post("/travel-plans/{travel_plan_id}/geofence-check", response_model=EventTravelGeofenceCheckRead)
+async def check_travel_geofence_route(
+    travel_plan_id: UUID,
+    payload: EventTravelGeofenceCheckCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelGeofenceCheckRead:
+    return await check_travel_geofence(db, identity, travel_plan_id, payload, authz)
 
 
 @router.get("/travel-plans/{travel_plan_id}/expenses", response_model=list[EventTravelExpenseRead])
