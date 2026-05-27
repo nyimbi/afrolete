@@ -7,6 +7,8 @@ from app.db.session import get_db
 from app.schemas.competition import (
     CompetitionAdvanceCreate,
     CompetitionAdvancementRead,
+    CompetitionBroadcastCreate,
+    CompetitionBroadcastRead,
     CompetitionCreate,
     CompetitionBracketRead,
     CompetitionConflictRead,
@@ -32,6 +34,7 @@ from app.services.authz.service import AuthorizationService, get_authorization_s
 from app.services.competitions import (
     add_competition_participant,
     advance_competition_round,
+    broadcast_competition_update,
     competition_bracket,
     competition_conflicts,
     assign_fixture_official,
@@ -272,6 +275,23 @@ async def optimize_competition_schedule_route(
         team_rest_minutes=result["team_rest_minutes"],
         match_spacing_minutes=result["match_spacing_minutes"],
         fixtures=[to_fixture_read(row) for row in rows if row[0].id in moved_ids],
+    )
+
+
+@router.post(
+    "/{competition_id}/broadcast",
+    response_model=CompetitionBroadcastRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def broadcast_competition_route(
+    competition_id: UUID,
+    payload: CompetitionBroadcastCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CompetitionBroadcastRead:
+    return CompetitionBroadcastRead(
+        **await broadcast_competition_update(db, identity, competition_id, payload, authz)
     )
 
 

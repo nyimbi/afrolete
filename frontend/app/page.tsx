@@ -53,6 +53,7 @@ import type {
   CompetitionAdvancementRead,
   CompetitionBracketRead,
   CompetitionBracketRoundRead,
+  CompetitionBroadcastRead,
   CompetitionConflictRead,
   CompetitionFixtureRead,
   CompetitionFixtureGenerationRead,
@@ -283,6 +284,7 @@ export default function HomePage() {
   const [competitionAdvancement, setCompetitionAdvancement] = useState<CompetitionAdvancementRead | null>(null);
   const [scheduleOptimization, setScheduleOptimization] =
     useState<CompetitionScheduleOptimizationRead | null>(null);
+  const [competitionBroadcast, setCompetitionBroadcast] = useState<CompetitionBroadcastRead | null>(null);
   const [competitionBracket, setCompetitionBracket] = useState<CompetitionBracketRead | null>(null);
   const [competitionConflicts, setCompetitionConflicts] = useState<CompetitionConflictRead[]>([]);
   const [matchEvents, setMatchEvents] = useState<FixtureMatchEventRead[]>([]);
@@ -1203,6 +1205,7 @@ export default function HomePage() {
       setFixtureGeneration(null);
       setCompetitionAdvancement(null);
       setScheduleOptimization(null);
+      setCompetitionBroadcast(null);
       setCompetitionBracket(null);
       setCompetitionConflicts([]);
       setMatchEvents([]);
@@ -1378,6 +1381,7 @@ export default function HomePage() {
       setFixtureGeneration(null);
       setCompetitionAdvancement(null);
       setScheduleOptimization(null);
+      setCompetitionBroadcast(null);
       setCompetitionBracket(null);
       setCompetitionConflicts([]);
       setMatchEvents([]);
@@ -2338,6 +2342,34 @@ export default function HomePage() {
         setScheduleOptimization(optimization);
         addLog(`${optimization.moved} fixtures optimized`, "good");
         void loadCompetitionWorkspace(selectedCompetitionId);
+      }
+    );
+  };
+
+  const broadcastCompetitionUpdate = () => {
+    if (!selectedCompetitionId) {
+      addLog("Select a competition first", "bad");
+      return;
+    }
+    runAction(
+      "broadcast-competition-update",
+      () =>
+        apiRequest<CompetitionBroadcastRead>(
+          `/competitions/${selectedCompetitionId}/broadcast`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              channel: messageForm.channel,
+              urgent: false,
+              include_guardians: true
+            }
+          }
+        ),
+      (broadcast) => {
+        setCompetitionBroadcast(broadcast);
+        addLog(`${broadcast.subject} sent to ${broadcast.recipient_count} recipients`, "good");
+        void loadCommunications(selectedOrganizationId);
       }
     );
   };
@@ -5638,6 +5670,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={reviewCompetitionConflicts} disabled={busyAction !== null}>Conflicts</button>
+                <button type="button" onClick={broadcastCompetitionUpdate} disabled={busyAction !== null}>Broadcast</button>
               </div>
             </div>
             <div className="consent-grid">
@@ -5681,6 +5714,14 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {competitionBroadcast ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{competitionBroadcast.channel} broadcast · {competitionBroadcast.delivered} delivered</strong>
+                    <span>{competitionBroadcast.recipient_count} recipients · {competitionBroadcast.queued} queued · {competitionBroadcast.suppressed} suppressed</span>
+                  </div>
+                </article>
+              ) : null}
               <article className="task-card">
                 <div>
                   <strong>Fixture integrity</strong>

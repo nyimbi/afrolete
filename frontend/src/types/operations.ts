@@ -1360,6 +1360,20 @@ export type CompetitionScheduleOptimizationRead = {
   fixtures: CompetitionFixtureRead[];
 };
 
+export type CompetitionBroadcastRead = {
+  competition_id: UUID;
+  message_id: UUID;
+  subject: string;
+  channel: CommunicationChannel;
+  recipient_count: number;
+  attempted: number;
+  delivered: number;
+  queued: number;
+  failed: number;
+  suppressed: number;
+  transport_mode: string;
+};
+
 export type CompetitionBracketMatchRead = {
   round_label: string;
   stage_label: string;

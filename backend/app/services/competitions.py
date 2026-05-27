@@ -12,13 +12,20 @@ from app.models.competition import (
     FixtureMatchEvent,
     FixtureOfficialAssignment,
 )
-from app.models.enums import FixtureStatus, MemberSubjectType
+from app.models.communication import CommunicationMessage, MessageRecipient
+from app.models.enums import (
+    CommunicationMessageType,
+    CommunicationScopeType,
+    FixtureStatus,
+    MemberSubjectType,
+)
 from app.models.event import Event
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
-from app.models.team import AthleteProfile, Team
+from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.competition import (
     CompetitionAdvanceCreate,
+    CompetitionBroadcastCreate,
     CompetitionCreate,
     CompetitionFixtureCreate,
     CompetitionFixtureGenerateCreate,
@@ -30,6 +37,7 @@ from app.schemas.competition import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.communications import destination_for_channel, dispatch_message, initial_delivery_status
 
 
 async def ensure_manage_competition(
@@ -547,6 +555,69 @@ async def optimize_competition_schedule(
     }
 
 
+async def broadcast_competition_update(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    competition_id: UUID,
+    payload: CompetitionBroadcastCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    competition = await get_competition(db, competition_id)
+    await ensure_manage_competition(authz, identity, competition.organization_id)
+    recipient_ids = await competition_broadcast_recipients(db, competition_id, payload.include_guardians)
+    if not recipient_ids:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No competition recipients")
+    subject = payload.subject or f"{competition.name} competition update"
+    body = payload.body or await competition_broadcast_body(db, competition_id, competition)
+    now = datetime.now(UTC)
+    message = CommunicationMessage(
+        organization_id=competition.organization_id,
+        template_id=None,
+        created_by_person_id=identity.person_id,
+        message_type=CommunicationMessageType.ANNOUNCEMENT,
+        channel=payload.channel,
+        scope_type=CommunicationScopeType.ORGANIZATION,
+        scope_id=competition.organization_id,
+        subject=subject,
+        body=body,
+        urgent=payload.urgent,
+        quiet_hours_override=payload.urgent,
+        scheduled_for=None,
+        sent_at=now,
+        status="sent",
+    )
+    db.add(message)
+    await db.flush()
+    for person_id in sorted(recipient_ids, key=str):
+        person = await db.get(Person, person_id)
+        if person is None:
+            continue
+        db.add(
+            MessageRecipient(
+                message_id=message.id,
+                person_id=person.id,
+                destination=destination_for_channel(person, payload.channel),
+                delivery_status=initial_delivery_status(person, payload.channel),
+            )
+        )
+    await db.commit()
+    await db.refresh(message)
+    summary = await dispatch_message(db, identity, message.id, authz)
+    return {
+        "competition_id": competition_id,
+        "message_id": message.id,
+        "subject": message.subject,
+        "channel": message.channel,
+        "recipient_count": len(recipient_ids),
+        "attempted": summary.attempted,
+        "delivered": summary.delivered,
+        "queued": summary.queued,
+        "failed": summary.failed,
+        "suppressed": summary.suppressed,
+        "transport_mode": summary.transport_mode,
+    }
+
+
 async def update_fixture_result(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -814,6 +885,59 @@ def fixture_schedule_notes(existing: str | None) -> str:
     if existing and entry not in existing:
         return f"{existing}\n{entry}"
     return existing or entry
+
+
+async def competition_broadcast_recipients(
+    db: AsyncSession,
+    competition_id: UUID,
+    include_guardians: bool,
+) -> set[UUID]:
+    rows = (
+        await db.execute(
+            select(AthleteProfile.person_id)
+            .join(TeamRosterEntry, TeamRosterEntry.athlete_profile_id == AthleteProfile.id)
+            .join(CompetitionParticipant, CompetitionParticipant.team_id == TeamRosterEntry.team_id)
+            .where(CompetitionParticipant.competition_id == competition_id)
+        )
+    ).all()
+    person_ids = {person_id for (person_id,) in rows}
+    if include_guardians and person_ids:
+        guardian_rows = (
+            await db.execute(
+                select(GuardianRelationship.guardian_person_id).where(
+                    GuardianRelationship.athlete_person_id.in_(person_ids)
+                )
+            )
+        ).all()
+        person_ids.update(guardian_id for (guardian_id,) in guardian_rows)
+    return person_ids
+
+
+async def competition_broadcast_body(
+    db: AsyncSession,
+    competition_id: UUID,
+    competition: Competition,
+) -> str:
+    standings = await competition_standings(db, competition_id)
+    fixtures = (
+        await db.scalars(
+            select(CompetitionFixture)
+            .where(CompetitionFixture.competition_id == competition_id)
+            .order_by(CompetitionFixture.scheduled_at)
+        )
+    ).all()
+    leader = standings[0]["team_name"] if standings else "No leader yet"
+    next_fixture = next((fixture for fixture in fixtures if fixture.status != FixtureStatus.FINAL), None)
+    next_line = (
+        f"Next fixture is scheduled for {next_fixture.scheduled_at} at {next_fixture.venue_name or 'the assigned venue'}."
+        if next_fixture
+        else "No pending fixtures remain."
+    )
+    final_count = sum(1 for fixture in fixtures if fixture.status == FixtureStatus.FINAL)
+    return (
+        f"{competition.name} update: {len(fixtures)} fixtures, {final_count} confirmed results, "
+        f"current leader {leader}. {next_line}"
+    )
 
 
 def conflict(

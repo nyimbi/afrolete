@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import (
+    CommunicationChannel,
     CompetitionFormat,
     CompetitionStatus,
     CompetitionType,
@@ -163,6 +164,28 @@ class CompetitionScheduleOptimizationRead(BaseModel):
     team_rest_minutes: int
     match_spacing_minutes: int
     fixtures: list[CompetitionFixtureRead]
+
+
+class CompetitionBroadcastCreate(BaseModel):
+    channel: CommunicationChannel = CommunicationChannel.IN_APP
+    subject: str | None = Field(default=None, max_length=240)
+    body: str | None = Field(default=None, max_length=8000)
+    urgent: bool = False
+    include_guardians: bool = True
+
+
+class CompetitionBroadcastRead(BaseModel):
+    competition_id: UUID
+    message_id: UUID
+    subject: str
+    channel: CommunicationChannel
+    recipient_count: int
+    attempted: int
+    delivered: int
+    queued: int
+    failed: int
+    suppressed: int
+    transport_mode: str
 
 
 class FixtureResultUpdate(BaseModel):
