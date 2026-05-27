@@ -2237,6 +2237,29 @@ export type DeveloperApplicationProvisionedRead = {
   secret_hint: string;
 };
 
+export type DeveloperApiKeyRead = {
+  id: UUID;
+  organization_id: UUID;
+  application_id: UUID;
+  name: string;
+  key_prefix: string;
+  scopes: string[];
+  environment: string;
+  status: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  last_used_ip: string | null;
+  usage_count: number;
+  rate_limit_per_minute: number;
+  notes: string | null;
+};
+
+export type DeveloperApiKeyProvisionedRead = {
+  api_key: DeveloperApiKeyRead;
+  key: string;
+  secret_hint: string;
+};
+
 export type DeveloperWebhookSubscriptionRead = {
   id: UUID;
   organization_id: UUID;
@@ -2277,6 +2300,8 @@ export type DeveloperPortalSummaryRead = {
   organization_id: UUID;
   application_count: number;
   active_application_count: number;
+  api_key_count: number;
+  active_api_key_count: number;
   webhook_subscription_count: number;
   live_webhook_count: number;
   marketplace_listing_count: number;

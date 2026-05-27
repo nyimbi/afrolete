@@ -8,12 +8,15 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.developer import (
+    DeveloperApiKey,
     DeveloperApplication,
     DeveloperMarketplaceListing,
     DeveloperWebhookSubscription,
 )
 from app.models.organization import Organization
 from app.schemas.developer import (
+    DeveloperApiKeyCreate,
+    DeveloperApiKeyInspectionRead,
     DeveloperApplicationCreate,
     DeveloperMarketplaceListingCreate,
     DeveloperMarketplaceListingReview,
@@ -111,6 +114,109 @@ async def list_developer_applications(
             )
         ).all()
     )
+
+
+async def create_developer_api_key(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: DeveloperApiKeyCreate,
+    authz: AuthorizationService,
+) -> tuple[DeveloperApiKey, str]:
+    organization = await get_organization(db, payload.organization_id)
+    await ensure_manage_developer_platform(authz, identity, payload.organization_id)
+    await get_developer_application_for_organization(db, payload.application_id, payload.organization_id)
+    key = build_api_key(organization.slug, payload.environment)
+    key_record = DeveloperApiKey(
+        organization_id=payload.organization_id,
+        application_id=payload.application_id,
+        name=payload.name,
+        key_prefix=key.split(".", 1)[0],
+        key_hash=hash_secret(key),
+        scopes=pack_list(payload.scopes),
+        environment=payload.environment,
+        expires_at=payload.expires_at,
+        rate_limit_per_minute=payload.rate_limit_per_minute,
+        notes=payload.notes,
+    )
+    db.add(key_record)
+    await db.commit()
+    await db.refresh(key_record)
+    return key_record, key
+
+
+async def list_developer_api_keys(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    application_id: UUID | None = None,
+) -> list[DeveloperApiKey]:
+    await ensure_manage_developer_platform(authz, identity, organization_id)
+    query = select(DeveloperApiKey).where(DeveloperApiKey.organization_id == organization_id)
+    if application_id is not None:
+        query = query.where(DeveloperApiKey.application_id == application_id)
+    return list((await db.scalars(query.order_by(DeveloperApiKey.created_at.desc()))).all())
+
+
+async def revoke_developer_api_key(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    api_key_id: UUID,
+    authz: AuthorizationService,
+) -> DeveloperApiKey:
+    api_key = await get_developer_api_key(db, api_key_id)
+    await ensure_manage_developer_platform(authz, identity, api_key.organization_id)
+    api_key.status = "revoked"
+    await db.commit()
+    await db.refresh(api_key)
+    return api_key
+
+
+async def inspect_developer_api_key(
+    db: AsyncSession,
+    raw_key: str,
+    request_ip: str | None = None,
+) -> DeveloperApiKeyInspectionRead:
+    api_key = await authenticate_developer_api_key(db, raw_key, request_ip=request_ip)
+    application = await get_developer_application(db, api_key.application_id)
+    return DeveloperApiKeyInspectionRead(
+        valid=True,
+        organization_id=api_key.organization_id,
+        application_id=api_key.application_id,
+        api_key_id=api_key.id,
+        client_id=application.client_id,
+        application_name=application.name,
+        environment=api_key.environment,
+        scopes=unpack_list(api_key.scopes),
+        rate_limit_per_minute=api_key.rate_limit_per_minute,
+        usage_count=api_key.usage_count,
+    )
+
+
+async def authenticate_developer_api_key(
+    db: AsyncSession,
+    raw_key: str,
+    request_ip: str | None = None,
+) -> DeveloperApiKey:
+    prefix = raw_key.split(".", 1)[0]
+    api_key = await db.scalar(select(DeveloperApiKey).where(DeveloperApiKey.key_prefix == prefix))
+    if api_key is None or api_key.key_hash != hash_secret(raw_key):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid developer API key")
+    if api_key.status != "active":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Developer API key is not active")
+    if api_key.expires_at is not None and api_key.expires_at <= datetime.now(UTC):
+        api_key.status = "expired"
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Developer API key has expired")
+    application = await get_developer_application(db, api_key.application_id)
+    if application.status != "active":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Developer application is not active")
+    api_key.last_used_at = datetime.now(UTC)
+    api_key.last_used_ip = request_ip
+    api_key.usage_count += 1
+    await db.commit()
+    await db.refresh(api_key)
+    return api_key
 
 
 async def create_developer_webhook_subscription(
@@ -254,6 +360,8 @@ async def developer_portal_summary(
     await ensure_manage_developer_platform(authz, identity, organization_id)
     application_count = await count_where(db, DeveloperApplication, organization_id)
     active_application_count = await count_where(db, DeveloperApplication, organization_id, status_value="active")
+    api_key_count = await count_where(db, DeveloperApiKey, organization_id)
+    active_api_key_count = await count_where(db, DeveloperApiKey, organization_id, status_value="active")
     webhook_subscription_count = await count_where(db, DeveloperWebhookSubscription, organization_id)
     live_webhook_count = await count_where(
         db,
@@ -281,6 +389,8 @@ async def developer_portal_summary(
     next_steps: list[str] = []
     if application_count == 0:
         next_steps.append("Register a developer application before issuing third-party integrations.")
+    if api_key_count == 0:
+        next_steps.append("Issue a sandbox API key so SDK clients can authenticate against tenant APIs.")
     if webhook_subscription_count == 0:
         next_steps.append("Create webhook subscriptions for tenant events that external systems need.")
     if approved_marketplace_listing_count == 0:
@@ -291,6 +401,8 @@ async def developer_portal_summary(
         organization_id=organization_id,
         application_count=application_count,
         active_application_count=active_application_count,
+        api_key_count=api_key_count,
+        active_api_key_count=active_api_key_count,
         webhook_subscription_count=webhook_subscription_count,
         live_webhook_count=live_webhook_count,
         marketplace_listing_count=marketplace_listing_count,
@@ -342,6 +454,13 @@ async def get_developer_application_for_organization(
     return application
 
 
+async def get_developer_api_key(db: AsyncSession, api_key_id: UUID) -> DeveloperApiKey:
+    api_key = await db.get(DeveloperApiKey, api_key_id)
+    if api_key is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Developer API key not found")
+    return api_key
+
+
 async def get_webhook_subscription(db: AsyncSession, subscription_id: UUID) -> DeveloperWebhookSubscription:
     subscription = await db.get(DeveloperWebhookSubscription, subscription_id)
     if subscription is None:
@@ -368,3 +487,10 @@ def unpack_list(value: str | None) -> list[str]:
     if not value:
         return []
     return [entry for entry in value.splitlines() if entry]
+
+
+def build_api_key(organization_slug: str, environment: str) -> str:
+    slug_part = "".join(character for character in organization_slug.lower() if character.isalnum())[:12] or "tenant"
+    environment_part = "".join(character for character in environment.lower() if character.isalnum())[:12] or "sandbox"
+    prefix = f"al_{slug_part}_{environment_part}_{token_urlsafe(6)}"
+    return f"{prefix}.{token_urlsafe(32)}"

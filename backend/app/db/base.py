@@ -49,6 +49,7 @@ from app.models.commercial import (  # noqa: F401,E402
     TicketProduct,
 )
 from app.models.developer import (  # noqa: F401,E402
+    DeveloperApiKey,
     DeveloperApplication,
     DeveloperMarketplaceListing,
     DeveloperWebhookSubscription,

@@ -1,10 +1,14 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.developer import (
+    DeveloperApiKeyCreate,
+    DeveloperApiKeyInspectionRead,
+    DeveloperApiKeyProvisionedRead,
+    DeveloperApiKeyRead,
     DeveloperApplicationCreate,
     DeveloperApplicationProvisionedRead,
     DeveloperApplicationRead,
@@ -21,14 +25,18 @@ from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.developer import (
+    create_developer_api_key,
     create_developer_application,
     create_developer_marketplace_listing,
     create_developer_webhook_subscription,
     developer_portal_summary,
+    inspect_developer_api_key,
+    list_developer_api_keys,
     list_developer_applications,
     list_developer_marketplace_listings,
     list_developer_webhook_subscriptions,
     record_developer_marketplace_install,
+    revoke_developer_api_key,
     review_developer_marketplace_listing,
     rotate_developer_application_secret,
     unpack_list,
@@ -52,6 +60,25 @@ def application_read(application) -> DeveloperApplicationRead:
         status=application.status,
         last_rotated_at=application.last_rotated_at,
         notes=application.notes,
+    )
+
+
+def api_key_read(api_key) -> DeveloperApiKeyRead:
+    return DeveloperApiKeyRead(
+        id=api_key.id,
+        organization_id=api_key.organization_id,
+        application_id=api_key.application_id,
+        name=api_key.name,
+        key_prefix=api_key.key_prefix,
+        scopes=unpack_list(api_key.scopes),
+        environment=api_key.environment,
+        status=api_key.status,
+        expires_at=api_key.expires_at,
+        last_used_at=api_key.last_used_at,
+        last_used_ip=api_key.last_used_ip,
+        usage_count=api_key.usage_count,
+        rate_limit_per_minute=api_key.rate_limit_per_minute,
+        notes=api_key.notes,
     )
 
 
@@ -87,6 +114,54 @@ def marketplace_listing_read(listing) -> DeveloperMarketplaceListingRead:
         review_status=listing.review_status,
         install_count=listing.install_count,
     )
+
+
+@router.post("/api-keys", response_model=DeveloperApiKeyProvisionedRead, status_code=status.HTTP_201_CREATED)
+async def create_developer_api_key_route(
+    payload: DeveloperApiKeyCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperApiKeyProvisionedRead:
+    api_key, key = await create_developer_api_key(db, identity, payload, authz)
+    return DeveloperApiKeyProvisionedRead(
+        api_key=api_key_read(api_key),
+        key=key,
+        secret_hint="Copy now; the API key is only returned once.",
+    )
+
+
+@router.get("/api-keys", response_model=list[DeveloperApiKeyRead])
+async def list_developer_api_keys_route(
+    organization_id: UUID = Query(),
+    application_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[DeveloperApiKeyRead]:
+    return [
+        api_key_read(api_key)
+        for api_key in await list_developer_api_keys(db, identity, organization_id, authz, application_id)
+    ]
+
+
+@router.post("/api-keys/{api_key_id}/revoke", response_model=DeveloperApiKeyRead)
+async def revoke_developer_api_key_route(
+    api_key_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperApiKeyRead:
+    return api_key_read(await revoke_developer_api_key(db, identity, api_key_id, authz))
+
+
+@router.get("/auth/inspect", response_model=DeveloperApiKeyInspectionRead)
+async def inspect_developer_api_key_route(
+    request: Request,
+    x_afrolete_api_key: str = Header(alias="X-Afrolete-API-Key"),
+    db: AsyncSession = Depends(get_db),
+) -> DeveloperApiKeyInspectionRead:
+    return await inspect_developer_api_key(db, x_afrolete_api_key, request.client.host if request.client else None)
 
 
 @router.post("/applications", response_model=DeveloperApplicationProvisionedRead, status_code=status.HTTP_201_CREATED)

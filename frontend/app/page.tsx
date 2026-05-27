@@ -90,6 +90,8 @@ import type {
   ConsentCaptureChannel,
   ConsentRequestRead,
   DonationRead,
+  DeveloperApiKeyProvisionedRead,
+  DeveloperApiKeyRead,
   DeveloperApplicationProvisionedRead,
   DeveloperApplicationRead,
   DeveloperMarketplaceListingRead,
@@ -824,11 +826,14 @@ export default function HomePage() {
   const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
   const [developerApplications, setDeveloperApplications] = useState<DeveloperApplicationRead[]>([]);
+  const [developerApiKeys, setDeveloperApiKeys] = useState<DeveloperApiKeyRead[]>([]);
   const [developerWebhooks, setDeveloperWebhooks] = useState<DeveloperWebhookSubscriptionRead[]>([]);
   const [developerListings, setDeveloperListings] = useState<DeveloperMarketplaceListingRead[]>([]);
   const [developerSummary, setDeveloperSummary] = useState<DeveloperPortalSummaryRead | null>(null);
   const [developerApplicationSecret, setDeveloperApplicationSecret] =
     useState<DeveloperApplicationProvisionedRead | null>(null);
+  const [developerApiKeySecret, setDeveloperApiKeySecret] =
+    useState<DeveloperApiKeyProvisionedRead | null>(null);
   const [developerWebhookSecret, setDeveloperWebhookSecret] =
     useState<DeveloperWebhookSubscriptionProvisionedRead | null>(null);
   const [registrationInquiries, setRegistrationInquiries] = useState<RegistrationInquiryRead[]>([]);
@@ -1413,6 +1418,9 @@ export default function HomePage() {
     app_scopes: "read:organization,write:events",
     redirect_uris: "https://sync.example/callback",
     contact_email: "integrations@example.com",
+    api_key_name: "Sandbox SDK Key",
+    api_key_environment: "sandbox",
+    api_key_rate_limit: 120,
     webhook_name: "Event Updates",
     webhook_url: "https://sync.example/webhooks/afrolete",
     webhook_events: "events.created,events.updated",
@@ -2012,8 +2020,9 @@ export default function HomePage() {
   }, []);
 
   const loadDevelopers = useCallback(async (organizationId: string) => {
-    const [applications, webhooks, listings, summary] = await Promise.all([
+    const [applications, apiKeys, webhooks, listings, summary] = await Promise.all([
       apiRequest<DeveloperApplicationRead[]>(`/developers/applications?organization_id=${organizationId}`),
+      apiRequest<DeveloperApiKeyRead[]>(`/developers/api-keys?organization_id=${organizationId}`),
       apiRequest<DeveloperWebhookSubscriptionRead[]>(
         `/developers/webhook-subscriptions?organization_id=${organizationId}`
       ),
@@ -2023,6 +2032,7 @@ export default function HomePage() {
       apiRequest<DeveloperPortalSummaryRead>(`/developers/summary?organization_id=${organizationId}`)
     ]);
     setDeveloperApplications(applications);
+    setDeveloperApiKeys(apiKeys);
     setDeveloperWebhooks(webhooks);
     setDeveloperListings(listings);
     setDeveloperSummary(summary);
@@ -2277,10 +2287,12 @@ export default function HomePage() {
       setBillingWebhook(null);
       setBillingSummary(null);
       setDeveloperApplications([]);
+      setDeveloperApiKeys([]);
       setDeveloperWebhooks([]);
       setDeveloperListings([]);
       setDeveloperSummary(null);
       setDeveloperApplicationSecret(null);
+      setDeveloperApiKeySecret(null);
       setDeveloperWebhookSecret(null);
       return;
     }
@@ -8525,6 +8537,55 @@ export default function HomePage() {
     );
   };
 
+  const createDeveloperApiKey = () => {
+    if (!selectedOrganizationId || developerApplications.length === 0) {
+      addLog("Create a developer application first", "bad");
+      return;
+    }
+    runAction(
+      "create-developer-api-key",
+      () =>
+        apiRequest<DeveloperApiKeyProvisionedRead>("/developers/api-keys", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            application_id: developerApplications[0].id,
+            name: developerForm.api_key_name,
+            scopes: parseCommaList(developerForm.app_scopes),
+            environment: developerForm.api_key_environment,
+            rate_limit_per_minute: developerForm.api_key_rate_limit,
+            notes: "Created from AfroLete developer console."
+          }
+        }),
+      (provisioned) => {
+        setDeveloperApiKeySecret(provisioned);
+        setDeveloperApiKeys((current) => [
+          provisioned.api_key,
+          ...current.filter((item) => item.id !== provisioned.api_key.id)
+        ]);
+        addLog(`${provisioned.api_key.name} API key issued`, "good");
+        void loadDevelopers(selectedOrganizationId);
+      }
+    );
+  };
+
+  const revokeDeveloperApiKey = (apiKeyId: string) => {
+    runAction(
+      "revoke-developer-api-key",
+      () =>
+        apiRequest<DeveloperApiKeyRead>(`/developers/api-keys/${apiKeyId}/revoke`, {
+          method: "POST",
+          identity
+        }),
+      (apiKey) => {
+        setDeveloperApiKeys((current) => current.map((item) => (item.id === apiKey.id ? apiKey : item)));
+        addLog(`${apiKey.name} revoked`, "good");
+        void loadDevelopers(selectedOrganizationId);
+      }
+    );
+  };
+
   const createDeveloperWebhook = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -11516,6 +11577,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createDeveloperApplication} disabled={busyAction !== null}>App</button>
+                <button type="button" onClick={createDeveloperApiKey} disabled={busyAction !== null}>Key</button>
                 <button type="button" onClick={createDeveloperWebhook} disabled={busyAction !== null}>Webhook</button>
               </div>
             </div>
@@ -11529,12 +11591,12 @@ export default function HomePage() {
                 <strong>{developerSummary?.active_application_count ?? 0}</strong>
               </div>
               <div>
-                <span className="muted">Webhooks</span>
-                <strong>{developerSummary?.webhook_subscription_count ?? 0}</strong>
+                <span className="muted">API keys</span>
+                <strong>{developerSummary?.api_key_count ?? 0}</strong>
               </div>
               <div>
-                <span className="muted">Live</span>
-                <strong>{developerSummary?.live_webhook_count ?? 0}</strong>
+                <span className="muted">Webhooks</span>
+                <strong>{developerSummary?.webhook_subscription_count ?? 0}</strong>
               </div>
             </div>
             <div className="form-grid">
@@ -11559,6 +11621,21 @@ export default function HomePage() {
                 <input value={developerForm.contact_email} onChange={(event) => setDeveloperForm({ ...developerForm, contact_email: event.target.value })} />
               </label>
               <label>
+                API key
+                <input value={developerForm.api_key_name} onChange={(event) => setDeveloperForm({ ...developerForm, api_key_name: event.target.value })} />
+              </label>
+              <label>
+                Environment
+                <select value={developerForm.api_key_environment} onChange={(event) => setDeveloperForm({ ...developerForm, api_key_environment: event.target.value })}>
+                  <option value="sandbox">Sandbox</option>
+                  <option value="production">Production</option>
+                </select>
+              </label>
+              <label>
+                Rate/min
+                <input type="number" min="1" value={developerForm.api_key_rate_limit} onChange={(event) => setDeveloperForm({ ...developerForm, api_key_rate_limit: Number(event.target.value) })} />
+              </label>
+              <label>
                 Webhook
                 <input value={developerForm.webhook_name} onChange={(event) => setDeveloperForm({ ...developerForm, webhook_name: event.target.value })} />
               </label>
@@ -11580,6 +11657,14 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {developerApiKeySecret ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{developerApiKeySecret.api_key.name} API key</strong>
+                    <span>{developerApiKeySecret.key}</span>
+                  </div>
+                </article>
+              ) : null}
               {developerWebhookSecret ? (
                 <article className="task-card">
                   <div>
@@ -11595,6 +11680,15 @@ export default function HomePage() {
                     <span>{application.client_id} · {application.scopes.join(", ")}</span>
                   </div>
                   <button type="button" onClick={() => rotateDeveloperApplicationSecret(application.id)} disabled={busyAction !== null}>Rotate</button>
+                </article>
+              ))}
+              {developerApiKeys.slice(0, 3).map((apiKey) => (
+                <article key={apiKey.id} className="task-card">
+                  <div>
+                    <strong>{apiKey.name}</strong>
+                    <span>{apiKey.key_prefix} · {apiKey.environment} · {apiKey.status} · {apiKey.usage_count} calls</span>
+                  </div>
+                  <button type="button" onClick={() => revokeDeveloperApiKey(apiKey.id)} disabled={busyAction !== null || apiKey.status === "revoked"}>Revoke</button>
                 </article>
               ))}
               {developerWebhooks.slice(0, 3).map((webhook) => (

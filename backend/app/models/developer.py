@@ -25,6 +25,26 @@ class DeveloperApplication(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class DeveloperApiKey(IdMixin, TimestampMixin, Base):
+    __tablename__ = "developer_api_keys"
+    __table_args__ = (UniqueConstraint("application_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    application_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("developer_applications.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    key_prefix: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    scopes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    environment: Mapped[str] = mapped_column(String(40), default="sandbox", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_used_ip: Mapped[str | None] = mapped_column(String(80))
+    usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rate_limit_per_minute: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class DeveloperWebhookSubscription(IdMixin, TimestampMixin, Base):
     __tablename__ = "developer_webhook_subscriptions"
     __table_args__ = (UniqueConstraint("organization_id", "name"),)

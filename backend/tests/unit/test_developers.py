@@ -54,6 +54,46 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert rotated_secret
     assert rotated_secret != original_secret
 
+    api_key_response = client.post(
+        "/api/v1/developers/api-keys",
+        json={
+            "organization_id": organization["id"],
+            "application_id": application["id"],
+            "name": "Sandbox SDK Key",
+            "scopes": ["read:organization", "write:events"],
+            "environment": "sandbox",
+            "rate_limit_per_minute": 120,
+        },
+        headers=identity_headers,
+    )
+    assert api_key_response.status_code == 201
+    provisioned_api_key = api_key_response.json()
+    api_key = provisioned_api_key["api_key"]
+    raw_key = provisioned_api_key["key"]
+    assert raw_key.startswith("al_developerpla_sandbox_")
+    assert api_key["key_prefix"] == raw_key.split(".", 1)[0]
+    assert api_key["scopes"] == ["read:organization", "write:events"]
+    assert "key_hash" not in api_key
+
+    inspect_response = client.get(
+        "/api/v1/developers/auth/inspect",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert inspect_response.status_code == 200
+    inspection = inspect_response.json()
+    assert inspection["valid"] is True
+    assert inspection["application_id"] == application["id"]
+    assert inspection["usage_count"] == 1
+
+    api_key_list_response = client.get(
+        f"/api/v1/developers/api-keys?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert api_key_list_response.status_code == 200
+    listed_api_key = api_key_list_response.json()[0]
+    assert listed_api_key["usage_count"] == 1
+    assert "key_hash" not in listed_api_key
+
     webhook_response = client.post(
         "/api/v1/developers/webhook-subscriptions",
         json={
@@ -121,7 +161,22 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert summary_response.status_code == 200
     summary = summary_response.json()
     assert summary["application_count"] == 1
+    assert summary["api_key_count"] == 1
+    assert summary["active_api_key_count"] == 1
     assert summary["webhook_subscription_count"] == 1
     assert summary["marketplace_listing_count"] == 1
     assert summary["approved_marketplace_listing_count"] == 1
     assert summary["install_count"] == 1
+
+    revoke_response = client.post(
+        f"/api/v1/developers/api-keys/{api_key['id']}/revoke",
+        headers=identity_headers,
+    )
+    assert revoke_response.status_code == 200
+    assert revoke_response.json()["status"] == "revoked"
+
+    revoked_inspect_response = client.get(
+        "/api/v1/developers/auth/inspect",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert revoked_inspect_response.status_code == 401

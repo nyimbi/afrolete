@@ -35,6 +35,53 @@ class DeveloperApplicationProvisionedRead(BaseModel):
     secret_hint: str
 
 
+class DeveloperApiKeyCreate(BaseModel):
+    organization_id: UUID
+    application_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    scopes: list[str] = Field(default_factory=lambda: ["read:organization"], max_length=40)
+    environment: str = Field(default="sandbox", max_length=40)
+    expires_at: datetime | None = None
+    rate_limit_per_minute: int = Field(default=60, ge=1, le=100_000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class DeveloperApiKeyRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    application_id: UUID
+    name: str
+    key_prefix: str
+    scopes: list[str]
+    environment: str
+    status: str
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    last_used_ip: str | None
+    usage_count: int
+    rate_limit_per_minute: int
+    notes: str | None
+
+
+class DeveloperApiKeyProvisionedRead(BaseModel):
+    api_key: DeveloperApiKeyRead
+    key: str
+    secret_hint: str
+
+
+class DeveloperApiKeyInspectionRead(BaseModel):
+    valid: bool
+    organization_id: UUID
+    application_id: UUID
+    api_key_id: UUID
+    client_id: str
+    application_name: str
+    environment: str
+    scopes: list[str]
+    rate_limit_per_minute: int
+    usage_count: int
+
+
 class DeveloperWebhookSubscriptionCreate(BaseModel):
     organization_id: UUID
     application_id: UUID | None = None
@@ -109,6 +156,8 @@ class DeveloperPortalSummaryRead(BaseModel):
     organization_id: UUID
     application_count: int
     active_application_count: int
+    api_key_count: int
+    active_api_key_count: int
     webhook_subscription_count: int
     live_webhook_count: int
     marketplace_listing_count: int
