@@ -23,7 +23,7 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
             "name": "Matchday Sync",
             "app_type": "server_to_server",
             "redirect_uris": ["https://sync.example/callback"],
-            "scopes": ["read:organization", "write:events"],
+            "scopes": ["read:organization", "write:events", "write:training"],
             "contact_email": "integrations@example.com",
         },
         headers=identity_headers,
@@ -34,7 +34,7 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     original_secret = provisioned_application["client_secret"]
     assert application["client_id"].startswith("afrolete_")
     assert original_secret
-    assert application["scopes"] == ["read:organization", "write:events"]
+    assert application["scopes"] == ["read:organization", "write:events", "write:training"]
 
     application_list_response = client.get(
         f"/api/v1/developers/applications?organization_id={organization['id']}",
@@ -60,7 +60,7 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
             "organization_id": organization["id"],
             "application_id": application["id"],
             "name": "Sandbox SDK Key",
-            "scopes": ["read:organization", "write:events"],
+            "scopes": ["read:organization", "write:events", "write:training"],
             "environment": "sandbox",
             "rate_limit_per_minute": 120,
         },
@@ -72,7 +72,7 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     raw_key = provisioned_api_key["key"]
     assert raw_key.startswith("al_developerpla_sandbox_")
     assert api_key["key_prefix"] == raw_key.split(".", 1)[0]
-    assert api_key["scopes"] == ["read:organization", "write:events"]
+    assert api_key["scopes"] == ["read:organization", "write:events", "write:training"]
     assert "key_hash" not in api_key
 
     inspect_response = client.get(
@@ -93,6 +93,73 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     listed_api_key = api_key_list_response.json()[0]
     assert listed_api_key["usage_count"] == 1
     assert "key_hash" not in listed_api_key
+
+    sdk_me_response = client.get(
+        "/api/v1/sdk/me",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_me_response.status_code == 200
+    assert sdk_me_response.json()["organization_id"] == organization["id"]
+
+    sdk_organization_response = client.get(
+        f"/api/v1/sdk/organization?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_organization_response.status_code == 200
+    assert sdk_organization_response.json()["slug"] == organization["slug"]
+
+    sdk_drill_response = client.post(
+        "/api/v1/sdk/training/drills",
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "name": "Advanced Passing Circuit",
+            "focus_area": "Passing",
+            "category": "technical",
+            "equipment": "cones, balls, goals",
+            "description": "Players circulate through a one-touch passing square with timed progressions.",
+            "coaching_points": "Open body shape, scan before receiving, firm pass weight.",
+            "default_duration_minutes": 20,
+            "default_intensity": 6,
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_drill_response.status_code == 201
+    assert sdk_drill_response.json()["name"] == "Advanced Passing Circuit"
+
+    sdk_drills_response = client.get(
+        f"/api/v1/sdk/training/drills?organization_id={organization['id']}&sport=football",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_drills_response.status_code == 200
+    assert sdk_drills_response.json()[0]["name"] == "Advanced Passing Circuit"
+
+    read_only_key_response = client.post(
+        "/api/v1/developers/api-keys",
+        json={
+            "organization_id": organization["id"],
+            "application_id": application["id"],
+            "name": "Read Only SDK Key",
+            "scopes": ["read:organization"],
+            "environment": "sandbox",
+        },
+        headers=identity_headers,
+    )
+    assert read_only_key_response.status_code == 201
+    read_only_raw_key = read_only_key_response.json()["key"]
+    denied_sdk_drill_response = client.post(
+        "/api/v1/sdk/training/drills",
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "name": "Denied Drill",
+            "focus_area": "Passing",
+            "category": "technical",
+            "description": "This drill should be denied by API-key scope enforcement.",
+        },
+        headers={"X-Afrolete-API-Key": read_only_raw_key},
+    )
+    assert denied_sdk_drill_response.status_code == 403
 
     webhook_response = client.post(
         "/api/v1/developers/webhook-subscriptions",
@@ -161,8 +228,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert summary_response.status_code == 200
     summary = summary_response.json()
     assert summary["application_count"] == 1
-    assert summary["api_key_count"] == 1
-    assert summary["active_api_key_count"] == 1
+    assert summary["api_key_count"] == 2
+    assert summary["active_api_key_count"] == 2
     assert summary["webhook_subscription_count"] == 1
     assert summary["marketplace_listing_count"] == 1
     assert summary["approved_marketplace_listing_count"] == 1

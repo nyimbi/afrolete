@@ -193,6 +193,18 @@ async def inspect_developer_api_key(
     )
 
 
+def ensure_developer_api_scope(
+    credential: DeveloperApiKeyInspectionRead,
+    organization_id: UUID,
+    required_scopes: set[str],
+) -> None:
+    if credential.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API key cannot access this organization")
+    granted_scopes = set(credential.scopes)
+    if "admin:*" not in granted_scopes and granted_scopes.isdisjoint(required_scopes):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API key scope is insufficient")
+
+
 async def authenticate_developer_api_key(
     db: AsyncSession,
     raw_key: str,
