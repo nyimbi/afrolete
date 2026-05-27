@@ -217,6 +217,24 @@ class EventTravelDeviceIngestEvent(IdMixin, TimestampMixin, Base):
     signature_validated: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
 
 
+class EventTravelBackupDriver(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_backup_drivers"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    travel_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("event_travel_plans.id"), index=True)
+    driver_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    driver_name: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    phone: Mapped[str | None] = mapped_column(String(80), index=True)
+    vehicle_label: Mapped[str | None] = mapped_column(String(180), index=True)
+    capacity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    license_status: Mapped[str] = mapped_column(String(80), default="unverified", nullable=False, index=True)
+    background_check_status: Mapped[str] = mapped_column(String(80), default="unverified", nullable=False, index=True)
+    availability_status: Mapped[str] = mapped_column(String(40), default="standby", nullable=False, index=True)
+    response_minutes: Mapped[int | None] = mapped_column(Integer)
+    priority: Mapped[int] = mapped_column(Integer, default=1, nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class EventTravelDriverRating(IdMixin, TimestampMixin, Base):
     __tablename__ = "event_travel_driver_ratings"
 

@@ -39,6 +39,7 @@ from app.models.event import (
     ConsentRequest,
     Event,
     EventTravelApproval,
+    EventTravelBackupDriver,
     EventTravelCarpoolRide,
     EventTravelChecklistItem,
     EventTravelDevice,
@@ -70,6 +71,9 @@ from app.schemas.event import (
     EventTravelApprovalRoutingCreate,
     EventTravelApprovalRoutingRead,
     EventTravelApprovalUpdate,
+    EventTravelBackupDriverCreate,
+    EventTravelBackupDriverRead,
+    EventTravelBackupDriverUpdate,
     EventTravelCarpoolAutoMatchCreate,
     EventTravelCarpoolAutoMatchPairRead,
     EventTravelCarpoolAutoMatchRead,
@@ -1738,6 +1742,86 @@ def travel_geofence_zone_read(zone: EventTravelGeofenceZone) -> EventTravelGeofe
     )
 
 
+async def list_travel_backup_drivers(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> list[EventTravelBackupDriverRead]:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    rows = (
+        await db.scalars(
+            select(EventTravelBackupDriver)
+            .where(EventTravelBackupDriver.travel_plan_id == plan.id)
+            .order_by(
+                EventTravelBackupDriver.priority,
+                EventTravelBackupDriver.availability_status,
+                EventTravelBackupDriver.driver_name,
+            )
+        )
+    ).all()
+    return [travel_backup_driver_read(item) for item in rows]
+
+
+async def create_travel_backup_driver(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelBackupDriverCreate,
+    authz: AuthorizationService,
+) -> EventTravelBackupDriverRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    await ensure_optional_person(db, payload.driver_person_id, "Backup driver not found")
+    driver = EventTravelBackupDriver(
+        organization_id=plan.organization_id,
+        travel_plan_id=plan.id,
+        driver_person_id=payload.driver_person_id,
+        driver_name=payload.driver_name,
+        phone=payload.phone,
+        vehicle_label=payload.vehicle_label,
+        capacity=payload.capacity,
+        license_status=payload.license_status,
+        background_check_status=payload.background_check_status,
+        availability_status=payload.availability_status,
+        response_minutes=payload.response_minutes,
+        priority=payload.priority,
+        notes=payload.notes,
+    )
+    db.add(driver)
+    await db.commit()
+    await db.refresh(driver)
+    return travel_backup_driver_read(driver)
+
+
+async def update_travel_backup_driver(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    backup_driver_id: UUID,
+    payload: EventTravelBackupDriverUpdate,
+    authz: AuthorizationService,
+) -> EventTravelBackupDriverRead:
+    driver = await db.get(EventTravelBackupDriver, backup_driver_id)
+    if driver is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup driver not found")
+    await ensure_manage_event_scope(authz, driver.organization_id, identity)
+    for field in ["phone", "vehicle_label", "response_minutes", "notes"]:
+        if field in payload.model_fields_set:
+            setattr(driver, field, getattr(payload, field))
+    for field in ["capacity", "license_status", "background_check_status", "availability_status", "priority"]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(driver, field, value)
+    await db.commit()
+    await db.refresh(driver)
+    return travel_backup_driver_read(driver)
+
+
 async def list_travel_driver_ratings(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -2819,6 +2903,27 @@ def travel_driver_rating_read(rating: EventTravelDriverRating) -> EventTravelDri
         notes=rating.notes,
         created_at=rating.created_at,
         updated_at=rating.updated_at,
+    )
+
+
+def travel_backup_driver_read(driver: EventTravelBackupDriver) -> EventTravelBackupDriverRead:
+    return EventTravelBackupDriverRead(
+        id=driver.id,
+        organization_id=driver.organization_id,
+        travel_plan_id=driver.travel_plan_id,
+        driver_name=driver.driver_name,
+        driver_person_id=driver.driver_person_id,
+        phone=driver.phone,
+        vehicle_label=driver.vehicle_label,
+        capacity=driver.capacity,
+        license_status=driver.license_status,
+        background_check_status=driver.background_check_status,
+        availability_status=driver.availability_status,
+        response_minutes=driver.response_minutes,
+        priority=driver.priority,
+        notes=driver.notes,
+        created_at=driver.created_at,
+        updated_at=driver.updated_at,
     )
 
 

@@ -584,6 +584,43 @@ class EventTravelDriverRatingSummaryRead(BaseModel):
     incident_reported_count: int
 
 
+class EventTravelBackupDriverCreate(BaseModel):
+    driver_name: str = Field(min_length=2, max_length=160)
+    driver_person_id: UUID | None = None
+    phone: str | None = Field(default=None, max_length=80)
+    vehicle_label: str | None = Field(default=None, max_length=180)
+    capacity: int = Field(default=0, ge=0, le=80)
+    license_status: str = Field(default="unverified", min_length=2, max_length=80)
+    background_check_status: str = Field(default="unverified", min_length=2, max_length=80)
+    availability_status: str = Field(default="standby", pattern="^(standby|available|dispatched|unavailable)$")
+    response_minutes: int | None = Field(default=None, ge=0, le=1440)
+    priority: int = Field(default=1, ge=1, le=20)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelBackupDriverUpdate(BaseModel):
+    phone: str | None = Field(default=None, max_length=80)
+    vehicle_label: str | None = Field(default=None, max_length=180)
+    capacity: int | None = Field(default=None, ge=0, le=80)
+    license_status: str | None = Field(default=None, min_length=2, max_length=80)
+    background_check_status: str | None = Field(default=None, min_length=2, max_length=80)
+    availability_status: str | None = Field(
+        default=None,
+        pattern="^(standby|available|dispatched|unavailable)$",
+    )
+    response_minutes: int | None = Field(default=None, ge=0, le=1440)
+    priority: int | None = Field(default=None, ge=1, le=20)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelBackupDriverRead(EventTravelBackupDriverCreate):
+    id: UUID
+    organization_id: UUID
+    travel_plan_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
 class EventTravelExpenseCreate(BaseModel):
     category: str = Field(default="fuel", min_length=2, max_length=80)
     vendor: str | None = Field(default=None, max_length=180)

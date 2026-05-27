@@ -761,6 +761,25 @@ export type EventTravelDriverRatingSummaryRead = {
   incident_reported_count: number;
 };
 
+export type EventTravelBackupDriverRead = {
+  id: UUID;
+  organization_id: UUID;
+  travel_plan_id: UUID;
+  driver_name: string;
+  driver_person_id: UUID | null;
+  phone: string | null;
+  vehicle_label: string | null;
+  capacity: number;
+  license_status: string;
+  background_check_status: string;
+  availability_status: "standby" | "available" | "dispatched" | "unavailable";
+  response_minutes: number | null;
+  priority: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type EventTravelExpenseRead = {
   id: UUID;
   organization_id: UUID;

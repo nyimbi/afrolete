@@ -15,6 +15,9 @@ from app.schemas.event import (
     EventTravelApprovalRoutingCreate,
     EventTravelApprovalRoutingRead,
     EventTravelApprovalUpdate,
+    EventTravelBackupDriverCreate,
+    EventTravelBackupDriverRead,
+    EventTravelBackupDriverUpdate,
     EventTravelCarpoolAutoMatchCreate,
     EventTravelCarpoolAutoMatchRead,
     EventTravelCarpoolRideCreate,
@@ -82,6 +85,7 @@ from app.services.events import (
     dispatch_weather_assessment_alert,
     create_travel_approval,
     auto_match_travel_carpools,
+    create_travel_backup_driver,
     create_travel_carpool_ride,
     create_travel_device,
     create_travel_driver_rating,
@@ -100,6 +104,7 @@ from app.services.events import (
     get_travel_readiness,
     ingest_travel_device_location,
     list_attendance,
+    list_travel_backup_drivers,
     list_travel_carpool_rides,
     list_travel_checklist_items,
     list_travel_devices,
@@ -122,6 +127,7 @@ from app.services.events import (
     seed_travel_checklist_items,
     send_travel_consent_reminders,
     update_travel_approval,
+    update_travel_backup_driver,
     update_travel_carpool_ride,
     update_travel_checklist_item,
     update_travel_device,
@@ -700,6 +706,42 @@ async def rotate_travel_device_secret_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelDeviceSecretRead:
     return await rotate_travel_device_secret(db, identity, travel_device_id, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/backup-drivers", response_model=list[EventTravelBackupDriverRead])
+async def list_travel_backup_drivers_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EventTravelBackupDriverRead]:
+    return await list_travel_backup_drivers(db, identity, travel_plan_id, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/backup-drivers",
+    response_model=EventTravelBackupDriverRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_travel_backup_driver_route(
+    travel_plan_id: UUID,
+    payload: EventTravelBackupDriverCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelBackupDriverRead:
+    return await create_travel_backup_driver(db, identity, travel_plan_id, payload, authz)
+
+
+@router.patch("/travel-backup-drivers/{backup_driver_id}", response_model=EventTravelBackupDriverRead)
+async def update_travel_backup_driver_route(
+    backup_driver_id: UUID,
+    payload: EventTravelBackupDriverUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelBackupDriverRead:
+    return await update_travel_backup_driver(db, identity, backup_driver_id, payload, authz)
 
 
 @router.get("/travel-plans/{travel_plan_id}/driver-ratings", response_model=list[EventTravelDriverRatingRead])
