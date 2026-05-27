@@ -275,6 +275,12 @@ export type RegistrationInquiryConversionRead = {
   guardian_person_id: UUID | null;
 };
 
+export type RegistrationInquiryFollowUpRead = {
+  inquiry: RegistrationInquiryRead;
+  message: CommunicationMessageRead;
+  recipient_person_id: UUID;
+};
+
 export type MembershipRead = {
   id: UUID;
   organization_id: UUID;

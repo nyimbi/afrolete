@@ -121,6 +121,7 @@ import type {
   ReportFormat,
   ReportFrequency,
   RegistrationInquiryConversionRead,
+  RegistrationInquiryFollowUpRead,
   RegistrationInquiryRead,
   RenderedReportRead,
   ReportVerificationRead,
@@ -1766,6 +1767,63 @@ export default function HomePage() {
           }
         }));
         addLog(`${updated.athlete_name} inquiry moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
+  const sendRegistrationInquiryFollowUp = (inquiry: RegistrationInquiryRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const form = inquiryReviewForms[inquiry.id];
+    const notes = form?.review_notes || inquiry.review_notes || "";
+    const subject = `Registration follow-up for ${inquiry.athlete_name}`;
+    const body = [
+      `Hello ${inquiry.guardian_name || inquiry.athlete_name},`,
+      "",
+      `Thank you for your interest in ${selectedOrganization?.public_name || selectedOrganization?.name || "our program"}.`,
+      inquiry.sport_interest ? `Sport/program: ${inquiry.sport_interest}.` : null,
+      inquiry.age_group ? `Age group: ${inquiry.age_group}.` : null,
+      notes ? `Notes from our team: ${notes}` : null,
+      "",
+      "Please reply with any availability, medical, or registration questions so we can complete the intake."
+    ].filter(Boolean).join("\n");
+    runAction(
+      `follow-up-registration-inquiry-${inquiry.id}`,
+      () =>
+        apiRequest<RegistrationInquiryFollowUpRead>(
+          `/organizations/${selectedOrganizationId}/registration-inquiries/${inquiry.id}/follow-up`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              channel: "email",
+              subject,
+              body,
+              urgent: false,
+              quiet_hours_override: false
+            }
+          }
+        ),
+      (result) => {
+        setRegistrationInquiries((current) =>
+          current.map((item) => (item.id === result.inquiry.id ? result.inquiry : item))
+        );
+        setInquiryReviewForms((current) => ({
+          ...current,
+          [result.inquiry.id]: {
+            status: result.inquiry.status,
+            review_notes: result.inquiry.review_notes ?? "",
+            follow_up_at: toDateTimeLocalValue(result.inquiry.follow_up_at)
+          }
+        }));
+        setCommunicationMessages((current) => [
+          result.message,
+          ...current.filter((item) => item.id !== result.message.id)
+        ]);
+        setSelectedMessageId(result.message.id);
+        addLog(`Follow-up queued for ${result.inquiry.athlete_name}`, "good");
       }
     );
   };
@@ -5086,6 +5144,13 @@ export default function HomePage() {
                         disabled={busyAction !== null || inquiry.status === "converted"}
                       >
                         Waitlist
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => sendRegistrationInquiryFollowUp(inquiry)}
+                        disabled={busyAction !== null || inquiry.status === "converted"}
+                      >
+                        Follow up
                       </button>
                       <button
                         type="button"

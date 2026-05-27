@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.schemas.communication import CommunicationMessageRead
 from app.schemas.organization import (
     CommitteeCreate,
     CommitteeMemberAdd,
@@ -19,6 +20,8 @@ from app.schemas.organization import (
     PublicSiteTeamRead,
     RegistrationInquiryConversionCreate,
     RegistrationInquiryConversionRead,
+    RegistrationInquiryFollowUpCreate,
+    RegistrationInquiryFollowUpRead,
     RegistrationInquiryRead,
     RegistrationInquiryUpdate,
 )
@@ -29,6 +32,7 @@ from app.services.organizations import (
     add_committee_member,
     add_member,
     convert_registration_inquiry,
+    create_registration_inquiry_follow_up,
     create_public_registration_inquiry,
     create_committee,
     create_organization,
@@ -39,6 +43,7 @@ from app.services.organizations import (
     list_registration_inquiries,
     update_registration_inquiry,
 )
+from app.services.communications import list_recipients
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
@@ -144,6 +149,36 @@ def to_registration_conversion_read(item) -> RegistrationInquiryConversionRead:
     )
 
 
+def to_communication_message_read(message, recipient_count: int = 0) -> CommunicationMessageRead:
+    return CommunicationMessageRead(
+        id=message.id,
+        organization_id=message.organization_id,
+        template_id=message.template_id,
+        created_by_person_id=message.created_by_person_id,
+        message_type=message.message_type,
+        channel=message.channel,
+        scope_type=message.scope_type,
+        scope_id=message.scope_id,
+        subject=message.subject,
+        body=message.body,
+        urgent=message.urgent,
+        quiet_hours_override=message.quiet_hours_override,
+        scheduled_for=message.scheduled_for,
+        sent_at=message.sent_at,
+        status=message.status,
+        recipient_count=recipient_count,
+    )
+
+
+def to_registration_follow_up_read(item, recipient_count: int) -> RegistrationInquiryFollowUpRead:
+    inquiry, message, recipient = item
+    return RegistrationInquiryFollowUpRead(
+        inquiry=to_registration_inquiry_read(inquiry),
+        message=to_communication_message_read(message, recipient_count=recipient_count),
+        recipient_person_id=recipient.id,
+    )
+
+
 @router.post("", response_model=OrganizationRead, status_code=status.HTTP_201_CREATED)
 async def create_organization_route(
     payload: OrganizationCreate,
@@ -215,6 +250,30 @@ async def update_registration_inquiry_route(
     return to_registration_inquiry_read(
         await update_registration_inquiry(db, identity, organization_id, inquiry_id, payload, authz)
     )
+
+
+@router.post(
+    "/{organization_id}/registration-inquiries/{inquiry_id}/follow-up",
+    response_model=RegistrationInquiryFollowUpRead,
+)
+async def create_registration_inquiry_follow_up_route(
+    organization_id: UUID,
+    inquiry_id: UUID,
+    payload: RegistrationInquiryFollowUpCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RegistrationInquiryFollowUpRead:
+    item = await create_registration_inquiry_follow_up(
+        db,
+        identity,
+        organization_id,
+        inquiry_id,
+        payload,
+        authz,
+    )
+    recipients = await list_recipients(db, item[1].id)
+    return to_registration_follow_up_read(item, recipient_count=len(recipients))
 
 
 @router.post(

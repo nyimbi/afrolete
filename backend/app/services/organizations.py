@@ -6,7 +6,16 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import GuardianRelationshipKind, MemberSubjectType, MembershipRole, RosterStatus, TeamRole
+from app.models.communication import CommunicationMessage
+from app.models.enums import (
+    CommunicationMessageType,
+    CommunicationScopeType,
+    GuardianRelationshipKind,
+    MemberSubjectType,
+    MembershipRole,
+    RosterStatus,
+    TeamRole,
+)
 from app.models.event import Event
 from app.models.identity import Person
 from app.models.organization import Committee, CommitteeMembership, Membership, Organization, RegistrationInquiry
@@ -16,12 +25,15 @@ from app.schemas.organization import (
     CommitteeMemberAdd,
     MemberAdd,
     OrganizationCreate,
-    RegistrationInquiryConversionCreate,
     PublicRegistrationInquiryCreate,
+    RegistrationInquiryConversionCreate,
+    RegistrationInquiryFollowUpCreate,
     RegistrationInquiryUpdate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
+from app.services.communications import create_message
+from app.schemas.communication import CommunicationMessageCreate
 
 
 def slugify(value: str) -> str:
@@ -58,6 +70,12 @@ async def can_manage_registration_inquiries(
         subject_type="user",
         subject_id=str(identity.user_id),
     )
+
+
+def append_review_note(existing: str | None, note: str) -> str:
+    if not existing:
+        return note
+    return f"{existing.rstrip()}\n{note}"
 
 
 async def create_organization(
@@ -305,6 +323,67 @@ async def update_registration_inquiry(
     await db.commit()
     await db.refresh(inquiry)
     return inquiry
+
+
+async def create_registration_inquiry_follow_up(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    inquiry_id: UUID,
+    payload: RegistrationInquiryFollowUpCreate,
+    authz: AuthorizationService,
+) -> tuple[RegistrationInquiry, CommunicationMessage, Person]:
+    if not await can_manage_registration_inquiries(identity, organization_id, authz):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    inquiry = await db.get(RegistrationInquiry, inquiry_id)
+    if inquiry is None or inquiry.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
+
+    recipient = await db.scalar(select(Person).where(Person.primary_email == inquiry.email))
+    if recipient is None:
+        recipient = Person(
+            display_name=inquiry.guardian_name or inquiry.email,
+            primary_email=inquiry.email,
+            primary_phone=inquiry.phone,
+        )
+        db.add(recipient)
+        await db.flush()
+    elif inquiry.phone and not recipient.primary_phone:
+        recipient.primary_phone = inquiry.phone
+        await db.flush()
+
+    message = await create_message(
+        db,
+        identity,
+        CommunicationMessageCreate(
+            organization_id=organization_id,
+            message_type=CommunicationMessageType.REMINDER,
+            channel=payload.channel,
+            scope_type=CommunicationScopeType.PERSON,
+            scope_id=recipient.id,
+            recipient_person_ids=[recipient.id],
+            subject=payload.subject,
+            body=payload.body,
+            urgent=payload.urgent,
+            quiet_hours_override=payload.quiet_hours_override,
+            copy_guardians_for_minors=False,
+        ),
+        authz,
+    )
+
+    inquiry.status = "contacted"
+    inquiry.review_notes = append_review_note(
+        inquiry.review_notes,
+        f"Follow-up queued via {payload.channel.value}: {payload.subject}",
+    )
+    inquiry.reviewed_by_person_id = identity.person_id
+    inquiry.reviewed_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(inquiry)
+    await db.refresh(message)
+    await db.refresh(recipient)
+    return inquiry, message, recipient
 
 
 async def convert_registration_inquiry(

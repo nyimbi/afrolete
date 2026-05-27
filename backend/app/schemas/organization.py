@@ -6,11 +6,13 @@ from pydantic import BaseModel, Field
 from app.models.enums import (
     AssociationLevel,
     CommitteeRole,
+    CommunicationChannel,
     MemberSubjectType,
     MembershipRole,
     OrganizationType,
     TeamRole,
 )
+from app.schemas.communication import CommunicationMessageRead
 
 
 class OrganizationCreate(BaseModel):
@@ -129,6 +131,14 @@ class RegistrationInquiryUpdate(BaseModel):
     follow_up_at: datetime | None = None
 
 
+class RegistrationInquiryFollowUpCreate(BaseModel):
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    subject: str = Field(min_length=2, max_length=240)
+    body: str = Field(min_length=2, max_length=8000)
+    urgent: bool = False
+    quiet_hours_override: bool = False
+
+
 class RegistrationInquiryConversionCreate(BaseModel):
     team_id: UUID | None = None
     role: TeamRole = TeamRole.PLAYER
@@ -143,6 +153,12 @@ class RegistrationInquiryConversionRead(BaseModel):
     athlete_profile_id: UUID
     roster_entry_id: UUID | None
     guardian_person_id: UUID | None
+
+
+class RegistrationInquiryFollowUpRead(BaseModel):
+    inquiry: RegistrationInquiryRead
+    message: CommunicationMessageRead
+    recipient_person_id: UUID
 
 
 class MemberAdd(BaseModel):
