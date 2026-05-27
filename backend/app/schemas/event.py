@@ -929,12 +929,20 @@ class EventTravelRouteOptimizationRead(BaseModel):
     event_id: UUID
     travel_plan_id: UUID
     strategy: str
+    recommended_strategy: str
     destination: str
     stop_count: int
     recommended_departure_at: datetime | None
     estimated_duration_minutes: int
+    traffic_delay_minutes: int = 0
+    weather_delay_minutes: int = 0
+    reroute_required: bool = False
+    reroute_reason: str | None = None
+    latest_weather_alert_level: WeatherAlertLevel | None = None
+    latest_weather_decision: WeatherDecision | None = None
     risk_level: TravelRiskLevel
     warnings: list[str]
+    reroute_actions: list[str] = []
     route_summary: str
     stops: list[EventTravelRouteStopRead]
 

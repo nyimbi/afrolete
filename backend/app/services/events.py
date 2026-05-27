@@ -2681,8 +2681,13 @@ async def optimize_travel_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
     event = await get_event(db, plan.event_id)
     await ensure_manage_event_scope(authz, plan.organization_id, identity)
-
     risk_level, risk_assessment = classify_travel_plan(plan)
+    latest_weather = await latest_event_weather_assessment(db, event.id) if payload.avoid_weather_risk else None
+    recommended_strategy = recommended_route_strategy(payload.strategy, risk_level, latest_weather, plan.route_weather_risk)
+    reroute_required = recommended_strategy != payload.strategy or weather_decision_blocks_route(latest_weather)
+    reroute_reason = travel_reroute_reason(latest_weather, plan.route_weather_risk, risk_level) if reroute_required else None
+    reroute_actions = travel_reroute_actions(latest_weather, plan.route_weather_risk, recommended_strategy)
+
     warnings = [
         line
         for line in risk_assessment.splitlines()
@@ -2742,22 +2747,37 @@ async def optimize_travel_route(
         )
     )
     stops = resequence_stops(stops)
-    estimated_duration_minutes = estimate_travel_duration_minutes(payload.strategy, len(stops), risk_level)
+    traffic_delay_minutes = estimate_travel_traffic_delay_minutes(len(stops), risk_level, plan.route_weather_risk)
+    weather_delay_minutes = estimate_travel_weather_delay_minutes(latest_weather, plan.route_weather_risk)
+    estimated_duration_minutes = (
+        estimate_travel_duration_minutes(recommended_strategy, len(stops), risk_level)
+        + traffic_delay_minutes
+        + weather_delay_minutes
+    )
     recommended_departure_at = optimized_departure_time(plan.departure_at, stops, estimated_duration_minutes)
     if payload.avoid_weather_risk and risk_level in {TravelRiskLevel.HIGH, TravelRiskLevel.CRITICAL}:
         warnings.append("Use safest routing with weather monitoring, backup stops, and guardian updates before departure.")
+    warnings.extend(reroute_actions)
 
     return EventTravelRouteOptimizationRead(
         event_id=event.id,
         travel_plan_id=plan.id,
         strategy=payload.strategy,
+        recommended_strategy=recommended_strategy,
         destination=plan.destination,
         stop_count=len(stops),
         recommended_departure_at=recommended_departure_at,
         estimated_duration_minutes=estimated_duration_minutes,
+        traffic_delay_minutes=traffic_delay_minutes,
+        weather_delay_minutes=weather_delay_minutes,
+        reroute_required=reroute_required,
+        reroute_reason=reroute_reason,
+        latest_weather_alert_level=latest_weather.alert_level if latest_weather is not None else None,
+        latest_weather_decision=latest_weather.decision if latest_weather is not None else None,
         risk_level=risk_level,
         warnings=warnings,
-        route_summary=route_optimization_summary(payload.strategy, stops, estimated_duration_minutes, risk_level),
+        reroute_actions=reroute_actions,
+        route_summary=route_optimization_summary(recommended_strategy, stops, estimated_duration_minutes, risk_level),
         stops=stops,
     )
 
@@ -3321,6 +3341,108 @@ def route_optimization_summary(
         f"{strategy.replace('_', ' ')} route with {len(stops)} stops, "
         f"estimated {estimated_duration_minutes} minutes, {risk_level.value} travel risk: {stop_labels}"
     )
+
+
+async def latest_event_weather_assessment(db: AsyncSession, event_id: UUID) -> EventWeatherAssessment | None:
+    return await db.scalar(
+        select(EventWeatherAssessment)
+        .where(EventWeatherAssessment.event_id == event_id)
+        .order_by(EventWeatherAssessment.observed_at.desc(), EventWeatherAssessment.created_at.desc())
+    )
+
+
+def recommended_route_strategy(
+    requested_strategy: str,
+    risk_level: TravelRiskLevel,
+    latest_weather: EventWeatherAssessment | None,
+    route_weather_risk: str | None,
+) -> str:
+    if weather_decision_blocks_route(latest_weather) or route_weather_risk_label(route_weather_risk) in {"critical", "severe", "storm", "flood"}:
+        return "safest"
+    if latest_weather is not None and latest_weather.alert_level in {WeatherAlertLevel.WARNING, WeatherAlertLevel.CRITICAL}:
+        return "safest"
+    if risk_level in {TravelRiskLevel.HIGH, TravelRiskLevel.CRITICAL} and requested_strategy == "fastest":
+        return "balanced"
+    return requested_strategy
+
+
+def weather_decision_blocks_route(latest_weather: EventWeatherAssessment | None) -> bool:
+    return latest_weather is not None and latest_weather.decision in {
+        WeatherDecision.DELAY,
+        WeatherDecision.CANCEL,
+        WeatherDecision.EVACUATE,
+    }
+
+
+def route_weather_risk_label(route_weather_risk: str | None) -> str:
+    return (route_weather_risk or "").strip().lower()
+
+
+def estimate_travel_traffic_delay_minutes(
+    stop_count: int,
+    risk_level: TravelRiskLevel,
+    route_weather_risk: str | None,
+) -> int:
+    delay = max(stop_count - 1, 0) * 3
+    if risk_level == TravelRiskLevel.HIGH:
+        delay += 10
+    if risk_level == TravelRiskLevel.CRITICAL:
+        delay += 20
+    if route_weather_risk_label(route_weather_risk) in {"moderate", "high", "warning", "severe", "critical", "storm", "flood"}:
+        delay += 15
+    return delay
+
+
+def estimate_travel_weather_delay_minutes(
+    latest_weather: EventWeatherAssessment | None,
+    route_weather_risk: str | None,
+) -> int:
+    delay = 0
+    if latest_weather is not None:
+        if latest_weather.alert_level == WeatherAlertLevel.ADVISORY:
+            delay += 10
+        elif latest_weather.alert_level == WeatherAlertLevel.WARNING:
+            delay += 25
+        elif latest_weather.alert_level == WeatherAlertLevel.CRITICAL:
+            delay += 60
+        if latest_weather.decision == WeatherDecision.DELAY:
+            delay += 30
+        elif latest_weather.decision in {WeatherDecision.CANCEL, WeatherDecision.EVACUATE}:
+            delay += 90
+    if route_weather_risk_label(route_weather_risk) in {"high", "warning"}:
+        delay += 20
+    elif route_weather_risk_label(route_weather_risk) in {"critical", "severe", "storm", "flood"}:
+        delay += 45
+    return delay
+
+
+def travel_reroute_reason(
+    latest_weather: EventWeatherAssessment | None,
+    route_weather_risk: str | None,
+    risk_level: TravelRiskLevel,
+) -> str:
+    if latest_weather is not None and latest_weather.alert_level in {WeatherAlertLevel.WARNING, WeatherAlertLevel.CRITICAL}:
+        return f"Latest weather assessment is {latest_weather.alert_level.value} with {latest_weather.decision.value} decision."
+    if route_weather_risk:
+        return f"Route weather risk is marked {route_weather_risk}."
+    return f"Travel risk is {risk_level.value}; route should avoid exposed corridors."
+
+
+def travel_reroute_actions(
+    latest_weather: EventWeatherAssessment | None,
+    route_weather_risk: str | None,
+    recommended_strategy: str,
+) -> list[str]:
+    actions: list[str] = []
+    if recommended_strategy == "safest":
+        actions.append("Use safest reroute, confirm sheltered pickup points, and avoid flood-prone or exposed roads.")
+    if latest_weather is not None and latest_weather.decision in {WeatherDecision.DELAY, WeatherDecision.EVACUATE, WeatherDecision.CANCEL}:
+        actions.append("Hold departure until weather decision is cleared by operations.")
+    if latest_weather is not None and latest_weather.recommended_actions:
+        actions.append(latest_weather.recommended_actions.splitlines()[0][:240])
+    if route_weather_risk_label(route_weather_risk) in {"high", "warning", "critical", "severe", "storm", "flood"}:
+        actions.append("Notify guardians and backup drivers before departure with route risk status.")
+    return actions
 
 
 async def travel_location_update_read(

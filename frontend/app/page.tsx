@@ -2566,8 +2566,10 @@ export default function HomePage() {
       (optimization) => {
         setTravelRouteOptimization(optimization);
         addLog(
-          `Route optimized: ${optimization.stop_count} stops, ${optimization.estimated_duration_minutes} min`,
-          optimization.risk_level === "high" || optimization.risk_level === "critical" ? "bad" : "good"
+          optimization.reroute_required
+            ? `Reroute advised: ${optimization.recommended_strategy}, ${optimization.estimated_duration_minutes} min`
+            : `Route optimized: ${optimization.stop_count} stops, ${optimization.estimated_duration_minutes} min`,
+          optimization.reroute_required || optimization.risk_level === "high" || optimization.risk_level === "critical" ? "bad" : "good"
         );
       }
     );
@@ -8373,8 +8375,15 @@ export default function HomePage() {
               {travelRouteOptimization ? (
                 <article className="task-card">
                   <div>
-                    <strong>{travelRouteOptimization.strategy} route · {travelRouteOptimization.stop_count} stops</strong>
-                    <span>{travelRouteOptimization.estimated_duration_minutes} min · depart {travelRouteOptimization.recommended_departure_at ? new Date(travelRouteOptimization.recommended_departure_at).toLocaleString() : "not set"}</span>
+                    <strong>{travelRouteOptimization.recommended_strategy} route · {travelRouteOptimization.stop_count} stops</strong>
+                    <span>
+                      {travelRouteOptimization.estimated_duration_minutes} min · traffic +{travelRouteOptimization.traffic_delay_minutes} · weather +{travelRouteOptimization.weather_delay_minutes}
+                    </span>
+                    <span>Depart {travelRouteOptimization.recommended_departure_at ? new Date(travelRouteOptimization.recommended_departure_at).toLocaleString() : "not set"}</span>
+                    <span>
+                      {travelRouteOptimization.reroute_required ? `Reroute: ${travelRouteOptimization.reroute_reason ?? "weather/traffic risk"}` : "No reroute required"}
+                      {travelRouteOptimization.latest_weather_alert_level ? ` · ${travelRouteOptimization.latest_weather_alert_level}/${travelRouteOptimization.latest_weather_decision}` : ""}
+                    </span>
                     <span>{travelRouteOptimization.route_summary}</span>
                   </div>
                 </article>
