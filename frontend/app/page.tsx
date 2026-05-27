@@ -23,6 +23,7 @@ import type {
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
   AgentScorecardCommentModerationRead,
+  AgentScorecardPublicationArtifactRead,
   AgentScorecardPublicationRead,
   AgentScorecardPublicationReadinessRead,
   AgentTaskRead,
@@ -501,6 +502,18 @@ function ReportingChartCard({ chart }: { chart: ReportChartRead }) {
       )}
     </article>
   );
+}
+
+function downloadTextArtifact(content: string, contentType: string, filename: string) {
+  const blob = new Blob([content], { type: contentType });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 function CompetitionBracketLane({ round }: { round: CompetitionBracketRoundRead }) {
@@ -4974,6 +4987,20 @@ export default function HomePage() {
           void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
         }
         addLog(`Published ${publication.period_label} AI scorecard`, "good");
+      }
+    );
+  };
+
+  const downloadAgentScorecardPublication = (publication: AgentScorecardPublicationRead) => {
+    runAction(
+      `agent-scorecard-artifact-${publication.id}`,
+      () =>
+        apiRequest<AgentScorecardPublicationArtifactRead>(
+          `/agents/ethical-scorecard/publications/${publication.id}/artifact`
+        ),
+      (artifact) => {
+        downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
+        addLog(`Downloaded ${artifact.period_label} scorecard artifact`, "good");
       }
     );
   };
@@ -11877,6 +11904,9 @@ export default function HomePage() {
                     <span>{publication.published_comment_count} comments · {publication.flagged_comment_count} held · ledger {publication.ledger_valid ? "valid" : "review"}</span>
                     <span>{new Date(publication.published_at).toLocaleDateString()} · {publication.snapshot_hash.slice(0, 16)}</span>
                     <span>{publication.public_summary}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => downloadAgentScorecardPublication(publication)}>Artifact</button>
                   </div>
                 </article>
               ))}

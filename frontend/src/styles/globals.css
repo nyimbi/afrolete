@@ -1487,6 +1487,11 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.public-ai-publication button {
+  margin-top: 10px;
+  background: var(--site-primary);
+}
+
 .public-ai-comments {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;

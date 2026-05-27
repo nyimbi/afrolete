@@ -1013,6 +1013,26 @@ async def list_agent_scorecard_publications(
     )
 
 
+async def get_agent_scorecard_publication_artifact(
+    db: AsyncSession,
+    publication_id: UUID,
+) -> dict[str, object]:
+    publication = await db.get(AgentScorecardPublication, publication_id)
+    if publication is None or publication.status != "published":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scorecard publication not found")
+    generated_at = datetime.now(UTC)
+    content = render_scorecard_publication_artifact(publication, generated_at)
+    return {
+        "publication_id": publication.id,
+        "organization_id": publication.organization_id,
+        "period_label": publication.period_label,
+        "generated_at": generated_at,
+        "download_filename": f"afrolete-ai-scorecard-{publication.period_label}-{str(publication.id)[:8]}.md",
+        "content_type": "text/markdown; charset=utf-8",
+        "content": content,
+    }
+
+
 async def agent_scorecard_publication_readiness(
     db: AsyncSession,
     organization_id: UUID,
@@ -1181,6 +1201,54 @@ def scorecard_publication_actions(publication: AgentScorecardPublication) -> lis
     if isinstance(parsed, list):
         return [str(item) for item in parsed]
     return [str(parsed)]
+
+
+def render_scorecard_publication_artifact(
+    publication: AgentScorecardPublication,
+    generated_at: datetime,
+) -> str:
+    actions = scorecard_publication_actions(publication)
+    action_lines = "\n".join(f"- {action}" for action in actions)
+    return "\n".join(
+        [
+            "# AfroLete Public AI Scorecard Publication",
+            "",
+            f"Period: {publication.period_label}",
+            f"Published: {publication.published_at.isoformat()}",
+            f"Artifact generated: {generated_at.isoformat()}",
+            f"Organization ID: {publication.organization_id}",
+            f"Publication ID: {publication.id}",
+            f"Snapshot hash: {publication.snapshot_hash}",
+            "",
+            "## Score",
+            "",
+            f"Score: {publication.score}/100",
+            f"Grade: {publication.grade}",
+            f"Ledger valid: {'yes' if publication.ledger_valid else 'no'}",
+            "",
+            "## Governance Metrics",
+            "",
+            f"Total models: {publication.total_models}",
+            f"Approved models: {publication.approved_models}",
+            f"Fairness audits: {publication.bias_audits}",
+            f"Pending appeals: {publication.pending_appeals}",
+            f"Published comments: {publication.published_comment_count}",
+            f"Flagged comments held for review: {publication.flagged_comment_count}",
+            "",
+            "## Public Summary",
+            "",
+            publication.public_summary,
+            "",
+            "## Improvement Actions",
+            "",
+            action_lines or "- No current improvement actions.",
+            "",
+            "## Verification",
+            "",
+            "This artifact is generated from a persisted AfroLete scorecard publication snapshot. "
+            "Compare the snapshot hash above with the platform publication record to verify integrity.",
+        ]
+    )
 
 
 async def update_agent_task(

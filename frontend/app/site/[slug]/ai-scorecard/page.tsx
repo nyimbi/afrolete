@@ -6,6 +6,7 @@ import { apiRequest } from "@/lib/api";
 import type {
   AgentEthicalScorecardRead,
   AgentScorecardCommentRead,
+  AgentScorecardPublicationArtifactRead,
   AgentScorecardPublicationRead,
   OrganizationPublicSiteRead
 } from "@/types/operations";
@@ -115,6 +116,21 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
     }
   };
 
+  const downloadPublicationArtifact = async (publicationId: string) => {
+    setBusy(true);
+    setCommentError("");
+    try {
+      const artifact = await apiRequest<AgentScorecardPublicationArtifactRead>(
+        `/agents/ethical-scorecard/publications/${publicationId}/artifact`
+      );
+      downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
+    } catch (caught) {
+      setCommentError(caught instanceof Error ? caught.message : "Publication artifact could not be downloaded");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (error) {
     return (
       <main className="public-site-page public-ai-page" style={colors}>
@@ -211,6 +227,9 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
               <span>Published {formatDate(latestPublication.published_at)}</span>
               <span>{latestPublication.published_comment_count} public comments · {latestPublication.flagged_comment_count} held for review</span>
               <span>Snapshot {latestPublication.snapshot_hash.slice(0, 16)}</span>
+              <button type="button" onClick={() => downloadPublicationArtifact(latestPublication.id)} disabled={busy}>
+                Download artifact
+              </button>
             </div>
           </div>
         ) : null}
@@ -305,4 +324,16 @@ function initials(value: string): string {
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString();
+}
+
+function downloadTextArtifact(content: string, contentType: string, filename: string) {
+  const blob = new Blob([content], { type: contentType });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }

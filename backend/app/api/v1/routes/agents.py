@@ -28,6 +28,7 @@ from app.schemas.agent import (
     AgentScorecardCommentRead,
     AgentScorecardCommentUpdate,
     AgentScorecardPublicationCreate,
+    AgentScorecardPublicationArtifactRead,
     AgentScorecardPublicationReadinessRead,
     AgentScorecardPublicationRead,
     AgentCreate,
@@ -50,6 +51,7 @@ from app.services.agents import (
     create_agent_model_registry,
     create_agent_scorecard_comment,
     execute_agent_task,
+    get_agent_scorecard_publication_artifact,
     get_my_agent_decision_appeal_form,
     list_agent_assignments,
     list_agent_bias_audits,
@@ -410,6 +412,16 @@ async def agent_scorecard_publication_readiness_route(
 ) -> AgentScorecardPublicationReadinessRead:
     return AgentScorecardPublicationReadinessRead(
         **await agent_scorecard_publication_readiness(db, organization_id)
+    )
+
+
+@router.get("/ethical-scorecard/publications/{publication_id}/artifact", response_model=AgentScorecardPublicationArtifactRead)
+async def get_agent_scorecard_publication_artifact_route(
+    publication_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> AgentScorecardPublicationArtifactRead:
+    return AgentScorecardPublicationArtifactRead(
+        **await get_agent_scorecard_publication_artifact(db, publication_id)
     )
 
 

@@ -2668,6 +2668,16 @@ export type AgentScorecardPublicationRead = {
   published_at: string;
 };
 
+export type AgentScorecardPublicationArtifactRead = {
+  publication_id: UUID;
+  organization_id: UUID;
+  period_label: string;
+  generated_at: string;
+  download_filename: string;
+  content_type: string;
+  content: string;
+};
+
 export type AgentScorecardPublicationReadinessRead = {
   organization_id: UUID;
   current_period_label: string;

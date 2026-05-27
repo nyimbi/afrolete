@@ -402,6 +402,16 @@ class AgentScorecardPublicationRead(BaseModel):
     published_at: datetime
 
 
+class AgentScorecardPublicationArtifactRead(BaseModel):
+    publication_id: UUID
+    organization_id: UUID
+    period_label: str
+    generated_at: datetime
+    download_filename: str
+    content_type: str
+    content: str
+
+
 class AgentScorecardPublicationReadinessRead(BaseModel):
     organization_id: UUID
     current_period_label: str
