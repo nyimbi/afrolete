@@ -1350,6 +1350,16 @@ export type CompetitionAdvancementRead = {
   fixtures: CompetitionFixtureRead[];
 };
 
+export type CompetitionScheduleOptimizationRead = {
+  competition_id: UUID;
+  moved: number;
+  unchanged: number;
+  protected_finals: number;
+  team_rest_minutes: number;
+  match_spacing_minutes: number;
+  fixtures: CompetitionFixtureRead[];
+};
+
 export type CompetitionBracketMatchRead = {
   round_label: string;
   stage_label: string;

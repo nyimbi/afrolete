@@ -23,6 +23,7 @@ from app.schemas.competition import (
     CompetitionFixtureCreate,
     CompetitionFixtureGenerateCreate,
     CompetitionParticipantCreate,
+    CompetitionScheduleOptimizeCreate,
     FixtureMatchEventCreate,
     FixtureOfficialAssignmentCreate,
     FixtureResultUpdate,
@@ -483,6 +484,69 @@ async def advance_competition_round(
     }
 
 
+async def optimize_competition_schedule(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    competition_id: UUID,
+    payload: CompetitionScheduleOptimizeCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    competition = await get_competition(db, competition_id)
+    await ensure_manage_competition(authz, identity, competition.organization_id)
+    fixtures = (
+        await db.scalars(
+            select(CompetitionFixture)
+            .where(CompetitionFixture.competition_id == competition_id)
+            .order_by(CompetitionFixture.stage_label, CompetitionFixture.round_label, CompetitionFixture.scheduled_at)
+        )
+    ).all()
+    if not fixtures:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No fixtures found")
+
+    protected_finals = 0
+    moved: list[CompetitionFixture] = []
+    unchanged = 0
+    last_team_time: dict[UUID, datetime] = {}
+    venue_available_at: dict[str, datetime] = {}
+    next_slot = payload.starts_at
+    for fixture in fixtures:
+        if payload.preserve_final_results and fixture.status == FixtureStatus.FINAL:
+            protected_finals += 1
+            remember_schedule_constraint(fixture, last_team_time, venue_available_at, payload.match_spacing_minutes)
+            continue
+        venue_name = payload.venue_name or fixture.venue_name or "Competition venue"
+        scheduled_at = optimized_fixture_time(
+            next_slot,
+            fixture,
+            venue_name,
+            last_team_time,
+            venue_available_at,
+            payload.team_rest_minutes,
+        )
+        changed = fixture.scheduled_at != scheduled_at or fixture.venue_name != venue_name
+        if changed:
+            fixture.scheduled_at = scheduled_at
+            fixture.venue_name = venue_name
+            fixture.notes = fixture_schedule_notes(fixture.notes)
+            moved.append(fixture)
+        else:
+            unchanged += 1
+        remember_schedule_constraint(fixture, last_team_time, venue_available_at, payload.match_spacing_minutes)
+        next_slot = scheduled_at + timedelta(minutes=payload.match_spacing_minutes)
+    await db.commit()
+    for fixture in moved:
+        await db.refresh(fixture)
+    return {
+        "competition_id": competition_id,
+        "moved": len(moved),
+        "unchanged": unchanged,
+        "protected_finals": protected_finals,
+        "team_rest_minutes": payload.team_rest_minutes,
+        "match_spacing_minutes": payload.match_spacing_minutes,
+        "fixtures": moved,
+    }
+
+
 async def update_fixture_result(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -715,6 +779,41 @@ def advance_pairings(team_ids: list[UUID]) -> list[tuple[UUID, UUID | None]]:
         pairs.append((home, away))
         index += 2
     return pairs
+
+
+def optimized_fixture_time(
+    candidate: datetime,
+    fixture: CompetitionFixture,
+    venue_name: str,
+    last_team_time: dict[UUID, datetime],
+    venue_available_at: dict[str, datetime],
+    team_rest_minutes: int,
+) -> datetime:
+    for team_id in (fixture.home_team_id, fixture.away_team_id):
+        if team_id in last_team_time:
+            candidate = max(candidate, last_team_time[team_id] + timedelta(minutes=team_rest_minutes))
+    if venue_name in venue_available_at:
+        candidate = max(candidate, venue_available_at[venue_name])
+    return candidate
+
+
+def remember_schedule_constraint(
+    fixture: CompetitionFixture,
+    last_team_time: dict[UUID, datetime],
+    venue_available_at: dict[str, datetime],
+    match_spacing_minutes: int,
+) -> None:
+    last_team_time[fixture.home_team_id] = fixture.scheduled_at
+    last_team_time[fixture.away_team_id] = fixture.scheduled_at
+    if fixture.venue_name:
+        venue_available_at[fixture.venue_name] = fixture.scheduled_at + timedelta(minutes=match_spacing_minutes)
+
+
+def fixture_schedule_notes(existing: str | None) -> str:
+    entry = "Schedule optimized by AfroLete to reduce rest-window and venue conflicts."
+    if existing and entry not in existing:
+        return f"{existing}\n{entry}"
+    return existing or entry
 
 
 def conflict(

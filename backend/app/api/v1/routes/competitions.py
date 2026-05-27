@@ -17,6 +17,8 @@ from app.schemas.competition import (
     CompetitionParticipantCreate,
     CompetitionParticipantRead,
     CompetitionRead,
+    CompetitionScheduleOptimizationRead,
+    CompetitionScheduleOptimizeCreate,
     CompetitionStandingRead,
     FixtureMatchEventCreate,
     FixtureMatchEventRead,
@@ -41,6 +43,7 @@ from app.services.competitions import (
     list_competition_participants,
     list_competitions,
     list_fixture_match_events,
+    optimize_competition_schedule,
     record_fixture_match_event,
     update_fixture_result,
 )
@@ -244,6 +247,31 @@ async def advance_competition_route(
         created=result["created"],
         skipped=result["skipped"],
         fixtures=[to_fixture_read(row) for row in rows if row[0].id in created_ids],
+    )
+
+
+@router.post(
+    "/{competition_id}/schedule/optimize",
+    response_model=CompetitionScheduleOptimizationRead,
+)
+async def optimize_competition_schedule_route(
+    competition_id: UUID,
+    payload: CompetitionScheduleOptimizeCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CompetitionScheduleOptimizationRead:
+    result = await optimize_competition_schedule(db, identity, competition_id, payload, authz)
+    moved_ids = {fixture.id for fixture in result["fixtures"]}
+    rows = await list_competition_fixtures(db, competition_id)
+    return CompetitionScheduleOptimizationRead(
+        competition_id=result["competition_id"],
+        moved=result["moved"],
+        unchanged=result["unchanged"],
+        protected_finals=result["protected_finals"],
+        team_rest_minutes=result["team_rest_minutes"],
+        match_spacing_minutes=result["match_spacing_minutes"],
+        fixtures=[to_fixture_read(row) for row in rows if row[0].id in moved_ids],
     )
 
 

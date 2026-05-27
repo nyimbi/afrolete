@@ -106,6 +106,14 @@ class CompetitionAdvanceCreate(BaseModel):
     venue_name: str | None = Field(default=None, max_length=200)
 
 
+class CompetitionScheduleOptimizeCreate(BaseModel):
+    starts_at: datetime
+    match_spacing_minutes: int = Field(default=120, ge=30, le=720)
+    team_rest_minutes: int = Field(default=240, ge=60, le=2880)
+    venue_name: str | None = Field(default=None, max_length=200)
+    preserve_final_results: bool = True
+
+
 class CompetitionFixtureRead(BaseModel):
     id: UUID
     organization_id: UUID
@@ -144,6 +152,16 @@ class CompetitionAdvancementRead(BaseModel):
     byes: list[str]
     created: int
     skipped: int
+    fixtures: list[CompetitionFixtureRead]
+
+
+class CompetitionScheduleOptimizationRead(BaseModel):
+    competition_id: UUID
+    moved: int
+    unchanged: int
+    protected_finals: int
+    team_rest_minutes: int
+    match_spacing_minutes: int
     fixtures: list[CompetitionFixtureRead]
 
 

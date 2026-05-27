@@ -59,6 +59,7 @@ import type {
   CompetitionFormat,
   CompetitionParticipantRead,
   CompetitionRead,
+  CompetitionScheduleOptimizationRead,
   CompetitionStandingRead,
   CompetitionType,
   ConsentRequestRead,
@@ -280,6 +281,8 @@ export default function HomePage() {
   const [competitionStandings, setCompetitionStandings] = useState<CompetitionStandingRead[]>([]);
   const [fixtureGeneration, setFixtureGeneration] = useState<CompetitionFixtureGenerationRead | null>(null);
   const [competitionAdvancement, setCompetitionAdvancement] = useState<CompetitionAdvancementRead | null>(null);
+  const [scheduleOptimization, setScheduleOptimization] =
+    useState<CompetitionScheduleOptimizationRead | null>(null);
   const [competitionBracket, setCompetitionBracket] = useState<CompetitionBracketRead | null>(null);
   const [competitionConflicts, setCompetitionConflicts] = useState<CompetitionConflictRead[]>([]);
   const [matchEvents, setMatchEvents] = useState<FixtureMatchEventRead[]>([]);
@@ -1199,6 +1202,7 @@ export default function HomePage() {
       setCompetitionStandings([]);
       setFixtureGeneration(null);
       setCompetitionAdvancement(null);
+      setScheduleOptimization(null);
       setCompetitionBracket(null);
       setCompetitionConflicts([]);
       setMatchEvents([]);
@@ -1373,6 +1377,7 @@ export default function HomePage() {
       setCompetitionStandings([]);
       setFixtureGeneration(null);
       setCompetitionAdvancement(null);
+      setScheduleOptimization(null);
       setCompetitionBracket(null);
       setCompetitionConflicts([]);
       setMatchEvents([]);
@@ -2302,6 +2307,36 @@ export default function HomePage() {
       (advancement) => {
         setCompetitionAdvancement(advancement);
         addLog(`${advancement.created} advancement fixtures created`, "good");
+        void loadCompetitionWorkspace(selectedCompetitionId);
+      }
+    );
+  };
+
+  const optimizeCompetitionSchedule = () => {
+    if (!selectedCompetitionId) {
+      addLog("Select a competition first", "bad");
+      return;
+    }
+    runAction(
+      "optimize-competition-schedule",
+      () =>
+        apiRequest<CompetitionScheduleOptimizationRead>(
+          `/competitions/${selectedCompetitionId}/schedule/optimize`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              starts_at: new Date(fixtureForm.scheduled_at).toISOString(),
+              match_spacing_minutes: 120,
+              team_rest_minutes: 240,
+              venue_name: fixtureForm.venue_name,
+              preserve_final_results: true
+            }
+          }
+        ),
+      (optimization) => {
+        setScheduleOptimization(optimization);
+        addLog(`${optimization.moved} fixtures optimized`, "good");
         void loadCompetitionWorkspace(selectedCompetitionId);
       }
     );
@@ -5433,6 +5468,7 @@ export default function HomePage() {
                 <button type="button" onClick={createCompetitionFixture} disabled={busyAction !== null}>Fixture</button>
                 <button type="button" onClick={generateCompetitionFixtures} disabled={busyAction !== null}>Auto fixtures</button>
                 <button type="button" onClick={advanceCompetitionRound} disabled={busyAction !== null}>Advance</button>
+                <button type="button" onClick={optimizeCompetitionSchedule} disabled={busyAction !== null}>Optimize</button>
                 <button type="button" onClick={recordFixtureResult} disabled={busyAction !== null}>Result</button>
               </div>
             </div>
@@ -5481,6 +5517,14 @@ export default function HomePage() {
                   <div>
                     <strong>{competitionAdvancement.created} advanced · {competitionAdvancement.next_round_label}</strong>
                     <span>{competitionAdvancement.winners.join(", ")}{competitionAdvancement.byes.length ? ` · byes: ${competitionAdvancement.byes.join(", ")}` : ""}</span>
+                  </div>
+                </article>
+              ) : null}
+              {scheduleOptimization ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{scheduleOptimization.moved} moved · {scheduleOptimization.protected_finals} finals protected</strong>
+                    <span>{scheduleOptimization.team_rest_minutes} min rest · {scheduleOptimization.unchanged} unchanged</span>
                   </div>
                 </article>
               ) : null}
