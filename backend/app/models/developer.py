@@ -65,6 +65,26 @@ class DeveloperWebhookSubscription(IdMixin, TimestampMixin, Base):
     last_delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class DeveloperWebhookDelivery(IdMixin, TimestampMixin, Base):
+    __tablename__ = "developer_webhook_deliveries"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    subscription_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("developer_webhook_subscriptions.id"), index=True
+    )
+    application_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("developer_applications.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    event_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    target_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    delivery_mode: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="queued", nullable=False, index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    response_status_code: Mapped[int | None] = mapped_column(Integer)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class DeveloperMarketplaceListing(IdMixin, TimestampMixin, Base):
     __tablename__ = "developer_marketplace_listings"
     __table_args__ = (UniqueConstraint("organization_id", "name"),)

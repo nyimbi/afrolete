@@ -96,6 +96,7 @@ import type {
   DeveloperApplicationRead,
   DeveloperMarketplaceListingRead,
   DeveloperPortalSummaryRead,
+  DeveloperWebhookDeliveryRead,
   DeveloperWebhookSubscriptionProvisionedRead,
   DeveloperWebhookSubscriptionRead,
   EventRead,
@@ -828,6 +829,7 @@ export default function HomePage() {
   const [developerApplications, setDeveloperApplications] = useState<DeveloperApplicationRead[]>([]);
   const [developerApiKeys, setDeveloperApiKeys] = useState<DeveloperApiKeyRead[]>([]);
   const [developerWebhooks, setDeveloperWebhooks] = useState<DeveloperWebhookSubscriptionRead[]>([]);
+  const [developerWebhookDeliveries, setDeveloperWebhookDeliveries] = useState<DeveloperWebhookDeliveryRead[]>([]);
   const [developerListings, setDeveloperListings] = useState<DeveloperMarketplaceListingRead[]>([]);
   const [developerSummary, setDeveloperSummary] = useState<DeveloperPortalSummaryRead | null>(null);
   const [developerApplicationSecret, setDeveloperApplicationSecret] =
@@ -2020,11 +2022,14 @@ export default function HomePage() {
   }, []);
 
   const loadDevelopers = useCallback(async (organizationId: string) => {
-    const [applications, apiKeys, webhooks, listings, summary] = await Promise.all([
+    const [applications, apiKeys, webhooks, deliveries, listings, summary] = await Promise.all([
       apiRequest<DeveloperApplicationRead[]>(`/developers/applications?organization_id=${organizationId}`),
       apiRequest<DeveloperApiKeyRead[]>(`/developers/api-keys?organization_id=${organizationId}`),
       apiRequest<DeveloperWebhookSubscriptionRead[]>(
         `/developers/webhook-subscriptions?organization_id=${organizationId}`
+      ),
+      apiRequest<DeveloperWebhookDeliveryRead[]>(
+        `/developers/webhook-deliveries?organization_id=${organizationId}`
       ),
       apiRequest<DeveloperMarketplaceListingRead[]>(
         `/developers/marketplace-listings?organization_id=${organizationId}`
@@ -2034,6 +2039,7 @@ export default function HomePage() {
     setDeveloperApplications(applications);
     setDeveloperApiKeys(apiKeys);
     setDeveloperWebhooks(webhooks);
+    setDeveloperWebhookDeliveries(deliveries);
     setDeveloperListings(listings);
     setDeveloperSummary(summary);
   }, []);
@@ -2289,6 +2295,7 @@ export default function HomePage() {
       setDeveloperApplications([]);
       setDeveloperApiKeys([]);
       setDeveloperWebhooks([]);
+      setDeveloperWebhookDeliveries([]);
       setDeveloperListings([]);
       setDeveloperSummary(null);
       setDeveloperApplicationSecret(null);
@@ -11698,6 +11705,16 @@ export default function HomePage() {
                   <div>
                     <strong>{webhook.name}</strong>
                     <span>{webhook.status} · {webhook.delivery_mode} · {webhook.event_types.join(", ")}</span>
+                  </div>
+                </article>
+              ))}
+              {developerWebhookDeliveries.slice(0, 3).map((delivery) => (
+                <article key={delivery.id} className="task-card">
+                  <div>
+                    <strong>{delivery.event_type}</strong>
+                    <span>
+                      {delivery.status} · {delivery.delivery_mode} · {delivery.attempt_count} attempt{delivery.attempt_count === 1 ? "" : "s"}
+                    </span>
                   </div>
                 </article>
               ))}

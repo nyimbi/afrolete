@@ -123,6 +123,22 @@ class DeveloperWebhookSubscriptionProvisionedRead(BaseModel):
     secret_hint: str
 
 
+class DeveloperWebhookDeliveryRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    subscription_id: UUID
+    application_id: UUID | None
+    event_type: str
+    event_id: str
+    target_url: str
+    delivery_mode: str
+    status: str
+    attempt_count: int
+    response_status_code: int | None
+    failure_reason: str | None
+    delivered_at: datetime | None
+
+
 class DeveloperMarketplaceListingCreate(BaseModel):
     organization_id: UUID
     application_id: UUID | None = None

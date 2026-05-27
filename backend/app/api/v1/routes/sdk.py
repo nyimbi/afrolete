@@ -9,7 +9,11 @@ from app.models.training import TrainingDrill
 from app.schemas.developer import DeveloperApiKeyInspectionRead
 from app.schemas.organization import OrganizationRead
 from app.schemas.training import TrainingDrillCreate, TrainingDrillRead
-from app.services.developer import ensure_developer_api_scope, inspect_developer_api_key
+from app.services.developer import (
+    deliver_developer_webhook_event,
+    ensure_developer_api_scope,
+    inspect_developer_api_key,
+)
 from app.services.training import list_training_drills
 
 router = APIRouter(prefix="/sdk", tags=["sdk"])
@@ -109,4 +113,20 @@ async def sdk_create_training_drill(
     db.add(drill)
     await db.commit()
     await db.refresh(drill)
+    await deliver_developer_webhook_event(
+        db,
+        payload.organization_id,
+        "training.drill.created",
+        str(drill.id),
+        {
+            "id": str(drill.id),
+            "organization_id": str(drill.organization_id),
+            "sport": drill.sport,
+            "name": drill.name,
+            "focus_area": drill.focus_area,
+            "category": drill.category,
+            "default_duration_minutes": drill.default_duration_minutes,
+            "default_intensity": drill.default_intensity,
+        },
+    )
     return to_drill_read(drill)

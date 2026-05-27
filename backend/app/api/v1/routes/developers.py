@@ -16,6 +16,7 @@ from app.schemas.developer import (
     DeveloperMarketplaceListingRead,
     DeveloperMarketplaceListingReview,
     DeveloperPortalSummaryRead,
+    DeveloperWebhookDeliveryRead,
     DeveloperWebhookSubscriptionCreate,
     DeveloperWebhookSubscriptionProvisionedRead,
     DeveloperWebhookSubscriptionRead,
@@ -34,6 +35,7 @@ from app.services.developer import (
     list_developer_api_keys,
     list_developer_applications,
     list_developer_marketplace_listings,
+    list_developer_webhook_deliveries,
     list_developer_webhook_subscriptions,
     record_developer_marketplace_install,
     revoke_developer_api_key,
@@ -98,6 +100,24 @@ def webhook_subscription_read(subscription) -> DeveloperWebhookSubscriptionRead:
         failure_count=subscription.failure_count,
         last_delivery_status=subscription.last_delivery_status,
         last_delivered_at=subscription.last_delivered_at,
+    )
+
+
+def webhook_delivery_read(delivery) -> DeveloperWebhookDeliveryRead:
+    return DeveloperWebhookDeliveryRead(
+        id=delivery.id,
+        organization_id=delivery.organization_id,
+        subscription_id=delivery.subscription_id,
+        application_id=delivery.application_id,
+        event_type=delivery.event_type,
+        event_id=delivery.event_id,
+        target_url=delivery.target_url,
+        delivery_mode=delivery.delivery_mode,
+        status=delivery.status,
+        attempt_count=delivery.attempt_count,
+        response_status_code=delivery.response_status_code,
+        failure_reason=delivery.failure_reason,
+        delivered_at=delivery.delivered_at,
     )
 
 
@@ -239,6 +259,26 @@ async def list_developer_webhook_subscriptions_route(
     return [
         webhook_subscription_read(subscription)
         for subscription in await list_developer_webhook_subscriptions(db, identity, organization_id, authz)
+    ]
+
+
+@router.get("/webhook-deliveries", response_model=list[DeveloperWebhookDeliveryRead])
+async def list_developer_webhook_deliveries_route(
+    organization_id: UUID = Query(),
+    subscription_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[DeveloperWebhookDeliveryRead]:
+    return [
+        webhook_delivery_read(delivery)
+        for delivery in await list_developer_webhook_deliveries(
+            db,
+            identity,
+            organization_id,
+            authz,
+            subscription_id,
+        )
     ]
 
 

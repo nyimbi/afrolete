@@ -2283,6 +2283,22 @@ export type DeveloperWebhookSubscriptionProvisionedRead = {
   secret_hint: string;
 };
 
+export type DeveloperWebhookDeliveryRead = {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  application_id: UUID | null;
+  event_type: string;
+  event_id: string;
+  target_url: string;
+  delivery_mode: string;
+  status: string;
+  attempt_count: number;
+  response_status_code: number | null;
+  failure_reason: string | null;
+  delivered_at: string | null;
+};
+
 export type DeveloperMarketplaceListingRead = {
   id: UUID;
   organization_id: UUID;

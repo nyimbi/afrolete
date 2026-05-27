@@ -108,6 +108,21 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert sdk_organization_response.status_code == 200
     assert sdk_organization_response.json()["slug"] == organization["slug"]
 
+    sdk_webhook_response = client.post(
+        "/api/v1/developers/webhook-subscriptions",
+        json={
+            "organization_id": organization["id"],
+            "application_id": application["id"],
+            "name": "SDK Training Events",
+            "target_url": "https://sync.example/webhooks/training",
+            "event_types": ["training.drill.created"],
+            "delivery_mode": "record_only",
+        },
+        headers=identity_headers,
+    )
+    assert sdk_webhook_response.status_code == 201
+    sdk_webhook = sdk_webhook_response.json()["subscription"]
+
     sdk_drill_response = client.post(
         "/api/v1/sdk/training/drills",
         json={
@@ -133,6 +148,18 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert sdk_drills_response.status_code == 200
     assert sdk_drills_response.json()[0]["name"] == "Advanced Passing Circuit"
+
+    webhook_deliveries_response = client.get(
+        f"/api/v1/developers/webhook-deliveries?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert webhook_deliveries_response.status_code == 200
+    deliveries = webhook_deliveries_response.json()
+    assert len(deliveries) == 1
+    assert deliveries[0]["subscription_id"] == sdk_webhook["id"]
+    assert deliveries[0]["event_type"] == "training.drill.created"
+    assert deliveries[0]["status"] == "recorded"
+    assert deliveries[0]["attempt_count"] == 1
 
     read_only_key_response = client.post(
         "/api/v1/developers/api-keys",
@@ -256,7 +283,7 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert summary["application_count"] == 1
     assert summary["api_key_count"] == 3
     assert summary["active_api_key_count"] == 3
-    assert summary["webhook_subscription_count"] == 1
+    assert summary["webhook_subscription_count"] == 2
     assert summary["marketplace_listing_count"] == 1
     assert summary["approved_marketplace_listing_count"] == 1
     assert summary["install_count"] == 1

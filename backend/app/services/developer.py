@@ -1,8 +1,12 @@
+import hmac
+import json
+import time
 from datetime import UTC, datetime
 from hashlib import sha256
 from secrets import token_urlsafe
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +15,7 @@ from app.models.developer import (
     DeveloperApiKey,
     DeveloperApplication,
     DeveloperMarketplaceListing,
+    DeveloperWebhookDelivery,
     DeveloperWebhookSubscription,
 )
 from app.models.organization import Organization
@@ -290,6 +295,104 @@ async def list_developer_webhook_subscriptions(
     )
 
 
+async def deliver_developer_webhook_event(
+    db: AsyncSession,
+    organization_id: UUID,
+    event_type: str,
+    event_id: str,
+    payload: dict[str, object],
+) -> list[DeveloperWebhookDelivery]:
+    subscriptions = list(
+        (
+            await db.scalars(
+                select(DeveloperWebhookSubscription).where(
+                    DeveloperWebhookSubscription.organization_id == organization_id,
+                    DeveloperWebhookSubscription.status == "active",
+                )
+            )
+        ).all()
+    )
+    matching_subscriptions = [
+        subscription
+        for subscription in subscriptions
+        if event_type in set(unpack_list(subscription.event_types))
+    ]
+    deliveries = [
+        DeveloperWebhookDelivery(
+            organization_id=organization_id,
+            subscription_id=subscription.id,
+            application_id=subscription.application_id,
+            event_type=event_type,
+            event_id=event_id,
+            target_url=subscription.target_url,
+            delivery_mode=subscription.delivery_mode,
+            payload=stable_json(payload),
+        )
+        for subscription in matching_subscriptions
+    ]
+    for delivery in deliveries:
+        db.add(delivery)
+    await db.flush()
+    for subscription, delivery in zip(matching_subscriptions, deliveries, strict=True):
+        await deliver_single_webhook(db, subscription, delivery)
+    await db.commit()
+    for delivery in deliveries:
+        await db.refresh(delivery)
+    return deliveries
+
+
+async def list_developer_webhook_deliveries(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    subscription_id: UUID | None = None,
+) -> list[DeveloperWebhookDelivery]:
+    await ensure_manage_developer_platform(authz, identity, organization_id)
+    query = select(DeveloperWebhookDelivery).where(DeveloperWebhookDelivery.organization_id == organization_id)
+    if subscription_id is not None:
+        query = query.where(DeveloperWebhookDelivery.subscription_id == subscription_id)
+    return list((await db.scalars(query.order_by(DeveloperWebhookDelivery.created_at.desc()).limit(100))).all())
+
+
+async def deliver_single_webhook(
+    db: AsyncSession,
+    subscription: DeveloperWebhookSubscription,
+    delivery: DeveloperWebhookDelivery,
+) -> None:
+    now = datetime.now(UTC)
+    delivery.attempt_count += 1
+    if subscription.delivery_mode == "record_only":
+        delivery.status = "recorded"
+        delivery.delivered_at = now
+        subscription.last_delivery_status = delivery.status
+        subscription.last_delivered_at = now
+        return
+    try:
+        timestamp = str(int(time.time()))
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                subscription.target_url,
+                content=delivery.payload,
+                headers=developer_webhook_headers(subscription, delivery, timestamp),
+            )
+        delivery.response_status_code = response.status_code
+        if 200 <= response.status_code < 300:
+            delivery.status = "delivered"
+            delivery.delivered_at = now
+        else:
+            delivery.status = "failed"
+            delivery.failure_reason = f"Webhook returned {response.status_code}: {response.text[:500]}"
+            subscription.failure_count += 1
+    except httpx.HTTPError as error:
+        delivery.status = "failed"
+        delivery.failure_reason = f"Webhook delivery failed: {error}"
+        subscription.failure_count += 1
+    subscription.last_delivery_status = delivery.status
+    subscription.last_delivered_at = delivery.delivered_at
+    await db.flush()
+
+
 async def update_developer_webhook_subscription(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -514,6 +617,26 @@ def unpack_list(value: str | None) -> list[str]:
     if not value:
         return []
     return [entry for entry in value.splitlines() if entry]
+
+
+def stable_json(payload: dict[str, object]) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def developer_webhook_headers(
+    subscription: DeveloperWebhookSubscription,
+    delivery: DeveloperWebhookDelivery,
+    timestamp: str,
+) -> dict[str, str]:
+    signed = f"{timestamp}.{delivery.payload}".encode("utf-8")
+    signature = hmac.new(subscription.signing_secret_hash.encode("utf-8"), signed, sha256).hexdigest()
+    return {
+        "Content-Type": "application/json",
+        "X-Afrolete-Webhook-Event": delivery.event_type,
+        "X-Afrolete-Webhook-Delivery": str(delivery.id),
+        "X-Afrolete-Webhook-Timestamp": timestamp,
+        "X-Afrolete-Webhook-Signature": f"sha256={signature}",
+    }
 
 
 def as_utc(value: datetime | None) -> datetime | None:
