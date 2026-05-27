@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import type {
   ActivityConsentRead,
+  AgentDecisionAppealRead,
   AttendanceStatus,
   CommunicationInboxItemRead,
   ConsentStatus,
@@ -26,7 +27,12 @@ export default function FamilyPortalPage() {
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
   const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
   const [consentRequests, setConsentRequests] = useState<FamilyConsentRequestRead[]>([]);
+  const [aiAppeals, setAiAppeals] = useState<AgentDecisionAppealRead[]>([]);
   const [items, setItems] = useState<CommunicationInboxItemRead[]>([]);
+  const [appealForm, setAppealForm] = useState({
+    task_id: "",
+    question: "Please explain and review this AI recommendation for my family."
+  });
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -67,7 +73,7 @@ export default function FamilyPortalPage() {
     setError("");
     try {
       const organizationQuery = encodeURIComponent(organizationId);
-      const [familyRows, eventRows, pendingRequests, inbox] = await Promise.all([
+      const [familyRows, eventRows, pendingRequests, appeals, inbox] = await Promise.all([
         apiRequest<FamilyAthleteSummaryRead[]>(`/safeguarding/my-family?organization_id=${organizationQuery}`, {
           identity
         }),
@@ -78,6 +84,9 @@ export default function FamilyPortalPage() {
           `/safeguarding/my-family/consent-requests?organization_id=${organizationQuery}`,
           { identity }
         ),
+        apiRequest<AgentDecisionAppealRead[]>(`/agents/my-appeals?organization_id=${organizationQuery}`, {
+          identity
+        }),
         apiRequest<CommunicationInboxItemRead[]>(`/communications/my-inbox?organization_id=${organizationQuery}`, {
           identity
         })
@@ -85,6 +94,7 @@ export default function FamilyPortalPage() {
       setFamily(familyRows);
       setEvents(eventRows);
       setConsentRequests(pendingRequests);
+      setAiAppeals(appeals);
       setItems(inbox);
       setSelectedRecipientId((current) =>
         inbox.some((item) => item.recipient_id === current) ? current : inbox[0]?.recipient_id ?? ""
@@ -194,6 +204,38 @@ export default function FamilyPortalPage() {
     }
   };
 
+  const submitAiAppeal = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!organizationId || !appealForm.task_id) {
+      setError("Organization and agent task id are required");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const appeal = await apiRequest<AgentDecisionAppealRead>("/agents/my-appeals", {
+        method: "POST",
+        identity,
+        body: {
+          organization_id: organizationId,
+          task_id: appealForm.task_id,
+          reason: "family_review",
+          question: appealForm.question,
+          supporting_evidence_ref: `family-portal:${identity.email}`
+        }
+      });
+      setAiAppeals((current) => [appeal, ...current.filter((item) => item.id !== appeal.id)]);
+      setAppealForm({
+        task_id: "",
+        question: "Please explain and review this AI recommendation for my family."
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "AI appeal could not be submitted");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="consent-page family-page">
       <section className="consent-shell family-shell">
@@ -246,6 +288,10 @@ export default function FamilyPortalPage() {
           <div>
             <span>Consent</span>
             <strong>{pendingConsentCount}</strong>
+          </div>
+          <div>
+            <span>AI appeals</span>
+            <strong>{aiAppeals.filter((appeal) => !appeal.resolved_at).length}</strong>
           </div>
         </div>
 
@@ -302,6 +348,42 @@ export default function FamilyPortalPage() {
             </article>
           ))}
         </div>
+
+        <section className="family-ai-appeals">
+          <div>
+            <p className="section-label">AI appeals</p>
+            <h2>Question an AI recommendation</h2>
+            <p>Request a human explanation, data review, or outcome change for an agent task affecting your family.</p>
+          </div>
+          <form onSubmit={submitAiAppeal}>
+            <label>
+              Agent task id
+              <input
+                value={appealForm.task_id}
+                onChange={(event) => setAppealForm({ ...appealForm, task_id: event.target.value })}
+                placeholder="Task UUID from a recommendation"
+              />
+            </label>
+            <label>
+              Question
+              <textarea
+                value={appealForm.question}
+                onChange={(event) => setAppealForm({ ...appealForm, question: event.target.value })}
+              />
+            </label>
+            <button type="submit" disabled={busy}>Submit appeal</button>
+          </form>
+          <div className="family-appeal-list">
+            {aiAppeals.slice(0, 4).map((appeal) => (
+              <article key={appeal.id}>
+                <strong>{appeal.model_policy} · {appeal.status}</strong>
+                <span>{appeal.simple_explanation}</span>
+                <small>Due {formatDate(appeal.due_at)} · {appeal.resolution_notes ?? appeal.alternative_options}</small>
+              </article>
+            ))}
+            {aiAppeals.length === 0 ? <span>No AI appeals yet</span> : null}
+          </div>
+        </section>
 
         <div className="family-layout">
           <div className="family-list" aria-label="Inbox messages">

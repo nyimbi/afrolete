@@ -30,6 +30,7 @@ from app.schemas.agent import (
     AgentCreate,
     AgentDecisionAppealCreate,
     AgentDecisionAppealUpdate,
+    AgentMyDecisionAppealCreate,
     AgentModelRegistryCreate,
     AgentModelRegistryUpdate,
     AgentTaskCreate,
@@ -156,6 +157,23 @@ async def list_agent_decision_appeals(
     )
 
 
+async def list_my_agent_decision_appeals(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> list[AgentDecisionAppeal]:
+    return list(
+        (
+            await db.scalars(
+                select(AgentDecisionAppeal)
+                .where(AgentDecisionAppeal.organization_id == organization_id)
+                .where(AgentDecisionAppeal.submitted_by_person_id == identity.person_id)
+                .order_by(AgentDecisionAppeal.created_at.desc(), AgentDecisionAppeal.due_at)
+            )
+        ).all()
+    )
+
+
 async def submit_agent_decision_appeal(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -168,6 +186,28 @@ async def submit_agent_decision_appeal(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
     await ensure_manage_organization(authz, identity, task.organization_id)
+    return await create_agent_decision_appeal_record(db, identity, task, payload, settings)
+
+
+async def submit_my_agent_decision_appeal(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentMyDecisionAppealCreate,
+    settings: Settings | None = None,
+) -> AgentDecisionAppeal:
+    task = await db.get(AgentTask, payload.task_id)
+    if task is None or task.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+    return await create_agent_decision_appeal_record(db, identity, task, payload, settings)
+
+
+async def create_agent_decision_appeal_record(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    task: AgentTask,
+    payload: AgentDecisionAppealCreate,
+    settings: Settings | None = None,
+) -> AgentDecisionAppeal:
     agent = await db.get(Agent, task.agent_id)
     if agent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")

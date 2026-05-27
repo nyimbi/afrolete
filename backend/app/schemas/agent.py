@@ -176,6 +176,11 @@ class AgentDecisionAppealCreate(BaseModel):
     supporting_evidence_ref: str | None = Field(default=None, max_length=500)
 
 
+class AgentMyDecisionAppealCreate(AgentDecisionAppealCreate):
+    organization_id: UUID
+    task_id: UUID
+
+
 class AgentDecisionAppealUpdate(BaseModel):
     status: str = Field(pattern="^(pending|under_review|upheld|modified|overturned|withdrawn)$")
     resolution_notes: str = Field(min_length=4, max_length=4000)

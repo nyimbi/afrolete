@@ -807,13 +807,16 @@ textarea:focus {
 
 .family-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-top: 14px;
 }
 
 .family-metrics div,
 .family-athletes article,
+.family-ai-appeals,
+.family-appeal-list article,
+.family-appeal-list > span,
 .family-message {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -947,6 +950,57 @@ textarea:focus {
 .family-event-status button {
   min-height: 32px;
   padding: 7px 10px;
+}
+
+.family-ai-appeals {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+  padding: 14px;
+}
+
+.family-ai-appeals h2 {
+  margin: 4px 0 8px;
+}
+
+.family-ai-appeals p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.family-ai-appeals form {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.family-ai-appeals textarea {
+  min-height: 44px;
+}
+
+.family-appeal-list {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+}
+
+.family-appeal-list article,
+.family-appeal-list > span {
+  padding: 12px;
+}
+
+.family-appeal-list strong,
+.family-appeal-list span,
+.family-appeal-list small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.family-appeal-list span,
+.family-appeal-list small {
+  color: var(--muted);
 }
 
 .family-layout {
@@ -1423,7 +1477,9 @@ textarea:focus {
 
   .family-toolbar,
   .family-layout,
-  .family-athletes {
+  .family-athletes,
+  .family-ai-appeals,
+  .family-ai-appeals form {
     grid-template-columns: 1fr;
   }
 

@@ -18,6 +18,7 @@ from app.schemas.agent import (
     AgentModelRegistryRead,
     AgentModelRegistryUpdate,
     AgentModelTransparencyReportRead,
+    AgentMyDecisionAppealCreate,
     AgentRunLedgerVerificationRead,
     AgentRunRecordRead,
     AgentCreate,
@@ -44,9 +45,11 @@ from app.services.agents import (
     list_agent_model_registry,
     list_agent_tasks,
     list_agents,
+    list_my_agent_decision_appeals,
     queue_agent_task,
     run_agent_bias_audit,
     submit_agent_decision_appeal,
+    submit_my_agent_decision_appeal,
     update_agent_decision_appeal,
     update_agent_model_registry,
     update_agent_task,
@@ -214,6 +217,29 @@ async def list_agent_decision_appeals_route(
         to_decision_appeal_read(appeal)
         for appeal in await list_agent_decision_appeals(db, organization_id, status_value)
     ]
+
+
+@router.get("/my-appeals", response_model=list[AgentDecisionAppealRead])
+async def list_my_agent_decision_appeals_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentDecisionAppealRead]:
+    return [
+        to_decision_appeal_read(appeal)
+        for appeal in await list_my_agent_decision_appeals(db, identity, organization_id)
+    ]
+
+
+@router.post("/my-appeals", response_model=AgentDecisionAppealRead, status_code=status.HTTP_201_CREATED)
+async def submit_my_agent_decision_appeal_route(
+    payload: AgentMyDecisionAppealCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> AgentDecisionAppealRead:
+    return to_decision_appeal_read(
+        await submit_my_agent_decision_appeal(db, identity, payload)
+    )
 
 
 @router.get("/ethical-scorecard", response_model=AgentEthicalScorecardRead)
