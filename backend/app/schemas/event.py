@@ -1,3 +1,4 @@
+from typing import Any
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -359,9 +360,18 @@ class EventTravelFeeCheckoutSettlementCreate(BaseModel):
     raw_reference: str | None = Field(default=None, max_length=2000)
 
 
-class EventTravelFeePaymentWebhookCreate(EventTravelFeeCheckoutSettlementCreate):
-    session_id: str = Field(min_length=8, max_length=120)
+class EventTravelFeePaymentWebhookCreate(BaseModel):
+    invoice_id: UUID | None = None
+    session_id: str | None = Field(default=None, min_length=8, max_length=120)
+    provider: str = Field(default="provider_neutral", min_length=2, max_length=80)
     event_type: str = Field(default="payment.succeeded", min_length=2, max_length=120)
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    method: str = Field(default="provider_webhook", min_length=2, max_length=80)
+    external_payment_id: str | None = Field(default=None, max_length=240)
+    status: str = Field(default="succeeded", pattern="^(succeeded|pending|failed|cancelled)$")
+    raw_reference: str | None = Field(default=None, max_length=2000)
+    raw_payload: dict[str, Any] | None = None
 
 
 class EventTravelFeeCheckoutSettlementRead(BaseModel):

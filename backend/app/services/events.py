@@ -5,12 +5,13 @@ import time
 from base64 import b64decode, urlsafe_b64encode
 from binascii import Error as Base64Error
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from math import asin, cos, radians, sin, sqrt
 from pathlib import Path
 from re import sub
 from secrets import token_urlsafe
+from typing import Any
 from urllib.parse import quote
 from uuid import UUID
 
@@ -1017,10 +1018,16 @@ async def settle_travel_fee_checkout(
 
 async def ingest_travel_fee_payment_webhook(
     db: AsyncSession,
-    payload: EventTravelFeePaymentWebhookCreate,
+    payload: EventTravelFeePaymentWebhookCreate | dict[str, Any],
+    provider_hint: str | None = None,
     signature_required: bool = False,
     signature_validated: bool = False,
 ) -> EventTravelFeeCheckoutSettlementRead:
+    payload = normalize_travel_fee_payment_webhook(payload, provider_hint)
+    if payload.invoice_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Travel fee webhook invoice_id required")
+    if payload.session_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Travel fee webhook session_id required")
     settlement_payload = EventTravelFeeCheckoutSettlementCreate(
         invoice_id=payload.invoice_id,
         provider=payload.provider,
@@ -1038,6 +1045,177 @@ async def ingest_travel_fee_payment_webhook(
         signature_required=signature_required,
         signature_validated=signature_validated,
     )
+
+
+def normalize_travel_fee_payment_webhook(
+    payload: EventTravelFeePaymentWebhookCreate | dict[str, Any],
+    provider_hint: str | None = None,
+) -> EventTravelFeePaymentWebhookCreate:
+    if isinstance(payload, EventTravelFeePaymentWebhookCreate):
+        return payload
+    provider_payload = payload.get("raw_payload") if isinstance(payload.get("raw_payload"), dict) else payload
+    provider = (provider_hint or str(payload.get("provider") or "")).strip().lower()
+    if not provider:
+        provider = detect_travel_fee_payment_provider(provider_payload)
+    if has_travel_fee_internal_payment_shape(payload) or has_travel_fee_internal_payment_shape(provider_payload):
+        normalized = dict(provider_payload if has_travel_fee_internal_payment_shape(provider_payload) else payload)
+        normalized["provider"] = normalized.get("provider") or provider or "provider_neutral"
+        return EventTravelFeePaymentWebhookCreate.model_validate(normalized)
+    if provider == "stripe":
+        return normalize_stripe_travel_fee_payment(provider_payload)
+    if provider in {"mpesa", "m-pesa", "safaricom_mpesa"}:
+        return normalize_mpesa_travel_fee_payment(provider_payload)
+    if provider == "paypal":
+        return normalize_paypal_travel_fee_payment(provider_payload)
+    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported travel fee payment webhook payload")
+
+
+def has_travel_fee_internal_payment_shape(payload: dict[str, Any]) -> bool:
+    return bool(payload.get("invoice_id") and payload.get("session_id"))
+
+
+def detect_travel_fee_payment_provider(payload: dict[str, Any]) -> str:
+    if "Body" in payload and isinstance(payload.get("Body"), dict):
+        return "mpesa"
+    if "data" in payload and "type" in payload:
+        return "stripe"
+    if "resource" in payload and "event_type" in payload:
+        return "paypal"
+    return "provider_neutral"
+
+
+def normalize_stripe_travel_fee_payment(payload: dict[str, Any]) -> EventTravelFeePaymentWebhookCreate:
+    event_type = str(payload.get("type") or "payment.succeeded")
+    obj = nested_dict(payload, "data", "object")
+    metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+    amount = decimal_minor_units(obj.get("amount_total") or obj.get("amount_paid"))
+    payment_status = str(obj.get("payment_status") or obj.get("status") or "").lower()
+    return EventTravelFeePaymentWebhookCreate(
+        invoice_id=uuid_or_none(metadata.get("invoice_id") or metadata.get("afrolete_invoice_id")),
+        session_id=string_or_none(metadata.get("session_id") or metadata.get("afrolete_session_id")),
+        provider="stripe",
+        event_type=event_type,
+        amount=amount,
+        currency=string_or_none(obj.get("currency"), upper=True),
+        method="stripe_checkout",
+        external_payment_id=string_or_none(obj.get("payment_intent") or obj.get("id")),
+        status="succeeded" if event_type == "checkout.session.completed" or payment_status == "paid" else "pending",
+        raw_reference=json.dumps(payload, sort_keys=True)[:2000],
+    )
+
+
+def normalize_mpesa_travel_fee_payment(payload: dict[str, Any]) -> EventTravelFeePaymentWebhookCreate:
+    callback = nested_dict(payload, "Body", "stkCallback")
+    items = callback_metadata_items(callback)
+    result_code = str(callback.get("ResultCode") or "")
+    metadata = callback.get("Metadata") if isinstance(callback.get("Metadata"), dict) else payload.get("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return EventTravelFeePaymentWebhookCreate(
+        invoice_id=uuid_or_none(metadata.get("invoice_id") or metadata.get("afrolete_invoice_id")),
+        session_id=string_or_none(metadata.get("session_id") or metadata.get("afrolete_session_id")),
+        provider="mpesa",
+        event_type="mpesa.stk_callback",
+        amount=decimal_or_none(items.get("Amount")),
+        currency=string_or_none(metadata.get("currency"), upper=True) or "KES",
+        method="mpesa_stk",
+        external_payment_id=string_or_none(items.get("MpesaReceiptNumber") or callback.get("CheckoutRequestID")),
+        status="succeeded" if result_code == "0" else "failed",
+        raw_reference=json.dumps(payload, sort_keys=True)[:2000],
+    )
+
+
+def normalize_paypal_travel_fee_payment(payload: dict[str, Any]) -> EventTravelFeePaymentWebhookCreate:
+    event_type = str(payload.get("event_type") or "")
+    resource = payload.get("resource") if isinstance(payload.get("resource"), dict) else {}
+    purchase_unit = first_dict(resource.get("purchase_units"))
+    capture = first_dict(nested_dict(purchase_unit, "payments").get("captures"))
+    amount_payload = capture.get("amount") if isinstance(capture.get("amount"), dict) else resource.get("amount", {})
+    reference_metadata = parse_payment_reference(str(purchase_unit.get("reference_id") or resource.get("custom_id") or ""))
+    return EventTravelFeePaymentWebhookCreate(
+        invoice_id=uuid_or_none(reference_metadata.get("invoice_id") or resource.get("invoice_id")),
+        session_id=string_or_none(reference_metadata.get("session_id")),
+        provider="paypal",
+        event_type=event_type or "PAYMENT.CAPTURE.COMPLETED",
+        amount=decimal_or_none(amount_payload.get("value")),
+        currency=string_or_none(amount_payload.get("currency_code"), upper=True),
+        method="paypal_checkout",
+        external_payment_id=string_or_none(capture.get("id") or resource.get("id")),
+        status="succeeded" if event_type == "PAYMENT.CAPTURE.COMPLETED" or capture.get("status") == "COMPLETED" else "pending",
+        raw_reference=json.dumps(payload, sort_keys=True)[:2000],
+    )
+
+
+def nested_dict(payload: dict[str, Any], *keys: str) -> dict[str, Any]:
+    current: Any = payload
+    for key in keys:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
+
+
+def first_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                return item
+    return value if isinstance(value, dict) else {}
+
+
+def callback_metadata_items(callback: dict[str, Any]) -> dict[str, Any]:
+    metadata = callback.get("CallbackMetadata")
+    items = metadata.get("Item") if isinstance(metadata, dict) else []
+    result: dict[str, Any] = {}
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict) and item.get("Name"):
+                result[str(item["Name"])] = item.get("Value")
+    return result
+
+
+def parse_payment_reference(value: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for part in value.replace("|", ";").split(";"):
+        if "=" not in part:
+            continue
+        key, item_value = part.split("=", 1)
+        result[key.strip()] = item_value.strip()
+    return result
+
+
+def uuid_or_none(value: Any) -> UUID | None:
+    if value is None:
+        return None
+    try:
+        return UUID(str(value))
+    except ValueError:
+        return None
+
+
+def string_or_none(value: Any, upper: bool = False) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text.upper() if upper else text
+
+
+def decimal_or_none(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"))
+    except InvalidOperation as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid payment amount") from exc
+
+
+def decimal_minor_units(value: Any) -> Decimal | None:
+    amount = decimal_or_none(value)
+    if amount is None:
+        return None
+    return (amount / Decimal("100")).quantize(Decimal("0.01"))
 
 
 def validate_travel_fee_payment_webhook_signature(

@@ -1,4 +1,5 @@
 import json
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
@@ -58,7 +59,6 @@ from app.schemas.event import (
     EventTravelFeeCheckoutCreate,
     EventTravelFeeCheckoutSettlementCreate,
     EventTravelFeeCheckoutSettlementRead,
-    EventTravelFeePaymentWebhookCreate,
     EventTravelFeeHostedCheckoutRead,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
@@ -590,7 +590,8 @@ async def settle_travel_fee_checkout_route(
 )
 async def travel_fee_payment_webhook_route(
     request: Request,
-    payload: EventTravelFeePaymentWebhookCreate,
+    payload: dict[str, Any],
+    provider: str | None = Query(default=None),
     x_afrolete_travel_fee_timestamp: str | None = Header(
         default=None,
         alias="X-Afrolete-Travel-Fee-Timestamp",
@@ -609,6 +610,7 @@ async def travel_fee_payment_webhook_route(
     return await ingest_travel_fee_payment_webhook(
         db,
         payload,
+        provider_hint=provider,
         signature_required=signature_required,
         signature_validated=signature_validated,
     )
