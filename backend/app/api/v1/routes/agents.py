@@ -7,6 +7,8 @@ from app.db.session import get_db
 from app.schemas.agent import (
     AgentAssignmentCreate,
     AgentAssignmentRead,
+    AgentGovernanceSummaryRead,
+    AgentRunRecordRead,
     AgentCreate,
     AgentRead,
     AgentTaskCreate,
@@ -14,6 +16,8 @@ from app.schemas.agent import (
     AgentTaskUpdate,
 )
 from app.services.agents import (
+    agent_governance_summary,
+    agent_run_records,
     assign_agent,
     create_agent,
     execute_agent_task,
@@ -130,6 +134,22 @@ async def list_agent_tasks_route(
         to_task_read(task)
         for task in await list_agent_tasks(db, organization_id, agent_id=agent_id)
     ]
+
+
+@router.get("/runs", response_model=list[AgentRunRecordRead])
+async def list_agent_runs_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentRunRecordRead]:
+    return [AgentRunRecordRead(**record) for record in await agent_run_records(db, organization_id)]
+
+
+@router.get("/governance", response_model=AgentGovernanceSummaryRead)
+async def agent_governance_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> AgentGovernanceSummaryRead:
+    return AgentGovernanceSummaryRead(**await agent_governance_summary(db, organization_id))
 
 
 @router.post("/tasks/{task_id}/execute", response_model=AgentTaskRead)

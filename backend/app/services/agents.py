@@ -197,6 +197,60 @@ async def list_agent_tasks(
     )
 
 
+async def agent_run_records(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[dict[str, object]]:
+    rows = (
+        await db.execute(
+            select(AgentTask, Agent)
+            .join(Agent, Agent.id == AgentTask.agent_id)
+            .where(AgentTask.organization_id == organization_id)
+            .order_by(AgentTask.created_at.desc())
+        )
+    ).all()
+    return [
+        {
+            "task_id": task.id,
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "agent_kind": agent.kind,
+            "organization_id": task.organization_id,
+            "task_type": task.task_type,
+            "title": task.title,
+            "status": task.status,
+            "model_policy": agent.model_policy or get_settings().agent_default_model,
+            "input_ref": task.input_ref,
+            "output_ref": task.output_ref,
+            "review_required": task.status == AgentTaskStatus.WAITING_FOR_REVIEW,
+            "governance_notes": governance_notes(agent, task),
+        }
+        for task, agent in rows
+    ]
+
+
+async def agent_governance_summary(
+    db: AsyncSession,
+    organization_id: UUID,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    settings = settings or get_settings()
+    agents = await list_agents(db, organization_id)
+    tasks = await list_agent_tasks(db, organization_id)
+    return {
+        "organization_id": organization_id,
+        "agents": len(agents),
+        "queued_tasks": count_tasks(tasks, AgentTaskStatus.QUEUED),
+        "running_tasks": count_tasks(tasks, AgentTaskStatus.RUNNING),
+        "waiting_for_review": count_tasks(tasks, AgentTaskStatus.WAITING_FOR_REVIEW),
+        "completed_tasks": count_tasks(tasks, AgentTaskStatus.COMPLETED),
+        "failed_tasks": count_tasks(tasks, AgentTaskStatus.FAILED),
+        "cancelled_tasks": count_tasks(tasks, AgentTaskStatus.CANCELLED),
+        "human_review_required": sum(1 for task in tasks if task.status == AgentTaskStatus.WAITING_FOR_REVIEW),
+        "credential_status": agent_credential_status(settings),
+    }
+
+
 async def update_agent_task(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -387,3 +441,36 @@ def apply_agent_webhook_response(task: AgentTask, response: httpx.Response) -> N
         task.status = AgentTaskStatus(str(raw_status))
     except ValueError:
         task.status = AgentTaskStatus.WAITING_FOR_REVIEW
+
+
+def count_tasks(tasks: list[AgentTask], status_value: AgentTaskStatus) -> int:
+    return sum(1 for task in tasks if task.status == status_value)
+
+
+def agent_credential_status(settings: Settings) -> dict[str, object]:
+    webhook_configured = bool(settings.agent_webhook_url)
+    webhook_key_configured = bool(settings.agent_webhook_key)
+    if settings.agent_execution_mode == "webhook" and not webhook_configured:
+        recommendation = "Configure AGENT_WEBHOOK_URL before enabling live provider execution."
+    elif settings.agent_execution_mode == "webhook" and not webhook_key_configured:
+        recommendation = "Add AGENT_WEBHOOK_KEY or OpenBao-injected equivalent before production execution."
+    else:
+        recommendation = "Execution boundary is usable; keep human review enabled for applied actions."
+    return {
+        "execution_mode": settings.agent_execution_mode,
+        "default_model": settings.agent_default_model,
+        "webhook_configured": webhook_configured,
+        "webhook_key_configured": webhook_key_configured,
+        "credential_boundary": "openbao/env" if webhook_key_configured else "local-deterministic",
+        "recommendation": recommendation,
+    }
+
+
+def governance_notes(agent: Agent, task: AgentTask) -> str:
+    if task.status == AgentTaskStatus.FAILED:
+        return "Failed runs require operator review before retry."
+    if task.status == AgentTaskStatus.WAITING_FOR_REVIEW:
+        return f"{agent.name} output must be reviewed by a human before side effects are applied."
+    if task.status == AgentTaskStatus.COMPLETED:
+        return "Task completed after review or explicit operator action."
+    return "Task is tracked in the governance ledger for audit and billing."

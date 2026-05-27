@@ -12,8 +12,10 @@ import {
 import { afroleteAuthMode, apiBaseUrl, keycloakClientId, keycloakIssuer } from "@/lib/config";
 import type {
   AgentAssignmentRead,
+  AgentGovernanceSummaryRead,
   AgentKind,
   AgentRead,
+  AgentRunRecordRead,
   AgentTaskRead,
   AgentTaskStatus,
   AccountingExportRead,
@@ -162,6 +164,8 @@ export default function HomePage() {
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
+  const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
+  const [agentGovernance, setAgentGovernance] = useState<AgentGovernanceSummaryRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -718,10 +722,14 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const data = await apiRequest<AgentTaskRead[]>(
-      `/agents/tasks?organization_id=${organizationId}${query}`
-    );
-    setAgentTasks(data);
+    const [tasks, runs, governance] = await Promise.all([
+      apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
+      apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
+      apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`)
+    ]);
+    setAgentTasks(tasks);
+    setAgentRuns(runs);
+    setAgentGovernance(governance);
   }, []);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1068,6 +1076,10 @@ export default function HomePage() {
     if (!selectedOrganizationId) {
       setTeams([]);
       setEvents([]);
+      setAgents([]);
+      setAgentTasks([]);
+      setAgentRuns([]);
+      setAgentGovernance(null);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -1211,7 +1223,6 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!selectedOrganizationId) {
-      setAgentTasks([]);
       return;
     }
     runAction(
@@ -1571,6 +1582,7 @@ export default function HomePage() {
         setAgents((current) => [agent, ...current.filter((item) => item.id !== agent.id)]);
         setSelectedAgentId(agent.id);
         addLog(`${agent.name} is active`, "good");
+        void loadAgentTasks(selectedOrganizationId);
       }
     );
   };
@@ -1627,6 +1639,7 @@ export default function HomePage() {
       (task) => {
         setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
         addLog(`${selectedAgent?.name ?? "Agent"} task queued`, "good");
+        void loadAgentTasks(selectedOrganizationId, selectedAgentId);
       }
     );
   };
@@ -1650,6 +1663,9 @@ export default function HomePage() {
       (task) => {
         setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
         addLog(`Task moved to ${task.status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
       }
     );
   };
@@ -1665,7 +1681,22 @@ export default function HomePage() {
       (task) => {
         setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
         addLog(`Agent output is ${task.status}`, task.status === "failed" ? "bad" : "good");
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
       }
+    );
+  };
+
+  const refreshAgentTelemetry = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "refresh-agent-telemetry",
+      () => loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined),
+      () => addLog("Agent governance telemetry refreshed", "good")
     );
   };
 
@@ -5815,7 +5846,28 @@ export default function HomePage() {
                 <p className="section-label">Task inbox</p>
                 <h2>Human-reviewed agent work</h2>
               </div>
-              <button type="submit" disabled={busyAction !== null}>Queue</button>
+              <div className="event-toolbar">
+                <button type="button" onClick={refreshAgentTelemetry} disabled={busyAction !== null}>Telemetry</button>
+                <button type="submit" disabled={busyAction !== null}>Queue</button>
+              </div>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Queued</span>
+                <strong>{agentGovernance?.queued_tasks ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Review</span>
+                <strong>{agentGovernance?.waiting_for_review ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Failed</span>
+                <strong>{agentGovernance?.failed_tasks ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Boundary</span>
+                <strong>{agentGovernance?.credential_status.credential_boundary ?? "local"}</strong>
+              </div>
             </div>
             <div className="form-grid">
               <label>
@@ -5832,6 +5884,22 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {agentGovernance ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{agentGovernance.credential_status.execution_mode} · {agentGovernance.credential_status.default_model}</strong>
+                    <span>{agentGovernance.credential_status.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {agentRuns.slice(0, 3).map((run) => (
+                <article key={run.task_id} className="task-card">
+                  <div>
+                    <strong>{run.agent_name} · {run.status}</strong>
+                    <span>{run.model_policy} · {run.governance_notes}</span>
+                  </div>
+                </article>
+              ))}
               {agentTasks.map((task) => (
                 <article key={task.id} className="task-card">
                   <div>

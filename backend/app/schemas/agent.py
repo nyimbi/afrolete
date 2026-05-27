@@ -68,3 +68,41 @@ class AgentTaskUpdate(BaseModel):
         if self.status is None and self.output_ref is None and self.review_notes is None:
             raise ValueError("status, output_ref, or review_notes is required")
         return self
+
+
+class AgentRunRecordRead(BaseModel):
+    task_id: UUID
+    agent_id: UUID
+    agent_name: str
+    agent_kind: AgentKind
+    organization_id: UUID
+    task_type: str
+    title: str
+    status: AgentTaskStatus
+    model_policy: str
+    input_ref: str | None
+    output_ref: str | None
+    review_required: bool
+    governance_notes: str
+
+
+class AgentCredentialStatusRead(BaseModel):
+    execution_mode: str
+    default_model: str
+    webhook_configured: bool
+    webhook_key_configured: bool
+    credential_boundary: str
+    recommendation: str
+
+
+class AgentGovernanceSummaryRead(BaseModel):
+    organization_id: UUID
+    agents: int
+    queued_tasks: int
+    running_tasks: int
+    waiting_for_review: int
+    completed_tasks: int
+    failed_tasks: int
+    cancelled_tasks: int
+    human_review_required: int
+    credential_status: AgentCredentialStatusRead

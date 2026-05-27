@@ -1049,6 +1049,44 @@ export type AgentTaskRead = {
   review_notes: string | null;
 };
 
+export type AgentCredentialStatusRead = {
+  execution_mode: string;
+  default_model: string;
+  webhook_configured: boolean;
+  webhook_key_configured: boolean;
+  credential_boundary: string;
+  recommendation: string;
+};
+
+export type AgentGovernanceSummaryRead = {
+  organization_id: UUID;
+  agents: number;
+  queued_tasks: number;
+  running_tasks: number;
+  waiting_for_review: number;
+  completed_tasks: number;
+  failed_tasks: number;
+  cancelled_tasks: number;
+  human_review_required: number;
+  credential_status: AgentCredentialStatusRead;
+};
+
+export type AgentRunRecordRead = {
+  task_id: UUID;
+  agent_id: UUID;
+  agent_name: string;
+  agent_kind: AgentKind;
+  organization_id: UUID;
+  task_type: string;
+  title: string;
+  status: AgentTaskStatus;
+  model_policy: string;
+  input_ref: string | null;
+  output_ref: string | null;
+  review_required: boolean;
+  governance_notes: string;
+};
+
 export type MetricDefinitionRead = {
   id: UUID;
   organization_id: UUID;
