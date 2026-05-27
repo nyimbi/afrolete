@@ -1,0 +1,127 @@
+def create_developer_org(client, identity_headers):
+    response = client.post(
+        "/api/v1/organizations",
+        json={
+            "name": "Developer Platform Club",
+            "organization_type": "club",
+            "primary_sport": "football",
+            "country_code": "KE",
+        },
+        headers=identity_headers,
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_developer_application_webhook_marketplace_workflow(client, identity_headers) -> None:
+    organization = create_developer_org(client, identity_headers)
+
+    application_response = client.post(
+        "/api/v1/developers/applications",
+        json={
+            "organization_id": organization["id"],
+            "name": "Matchday Sync",
+            "app_type": "server_to_server",
+            "redirect_uris": ["https://sync.example/callback"],
+            "scopes": ["read:organization", "write:events"],
+            "contact_email": "integrations@example.com",
+        },
+        headers=identity_headers,
+    )
+    assert application_response.status_code == 201
+    provisioned_application = application_response.json()
+    application = provisioned_application["application"]
+    original_secret = provisioned_application["client_secret"]
+    assert application["client_id"].startswith("afrolete_")
+    assert original_secret
+    assert application["scopes"] == ["read:organization", "write:events"]
+
+    application_list_response = client.get(
+        f"/api/v1/developers/applications?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert application_list_response.status_code == 200
+    listed_application = application_list_response.json()[0]
+    assert listed_application["id"] == application["id"]
+    assert "client_secret_hash" not in listed_application
+
+    rotation_response = client.post(
+        f"/api/v1/developers/applications/{application['id']}/rotate-secret",
+        headers=identity_headers,
+    )
+    assert rotation_response.status_code == 200
+    rotated_secret = rotation_response.json()["client_secret"]
+    assert rotated_secret
+    assert rotated_secret != original_secret
+
+    webhook_response = client.post(
+        "/api/v1/developers/webhook-subscriptions",
+        json={
+            "organization_id": organization["id"],
+            "application_id": application["id"],
+            "name": "Event Updates",
+            "target_url": "https://sync.example/webhooks/afrolete",
+            "event_types": ["events.created", "events.updated"],
+            "delivery_mode": "webhook",
+        },
+        headers=identity_headers,
+    )
+    assert webhook_response.status_code == 201
+    provisioned_webhook = webhook_response.json()
+    webhook = provisioned_webhook["subscription"]
+    assert provisioned_webhook["signing_secret"]
+    assert webhook["event_types"] == ["events.created", "events.updated"]
+
+    paused_webhook_response = client.patch(
+        f"/api/v1/developers/webhook-subscriptions/{webhook['id']}",
+        json={"status": "paused", "delivery_mode": "record_only"},
+        headers=identity_headers,
+    )
+    assert paused_webhook_response.status_code == 200
+    assert paused_webhook_response.json()["status"] == "paused"
+    assert paused_webhook_response.json()["delivery_mode"] == "record_only"
+
+    listing_response = client.post(
+        "/api/v1/developers/marketplace-listings",
+        json={
+            "organization_id": organization["id"],
+            "application_id": application["id"],
+            "name": "Matchday Sync Connector",
+            "category": "operations",
+            "summary": "Synchronizes fixtures, attendance, and matchday logistics.",
+            "install_url": "https://sync.example/install",
+            "support_url": "https://sync.example/support",
+        },
+        headers=identity_headers,
+    )
+    assert listing_response.status_code == 201
+    listing = listing_response.json()
+    assert listing["review_status"] == "draft"
+
+    review_response = client.patch(
+        f"/api/v1/developers/marketplace-listings/{listing['id']}/review",
+        json={"review_status": "approved", "visibility": "public"},
+        headers=identity_headers,
+    )
+    assert review_response.status_code == 200
+    assert review_response.json()["review_status"] == "approved"
+    assert review_response.json()["visibility"] == "public"
+
+    install_response = client.post(
+        f"/api/v1/developers/marketplace-listings/{listing['id']}/install",
+        headers=identity_headers,
+    )
+    assert install_response.status_code == 200
+    assert install_response.json()["install_count"] == 1
+
+    summary_response = client.get(
+        f"/api/v1/developers/summary?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["application_count"] == 1
+    assert summary["webhook_subscription_count"] == 1
+    assert summary["marketplace_listing_count"] == 1
+    assert summary["approved_marketplace_listing_count"] == 1
+    assert summary["install_count"] == 1

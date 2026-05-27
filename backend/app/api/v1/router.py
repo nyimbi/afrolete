@@ -6,6 +6,7 @@ from app.api.v1.routes import billing
 from app.api.v1.routes import commercial
 from app.api.v1.routes import communications
 from app.api.v1.routes import competitions
+from app.api.v1.routes import developers
 from app.api.v1.routes import events
 from app.api.v1.routes import organizations
 from app.api.v1.routes import platform
@@ -23,6 +24,7 @@ api_router.include_router(billing.router)
 api_router.include_router(commercial.router)
 api_router.include_router(communications.router)
 api_router.include_router(competitions.router)
+api_router.include_router(developers.router)
 api_router.include_router(events.router)
 api_router.include_router(organizations.router)
 api_router.include_router(performance.router)

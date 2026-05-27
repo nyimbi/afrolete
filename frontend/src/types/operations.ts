@@ -2216,6 +2216,75 @@ export type BillingSummaryRead = {
   entitlements: number;
 };
 
+export type DeveloperApplicationRead = {
+  id: UUID;
+  organization_id: UUID;
+  owner_person_id: UUID | null;
+  name: string;
+  app_type: string;
+  client_id: string;
+  redirect_uris: string[];
+  scopes: string[];
+  contact_email: string | null;
+  status: string;
+  last_rotated_at: string | null;
+  notes: string | null;
+};
+
+export type DeveloperApplicationProvisionedRead = {
+  application: DeveloperApplicationRead;
+  client_secret: string;
+  secret_hint: string;
+};
+
+export type DeveloperWebhookSubscriptionRead = {
+  id: UUID;
+  organization_id: UUID;
+  application_id: UUID | null;
+  name: string;
+  target_url: string;
+  event_types: string[];
+  delivery_mode: string;
+  status: string;
+  failure_count: number;
+  last_delivery_status: string | null;
+  last_delivered_at: string | null;
+};
+
+export type DeveloperWebhookSubscriptionProvisionedRead = {
+  subscription: DeveloperWebhookSubscriptionRead;
+  signing_secret: string;
+  secret_hint: string;
+};
+
+export type DeveloperMarketplaceListingRead = {
+  id: UUID;
+  organization_id: UUID;
+  application_id: UUID | null;
+  name: string;
+  category: string;
+  summary: string;
+  install_url: string | null;
+  support_url: string | null;
+  pricing_model: string;
+  version: string;
+  visibility: string;
+  review_status: string;
+  install_count: number;
+};
+
+export type DeveloperPortalSummaryRead = {
+  organization_id: UUID;
+  application_count: number;
+  active_application_count: number;
+  webhook_subscription_count: number;
+  live_webhook_count: number;
+  marketplace_listing_count: number;
+  approved_marketplace_listing_count: number;
+  install_count: number;
+  recommended_next_steps: string[];
+};
+
 export type ActivityConsentRead = {
   id: UUID;
   organization_id: UUID;

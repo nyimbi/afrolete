@@ -48,6 +48,11 @@ from app.models.commercial import (  # noqa: F401,E402
     TicketOrder,
     TicketProduct,
 )
+from app.models.developer import (  # noqa: F401,E402
+    DeveloperApplication,
+    DeveloperMarketplaceListing,
+    DeveloperWebhookSubscription,
+)
 from app.models.communication import (  # noqa: F401,E402
     CommunicationMessage,
     CommunicationTemplate,

@@ -90,6 +90,12 @@ import type {
   ConsentCaptureChannel,
   ConsentRequestRead,
   DonationRead,
+  DeveloperApplicationProvisionedRead,
+  DeveloperApplicationRead,
+  DeveloperMarketplaceListingRead,
+  DeveloperPortalSummaryRead,
+  DeveloperWebhookSubscriptionProvisionedRead,
+  DeveloperWebhookSubscriptionRead,
   EventRead,
   EventTravelApprovalRead,
   EventTravelApprovalRoutingRead,
@@ -397,6 +403,12 @@ const parseGeofencePolygon = (value: string) => {
     .filter((point): point is { latitude: string; longitude: string } => point !== null);
   return points.length >= 3 ? points : null;
 };
+
+const parseCommaList = (value: string) =>
+  value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 
 const defaultIdentity: LocalIdentity = {
   sub: "kc-owner-1",
@@ -811,6 +823,14 @@ export default function HomePage() {
     useState<BillingDunningDeliveryRead | null>(null);
   const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
+  const [developerApplications, setDeveloperApplications] = useState<DeveloperApplicationRead[]>([]);
+  const [developerWebhooks, setDeveloperWebhooks] = useState<DeveloperWebhookSubscriptionRead[]>([]);
+  const [developerListings, setDeveloperListings] = useState<DeveloperMarketplaceListingRead[]>([]);
+  const [developerSummary, setDeveloperSummary] = useState<DeveloperPortalSummaryRead | null>(null);
+  const [developerApplicationSecret, setDeveloperApplicationSecret] =
+    useState<DeveloperApplicationProvisionedRead | null>(null);
+  const [developerWebhookSecret, setDeveloperWebhookSecret] =
+    useState<DeveloperWebhookSubscriptionProvisionedRead | null>(null);
   const [registrationInquiries, setRegistrationInquiries] = useState<RegistrationInquiryRead[]>([]);
   const [inquiryReviewForms, setInquiryReviewForms] = useState<Record<string, InquiryReviewForm>>({});
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
@@ -1386,6 +1406,22 @@ export default function HomePage() {
     webhook_provider: "stripe",
     entitlement_feature: "ai_agents",
     entitlement_limit: 12
+  });
+  const [developerForm, setDeveloperForm] = useState({
+    app_name: "Matchday Sync",
+    app_type: "server_to_server",
+    app_scopes: "read:organization,write:events",
+    redirect_uris: "https://sync.example/callback",
+    contact_email: "integrations@example.com",
+    webhook_name: "Event Updates",
+    webhook_url: "https://sync.example/webhooks/afrolete",
+    webhook_events: "events.created,events.updated",
+    webhook_delivery_mode: "webhook",
+    listing_name: "Matchday Sync Connector",
+    listing_category: "operations",
+    listing_summary: "Synchronizes fixtures, attendance, and matchday logistics.",
+    listing_install_url: "https://sync.example/install",
+    listing_support_url: "https://sync.example/support"
   });
 
   const selectedOrganization = useMemo(
@@ -1975,6 +2011,23 @@ export default function HomePage() {
     );
   }, []);
 
+  const loadDevelopers = useCallback(async (organizationId: string) => {
+    const [applications, webhooks, listings, summary] = await Promise.all([
+      apiRequest<DeveloperApplicationRead[]>(`/developers/applications?organization_id=${organizationId}`),
+      apiRequest<DeveloperWebhookSubscriptionRead[]>(
+        `/developers/webhook-subscriptions?organization_id=${organizationId}`
+      ),
+      apiRequest<DeveloperMarketplaceListingRead[]>(
+        `/developers/marketplace-listings?organization_id=${organizationId}`
+      ),
+      apiRequest<DeveloperPortalSummaryRead>(`/developers/summary?organization_id=${organizationId}`)
+    ]);
+    setDeveloperApplications(applications);
+    setDeveloperWebhooks(webhooks);
+    setDeveloperListings(listings);
+    setDeveloperSummary(summary);
+  }, []);
+
   const loadInfrastructure = useCallback(async () => {
     const [status, probes] = await Promise.all([
       apiRequest<InfrastructureStatus>("/infrastructure"),
@@ -2223,6 +2276,12 @@ export default function HomePage() {
       setBillingDunningDelivery(null);
       setBillingWebhook(null);
       setBillingSummary(null);
+      setDeveloperApplications([]);
+      setDeveloperWebhooks([]);
+      setDeveloperListings([]);
+      setDeveloperSummary(null);
+      setDeveloperApplicationSecret(null);
+      setDeveloperWebhookSecret(null);
       return;
     }
     runAction("load-tenant-data", async () => {
@@ -2246,6 +2305,7 @@ export default function HomePage() {
       await loadCommercial(selectedOrganizationId);
       await loadReporting(selectedOrganizationId);
       await loadBilling(selectedOrganizationId);
+      await loadDevelopers(selectedOrganizationId);
     }, () => addLog("Organization workspace loaded", "good"));
   }, [
     selectedOrganizationId,
@@ -2269,6 +2329,7 @@ export default function HomePage() {
     loadCommercial,
     loadReporting,
     loadBilling,
+    loadDevelopers,
     runAction,
     addLog
   ]);
@@ -8413,6 +8474,154 @@ export default function HomePage() {
     );
   };
 
+  const createDeveloperApplication = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-developer-application",
+      () =>
+        apiRequest<DeveloperApplicationProvisionedRead>("/developers/applications", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: developerForm.app_name,
+            app_type: developerForm.app_type,
+            redirect_uris: parseCommaList(developerForm.redirect_uris),
+            scopes: parseCommaList(developerForm.app_scopes),
+            contact_email: developerForm.contact_email || null,
+            notes: "Created from AfroLete developer console."
+          }
+        }),
+      (provisioned) => {
+        setDeveloperApplicationSecret(provisioned);
+        setDeveloperApplications((current) => [
+          provisioned.application,
+          ...current.filter((item) => item.id !== provisioned.application.id)
+        ]);
+        addLog(`${provisioned.application.name} developer app created`, "good");
+        void loadDevelopers(selectedOrganizationId);
+      }
+    );
+  };
+
+  const rotateDeveloperApplicationSecret = (applicationId: string) => {
+    runAction(
+      "rotate-developer-secret",
+      () =>
+        apiRequest<DeveloperApplicationProvisionedRead>(
+          `/developers/applications/${applicationId}/rotate-secret`,
+          { method: "POST", identity }
+        ),
+      (provisioned) => {
+        setDeveloperApplicationSecret(provisioned);
+        setDeveloperApplications((current) =>
+          current.map((item) => (item.id === provisioned.application.id ? provisioned.application : item))
+        );
+        addLog(`${provisioned.application.name} secret rotated`, "good");
+      }
+    );
+  };
+
+  const createDeveloperWebhook = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-developer-webhook",
+      () =>
+        apiRequest<DeveloperWebhookSubscriptionProvisionedRead>("/developers/webhook-subscriptions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            application_id: developerApplications[0]?.id ?? null,
+            name: developerForm.webhook_name,
+            target_url: developerForm.webhook_url,
+            event_types: parseCommaList(developerForm.webhook_events),
+            delivery_mode: developerForm.webhook_delivery_mode
+          }
+        }),
+      (provisioned) => {
+        setDeveloperWebhookSecret(provisioned);
+        setDeveloperWebhooks((current) => [
+          provisioned.subscription,
+          ...current.filter((item) => item.id !== provisioned.subscription.id)
+        ]);
+        addLog(`${provisioned.subscription.name} webhook created`, "good");
+        void loadDevelopers(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createDeveloperListing = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-developer-listing",
+      () =>
+        apiRequest<DeveloperMarketplaceListingRead>("/developers/marketplace-listings", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            application_id: developerApplications[0]?.id ?? null,
+            name: developerForm.listing_name,
+            category: developerForm.listing_category,
+            summary: developerForm.listing_summary,
+            install_url: developerForm.listing_install_url || null,
+            support_url: developerForm.listing_support_url || null
+          }
+        }),
+      (listing) => {
+        setDeveloperListings((current) => [listing, ...current.filter((item) => item.id !== listing.id)]);
+        addLog(`${listing.name} listing drafted`, "good");
+        void loadDevelopers(selectedOrganizationId);
+      }
+    );
+  };
+
+  const approveDeveloperListing = (listingId: string) => {
+    runAction(
+      "approve-developer-listing",
+      () =>
+        apiRequest<DeveloperMarketplaceListingRead>(
+          `/developers/marketplace-listings/${listingId}/review`,
+          {
+            method: "PATCH",
+            identity,
+            body: { review_status: "approved", visibility: "public" }
+          }
+        ),
+      (listing) => {
+        setDeveloperListings((current) => current.map((item) => (item.id === listing.id ? listing : item)));
+        addLog(`${listing.name} approved for marketplace`, "good");
+        void loadDevelopers(selectedOrganizationId);
+      }
+    );
+  };
+
+  const recordDeveloperListingInstall = (listingId: string) => {
+    runAction(
+      "install-developer-listing",
+      () =>
+        apiRequest<DeveloperMarketplaceListingRead>(
+          `/developers/marketplace-listings/${listingId}/install`,
+          { method: "POST", identity }
+        ),
+      (listing) => {
+        setDeveloperListings((current) => current.map((item) => (item.id === listing.id ? listing : item)));
+        addLog(`${listing.name} install recorded`, "good");
+        void loadDevelopers(selectedOrganizationId);
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -8436,6 +8645,7 @@ export default function HomePage() {
           <a href="#commercial">Commerce</a>
           <a href="#reports">Reports</a>
           <a href="#billing">Billing</a>
+          <a href="#developers">Developers</a>
           <a href="#competition">Competition</a>
           <a href="#communications">Comms</a>
           <a href="#performance">Performance</a>
@@ -11291,6 +11501,171 @@ export default function HomePage() {
                     <strong>{record.quantity} units</strong>
                     <span>{record.source} · {new Date(record.recorded_at).toLocaleString()}</span>
                   </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid" id="developers">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Developer ecosystem</p>
+                <h2>Apps and webhooks</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createDeveloperApplication} disabled={busyAction !== null}>App</button>
+                <button type="button" onClick={createDeveloperWebhook} disabled={busyAction !== null}>Webhook</button>
+              </div>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Apps</span>
+                <strong>{developerSummary?.application_count ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Active</span>
+                <strong>{developerSummary?.active_application_count ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Webhooks</span>
+                <strong>{developerSummary?.webhook_subscription_count ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Live</span>
+                <strong>{developerSummary?.live_webhook_count ?? 0}</strong>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Application
+                <input value={developerForm.app_name} onChange={(event) => setDeveloperForm({ ...developerForm, app_name: event.target.value })} />
+              </label>
+              <label>
+                Type
+                <input value={developerForm.app_type} onChange={(event) => setDeveloperForm({ ...developerForm, app_type: event.target.value })} />
+              </label>
+              <label>
+                Scopes
+                <input value={developerForm.app_scopes} onChange={(event) => setDeveloperForm({ ...developerForm, app_scopes: event.target.value })} />
+              </label>
+              <label>
+                Redirects
+                <input value={developerForm.redirect_uris} onChange={(event) => setDeveloperForm({ ...developerForm, redirect_uris: event.target.value })} />
+              </label>
+              <label>
+                Contact
+                <input value={developerForm.contact_email} onChange={(event) => setDeveloperForm({ ...developerForm, contact_email: event.target.value })} />
+              </label>
+              <label>
+                Webhook
+                <input value={developerForm.webhook_name} onChange={(event) => setDeveloperForm({ ...developerForm, webhook_name: event.target.value })} />
+              </label>
+              <label>
+                Endpoint
+                <input value={developerForm.webhook_url} onChange={(event) => setDeveloperForm({ ...developerForm, webhook_url: event.target.value })} />
+              </label>
+              <label>
+                Events
+                <input value={developerForm.webhook_events} onChange={(event) => setDeveloperForm({ ...developerForm, webhook_events: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {developerApplicationSecret ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{developerApplicationSecret.application.name} client secret</strong>
+                    <span>{developerApplicationSecret.client_secret}</span>
+                  </div>
+                </article>
+              ) : null}
+              {developerWebhookSecret ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{developerWebhookSecret.subscription.name} signing secret</strong>
+                    <span>{developerWebhookSecret.signing_secret}</span>
+                  </div>
+                </article>
+              ) : null}
+              {developerApplications.slice(0, 3).map((application) => (
+                <article key={application.id} className="task-card">
+                  <div>
+                    <strong>{application.name}</strong>
+                    <span>{application.client_id} · {application.scopes.join(", ")}</span>
+                  </div>
+                  <button type="button" onClick={() => rotateDeveloperApplicationSecret(application.id)} disabled={busyAction !== null}>Rotate</button>
+                </article>
+              ))}
+              {developerWebhooks.slice(0, 3).map((webhook) => (
+                <article key={webhook.id} className="task-card">
+                  <div>
+                    <strong>{webhook.name}</strong>
+                    <span>{webhook.status} · {webhook.delivery_mode} · {webhook.event_types.join(", ")}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Marketplace</p>
+                <h2>Listings and installs</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createDeveloperListing} disabled={busyAction !== null}>Listing</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{developerSummary?.install_count ?? 0}</strong>
+              <span>installs</span>
+              <small>
+                {developerSummary
+                  ? `${developerSummary.approved_marketplace_listing_count}/${developerSummary.marketplace_listing_count} approved`
+                  : "No marketplace summary"}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Listing
+                <input value={developerForm.listing_name} onChange={(event) => setDeveloperForm({ ...developerForm, listing_name: event.target.value })} />
+              </label>
+              <label>
+                Category
+                <input value={developerForm.listing_category} onChange={(event) => setDeveloperForm({ ...developerForm, listing_category: event.target.value })} />
+              </label>
+              <label>
+                Install URL
+                <input value={developerForm.listing_install_url} onChange={(event) => setDeveloperForm({ ...developerForm, listing_install_url: event.target.value })} />
+              </label>
+              <label>
+                Support URL
+                <input value={developerForm.listing_support_url} onChange={(event) => setDeveloperForm({ ...developerForm, listing_support_url: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Summary
+                <input value={developerForm.listing_summary} onChange={(event) => setDeveloperForm({ ...developerForm, listing_summary: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {developerSummary?.recommended_next_steps.slice(0, 2).map((step) => (
+                <article key={step} className="task-card">
+                  <div>
+                    <strong>Next step</strong>
+                    <span>{step}</span>
+                  </div>
+                </article>
+              ))}
+              {developerListings.slice(0, 4).map((listing) => (
+                <article key={listing.id} className="task-card">
+                  <div>
+                    <strong>{listing.name}</strong>
+                    <span>{listing.category} · {listing.review_status} · {listing.visibility} · {listing.install_count} installs</span>
+                  </div>
+                  <button type="button" onClick={() => approveDeveloperListing(listing.id)} disabled={busyAction !== null}>Approve</button>
+                  <button type="button" onClick={() => recordDeveloperListingInstall(listing.id)} disabled={busyAction !== null}>Install</button>
                 </article>
               ))}
             </div>

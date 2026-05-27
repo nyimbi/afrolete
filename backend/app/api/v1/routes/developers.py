@@ -1,0 +1,231 @@
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.session import get_db
+from app.schemas.developer import (
+    DeveloperApplicationCreate,
+    DeveloperApplicationProvisionedRead,
+    DeveloperApplicationRead,
+    DeveloperMarketplaceListingCreate,
+    DeveloperMarketplaceListingRead,
+    DeveloperMarketplaceListingReview,
+    DeveloperPortalSummaryRead,
+    DeveloperWebhookSubscriptionCreate,
+    DeveloperWebhookSubscriptionProvisionedRead,
+    DeveloperWebhookSubscriptionRead,
+    DeveloperWebhookSubscriptionUpdate,
+)
+from app.services.auth.dependencies import get_current_identity
+from app.services.auth.identity_bridge import CurrentIdentity
+from app.services.authz.service import AuthorizationService, get_authorization_service
+from app.services.developer import (
+    create_developer_application,
+    create_developer_marketplace_listing,
+    create_developer_webhook_subscription,
+    developer_portal_summary,
+    list_developer_applications,
+    list_developer_marketplace_listings,
+    list_developer_webhook_subscriptions,
+    record_developer_marketplace_install,
+    review_developer_marketplace_listing,
+    rotate_developer_application_secret,
+    unpack_list,
+    update_developer_webhook_subscription,
+)
+
+router = APIRouter(prefix="/developers", tags=["developers"])
+
+
+def application_read(application) -> DeveloperApplicationRead:
+    return DeveloperApplicationRead(
+        id=application.id,
+        organization_id=application.organization_id,
+        owner_person_id=application.owner_person_id,
+        name=application.name,
+        app_type=application.app_type,
+        client_id=application.client_id,
+        redirect_uris=unpack_list(application.redirect_uris),
+        scopes=unpack_list(application.scopes),
+        contact_email=application.contact_email,
+        status=application.status,
+        last_rotated_at=application.last_rotated_at,
+        notes=application.notes,
+    )
+
+
+def webhook_subscription_read(subscription) -> DeveloperWebhookSubscriptionRead:
+    return DeveloperWebhookSubscriptionRead(
+        id=subscription.id,
+        organization_id=subscription.organization_id,
+        application_id=subscription.application_id,
+        name=subscription.name,
+        target_url=subscription.target_url,
+        event_types=unpack_list(subscription.event_types),
+        delivery_mode=subscription.delivery_mode,
+        status=subscription.status,
+        failure_count=subscription.failure_count,
+        last_delivery_status=subscription.last_delivery_status,
+        last_delivered_at=subscription.last_delivered_at,
+    )
+
+
+def marketplace_listing_read(listing) -> DeveloperMarketplaceListingRead:
+    return DeveloperMarketplaceListingRead(
+        id=listing.id,
+        organization_id=listing.organization_id,
+        application_id=listing.application_id,
+        name=listing.name,
+        category=listing.category,
+        summary=listing.summary,
+        install_url=listing.install_url,
+        support_url=listing.support_url,
+        pricing_model=listing.pricing_model,
+        version=listing.version,
+        visibility=listing.visibility,
+        review_status=listing.review_status,
+        install_count=listing.install_count,
+    )
+
+
+@router.post("/applications", response_model=DeveloperApplicationProvisionedRead, status_code=status.HTTP_201_CREATED)
+async def create_developer_application_route(
+    payload: DeveloperApplicationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperApplicationProvisionedRead:
+    application, secret = await create_developer_application(db, identity, payload, authz)
+    return DeveloperApplicationProvisionedRead(
+        application=application_read(application),
+        client_secret=secret,
+        secret_hint="Copy now; the client secret is only returned once.",
+    )
+
+
+@router.get("/applications", response_model=list[DeveloperApplicationRead])
+async def list_developer_applications_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[DeveloperApplicationRead]:
+    return [
+        application_read(application)
+        for application in await list_developer_applications(db, identity, organization_id, authz)
+    ]
+
+
+@router.post("/applications/{application_id}/rotate-secret", response_model=DeveloperApplicationProvisionedRead)
+async def rotate_developer_application_secret_route(
+    application_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperApplicationProvisionedRead:
+    application, secret = await rotate_developer_application_secret(db, identity, application_id, authz)
+    return DeveloperApplicationProvisionedRead(
+        application=application_read(application),
+        client_secret=secret,
+        secret_hint="Copy now; the rotated secret is only returned once.",
+    )
+
+
+@router.post(
+    "/webhook-subscriptions",
+    response_model=DeveloperWebhookSubscriptionProvisionedRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_developer_webhook_subscription_route(
+    payload: DeveloperWebhookSubscriptionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperWebhookSubscriptionProvisionedRead:
+    subscription, secret = await create_developer_webhook_subscription(db, identity, payload, authz)
+    return DeveloperWebhookSubscriptionProvisionedRead(
+        subscription=webhook_subscription_read(subscription),
+        signing_secret=secret,
+        secret_hint="Copy now; the webhook signing secret is only returned once.",
+    )
+
+
+@router.get("/webhook-subscriptions", response_model=list[DeveloperWebhookSubscriptionRead])
+async def list_developer_webhook_subscriptions_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[DeveloperWebhookSubscriptionRead]:
+    return [
+        webhook_subscription_read(subscription)
+        for subscription in await list_developer_webhook_subscriptions(db, identity, organization_id, authz)
+    ]
+
+
+@router.patch("/webhook-subscriptions/{subscription_id}", response_model=DeveloperWebhookSubscriptionRead)
+async def update_developer_webhook_subscription_route(
+    subscription_id: UUID,
+    payload: DeveloperWebhookSubscriptionUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperWebhookSubscriptionRead:
+    return webhook_subscription_read(
+        await update_developer_webhook_subscription(db, identity, subscription_id, payload, authz)
+    )
+
+
+@router.post("/marketplace-listings", response_model=DeveloperMarketplaceListingRead, status_code=status.HTTP_201_CREATED)
+async def create_developer_marketplace_listing_route(
+    payload: DeveloperMarketplaceListingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperMarketplaceListingRead:
+    return marketplace_listing_read(await create_developer_marketplace_listing(db, identity, payload, authz))
+
+
+@router.get("/marketplace-listings", response_model=list[DeveloperMarketplaceListingRead])
+async def list_developer_marketplace_listings_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[DeveloperMarketplaceListingRead]:
+    return [
+        marketplace_listing_read(listing)
+        for listing in await list_developer_marketplace_listings(db, identity, organization_id, authz)
+    ]
+
+
+@router.patch("/marketplace-listings/{listing_id}/review", response_model=DeveloperMarketplaceListingRead)
+async def review_developer_marketplace_listing_route(
+    listing_id: UUID,
+    payload: DeveloperMarketplaceListingReview,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperMarketplaceListingRead:
+    return marketplace_listing_read(await review_developer_marketplace_listing(db, identity, listing_id, payload, authz))
+
+
+@router.post("/marketplace-listings/{listing_id}/install", response_model=DeveloperMarketplaceListingRead)
+async def record_developer_marketplace_install_route(
+    listing_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperMarketplaceListingRead:
+    return marketplace_listing_read(await record_developer_marketplace_install(db, identity, listing_id, authz))
+
+
+@router.get("/summary", response_model=DeveloperPortalSummaryRead)
+async def developer_portal_summary_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperPortalSummaryRead:
+    return await developer_portal_summary(db, identity, organization_id, authz)
