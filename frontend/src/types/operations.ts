@@ -1380,6 +1380,15 @@ export type AgentGovernanceSummaryRead = {
   credential_status: AgentCredentialStatusRead;
 };
 
+export type AgentRunLedgerVerificationRead = {
+  organization_id: UUID;
+  total_records: number;
+  verified_records: number;
+  broken_records: UUID[];
+  latest_record_hash: string | null;
+  valid: boolean;
+};
+
 export type AgentRunRecordRead = {
   id: UUID;
   task_id: UUID;
@@ -1400,6 +1409,7 @@ export type AgentRunRecordRead = {
   started_at: string | null;
   finished_at: string | null;
   duration_ms: number | null;
+  ledger_sequence: number;
   record_hash: string;
   previous_record_hash: string | null;
 };

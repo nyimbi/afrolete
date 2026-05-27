@@ -91,6 +91,7 @@ class AgentRunRecordRead(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     duration_ms: int | None
+    ledger_sequence: int
     record_hash: str
     previous_record_hash: str | None
 
@@ -115,3 +116,12 @@ class AgentGovernanceSummaryRead(BaseModel):
     cancelled_tasks: int
     human_review_required: int
     credential_status: AgentCredentialStatusRead
+
+
+class AgentRunLedgerVerificationRead(BaseModel):
+    organization_id: UUID
+    total_records: int
+    verified_records: int
+    broken_records: list[UUID]
+    latest_record_hash: str | None
+    valid: bool

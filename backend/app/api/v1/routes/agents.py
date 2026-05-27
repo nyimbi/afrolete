@@ -8,6 +8,7 @@ from app.schemas.agent import (
     AgentAssignmentCreate,
     AgentAssignmentRead,
     AgentGovernanceSummaryRead,
+    AgentRunLedgerVerificationRead,
     AgentRunRecordRead,
     AgentCreate,
     AgentRead,
@@ -26,6 +27,7 @@ from app.services.agents import (
     list_agents,
     queue_agent_task,
     update_agent_task,
+    verify_agent_run_ledger,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -142,6 +144,14 @@ async def list_agent_runs_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[AgentRunRecordRead]:
     return [AgentRunRecordRead(**record) for record in await agent_run_records(db, organization_id)]
+
+
+@router.get("/runs/verify", response_model=AgentRunLedgerVerificationRead)
+async def verify_agent_runs_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> AgentRunLedgerVerificationRead:
+    return AgentRunLedgerVerificationRead(**await verify_agent_run_ledger(db, organization_id))
 
 
 @router.get("/governance", response_model=AgentGovernanceSummaryRead)

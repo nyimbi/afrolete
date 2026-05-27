@@ -80,6 +80,7 @@ class AgentRunRecord(IdMixin, TimestampMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     executed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    ledger_sequence: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     governance_notes: Mapped[str] = mapped_column(Text, nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
     previous_record_hash: Mapped[str | None] = mapped_column(String(128))

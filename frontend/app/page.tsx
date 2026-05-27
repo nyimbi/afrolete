@@ -15,6 +15,7 @@ import type {
   AgentGovernanceSummaryRead,
   AgentKind,
   AgentRead,
+  AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
   AgentTaskRead,
   AgentTaskStatus,
@@ -310,6 +311,8 @@ export default function HomePage() {
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
+  const [agentLedgerVerification, setAgentLedgerVerification] =
+    useState<AgentRunLedgerVerificationRead | null>(null);
   const [agentGovernance, setAgentGovernance] = useState<AgentGovernanceSummaryRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
@@ -930,14 +933,16 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
-      apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`)
+      apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
+      apiRequest<AgentRunLedgerVerificationRead>(`/agents/runs/verify?organization_id=${organizationId}`)
     ]);
     setAgentTasks(tasks);
     setAgentRuns(runs);
     setAgentGovernance(governance);
+    setAgentLedgerVerification(ledgerVerification);
   }, []);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1325,6 +1330,7 @@ export default function HomePage() {
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
+      setAgentLedgerVerification(null);
       setAgentGovernance(null);
       setMetricDefinitions([]);
       setObservations([]);
@@ -7512,6 +7518,10 @@ export default function HomePage() {
                 <span className="muted">Boundary</span>
                 <strong>{agentGovernance?.credential_status.credential_boundary ?? "local"}</strong>
               </div>
+              <div>
+                <span className="muted">Ledger</span>
+                <strong>{agentLedgerVerification?.valid ? "valid" : "check"}</strong>
+              </div>
             </div>
             <div className="form-grid">
               <label>
@@ -7533,13 +7543,18 @@ export default function HomePage() {
                   <div>
                     <strong>{agentGovernance.credential_status.execution_mode} · {agentGovernance.credential_status.default_model}</strong>
                     <span>{agentGovernance.credential_status.recommendation}</span>
+                    {agentLedgerVerification ? (
+                      <span>
+                        Ledger {agentLedgerVerification.verified_records}/{agentLedgerVerification.total_records} · {agentLedgerVerification.latest_record_hash?.slice(0, 12) ?? "empty"}
+                      </span>
+                    ) : null}
                   </div>
                 </article>
               ) : null}
               {agentRuns.slice(0, 3).map((run) => (
                 <article key={run.id} className="task-card">
                   <div>
-                    <strong>{run.agent_name} · {run.event_type} · {run.status}</strong>
+                    <strong>#{run.ledger_sequence} · {run.agent_name} · {run.event_type} · {run.status}</strong>
                     <span>{run.execution_mode} · {run.model_policy} · {run.governance_notes}</span>
                     <span>{run.record_hash.slice(0, 12)}{run.previous_record_hash ? ` <- ${run.previous_record_hash.slice(0, 12)}` : ""}</span>
                   </div>

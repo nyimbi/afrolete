@@ -243,6 +243,7 @@ async def agent_run_records(
             "started_at": record.started_at,
             "finished_at": record.finished_at,
             "duration_ms": record.duration_ms,
+            "ledger_sequence": record.ledger_sequence,
             "record_hash": record.record_hash,
             "previous_record_hash": record.previous_record_hash,
         }
@@ -269,6 +270,36 @@ async def agent_governance_summary(
         "cancelled_tasks": count_tasks(tasks, AgentTaskStatus.CANCELLED),
         "human_review_required": sum(1 for task in tasks if task.status == AgentTaskStatus.WAITING_FOR_REVIEW),
         "credential_status": agent_credential_status(settings),
+    }
+
+
+async def verify_agent_run_ledger(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> dict[str, object]:
+    records = list(
+        (
+            await db.scalars(
+                select(AgentRunRecord)
+                .where(AgentRunRecord.organization_id == organization_id)
+                .order_by(AgentRunRecord.ledger_sequence, AgentRunRecord.created_at, AgentRunRecord.id)
+            )
+        ).all()
+    )
+    previous_hash = None
+    broken_records: list[UUID] = []
+    for record in records:
+        expected_hash = agent_record_hash(record_hash_payload(record, previous_hash))
+        if record.previous_record_hash != previous_hash or record.record_hash != expected_hash:
+            broken_records.append(record.id)
+        previous_hash = record.record_hash
+    return {
+        "organization_id": organization_id,
+        "total_records": len(records),
+        "verified_records": len(records) - len(broken_records),
+        "broken_records": broken_records,
+        "latest_record_hash": previous_hash,
+        "valid": not broken_records,
     }
 
 
@@ -373,6 +404,7 @@ async def append_agent_run_record(
     duration_ms: int | None = None,
 ) -> AgentRunRecord:
     sequence = await agent_task_record_sequence(db, task.id)
+    ledger_sequence = await next_agent_ledger_sequence(db, task.organization_id)
     previous_hash = await latest_agent_record_hash(db, task.organization_id)
     model_policy = agent.model_policy or settings.agent_default_model
     note = governance_notes(agent, task)
@@ -389,10 +421,11 @@ async def append_agent_run_record(
             "input_ref": task.input_ref,
             "output_ref": task.output_ref,
             "review_notes": task.review_notes,
-            "started_at": started_at.isoformat() if started_at else None,
-            "finished_at": finished_at.isoformat() if finished_at else None,
+            "started_at": datetime_digest(started_at),
+            "finished_at": datetime_digest(finished_at),
             "duration_ms": duration_ms,
             "executed_by_person_id": str(identity.person_id) if identity.person_id else None,
+            "ledger_sequence": ledger_sequence,
             "governance_notes": note,
             "idempotency_key": idempotency_key,
             "previous_record_hash": previous_hash,
@@ -413,6 +446,7 @@ async def append_agent_run_record(
         finished_at=finished_at,
         duration_ms=duration_ms,
         executed_by_person_id=identity.person_id,
+        ledger_sequence=ledger_sequence,
         governance_notes=note,
         idempotency_key=idempotency_key,
         previous_record_hash=previous_hash,
@@ -434,14 +468,54 @@ async def latest_agent_record_hash(db: AsyncSession, organization_id: UUID) -> s
     return await db.scalar(
         select(AgentRunRecord.record_hash)
         .where(AgentRunRecord.organization_id == organization_id)
-        .order_by(AgentRunRecord.created_at.desc(), AgentRunRecord.id.desc())
+        .order_by(AgentRunRecord.ledger_sequence.desc(), AgentRunRecord.created_at.desc(), AgentRunRecord.id.desc())
         .limit(1)
     )
+
+
+async def next_agent_ledger_sequence(db: AsyncSession, organization_id: UUID) -> int:
+    current = await db.scalar(
+        select(func.max(AgentRunRecord.ledger_sequence)).where(
+            AgentRunRecord.organization_id == organization_id
+        )
+    )
+    return int(current or 0) + 1
 
 
 def agent_record_hash(payload: dict[str, object]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def record_hash_payload(record: AgentRunRecord, previous_hash: str | None) -> dict[str, object]:
+    return {
+        "organization_id": str(record.organization_id),
+        "agent_id": str(record.agent_id),
+        "task_id": str(record.task_id),
+        "event_type": record.event_type,
+        "status": record.status.value,
+        "model_policy": record.model_policy,
+        "execution_mode": record.execution_mode,
+        "input_ref": record.input_ref,
+        "output_ref": record.output_ref,
+        "review_notes": record.review_notes,
+        "started_at": datetime_digest(record.started_at),
+        "finished_at": datetime_digest(record.finished_at),
+        "duration_ms": record.duration_ms,
+        "executed_by_person_id": str(record.executed_by_person_id) if record.executed_by_person_id else None,
+        "ledger_sequence": record.ledger_sequence,
+        "governance_notes": record.governance_notes,
+        "idempotency_key": record.idempotency_key,
+        "previous_record_hash": previous_hash,
+    }
+
+
+def datetime_digest(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
 
 
 async def validate_assignment_scope(
