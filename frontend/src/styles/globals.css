@@ -393,6 +393,16 @@ textarea:focus {
   margin-top: 14px;
 }
 
+.standings-table {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.standings-table .attendance-row {
+  grid-template-columns: minmax(0, 1fr) minmax(56px, auto) minmax(130px, auto);
+}
+
 .attendance-row {
   display: grid;
   grid-template-columns: minmax(72px, 0.8fr) minmax(92px, 1fr) auto auto;

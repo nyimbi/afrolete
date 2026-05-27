@@ -107,6 +107,33 @@ export type MetricSource =
 export type MetricVerificationStatus = "pending_review" | "verified" | "rejected";
 export type TrainingPlanStatus = "draft" | "active" | "completed" | "archived";
 export type TrainingSessionStatus = "planned" | "in_progress" | "completed" | "cancelled";
+export type CompetitionType = "league" | "tournament" | "cup" | "friendly_series";
+export type CompetitionFormat =
+  | "round_robin"
+  | "single_elimination"
+  | "double_elimination"
+  | "group_knockout"
+  | "swiss"
+  | "friendly";
+export type CompetitionStatus = "draft" | "scheduled" | "active" | "completed" | "cancelled";
+export type FixtureStatus = "draft" | "scheduled" | "live" | "final" | "postponed" | "cancelled";
+export type OfficialRole =
+  | "referee"
+  | "assistant_referee"
+  | "fourth_official"
+  | "scorer"
+  | "timekeeper"
+  | "match_commissioner";
+export type OfficialAssignmentStatus = "proposed" | "accepted" | "declined" | "confirmed";
+export type MatchEventType =
+  | "goal"
+  | "own_goal"
+  | "assist"
+  | "yellow_card"
+  | "red_card"
+  | "substitution"
+  | "injury"
+  | "note";
 
 export type LocalIdentity = {
   sub: string;
@@ -407,4 +434,86 @@ export type TrainingSessionPlanRead = {
   load_score: number;
   objectives: string | null;
   status: TrainingSessionStatus;
+};
+
+export type CompetitionRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  sport: string;
+  competition_type: CompetitionType;
+  format: CompetitionFormat;
+  season_label: string | null;
+  starts_on: string | null;
+  ends_on: string | null;
+  status: CompetitionStatus;
+  points_for_win: number;
+  points_for_draw: number;
+  points_for_loss: number;
+  tiebreakers: string | null;
+  rules_summary: string | null;
+};
+
+export type CompetitionParticipantRead = {
+  id: UUID;
+  competition_id: UUID;
+  team_id: UUID;
+  team_name: string;
+  seed: number | null;
+  group_label: string | null;
+  status: string;
+};
+
+export type CompetitionFixtureRead = {
+  id: UUID;
+  organization_id: UUID;
+  competition_id: UUID;
+  event_id: UUID | null;
+  home_team_id: UUID;
+  away_team_id: UUID;
+  home_team_name: string;
+  away_team_name: string;
+  round_label: string | null;
+  stage_label: string | null;
+  scheduled_at: string;
+  venue_name: string | null;
+  status: FixtureStatus;
+  home_score: number | null;
+  away_score: number | null;
+  result_confirmed_at: string | null;
+  notes: string | null;
+};
+
+export type FixtureOfficialAssignmentRead = {
+  id: UUID;
+  fixture_id: UUID;
+  person_id: UUID;
+  role: OfficialRole;
+  status: OfficialAssignmentStatus;
+  certification_level: string | null;
+  conflict_notes: string | null;
+};
+
+export type FixtureMatchEventRead = {
+  id: UUID;
+  fixture_id: UUID;
+  team_id: UUID;
+  athlete_profile_id: UUID | null;
+  minute: number | null;
+  event_type: MatchEventType;
+  description: string | null;
+};
+
+export type CompetitionStandingRead = {
+  competition_id: UUID;
+  team_id: UUID;
+  team_name: string;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goals_for: number;
+  goals_against: number;
+  goal_difference: number;
+  points: number;
 };

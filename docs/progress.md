@@ -178,6 +178,28 @@ athlete-development platform:
     PostgreSQL `alembic upgrade head`, `pnpm --filter @afrolete/frontend
     typecheck`, `pnpm --filter @afrolete/frontend build`, production
     Playwright screenshot at `/private/tmp/afrolete-training-console.png`.
+- Implemented slice 012 competition management foundation:
+  - Added competition records for leagues, tournaments, cups, and friendly
+    series with sport, format, season dates, points rules, tiebreakers, status,
+    and rules summary.
+  - Added registered competition participants with team, seed, group, and
+    tenant-scoped validation.
+  - Added fixtures with home/away teams, schedule, stage/round, venue, linked
+    event support, result confirmation, and final score recording.
+  - Added official assignments with role, status, certification level, and
+    conflict notes, restricted to organization members.
+  - Added match event logging for goals, cards, substitutions, injuries, and
+    notes.
+  - Added computed standings with played/win/draw/loss, goals for/against,
+    goal difference, and points using the competition scoring rules.
+  - Added the Competition console lane for competition creation, team
+    registration, fixture creation, result confirmation, official assignment,
+    match event logging, readiness checks, and standings review.
+  - Verification: `uv run ruff check .`, `uv run pytest`, PostgreSQL
+    `alembic upgrade head`, PostgreSQL `alembic downgrade b23079d70437`,
+    PostgreSQL `alembic upgrade head`, `pnpm --filter @afrolete/frontend
+    typecheck`, `pnpm --filter @afrolete/frontend build`, production
+    Playwright screenshot at `/private/tmp/afrolete-competition-console.png`.
 
 ## Implementation Slices
 
@@ -195,6 +217,7 @@ athlete-development platform:
 | 009 - AI agent operations | Partial | Backend tests 29/29; frontend build | Agents can be created, permissioned, assigned to scopes, queued for work, and reviewed from the console; real model execution and AI governance dashboards remain. |
 | 010 - Athlete performance metrics and assessments | Partial | Backend tests 31/31; PostgreSQL migration upgrade/downgrade; frontend build | Metric definitions, observations, ALS-style assessments, summaries, and console recording flows are implemented; automated video/audio/wearable ingestion remains. |
 | 011 - Training and coaching plans | Partial | Backend tests 34/34; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Drill library, scoped plans, weekly plan blocks, session load planning, and console workflows are implemented; automatic AI plan generation, readiness check-ins, and post-session feedback loops remain. |
+| 012 - Competition management foundation | Partial | Backend tests 36/36; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Competition records, team registration, fixtures, official assignments, match events, result confirmation, computed standings, and console workflows are implemented; automated fixture generation, bracket visualization, conflict optimization, ticketing, and broadcast operations remain. |
 
 ## Capability Coverage
 
@@ -214,7 +237,7 @@ Status values:
 | Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, and console workflows are implemented. |
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, task review, and console workflows are implemented; real AI execution pipelines and model governance remain. |
 | Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, and console workflows are implemented; automatic AI generation/readiness/feedback loops remain. |
-| Competition, fixtures, officials, tournaments | not-started | Future slice. |
+| Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, and console workflows are implemented; automated fixture generation, bracket visualization, advanced conflict resolution, ticketing, and broadcast operations remain. |
 | Communications and notifications | foundation | Service boundary exists; workflow pending. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | not-started | Future slice. |
@@ -222,16 +245,18 @@ Status values:
 | Reports and intelligence | not-started | Future slice. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation and SpiceDB gRPC authorization adapter are implemented; other integrations remain future slices. |
 | SaaS billing/subscriptions | not-started | Future slice. |
-| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, attendance, performance, training, agent, and safeguarding workflows. |
+| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, competition, attendance, performance, training, agent, and safeguarding workflows. |
 
 ## Next Actions
 
 1. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
 2. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
    SpiceDB key.
-3. Add automated training-plan generation from performance trends, readiness,
+3. Add automated fixture generation, bracket visualization, and scheduling
+   conflict checks for leagues and tournaments.
+4. Add automated training-plan generation from performance trends, readiness,
    upcoming competitions, and availability constraints.
-4. Add automated ingestion pipelines for video, audio narration, text
+5. Add automated ingestion pipelines for video, audio narration, text
    evaluation, wearable feeds, and agent-extracted metric review.
-5. Add real AI execution workers, model/provider configuration, and AI
+6. Add real AI execution workers, model/provider configuration, and AI
    governance telemetry.

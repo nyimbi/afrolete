@@ -197,3 +197,63 @@ class TrainingSessionStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+
+class CompetitionType(StrEnum):
+    LEAGUE = "league"
+    TOURNAMENT = "tournament"
+    CUP = "cup"
+    FRIENDLY_SERIES = "friendly_series"
+
+
+class CompetitionFormat(StrEnum):
+    ROUND_ROBIN = "round_robin"
+    SINGLE_ELIMINATION = "single_elimination"
+    DOUBLE_ELIMINATION = "double_elimination"
+    GROUP_KNOCKOUT = "group_knockout"
+    SWISS = "swiss"
+    FRIENDLY = "friendly"
+
+
+class CompetitionStatus(StrEnum):
+    DRAFT = "draft"
+    SCHEDULED = "scheduled"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class FixtureStatus(StrEnum):
+    DRAFT = "draft"
+    SCHEDULED = "scheduled"
+    LIVE = "live"
+    FINAL = "final"
+    POSTPONED = "postponed"
+    CANCELLED = "cancelled"
+
+
+class OfficialRole(StrEnum):
+    REFEREE = "referee"
+    ASSISTANT_REFEREE = "assistant_referee"
+    FOURTH_OFFICIAL = "fourth_official"
+    SCORER = "scorer"
+    TIMEKEEPER = "timekeeper"
+    MATCH_COMMISSIONER = "match_commissioner"
+
+
+class OfficialAssignmentStatus(StrEnum):
+    PROPOSED = "proposed"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    CONFIRMED = "confirmed"
+
+
+class MatchEventType(StrEnum):
+    GOAL = "goal"
+    OWN_GOAL = "own_goal"
+    ASSIST = "assist"
+    YELLOW_CARD = "yellow_card"
+    RED_CARD = "red_card"
+    SUBSTITUTION = "substitution"
+    INJURY = "injury"
+    NOTE = "note"

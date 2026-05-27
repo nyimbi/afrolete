@@ -14,15 +14,25 @@ import type {
   AttendanceRecordRead,
   AttendanceSeedRead,
   AttendanceStatus,
+  CompetitionFixtureRead,
+  CompetitionFormat,
+  CompetitionParticipantRead,
+  CompetitionRead,
+  CompetitionStandingRead,
+  CompetitionType,
   ConsentRequestRead,
   EventRead,
   EventType,
+  FixtureMatchEventRead,
+  FixtureOfficialAssignmentRead,
   GuardianRelationshipRead,
   LocalIdentity,
+  MatchEventType,
   MembershipRead,
   MetricCategory,
   MetricDefinitionRead,
   MetricSource,
+  OfficialRole,
   OrganizationRead,
   OrganizationType,
   ParticipationClearanceRead,
@@ -74,6 +84,12 @@ export default function HomePage() {
   const [trainingPlans, setTrainingPlans] = useState<TrainingPlanRead[]>([]);
   const [trainingPlanItems, setTrainingPlanItems] = useState<TrainingPlanItemRead[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSessionPlanRead[]>([]);
+  const [competitions, setCompetitions] = useState<CompetitionRead[]>([]);
+  const [competitionParticipants, setCompetitionParticipants] = useState<CompetitionParticipantRead[]>([]);
+  const [competitionFixtures, setCompetitionFixtures] = useState<CompetitionFixtureRead[]>([]);
+  const [competitionStandings, setCompetitionStandings] = useState<CompetitionStandingRead[]>([]);
+  const [matchEvents, setMatchEvents] = useState<FixtureMatchEventRead[]>([]);
+  const [officialAssignments, setOfficialAssignments] = useState<FixtureOfficialAssignmentRead[]>([]);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -84,6 +100,8 @@ export default function HomePage() {
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
   const [selectedTrainingPlanId, setSelectedTrainingPlanId] = useState("");
+  const [selectedCompetitionId, setSelectedCompetitionId] = useState("");
+  const [selectedFixtureId, setSelectedFixtureId] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -195,6 +213,34 @@ export default function HomePage() {
     rpe_target: 7,
     objectives: "Improve scanning before receiving under pressure."
   });
+  const [competitionForm, setCompetitionForm] = useState({
+    name: "U17 City League",
+    sport: "football",
+    competition_type: "league" as CompetitionType,
+    format: "round_robin" as CompetitionFormat,
+    season_label: "2026",
+    starts_on: "2026-06-01",
+    ends_on: "2026-08-31",
+    tiebreakers: "Points, goal difference, goals for",
+    rules_summary: "Standard league scoring with confirmed official results."
+  });
+  const [fixtureForm, setFixtureForm] = useState({
+    round_label: "Round 1",
+    stage_label: "League",
+    scheduled_at: "2026-06-05T16:00",
+    venue_name: "City Stadium",
+    home_score: 2,
+    away_score: 1,
+    event_minute: 31,
+    event_type: "goal" as MatchEventType,
+    event_description: "Opening goal from a set piece."
+  });
+  const [officialForm, setOfficialForm] = useState({
+    display_name: "Referee Example",
+    email: "referee@example.com",
+    role: "referee" as OfficialRole,
+    certification_level: "Regional"
+  });
 
   const selectedOrganization = useMemo(
     () => organizations.find((organization) => organization.id === selectedOrganizationId) ?? null,
@@ -219,6 +265,14 @@ export default function HomePage() {
   const selectedTrainingPlan = useMemo(
     () => trainingPlans.find((plan) => plan.id === selectedTrainingPlanId) ?? null,
     [trainingPlans, selectedTrainingPlanId]
+  );
+  const selectedCompetition = useMemo(
+    () => competitions.find((competition) => competition.id === selectedCompetitionId) ?? null,
+    [competitions, selectedCompetitionId]
+  );
+  const selectedFixture = useMemo(
+    () => competitionFixtures.find((fixture) => fixture.id === selectedFixtureId) ?? null,
+    [competitionFixtures, selectedFixtureId]
   );
 
   const addLog = useCallback((message: string, tone: LogEntry["tone"] = "neutral") => {
@@ -337,6 +391,33 @@ export default function HomePage() {
     setTrainingPlanItems(data);
   }, []);
 
+  const loadCompetitions = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<CompetitionRead[]>(`/competitions?organization_id=${organizationId}`);
+    setCompetitions(data);
+    setSelectedCompetitionId((current) =>
+      data.some((competition) => competition.id === current) ? current : data[0]?.id ?? ""
+    );
+  }, []);
+
+  const loadCompetitionWorkspace = useCallback(async (competitionId: string) => {
+    const [participants, fixtures, standings] = await Promise.all([
+      apiRequest<CompetitionParticipantRead[]>(`/competitions/${competitionId}/participants`),
+      apiRequest<CompetitionFixtureRead[]>(`/competitions/${competitionId}/fixtures`),
+      apiRequest<CompetitionStandingRead[]>(`/competitions/${competitionId}/standings`)
+    ]);
+    setCompetitionParticipants(participants);
+    setCompetitionFixtures(fixtures);
+    setCompetitionStandings(standings);
+    setSelectedFixtureId((current) =>
+      fixtures.some((fixture) => fixture.id === current) ? current : fixtures[0]?.id ?? ""
+    );
+  }, []);
+
+  const loadFixtureEvents = useCallback(async (fixtureId: string) => {
+    const data = await apiRequest<FixtureMatchEventRead[]>(`/competitions/fixtures/${fixtureId}/events`);
+    setMatchEvents(data);
+  }, []);
+
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.localIdentity");
     if (stored) {
@@ -360,6 +441,12 @@ export default function HomePage() {
       setTrainingPlans([]);
       setTrainingSessions([]);
       setTrainingPlanItems([]);
+      setCompetitions([]);
+      setCompetitionParticipants([]);
+      setCompetitionFixtures([]);
+      setCompetitionStandings([]);
+      setMatchEvents([]);
+      setOfficialAssignments([]);
       return;
     }
     runAction("load-tenant-data", async () => {
@@ -369,6 +456,7 @@ export default function HomePage() {
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
       await loadTraining(selectedOrganizationId);
+      await loadCompetitions(selectedOrganizationId);
     }, () => addLog("Organization workspace loaded", "good"));
   }, [
     selectedOrganizationId,
@@ -378,6 +466,7 @@ export default function HomePage() {
     loadAgentTasks,
     loadMetricDefinitions,
     loadTraining,
+    loadCompetitions,
     runAction,
     addLog
   ]);
@@ -441,6 +530,31 @@ export default function HomePage() {
       () => undefined
     );
   }, [selectedTrainingPlanId, loadTrainingPlanItems, runAction]);
+
+  useEffect(() => {
+    if (!selectedCompetitionId) {
+      setCompetitionParticipants([]);
+      setCompetitionFixtures([]);
+      setCompetitionStandings([]);
+      setMatchEvents([]);
+      setOfficialAssignments([]);
+      return;
+    }
+    runAction(
+      "load-competition-workspace",
+      () => loadCompetitionWorkspace(selectedCompetitionId),
+      () => undefined
+    );
+  }, [selectedCompetitionId, loadCompetitionWorkspace, runAction]);
+
+  useEffect(() => {
+    if (!selectedFixtureId) {
+      setMatchEvents([]);
+      setOfficialAssignments([]);
+      return;
+    }
+    runAction("load-fixture-events", () => loadFixtureEvents(selectedFixtureId), () => undefined);
+  }, [selectedFixtureId, loadFixtureEvents, runAction]);
 
   const createOrganization = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1010,6 +1124,200 @@ export default function HomePage() {
     );
   };
 
+  const createCompetition = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-competition",
+      () =>
+        apiRequest<CompetitionRead>("/competitions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            ...competitionForm
+          }
+        }),
+      (competition) => {
+        setCompetitions((current) => [
+          competition,
+          ...current.filter((item) => item.id !== competition.id)
+        ]);
+        setSelectedCompetitionId(competition.id);
+        addLog(`${competition.name} competition workspace created`, "good");
+      }
+    );
+  };
+
+  const registerCompetitionTeam = () => {
+    if (!selectedCompetitionId || !selectedTeamId) {
+      addLog("Select a competition and team first", "bad");
+      return;
+    }
+    runAction(
+      "register-competition-team",
+      () =>
+        apiRequest<CompetitionParticipantRead>(
+          `/competitions/${selectedCompetitionId}/participants`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              team_id: selectedTeamId,
+              seed: competitionParticipants.length + 1,
+              group_label: "A"
+            }
+          }
+        ),
+      (participant) => {
+        setCompetitionParticipants((current) => [
+          participant,
+          ...current.filter((item) => item.id !== participant.id)
+        ]);
+        addLog(`${participant.team_name} registered`, "good");
+        void loadCompetitionWorkspace(selectedCompetitionId);
+      }
+    );
+  };
+
+  const createCompetitionFixture = () => {
+    if (!selectedCompetitionId || competitionParticipants.length < 2) {
+      addLog("Register at least two teams first", "bad");
+      return;
+    }
+    const [home, away] = competitionParticipants;
+    runAction(
+      "create-competition-fixture",
+      () =>
+        apiRequest<CompetitionFixtureRead>(`/competitions/${selectedCompetitionId}/fixtures`, {
+          method: "POST",
+          identity,
+          body: {
+            home_team_id: home.team_id,
+            away_team_id: away.team_id,
+            round_label: fixtureForm.round_label,
+            stage_label: fixtureForm.stage_label,
+            scheduled_at: new Date(fixtureForm.scheduled_at).toISOString(),
+            venue_name: fixtureForm.venue_name,
+            notes: `Fixture in ${selectedCompetition?.name ?? "competition"}`
+          }
+        }),
+      (fixture) => {
+        setCompetitionFixtures((current) => [
+          fixture,
+          ...current.filter((item) => item.id !== fixture.id)
+        ]);
+        setSelectedFixtureId(fixture.id);
+        addLog(`${fixture.home_team_name} vs ${fixture.away_team_name} scheduled`, "good");
+      }
+    );
+  };
+
+  const recordFixtureResult = () => {
+    if (!selectedFixtureId || !selectedCompetitionId) {
+      addLog("Select a fixture first", "bad");
+      return;
+    }
+    runAction(
+      "record-fixture-result",
+      () =>
+        apiRequest<CompetitionFixtureRead>(`/competitions/fixtures/${selectedFixtureId}/result`, {
+          method: "PATCH",
+          identity,
+          body: {
+            home_score: fixtureForm.home_score,
+            away_score: fixtureForm.away_score,
+            confirmed: true,
+            notes: "Result confirmed from the operations console."
+          }
+        }),
+      (fixture) => {
+        setCompetitionFixtures((current) => [
+          fixture,
+          ...current.filter((item) => item.id !== fixture.id)
+        ]);
+        addLog(`Result confirmed: ${fixture.home_score}-${fixture.away_score}`, "good");
+        void loadCompetitionWorkspace(selectedCompetitionId);
+      }
+    );
+  };
+
+  const assignFixtureOfficial = () => {
+    if (!selectedOrganizationId || !selectedFixtureId) {
+      addLog("Select a fixture first", "bad");
+      return;
+    }
+    runAction(
+      "assign-fixture-official",
+      async () => {
+        const member = await apiRequest<MembershipRead>(
+          `/organizations/${selectedOrganizationId}/members`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              email: officialForm.email,
+              display_name: officialForm.display_name,
+              role: "staff",
+              title: officialForm.certification_level
+            }
+          }
+        );
+        const assignment = await apiRequest<FixtureOfficialAssignmentRead>(
+          `/competitions/fixtures/${selectedFixtureId}/officials`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              person_id: member.subject_id,
+              role: officialForm.role,
+              status: "confirmed",
+              certification_level: officialForm.certification_level
+            }
+          }
+        );
+        return assignment;
+      },
+      (assignment) => {
+        setOfficialAssignments((current) => [
+          assignment,
+          ...current.filter((item) => item.id !== assignment.id)
+        ]);
+        addLog(`${officialForm.display_name} assigned as ${assignment.role}`, "good");
+      }
+    );
+  };
+
+  const recordFixtureEvent = () => {
+    if (!selectedFixture) {
+      addLog("Select a fixture first", "bad");
+      return;
+    }
+    runAction(
+      "record-fixture-event",
+      () =>
+        apiRequest<FixtureMatchEventRead>(`/competitions/fixtures/${selectedFixture.id}/events`, {
+          method: "POST",
+          identity,
+          body: {
+            team_id: selectedFixture.home_team_id,
+            minute: fixtureForm.event_minute,
+            event_type: fixtureForm.event_type,
+            description: fixtureForm.event_description
+          }
+        }),
+      (matchEvent) => {
+        setMatchEvents((current) => [
+          matchEvent,
+          ...current.filter((item) => item.id !== matchEvent.id)
+        ]);
+        addLog(`Match event logged at ${matchEvent.minute ?? 0}'`, "good");
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -1029,6 +1337,7 @@ export default function HomePage() {
           <a href="#tenant">Tenant</a>
           <a href="#roster">Roster</a>
           <a href="#events">Events</a>
+          <a href="#competition">Competition</a>
           <a href="#performance">Performance</a>
           <a href="#training">Training</a>
           <a href="#agents">Agents</a>
@@ -1083,6 +1392,10 @@ export default function HomePage() {
             <div className="stat-row">
               <span>Events</span>
               <strong>{events.length}</strong>
+            </div>
+            <div className="stat-row">
+              <span>Competitions</span>
+              <strong>{competitions.length}</strong>
             </div>
             <div className="stat-row">
               <span>Attendance</span>
@@ -1351,6 +1664,272 @@ export default function HomePage() {
               ))}
             </div>
           </form>
+        </section>
+
+        <section className="work-grid" id="competition">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Competition</p>
+                <h2>League and tournament control</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createCompetition} disabled={busyAction !== null}>Create</button>
+                <button type="button" onClick={registerCompetitionTeam} disabled={busyAction !== null}>Register team</button>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Competition
+                <input value={competitionForm.name} onChange={(event) => setCompetitionForm({ ...competitionForm, name: event.target.value })} />
+              </label>
+              <label>
+                Type
+                <select value={competitionForm.competition_type} onChange={(event) => setCompetitionForm({ ...competitionForm, competition_type: event.target.value as CompetitionType })}>
+                  <option value="league">League</option>
+                  <option value="tournament">Tournament</option>
+                  <option value="cup">Cup</option>
+                  <option value="friendly_series">Friendly series</option>
+                </select>
+              </label>
+              <label>
+                Format
+                <select value={competitionForm.format} onChange={(event) => setCompetitionForm({ ...competitionForm, format: event.target.value as CompetitionFormat })}>
+                  <option value="round_robin">Round robin</option>
+                  <option value="single_elimination">Single elimination</option>
+                  <option value="double_elimination">Double elimination</option>
+                  <option value="group_knockout">Group + knockout</option>
+                  <option value="swiss">Swiss</option>
+                  <option value="friendly">Friendly</option>
+                </select>
+              </label>
+              <label>
+                Sport
+                <input value={competitionForm.sport} onChange={(event) => setCompetitionForm({ ...competitionForm, sport: event.target.value })} />
+              </label>
+              <label>
+                Starts
+                <input type="date" value={competitionForm.starts_on} onChange={(event) => setCompetitionForm({ ...competitionForm, starts_on: event.target.value })} />
+              </label>
+              <label>
+                Ends
+                <input type="date" value={competitionForm.ends_on} onChange={(event) => setCompetitionForm({ ...competitionForm, ends_on: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Tiebreakers
+                <input value={competitionForm.tiebreakers} onChange={(event) => setCompetitionForm({ ...competitionForm, tiebreakers: event.target.value })} />
+              </label>
+            </div>
+            <div className="selection-list compact">
+              {competitions.map((competition) => (
+                <button
+                  type="button"
+                  key={competition.id}
+                  className={competition.id === selectedCompetitionId ? "selected" : ""}
+                  onClick={() => setSelectedCompetitionId(competition.id)}
+                >
+                  <span>{competition.name}</span>
+                  <small>{competition.competition_type} · {competition.format} · {competition.status}</small>
+                </button>
+              ))}
+            </div>
+            <div className="task-list">
+              {competitionParticipants.map((participant) => (
+                <article key={participant.id} className="task-card">
+                  <div>
+                    <strong>{participant.team_name}</strong>
+                    <span>Seed {participant.seed ?? "—"} · Group {participant.group_label ?? "—"}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Fixtures</p>
+                <h2>Match day and standings</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createCompetitionFixture} disabled={busyAction !== null}>Fixture</button>
+                <button type="button" onClick={recordFixtureResult} disabled={busyAction !== null}>Result</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{competitionStandings[0]?.points ?? 0}</strong>
+              <span>{competitionStandings[0]?.team_name ?? "No leader"}</span>
+              <small>{selectedCompetition?.name ?? "No competition selected"}</small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Round
+                <input value={fixtureForm.round_label} onChange={(event) => setFixtureForm({ ...fixtureForm, round_label: event.target.value })} />
+              </label>
+              <label>
+                Stage
+                <input value={fixtureForm.stage_label} onChange={(event) => setFixtureForm({ ...fixtureForm, stage_label: event.target.value })} />
+              </label>
+              <label>
+                Kick-off
+                <input type="datetime-local" value={fixtureForm.scheduled_at} onChange={(event) => setFixtureForm({ ...fixtureForm, scheduled_at: event.target.value })} />
+              </label>
+              <label>
+                Venue
+                <input value={fixtureForm.venue_name} onChange={(event) => setFixtureForm({ ...fixtureForm, venue_name: event.target.value })} />
+              </label>
+              <label>
+                Home score
+                <input type="number" min="0" value={fixtureForm.home_score} onChange={(event) => setFixtureForm({ ...fixtureForm, home_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Away score
+                <input type="number" min="0" value={fixtureForm.away_score} onChange={(event) => setFixtureForm({ ...fixtureForm, away_score: Number(event.target.value) })} />
+              </label>
+            </div>
+            <div className="selection-list compact">
+              {competitionFixtures.map((fixture) => (
+                <button
+                  type="button"
+                  key={fixture.id}
+                  className={fixture.id === selectedFixtureId ? "selected" : ""}
+                  onClick={() => setSelectedFixtureId(fixture.id)}
+                >
+                  <span>{fixture.home_team_name} vs {fixture.away_team_name}</span>
+                  <small>{fixture.status} · {fixture.home_score ?? "—"}-{fixture.away_score ?? "—"} · {new Date(fixture.scheduled_at).toLocaleString()}</small>
+                </button>
+              ))}
+            </div>
+            <div className="standings-table">
+              {competitionStandings.map((row) => (
+                <div key={row.team_id} className="attendance-row">
+                  <span>{row.team_name}</span>
+                  <strong>{row.points} pts</strong>
+                  <small>{row.played}P {row.wins}W {row.draws}D {row.losses}L GD {row.goal_difference}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Officials</p>
+                <h2>Assignments and live log</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={assignFixtureOfficial} disabled={busyAction !== null}>Assign</button>
+                <button type="button" onClick={recordFixtureEvent} disabled={busyAction !== null}>Log event</button>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Official
+                <input value={officialForm.display_name} onChange={(event) => setOfficialForm({ ...officialForm, display_name: event.target.value })} />
+              </label>
+              <label>
+                Email
+                <input value={officialForm.email} onChange={(event) => setOfficialForm({ ...officialForm, email: event.target.value })} />
+              </label>
+              <label>
+                Role
+                <select value={officialForm.role} onChange={(event) => setOfficialForm({ ...officialForm, role: event.target.value as OfficialRole })}>
+                  <option value="referee">Referee</option>
+                  <option value="assistant_referee">Assistant referee</option>
+                  <option value="fourth_official">Fourth official</option>
+                  <option value="scorer">Scorer</option>
+                  <option value="timekeeper">Timekeeper</option>
+                  <option value="match_commissioner">Match commissioner</option>
+                </select>
+              </label>
+              <label>
+                Certification
+                <input value={officialForm.certification_level} onChange={(event) => setOfficialForm({ ...officialForm, certification_level: event.target.value })} />
+              </label>
+              <label>
+                Minute
+                <input type="number" min="0" max="200" value={fixtureForm.event_minute} onChange={(event) => setFixtureForm({ ...fixtureForm, event_minute: Number(event.target.value) })} />
+              </label>
+              <label>
+                Event
+                <select value={fixtureForm.event_type} onChange={(event) => setFixtureForm({ ...fixtureForm, event_type: event.target.value as MatchEventType })}>
+                  <option value="goal">Goal</option>
+                  <option value="own_goal">Own goal</option>
+                  <option value="assist">Assist</option>
+                  <option value="yellow_card">Yellow card</option>
+                  <option value="red_card">Red card</option>
+                  <option value="substitution">Substitution</option>
+                  <option value="injury">Injury</option>
+                  <option value="note">Note</option>
+                </select>
+              </label>
+              <label className="wide-field">
+                Event note
+                <input value={fixtureForm.event_description} onChange={(event) => setFixtureForm({ ...fixtureForm, event_description: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {officialAssignments.map((assignment) => (
+                <article key={assignment.id} className="task-card">
+                  <div>
+                    <strong>{assignment.role}</strong>
+                    <span>{assignment.status} · {assignment.certification_level ?? "Uncertified"}</span>
+                  </div>
+                </article>
+              ))}
+              {matchEvents.slice(0, 4).map((matchEvent) => (
+                <article key={matchEvent.id} className="task-card">
+                  <div>
+                    <strong>{matchEvent.minute ?? 0}' {matchEvent.event_type}</strong>
+                    <span>{matchEvent.description ?? "Match event recorded"}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Competition readiness</p>
+                <h2>Operational checks</h2>
+              </div>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Participants</span>
+                <strong>{competitionParticipants.length}</strong>
+              </div>
+              <div>
+                <span className="muted">Fixtures</span>
+                <strong>{competitionFixtures.length}</strong>
+              </div>
+              <div>
+                <span className="muted">Results</span>
+                <strong>{competitionFixtures.filter((fixture) => fixture.status === "final").length}</strong>
+              </div>
+              <div>
+                <span className="muted">Officials</span>
+                <strong>{officialAssignments.length}</strong>
+              </div>
+            </div>
+            <div className="task-list">
+              <article className="task-card">
+                <div>
+                  <strong>Fixture integrity</strong>
+                  <span>Teams must be registered participants before matches can be scheduled.</span>
+                </div>
+              </article>
+              <article className="task-card">
+                <div>
+                  <strong>Table updates</strong>
+                  <span>Confirmed final scores immediately recalculate points and goal difference.</span>
+                </div>
+              </article>
+            </div>
+          </div>
         </section>
 
         <section className="work-grid">

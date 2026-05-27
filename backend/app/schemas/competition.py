@@ -1,0 +1,164 @@
+from datetime import date, datetime
+from uuid import UUID
+
+from pydantic import BaseModel, Field, model_validator
+
+from app.models.enums import (
+    CompetitionFormat,
+    CompetitionStatus,
+    CompetitionType,
+    FixtureStatus,
+    MatchEventType,
+    OfficialAssignmentStatus,
+    OfficialRole,
+)
+
+
+class CompetitionCreate(BaseModel):
+    organization_id: UUID
+    name: str = Field(min_length=2, max_length=240)
+    sport: str = Field(min_length=2, max_length=80)
+    competition_type: CompetitionType
+    format: CompetitionFormat
+    season_label: str | None = Field(default=None, max_length=80)
+    starts_on: date | None = None
+    ends_on: date | None = None
+    points_for_win: int = Field(default=3, ge=0, le=10)
+    points_for_draw: int = Field(default=1, ge=0, le=10)
+    points_for_loss: int = Field(default=0, ge=0, le=10)
+    tiebreakers: str | None = Field(default=None, max_length=2000)
+    rules_summary: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def valid_date_range(self) -> "CompetitionCreate":
+        if self.starts_on is not None and self.ends_on is not None and self.ends_on < self.starts_on:
+            raise ValueError("ends_on must be on or after starts_on")
+        return self
+
+
+class CompetitionRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    name: str
+    sport: str
+    competition_type: CompetitionType
+    format: CompetitionFormat
+    season_label: str | None
+    starts_on: date | None
+    ends_on: date | None
+    status: CompetitionStatus
+    points_for_win: int
+    points_for_draw: int
+    points_for_loss: int
+    tiebreakers: str | None
+    rules_summary: str | None
+
+
+class CompetitionParticipantCreate(BaseModel):
+    team_id: UUID
+    seed: int | None = Field(default=None, ge=1)
+    group_label: str | None = Field(default=None, max_length=80)
+
+
+class CompetitionParticipantRead(BaseModel):
+    id: UUID
+    competition_id: UUID
+    team_id: UUID
+    team_name: str
+    seed: int | None
+    group_label: str | None
+    status: str
+
+
+class CompetitionFixtureCreate(BaseModel):
+    home_team_id: UUID
+    away_team_id: UUID
+    event_id: UUID | None = None
+    round_label: str | None = Field(default=None, max_length=80)
+    stage_label: str | None = Field(default=None, max_length=80)
+    scheduled_at: datetime
+    venue_name: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def teams_are_different(self) -> "CompetitionFixtureCreate":
+        if self.home_team_id == self.away_team_id:
+            raise ValueError("home_team_id and away_team_id must differ")
+        return self
+
+
+class CompetitionFixtureRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    competition_id: UUID
+    event_id: UUID | None
+    home_team_id: UUID
+    away_team_id: UUID
+    home_team_name: str
+    away_team_name: str
+    round_label: str | None
+    stage_label: str | None
+    scheduled_at: datetime
+    venue_name: str | None
+    status: FixtureStatus
+    home_score: int | None
+    away_score: int | None
+    result_confirmed_at: datetime | None
+    notes: str | None
+
+
+class FixtureResultUpdate(BaseModel):
+    home_score: int = Field(ge=0)
+    away_score: int = Field(ge=0)
+    confirmed: bool = True
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FixtureOfficialAssignmentCreate(BaseModel):
+    person_id: UUID
+    role: OfficialRole = OfficialRole.REFEREE
+    status: OfficialAssignmentStatus = OfficialAssignmentStatus.PROPOSED
+    certification_level: str | None = Field(default=None, max_length=120)
+    conflict_notes: str | None = Field(default=None, max_length=4000)
+
+
+class FixtureOfficialAssignmentRead(BaseModel):
+    id: UUID
+    fixture_id: UUID
+    person_id: UUID
+    role: OfficialRole
+    status: OfficialAssignmentStatus
+    certification_level: str | None
+    conflict_notes: str | None
+
+
+class FixtureMatchEventCreate(BaseModel):
+    team_id: UUID
+    athlete_profile_id: UUID | None = None
+    minute: int | None = Field(default=None, ge=0, le=200)
+    event_type: MatchEventType
+    description: str | None = Field(default=None, max_length=4000)
+
+
+class FixtureMatchEventRead(BaseModel):
+    id: UUID
+    fixture_id: UUID
+    team_id: UUID
+    athlete_profile_id: UUID | None
+    minute: int | None
+    event_type: MatchEventType
+    description: str | None
+
+
+class CompetitionStandingRead(BaseModel):
+    competition_id: UUID
+    team_id: UUID
+    team_name: str
+    played: int
+    wins: int
+    draws: int
+    losses: int
+    goals_for: int
+    goals_against: int
+    goal_difference: int
+    points: int
