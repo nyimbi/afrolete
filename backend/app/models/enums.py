@@ -185,6 +185,34 @@ class SafeguardingIncidentStatus(StrEnum):
     CLOSED = "closed"
 
 
+class BackgroundCheckStatus(StrEnum):
+    REQUESTED = "requested"
+    IN_PROGRESS = "in_progress"
+    CLEAR = "clear"
+    REVIEW_REQUIRED = "review_required"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class ComplianceCredentialType(StrEnum):
+    SAFEGUARDING_TRAINING = "safeguarding_training"
+    FIRST_AID = "first_aid"
+    COACHING_LICENSE = "coaching_license"
+    OFFICIATING_LICENSE = "officiating_license"
+    DRIVER_CERTIFICATION = "driver_certification"
+    BACKGROUND_CHECK = "background_check"
+    MEDICAL_LICENSE = "medical_license"
+    OTHER = "other"
+
+
+class ComplianceCredentialStatus(StrEnum):
+    PENDING = "pending"
+    VERIFIED = "verified"
+    EXPIRING_SOON = "expiring_soon"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+
+
 class MetricCategory(StrEnum):
     PHYSICAL = "physical"
     TECHNICAL = "technical"

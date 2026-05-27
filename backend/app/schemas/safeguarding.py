@@ -9,6 +9,9 @@ from app.models.enums import (
     ConsentRequestStatus,
     ConsentScopeType,
     ConsentStatus,
+    BackgroundCheckStatus,
+    ComplianceCredentialStatus,
+    ComplianceCredentialType,
     EventType,
     GuardianRelationshipKind,
     ParticipationClearanceStatus,
@@ -289,4 +292,92 @@ class SafeguardingIncidentRead(BaseModel):
     regulatory_report_required: bool
     resolution_notes: str | None
     resolved_at: datetime | None
+    created_at: datetime
+
+
+class BackgroundCheckCreate(BaseModel):
+    organization_id: UUID
+    person_id: UUID
+    provider: str = Field(min_length=2, max_length=120)
+    check_type: str = Field(min_length=2, max_length=120)
+    requested_at: datetime
+    expires_at: date | None = None
+    external_reference: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class BackgroundCheckUpdate(BaseModel):
+    status: BackgroundCheckStatus | None = None
+    reviewed_by_person_id: UUID | None = None
+    risk_level: str | None = Field(default=None, max_length=40)
+    completed_at: datetime | None = None
+    expires_at: date | None = None
+    external_reference: str | None = Field(default=None, max_length=240)
+    result_summary: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class BackgroundCheckRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    person_id: UUID
+    requested_by_person_id: UUID | None
+    reviewed_by_person_id: UUID | None
+    provider: str
+    check_type: str
+    status: BackgroundCheckStatus
+    risk_level: str
+    requested_at: datetime
+    completed_at: datetime | None
+    expires_at: date | None
+    external_reference: str | None
+    result_summary: str | None
+    notes: str | None
+    created_at: datetime
+
+
+class ComplianceCredentialCreate(BaseModel):
+    organization_id: UUID
+    person_id: UUID
+    credential_type: ComplianceCredentialType
+    title: str = Field(min_length=2, max_length=240)
+    issuing_body: str | None = Field(default=None, max_length=240)
+    credential_number: str | None = Field(default=None, max_length=160)
+    issued_at: date | None = None
+    expires_at: date | None = None
+    renewal_due_at: date | None = None
+    verification_url: str | None = Field(default=None, max_length=500)
+    evidence_object_key: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class ComplianceCredentialUpdate(BaseModel):
+    status: ComplianceCredentialStatus | None = None
+    verified_by_person_id: UUID | None = None
+    issuing_body: str | None = Field(default=None, max_length=240)
+    credential_number: str | None = Field(default=None, max_length=160)
+    issued_at: date | None = None
+    expires_at: date | None = None
+    renewal_due_at: date | None = None
+    verification_url: str | None = Field(default=None, max_length=500)
+    evidence_object_key: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class ComplianceCredentialRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    person_id: UUID
+    verified_by_person_id: UUID | None
+    credential_type: ComplianceCredentialType
+    status: ComplianceCredentialStatus
+    title: str
+    issuing_body: str | None
+    credential_number: str | None
+    issued_at: date | None
+    expires_at: date | None
+    renewal_due_at: date | None
+    verification_url: str | None
+    evidence_object_key: str | None
+    notes: str | None
     created_at: datetime

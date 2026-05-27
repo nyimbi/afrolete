@@ -98,6 +98,23 @@ export type SafeguardingIncidentType =
 
 export type SafeguardingIncidentSeverity = "low" | "medium" | "high" | "critical";
 export type SafeguardingIncidentStatus = "open" | "triaged" | "investigating" | "resolved" | "closed";
+export type BackgroundCheckStatus =
+  | "requested"
+  | "in_progress"
+  | "clear"
+  | "review_required"
+  | "failed"
+  | "expired";
+export type ComplianceCredentialType =
+  | "safeguarding_training"
+  | "first_aid"
+  | "coaching_license"
+  | "officiating_license"
+  | "driver_certification"
+  | "background_check"
+  | "medical_license"
+  | "other";
+export type ComplianceCredentialStatus = "pending" | "verified" | "expiring_soon" | "expired" | "revoked";
 
 export type MetricCategory =
   | "physical"
@@ -1360,6 +1377,44 @@ export type SafeguardingIncidentRead = {
   regulatory_report_required: boolean;
   resolution_notes: string | null;
   resolved_at: string | null;
+  created_at: string;
+};
+
+export type BackgroundCheckRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID;
+  requested_by_person_id: UUID | null;
+  reviewed_by_person_id: UUID | null;
+  provider: string;
+  check_type: string;
+  status: BackgroundCheckStatus;
+  risk_level: string;
+  requested_at: string;
+  completed_at: string | null;
+  expires_at: string | null;
+  external_reference: string | null;
+  result_summary: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+export type ComplianceCredentialRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID;
+  verified_by_person_id: UUID | null;
+  credential_type: ComplianceCredentialType;
+  status: ComplianceCredentialStatus;
+  title: string;
+  issuing_body: string | null;
+  credential_number: string | null;
+  issued_at: string | null;
+  expires_at: string | null;
+  renewal_due_at: string | null;
+  verification_url: string | null;
+  evidence_object_key: string | null;
+  notes: string | null;
   created_at: string;
 };
 

@@ -91,6 +91,8 @@ import type {
   FundraisingCampaignRead,
   GeneratedTrainingPlanRead,
   GeneratedReportRead,
+  BackgroundCheckRead,
+  BackgroundCheckStatus,
   GuardianRelationshipRead,
   InsightSeverity,
   InsightStatus,
@@ -134,6 +136,9 @@ import type {
   SafeguardingIncidentSeverity,
   SafeguardingIncidentStatus,
   SafeguardingIncidentType,
+  ComplianceCredentialRead,
+  ComplianceCredentialStatus,
+  ComplianceCredentialType,
   ScheduledReportRead,
   SponsorRead,
   SponsorshipAgreementRead,
@@ -423,6 +428,8 @@ export default function HomePage() {
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
   const [clearance, setClearance] = useState<ParticipationClearanceRead | null>(null);
   const [safeguardingIncidents, setSafeguardingIncidents] = useState<SafeguardingIncidentRead[]>([]);
+  const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
+  const [complianceCredentials, setComplianceCredentials] = useState<ComplianceCredentialRead[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
@@ -506,6 +513,25 @@ export default function HomePage() {
     immediate_action: "Removed from play, first aid applied, guardian notified.",
     medical_follow_up_required: "yes",
     regulatory_report_required: false
+  });
+  const [backgroundCheckForm, setBackgroundCheckForm] = useState({
+    provider: "Manual verification",
+    check_type: "Safeguarding background",
+    requested_at: "2026-05-28T09:00",
+    expires_at: "2027-05-28",
+    external_reference: "BG-2026-001",
+    notes: "Initial safeguarding screen for athlete-facing role."
+  });
+  const [credentialForm, setCredentialForm] = useState({
+    title: "Safeguarding essentials",
+    credential_type: "safeguarding_training" as ComplianceCredentialType,
+    issuing_body: "AfroLete Academy",
+    credential_number: "SAFE-2026-001",
+    issued_at: "2026-05-28",
+    expires_at: "2027-05-28",
+    renewal_due_at: "2027-04-28",
+    verification_url: "",
+    notes: "Required before unsupervised athlete activities."
   });
   const [agentForm, setAgentForm] = useState({
     name: "Safeguarding Watch",
@@ -947,6 +973,22 @@ export default function HomePage() {
     setSafeguardingIncidents(data);
   }, [identity]);
 
+  const loadBackgroundChecks = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<BackgroundCheckRead[]>(
+      `/safeguarding/background-checks?organization_id=${organizationId}`,
+      { identity }
+    );
+    setBackgroundChecks(data);
+  }, [identity]);
+
+  const loadComplianceCredentials = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<ComplianceCredentialRead[]>(
+      `/safeguarding/credentials?organization_id=${organizationId}`,
+      { identity }
+    );
+    setComplianceCredentials(data);
+  }, [identity]);
+
   const loadAgents = useCallback(async (organizationId: string) => {
     const data = await apiRequest<AgentRead[]>(`/agents?organization_id=${organizationId}`);
     setAgents(data);
@@ -1383,6 +1425,8 @@ export default function HomePage() {
       setOfficialAssignments([]);
       setRegistrationInquiries([]);
       setSafeguardingIncidents([]);
+      setBackgroundChecks([]);
+      setComplianceCredentials([]);
       setCommunicationTemplates([]);
       setCommunicationMessages([]);
       setMessageRecipients([]);
@@ -1460,6 +1504,8 @@ export default function HomePage() {
       await loadRegistrationInquiries(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
       await loadSafeguardingIncidents(selectedOrganizationId);
+      await loadBackgroundChecks(selectedOrganizationId);
+      await loadComplianceCredentials(selectedOrganizationId);
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
@@ -1477,6 +1523,8 @@ export default function HomePage() {
     loadRegistrationInquiries,
     loadEvents,
     loadSafeguardingIncidents,
+    loadBackgroundChecks,
+    loadComplianceCredentials,
     loadAgents,
     loadAgentTasks,
     loadMetricDefinitions,
@@ -2127,6 +2175,123 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updated.id)
         ]);
         addLog(`${updated.title} moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
+  const createBackgroundCheck = () => {
+    if (!selectedOrganizationId || !selectedAthleteId) {
+      addLog("Select an organization and athlete first", "bad");
+      return;
+    }
+    runAction(
+      "create-background-check",
+      () =>
+        apiRequest<BackgroundCheckRead>("/safeguarding/background-checks", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            person_id: selectedAthleteId,
+            provider: backgroundCheckForm.provider,
+            check_type: backgroundCheckForm.check_type,
+            requested_at: new Date(backgroundCheckForm.requested_at).toISOString(),
+            expires_at: backgroundCheckForm.expires_at || null,
+            external_reference: backgroundCheckForm.external_reference || null,
+            notes: backgroundCheckForm.notes || null
+          }
+        }),
+      (check) => {
+        setBackgroundChecks((current) => [
+          check,
+          ...current.filter((item) => item.id !== check.id)
+        ]);
+        addLog(`${check.check_type} background check requested`, "good");
+      }
+    );
+  };
+
+  const updateBackgroundCheck = (check: BackgroundCheckRead, statusValue: BackgroundCheckStatus) => {
+    runAction(
+      `background-check-${check.id}-${statusValue}`,
+      () =>
+        apiRequest<BackgroundCheckRead>(`/safeguarding/background-checks/${check.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            completed_at: statusValue === "clear" || statusValue === "failed"
+              ? new Date().toISOString()
+              : null,
+            result_summary: `Marked ${statusValue} from the operations console.`
+          }
+        }),
+      (updated) => {
+        setBackgroundChecks((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.check_type} moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
+  const createComplianceCredential = () => {
+    if (!selectedOrganizationId || !selectedAthleteId) {
+      addLog("Select an organization and athlete first", "bad");
+      return;
+    }
+    runAction(
+      "create-compliance-credential",
+      () =>
+        apiRequest<ComplianceCredentialRead>("/safeguarding/credentials", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            person_id: selectedAthleteId,
+            credential_type: credentialForm.credential_type,
+            title: credentialForm.title,
+            issuing_body: credentialForm.issuing_body || null,
+            credential_number: credentialForm.credential_number || null,
+            issued_at: credentialForm.issued_at || null,
+            expires_at: credentialForm.expires_at || null,
+            renewal_due_at: credentialForm.renewal_due_at || null,
+            verification_url: credentialForm.verification_url || null,
+            notes: credentialForm.notes || null
+          }
+        }),
+      (credential) => {
+        setComplianceCredentials((current) => [
+          credential,
+          ...current.filter((item) => item.id !== credential.id)
+        ]);
+        addLog(`${credential.title} credential tracked`, "good");
+      }
+    );
+  };
+
+  const updateComplianceCredential = (
+    credential: ComplianceCredentialRead,
+    statusValue: ComplianceCredentialStatus
+  ) => {
+    runAction(
+      `compliance-credential-${credential.id}-${statusValue}`,
+      () =>
+        apiRequest<ComplianceCredentialRead>(`/safeguarding/credentials/${credential.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            notes: `Marked ${statusValue} from the operations console.`
+          }
+        }),
+      (updated) => {
+        setComplianceCredentials((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.title} credential moved to ${updated.status}`, "good");
       }
     );
   };
@@ -7719,11 +7884,13 @@ export default function HomePage() {
           <div className="panel-head">
             <div>
               <p className="section-label">Safeguarding</p>
-              <h2>Guardian consent and event clearance</h2>
+              <h2>Consent, checks, credentials, and incidents</h2>
             </div>
             <div className="event-toolbar">
               <button type="button" onClick={createGuardian} disabled={busyAction !== null}>Link guardian</button>
               <button type="button" onClick={requestConsent} disabled={busyAction !== null}>Request consent</button>
+              <button type="button" onClick={createBackgroundCheck} disabled={busyAction !== null}>Request check</button>
+              <button type="button" onClick={createComplianceCredential} disabled={busyAction !== null}>Track credential</button>
               <button type="button" onClick={createSafeguardingIncident} disabled={busyAction !== null}>Log incident</button>
             </div>
           </div>
@@ -7798,6 +7965,79 @@ export default function HomePage() {
               Regulatory report
             </label>
           </div>
+          <div className="form-grid three">
+            <label>
+              Check provider
+              <input value={backgroundCheckForm.provider} onChange={(event) => setBackgroundCheckForm({ ...backgroundCheckForm, provider: event.target.value })} />
+            </label>
+            <label>
+              Check type
+              <input value={backgroundCheckForm.check_type} onChange={(event) => setBackgroundCheckForm({ ...backgroundCheckForm, check_type: event.target.value })} />
+            </label>
+            <label>
+              Requested
+              <input type="datetime-local" value={backgroundCheckForm.requested_at} onChange={(event) => setBackgroundCheckForm({ ...backgroundCheckForm, requested_at: event.target.value })} />
+            </label>
+            <label>
+              Check expiry
+              <input type="date" value={backgroundCheckForm.expires_at} onChange={(event) => setBackgroundCheckForm({ ...backgroundCheckForm, expires_at: event.target.value })} />
+            </label>
+            <label>
+              Reference
+              <input value={backgroundCheckForm.external_reference} onChange={(event) => setBackgroundCheckForm({ ...backgroundCheckForm, external_reference: event.target.value })} />
+            </label>
+            <label>
+              Check notes
+              <input value={backgroundCheckForm.notes} onChange={(event) => setBackgroundCheckForm({ ...backgroundCheckForm, notes: event.target.value })} />
+            </label>
+          </div>
+          <div className="form-grid three">
+            <label>
+              Credential
+              <input value={credentialForm.title} onChange={(event) => setCredentialForm({ ...credentialForm, title: event.target.value })} />
+            </label>
+            <label>
+              Credential type
+              <select value={credentialForm.credential_type} onChange={(event) => setCredentialForm({ ...credentialForm, credential_type: event.target.value as ComplianceCredentialType })}>
+                <option value="safeguarding_training">Safeguarding training</option>
+                <option value="first_aid">First aid</option>
+                <option value="coaching_license">Coaching license</option>
+                <option value="officiating_license">Officiating license</option>
+                <option value="driver_certification">Driver certification</option>
+                <option value="background_check">Background check</option>
+                <option value="medical_license">Medical license</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>
+              Issuer
+              <input value={credentialForm.issuing_body} onChange={(event) => setCredentialForm({ ...credentialForm, issuing_body: event.target.value })} />
+            </label>
+            <label>
+              Number
+              <input value={credentialForm.credential_number} onChange={(event) => setCredentialForm({ ...credentialForm, credential_number: event.target.value })} />
+            </label>
+            <label>
+              Issued
+              <input type="date" value={credentialForm.issued_at} onChange={(event) => setCredentialForm({ ...credentialForm, issued_at: event.target.value })} />
+            </label>
+            <label>
+              Expires
+              <input type="date" value={credentialForm.expires_at} onChange={(event) => setCredentialForm({ ...credentialForm, expires_at: event.target.value })} />
+            </label>
+            <label>
+              Renewal due
+              <input type="date" value={credentialForm.renewal_due_at} onChange={(event) => setCredentialForm({ ...credentialForm, renewal_due_at: event.target.value })} />
+            </label>
+            <label>
+              Verify URL
+              <input value={credentialForm.verification_url} onChange={(event) => setCredentialForm({ ...credentialForm, verification_url: event.target.value })} />
+            </label>
+            <label>
+              Credential notes
+              <input value={credentialForm.notes} onChange={(event) => setCredentialForm({ ...credentialForm, notes: event.target.value })} />
+            </label>
+          </div>
           <div className="consent-grid">
             <div>
               <span className="muted">Athlete</span>
@@ -7817,6 +8057,36 @@ export default function HomePage() {
             </div>
           </div>
           <div className="task-list">
+            {backgroundChecks.slice(0, 4).map((check) => (
+              <article key={check.id} className="task-card">
+                <div>
+                  <strong>{check.check_type}</strong>
+                  <span>{check.provider} · {check.status} · risk {check.risk_level}</span>
+                  <span>Expires {check.expires_at ?? "not set"} · {check.external_reference ?? "no reference"}</span>
+                  {check.result_summary ? <span>{check.result_summary}</span> : null}
+                </div>
+                <div className="event-toolbar">
+                  <button type="button" onClick={() => updateBackgroundCheck(check, "in_progress")}>Start</button>
+                  <button type="button" onClick={() => updateBackgroundCheck(check, "clear")}>Clear</button>
+                  <button type="button" onClick={() => updateBackgroundCheck(check, "review_required")}>Review</button>
+                </div>
+              </article>
+            ))}
+            {complianceCredentials.slice(0, 4).map((credential) => (
+              <article key={credential.id} className="task-card">
+                <div>
+                  <strong>{credential.title}</strong>
+                  <span>{credential.credential_type} · {credential.status} · {credential.issuing_body ?? "issuer pending"}</span>
+                  <span>Renew {credential.renewal_due_at ?? "not set"} · expires {credential.expires_at ?? "not set"}</span>
+                  {credential.notes ? <span>{credential.notes}</span> : null}
+                </div>
+                <div className="event-toolbar">
+                  <button type="button" onClick={() => updateComplianceCredential(credential, "verified")}>Verify</button>
+                  <button type="button" onClick={() => updateComplianceCredential(credential, "expiring_soon")}>Expiring</button>
+                  <button type="button" onClick={() => updateComplianceCredential(credential, "expired")}>Expire</button>
+                </div>
+              </article>
+            ))}
             {safeguardingIncidents.slice(0, 5).map((incident) => (
               <article key={incident.id} className="task-card">
                 <div>

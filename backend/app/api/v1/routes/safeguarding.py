@@ -4,10 +4,20 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models.enums import SafeguardingIncidentStatus
+from app.models.enums import (
+    BackgroundCheckStatus,
+    ComplianceCredentialStatus,
+    SafeguardingIncidentStatus,
+)
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
     ActivityConsentRead,
+    BackgroundCheckCreate,
+    BackgroundCheckRead,
+    BackgroundCheckUpdate,
+    ComplianceCredentialCreate,
+    ComplianceCredentialRead,
+    ComplianceCredentialUpdate,
     ConsentRequestCreate,
     ConsentRequestRead,
     FamilyAthleteSummaryRead,
@@ -32,10 +42,14 @@ from app.services.safeguarding import (
     capture_consent_by_token,
     clearance_for_event,
     create_activity_consent,
+    create_background_check,
+    create_compliance_credential,
     create_consent_request,
     create_guardian_relationship,
     create_safeguarding_incident,
     ensure_org_manage,
+    list_background_checks,
+    list_compliance_credentials,
     list_guardians_for_athlete,
     list_safeguarding_incidents,
     list_my_family_consent_requests,
@@ -43,6 +57,8 @@ from app.services.safeguarding import (
     list_my_family_events,
     respond_to_family_consent_request,
     respond_to_family_event,
+    update_background_check,
+    update_compliance_credential,
     update_safeguarding_incident,
 )
 
@@ -131,6 +147,48 @@ def to_incident_read(incident) -> SafeguardingIncidentRead:
     )
 
 
+def to_background_check_read(check) -> BackgroundCheckRead:
+    return BackgroundCheckRead(
+        id=check.id,
+        organization_id=check.organization_id,
+        person_id=check.person_id,
+        requested_by_person_id=check.requested_by_person_id,
+        reviewed_by_person_id=check.reviewed_by_person_id,
+        provider=check.provider,
+        check_type=check.check_type,
+        status=check.status,
+        risk_level=check.risk_level,
+        requested_at=check.requested_at,
+        completed_at=check.completed_at,
+        expires_at=check.expires_at,
+        external_reference=check.external_reference,
+        result_summary=check.result_summary,
+        notes=check.notes,
+        created_at=check.created_at,
+    )
+
+
+def to_credential_read(credential) -> ComplianceCredentialRead:
+    return ComplianceCredentialRead(
+        id=credential.id,
+        organization_id=credential.organization_id,
+        person_id=credential.person_id,
+        verified_by_person_id=credential.verified_by_person_id,
+        credential_type=credential.credential_type,
+        status=credential.status,
+        title=credential.title,
+        issuing_body=credential.issuing_body,
+        credential_number=credential.credential_number,
+        issued_at=credential.issued_at,
+        expires_at=credential.expires_at,
+        renewal_due_at=credential.renewal_due_at,
+        verification_url=credential.verification_url,
+        evidence_object_key=credential.evidence_object_key,
+        notes=credential.notes,
+        created_at=credential.created_at,
+    )
+
+
 @router.post("/guardians", response_model=GuardianRelationshipRead, status_code=201)
 async def create_guardian_route(
     payload: GuardianRelationshipCreate,
@@ -197,6 +255,80 @@ async def update_safeguarding_incident_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> SafeguardingIncidentRead:
     return to_incident_read(await update_safeguarding_incident(db, identity, incident_id, payload, authz))
+
+
+@router.post("/background-checks", response_model=BackgroundCheckRead, status_code=201)
+async def create_background_check_route(
+    payload: BackgroundCheckCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BackgroundCheckRead:
+    return to_background_check_read(await create_background_check(db, identity, payload, authz))
+
+
+@router.get("/background-checks", response_model=list[BackgroundCheckRead])
+async def list_background_checks_route(
+    organization_id: UUID = Query(),
+    status_filter: BackgroundCheckStatus | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[BackgroundCheckRead]:
+    await ensure_org_manage(authz, organization_id, identity)
+    return [
+        to_background_check_read(check)
+        for check in await list_background_checks(db, organization_id, status_filter)
+    ]
+
+
+@router.patch("/background-checks/{check_id}", response_model=BackgroundCheckRead)
+async def update_background_check_route(
+    check_id: UUID,
+    payload: BackgroundCheckUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BackgroundCheckRead:
+    return to_background_check_read(await update_background_check(db, identity, check_id, payload, authz))
+
+
+@router.post("/credentials", response_model=ComplianceCredentialRead, status_code=201)
+async def create_compliance_credential_route(
+    payload: ComplianceCredentialCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ComplianceCredentialRead:
+    return to_credential_read(await create_compliance_credential(db, identity, payload, authz))
+
+
+@router.get("/credentials", response_model=list[ComplianceCredentialRead])
+async def list_compliance_credentials_route(
+    organization_id: UUID = Query(),
+    status_filter: ComplianceCredentialStatus | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[ComplianceCredentialRead]:
+    await ensure_org_manage(authz, organization_id, identity)
+    return [
+        to_credential_read(credential)
+        for credential in await list_compliance_credentials(db, organization_id, status_filter)
+    ]
+
+
+@router.patch("/credentials/{credential_id}", response_model=ComplianceCredentialRead)
+async def update_compliance_credential_route(
+    credential_id: UUID,
+    payload: ComplianceCredentialUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ComplianceCredentialRead:
+    return to_credential_read(
+        await update_compliance_credential(db, identity, credential_id, payload, authz)
+    )
 
 
 @router.get("/my-family/events", response_model=list[FamilyEventSummaryRead])

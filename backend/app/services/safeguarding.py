@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import (
     AttendanceStatus,
+    BackgroundCheckStatus,
+    ComplianceCredentialStatus,
     ConsentCaptureChannel,
     ConsentRequestStatus,
     ConsentScopeType,
@@ -16,11 +18,23 @@ from app.models.enums import (
     ParticipationClearanceStatus,
     SafeguardingIncidentStatus,
 )
-from app.models.event import ActivityConsent, AttendanceRecord, ConsentRequest, Event, SafeguardingIncident
+from app.models.event import (
+    ActivityConsent,
+    AttendanceRecord,
+    BackgroundCheck,
+    ComplianceCredential,
+    ConsentRequest,
+    Event,
+    SafeguardingIncident,
+)
 from app.models.identity import Person
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
+    BackgroundCheckCreate,
+    BackgroundCheckUpdate,
+    ComplianceCredentialCreate,
+    ComplianceCredentialUpdate,
     ConsentRequestCreate,
     FamilyAthleteSummaryRead,
     FamilyConsentRequestRead,
@@ -282,6 +296,152 @@ async def update_safeguarding_incident(
     await db.commit()
     await db.refresh(incident)
     return incident
+
+
+async def create_background_check(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: BackgroundCheckCreate,
+    authz: AuthorizationService,
+) -> BackgroundCheck:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    await validate_person_in_organization(db, payload.organization_id, payload.person_id)
+    check = BackgroundCheck(
+        requested_by_person_id=identity.person_id,
+        **payload.model_dump(),
+    )
+    db.add(check)
+    await db.commit()
+    await db.refresh(check)
+    return check
+
+
+async def list_background_checks(
+    db: AsyncSession,
+    organization_id: UUID,
+    status_filter: BackgroundCheckStatus | None = None,
+) -> list[BackgroundCheck]:
+    statement = select(BackgroundCheck).where(BackgroundCheck.organization_id == organization_id)
+    if status_filter is not None:
+        statement = statement.where(BackgroundCheck.status == status_filter)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    BackgroundCheck.status,
+                    BackgroundCheck.expires_at.nulls_last(),
+                    BackgroundCheck.requested_at.desc(),
+                )
+            )
+        ).all()
+    )
+
+
+async def update_background_check(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    check_id: UUID,
+    payload: BackgroundCheckUpdate,
+    authz: AuthorizationService,
+) -> BackgroundCheck:
+    check = await db.get(BackgroundCheck, check_id)
+    if check is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Background check not found")
+    await ensure_org_manage(authz, check.organization_id, identity)
+
+    if payload.reviewed_by_person_id is not None:
+        await validate_person_in_organization(db, check.organization_id, payload.reviewed_by_person_id)
+        check.reviewed_by_person_id = payload.reviewed_by_person_id
+    for field in [
+        "status",
+        "risk_level",
+        "completed_at",
+        "expires_at",
+        "external_reference",
+        "result_summary",
+        "notes",
+    ]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(check, field, value)
+
+    await db.commit()
+    await db.refresh(check)
+    return check
+
+
+async def create_compliance_credential(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ComplianceCredentialCreate,
+    authz: AuthorizationService,
+) -> ComplianceCredential:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    await validate_person_in_organization(db, payload.organization_id, payload.person_id)
+    credential = ComplianceCredential(**payload.model_dump())
+    db.add(credential)
+    await db.commit()
+    await db.refresh(credential)
+    return credential
+
+
+async def list_compliance_credentials(
+    db: AsyncSession,
+    organization_id: UUID,
+    status_filter: ComplianceCredentialStatus | None = None,
+) -> list[ComplianceCredential]:
+    statement = select(ComplianceCredential).where(
+        ComplianceCredential.organization_id == organization_id
+    )
+    if status_filter is not None:
+        statement = statement.where(ComplianceCredential.status == status_filter)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    ComplianceCredential.status,
+                    ComplianceCredential.renewal_due_at.nulls_last(),
+                    ComplianceCredential.expires_at.nulls_last(),
+                    ComplianceCredential.title,
+                )
+            )
+        ).all()
+    )
+
+
+async def update_compliance_credential(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    credential_id: UUID,
+    payload: ComplianceCredentialUpdate,
+    authz: AuthorizationService,
+) -> ComplianceCredential:
+    credential = await db.get(ComplianceCredential, credential_id)
+    if credential is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
+    await ensure_org_manage(authz, credential.organization_id, identity)
+
+    if payload.verified_by_person_id is not None:
+        await validate_person_in_organization(db, credential.organization_id, payload.verified_by_person_id)
+        credential.verified_by_person_id = payload.verified_by_person_id
+    for field in [
+        "status",
+        "issuing_body",
+        "credential_number",
+        "issued_at",
+        "expires_at",
+        "renewal_due_at",
+        "verification_url",
+        "evidence_object_key",
+        "notes",
+    ]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(credential, field, value)
+
+    await db.commit()
+    await db.refresh(credential)
+    return credential
 
 
 async def list_guardians_for_athlete(

@@ -7,6 +7,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
 from app.models.enums import (
     AttendanceStatus,
+    BackgroundCheckStatus,
+    ComplianceCredentialStatus,
+    ComplianceCredentialType,
     ConsentCaptureChannel,
     ConsentRequestStatus,
     ConsentScopeType,
@@ -163,3 +166,59 @@ class SafeguardingIncident(IdMixin, TimestampMixin, Base):
     regulatory_report_required: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
     resolution_notes: Mapped[str | None] = mapped_column(Text)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class BackgroundCheck(IdMixin, TimestampMixin, Base):
+    __tablename__ = "background_checks"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    requested_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reviewed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    check_type: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    status: Mapped[BackgroundCheckStatus] = mapped_column(
+        enum_type(BackgroundCheckStatus),
+        default=BackgroundCheckStatus.REQUESTED,
+        nullable=False,
+        index=True,
+    )
+    risk_level: Mapped[str] = mapped_column(String(40), default="unknown", nullable=False, index=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    expires_at: Mapped[date | None] = mapped_column(Date, index=True)
+    external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    result_summary: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ComplianceCredential(IdMixin, TimestampMixin, Base):
+    __tablename__ = "compliance_credentials"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    verified_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    credential_type: Mapped[ComplianceCredentialType] = mapped_column(
+        enum_type(ComplianceCredentialType),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[ComplianceCredentialStatus] = mapped_column(
+        enum_type(ComplianceCredentialStatus),
+        default=ComplianceCredentialStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    issuing_body: Mapped[str | None] = mapped_column(String(240), index=True)
+    credential_number: Mapped[str | None] = mapped_column(String(160), index=True)
+    issued_at: Mapped[date | None] = mapped_column(Date)
+    expires_at: Mapped[date | None] = mapped_column(Date, index=True)
+    renewal_due_at: Mapped[date | None] = mapped_column(Date, index=True)
+    verification_url: Mapped[str | None] = mapped_column(String(500))
+    evidence_object_key: Mapped[str | None] = mapped_column(String(500), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
