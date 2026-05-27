@@ -122,6 +122,8 @@ from app.schemas.event import (
     EventTravelFeeReconciliationItemRead,
     EventTravelFeeReconciliationPaymentRead,
     EventTravelFeeReconciliationRead,
+    EventTravelFeeReconciliationResolutionCreate,
+    EventTravelFeeReconciliationResolutionRead,
     EventTravelGeofenceCheckCreate,
     EventTravelGeofenceCheckRead,
     EventTravelGeofencePoint,
@@ -1022,6 +1024,96 @@ async def get_travel_fee_reconciliation(
         exceptions=exceptions,
         reconciled_at=datetime.now(UTC),
         items=items,
+    )
+
+
+async def resolve_travel_fee_reconciliation_exception(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    provider: str,
+    payload: EventTravelFeeReconciliationResolutionCreate,
+    authz: AuthorizationService,
+) -> EventTravelFeeReconciliationResolutionRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    invoices = await travel_fee_invoices_for_plan(db, plan)
+    invoice = next((item for item in invoices if item.id == payload.invoice_id), None)
+    if invoice is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel fee invoice not found")
+
+    payment: FinancePayment | None = None
+    message = ""
+    now = datetime.now(UTC)
+    if payload.action == "apply_waiver":
+        amount = (payload.amount or travel_fee_checkout_open_amount(invoice)).quantize(Decimal("0.01"))
+        if amount <= 0 or amount > travel_fee_checkout_open_amount(invoice):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid waiver amount")
+        payment = FinancePayment(
+            organization_id=invoice.organization_id,
+            invoice_id=invoice.id,
+            amount=amount,
+            currency=invoice.currency,
+            method="travel_fee_waiver",
+            external_reference=payload.external_reference or travel_fee_resolution_reference("waiver", plan.id, invoice.id, now),
+            received_at=now,
+            notes=payload.notes or "Travel fee open balance waived during reconciliation.",
+        )
+        invoice.amount_paid += amount
+        travel_fee_update_invoice_status(invoice)
+        db.add(payment)
+        message = f"Applied {amount} {invoice.currency} travel fee waiver."
+    elif payload.action == "attach_payment_reference":
+        if payload.payment_id is None or not payload.external_reference:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment ID and reference required")
+        payment = await db.get(FinancePayment, payload.payment_id)
+        if payment is None or payment.organization_id != invoice.organization_id or payment.invoice_id != invoice.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found for travel fee invoice")
+        payment.external_reference = payload.external_reference
+        if payload.notes:
+            payment.notes = f"{payment.notes or ''}\n{payload.notes}".strip()
+        message = f"Attached provider reference {payload.external_reference}."
+    elif payload.action == "rebuild_missing_payment":
+        amount = (payload.amount or invoice.amount_paid).quantize(Decimal("0.01"))
+        if amount <= 0 or amount > invoice.amount_paid:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid rebuilt payment amount")
+        payment = FinancePayment(
+            organization_id=invoice.organization_id,
+            invoice_id=invoice.id,
+            amount=amount,
+            currency=invoice.currency,
+            method="travel_fee_reconciliation_rebuild",
+            external_reference=payload.external_reference or travel_fee_resolution_reference("rebuild", plan.id, invoice.id, now),
+            received_at=now,
+            notes=payload.notes or "Rebuilt missing finance payment row from travel fee reconciliation.",
+        )
+        db.add(payment)
+        message = f"Rebuilt missing payment row for {amount} {invoice.currency}."
+    elif payload.action == "refund_overpayment":
+        overpaid = (invoice.amount_paid - invoice.amount_due).quantize(Decimal("0.01"))
+        amount = (payload.amount or overpaid).quantize(Decimal("0.01"))
+        if amount <= 0 or amount > overpaid:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid overpayment refund amount")
+        invoice.amount_paid -= amount
+        travel_fee_update_invoice_status(invoice)
+        message = f"Recorded {amount} {invoice.currency} overpayment refund adjustment."
+    else:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported resolution action")
+
+    await db.commit()
+    if payment is not None:
+        await db.refresh(payment)
+    await db.refresh(invoice)
+    reconciliation = await get_travel_fee_reconciliation(db, identity, travel_plan_id, provider, authz)
+    return EventTravelFeeReconciliationResolutionRead(
+        travel_plan_id=plan.id,
+        invoice_id=invoice.id,
+        action=payload.action,
+        payment_id=payment.id if payment is not None else None,
+        message=message,
+        reconciliation=reconciliation,
     )
 
 
@@ -3585,6 +3677,20 @@ def travel_fee_reconciliation_exception(
         invoice_number=invoice.invoice_number,
         detail=detail,
         recommended_action=recommended_action,
+    )
+
+
+def travel_fee_resolution_reference(prefix: str, travel_plan_id: UUID, invoice_id: UUID, resolved_at: datetime) -> str:
+    return f"{prefix}:{str(travel_plan_id)[:8]}:{str(invoice_id)[:8]}:{resolved_at.strftime('%Y%m%d%H%M%S')}"
+
+
+def travel_fee_update_invoice_status(invoice: FinanceInvoice) -> None:
+    invoice.status = (
+        CommercialStatus.PAID
+        if invoice.amount_paid >= invoice.amount_due
+        else CommercialStatus.PARTIAL
+        if invoice.amount_paid > 0
+        else CommercialStatus.ACTIVE
     )
 
 

@@ -63,6 +63,8 @@ from app.schemas.event import (
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelFeeReconciliationRead,
+    EventTravelFeeReconciliationResolutionCreate,
+    EventTravelFeeReconciliationResolutionRead,
     EventTravelGeofenceCheckCreate,
     EventTravelGeofenceCheckRead,
     EventTravelGeofenceZoneCreate,
@@ -145,6 +147,7 @@ from app.services.events import (
     request_travel_consents,
     read_signed_travel_manifest,
     rotate_travel_device_secret,
+    resolve_travel_fee_reconciliation_exception,
     route_travel_approvals,
     run_event_travel_consent_reminders,
     seed_attendance_from_team_roster,
@@ -573,6 +576,21 @@ async def get_travel_fee_reconciliation_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelFeeReconciliationRead:
     return await get_travel_fee_reconciliation(db, identity, travel_plan_id, provider, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/fee-reconciliation/resolve",
+    response_model=EventTravelFeeReconciliationResolutionRead,
+)
+async def resolve_travel_fee_reconciliation_route(
+    travel_plan_id: UUID,
+    payload: EventTravelFeeReconciliationResolutionCreate,
+    provider: str = Query(default="manual_gateway"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelFeeReconciliationResolutionRead:
+    return await resolve_travel_fee_reconciliation_exception(db, identity, travel_plan_id, provider, payload, authz)
 
 
 @router.get(

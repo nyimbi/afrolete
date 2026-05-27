@@ -650,6 +650,15 @@ export type EventTravelFeeReconciliationRead = {
   items: EventTravelFeeReconciliationItemRead[];
 };
 
+export type EventTravelFeeReconciliationResolutionRead = {
+  travel_plan_id: UUID;
+  invoice_id: UUID;
+  action: string;
+  payment_id: UUID | null;
+  message: string;
+  reconciliation: EventTravelFeeReconciliationRead;
+};
+
 export type EventTravelFeeHostedCheckoutRead = {
   invoice_id: UUID;
   invoice_number: string;

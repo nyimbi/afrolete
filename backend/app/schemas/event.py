@@ -379,6 +379,24 @@ class EventTravelFeeReconciliationRead(BaseModel):
     items: list[EventTravelFeeReconciliationItemRead]
 
 
+class EventTravelFeeReconciliationResolutionCreate(BaseModel):
+    invoice_id: UUID
+    action: str = Field(pattern="^(apply_waiver|attach_payment_reference|rebuild_missing_payment|refund_overpayment)$")
+    payment_id: UUID | None = None
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    external_reference: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelFeeReconciliationResolutionRead(BaseModel):
+    travel_plan_id: UUID
+    invoice_id: UUID
+    action: str
+    payment_id: UUID | None
+    message: str
+    reconciliation: EventTravelFeeReconciliationRead
+
+
 class EventTravelFeeHostedCheckoutRead(BaseModel):
     invoice_id: UUID
     invoice_number: str

@@ -93,6 +93,7 @@ import type {
   EventTravelFeeCheckoutBatchRead,
   EventTravelFeeInvoiceBatchRead,
   EventTravelFeeReconciliationRead,
+  EventTravelFeeReconciliationResolutionRead,
   EventTravelGeofenceCheckRead,
   EventTravelGeofenceZoneRead,
   EventTravelLocationUpdateRead,
@@ -3023,6 +3024,57 @@ export default function HomePage() {
           `Travel fee reconciliation: ${reconciliation.paid_count} paid, ${reconciliation.exception_count} exceptions`,
           reconciliation.exception_count > 0 ? "bad" : Number(reconciliation.total_open) > 0 ? "neutral" : "good"
         );
+      }
+    );
+  };
+
+  const resolveTravelFeeException = (travelPlanId: string) => {
+    if (!travelFeeReconciliation?.exceptions.length) {
+      addLog("No travel fee reconciliation exceptions to resolve", "neutral");
+      return;
+    }
+    const exception = travelFeeReconciliation.exceptions[0];
+    const item = travelFeeReconciliation.items.find((entry) => entry.invoice_id === exception.invoice_id);
+    if (!item) {
+      addLog("Select a travel fee invoice exception first", "bad");
+      return;
+    }
+    const unresolvedPayment = item.payments.find((payment) => !payment.external_reference);
+    const action =
+      exception.code === "missing_provider_reference"
+        ? "attach_payment_reference"
+        : exception.code === "paid_without_payment_row"
+          ? "rebuild_missing_payment"
+          : exception.code === "overpaid_invoice"
+            ? "refund_overpayment"
+            : exception.code === "overdue_open_balance"
+              ? "apply_waiver"
+              : "";
+    if (!action) {
+      addLog(`${exception.code} requires finance review before automatic resolution`, "neutral");
+      return;
+    }
+    runAction(
+      `travel-fee-resolve-${travelPlanId}`,
+      () =>
+        apiRequest<EventTravelFeeReconciliationResolutionRead>(
+          `/events/travel-plans/${travelPlanId}/fee-reconciliation/resolve?provider=${travelFeeReconciliation.provider}`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              invoice_id: item.invoice_id,
+              action,
+              payment_id: action === "attach_payment_reference" ? unresolvedPayment?.payment_id ?? null : null,
+              amount: action === "apply_waiver" ? item.open_amount : null,
+              external_reference: `TRAVEL-RES-${Date.now()}`,
+              notes: `Resolved ${exception.code} from operations console.`
+            }
+          }
+        ),
+      (resolution) => {
+        setTravelFeeReconciliation(resolution.reconciliation);
+        addLog(resolution.message, resolution.reconciliation.exception_count > 0 ? "neutral" : "good");
       }
     );
   };
@@ -8837,6 +8889,9 @@ export default function HomePage() {
                     <span>
                       {travelFeeReconciliation.items[0]?.last_payment_reference ?? travelFeeReconciliation.items[0]?.session_id ?? "No travel payments reconciled yet"}
                     </span>
+                    <button type="button" onClick={() => resolveTravelFeeException(travelFeeReconciliation.travel_plan_id)}>
+                      Resolve first exception
+                    </button>
                   </div>
                 </article>
               ) : null}
