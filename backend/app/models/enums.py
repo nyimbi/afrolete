@@ -370,3 +370,21 @@ class FacilityBookingStatus(StrEnum):
     CHECKED_IN = "checked_in"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+
+class CommercialStatus(StrEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PLEDGED = "pledged"
+    PAID = "paid"
+    PARTIAL = "partial"
+    OVERDUE = "overdue"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class TicketStatus(StrEnum):
+    ISSUED = "issued"
+    CHECKED_IN = "checked_in"
+    VOID = "void"
+    REFUNDED = "refunded"

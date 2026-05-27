@@ -154,6 +154,16 @@ export type FacilityBookingStatus =
   | "checked_in"
   | "completed"
   | "cancelled";
+export type CommercialStatus =
+  | "draft"
+  | "active"
+  | "pledged"
+  | "paid"
+  | "partial"
+  | "overdue"
+  | "completed"
+  | "cancelled";
+export type TicketStatus = "issued" | "checked_in" | "void" | "refunded";
 
 export type LocalIdentity = {
   sub: string;
@@ -395,6 +405,143 @@ export type AssetSummaryRead = {
   upcoming_bookings: number;
   booked_hours: number;
   projected_booking_revenue: string;
+};
+
+export type SponsorRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  industry: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  website_url: string | null;
+  brand_assets_url: string | null;
+  notes: string | null;
+};
+
+export type SponsorshipAgreementRead = {
+  id: UUID;
+  organization_id: UUID;
+  sponsor_id: UUID;
+  event_id: UUID | null;
+  name: string;
+  tier: string;
+  value_amount: string;
+  currency: string;
+  starts_on: string | null;
+  ends_on: string | null;
+  deliverables: string | null;
+  activation_notes: string | null;
+  roi_notes: string | null;
+  status: CommercialStatus;
+};
+
+export type FundraisingCampaignRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  name: string;
+  purpose: string;
+  goal_amount: string;
+  raised_amount: string;
+  currency: string;
+  starts_on: string | null;
+  ends_on: string | null;
+  public_url: string | null;
+  status: CommercialStatus;
+};
+
+export type DonationRead = {
+  id: UUID;
+  organization_id: UUID;
+  campaign_id: UUID;
+  donor_name: string;
+  donor_email: string | null;
+  amount: string;
+  currency: string;
+  external_reference: string | null;
+  message: string | null;
+  status: CommercialStatus;
+};
+
+export type TicketProductRead = {
+  id: UUID;
+  organization_id: UUID;
+  event_id: UUID;
+  name: string;
+  price: string;
+  currency: string;
+  capacity: number;
+  sold_count: number;
+  access_zone: string | null;
+  status: CommercialStatus;
+};
+
+export type TicketOrderRead = {
+  id: UUID;
+  organization_id: UUID;
+  ticket_product_id: UUID;
+  buyer_name: string;
+  buyer_email: string;
+  quantity: number;
+  total_amount: string;
+  currency: string;
+  external_payment_reference: string | null;
+  status: CommercialStatus;
+  ticket_ids: UUID[];
+};
+
+export type TicketRead = {
+  id: UUID;
+  organization_id: UUID;
+  ticket_order_id: UUID;
+  ticket_product_id: UUID;
+  holder_name: string | null;
+  qr_token: string;
+  status: TicketStatus;
+  checked_in_at: string | null;
+  gate: string | null;
+};
+
+export type FinanceInvoiceRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID | null;
+  team_id: UUID | null;
+  sponsor_id: UUID | null;
+  invoice_number: string;
+  title: string;
+  amount_due: string;
+  amount_paid: string;
+  currency: string;
+  due_on: string | null;
+  status: CommercialStatus;
+  memo: string | null;
+};
+
+export type FinancePaymentRead = {
+  id: UUID;
+  organization_id: UUID;
+  invoice_id: UUID;
+  amount: string;
+  currency: string;
+  method: string;
+  external_reference: string | null;
+  received_at: string;
+  notes: string | null;
+};
+
+export type CommercialSummaryRead = {
+  organization_id: UUID;
+  sponsorship_value: string;
+  fundraising_goal: string;
+  fundraising_raised: string;
+  ticket_revenue: string;
+  invoice_outstanding: string;
+  active_sponsors: number;
+  active_campaigns: number;
+  tickets_sold: number;
+  tickets_checked_in: number;
 };
 
 export type ActivityConsentRead = {

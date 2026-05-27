@@ -17,6 +17,7 @@ import type {
   AttendanceSeedRead,
   AttendanceStatus,
   ChannelPreference,
+  CommercialSummaryRead,
   CommunicationChannel,
   CommunicationMessageRead,
   CommunicationMessageType,
@@ -29,15 +30,19 @@ import type {
   CompetitionStandingRead,
   CompetitionType,
   ConsentRequestRead,
+  DonationRead,
   EventRead,
   EventType,
   EquipmentCheckoutRead,
   EquipmentItemRead,
-  FixtureMatchEventRead,
   FacilityBookingRead,
   FacilityRead,
   FacilityType,
+  FinanceInvoiceRead,
+  FinancePaymentRead,
+  FixtureMatchEventRead,
   FixtureOfficialAssignmentRead,
+  FundraisingCampaignRead,
   GuardianRelationshipRead,
   LocalIdentity,
   MatchEventType,
@@ -54,6 +59,8 @@ import type {
   PerformanceObservationRead,
   NotificationFrequency,
   NotificationPreferenceRead,
+  SponsorRead,
+  SponsorshipAgreementRead,
   SportFormat,
   TeamRead,
   TeamRosterEntryRead,
@@ -62,6 +69,9 @@ import type {
   TrainingPlanItemRead,
   TrainingPlanRead,
   TrainingSessionPlanRead,
+  TicketOrderRead,
+  TicketProductRead,
+  TicketRead,
   WorkOrderPriority,
   WorkOrderStatus,
   MaintenanceWorkOrderRead
@@ -120,6 +130,16 @@ export default function HomePage() {
   const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [assetSummary, setAssetSummary] = useState<AssetSummaryRead | null>(null);
+  const [sponsors, setSponsors] = useState<SponsorRead[]>([]);
+  const [sponsorships, setSponsorships] = useState<SponsorshipAgreementRead[]>([]);
+  const [campaigns, setCampaigns] = useState<FundraisingCampaignRead[]>([]);
+  const [donations, setDonations] = useState<DonationRead[]>([]);
+  const [ticketProducts, setTicketProducts] = useState<TicketProductRead[]>([]);
+  const [ticketOrders, setTicketOrders] = useState<TicketOrderRead[]>([]);
+  const [tickets, setTickets] = useState<TicketRead[]>([]);
+  const [invoices, setInvoices] = useState<FinanceInvoiceRead[]>([]);
+  const [payments, setPayments] = useState<FinancePaymentRead[]>([]);
+  const [commercialSummary, setCommercialSummary] = useState<CommercialSummaryRead | null>(null);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -137,6 +157,11 @@ export default function HomePage() {
   const [selectedEquipmentId, setSelectedEquipmentId] = useState("");
   const [selectedCheckoutId, setSelectedCheckoutId] = useState("");
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState("");
+  const [selectedSponsorId, setSelectedSponsorId] = useState("");
+  const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [selectedTicketProductId, setSelectedTicketProductId] = useState("");
+  const [selectedTicketId, setSelectedTicketId] = useState("");
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -355,6 +380,45 @@ export default function HomePage() {
     deposit_required: 50,
     insurance_certificate_ref: "CERT-2026",
     special_requirements: "Goals, corner flags, and first-aid kit."
+  });
+  const [sponsorForm, setSponsorForm] = useState({
+    name: "Sportswear Co.",
+    industry: "Sports apparel",
+    contact_name: "Sponsor Lead",
+    contact_email: "sponsor@example.com",
+    agreement_name: "Season development partner",
+    tier: "Gold",
+    value_amount: 10000,
+    deliverables: "Logo on kits, matchday signage, branded challenge, coupon code.",
+    activation_notes: "Launch branded first-touch challenge for U17 athletes."
+  });
+  const [campaignForm, setCampaignForm] = useState({
+    name: "New Training Facility",
+    purpose: "Equipment upgrades and scholarship access",
+    goal_amount: 15000,
+    donor_name: "Community Donor",
+    donor_email: "donor@example.com",
+    donation_amount: 250,
+    message: "Supporting the next generation."
+  });
+  const [ticketForm, setTicketForm] = useState({
+    name: "General admission",
+    price: 5,
+    capacity: 500,
+    access_zone: "Main gate",
+    buyer_name: "Ticket Buyer",
+    buyer_email: "buyer@example.com",
+    quantity: 2,
+    gate: "Gate A"
+  });
+  const [invoiceForm, setInvoiceForm] = useState({
+    invoice_number: "INV-2026-001",
+    title: "Season membership fees",
+    amount_due: 500,
+    due_on: "2026-06-30",
+    memo: "Membership, facility, and program participation.",
+    payment_amount: 250,
+    method: "card"
   });
 
   const selectedOrganization = useMemo(
@@ -596,6 +660,48 @@ export default function HomePage() {
     );
   }, []);
 
+  const loadCommercial = useCallback(async (organizationId: string) => {
+    const [
+      sponsorData,
+      sponsorshipData,
+      campaignData,
+      ticketProductData,
+      ticketData,
+      invoiceData,
+      summaryData
+    ] = await Promise.all([
+      apiRequest<SponsorRead[]>(`/commercial/sponsors?organization_id=${organizationId}`),
+      apiRequest<SponsorshipAgreementRead[]>(`/commercial/sponsorships?organization_id=${organizationId}`),
+      apiRequest<FundraisingCampaignRead[]>(`/commercial/campaigns?organization_id=${organizationId}`),
+      apiRequest<TicketProductRead[]>(`/commercial/tickets/products?organization_id=${organizationId}`),
+      apiRequest<TicketRead[]>(`/commercial/tickets?organization_id=${organizationId}`),
+      apiRequest<FinanceInvoiceRead[]>(`/commercial/invoices?organization_id=${organizationId}`),
+      apiRequest<CommercialSummaryRead>(`/commercial/summary?organization_id=${organizationId}`)
+    ]);
+    setSponsors(sponsorData);
+    setSponsorships(sponsorshipData);
+    setCampaigns(campaignData);
+    setTicketProducts(ticketProductData);
+    setTickets(ticketData);
+    setInvoices(invoiceData);
+    setCommercialSummary(summaryData);
+    setSelectedSponsorId((current) =>
+      sponsorData.some((sponsor) => sponsor.id === current) ? current : sponsorData[0]?.id ?? ""
+    );
+    setSelectedCampaignId((current) =>
+      campaignData.some((campaign) => campaign.id === current) ? current : campaignData[0]?.id ?? ""
+    );
+    setSelectedTicketProductId((current) =>
+      ticketProductData.some((product) => product.id === current) ? current : ticketProductData[0]?.id ?? ""
+    );
+    setSelectedTicketId((current) =>
+      ticketData.some((ticket) => ticket.id === current) ? current : ticketData[0]?.id ?? ""
+    );
+    setSelectedInvoiceId((current) =>
+      invoiceData.some((invoice) => invoice.id === current) ? current : invoiceData[0]?.id ?? ""
+    );
+  }, []);
+
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.localIdentity");
     if (stored) {
@@ -635,6 +741,16 @@ export default function HomePage() {
       setWorkOrders([]);
       setFacilityBookings([]);
       setAssetSummary(null);
+      setSponsors([]);
+      setSponsorships([]);
+      setCampaigns([]);
+      setDonations([]);
+      setTicketProducts([]);
+      setTicketOrders([]);
+      setTickets([]);
+      setInvoices([]);
+      setPayments([]);
+      setCommercialSummary(null);
       return;
     }
     runAction("load-tenant-data", async () => {
@@ -647,6 +763,7 @@ export default function HomePage() {
       await loadCompetitions(selectedOrganizationId);
       await loadCommunications(selectedOrganizationId);
       await loadAssets(selectedOrganizationId);
+      await loadCommercial(selectedOrganizationId);
     }, () => addLog("Organization workspace loaded", "good"));
   }, [
     selectedOrganizationId,
@@ -659,6 +776,7 @@ export default function HomePage() {
     loadCompetitions,
     loadCommunications,
     loadAssets,
+    loadCommercial,
     runAction,
     addLog
   ]);
@@ -1870,6 +1988,211 @@ export default function HomePage() {
     );
   };
 
+  const createSponsorAndAgreement = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-sponsorship",
+      async () => {
+        const sponsor = await apiRequest<SponsorRead>("/commercial/sponsors", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: sponsorForm.name,
+            industry: sponsorForm.industry,
+            contact_name: sponsorForm.contact_name,
+            contact_email: sponsorForm.contact_email
+          }
+        });
+        const agreement = await apiRequest<SponsorshipAgreementRead>("/commercial/sponsorships", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sponsor_id: sponsor.id,
+            event_id: selectedEventId || null,
+            name: sponsorForm.agreement_name,
+            tier: sponsorForm.tier,
+            value_amount: String(sponsorForm.value_amount),
+            deliverables: sponsorForm.deliverables,
+            activation_notes: sponsorForm.activation_notes,
+            roi_notes: "Track reach, ticket conversion, athlete challenge completions, and coupon use."
+          }
+        });
+        return { sponsor, agreement };
+      },
+      ({ sponsor, agreement }) => {
+        setSponsors((current) => [sponsor, ...current.filter((item) => item.id !== sponsor.id)]);
+        setSponsorships((current) => [
+          agreement,
+          ...current.filter((item) => item.id !== agreement.id)
+        ]);
+        setSelectedSponsorId(sponsor.id);
+        addLog(`${sponsor.name} sponsorship activated`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createCampaignAndDonation = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-campaign-donation",
+      async () => {
+        const campaign = await apiRequest<FundraisingCampaignRead>("/commercial/campaigns", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            name: campaignForm.name,
+            purpose: campaignForm.purpose,
+            goal_amount: String(campaignForm.goal_amount),
+            public_url: `https://${organizationForm.subdomain}.afrolete.local/fundraising`
+          }
+        });
+        const donation = await apiRequest<DonationRead>("/commercial/donations", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            campaign_id: campaign.id,
+            donor_name: campaignForm.donor_name,
+            donor_email: campaignForm.donor_email,
+            amount: String(campaignForm.donation_amount),
+            external_reference: `DON-${Date.now()}`,
+            message: campaignForm.message
+          }
+        });
+        return { campaign, donation };
+      },
+      ({ campaign, donation }) => {
+        setCampaigns((current) => [campaign, ...current.filter((item) => item.id !== campaign.id)]);
+        setDonations((current) => [donation, ...current.filter((item) => item.id !== donation.id)]);
+        setSelectedCampaignId(campaign.id);
+        addLog(`${donation.donor_name} donated ${donation.amount}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createTicketSale = () => {
+    if (!selectedOrganizationId || !selectedEventId) {
+      addLog("Select an event first", "bad");
+      return;
+    }
+    runAction(
+      "create-ticket-sale",
+      async () => {
+        const product = await apiRequest<TicketProductRead>("/commercial/tickets/products", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            event_id: selectedEventId,
+            name: ticketForm.name,
+            price: String(ticketForm.price),
+            capacity: ticketForm.capacity,
+            access_zone: ticketForm.access_zone
+          }
+        });
+        const order = await apiRequest<TicketOrderRead>("/commercial/tickets/orders", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            ticket_product_id: product.id,
+            buyer_name: ticketForm.buyer_name,
+            buyer_email: ticketForm.buyer_email,
+            quantity: ticketForm.quantity,
+            external_payment_reference: `PAY-${Date.now()}`
+          }
+        });
+        return { product, order };
+      },
+      ({ product, order }) => {
+        setTicketProducts((current) => [product, ...current.filter((item) => item.id !== product.id)]);
+        setTicketOrders((current) => [order, ...current.filter((item) => item.id !== order.id)]);
+        setSelectedTicketProductId(product.id);
+        addLog(`${order.quantity} ticket(s) sold`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const checkInSelectedTicket = () => {
+    if (!selectedTicketId || !selectedOrganizationId) {
+      addLog("Sell or select a ticket first", "bad");
+      return;
+    }
+    runAction(
+      "check-in-ticket",
+      () =>
+        apiRequest<TicketRead>(`/commercial/tickets/${selectedTicketId}/check-in`, {
+          method: "PATCH",
+          identity,
+          body: { gate: ticketForm.gate }
+        }),
+      (ticket) => {
+        setTickets((current) => [ticket, ...current.filter((item) => item.id !== ticket.id)]);
+        addLog(`Ticket checked in at ${ticket.gate ?? "gate"}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createInvoiceAndPayment = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-invoice-payment",
+      async () => {
+        const invoice = await apiRequest<FinanceInvoiceRead>("/commercial/invoices", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            sponsor_id: selectedSponsorId || null,
+            invoice_number: invoiceForm.invoice_number,
+            title: invoiceForm.title,
+            amount_due: String(invoiceForm.amount_due),
+            due_on: invoiceForm.due_on,
+            memo: invoiceForm.memo
+          }
+        });
+        const payment = await apiRequest<FinancePaymentRead>("/commercial/payments", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            invoice_id: invoice.id,
+            amount: String(invoiceForm.payment_amount),
+            method: invoiceForm.method,
+            external_reference: `RCPT-${Date.now()}`,
+            notes: "Recorded from the operations console."
+          }
+        });
+        return { invoice, payment };
+      },
+      ({ invoice, payment }) => {
+        setInvoices((current) => [invoice, ...current.filter((item) => item.id !== invoice.id)]);
+        setPayments((current) => [payment, ...current.filter((item) => item.id !== payment.id)]);
+        setSelectedInvoiceId(invoice.id);
+        addLog(`Payment recorded: ${payment.amount}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -1890,6 +2213,7 @@ export default function HomePage() {
           <a href="#roster">Roster</a>
           <a href="#events">Events</a>
           <a href="#assets">Assets</a>
+          <a href="#commercial">Commerce</a>
           <a href="#competition">Competition</a>
           <a href="#communications">Comms</a>
           <a href="#performance">Performance</a>
@@ -1958,6 +2282,10 @@ export default function HomePage() {
             <div className="stat-row">
               <span>Assets</span>
               <strong>{assetSummary?.equipment_items ?? 0}</strong>
+            </div>
+            <div className="stat-row">
+              <span>Revenue</span>
+              <strong>{commercialSummary?.tickets_sold ?? 0}</strong>
             </div>
             <div className="stat-row">
               <span>Attendance</span>
@@ -2522,6 +2850,185 @@ export default function HomePage() {
                   <span>Safety-related work orders stay visible until completed with cost and notes.</span>
                 </div>
               </article>
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid" id="commercial">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Commercial</p>
+                <h2>Sponsorship and fundraising</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createSponsorAndAgreement} disabled={busyAction !== null}>Sponsor</button>
+                <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{commercialSummary?.fundraising_raised ?? "0.00"}</strong>
+              <span>Raised</span>
+              <small>{commercialSummary ? `${commercialSummary.active_sponsors} sponsors · ${commercialSummary.sponsorship_value} committed` : "No commercial summary"}</small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Sponsor
+                <input value={sponsorForm.name} onChange={(event) => setSponsorForm({ ...sponsorForm, name: event.target.value })} />
+              </label>
+              <label>
+                Tier
+                <input value={sponsorForm.tier} onChange={(event) => setSponsorForm({ ...sponsorForm, tier: event.target.value })} />
+              </label>
+              <label>
+                Value
+                <input type="number" min="0" value={sponsorForm.value_amount} onChange={(event) => setSponsorForm({ ...sponsorForm, value_amount: Number(event.target.value) })} />
+              </label>
+              <label>
+                Contact
+                <input value={sponsorForm.contact_email} onChange={(event) => setSponsorForm({ ...sponsorForm, contact_email: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Deliverables
+                <input value={sponsorForm.deliverables} onChange={(event) => setSponsorForm({ ...sponsorForm, deliverables: event.target.value })} />
+              </label>
+              <label>
+                Campaign
+                <input value={campaignForm.name} onChange={(event) => setCampaignForm({ ...campaignForm, name: event.target.value })} />
+              </label>
+              <label>
+                Goal
+                <input type="number" min="0" value={campaignForm.goal_amount} onChange={(event) => setCampaignForm({ ...campaignForm, goal_amount: Number(event.target.value) })} />
+              </label>
+              <label>
+                Donor
+                <input value={campaignForm.donor_name} onChange={(event) => setCampaignForm({ ...campaignForm, donor_name: event.target.value })} />
+              </label>
+              <label>
+                Amount
+                <input type="number" min="1" value={campaignForm.donation_amount} onChange={(event) => setCampaignForm({ ...campaignForm, donation_amount: Number(event.target.value) })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {sponsorships.slice(0, 3).map((agreement) => (
+                <article key={agreement.id} className="task-card">
+                  <div>
+                    <strong>{agreement.name}</strong>
+                    <span>{agreement.tier} · {agreement.value_amount} · {agreement.status}</span>
+                  </div>
+                </article>
+              ))}
+              {campaigns.slice(0, 3).map((campaign) => (
+                <button
+                  type="button"
+                  key={campaign.id}
+                  className={`task-card ${campaign.id === selectedCampaignId ? "selected" : ""}`}
+                  onClick={() => setSelectedCampaignId(campaign.id)}
+                >
+                  <div>
+                    <strong>{campaign.name}</strong>
+                    <span>{campaign.raised_amount}/{campaign.goal_amount} · {campaign.status}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Ticketing and finance</p>
+                <h2>Access, invoices, and payment</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createTicketSale} disabled={busyAction !== null}>Ticket</button>
+                <button type="button" onClick={checkInSelectedTicket} disabled={busyAction !== null}>Scan</button>
+                <button type="button" onClick={createInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
+              </div>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Ticket revenue</span>
+                <strong>{commercialSummary?.ticket_revenue ?? "0.00"}</strong>
+              </div>
+              <div>
+                <span className="muted">Sold</span>
+                <strong>{commercialSummary?.tickets_sold ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Checked in</span>
+                <strong>{commercialSummary?.tickets_checked_in ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Outstanding</span>
+                <strong>{commercialSummary?.invoice_outstanding ?? "0.00"}</strong>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Ticket
+                <input value={ticketForm.name} onChange={(event) => setTicketForm({ ...ticketForm, name: event.target.value })} />
+              </label>
+              <label>
+                Price
+                <input type="number" min="0" value={ticketForm.price} onChange={(event) => setTicketForm({ ...ticketForm, price: Number(event.target.value) })} />
+              </label>
+              <label>
+                Capacity
+                <input type="number" min="1" value={ticketForm.capacity} onChange={(event) => setTicketForm({ ...ticketForm, capacity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Buyer
+                <input value={ticketForm.buyer_email} onChange={(event) => setTicketForm({ ...ticketForm, buyer_email: event.target.value })} />
+              </label>
+              <label>
+                Quantity
+                <input type="number" min="1" value={ticketForm.quantity} onChange={(event) => setTicketForm({ ...ticketForm, quantity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Gate
+                <input value={ticketForm.gate} onChange={(event) => setTicketForm({ ...ticketForm, gate: event.target.value })} />
+              </label>
+              <label>
+                Invoice
+                <input value={invoiceForm.invoice_number} onChange={(event) => setInvoiceForm({ ...invoiceForm, invoice_number: event.target.value })} />
+              </label>
+              <label>
+                Due
+                <input type="number" min="0" value={invoiceForm.amount_due} onChange={(event) => setInvoiceForm({ ...invoiceForm, amount_due: Number(event.target.value) })} />
+              </label>
+              <label>
+                Payment
+                <input type="number" min="0" value={invoiceForm.payment_amount} onChange={(event) => setInvoiceForm({ ...invoiceForm, payment_amount: Number(event.target.value) })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {tickets.slice(0, 3).map((ticket) => (
+                <button
+                  type="button"
+                  key={ticket.id}
+                  className={`task-card ${ticket.id === selectedTicketId ? "selected" : ""}`}
+                  onClick={() => setSelectedTicketId(ticket.id)}
+                >
+                  <div>
+                    <strong>{ticket.status} · {ticket.qr_token.slice(0, 12)}</strong>
+                    <span>{ticket.gate ?? "No gate"} · {ticket.checked_in_at ? new Date(ticket.checked_in_at).toLocaleString() : "Not scanned"}</span>
+                  </div>
+                </button>
+              ))}
+              {invoices.slice(0, 3).map((invoice) => (
+                <button
+                  type="button"
+                  key={invoice.id}
+                  className={`task-card ${invoice.id === selectedInvoiceId ? "selected" : ""}`}
+                  onClick={() => setSelectedInvoiceId(invoice.id)}
+                >
+                  <div>
+                    <strong>{invoice.invoice_number}</strong>
+                    <span>{invoice.amount_paid}/{invoice.amount_due} · {invoice.status}</span>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
         </section>

@@ -9,6 +9,17 @@ from app.models.assets import (  # noqa: F401,E402
     FacilityBooking,
     MaintenanceWorkOrder,
 )
+from app.models.commercial import (  # noqa: F401,E402
+    Donation,
+    FinanceInvoice,
+    FinancePayment,
+    FundraisingCampaign,
+    Sponsor,
+    SponsorshipAgreement,
+    Ticket,
+    TicketOrder,
+    TicketProduct,
+)
 from app.models.communication import (  # noqa: F401,E402
     CommunicationMessage,
     CommunicationTemplate,

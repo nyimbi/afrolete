@@ -250,6 +250,25 @@ athlete-development platform:
     typecheck`, `pnpm --filter @afrolete/frontend build`, production
     Playwright screenshot at
     `/private/tmp/afrolete-assets-console-viewport.png`.
+- Implemented slice 015 commercial operations fast surface:
+  - Added sponsors with industry, contacts, websites, brand assets, and notes.
+  - Added sponsorship agreements with event linkage, tiers, value, currency,
+    dates, deliverables, activation notes, ROI notes, and lifecycle status.
+  - Added fundraising campaigns and donations with goals, raised totals,
+    donor records, external references, messages, and automatic campaign
+    completion when the goal is met.
+  - Added ticket products, paid ticket orders, issued QR-token tickets, and
+    ticket check-in with gate and timestamp.
+  - Added finance invoices and payments with partial/paid status tracking.
+  - Added a commercial summary endpoint for sponsorship value, fundraising
+    goals/raised totals, ticket revenue, invoice outstanding, sponsors,
+    campaigns, tickets sold, and tickets checked in.
+  - Added the Commerce console lane for sponsorship activation, fundraising
+    donation capture, ticket sale/check-in, invoice/payment capture, and
+    commercial summary review.
+  - Verification: `uv run ruff check .`, PostgreSQL `alembic upgrade head`,
+    `pnpm --filter @afrolete/frontend typecheck`. Full test/build/screenshot
+    verification deferred by user instruction during low-battery fast delivery.
 
 ## Implementation Slices
 
@@ -270,6 +289,7 @@ athlete-development platform:
 | 012 - Competition management foundation | Partial | Backend tests 36/36; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Competition records, team registration, fixtures, official assignments, match events, result confirmation, computed standings, and console workflows are implemented; automated fixture generation, bracket visualization, conflict optimization, ticketing, and broadcast operations remain. |
 | 013 - Communications and notifications | Partial | Backend tests 39/39; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Templates, scoped broadcasts, recipient expansion, delivery/read audit records, preferences, quiet hours, emergency override, guardian copy for minors, and console workflows are implemented; live transport adapters, digest jobs, and parent inbox remain. |
 | 014 - Equipment, facilities, and asset operations | Partial | Backend tests 42/42; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Facility profiles, equipment inventory, checkout/return, maintenance work orders, facility bookings, overlap rejection, asset summary metrics, and console workflows are implemented; procurement, supplier scoring, RFID scanning, photo uploads, lease billing, and AI optimization remain. |
+| 015 - Commercial operations fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, commercial summary, and console workflows are implemented; payment gateway settlement, refunds, tax, accounting exports, sponsorship dashboards, and full verification remain. |
 
 ## Capability Coverage
 
@@ -293,11 +313,11 @@ Status values:
 | Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, delivery/read audit records, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; live email/SMS/WhatsApp/push adapters remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, and console workflows are implemented; procurement, supplier scoring, RFID scanning, photo upload, lease billing, and AI utilization optimization remain. |
-| Finance, sponsorship, fundraising, ticketing | not-started | Future slice. |
+| Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, commercial summary, and console workflows are implemented; payment gateway settlement, refunds, tax, accounting exports, sponsorship dashboards, and full verification remain. |
 | Reports and intelligence | not-started | Future slice. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation and SpiceDB gRPC authorization adapter are implemented; other integrations remain future slices. |
 | SaaS billing/subscriptions | not-started | Future slice. |
-| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
+| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, commerce, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
 
 ## Next Actions
 
@@ -309,11 +329,13 @@ Status values:
    drafting.
 4. Add procurement, supplier scoring, RFID/barcode scan flows, photo uploads,
    lease billing, and AI utilization recommendations for assets and facilities.
-5. Add automated fixture generation, bracket visualization, and scheduling
+5. Add payment gateway settlement, refunds, tax handling, accounting exports,
+   sponsorship dashboards, and commercial reporting verification.
+6. Add automated fixture generation, bracket visualization, and scheduling
    conflict checks for leagues and tournaments.
-6. Add automated training-plan generation from performance trends, readiness,
+7. Add automated training-plan generation from performance trends, readiness,
    upcoming competitions, and availability constraints.
-7. Add automated ingestion pipelines for video, audio narration, text
+8. Add automated ingestion pipelines for video, audio narration, text
    evaluation, wearable feeds, and agent-extracted metric review.
 6. Add real AI execution workers, model/provider configuration, and AI
    governance telemetry.
