@@ -61,6 +61,15 @@ athlete-development platform:
     API routes.
   - Verification: `uv run ruff check .`, `uv run pytest`,
     `pnpm --filter @afrolete/frontend typecheck`.
+- Implemented slice 003 database migration baseline:
+  - Added Alembic migration template and initial schema revision for the
+    current identity, organization, committee, team, roster, event, attendance,
+    and AI-agent tables.
+  - Normalized SQLAlchemy enum persistence to use public lowercase API values
+    before the baseline migration.
+  - Added local SQLite database artifacts to `.gitignore`.
+  - Verification: `uv run alembic upgrade head`,
+    `uv run alembic downgrade base`, `uv run ruff check .`, `uv run pytest`.
 
 ## Implementation Slices
 
@@ -69,6 +78,7 @@ athlete-development platform:
 | 000 - Fresh V2 repository | Complete | Commit `d723d61`; commit `0affab9` | Repo initialized, README charter pushed. |
 | 001 - Executable SaaS foundation | Complete | Slice 001 foundation commit | Backend/frontend/infra starter code added and verified. |
 | 002 - Identity, tenant, and authorization vertical | Partial | Backend tests 11/11 | Tenant graph, local identity bridge, authz boundary, organization APIs, team APIs, and committee APIs implemented; production Keycloak/SpiceDB adapters and migrations remain. |
+| 003 - Database migration baseline | Complete | Alembic upgrade/downgrade; backend tests 11/11 | Baseline revision captures the current schema; production execution against `db.lindela.io` remains a deployment task. |
 
 ## Capability Coverage
 
@@ -100,11 +110,12 @@ Status values:
 
 ## Next Actions
 
-1. Commit and push slice 002 tenant graph foundation.
-2. Add Alembic baseline migration for the current schema.
-3. Replace local/test identity bridge with Keycloak token validation and user
+1. Commit and push slice 003 database migration baseline.
+2. Replace local/test identity bridge with Keycloak token validation and user
    provisioning rules.
-4. Replace in-memory authorization with a live SpiceDB client adapter and
+3. Replace in-memory authorization with a live SpiceDB client adapter and
    relationship writer.
-5. Continue the operating vertical into event scheduling, attendance, and
+4. Continue the operating vertical into event scheduling, attendance, and
    athlete profile workflows.
+5. Create deployment runbooks for creating/applying the `afrolete` database and
+   role on `db.lindela.io`.

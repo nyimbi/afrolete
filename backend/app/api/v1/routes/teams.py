@@ -98,7 +98,9 @@ async def create_team_committee_route(
     db: AsyncSession = Depends(get_db),
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> TeamCommitteeRead:
-    return to_team_committee_read(await create_team_committee(db, identity, team_id, payload, authz))
+    return to_team_committee_read(
+        await create_team_committee(db, identity, team_id, payload, authz)
+    )
 
 
 @router.post(

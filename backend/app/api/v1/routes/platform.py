@@ -36,4 +36,3 @@ async def platform_summary() -> PlatformSummary:
             ),
         ],
     )
-

@@ -1,20 +1,22 @@
 from uuid import UUID
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, GUID, IdMixin, TimestampMixin
+from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
 from app.models.enums import CommitteeRole, RosterStatus, SportFormat, TeamRole
 
 
 class Team(IdMixin, TimestampMixin, Base):
     __tablename__ = "teams"
 
-    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
     name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
     sport: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     sport_format: Mapped[SportFormat] = mapped_column(
-        Enum(SportFormat),
+        enum_type(SportFormat),
         default=SportFormat.TEAM,
         nullable=False,
         index=True,
@@ -28,7 +30,9 @@ class AthleteProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "athlete_profiles"
     __table_args__ = (UniqueConstraint("organization_id", "person_id"),)
 
-    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
     person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     athlete_code: Mapped[str | None] = mapped_column(String(80), index=True)
     dominant_side: Mapped[str | None] = mapped_column(String(40))
@@ -44,12 +48,14 @@ class TeamRosterEntry(IdMixin, TimestampMixin, Base):
     athlete_profile_id: Mapped[UUID] = mapped_column(
         GUID(), ForeignKey("athlete_profiles.id"), index=True
     )
-    role: Mapped[TeamRole] = mapped_column(Enum(TeamRole), default=TeamRole.PLAYER, nullable=False)
+    role: Mapped[TeamRole] = mapped_column(
+        enum_type(TeamRole), default=TeamRole.PLAYER, nullable=False
+    )
     jersey_number: Mapped[str | None] = mapped_column(String(16))
     primary_position: Mapped[str | None] = mapped_column(String(80))
     is_captain: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[RosterStatus] = mapped_column(
-        Enum(RosterStatus),
+        enum_type(RosterStatus),
         default=RosterStatus.ACTIVE,
         nullable=False,
         index=True,
@@ -93,6 +99,8 @@ class TeamCommitteeMembership(IdMixin, TimestampMixin, Base):
         GUID(), ForeignKey("team_committees.id"), index=True
     )
     person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
-    role: Mapped[CommitteeRole] = mapped_column(Enum(CommitteeRole), nullable=False, index=True)
+    role: Mapped[CommitteeRole] = mapped_column(
+        enum_type(CommitteeRole), nullable=False, index=True
+    )
     title: Mapped[str | None] = mapped_column(String(160))
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)

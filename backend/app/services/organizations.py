@@ -9,7 +9,12 @@ from app.models.enums import MemberSubjectType, MembershipRole
 from app.models.identity import Person
 from app.models.organization import Committee, CommitteeMembership, Membership, Organization
 from app.models.team import Team
-from app.schemas.organization import CommitteeCreate, CommitteeMemberAdd, MemberAdd, OrganizationCreate
+from app.schemas.organization import (
+    CommitteeCreate,
+    CommitteeMemberAdd,
+    MemberAdd,
+    OrganizationCreate,
+)
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 
@@ -296,7 +301,9 @@ async def add_committee_member(
             raise HTTPException(status_code=404, detail="Person not found")
     else:
         if not payload.email:
-            raise HTTPException(status_code=422, detail="Committee member requires email or person_id")
+            raise HTTPException(
+                status_code=422, detail="Committee member requires email or person_id"
+            )
         person = await db.scalar(select(Person).where(Person.primary_email == payload.email))
         if person is None:
             person = Person(

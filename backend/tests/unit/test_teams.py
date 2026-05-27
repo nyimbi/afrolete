@@ -1,7 +1,9 @@
 from app.services.authz.service import authorization_service
 
 
-def test_club_can_create_team_and_add_person_member(client, identity_headers, athlete_person) -> None:
+def test_club_can_create_team_and_add_person_member(
+    client, identity_headers, athlete_person
+) -> None:
     organization = client.post(
         "/api/v1/organizations",
         headers=identity_headers,

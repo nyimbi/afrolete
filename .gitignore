@@ -56,4 +56,6 @@ uploads/
 tmp/
 temp/
 *.tmp
-
+*.db
+*.sqlite
+*.sqlite3

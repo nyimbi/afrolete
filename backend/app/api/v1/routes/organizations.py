@@ -61,8 +61,7 @@ async def list_organizations_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[OrganizationRead]:
     return [
-        to_organization_read(item)
-        for item in await list_organizations_for_identity(db, identity)
+        to_organization_read(item) for item in await list_organizations_for_identity(db, identity)
     ]
 
 
@@ -72,9 +71,7 @@ async def get_organization_route(
     identity: CurrentIdentity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
 ) -> OrganizationRead:
-    return to_organization_read(
-        await get_organization_for_identity(db, identity, organization_id)
-    )
+    return to_organization_read(await get_organization_for_identity(db, identity, organization_id))
 
 
 @router.post("/{organization_id}/members", response_model=MembershipRead, status_code=201)
@@ -124,10 +121,14 @@ async def list_committees_route(
     organization_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> list[CommitteeRead]:
-    return [to_committee_read(committee) for committee in await list_committees(db, organization_id)]
+    return [
+        to_committee_read(committee) for committee in await list_committees(db, organization_id)
+    ]
 
 
-@router.post("/committees/{committee_id}/members", response_model=CommitteeMembershipRead, status_code=201)
+@router.post(
+    "/committees/{committee_id}/members", response_model=CommitteeMembershipRead, status_code=201
+)
 async def add_committee_member_route(
     committee_id: UUID,
     payload: CommitteeMemberAdd,

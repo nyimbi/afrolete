@@ -18,4 +18,3 @@ class PlatformSummary(BaseModel):
     product: str
     architecture: str
     capabilities: list[Capability]
-

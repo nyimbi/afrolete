@@ -1,7 +1,9 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, MetaData, func
+from enum import Enum as PyEnum
+
+from sqlalchemy import DateTime, Enum, MetaData, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import CHAR, TypeDecorator
 
@@ -45,6 +47,15 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=convention)
 
 
+def enum_type(enum_cls: type[PyEnum]) -> Enum:
+    return Enum(
+        enum_cls,
+        values_callable=lambda members: [member.value for member in members],
+        native_enum=False,
+        create_constraint=True,
+    )
+
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -61,4 +72,3 @@ class TimestampMixin:
 
 class IdMixin:
     id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=uuid4)
-
