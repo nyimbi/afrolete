@@ -2595,13 +2595,13 @@ export default function HomePage() {
           method: "POST",
           identity,
           body: {
-            format: "csv",
+            format: "pdf",
             ttl_seconds: 3600
           }
         }),
       (link) => {
         setTravelManifestOfflineLink(link);
-        addLog(`Travel manifest signed link ready until ${new Date(link.expires_at).toLocaleTimeString()}`, "good");
+        addLog(`Travel manifest PDF link ready until ${new Date(link.expires_at).toLocaleTimeString()}`, "good");
       }
     );
   };
@@ -7719,7 +7719,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => remindTravelConsents(plan)}>Remind</button>
                     <button type="button" onClick={() => loadTravelManifest(plan)}>Manifest</button>
                     <button type="button" onClick={() => exportTravelManifest(plan)}>Export</button>
-                    <button type="button" onClick={() => createTravelManifestOfflineLink(plan)}>Offline link</button>
+                    <button type="button" onClick={() => createTravelManifestOfflineLink(plan)}>PDF link</button>
                     <button type="button" onClick={() => checkTravelReadiness(plan)}>Gate</button>
                     <button type="button" onClick={() => optimizeTravelRoute(plan)}>Optimize</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>

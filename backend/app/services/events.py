@@ -1,4 +1,5 @@
 import hmac
+import io
 import time
 from base64 import b64decode, urlsafe_b64encode
 from binascii import Error as Base64Error
@@ -684,16 +685,10 @@ async def create_travel_manifest_offline_link(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
     await ensure_manage_event_scope(authz, plan.organization_id, identity)
     selected_settings = settings or get_settings()
-    manifest_export = await export_travel_manifest(
-        db,
-        identity,
-        travel_plan_id,
-        EventTravelManifestExportCreate(format=payload.format),
-        authz,
-    )
-    content = manifest_export.content.encode()
+    manifest = await get_travel_manifest(db, identity, travel_plan_id, authz)
+    filename, content_type, content = travel_manifest_artifact(manifest, payload.format)
     checksum = sha256(content).hexdigest()
-    storage_name = f"{checksum[:16]}-{safe_upload_filename(manifest_export.filename, fallback='travel-manifest')}"
+    storage_name = f"{checksum[:16]}-{safe_upload_filename(filename, fallback='travel-manifest')}"
     relative_path = (Path(str(plan.organization_id)) / str(plan.id) / storage_name).as_posix()
     put_object(
         selected_settings,
@@ -701,7 +696,7 @@ async def create_travel_manifest_offline_link(
         local_url_prefix=selected_settings.travel_manifest_file_url_prefix,
         key=relative_path,
         content=content,
-        content_type=manifest_export.content_type,
+        content_type=content_type,
     )
     ttl_seconds = payload.ttl_seconds or selected_settings.travel_manifest_url_ttl_seconds
     expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
@@ -713,10 +708,10 @@ async def create_travel_manifest_offline_link(
         expires_at,
     )
     return EventTravelManifestOfflineLinkRead(
-        event_id=manifest_export.event_id,
+        event_id=manifest.event_id,
         travel_plan_id=plan.id,
-        filename=manifest_export.filename,
-        content_type=manifest_export.content_type,
+        filename=filename,
+        content_type=content_type,
         size_bytes=len(content),
         checksum=checksum,
         signed_url=signed_url,
@@ -2455,6 +2450,111 @@ def travel_manifest_text(manifest: EventTravelManifestRead) -> str:
     return "\n".join(lines)
 
 
+def travel_manifest_artifact(manifest: EventTravelManifestRead, format_value: str) -> tuple[str, str, bytes]:
+    if format_value == "csv":
+        return (
+            f"travel-manifest-{slugify_filename(manifest.destination)}.csv",
+            "text/csv",
+            travel_manifest_csv(manifest).encode(),
+        )
+    if format_value == "pdf":
+        return (
+            f"travel-manifest-{slugify_filename(manifest.destination)}.pdf",
+            "application/pdf",
+            travel_manifest_pdf(manifest),
+        )
+    return (
+        f"travel-manifest-{slugify_filename(manifest.destination)}.txt",
+        "text/plain",
+        travel_manifest_text(manifest).encode(),
+    )
+
+
+def travel_manifest_pdf(manifest: EventTravelManifestRead) -> bytes:
+    body_lines = travel_manifest_pdf_lines(manifest)
+    chunks = [body_lines[index : index + 44] for index in range(0, len(body_lines), 44)] or [[]]
+    page_objects: list[bytes] = []
+    page_ids: list[int] = []
+    total_pages = len(chunks)
+    for page_index, chunk in enumerate(chunks):
+        page_id = 4 + page_index * 2
+        stream_id = page_id + 1
+        page_ids.append(page_id)
+        page_lines = [
+            f"Travel manifest: {manifest.destination}",
+            f"Page {page_index + 1} of {total_pages}",
+            "",
+            *chunk,
+        ]
+        text_commands = ["BT", "/F1 9 Tf", "54 748 Td"]
+        for line_index, line in enumerate(page_lines):
+            if line_index:
+                text_commands.append("0 -13 Td")
+            text_commands.append(f"({travel_manifest_pdf_escape(line[:112])}) Tj")
+        text_commands.append("ET")
+        stream = "\n".join(text_commands).encode()
+        page_objects.extend(
+            [
+                (
+                    f"{page_id} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                    f"/Resources << /Font << /F1 3 0 R >> >> /Contents {stream_id} 0 R >> endobj\n"
+                ).encode(),
+                (
+                    f"{stream_id} 0 obj << /Length {len(stream)} >> stream\n".encode()
+                    + stream
+                    + b"\nendstream endobj\n"
+                ),
+            ]
+        )
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects = [
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+        f"2 0 obj << /Type /Pages /Kids [{kids}] /Count {total_pages} >> endobj\n".encode(),
+        b"3 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n",
+        *page_objects,
+    ]
+    output = io.BytesIO()
+    output.write(b"%PDF-1.4\n")
+    offsets = [0]
+    for item in objects:
+        offsets.append(output.tell())
+        output.write(item)
+    xref_at = output.tell()
+    output.write(f"xref\n0 {len(objects) + 1}\n".encode())
+    output.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.write(f"{offset:010d} 00000 n \n".encode())
+    output.write(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n".encode()
+    )
+    return output.getvalue()
+
+
+def travel_manifest_pdf_lines(manifest: EventTravelManifestRead) -> list[str]:
+    lines = [
+        f"Participants: {manifest.participant_count}",
+        f"Emergency contacts: {manifest.emergency_contacts or 'not set'}",
+        f"Medical access: {manifest.medical_access_plan or 'not set'}",
+        "",
+        "Participants",
+    ]
+    for participant in manifest.participants:
+        medical_status = participant.medical_clearance_status.value if participant.medical_clearance_status else "not reviewed"
+        lines.extend(
+            [
+                f"- {participant.display_name} ({participant.person_id})",
+                f"  Guardians: {'; '.join(participant.guardian_names) or 'none listed'}",
+                f"  Contacts: {'; '.join(participant.guardian_contacts) or 'none listed'}",
+                f"  Medical: {medical_status} - {participant.medical_clearance_reason}",
+            ]
+        )
+    return lines
+
+
+def travel_manifest_pdf_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
 def signed_travel_manifest_url(
     settings: Settings,
     organization_id: UUID,
@@ -2491,6 +2591,8 @@ def travel_manifest_signing_key(settings: Settings) -> bytes:
 def travel_manifest_content_type(storage_name: str) -> str:
     if storage_name.endswith(".csv"):
         return "text/csv"
+    if storage_name.endswith(".pdf"):
+        return "application/pdf"
     return "text/plain"
 
 

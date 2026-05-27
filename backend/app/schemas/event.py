@@ -246,7 +246,7 @@ class EventTravelManifestExportRead(BaseModel):
 
 
 class EventTravelManifestOfflineLinkCreate(BaseModel):
-    format: str = Field(default="csv", pattern="^(csv|text)$")
+    format: str = Field(default="csv", pattern="^(csv|text|pdf)$")
     ttl_seconds: int | None = Field(default=None, ge=60, le=604800)
 
 
