@@ -207,6 +207,22 @@ class AgentDecisionAppealRead(BaseModel):
     resolved_at: datetime | None
 
 
+class AgentFamilyTaskRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    agent_id: UUID
+    agent_name: str
+    agent_kind: AgentKind
+    task_type: str
+    title: str
+    status: AgentTaskStatus
+    input_ref: str | None
+    output_ref: str | None
+    review_notes: str | None
+    athlete_name: str | None
+    appeal_status: str | None
+
+
 class AgentRunRecordRead(BaseModel):
     id: UUID
     task_id: UUID

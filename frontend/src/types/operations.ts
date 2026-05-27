@@ -2516,6 +2516,22 @@ export type AgentDecisionAppealRead = {
   resolved_at: string | null;
 };
 
+export type AgentFamilyTaskRead = {
+  id: UUID;
+  organization_id: UUID;
+  agent_id: UUID;
+  agent_name: string;
+  agent_kind: AgentKind;
+  task_type: string;
+  title: string;
+  status: AgentTaskStatus;
+  input_ref: string | null;
+  output_ref: string | null;
+  review_notes: string | null;
+  athlete_name: string | null;
+  appeal_status: string | null;
+};
+
 export type AgentCredentialStatusRead = {
   execution_mode: string;
   default_model: string;

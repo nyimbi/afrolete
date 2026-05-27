@@ -5,6 +5,7 @@ import { apiRequest } from "@/lib/api";
 import type {
   ActivityConsentRead,
   AgentDecisionAppealRead,
+  AgentFamilyTaskRead,
   AttendanceStatus,
   CommunicationInboxItemRead,
   ConsentStatus,
@@ -28,6 +29,7 @@ export default function FamilyPortalPage() {
   const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
   const [consentRequests, setConsentRequests] = useState<FamilyConsentRequestRead[]>([]);
   const [aiAppeals, setAiAppeals] = useState<AgentDecisionAppealRead[]>([]);
+  const [aiTasks, setAiTasks] = useState<AgentFamilyTaskRead[]>([]);
   const [items, setItems] = useState<CommunicationInboxItemRead[]>([]);
   const [appealForm, setAppealForm] = useState({
     task_id: "",
@@ -73,7 +75,7 @@ export default function FamilyPortalPage() {
     setError("");
     try {
       const organizationQuery = encodeURIComponent(organizationId);
-      const [familyRows, eventRows, pendingRequests, appeals, inbox] = await Promise.all([
+      const [familyRows, eventRows, pendingRequests, appeals, aiTaskRows, inbox] = await Promise.all([
         apiRequest<FamilyAthleteSummaryRead[]>(`/safeguarding/my-family?organization_id=${organizationQuery}`, {
           identity
         }),
@@ -87,6 +89,9 @@ export default function FamilyPortalPage() {
         apiRequest<AgentDecisionAppealRead[]>(`/agents/my-appeals?organization_id=${organizationQuery}`, {
           identity
         }),
+        apiRequest<AgentFamilyTaskRead[]>(`/agents/my-family-tasks?organization_id=${organizationQuery}`, {
+          identity
+        }),
         apiRequest<CommunicationInboxItemRead[]>(`/communications/my-inbox?organization_id=${organizationQuery}`, {
           identity
         })
@@ -94,6 +99,7 @@ export default function FamilyPortalPage() {
       setFamily(familyRows);
       setEvents(eventRows);
       setConsentRequests(pendingRequests);
+      setAiTasks(aiTaskRows);
       setAiAppeals(appeals);
       setItems(inbox);
       setSelectedRecipientId((current) =>
@@ -357,12 +363,18 @@ export default function FamilyPortalPage() {
           </div>
           <form onSubmit={submitAiAppeal}>
             <label>
-              Agent task id
-              <input
+              Agent task
+              <select
                 value={appealForm.task_id}
                 onChange={(event) => setAppealForm({ ...appealForm, task_id: event.target.value })}
-                placeholder="Task UUID from a recommendation"
-              />
+              >
+                <option value="">Select an AI recommendation</option>
+                {aiTasks.map((task) => (
+                  <option value={task.id} key={task.id}>
+                    {task.title} · {task.athlete_name ?? task.agent_name} · {task.status}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Question
@@ -373,6 +385,16 @@ export default function FamilyPortalPage() {
             </label>
             <button type="submit" disabled={busy}>Submit appeal</button>
           </form>
+          <div className="family-appeal-list">
+            {aiTasks.slice(0, 4).map((task) => (
+              <article key={task.id}>
+                <strong>{task.title} · {task.status}</strong>
+                <span>{task.athlete_name ?? "Linked family"} · {task.agent_name} · {task.task_type}</span>
+                <small>{task.appeal_status ? `Appeal ${task.appeal_status}` : task.review_notes ?? "No appeal opened"}</small>
+              </article>
+            ))}
+            {aiTasks.length === 0 ? <span>No linked AI recommendations yet</span> : null}
+          </div>
           <div className="family-appeal-list">
             {aiAppeals.slice(0, 4).map((appeal) => (
               <article key={appeal.id}>

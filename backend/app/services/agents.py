@@ -7,7 +7,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -22,8 +22,9 @@ from app.models.agent import (
 )
 from app.models.enums import AgentTaskStatus
 from app.models.event import Event
+from app.models.identity import Person
 from app.models.organization import Organization
-from app.models.team import AthleteProfile, Team
+from app.models.team import AthleteProfile, GuardianRelationship, Team
 from app.schemas.agent import (
     AgentAssignmentCreate,
     AgentBiasAuditCreate,
@@ -174,6 +175,75 @@ async def list_my_agent_decision_appeals(
     )
 
 
+async def list_my_agent_family_tasks(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> list[dict[str, object]]:
+    athlete_names, profile_ids, person_ids = await linked_family_athlete_refs(db, identity, organization_id)
+    if not profile_ids and not person_ids:
+        return []
+
+    profile_ref_values = [f"athlete_profile:{profile_id}" for profile_id in profile_ids]
+    person_ref_values = [f"athlete:{person_id}" for person_id in person_ids]
+    assigned_agent_ids = list(
+        (
+            await db.scalars(
+                select(AgentAssignment.agent_id)
+                .where(AgentAssignment.organization_id == organization_id)
+                .where(AgentAssignment.scope_type == "athlete_profile")
+                .where(AgentAssignment.scope_id.in_([str(profile_id) for profile_id in profile_ids]))
+            )
+        ).all()
+    )
+    conditions = [AgentTask.input_ref.in_([*profile_ref_values, *person_ref_values])]
+    if assigned_agent_ids:
+        conditions.append(AgentTask.agent_id.in_(assigned_agent_ids))
+    rows = (
+        await db.execute(
+            select(AgentTask, Agent)
+            .join(Agent, Agent.id == AgentTask.agent_id)
+            .where(AgentTask.organization_id == organization_id)
+            .where(or_(*conditions))
+            .order_by(AgentTask.created_at.desc())
+            .limit(20)
+        )
+    ).all()
+
+    task_ids = [task.id for task, _ in rows]
+    appeal_status_by_task: dict[UUID, str] = {}
+    if task_ids:
+        appeals = (
+            await db.scalars(
+                select(AgentDecisionAppeal)
+                .where(AgentDecisionAppeal.submitted_by_person_id == identity.person_id)
+                .where(AgentDecisionAppeal.task_id.in_(task_ids))
+                .order_by(AgentDecisionAppeal.created_at.desc())
+            )
+        ).all()
+        for appeal in appeals:
+            appeal_status_by_task.setdefault(appeal.task_id, appeal.status)
+
+    return [
+        {
+            "id": task.id,
+            "organization_id": task.organization_id,
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "agent_kind": agent.kind,
+            "task_type": task.task_type,
+            "title": task.title,
+            "status": task.status,
+            "input_ref": task.input_ref,
+            "output_ref": task.output_ref,
+            "review_notes": task.review_notes,
+            "athlete_name": athlete_name_for_task_ref(task.input_ref, athlete_names),
+            "appeal_status": appeal_status_by_task.get(task.id),
+        }
+        for task, agent in rows
+    ]
+
+
 async def submit_agent_decision_appeal(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -198,6 +268,9 @@ async def submit_my_agent_decision_appeal(
     task = await db.get(AgentTask, payload.task_id)
     if task is None or task.organization_id != payload.organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+    visible_tasks = await list_my_agent_family_tasks(db, identity, payload.organization_id)
+    if task.id not in {item["id"] for item in visible_tasks}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Agent task is not linked to this family")
     return await create_agent_decision_appeal_record(db, identity, task, payload, settings)
 
 
@@ -1347,6 +1420,38 @@ def agent_ethics_improvement_actions(
     if not actions:
         actions.append("Publish the scorecard and keep quarterly fairness monitoring active.")
     return actions
+
+
+async def linked_family_athlete_refs(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> tuple[dict[str, str], list[UUID], list[UUID]]:
+    rows = (
+        await db.execute(
+            select(AthleteProfile, Person)
+            .join(Person, Person.id == AthleteProfile.person_id)
+            .join(GuardianRelationship, GuardianRelationship.athlete_person_id == AthleteProfile.person_id)
+            .where(AthleteProfile.organization_id == organization_id)
+            .where(GuardianRelationship.guardian_person_id == identity.person_id)
+            .order_by(Person.display_name)
+        )
+    ).all()
+    names: dict[str, str] = {}
+    profile_ids: list[UUID] = []
+    person_ids: list[UUID] = []
+    for profile, person in rows:
+        profile_ids.append(profile.id)
+        person_ids.append(profile.person_id)
+        names[f"athlete_profile:{profile.id}"] = person.display_name
+        names[f"athlete:{profile.person_id}"] = person.display_name
+    return names, profile_ids, person_ids
+
+
+def athlete_name_for_task_ref(input_ref: str | None, athlete_names: dict[str, str]) -> str | None:
+    if input_ref is None:
+        return None
+    return athlete_names.get(input_ref)
 
 
 def agent_bias_disparity_score(records: list[AgentRunRecord], registry: AgentModelRegistry) -> float:

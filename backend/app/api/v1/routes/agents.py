@@ -13,6 +13,7 @@ from app.schemas.agent import (
     AgentDecisionAppealRead,
     AgentDecisionAppealUpdate,
     AgentEthicalScorecardRead,
+    AgentFamilyTaskRead,
     AgentGovernanceSummaryRead,
     AgentModelRegistryCreate,
     AgentModelRegistryRead,
@@ -45,6 +46,7 @@ from app.services.agents import (
     list_agent_model_registry,
     list_agent_tasks,
     list_agents,
+    list_my_agent_family_tasks,
     list_my_agent_decision_appeals,
     queue_agent_task,
     run_agent_bias_audit,
@@ -228,6 +230,18 @@ async def list_my_agent_decision_appeals_route(
     return [
         to_decision_appeal_read(appeal)
         for appeal in await list_my_agent_decision_appeals(db, identity, organization_id)
+    ]
+
+
+@router.get("/my-family-tasks", response_model=list[AgentFamilyTaskRead])
+async def list_my_agent_family_tasks_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentFamilyTaskRead]:
+    return [
+        AgentFamilyTaskRead(**task)
+        for task in await list_my_agent_family_tasks(db, identity, organization_id)
     ]
 
 
