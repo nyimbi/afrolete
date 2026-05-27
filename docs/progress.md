@@ -476,6 +476,23 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
   - Not tested in this fast slice: full backend test suite, frontend production
     build, Playwright screenshots, and complex tournament bracket advancement.
+- Implemented slice 027 AI training plan generation:
+  - Added an AI-assisted training plan generation endpoint that creates a plan
+    and session blocks from organization/team/athlete scope, readiness score,
+    period, weekly session target, drill library, recent assessments,
+    observations, and upcoming competition fixtures.
+  - Added deterministic focus inference from readiness and lowest assessment
+    dimension, load guidance, recovery protocol, competition tapering, and
+    readiness-aware intensity progression.
+  - Added generated plan response metadata with rationale, load balance,
+    readiness score, next competition date, plan, and generated items.
+  - Extended the operations console with AI Plan controls, readiness/session
+    inputs, and generated-plan rationale cards.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, frontend production
+    build, Playwright screenshots, live model generation, availability
+    calendars, and post-session feedback loops.
 
 ## Implementation Slices
 
@@ -508,6 +525,7 @@ athlete-development platform:
 | 024 - Reporting output intelligence | Partial | Backend ruff; frontend typecheck; diff check | Report artifact rendering metadata, verification scoring, chart-ready summaries, benchmark models, deterministic AI review insights, and console controls are implemented; real binary PDF/Excel generation, report file storage, visual chart rendering, and full verification remain. |
 | 025 - SaaS billing operations | Partial | Backend ruff; frontend typecheck; diff check | SaaS tax quotes, plan-change proration quotes, dunning notice preparation, payment webhook intake, invoice status mutation, and console controls are implemented; webhook signature validation, external dunning delivery, tax filing integrations, and full verification remain. |
 | 026 - Competition automation | Partial | Backend ruff; frontend typecheck; diff check | Round-robin fixture generation, bracket projections, conflict detection, and console controls are implemented; advanced tournament advancement, bracket visualization polish, optimization algorithms, and full verification remain. |
+| 027 - AI training plan generation | Partial | Backend ruff; frontend typecheck; diff check | AI-assisted plan generation from readiness, assessments, observations, drills, and upcoming competition fixtures is implemented with generated blocks and console controls; live model generation, availability calendars, post-session feedback, and full verification remain. |
 
 ## Capability Coverage
 
@@ -526,7 +544,7 @@ Status values:
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
 | Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, and console workflows are implemented. |
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, and console workflows are implemented; live provider workers, model credential vaulting, run history tables, and model governance remain. |
-| Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, and console workflows are implemented; automatic AI generation/readiness/feedback loops remain. |
+| Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, AI-assisted plan generation from readiness/performance/competition context, and console workflows are implemented; live model generation, availability calendars, and post-session feedback loops remain. |
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, round-robin fixture generation, bracket projections, conflict detection, and console workflows are implemented; advanced tournament advancement, bracket visualization polish, optimization algorithms, ticketing, and broadcast operations remain. |
 | Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, digest generation, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, background digest scheduler, and full parent portal remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
@@ -558,8 +576,8 @@ Status values:
 8. Add advanced tournament advancement, bracket visualization polish,
    scheduling optimization algorithms, ticketing, and broadcast operations for
    leagues and tournaments.
-9. Add automated training-plan generation from performance trends, readiness,
-   upcoming competitions, and availability constraints.
+9. Add live-model training-plan generation, availability calendars, readiness
+   check-ins, and post-session feedback loops.
 10. Add automated ingestion pipelines for video, audio narration, text
    evaluation, wearable feeds, and agent-extracted metric review.
 11. Add live AI provider workers, credential vaulting, run history tables, and

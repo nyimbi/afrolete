@@ -1155,6 +1155,15 @@ export type TrainingPlanItemRead = {
   notes: string | null;
 };
 
+export type GeneratedTrainingPlanRead = {
+  plan: TrainingPlanRead;
+  items: TrainingPlanItemRead[];
+  readiness_score: number;
+  rationale: string;
+  load_balance: string;
+  next_competition_at: string | null;
+};
+
 export type TrainingSessionPlanRead = {
   id: UUID;
   organization_id: UUID;

@@ -70,6 +70,7 @@ import type {
   FixtureMatchEventRead,
   FixtureOfficialAssignmentRead,
   FundraisingCampaignRead,
+  GeneratedTrainingPlanRead,
   GeneratedReportRead,
   GuardianRelationshipRead,
   InsightSeverity,
@@ -169,6 +170,7 @@ export default function HomePage() {
   const [trainingPlans, setTrainingPlans] = useState<TrainingPlanRead[]>([]);
   const [trainingPlanItems, setTrainingPlanItems] = useState<TrainingPlanItemRead[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSessionPlanRead[]>([]);
+  const [generatedTrainingPlan, setGeneratedTrainingPlan] = useState<GeneratedTrainingPlanRead | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionRead[]>([]);
   const [competitionParticipants, setCompetitionParticipants] = useState<CompetitionParticipantRead[]>([]);
   const [competitionFixtures, setCompetitionFixtures] = useState<CompetitionFixtureRead[]>([]);
@@ -355,6 +357,8 @@ export default function HomePage() {
     focus_area: "Scanning and first touch",
     period_start: "2026-06-01",
     period_end: "2026-06-28",
+    readiness_score: 72,
+    weekly_sessions: 3,
     load_guidance: "Keep acute load below 1.3x the four-week baseline.",
     recovery_protocol: "Mobility, hydration, and wellness check after high-intensity days.",
     progress_checkpoints: "Weekly coach review and first-touch score."
@@ -1058,6 +1062,7 @@ export default function HomePage() {
       setTrainingPlans([]);
       setTrainingSessions([]);
       setTrainingPlanItems([]);
+      setGeneratedTrainingPlan(null);
       setCompetitions([]);
       setCompetitionParticipants([]);
       setCompetitionFixtures([]);
@@ -1773,6 +1778,15 @@ export default function HomePage() {
       addLog("Select an organization first", "bad");
       return;
     }
+    const planPayload = {
+      title: trainingPlanForm.title,
+      focus_area: trainingPlanForm.focus_area,
+      period_start: trainingPlanForm.period_start,
+      period_end: trainingPlanForm.period_end,
+      load_guidance: trainingPlanForm.load_guidance,
+      recovery_protocol: trainingPlanForm.recovery_protocol,
+      progress_checkpoints: trainingPlanForm.progress_checkpoints
+    };
     runAction(
       "create-training-plan",
       () =>
@@ -1788,13 +1802,51 @@ export default function HomePage() {
               typeof performanceSummary?.latest_overall_score === "number"
                 ? `Latest ALS ${performanceSummary.latest_overall_score} informs this plan.`
                 : "Plan created from coach inputs.",
-            ...trainingPlanForm
+            ...planPayload
           }
         }),
       (plan) => {
         setTrainingPlans((current) => [plan, ...current.filter((item) => item.id !== plan.id)]);
         setSelectedTrainingPlanId(plan.id);
         addLog(`${plan.title} opened for session planning`, "good");
+      }
+    );
+  };
+
+  const generateTrainingPlan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "generate-training-plan",
+      () =>
+        apiRequest<GeneratedTrainingPlanRead>("/training/plans/generate", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            athlete_profile_id: selectedAthlete?.athleteProfileId ?? null,
+            title: `AI ${trainingPlanForm.focus_area} plan`,
+            focus_area: trainingPlanForm.focus_area,
+            period_start: trainingPlanForm.period_start,
+            period_end: trainingPlanForm.period_end,
+            weekly_sessions: trainingPlanForm.weekly_sessions,
+            readiness_score: trainingPlanForm.readiness_score,
+            upcoming_competition_weight: competitionFixtures.length ? 8 : 5
+          }
+        }),
+      (generated) => {
+        setGeneratedTrainingPlan(generated);
+        setTrainingPlans((current) => [
+          generated.plan,
+          ...current.filter((item) => item.id !== generated.plan.id)
+        ]);
+        setTrainingPlanItems(generated.items);
+        setSelectedTrainingPlanId(generated.plan.id);
+        addLog(`AI generated ${generated.items.length} training sessions`, "good");
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
       }
     );
   };
@@ -5446,6 +5498,7 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createTrainingDrill} disabled={busyAction !== null}>Drill</button>
                 <button type="button" onClick={createTrainingPlan} disabled={busyAction !== null}>Plan</button>
+                <button type="button" onClick={generateTrainingPlan} disabled={busyAction !== null}>AI Plan</button>
                 <button type="button" onClick={addTrainingPlanItem} disabled={busyAction !== null}>Block</button>
               </div>
             </div>
@@ -5490,6 +5543,14 @@ export default function HomePage() {
                 Ends
                 <input type="date" value={trainingPlanForm.period_end} onChange={(event) => setTrainingPlanForm({ ...trainingPlanForm, period_end: event.target.value })} />
               </label>
+              <label>
+                Readiness
+                <input type="number" min="0" max="100" value={trainingPlanForm.readiness_score} onChange={(event) => setTrainingPlanForm({ ...trainingPlanForm, readiness_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Sessions
+                <input type="number" min="1" max="7" value={trainingPlanForm.weekly_sessions} onChange={(event) => setTrainingPlanForm({ ...trainingPlanForm, weekly_sessions: Number(event.target.value) })} />
+              </label>
               <label className="wide-field">
                 Load guidance
                 <input value={trainingPlanForm.load_guidance} onChange={(event) => setTrainingPlanForm({ ...trainingPlanForm, load_guidance: event.target.value })} />
@@ -5509,6 +5570,14 @@ export default function HomePage() {
               ))}
             </div>
             <div className="task-list">
+              {generatedTrainingPlan ? (
+                <article className="task-card">
+                  <div>
+                    <strong>AI readiness {generatedTrainingPlan.readiness_score}</strong>
+                    <span>{generatedTrainingPlan.load_balance} · {generatedTrainingPlan.rationale}</span>
+                  </div>
+                </article>
+              ) : null}
               {trainingPlanItems.slice(0, 4).map((item) => (
                 <article key={item.id} className="task-card">
                   <div>

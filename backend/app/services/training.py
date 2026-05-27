@@ -1,11 +1,14 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.competition import CompetitionFixture
 from app.models.event import Event
 from app.models.organization import Organization
+from app.models.performance import AthleteAssessment, AthletePerformanceObservation
 from app.models.team import AthleteProfile, Team
 from app.models.training import (
     TrainingDrill,
@@ -15,6 +18,7 @@ from app.models.training import (
 )
 from app.schemas.training import (
     TrainingDrillCreate,
+    TrainingPlanGenerateCreate,
     TrainingPlanCreate,
     TrainingPlanItemCreate,
     TrainingSessionPlanCreate,
@@ -142,6 +146,83 @@ async def add_training_plan_item(
     return item
 
 
+async def generate_training_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: TrainingPlanGenerateCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_training(authz, identity, payload.organization_id)
+    team = await get_team_for_organization(db, payload.team_id, payload.organization_id) if payload.team_id else None
+    if payload.athlete_profile_id is not None:
+        await get_athlete_for_organization(db, payload.athlete_profile_id, payload.organization_id)
+
+    assessments = await recent_assessments(db, payload.organization_id, payload.athlete_profile_id)
+    observations = await recent_observations(db, payload.organization_id, payload.athlete_profile_id)
+    next_competition_at = await next_competition_datetime(db, payload.organization_id, payload.team_id)
+    focus_area = payload.focus_area or infer_focus_area(assessments, payload.readiness_score)
+    readiness_band = readiness_label(payload.readiness_score)
+    source_summary = (
+        f"Generated from {len(assessments)} assessments, {len(observations)} observations, "
+        f"{'one upcoming competition' if next_competition_at else 'no upcoming competition'}, "
+        f"and readiness band {readiness_band}."
+    )
+    load_guidance = generated_load_guidance(payload.readiness_score, payload.weekly_sessions, next_competition_at)
+    plan = TrainingPlan(
+        organization_id=payload.organization_id,
+        team_id=payload.team_id,
+        athlete_profile_id=payload.athlete_profile_id,
+        created_by_person_id=identity.person_id,
+        title=payload.title or f"AI {focus_area} block",
+        focus_area=focus_area,
+        period_start=payload.period_start,
+        period_end=payload.period_end,
+        ai_generated=True,
+        source_summary=source_summary,
+        load_guidance=load_guidance,
+        recovery_protocol=generated_recovery_protocol(payload.readiness_score),
+        progress_checkpoints="Review readiness after session 2; reassess after the final session; adjust load if soreness or school/work constraints increase.",
+    )
+    db.add(plan)
+    await db.commit()
+    await db.refresh(plan)
+
+    drills = await list_training_drills(db, payload.organization_id, sport=team.sport if team else None)
+    selected_drills = select_training_drills(drills, focus_area, payload.weekly_sessions)
+    items: list[TrainingPlanItem] = []
+    for sequence in range(1, payload.weekly_sessions + 1):
+        drill = selected_drills[sequence - 1] if sequence - 1 < len(selected_drills) else None
+        intensity = generated_intensity(payload.readiness_score, sequence, payload.upcoming_competition_weight)
+        item = TrainingPlanItem(
+            plan_id=plan.id,
+            drill_id=drill.id if drill else None,
+            sequence=sequence,
+            day_label=f"Session {sequence}",
+            title=drill.name if drill else f"{focus_area} progression {sequence}",
+            focus_area=drill.focus_area if drill else focus_area,
+            duration_minutes=drill.default_duration_minutes if drill else 45,
+            intensity=intensity,
+            notes=(
+                f"AI-generated for {readiness_band} readiness. "
+                f"Keep RPE near {intensity}; adjust if competition proximity or recovery changes."
+            ),
+        )
+        db.add(item)
+        items.append(item)
+    await db.commit()
+    for item in items:
+        await db.refresh(item)
+    return {
+        "plan": plan,
+        "items": items,
+        "readiness_score": payload.readiness_score,
+        "rationale": source_summary,
+        "load_balance": load_guidance,
+        "next_competition_at": next_competition_at,
+    }
+
+
 async def list_training_plan_items(
     db: AsyncSession,
     plan_id: UUID,
@@ -156,6 +237,54 @@ async def list_training_plan_items(
             )
         ).all()
     )
+
+
+async def recent_assessments(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID | None,
+) -> list[AthleteAssessment]:
+    statement = select(AthleteAssessment).where(AthleteAssessment.organization_id == organization_id)
+    if athlete_profile_id is not None:
+        statement = statement.where(AthleteAssessment.athlete_profile_id == athlete_profile_id)
+    return list((await db.scalars(statement.order_by(AthleteAssessment.assessed_at.desc()).limit(10))).all())
+
+
+async def recent_observations(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID | None,
+) -> list[AthletePerformanceObservation]:
+    statement = select(AthletePerformanceObservation).where(
+        AthletePerformanceObservation.organization_id == organization_id
+    )
+    if athlete_profile_id is not None:
+        statement = statement.where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(AthletePerformanceObservation.observed_at.desc()).limit(20)
+            )
+        ).all()
+    )
+
+
+async def next_competition_datetime(
+    db: AsyncSession,
+    organization_id: UUID,
+    team_id: UUID | None,
+) -> datetime | None:
+    statement = (
+        select(CompetitionFixture.scheduled_at)
+        .where(CompetitionFixture.organization_id == organization_id)
+        .where(CompetitionFixture.scheduled_at >= datetime.now(UTC))
+    )
+    if team_id is not None:
+        statement = statement.where(
+            (CompetitionFixture.home_team_id == team_id) | (CompetitionFixture.away_team_id == team_id)
+        )
+    result = await db.scalar(statement.order_by(CompetitionFixture.scheduled_at).limit(1))
+    return result
 
 
 async def create_training_session_plan(
@@ -252,3 +381,72 @@ async def get_training_plan_for_organization(
     if plan.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     return plan
+
+
+def infer_focus_area(assessments: list[AthleteAssessment], readiness_score: int) -> str:
+    if readiness_score < 45:
+        return "recovery and movement quality"
+    if not assessments:
+        return "technical fundamentals"
+    latest = assessments[0]
+    scores = {
+        "physical conditioning": latest.physical_score,
+        "technical execution": latest.technical_score,
+        "tactical decision making": latest.tactical_score,
+        "mental resilience": latest.mental_score,
+    }
+    return min(scores, key=scores.get)
+
+
+def readiness_label(readiness_score: int) -> str:
+    if readiness_score >= 85:
+        return "high"
+    if readiness_score >= 65:
+        return "moderate"
+    if readiness_score >= 45:
+        return "limited"
+    return "recovery"
+
+
+def generated_load_guidance(
+    readiness_score: int,
+    weekly_sessions: int,
+    next_competition_at: datetime | None,
+) -> str:
+    base = (
+        f"Plan for {weekly_sessions} session(s) with "
+        f"{'reduced' if readiness_score < 65 else 'progressive'} load."
+    )
+    if next_competition_at is not None:
+        return f"{base} Taper the final session before {next_competition_at.date()}."
+    return f"{base} Increase intensity only after readiness and soreness checks are stable."
+
+
+def generated_recovery_protocol(readiness_score: int) -> str:
+    if readiness_score < 45:
+        return "Prioritize sleep, hydration, mobility, and medical review before high-intensity work."
+    if readiness_score < 65:
+        return "Add mobility, low-impact conditioning, and post-session soreness checks."
+    return "Use normal cooldown, hydration, nutrition, and next-day readiness check-ins."
+
+
+def select_training_drills(
+    drills: list[TrainingDrill],
+    focus_area: str,
+    weekly_sessions: int,
+) -> list[TrainingDrill]:
+    focus = focus_area.lower()
+    matching = [drill for drill in drills if focus in drill.focus_area.lower()]
+    selected = matching or drills
+    return selected[:weekly_sessions]
+
+
+def generated_intensity(
+    readiness_score: int,
+    sequence: int,
+    competition_weight: int,
+) -> int:
+    base = 4 if readiness_score < 45 else 5 if readiness_score < 65 else 6
+    progression = min(sequence - 1, 2)
+    taper = 1 if competition_weight >= 7 and sequence > 1 else 0
+    return max(1, min(10, base + progression - taper))

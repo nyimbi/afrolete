@@ -107,6 +107,34 @@ class TrainingPlanItemRead(BaseModel):
     notes: str | None
 
 
+class TrainingPlanGenerateCreate(BaseModel):
+    organization_id: UUID
+    team_id: UUID | None = None
+    athlete_profile_id: UUID | None = None
+    title: str | None = Field(default=None, max_length=240)
+    focus_area: str | None = Field(default=None, max_length=160)
+    period_start: date
+    period_end: date
+    weekly_sessions: int = Field(default=3, ge=1, le=7)
+    readiness_score: int = Field(default=70, ge=0, le=100)
+    upcoming_competition_weight: int = Field(default=5, ge=1, le=10)
+
+    @model_validator(mode="after")
+    def valid_generated_period(self) -> "TrainingPlanGenerateCreate":
+        if self.period_end < self.period_start:
+            raise ValueError("period_end must be on or after period_start")
+        return self
+
+
+class GeneratedTrainingPlanRead(BaseModel):
+    plan: TrainingPlanRead
+    items: list[TrainingPlanItemRead]
+    readiness_score: int
+    rationale: str
+    load_balance: str
+    next_competition_at: datetime | None
+
+
 class TrainingSessionPlanCreate(BaseModel):
     organization_id: UUID
     team_id: UUID

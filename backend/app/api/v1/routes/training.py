@@ -5,8 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.training import (
+    GeneratedTrainingPlanRead,
     TrainingDrillCreate,
     TrainingDrillRead,
+    TrainingPlanGenerateCreate,
     TrainingPlanCreate,
     TrainingPlanItemCreate,
     TrainingPlanItemRead,
@@ -22,6 +24,7 @@ from app.services.training import (
     create_training_drill,
     create_training_plan,
     create_training_session_plan,
+    generate_training_plan,
     list_training_drills,
     list_training_plan_items,
     list_training_plans,
@@ -132,6 +135,28 @@ async def create_training_plan_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> TrainingPlanRead:
     return to_plan_read(await create_training_plan(db, identity, payload, authz))
+
+
+@router.post(
+    "/plans/generate",
+    response_model=GeneratedTrainingPlanRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_training_plan_route(
+    payload: TrainingPlanGenerateCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GeneratedTrainingPlanRead:
+    result = await generate_training_plan(db, identity, payload, authz)
+    return GeneratedTrainingPlanRead(
+        plan=to_plan_read(result["plan"]),
+        items=[to_plan_item_read(item) for item in result["items"]],
+        readiness_score=result["readiness_score"],
+        rationale=result["rationale"],
+        load_balance=result["load_balance"],
+        next_competition_at=result["next_competition_at"],
+    )
 
 
 @router.get("/plans", response_model=list[TrainingPlanRead])
