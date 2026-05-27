@@ -13,6 +13,7 @@ import { afroleteAuthMode, apiBaseUrl, keycloakClientId, keycloakIssuer } from "
 import type {
   AgentAssignmentRead,
   AgentBiasAuditRead,
+  AgentDecisionAppealRead,
   AgentGovernanceSummaryRead,
   AgentKind,
   AgentModelRegistryRead,
@@ -582,6 +583,7 @@ export default function HomePage() {
   const [agentTransparency, setAgentTransparency] = useState<AgentModelTransparencyReportRead | null>(null);
   const [agentModelRegistry, setAgentModelRegistry] = useState<AgentModelRegistryRead[]>([]);
   const [agentBiasAudits, setAgentBiasAudits] = useState<AgentBiasAuditRead[]>([]);
+  const [agentDecisionAppeals, setAgentDecisionAppeals] = useState<AgentDecisionAppealRead[]>([]);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1465,14 +1467,15 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
       apiRequest<AgentRunLedgerVerificationRead>(`/agents/runs/verify?organization_id=${organizationId}`),
       apiRequest<AgentModelTransparencyReportRead>(`/agents/model-transparency?organization_id=${organizationId}`),
       apiRequest<AgentModelRegistryRead[]>(`/agents/model-registry?organization_id=${organizationId}`),
-      apiRequest<AgentBiasAuditRead[]>(`/agents/bias-audits?organization_id=${organizationId}`)
+      apiRequest<AgentBiasAuditRead[]>(`/agents/bias-audits?organization_id=${organizationId}`),
+      apiRequest<AgentDecisionAppealRead[]>(`/agents/appeals?organization_id=${organizationId}`)
     ]);
     setAgentTasks(tasks);
     setAgentRuns(runs);
@@ -1481,6 +1484,7 @@ export default function HomePage() {
     setAgentTransparency(transparency);
     setAgentModelRegistry(registry);
     setAgentBiasAudits(biasAudits);
+    setAgentDecisionAppeals(appeals);
   }, []);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1917,6 +1921,7 @@ export default function HomePage() {
       setAgentTransparency(null);
       setAgentModelRegistry([]);
       setAgentBiasAudits([]);
+      setAgentDecisionAppeals([]);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -4845,6 +4850,57 @@ export default function HomePage() {
         if (selectedOrganizationId) {
           void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
         }
+      }
+    );
+  };
+
+  const submitAgentDecisionAppeal = (task: AgentTaskRead) => {
+    runAction(
+      `agent-decision-appeal-${task.id}`,
+      () =>
+        apiRequest<AgentDecisionAppealRead>(`/agents/tasks/${task.id}/appeals`, {
+          method: "POST",
+          identity,
+          body: {
+            reason: "human_review",
+            question: `Please explain and review the recommendation for ${task.title}.`,
+            supporting_evidence_ref: task.output_ref ?? task.input_ref ?? undefined
+          }
+        }),
+      (appeal) => {
+        setAgentDecisionAppeals((current) => [
+          appeal,
+          ...current.filter((item) => item.id !== appeal.id)
+        ]);
+        addLog(`Appeal opened for ${appeal.model_policy}`, "good");
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
+      }
+    );
+  };
+
+  const resolveAgentDecisionAppeal = (
+    appeal: AgentDecisionAppealRead,
+    statusValue: "upheld" | "modified" | "overturned"
+  ) => {
+    runAction(
+      `agent-decision-appeal-${appeal.id}-${statusValue}`,
+      () =>
+        apiRequest<AgentDecisionAppealRead>(`/agents/appeals/${appeal.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            resolution_notes: `Human reviewer ${statusValue} the appeal from the operations console.`
+          }
+        }),
+      (updatedAppeal) => {
+        setAgentDecisionAppeals((current) => [
+          updatedAppeal,
+          ...current.filter((item) => item.id !== updatedAppeal.id)
+        ]);
+        addLog(`Appeal ${updatedAppeal.status}`, "good");
       }
     );
   };
@@ -11749,6 +11805,21 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {agentDecisionAppeals.slice(0, 3).map((appeal) => (
+                <article key={appeal.id} className="task-card">
+                  <div>
+                    <strong>{appeal.model_policy} · appeal {appeal.status}</strong>
+                    <span>{appeal.reason} · due {new Date(appeal.due_at).toLocaleDateString()}</span>
+                    <span>{appeal.simple_explanation}</span>
+                    <span>{appeal.resolution_notes ?? appeal.alternative_options}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => resolveAgentDecisionAppeal(appeal, "upheld")}>Uphold</button>
+                    <button type="button" onClick={() => resolveAgentDecisionAppeal(appeal, "modified")}>Modify</button>
+                    <button type="button" onClick={() => resolveAgentDecisionAppeal(appeal, "overturned")}>Overturn</button>
+                  </div>
+                </article>
+              ))}
               {agentRuns.slice(0, 3).map((run) => (
                 <article key={run.id} className="task-card">
                   <div>
@@ -11769,6 +11840,7 @@ export default function HomePage() {
                   <div className="event-toolbar">
                     <button type="button" onClick={() => executeAgentTask(task.id)}>Run</button>
                     <button type="button" onClick={() => applyAgentWorkerCallback(task)}>Callback</button>
+                    <button type="button" onClick={() => submitAgentDecisionAppeal(task)}>Appeal</button>
                     <button type="button" onClick={() => updateAgentTask(task.id, "waiting_for_review")}>Review</button>
                     <button type="button" onClick={() => updateAgentTask(task.id, "completed")}>Done</button>
                   </div>

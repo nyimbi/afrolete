@@ -9,6 +9,9 @@ from app.schemas.agent import (
     AgentAssignmentRead,
     AgentBiasAuditCreate,
     AgentBiasAuditRead,
+    AgentDecisionAppealCreate,
+    AgentDecisionAppealRead,
+    AgentDecisionAppealUpdate,
     AgentGovernanceSummaryRead,
     AgentModelRegistryCreate,
     AgentModelRegistryRead,
@@ -35,11 +38,14 @@ from app.services.agents import (
     execute_agent_task,
     list_agent_assignments,
     list_agent_bias_audits,
+    list_agent_decision_appeals,
     list_agent_model_registry,
     list_agent_tasks,
     list_agents,
     queue_agent_task,
     run_agent_bias_audit,
+    submit_agent_decision_appeal,
+    update_agent_decision_appeal,
     update_agent_model_registry,
     update_agent_task,
     validate_agent_worker_callback_signature,
@@ -132,6 +138,29 @@ def to_bias_audit_read(audit) -> AgentBiasAuditRead:
     )
 
 
+def to_decision_appeal_read(appeal) -> AgentDecisionAppealRead:
+    return AgentDecisionAppealRead(
+        id=appeal.id,
+        organization_id=appeal.organization_id,
+        agent_id=appeal.agent_id,
+        task_id=appeal.task_id,
+        model_policy=appeal.model_policy,
+        status=appeal.status,
+        reason=appeal.reason,
+        question=appeal.question,
+        simple_explanation=appeal.simple_explanation,
+        technical_explanation=appeal.technical_explanation,
+        data_summary=appeal.data_summary,
+        alternative_options=appeal.alternative_options,
+        supporting_evidence_ref=appeal.supporting_evidence_ref,
+        submitted_by_person_id=appeal.submitted_by_person_id,
+        resolved_by_person_id=appeal.resolved_by_person_id,
+        resolution_notes=appeal.resolution_notes,
+        due_at=appeal.due_at,
+        resolved_at=appeal.resolved_at,
+    )
+
+
 @router.post("", response_model=AgentRead, status_code=status.HTTP_201_CREATED)
 async def create_agent_route(
     payload: AgentCreate,
@@ -170,6 +199,18 @@ async def list_agent_bias_audits_route(
     return [
         to_bias_audit_read(audit)
         for audit in await list_agent_bias_audits(db, organization_id, model_registry_id)
+    ]
+
+
+@router.get("/appeals", response_model=list[AgentDecisionAppealRead])
+async def list_agent_decision_appeals_route(
+    organization_id: UUID = Query(),
+    status_value: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentDecisionAppealRead]:
+    return [
+        to_decision_appeal_read(appeal)
+        for appeal in await list_agent_decision_appeals(db, organization_id, status_value)
     ]
 
 
@@ -212,6 +253,32 @@ async def update_agent_model_registry_route(
 ) -> AgentModelRegistryRead:
     return to_model_registry_read(
         await update_agent_model_registry(db, identity, registry_id, payload, authz)
+    )
+
+
+@router.post("/tasks/{task_id}/appeals", response_model=AgentDecisionAppealRead, status_code=status.HTTP_201_CREATED)
+async def submit_agent_decision_appeal_route(
+    task_id: UUID,
+    payload: AgentDecisionAppealCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentDecisionAppealRead:
+    return to_decision_appeal_read(
+        await submit_agent_decision_appeal(db, identity, task_id, payload, authz)
+    )
+
+
+@router.patch("/appeals/{appeal_id}", response_model=AgentDecisionAppealRead)
+async def update_agent_decision_appeal_route(
+    appeal_id: UUID,
+    payload: AgentDecisionAppealUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentDecisionAppealRead:
+    return to_decision_appeal_read(
+        await update_agent_decision_appeal(db, identity, appeal_id, payload, authz)
     )
 
 

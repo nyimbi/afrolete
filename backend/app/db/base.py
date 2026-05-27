@@ -5,6 +5,7 @@ from app.models.agent import (  # noqa: F401,E402
     Agent,
     AgentAssignment,
     AgentBiasAudit,
+    AgentDecisionAppeal,
     AgentModelRegistry,
     AgentRunRecord,
     AgentTask,

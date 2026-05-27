@@ -130,3 +130,25 @@ class AgentBiasAudit(IdMixin, TimestampMixin, Base):
     mitigation_status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
     audited_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     audited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class AgentDecisionAppeal(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_decision_appeals"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    agent_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("agents.id"), index=True)
+    task_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("agent_tasks.id"), index=True)
+    model_policy: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    simple_explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    technical_explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    data_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    alternative_options: Mapped[str] = mapped_column(Text, nullable=False)
+    supporting_evidence_ref: Mapped[str | None] = mapped_column(String(500))
+    submitted_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    resolved_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    resolution_notes: Mapped[str | None] = mapped_column(Text)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

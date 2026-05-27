@@ -170,6 +170,38 @@ class AgentBiasAuditRead(BaseModel):
     audited_at: datetime
 
 
+class AgentDecisionAppealCreate(BaseModel):
+    reason: str = Field(default="human_review", min_length=2, max_length=120)
+    question: str = Field(min_length=8, max_length=4000)
+    supporting_evidence_ref: str | None = Field(default=None, max_length=500)
+
+
+class AgentDecisionAppealUpdate(BaseModel):
+    status: str = Field(pattern="^(pending|under_review|upheld|modified|overturned|withdrawn)$")
+    resolution_notes: str = Field(min_length=4, max_length=4000)
+
+
+class AgentDecisionAppealRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    agent_id: UUID
+    task_id: UUID
+    model_policy: str
+    status: str
+    reason: str
+    question: str
+    simple_explanation: str
+    technical_explanation: str
+    data_summary: str
+    alternative_options: str
+    supporting_evidence_ref: str | None
+    submitted_by_person_id: UUID | None
+    resolved_by_person_id: UUID | None
+    resolution_notes: str | None
+    due_at: datetime
+    resolved_at: datetime | None
+
+
 class AgentRunRecordRead(BaseModel):
     id: UUID
     task_id: UUID

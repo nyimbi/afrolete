@@ -2495,6 +2495,27 @@ export type AgentBiasAuditRead = {
   audited_at: string;
 };
 
+export type AgentDecisionAppealRead = {
+  id: UUID;
+  organization_id: UUID;
+  agent_id: UUID;
+  task_id: UUID;
+  model_policy: string;
+  status: string;
+  reason: string;
+  question: string;
+  simple_explanation: string;
+  technical_explanation: string;
+  data_summary: string;
+  alternative_options: string;
+  supporting_evidence_ref: string | null;
+  submitted_by_person_id: UUID | null;
+  resolved_by_person_id: UUID | null;
+  resolution_notes: string | null;
+  due_at: string;
+  resolved_at: string | null;
+};
+
 export type AgentCredentialStatusRead = {
   execution_mode: string;
   default_model: string;

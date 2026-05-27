@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import json
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import httpx
@@ -15,6 +15,7 @@ from app.models.agent import (
     Agent,
     AgentAssignment,
     AgentBiasAudit,
+    AgentDecisionAppeal,
     AgentModelRegistry,
     AgentRunRecord,
     AgentTask,
@@ -27,6 +28,8 @@ from app.schemas.agent import (
     AgentAssignmentCreate,
     AgentBiasAuditCreate,
     AgentCreate,
+    AgentDecisionAppealCreate,
+    AgentDecisionAppealUpdate,
     AgentModelRegistryCreate,
     AgentModelRegistryUpdate,
     AgentTaskCreate,
@@ -134,6 +137,86 @@ async def list_agent_bias_audits(
             )
         ).all()
     )
+
+
+async def list_agent_decision_appeals(
+    db: AsyncSession,
+    organization_id: UUID,
+    status_value: str | None = None,
+) -> list[AgentDecisionAppeal]:
+    statement = select(AgentDecisionAppeal).where(AgentDecisionAppeal.organization_id == organization_id)
+    if status_value is not None:
+        statement = statement.where(AgentDecisionAppeal.status == status_value)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(AgentDecisionAppeal.created_at.desc(), AgentDecisionAppeal.due_at)
+            )
+        ).all()
+    )
+
+
+async def submit_agent_decision_appeal(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    task_id: UUID,
+    payload: AgentDecisionAppealCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> AgentDecisionAppeal:
+    task = await db.get(AgentTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+    await ensure_manage_organization(authz, identity, task.organization_id)
+    agent = await db.get(Agent, task.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    settings = settings or get_settings()
+    model_policy = agent.model_policy or settings.agent_default_model
+    appeal = AgentDecisionAppeal(
+        organization_id=task.organization_id,
+        agent_id=agent.id,
+        task_id=task.id,
+        model_policy=model_policy,
+        status="pending",
+        reason=payload.reason,
+        question=payload.question,
+        simple_explanation=agent_decision_simple_explanation(agent, task),
+        technical_explanation=agent_decision_technical_explanation(agent, task, model_policy, settings),
+        data_summary=agent_decision_data_summary(task),
+        alternative_options=agent_decision_alternative_options(task),
+        supporting_evidence_ref=payload.supporting_evidence_ref,
+        submitted_by_person_id=identity.person_id,
+        due_at=datetime.now(UTC) + timedelta(days=7),
+    )
+    db.add(appeal)
+    await db.commit()
+    await db.refresh(appeal)
+    return appeal
+
+
+async def update_agent_decision_appeal(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    appeal_id: UUID,
+    payload: AgentDecisionAppealUpdate,
+    authz: AuthorizationService,
+) -> AgentDecisionAppeal:
+    appeal = await db.get(AgentDecisionAppeal, appeal_id)
+    if appeal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent decision appeal not found")
+    await ensure_manage_organization(authz, identity, appeal.organization_id)
+    appeal.status = payload.status
+    appeal.resolution_notes = payload.resolution_notes
+    if payload.status in {"upheld", "modified", "overturned", "withdrawn"}:
+        appeal.resolved_by_person_id = identity.person_id
+        appeal.resolved_at = datetime.now(UTC)
+    else:
+        appeal.resolved_by_person_id = None
+        appeal.resolved_at = None
+    await db.commit()
+    await db.refresh(appeal)
+    return appeal
 
 
 async def run_agent_bias_audit(
@@ -1119,6 +1202,41 @@ def agent_bias_recommendation(status_value: str, registry: AgentModelRegistry) -
     if status_value == "watch":
         return "Keep human review active and compare outcomes across protected cohorts before scaling."
     return f"{registry.model_policy} can remain in governed operation with periodic fairness monitoring."
+
+
+def agent_decision_simple_explanation(agent: Agent, task: AgentTask) -> str:
+    if task.status == AgentTaskStatus.WAITING_FOR_REVIEW:
+        return f"{agent.name} produced a recommendation that is waiting for human review before action."
+    if task.status == AgentTaskStatus.FAILED:
+        return f"{agent.name} could not complete the recommendation and the failure should be reviewed."
+    return f"{agent.name} produced an output for {task.title}; the appeal requests human review of that output."
+
+
+def agent_decision_technical_explanation(
+    agent: Agent,
+    task: AgentTask,
+    model_policy: str,
+    settings: Settings,
+) -> str:
+    return (
+        f"Task {task.id} used model policy {model_policy} through {settings.agent_execution_mode} execution. "
+        f"Agent kind={agent.kind.value}; task_type={task.task_type}; status={task.status.value}; "
+        f"output_ref={task.output_ref or 'none'}."
+    )
+
+
+def agent_decision_data_summary(task: AgentTask) -> str:
+    return (
+        f"Input reference: {task.input_ref or 'none provided'}. "
+        f"Review notes: {task.review_notes or 'no review notes recorded yet'}."
+    )
+
+
+def agent_decision_alternative_options(task: AgentTask) -> str:
+    return (
+        "Available paths: correct source data, request a human reviewer, rerun the agent after new evidence, "
+        f"or mark task {task.id} modified/overturned if the appeal is valid."
+    )
 
 
 def governance_notes(agent: Agent, task: AgentTask) -> str:
