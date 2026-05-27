@@ -2721,6 +2721,14 @@ export type AgentScorecardArtifactAccessBucketRead = {
   count: number;
 };
 
+export type AgentScorecardArtifactAccessAnomalyRead = {
+  severity: string;
+  code: string;
+  title: string;
+  evidence: string;
+  recommended_action: string;
+};
+
 export type AgentScorecardArtifactAccessSummaryRead = {
   organization_id: UUID;
   total_events: number;
@@ -2731,6 +2739,7 @@ export type AgentScorecardArtifactAccessSummaryRead = {
   unique_requester_count: number;
   last_accessed_at: string | null;
   by_source: AgentScorecardArtifactAccessBucketRead[];
+  anomalies: AgentScorecardArtifactAccessAnomalyRead[];
 };
 
 export type AgentScorecardPublicationReminderRead = {

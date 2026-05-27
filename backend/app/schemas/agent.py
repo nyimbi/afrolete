@@ -455,6 +455,14 @@ class AgentScorecardArtifactAccessBucketRead(BaseModel):
     count: int
 
 
+class AgentScorecardArtifactAccessAnomalyRead(BaseModel):
+    severity: str
+    code: str
+    title: str
+    evidence: str
+    recommended_action: str
+
+
 class AgentScorecardArtifactAccessSummaryRead(BaseModel):
     organization_id: UUID
     total_events: int
@@ -465,6 +473,7 @@ class AgentScorecardArtifactAccessSummaryRead(BaseModel):
     unique_requester_count: int
     last_accessed_at: datetime | None
     by_source: list[AgentScorecardArtifactAccessBucketRead]
+    anomalies: list[AgentScorecardArtifactAccessAnomalyRead]
 
 
 class AgentScorecardPublicationReminderCreate(BaseModel):

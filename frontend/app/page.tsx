@@ -12094,9 +12094,23 @@ export default function HomePage() {
                     <span>
                       {agentScorecardArtifactAccessSummary.by_source.slice(0, 2).map((bucket) => `${bucket.label.replaceAll("_", " ")} ${bucket.count}`).join(" · ") || "No source activity"}
                     </span>
+                    <span>
+                      {agentScorecardArtifactAccessSummary.anomalies[0]
+                        ? `${agentScorecardArtifactAccessSummary.anomalies[0].severity}: ${agentScorecardArtifactAccessSummary.anomalies[0].title}`
+                        : "No artifact access anomalies"}
+                    </span>
                   </div>
                 </article>
               ) : null}
+              {agentScorecardArtifactAccessSummary?.anomalies.slice(0, 2).map((anomaly) => (
+                <article key={anomaly.code} className="task-card">
+                  <div>
+                    <strong>{anomaly.severity} · {anomaly.title}</strong>
+                    <span>{anomaly.evidence}</span>
+                    <span>{anomaly.recommended_action}</span>
+                  </div>
+                </article>
+              ))}
               {agentScorecardArtifactAccesses.slice(0, 3).map((access) => (
                 <article key={access.id} className="task-card">
                   <div>

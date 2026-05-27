@@ -1238,20 +1238,79 @@ async def scorecard_artifact_access_summary(
     for access in accesses:
         source = access.request_source or access.event_type
         source_counts[source] = source_counts.get(source, 0) + 1
+    link_created_count = sum(1 for access in accesses if access.event_type == "link_created")
+    artifact_opened_count = sum(1 for access in accesses if access.event_type == "artifact_opened")
+    unique_requester_count = len({access.request_ip for access in accesses if access.request_ip})
     return {
         "organization_id": organization_id,
         "total_events": len(accesses),
-        "link_created_count": sum(1 for access in accesses if access.event_type == "link_created"),
-        "artifact_opened_count": sum(1 for access in accesses if access.event_type == "artifact_opened"),
+        "link_created_count": link_created_count,
+        "artifact_opened_count": artifact_opened_count,
         "pdf_count": sum(1 for access in accesses if access.artifact_format == "pdf"),
         "markdown_count": sum(1 for access in accesses if access.artifact_format == "markdown"),
-        "unique_requester_count": len({access.request_ip for access in accesses if access.request_ip}),
+        "unique_requester_count": unique_requester_count,
         "last_accessed_at": max((access.accessed_at for access in accesses), default=None),
         "by_source": [
             {"label": label, "count": count}
             for label, count in sorted(source_counts.items(), key=lambda item: (-item[1], item[0]))
         ],
+        "anomalies": scorecard_artifact_access_anomalies(
+            accesses,
+            link_created_count,
+            artifact_opened_count,
+            unique_requester_count,
+        ),
     }
+
+
+def scorecard_artifact_access_anomalies(
+    accesses: list[AgentScorecardArtifactAccess],
+    link_created_count: int,
+    artifact_opened_count: int,
+    unique_requester_count: int,
+) -> list[dict[str, str]]:
+    anomalies: list[dict[str, str]] = []
+    if link_created_count >= 3 and artifact_opened_count == 0:
+        anomalies.append(
+            {
+                "severity": "warning",
+                "code": "links_without_opens",
+                "title": "Shared scorecard links are not being opened",
+                "evidence": f"{link_created_count} links were created with no recorded opens.",
+                "recommended_action": "Confirm recipients received the correct link and communication channel.",
+            }
+        )
+    if link_created_count and artifact_opened_count > link_created_count * 5:
+        anomalies.append(
+            {
+                "severity": "watch",
+                "code": "high_open_ratio",
+                "title": "Scorecard artifact opens are unusually high",
+                "evidence": f"{artifact_opened_count} opens for {link_created_count} created links.",
+                "recommended_action": "Review requester IPs and confirm the artifact is intended for broad sharing.",
+            }
+        )
+    if unique_requester_count >= 5:
+        anomalies.append(
+            {
+                "severity": "watch",
+                "code": "many_requesters",
+                "title": "Many requesters opened scorecard artifacts",
+                "evidence": f"{unique_requester_count} unique requester IPs are recorded.",
+                "recommended_action": "Check whether public distribution was intentional and rotate links if needed.",
+            }
+        )
+    if any(access.request_ip is None for access in accesses):
+        anomalies.append(
+            {
+                "severity": "info",
+                "code": "missing_requester_attribution",
+                "title": "Some artifact events lack requester IP attribution",
+                "evidence": "One or more access events were recorded without a requester IP.",
+                "recommended_action": "Verify proxy headers and deployment ingress forwarding configuration.",
+            }
+        )
+    return anomalies
 
 
 async def agent_scorecard_publication_readiness(
