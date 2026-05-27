@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -55,6 +55,7 @@ from app.services.assets import (
     list_equipment_readers,
     create_supplier_order,
     create_work_order,
+    downloadable_equipment_file,
     equipment_lease_quote,
     list_equipment_files,
     list_equipment_scan_events,
@@ -407,6 +408,24 @@ async def list_equipment_files_route(
         to_equipment_file_read(file_record)
         for file_record in await list_equipment_files(db, equipment_item_id)
     ]
+
+
+@router.get("/equipment/files/{file_id}/download")
+async def download_equipment_file_route(
+    file_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> Response:
+    artifact = await downloadable_equipment_file(db, identity, file_id, authz)
+    return Response(
+        content=artifact["content"],
+        media_type=str(artifact["content_type"]),
+        headers={
+            "Content-Disposition": f"attachment; filename={artifact['filename']}",
+            "X-Afrolete-Equipment-Checksum": str(artifact["checksum"]),
+        },
+    )
 
 
 @router.get("/equipment/{equipment_item_id}/lease-quote", response_model=EquipmentLeaseQuoteRead)

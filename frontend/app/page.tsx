@@ -3460,6 +3460,46 @@ export default function HomePage() {
     );
   };
 
+  const downloadEquipmentFile = (fileRecord: EquipmentFileRead) => {
+    runAction(
+      `download-equipment-file-${fileRecord.id}`,
+      async () => {
+        const headers = new Headers({ Accept: "*/*" });
+        if (authSession) {
+          headers.set("Authorization", `Bearer ${authSession.accessToken}`);
+        } else {
+          headers.set("X-Afrolete-Sub", identity.sub);
+          headers.set("X-Afrolete-Email", identity.email);
+          headers.set("X-Afrolete-Name", identity.name);
+        }
+        const response = await fetch(
+          `${apiBaseUrl}/api/v1/assets/equipment/files/${fileRecord.id}/download`,
+          { headers }
+        );
+        if (!response.ok) {
+          throw new Error(`Equipment file download failed: ${response.status}`);
+        }
+        const blob = await response.blob();
+        const href = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = href;
+        anchor.download = fileRecord.filename;
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(href);
+        return {
+          filename: fileRecord.filename,
+          checksum: response.headers.get("X-Afrolete-Equipment-Checksum") ?? fileRecord.checksum,
+          size: blob.size
+        };
+      },
+      (download) => {
+        addLog(`${download.filename} downloaded (${download.size} bytes, ${download.checksum.slice(0, 8)})`, "good");
+      }
+    );
+  };
+
   const quoteSelectedEquipmentLease = () => {
     if (!selectedOrganizationId || !selectedEquipmentId) {
       addLog("Select equipment first", "bad");
@@ -5667,6 +5707,9 @@ export default function HomePage() {
                   <div>
                     <strong>{fileRecord.filename}</strong>
                     <span>{fileRecord.content_type} · {fileRecord.size_bytes} bytes · {fileRecord.checksum.slice(0, 8)}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => downloadEquipmentFile(fileRecord)}>Download</button>
                   </div>
                 </article>
               ))}

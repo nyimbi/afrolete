@@ -81,7 +81,7 @@ from app.schemas.assets import (
 from app.schemas.commercial import FinanceInvoiceRead, FinancePaymentRead
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
-from app.services.storage.objects import put_object
+from app.services.storage.objects import get_object, put_object
 
 
 async def ensure_manage_assets(
@@ -427,6 +427,34 @@ async def list_equipment_files(
             )
         ).all()
     )
+
+
+async def downloadable_equipment_file(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    file_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    file_record = await db.get(EquipmentFile, file_id)
+    if file_record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipment file not found")
+    await ensure_manage_assets(authz, identity, file_record.organization_id)
+    selected_settings = settings or get_settings()
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.equipment_file_dir,
+        key=equipment_file_object_key(file_record, selected_settings),
+    )
+    actual_checksum = sha256(content).hexdigest()
+    if actual_checksum != file_record.checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Equipment file checksum mismatch")
+    return {
+        "content": content,
+        "filename": file_record.filename,
+        "content_type": file_record.content_type,
+        "checksum": actual_checksum,
+    }
 
 
 async def checkout_equipment(
@@ -1554,6 +1582,23 @@ def decode_upload_content(content_base64: str) -> bytes:
 def safe_upload_filename(filename: str) -> str:
     cleaned = sub(r"[^A-Za-z0-9._-]+", "-", Path(filename).name).strip(".-")
     return cleaned[:180] or "equipment-file"
+
+
+def equipment_file_object_key(file_record: EquipmentFile, settings: Settings) -> str:
+    if file_record.storage_path.startswith("s3://"):
+        prefix = f"s3://{settings.object_storage_bucket}/"
+        if file_record.storage_path.startswith(prefix):
+            return file_record.storage_path[len(prefix):]
+        return file_record.storage_path.split("/", 3)[-1]
+    path = Path(file_record.storage_path)
+    try:
+        return path.relative_to(Path(settings.equipment_file_dir)).as_posix()
+    except ValueError:
+        return (
+            Path(str(file_record.organization_id))
+            / str(file_record.equipment_item_id)
+            / path.name
+        ).as_posix()
 
 
 def hash_reader_key(api_key: str) -> str:
