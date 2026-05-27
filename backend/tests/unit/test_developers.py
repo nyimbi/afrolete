@@ -160,6 +160,14 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert deliveries[0]["event_type"] == "training.drill.created"
     assert deliveries[0]["status"] == "recorded"
     assert deliveries[0]["attempt_count"] == 1
+    replay_delivery_response = client.post(
+        f"/api/v1/developers/webhook-deliveries/{deliveries[0]['id']}/replay",
+        headers=identity_headers,
+    )
+    assert replay_delivery_response.status_code == 200
+    replayed_delivery = replay_delivery_response.json()
+    assert replayed_delivery["status"] == "recorded"
+    assert replayed_delivery["attempt_count"] == 2
 
     read_only_key_response = client.post(
         "/api/v1/developers/api-keys",

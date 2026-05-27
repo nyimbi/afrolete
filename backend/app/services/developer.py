@@ -355,6 +355,30 @@ async def list_developer_webhook_deliveries(
     return list((await db.scalars(query.order_by(DeveloperWebhookDelivery.created_at.desc()).limit(100))).all())
 
 
+async def replay_developer_webhook_delivery(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    delivery_id: UUID,
+    authz: AuthorizationService,
+) -> DeveloperWebhookDelivery:
+    delivery = await get_webhook_delivery(db, delivery_id)
+    await ensure_manage_developer_platform(authz, identity, delivery.organization_id)
+    subscription = await get_webhook_subscription(db, delivery.subscription_id)
+    if subscription.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Cannot replay delivery for inactive webhook subscription",
+        )
+    delivery.status = "queued"
+    delivery.failure_reason = None
+    delivery.response_status_code = None
+    delivery.delivered_at = None
+    await deliver_single_webhook(db, subscription, delivery)
+    await db.commit()
+    await db.refresh(delivery)
+    return delivery
+
+
 async def deliver_single_webhook(
     db: AsyncSession,
     subscription: DeveloperWebhookSubscription,
@@ -596,6 +620,13 @@ async def get_webhook_subscription(db: AsyncSession, subscription_id: UUID) -> D
     if subscription is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Developer webhook subscription not found")
     return subscription
+
+
+async def get_webhook_delivery(db: AsyncSession, delivery_id: UUID) -> DeveloperWebhookDelivery:
+    delivery = await db.get(DeveloperWebhookDelivery, delivery_id)
+    if delivery is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Developer webhook delivery not found")
+    return delivery
 
 
 async def get_marketplace_listing(db: AsyncSession, listing_id: UUID) -> DeveloperMarketplaceListing:

@@ -8690,6 +8690,24 @@ export default function HomePage() {
     );
   };
 
+  const replayDeveloperWebhookDelivery = (deliveryId: string) => {
+    runAction(
+      "replay-developer-webhook",
+      () =>
+        apiRequest<DeveloperWebhookDeliveryRead>(
+          `/developers/webhook-deliveries/${deliveryId}/replay`,
+          { method: "POST", identity }
+        ),
+      (delivery) => {
+        setDeveloperWebhookDeliveries((current) =>
+          current.map((item) => (item.id === delivery.id ? delivery : item))
+        );
+        addLog(`${delivery.event_type} webhook replay ${delivery.status}`, "good");
+        void loadDevelopers(selectedOrganizationId);
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -11716,6 +11734,7 @@ export default function HomePage() {
                       {delivery.status} · {delivery.delivery_mode} · {delivery.attempt_count} attempt{delivery.attempt_count === 1 ? "" : "s"}
                     </span>
                   </div>
+                  <button type="button" onClick={() => replayDeveloperWebhookDelivery(delivery.id)} disabled={busyAction !== null}>Replay</button>
                 </article>
               ))}
             </div>

@@ -38,6 +38,7 @@ from app.services.developer import (
     list_developer_webhook_deliveries,
     list_developer_webhook_subscriptions,
     record_developer_marketplace_install,
+    replay_developer_webhook_delivery,
     revoke_developer_api_key,
     review_developer_marketplace_listing,
     rotate_developer_application_secret,
@@ -280,6 +281,16 @@ async def list_developer_webhook_deliveries_route(
             subscription_id,
         )
     ]
+
+
+@router.post("/webhook-deliveries/{delivery_id}/replay", response_model=DeveloperWebhookDeliveryRead)
+async def replay_developer_webhook_delivery_route(
+    delivery_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperWebhookDeliveryRead:
+    return webhook_delivery_read(await replay_developer_webhook_delivery(db, identity, delivery_id, authz))
 
 
 @router.patch("/webhook-subscriptions/{subscription_id}", response_model=DeveloperWebhookSubscriptionRead)
