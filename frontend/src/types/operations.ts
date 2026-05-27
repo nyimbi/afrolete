@@ -512,6 +512,14 @@ export type EventTravelManifestRead = {
   participants: EventTravelManifestParticipantRead[];
 };
 
+export type EventTravelManifestExportRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  filename: string;
+  content_type: string;
+  content: string;
+};
+
 export type EventTravelFeeInvoiceItemRead = {
   invoice_id: UUID;
   invoice_number: string;

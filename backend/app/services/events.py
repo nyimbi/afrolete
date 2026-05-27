@@ -58,6 +58,8 @@ from app.schemas.event import (
     EventTravelFeeInvoiceItemRead,
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
+    EventTravelManifestExportCreate,
+    EventTravelManifestExportRead,
     EventTravelManifestParticipantRead,
     EventTravelManifestRead,
     EventTravelPlanCreate,
@@ -536,6 +538,31 @@ async def get_travel_manifest(
         emergency_contacts=plan.emergency_contacts,
         medical_access_plan=plan.medical_access_plan,
         participants=participants,
+    )
+
+
+async def export_travel_manifest(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelManifestExportCreate,
+    authz: AuthorizationService,
+) -> EventTravelManifestExportRead:
+    manifest = await get_travel_manifest(db, identity, travel_plan_id, authz)
+    suffix = "csv" if payload.format == "csv" else "txt"
+    filename = f"travel-manifest-{slugify_filename(manifest.destination)}.{suffix}"
+    if payload.format == "csv":
+        content_type = "text/csv"
+        content = travel_manifest_csv(manifest)
+    else:
+        content_type = "text/plain"
+        content = travel_manifest_text(manifest)
+    return EventTravelManifestExportRead(
+        event_id=manifest.event_id,
+        travel_plan_id=manifest.travel_plan_id,
+        filename=filename,
+        content_type=content_type,
+        content=content,
     )
 
 
@@ -1233,6 +1260,56 @@ def travel_consent_reminder_body(event: Event, plan: EventTravelPlan, pending_co
     if plan.emergency_contacts:
         parts.append(f"Emergency contacts: {plan.emergency_contacts}")
     return "\n".join(parts)[:4000]
+
+
+def slugify_filename(value: str) -> str:
+    cleaned = "".join(character.lower() if character.isalnum() else "-" for character in value)
+    return "-".join(part for part in cleaned.split("-") if part)[:80] or "travel"
+
+
+def csv_cell(value: object) -> str:
+    text = "" if value is None else str(value)
+    escaped = text.replace('"', '""')
+    return f'"{escaped}"'
+
+
+def travel_manifest_csv(manifest: EventTravelManifestRead) -> str:
+    rows = [
+        ["person_id", "display_name", "guardian_names", "guardian_contacts", "medical_clearance", "medical_reason"]
+    ]
+    rows.extend(
+        [
+            str(participant.person_id),
+            participant.display_name,
+            "; ".join(participant.guardian_names),
+            "; ".join(participant.guardian_contacts),
+            participant.medical_clearance_status.value if participant.medical_clearance_status else "",
+            participant.medical_clearance_reason,
+        ]
+        for participant in manifest.participants
+    )
+    return "\n".join(",".join(csv_cell(cell) for cell in row) for row in rows)
+
+
+def travel_manifest_text(manifest: EventTravelManifestRead) -> str:
+    lines = [
+        f"Travel manifest: {manifest.destination}",
+        f"Participants: {manifest.participant_count}",
+        f"Emergency contacts: {manifest.emergency_contacts or 'not set'}",
+        f"Medical access: {manifest.medical_access_plan or 'not set'}",
+        "",
+    ]
+    for participant in manifest.participants:
+        lines.extend(
+            [
+                participant.display_name,
+                f"  Person: {participant.person_id}",
+                f"  Guardians: {'; '.join(participant.guardian_names) or 'none listed'}",
+                f"  Contacts: {'; '.join(participant.guardian_contacts) or 'none listed'}",
+                f"  Medical: {participant.medical_clearance_status or 'not reviewed'} - {participant.medical_clearance_reason}",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def classify_travel_risk(payload: EventTravelPlanCreate) -> tuple[TravelRiskLevel, str]:

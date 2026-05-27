@@ -27,6 +27,8 @@ from app.schemas.event import (
     EventTravelFeeInvoiceCreate,
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
+    EventTravelManifestExportCreate,
+    EventTravelManifestExportRead,
     EventTravelManifestRead,
     EventTravelPlanCreate,
     EventTravelPlanRead,
@@ -47,6 +49,7 @@ from app.services.events import (
     create_travel_approval,
     create_travel_expense,
     create_travel_location_update,
+    export_travel_manifest,
     generate_travel_fee_invoices,
     get_event,
     get_travel_manifest,
@@ -353,6 +356,17 @@ async def get_travel_manifest_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelManifestRead:
     return await get_travel_manifest(db, identity, travel_plan_id, authz)
+
+
+@router.post("/travel-plans/{travel_plan_id}/manifest/export", response_model=EventTravelManifestExportRead)
+async def export_travel_manifest_route(
+    travel_plan_id: UUID,
+    payload: EventTravelManifestExportCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelManifestExportRead:
+    return await export_travel_manifest(db, identity, travel_plan_id, payload, authz)
 
 
 @router.post(

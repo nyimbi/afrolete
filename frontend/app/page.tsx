@@ -78,6 +78,7 @@ import type {
   EventTravelExpenseRead,
   EventTravelFeeInvoiceBatchRead,
   EventTravelLocationUpdateRead,
+  EventTravelManifestExportRead,
   EventTravelManifestRead,
   EventTravelPlanRead,
   EventWeatherAlertRead,
@@ -352,6 +353,7 @@ export default function HomePage() {
   const [travelConsentBatch, setTravelConsentBatch] = useState<EventTravelConsentBatchRead | null>(null);
   const [travelConsentReminder, setTravelConsentReminder] = useState<EventTravelConsentReminderRead | null>(null);
   const [travelManifest, setTravelManifest] = useState<EventTravelManifestRead | null>(null);
+  const [travelManifestExport, setTravelManifestExport] = useState<EventTravelManifestExportRead | null>(null);
   const [travelFeeBatch, setTravelFeeBatch] = useState<EventTravelFeeInvoiceBatchRead | null>(null);
   const [travelApprovals, setTravelApprovals] = useState<EventTravelApprovalRead[]>([]);
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
@@ -1599,6 +1601,7 @@ export default function HomePage() {
       setTravelConsentBatch(null);
       setTravelConsentReminder(null);
       setTravelManifest(null);
+      setTravelManifestExport(null);
       setTravelFeeBatch(null);
       setTravelApprovals([]);
       setTravelChecklistItems([]);
@@ -1808,6 +1811,7 @@ export default function HomePage() {
       setTravelConsentBatch(null);
       setTravelConsentReminder(null);
       setTravelManifest(null);
+      setTravelManifestExport(null);
       setTravelFeeBatch(null);
       setTravelApprovals([]);
       setTravelChecklistItems([]);
@@ -2428,6 +2432,24 @@ export default function HomePage() {
       (manifest) => {
         setTravelManifest(manifest);
         addLog(`Travel manifest loaded for ${manifest.participant_count} participants`, "good");
+      }
+    );
+  };
+
+  const exportTravelManifest = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-manifest-export-${plan.id}`,
+      () =>
+        apiRequest<EventTravelManifestExportRead>(`/events/travel-plans/${plan.id}/manifest/export`, {
+          method: "POST",
+          identity,
+          body: {
+            format: "csv"
+          }
+        }),
+      (manifestExport) => {
+        setTravelManifestExport(manifestExport);
+        addLog(`Travel manifest export ready: ${manifestExport.filename}`, "good");
       }
     );
   };
@@ -7043,6 +7065,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelManifestExport ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelManifestExport.filename}</strong>
+                    <span>{travelManifestExport.content_type} · {travelManifestExport.content.split("\n").length} lines</span>
+                    <span>{travelManifestExport.content.split("\n")[0] ?? "Manifest export ready"}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelFeeBatch ? (
                 <article className="task-card">
                   <div>
@@ -7113,6 +7144,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => requestTravelConsents(plan)}>Consent</button>
                     <button type="button" onClick={() => remindTravelConsents(plan)}>Remind</button>
                     <button type="button" onClick={() => loadTravelManifest(plan)}>Manifest</button>
+                    <button type="button" onClick={() => exportTravelManifest(plan)}>Export</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
                     <button type="button" onClick={() => createTravelApproval(plan)}>Require</button>
                     <button type="button" onClick={() => loadTravelApprovals(plan)}>Approvals</button>
