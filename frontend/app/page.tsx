@@ -5998,6 +5998,11 @@ export default function HomePage() {
                 <div key={record.id} className="attendance-row">
                   <span>{record.person_id.slice(0, 8)}</span>
                   <strong>{record.status}</strong>
+                  <small>
+                    {record.medical_clearance_status
+                      ? `${record.medical_clearance_status} · ${record.medical_clearance_reason ?? "medical review"}`
+                      : record.clearance_status ?? "clearance pending"}
+                  </small>
                   <button type="button" onClick={() => recordAttendance(record.person_id, "present")}>
                     Present
                   </button>

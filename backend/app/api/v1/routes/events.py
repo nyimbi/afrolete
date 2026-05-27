@@ -22,6 +22,7 @@ from app.services.events import (
     record_attendance,
     seed_attendance_from_team_roster,
 )
+from app.services.safeguarding import medical_clearance_for_event
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -41,7 +42,13 @@ def to_event_read(event) -> EventRead:
     )
 
 
-def to_attendance_read(attendance, clearance_status=None) -> AttendanceRecordRead:
+def to_attendance_read(
+    attendance,
+    clearance_status=None,
+    medical_clearance_status=None,
+    medical_clearance_id=None,
+    medical_clearance_reason=None,
+) -> AttendanceRecordRead:
     return AttendanceRecordRead(
         id=attendance.id,
         event_id=attendance.event_id,
@@ -51,6 +58,9 @@ def to_attendance_read(attendance, clearance_status=None) -> AttendanceRecordRea
         guardian_consent_id=attendance.guardian_consent_id,
         note=attendance.note,
         clearance_status=clearance_status,
+        medical_clearance_status=medical_clearance_status,
+        medical_clearance_id=medical_clearance_id,
+        medical_clearance_reason=medical_clearance_reason,
     )
 
 
@@ -89,8 +99,20 @@ async def record_attendance_route(
     db: AsyncSession = Depends(get_db),
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> AttendanceRecordRead:
-    attendance, clearance_status = await record_attendance(db, identity, event_id, payload, authz)
-    return to_attendance_read(attendance, clearance_status)
+    (
+        attendance,
+        clearance_status,
+        medical_clearance_status,
+        medical_clearance_id,
+        medical_clearance_reason,
+    ) = await record_attendance(db, identity, event_id, payload, authz)
+    return to_attendance_read(
+        attendance,
+        clearance_status,
+        medical_clearance_status,
+        medical_clearance_id,
+        medical_clearance_reason,
+    )
 
 
 @router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])
@@ -98,7 +120,22 @@ async def list_attendance_route(
     event_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> list[AttendanceRecordRead]:
-    return [to_attendance_read(attendance) for attendance in await list_attendance(db, event_id)]
+    records = []
+    for attendance in await list_attendance(db, event_id):
+        _, medical_status, medical_id, medical_reason = await medical_clearance_for_event(
+            db,
+            event_id,
+            attendance.person_id,
+        )
+        records.append(
+            to_attendance_read(
+                attendance,
+                medical_clearance_status=medical_status,
+                medical_clearance_id=medical_id,
+                medical_clearance_reason=medical_reason,
+            )
+        )
+    return records
 
 
 @router.post("/{event_id}/attendance/from-roster", response_model=AttendanceSeedRead)

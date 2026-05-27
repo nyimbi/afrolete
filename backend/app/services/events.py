@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import AttendanceStatus, ParticipationClearanceStatus
+from app.models.enums import AttendanceStatus, MedicalClearanceStatus, ParticipationClearanceStatus
 from app.models.event import AttendanceRecord, Event
 from app.models.identity import Person
 from app.models.organization import Organization
@@ -12,10 +12,17 @@ from app.models.team import AthleteProfile, Team, TeamRosterEntry
 from app.schemas.event import EventCreate, AttendanceRecordUpsert
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
-from app.services.safeguarding import clearance_for_event
+from app.services.safeguarding import clearance_for_event, medical_clearance_for_event
 
 
 PARTICIPATION_STATUSES = {AttendanceStatus.CONFIRMED, AttendanceStatus.PRESENT}
+AttendanceResult = tuple[
+    AttendanceRecord,
+    ParticipationClearanceStatus | None,
+    MedicalClearanceStatus | None,
+    UUID | None,
+    str | None,
+]
 
 
 async def can_manage_event_scope(
@@ -132,7 +139,7 @@ async def record_attendance(
     event_id: UUID,
     payload: AttendanceRecordUpsert,
     authz: AuthorizationService,
-) -> tuple[AttendanceRecord, ParticipationClearanceStatus | None]:
+) -> AttendanceResult:
     event = await get_event(db, event_id)
     await ensure_manage_event_scope(authz, event.organization_id, identity)
     person = await db.get(Person, payload.person_id)
@@ -140,6 +147,9 @@ async def record_attendance(
         raise HTTPException(status_code=404, detail="Person not found")
 
     clearance_status: ParticipationClearanceStatus | None = None
+    medical_clearance_status: MedicalClearanceStatus | None = None
+    medical_clearance_id: UUID | None = None
+    medical_clearance_reason: str | None = None
     guardian_consent_id: UUID | None = None
     if payload.status in PARTICIPATION_STATUSES:
         clearance_status, _, _, guardian_consent_id, reason = await clearance_for_event(
@@ -153,6 +163,26 @@ async def record_attendance(
                 detail={
                     "clearance_status": clearance_status.value,
                     "reason": reason,
+                },
+            )
+        (
+            medical_gate_status,
+            medical_clearance_status,
+            medical_clearance_id,
+            medical_clearance_reason,
+        ) = await medical_clearance_for_event(db, event_id, payload.person_id)
+        if medical_gate_status != ParticipationClearanceStatus.CLEARED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "clearance_status": medical_gate_status.value,
+                    "medical_clearance_status": medical_clearance_status.value
+                    if medical_clearance_status is not None
+                    else None,
+                    "medical_clearance_id": str(medical_clearance_id)
+                    if medical_clearance_id is not None
+                    else None,
+                    "reason": medical_clearance_reason,
                 },
             )
 
@@ -169,7 +199,13 @@ async def record_attendance(
         existing.note = payload.note
         await db.commit()
         await db.refresh(existing)
-        return existing, clearance_status
+        return (
+            existing,
+            clearance_status,
+            medical_clearance_status,
+            medical_clearance_id,
+            medical_clearance_reason,
+        )
 
     attendance = AttendanceRecord(
         event_id=event_id,
@@ -191,7 +227,13 @@ async def record_attendance(
     )
     await db.commit()
     await db.refresh(attendance)
-    return attendance, clearance_status
+    return (
+        attendance,
+        clearance_status,
+        medical_clearance_status,
+        medical_clearance_id,
+        medical_clearance_reason,
+    )
 
 
 async def list_attendance(db: AsyncSession, event_id: UUID) -> list[AttendanceRecord]:

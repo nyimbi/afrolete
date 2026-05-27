@@ -19,6 +19,7 @@ from app.models.enums import (
     InsuranceClaimStatus,
     MedicalClearanceStatus,
     ParticipationClearanceStatus,
+    SafeguardingIncidentType,
     SafeguardingIncidentStatus,
 )
 from app.models.event import (
@@ -76,6 +77,13 @@ def utc_now() -> datetime:
 
 def today_utc() -> date:
     return utc_now().date()
+
+
+MEDICAL_INCIDENT_TYPES = {
+    SafeguardingIncidentType.INJURY,
+    SafeguardingIncidentType.MEDICAL,
+}
+BLOCKING_MEDICAL_FOLLOW_UP_VALUES = {"yes", "urgent", "required", "true"}
 
 
 def is_minor_on(person: Person, on_date: date) -> bool | None:
@@ -1723,4 +1731,93 @@ async def clearance_for_event(
         True,
         latest_consent.id,
         "Guardian consent is recorded.",
+    )
+
+
+async def medical_clearance_for_event(
+    db: AsyncSession,
+    event_id: UUID,
+    athlete_person_id: UUID,
+) -> tuple[ParticipationClearanceStatus, MedicalClearanceStatus | None, UUID | None, str]:
+    event = await db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    event_date = event.starts_at.date()
+
+    blocking_incident = await db.scalar(
+        select(SafeguardingIncident)
+        .where(
+            SafeguardingIncident.organization_id == event.organization_id,
+            SafeguardingIncident.athlete_person_id == athlete_person_id,
+            SafeguardingIncident.status.notin_(
+                [SafeguardingIncidentStatus.RESOLVED, SafeguardingIncidentStatus.CLOSED]
+            ),
+        )
+        .where(
+            or_(
+                SafeguardingIncident.incident_type.in_(tuple(MEDICAL_INCIDENT_TYPES)),
+                SafeguardingIncident.medical_follow_up_required.in_(
+                    tuple(BLOCKING_MEDICAL_FOLLOW_UP_VALUES)
+                ),
+            )
+        )
+        .order_by(SafeguardingIncident.occurred_at.desc())
+    )
+    if blocking_incident is None:
+        return (
+            ParticipationClearanceStatus.CLEARED,
+            None,
+            None,
+            "No open injury or medical incident requires clearance.",
+        )
+
+    latest_clearance = await db.scalar(
+        select(IncidentMedicalClearance)
+        .where(
+            IncidentMedicalClearance.organization_id == event.organization_id,
+            IncidentMedicalClearance.incident_id == blocking_incident.id,
+            IncidentMedicalClearance.athlete_person_id == athlete_person_id,
+        )
+        .order_by(IncidentMedicalClearance.updated_at.desc())
+    )
+    if latest_clearance is None:
+        return (
+            ParticipationClearanceStatus.MEDICAL_CLEARANCE_REQUIRED,
+            None,
+            None,
+            f"{blocking_incident.title} requires medical clearance before participation.",
+        )
+    if latest_clearance.valid_from is not None and latest_clearance.valid_from > event_date:
+        return (
+            ParticipationClearanceStatus.MEDICAL_CLEARANCE_REQUIRED,
+            latest_clearance.status,
+            latest_clearance.id,
+            "Medical clearance is not yet valid for this event date.",
+        )
+    if latest_clearance.valid_until is not None and latest_clearance.valid_until < event_date:
+        return (
+            ParticipationClearanceStatus.MEDICAL_CLEARANCE_EXPIRED,
+            latest_clearance.status,
+            latest_clearance.id,
+            "Medical clearance expired before this event date.",
+        )
+    if latest_clearance.status == MedicalClearanceStatus.CLEARED:
+        return (
+            ParticipationClearanceStatus.CLEARED,
+            latest_clearance.status,
+            latest_clearance.id,
+            "Medical clearance allows full participation.",
+        )
+    if latest_clearance.status == MedicalClearanceStatus.RESTRICTED:
+        return (
+            ParticipationClearanceStatus.CLEARED,
+            latest_clearance.status,
+            latest_clearance.id,
+            latest_clearance.restrictions or "Medical clearance allows restricted participation.",
+        )
+    return (
+        ParticipationClearanceStatus.MEDICAL_NOT_CLEARED,
+        latest_clearance.status,
+        latest_clearance.id,
+        "Medical clearance does not permit participation.",
     )

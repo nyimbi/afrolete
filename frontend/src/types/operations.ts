@@ -68,7 +68,10 @@ export type ParticipationClearanceStatus =
   | "minor_requires_consent"
   | "consent_denied"
   | "consent_expired"
-  | "no_guardian";
+  | "no_guardian"
+  | "medical_clearance_required"
+  | "medical_not_cleared"
+  | "medical_clearance_expired";
 
 export type AgentKind =
   | "coaching"
@@ -396,6 +399,9 @@ export type AttendanceRecordRead = {
   guardian_consent_id: UUID | null;
   note: string | null;
   clearance_status: ParticipationClearanceStatus | null;
+  medical_clearance_status: MedicalClearanceStatus | null;
+  medical_clearance_id: UUID | null;
+  medical_clearance_reason: string | null;
 };
 
 export type AttendanceSeedRead = {

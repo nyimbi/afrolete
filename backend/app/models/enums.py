@@ -114,6 +114,9 @@ class ParticipationClearanceStatus(StrEnum):
     CONSENT_DENIED = "consent_denied"
     CONSENT_EXPIRED = "consent_expired"
     NO_GUARDIAN = "no_guardian"
+    MEDICAL_CLEARANCE_REQUIRED = "medical_clearance_required"
+    MEDICAL_NOT_CLEARED = "medical_not_cleared"
+    MEDICAL_CLEARANCE_EXPIRED = "medical_clearance_expired"
 
 
 class MemberSubjectType(StrEnum):

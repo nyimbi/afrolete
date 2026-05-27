@@ -3,7 +3,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.enums import AttendanceStatus, EventType, ParticipationClearanceStatus
+from app.models.enums import (
+    AttendanceStatus,
+    EventType,
+    MedicalClearanceStatus,
+    ParticipationClearanceStatus,
+)
 
 
 class EventCreate(BaseModel):
@@ -52,6 +57,9 @@ class AttendanceRecordRead(BaseModel):
     guardian_consent_id: UUID | None
     note: str | None
     clearance_status: ParticipationClearanceStatus | None = None
+    medical_clearance_status: MedicalClearanceStatus | None = None
+    medical_clearance_id: UUID | None = None
+    medical_clearance_reason: str | None = None
 
 
 class AttendanceSeedRead(BaseModel):
