@@ -3,9 +3,11 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { apiRequest } from "@/lib/api";
+import { apiBaseUrl } from "@/lib/config";
 import type {
   AgentEthicalScorecardRead,
   AgentScorecardCommentRead,
+  AgentScorecardPublicationArtifactLinkRead,
   AgentScorecardPublicationArtifactRead,
   AgentScorecardPublicationRead,
   OrganizationPublicSiteRead
@@ -16,6 +18,7 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
   const [scorecard, setScorecard] = useState<AgentEthicalScorecardRead | null>(null);
   const [comments, setComments] = useState<AgentScorecardCommentRead[]>([]);
   const [publications, setPublications] = useState<AgentScorecardPublicationRead[]>([]);
+  const [artifactLink, setArtifactLink] = useState<AgentScorecardPublicationArtifactLinkRead | null>(null);
   const [commentForm, setCommentForm] = useState({
     display_name: "",
     affiliation: "",
@@ -135,6 +138,21 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
     }
   };
 
+  const createPublicationArtifactLink = async (publicationId: string, artifactFormat: "markdown" | "pdf") => {
+    setBusy(true);
+    setCommentError("");
+    try {
+      const link = await apiRequest<AgentScorecardPublicationArtifactLinkRead>(
+        `/agents/ethical-scorecard/publications/${publicationId}/artifact-link?artifact_format=${artifactFormat}`
+      );
+      setArtifactLink(link);
+    } catch (caught) {
+      setCommentError(caught instanceof Error ? caught.message : "Publication link could not be created");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (error) {
     return (
       <main className="public-site-page public-ai-page" style={colors}>
@@ -237,6 +255,14 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
               <button type="button" onClick={() => downloadPublicationArtifact(latestPublication.id, "pdf")} disabled={busy}>
                 Download PDF
               </button>
+              <button type="button" onClick={() => createPublicationArtifactLink(latestPublication.id, "pdf")} disabled={busy}>
+                Share PDF
+              </button>
+              {artifactLink ? (
+                <a href={`${apiBaseUrl}${artifactLink.signed_url}`} target="_blank" rel="noreferrer">
+                  Open shared artifact
+                </a>
+              ) : null}
             </div>
           </div>
         ) : null}

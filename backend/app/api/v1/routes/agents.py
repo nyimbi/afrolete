@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -28,6 +28,7 @@ from app.schemas.agent import (
     AgentScorecardCommentRead,
     AgentScorecardCommentUpdate,
     AgentScorecardPublicationCreate,
+    AgentScorecardPublicationArtifactLinkRead,
     AgentScorecardPublicationArtifactRead,
     AgentScorecardPublicationReadinessRead,
     AgentScorecardPublicationRead,
@@ -71,8 +72,10 @@ from app.services.agents import (
     list_my_agent_decision_appeals,
     queue_agent_task,
     publish_agent_scorecard,
+    read_signed_agent_scorecard_publication_artifact,
     run_agent_scorecard_publication_reminder,
     run_agent_bias_audit,
+    signed_agent_scorecard_publication_artifact_access,
     submit_agent_decision_appeal,
     submit_my_agent_decision_appeal,
     update_agent_decision_appeal,
@@ -453,6 +456,51 @@ async def get_agent_scorecard_publication_artifact_route(
 ) -> AgentScorecardPublicationArtifactRead:
     return AgentScorecardPublicationArtifactRead(
         **await get_agent_scorecard_publication_artifact(db, publication_id, artifact_format)
+    )
+
+
+@router.post(
+    "/ethical-scorecard/publications/{publication_id}/artifact-link",
+    response_model=AgentScorecardPublicationArtifactLinkRead,
+)
+async def create_agent_scorecard_publication_artifact_link_route(
+    publication_id: UUID,
+    artifact_format: str = Query(default="pdf", pattern="^(markdown|pdf)$"),
+    ttl_seconds: int | None = Query(default=None, ge=60, le=86400),
+    db: AsyncSession = Depends(get_db),
+) -> AgentScorecardPublicationArtifactLinkRead:
+    return AgentScorecardPublicationArtifactLinkRead(
+        **await signed_agent_scorecard_publication_artifact_access(
+            db,
+            publication_id,
+            artifact_format,
+            ttl_seconds,
+        )
+    )
+
+
+@router.get("/ethical-scorecard/artifacts/{organization_id}/{publication_id}/{filename}")
+async def read_agent_scorecard_artifact_route(
+    organization_id: UUID,
+    publication_id: UUID,
+    filename: str,
+    expires: int = Query(),
+    signature: str = Query(),
+) -> Response:
+    artifact = read_signed_agent_scorecard_publication_artifact(
+        organization_id,
+        publication_id,
+        filename,
+        expires,
+        signature,
+    )
+    return Response(
+        content=artifact["content"],
+        media_type=str(artifact["content_type"]),
+        headers={
+            "Content-Disposition": f"inline; filename={artifact['filename']}",
+            "X-Afrolete-Scorecard-Checksum": str(artifact["checksum"]),
+        },
     )
 
 

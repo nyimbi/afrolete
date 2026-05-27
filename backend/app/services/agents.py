@@ -6,6 +6,7 @@ import json
 import re
 import time
 from datetime import UTC, datetime, timedelta
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -58,7 +59,7 @@ from app.schemas.communication import CommunicationMessageCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 from app.services.communications import create_message
-from app.services.storage.objects import put_object
+from app.services.storage.objects import get_object, put_object
 
 ASSIGNABLE_SCOPES = {"organization", "team", "event", "athlete_profile"}
 
@@ -1069,6 +1070,76 @@ async def get_agent_scorecard_publication_artifact(
     }
 
 
+async def signed_agent_scorecard_publication_artifact_access(
+    db: AsyncSession,
+    publication_id: UUID,
+    artifact_format: str = "pdf",
+    ttl_seconds: int | None = None,
+) -> dict[str, object]:
+    artifact = await get_agent_scorecard_publication_artifact(db, publication_id, artifact_format)
+    settings = get_settings()
+    expires_at = datetime.now(UTC) + timedelta(
+        seconds=ttl_seconds or settings.report_artifact_url_ttl_seconds
+    )
+    storage_name = str(artifact["storage_key"]).rsplit("/", 1)[-1]
+    signed_url = signed_scorecard_artifact_url(
+        settings,
+        UUID(str(artifact["organization_id"])),
+        UUID(str(artifact["publication_id"])),
+        storage_name,
+        expires_at,
+    )
+    return {
+        "publication_id": artifact["publication_id"],
+        "organization_id": artifact["organization_id"],
+        "period_label": artifact["period_label"],
+        "artifact_format": artifact["artifact_format"],
+        "storage_url": artifact["storage_url"],
+        "signed_url": signed_url,
+        "expires_at": expires_at,
+        "content_type": artifact["content_type"],
+        "filename": artifact["download_filename"],
+        "checksum": artifact["checksum"],
+        "size_bytes": artifact["size_bytes"],
+    }
+
+
+def read_signed_agent_scorecard_publication_artifact(
+    organization_id: UUID,
+    publication_id: UUID,
+    filename: str,
+    expires: int,
+    signature: str,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    selected_settings = settings or get_settings()
+    if "/" in filename or "\\" in filename or filename in {"", ".", ".."}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid artifact name")
+    if expires < int(time.time()):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Artifact link expired")
+    expected = scorecard_artifact_signature(
+        selected_settings,
+        organization_id,
+        publication_id,
+        filename,
+        expires,
+    )
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid artifact signature")
+    storage_key = f"ai-scorecards/{organization_id}/{publication_id}/{filename}"
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.report_artifact_dir,
+        key=storage_key,
+    )
+    return {
+        "content": content,
+        "content_type": scorecard_artifact_content_type(filename),
+        "filename": public_scorecard_artifact_filename(filename),
+        "checksum": hashlib.sha256(content).hexdigest(),
+    }
+
+
 async def agent_scorecard_publication_readiness(
     db: AsyncSession,
     organization_id: UUID,
@@ -1384,6 +1455,52 @@ def build_scorecard_publication_artifact(
         content_bytes = render_scorecard_publication_pdf(publication, generated_at)
         return "", content_bytes, "application/pdf", f"{filename_stem}.pdf"
     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported artifact format")
+
+
+def signed_scorecard_artifact_url(
+    settings: Settings,
+    organization_id: UUID,
+    publication_id: UUID,
+    storage_name: str,
+    expires_at: datetime,
+) -> str:
+    expires = int(expires_at.timestamp())
+    signature = scorecard_artifact_signature(settings, organization_id, publication_id, storage_name, expires)
+    safe_name = quote(storage_name, safe="")
+    return (
+        f"{settings.api_prefix}/agents/ethical-scorecard/artifacts/{organization_id}/{publication_id}/{safe_name}"
+        f"?expires={expires}&signature={signature}"
+    )
+
+
+def scorecard_artifact_signature(
+    settings: Settings,
+    organization_id: UUID,
+    publication_id: UUID,
+    storage_name: str,
+    expires: int,
+) -> str:
+    payload = f"{organization_id}/{publication_id}/{storage_name}:{expires}"
+    digest = hmac.new(scorecard_artifact_signing_key(settings), payload.encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def scorecard_artifact_signing_key(settings: Settings) -> bytes:
+    key = settings.report_artifact_signing_key or settings.agent_webhook_key
+    return (key or "local-scorecard-artifact-key").encode()
+
+
+def public_scorecard_artifact_filename(storage_name: str) -> str:
+    parts = storage_name.split("-", 1)
+    return parts[1] if len(parts) == 2 else storage_name
+
+
+def scorecard_artifact_content_type(filename: str) -> str:
+    if filename.endswith(".pdf"):
+        return "application/pdf"
+    if filename.endswith(".md"):
+        return "text/markdown; charset=utf-8"
+    return "application/octet-stream"
 
 
 def render_scorecard_publication_artifact(

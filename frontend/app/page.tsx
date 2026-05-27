@@ -23,6 +23,7 @@ import type {
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
   AgentScorecardCommentModerationRead,
+  AgentScorecardPublicationArtifactLinkRead,
   AgentScorecardPublicationArtifactRead,
   AgentScorecardPublicationRead,
   AgentScorecardPublicationReadinessRead,
@@ -627,6 +628,8 @@ export default function HomePage() {
   const [agentScorecardReminder, setAgentScorecardReminder] = useState<AgentScorecardPublicationReminderRead | null>(null);
   const [agentScorecardReminderRun, setAgentScorecardReminderRun] =
     useState<AgentScorecardPublicationReminderRunRead | null>(null);
+  const [agentScorecardArtifactLink, setAgentScorecardArtifactLink] =
+    useState<AgentScorecardPublicationArtifactLinkRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1985,6 +1988,7 @@ export default function HomePage() {
       setAgentScorecardReadiness(null);
       setAgentScorecardReminder(null);
       setAgentScorecardReminderRun(null);
+      setAgentScorecardArtifactLink(null);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -5033,6 +5037,26 @@ export default function HomePage() {
         }
         addLog(
           `Downloaded ${artifact.period_label} ${artifact.artifact_format} scorecard artifact`,
+          "good"
+        );
+      }
+    );
+  };
+
+  const shareAgentScorecardPublication = (
+    publication: AgentScorecardPublicationRead,
+    artifactFormat: "markdown" | "pdf"
+  ) => {
+    runAction(
+      `agent-scorecard-artifact-link-${artifactFormat}-${publication.id}`,
+      () =>
+        apiRequest<AgentScorecardPublicationArtifactLinkRead>(
+          `/agents/ethical-scorecard/publications/${publication.id}/artifact-link?artifact_format=${artifactFormat}`
+        ),
+      (link) => {
+        setAgentScorecardArtifactLink(link);
+        addLog(
+          `Created ${link.period_label} ${link.artifact_format} scorecard link`,
           "good"
         );
       }
@@ -12018,6 +12042,24 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {agentScorecardArtifactLink ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{agentScorecardArtifactLink.period_label} artifact link · {agentScorecardArtifactLink.artifact_format}</strong>
+                    <span>
+                      Expires {new Date(agentScorecardArtifactLink.expires_at).toLocaleString()} · {agentScorecardArtifactLink.size_bytes} bytes
+                    </span>
+                    <span>{agentScorecardArtifactLink.checksum.slice(0, 16)} · {agentScorecardArtifactLink.content_type}</span>
+                  </div>
+                  <a
+                    href={`${apiBaseUrl}${agentScorecardArtifactLink.signed_url}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open
+                  </a>
+                </article>
+              ) : null}
               {agentScorecardPublications.slice(0, 2).map((publication) => (
                 <article key={publication.id} className="task-card">
                   <div>
@@ -12029,6 +12071,7 @@ export default function HomePage() {
                   <div className="event-toolbar">
                     <button type="button" onClick={() => downloadAgentScorecardPublication(publication, "markdown")}>Markdown</button>
                     <button type="button" onClick={() => downloadAgentScorecardPublication(publication, "pdf")}>PDF</button>
+                    <button type="button" onClick={() => shareAgentScorecardPublication(publication, "pdf")}>Link</button>
                   </div>
                 </article>
               ))}
