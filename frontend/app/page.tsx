@@ -3335,6 +3335,9 @@ export default function HomePage() {
               ? {
                   ...item,
                   secret_configured: true,
+                  secret_storage_mode: secret.secret_storage_mode,
+                  secret_vault_provider: secret.secret_vault_provider,
+                  secret_vault_reference: secret.secret_vault_reference,
                   secret_rotated_at: secret.secret_rotated_at
                 }
               : item
@@ -8669,6 +8672,10 @@ export default function HomePage() {
                     <span>{device.provider}:{device.device_id} · {device.assigned_vehicle ?? "No vehicle assigned"}</span>
                     <span>{device.secret_configured ? `Secret rotated ${device.secret_rotated_at ? new Date(device.secret_rotated_at).toLocaleString() : "recently"}` : "Using global ingest key fallback"}</span>
                     <span>
+                      Secret custody: {device.secret_storage_mode}
+                      {device.secret_vault_provider ? ` · ${device.secret_vault_provider}` : ""}
+                    </span>
+                    <span>
                       {device.last_seen_at ? `Last seen ${new Date(device.last_seen_at).toLocaleString()}` : "No device pings yet"}
                       {device.last_battery_percent ? ` · ${device.last_battery_percent}% battery` : ""}
                     </span>
@@ -8686,6 +8693,7 @@ export default function HomePage() {
                   <div>
                     <strong>{travelDeviceSecret.label} ingest secret</strong>
                     <span>{travelDeviceSecret.provider}:{travelDeviceSecret.device_id} · rotated {new Date(travelDeviceSecret.secret_rotated_at).toLocaleString()}</span>
+                    <span>{travelDeviceSecret.secret_vault_reference ?? `Secret custody: ${travelDeviceSecret.secret_storage_mode}`}</span>
                     <span>{travelDeviceSecret.ingest_secret}</span>
                   </div>
                 </article>

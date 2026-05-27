@@ -200,6 +200,9 @@ class EventTravelDevice(IdMixin, TimestampMixin, Base):
     last_battery_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     last_accuracy_meters: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     ingest_secret_key: Mapped[str | None] = mapped_column(String(160))
+    secret_storage_mode: Mapped[str] = mapped_column(String(40), default="database", nullable=False, index=True)
+    secret_vault_provider: Mapped[str | None] = mapped_column(String(80), index=True)
+    secret_vault_reference: Mapped[str | None] = mapped_column(String(360), index=True)
     secret_rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
 

@@ -545,6 +545,9 @@ class EventTravelDeviceRead(EventTravelDeviceCreate):
     last_battery_percent: Decimal | None
     last_accuracy_meters: Decimal | None
     secret_configured: bool = False
+    secret_storage_mode: str = "database"
+    secret_vault_provider: str | None = None
+    secret_vault_reference: str | None = None
     secret_rotated_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -557,6 +560,9 @@ class EventTravelDeviceSecretRead(BaseModel):
     device_id: str
     label: str
     ingest_secret: str
+    secret_storage_mode: str = "database"
+    secret_vault_provider: str | None = None
+    secret_vault_reference: str | None = None
     secret_rotated_at: datetime
 
 
@@ -575,6 +581,9 @@ class EventTravelDeviceFleetItemRead(BaseModel):
     last_battery_percent: Decimal | None
     last_accuracy_meters: Decimal | None
     secret_configured: bool = False
+    secret_storage_mode: str = "database"
+    secret_vault_provider: str | None = None
+    secret_vault_reference: str | None = None
 
 
 class EventTravelDeviceFleetInventoryRead(BaseModel):

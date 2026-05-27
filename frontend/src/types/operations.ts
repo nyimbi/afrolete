@@ -761,6 +761,9 @@ export type EventTravelDeviceRead = {
   last_battery_percent: string | null;
   last_accuracy_meters: string | null;
   secret_configured: boolean;
+  secret_storage_mode: string;
+  secret_vault_provider: string | null;
+  secret_vault_reference: string | null;
   secret_rotated_at: string | null;
   created_at: string;
   updated_at: string;
@@ -773,6 +776,9 @@ export type EventTravelDeviceSecretRead = {
   device_id: string;
   label: string;
   ingest_secret: string;
+  secret_storage_mode: string;
+  secret_vault_provider: string | null;
+  secret_vault_reference: string | null;
   secret_rotated_at: string;
 };
 
@@ -791,6 +797,9 @@ export type EventTravelDeviceFleetItemRead = {
   last_battery_percent: string | null;
   last_accuracy_meters: string | null;
   secret_configured: boolean;
+  secret_storage_mode: string;
+  secret_vault_provider: string | null;
+  secret_vault_reference: string | null;
 };
 
 export type EventTravelDeviceFleetInventoryRead = {

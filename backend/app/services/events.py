@@ -1468,7 +1468,15 @@ async def rotate_travel_device_secret(
     await ensure_manage_event_scope(authz, device.organization_id, identity)
     secret = token_urlsafe(32)
     rotated_at = datetime.now(UTC)
+    secret_storage_mode, secret_vault_provider, secret_vault_reference = travel_device_secret_storage_metadata(
+        device,
+        rotated_at,
+        get_settings(),
+    )
     device.ingest_secret_key = secret
+    device.secret_storage_mode = secret_storage_mode
+    device.secret_vault_provider = secret_vault_provider
+    device.secret_vault_reference = secret_vault_reference
     device.secret_rotated_at = rotated_at
     await db.commit()
     await db.refresh(device)
@@ -1479,6 +1487,9 @@ async def rotate_travel_device_secret(
         device_id=device.device_id,
         label=device.label,
         ingest_secret=secret,
+        secret_storage_mode=device.secret_storage_mode,
+        secret_vault_provider=device.secret_vault_provider,
+        secret_vault_reference=device.secret_vault_reference,
         secret_rotated_at=rotated_at,
     )
 
@@ -1654,6 +1665,22 @@ def travel_device_replay_retention_days(settings: Settings, provider: str) -> in
 
 def travel_device_replay_retention_source(settings: Settings, provider: str) -> str:
     return "provider" if provider.lower() in settings.travel_device_provider_idempotency_days else "default"
+
+
+def travel_device_secret_storage_metadata(
+    device: EventTravelDevice,
+    rotated_at: datetime,
+    settings: Settings,
+) -> tuple[str, str | None, str | None]:
+    if settings.travel_device_secret_storage_mode != "database_with_vault_reference":
+        return "database", None, None
+    prefix = settings.travel_device_secret_vault_path_prefix.rstrip("/")
+    rotated_key = rotated_at.strftime("%Y%m%dT%H%M%SZ")
+    return (
+        "database_with_vault_reference",
+        settings.travel_device_secret_vault_provider,
+        f"{prefix}/{device.organization_id}/{device.id}/{rotated_key}",
+    )
 
 
 async def travel_device_for_ingest(
@@ -3621,7 +3648,10 @@ def travel_device_read(device: EventTravelDevice) -> EventTravelDeviceRead:
         last_location_update_id=device.last_location_update_id,
         last_battery_percent=device.last_battery_percent,
         last_accuracy_meters=device.last_accuracy_meters,
-        secret_configured=bool(device.ingest_secret_key),
+        secret_configured=bool(device.ingest_secret_key or device.secret_vault_reference),
+        secret_storage_mode=device.secret_storage_mode,
+        secret_vault_provider=device.secret_vault_provider,
+        secret_vault_reference=device.secret_vault_reference,
         secret_rotated_at=device.secret_rotated_at,
         notes=device.notes,
         created_at=device.created_at,
@@ -3647,7 +3677,10 @@ def travel_device_fleet_item_read(
         last_seen_at=device.last_seen_at,
         last_battery_percent=device.last_battery_percent,
         last_accuracy_meters=device.last_accuracy_meters,
-        secret_configured=bool(device.ingest_secret_key),
+        secret_configured=bool(device.ingest_secret_key or device.secret_vault_reference),
+        secret_storage_mode=device.secret_storage_mode,
+        secret_vault_provider=device.secret_vault_provider,
+        secret_vault_reference=device.secret_vault_reference,
     )
 
 

@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     travel_device_ingest_tolerance_seconds: int = 300
     travel_device_ingest_event_retention_days: int = 30
     travel_device_provider_idempotency_days: dict[str, int] = Field(default_factory=dict)
+    travel_device_secret_storage_mode: Literal["database", "database_with_vault_reference"] = "database"
+    travel_device_secret_vault_provider: str = "openbao"
+    travel_device_secret_vault_path_prefix: str = "secret/data/afrolete/travel-devices"
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"
