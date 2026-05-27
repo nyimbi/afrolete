@@ -22,6 +22,7 @@ from app.models.assets import (
     MaintenanceWorkOrder,
     SupplierOrder,
 )
+from app.models.commercial import FinanceInvoice
 from app.models.enums import (
     AssetCondition,
     CheckoutStatus,
@@ -41,6 +42,8 @@ from app.schemas.assets import (
     EquipmentCheckoutReturn,
     EquipmentLeaseQuoteRead,
     EquipmentFileUploadCreate,
+    EquipmentLeaseInvoiceCreate,
+    EquipmentLeaseInvoiceRead,
     EquipmentPhotoUpdate,
     EquipmentScanEventCreate,
     EquipmentScanEventRead,
@@ -58,6 +61,7 @@ from app.schemas.assets import (
     SupplierScoreRead,
     AssetUtilizationRecommendationRead,
 )
+from app.schemas.commercial import FinanceInvoiceRead
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
 
@@ -764,6 +768,53 @@ async def equipment_lease_quote(
     )
 
 
+async def create_equipment_lease_invoice(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    equipment_item_id: UUID,
+    payload: EquipmentLeaseInvoiceCreate,
+    authz: AuthorizationService,
+) -> EquipmentLeaseInvoiceRead:
+    item = await get_equipment_for_organization(db, equipment_item_id, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    if payload.team_id is not None:
+        await get_team_for_organization(db, payload.team_id, payload.organization_id)
+    if payload.person_id is not None:
+        await get_person_member_for_organization(db, payload.person_id, payload.organization_id)
+    quote = await equipment_lease_quote(
+        db,
+        payload.organization_id,
+        equipment_item_id,
+        payload.quantity,
+        payload.term_months,
+    )
+    today = datetime.now(UTC).date()
+    invoice = FinanceInvoice(
+        organization_id=payload.organization_id,
+        person_id=payload.person_id,
+        team_id=payload.team_id,
+        sponsor_id=None,
+        invoice_number=f"LEASE-{today.strftime('%Y%m%d')}-{str(item.id)[:8]}",
+        title=f"{item.name} lease ({payload.term_months} months)",
+        amount_due=quote.total_amount,
+        amount_paid=Decimal("0"),
+        currency="USD",
+        due_on=payload.due_on or today,
+        memo=payload.memo
+        or (
+            f"{payload.quantity} x {item.name}; monthly estimate {quote.monthly_amount}; "
+            f"residual value {quote.residual_value}. {quote.rationale}"
+        ),
+    )
+    db.add(invoice)
+    await db.commit()
+    await db.refresh(invoice)
+    return EquipmentLeaseInvoiceRead(
+        lease_quote=quote,
+        invoice=finance_invoice_read(invoice),
+    )
+
+
 async def utilization_recommendations(
     db: AsyncSession,
     organization_id: UUID,
@@ -1036,6 +1087,24 @@ def supplier_order_read(order: SupplierOrder) -> SupplierOrderRead:
         expected_delivery_at=order.expected_delivery_at,
         received_at=order.received_at,
         notes=order.notes,
+    )
+
+
+def finance_invoice_read(invoice: FinanceInvoice) -> FinanceInvoiceRead:
+    return FinanceInvoiceRead(
+        id=invoice.id,
+        organization_id=invoice.organization_id,
+        person_id=invoice.person_id,
+        team_id=invoice.team_id,
+        sponsor_id=invoice.sponsor_id,
+        invoice_number=invoice.invoice_number,
+        title=invoice.title,
+        amount_due=invoice.amount_due,
+        amount_paid=invoice.amount_paid,
+        currency=invoice.currency,
+        due_on=invoice.due_on,
+        status=invoice.status,
+        memo=invoice.memo,
     )
 
 

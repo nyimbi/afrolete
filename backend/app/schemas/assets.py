@@ -14,6 +14,7 @@ from app.models.enums import (
     WorkOrderPriority,
     WorkOrderStatus,
 )
+from app.schemas.commercial import FinanceInvoiceRead
 
 
 class FacilityCreate(BaseModel):
@@ -242,6 +243,21 @@ class EquipmentLeaseQuoteRead(BaseModel):
     total_amount: Decimal
     residual_value: Decimal
     rationale: str
+
+
+class EquipmentLeaseInvoiceCreate(BaseModel):
+    organization_id: UUID
+    quantity: int = Field(default=1, ge=1)
+    term_months: int = Field(default=12, ge=1, le=120)
+    person_id: UUID | None = None
+    team_id: UUID | None = None
+    due_on: date | None = None
+    memo: str | None = Field(default=None, max_length=4000)
+
+
+class EquipmentLeaseInvoiceRead(BaseModel):
+    lease_quote: EquipmentLeaseQuoteRead
+    invoice: FinanceInvoiceRead
 
 
 class AssetUtilizationRecommendationRead(BaseModel):

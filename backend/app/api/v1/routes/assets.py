@@ -14,6 +14,8 @@ from app.schemas.assets import (
     EquipmentFileUploadCreate,
     EquipmentItemCreate,
     EquipmentItemRead,
+    EquipmentLeaseInvoiceCreate,
+    EquipmentLeaseInvoiceRead,
     EquipmentLeaseQuoteRead,
     EquipmentPhotoUpdate,
     EquipmentScanEventCreate,
@@ -39,6 +41,7 @@ from app.services.assets import (
     create_equipment_item,
     create_facility,
     create_facility_booking,
+    create_equipment_lease_invoice,
     create_supplier_order,
     create_work_order,
     equipment_lease_quote,
@@ -364,6 +367,21 @@ async def equipment_lease_quote_route(
     db: AsyncSession = Depends(get_db),
 ) -> EquipmentLeaseQuoteRead:
     return await equipment_lease_quote(db, organization_id, equipment_item_id, quantity, term_months)
+
+
+@router.post(
+    "/equipment/{equipment_item_id}/lease-invoice",
+    response_model=EquipmentLeaseInvoiceRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_equipment_lease_invoice_route(
+    equipment_item_id: UUID,
+    payload: EquipmentLeaseInvoiceCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EquipmentLeaseInvoiceRead:
+    return await create_equipment_lease_invoice(db, identity, equipment_item_id, payload, authz)
 
 
 @router.post("/checkouts", response_model=EquipmentCheckoutRead, status_code=status.HTTP_201_CREATED)

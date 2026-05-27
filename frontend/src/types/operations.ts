@@ -447,6 +447,11 @@ export type EquipmentLeaseQuoteRead = {
   rationale: string;
 };
 
+export type EquipmentLeaseInvoiceRead = {
+  lease_quote: EquipmentLeaseQuoteRead;
+  invoice: FinanceInvoiceRead;
+};
+
 export type AssetUtilizationRecommendationRead = {
   target_type: string;
   target_id: UUID;

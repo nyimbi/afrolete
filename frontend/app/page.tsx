@@ -71,6 +71,7 @@ import type {
   EquipmentCheckoutRead,
   EquipmentFileRead,
   EquipmentItemRead,
+  EquipmentLeaseInvoiceRead,
   EquipmentLeaseQuoteRead,
   EquipmentScanEventRead,
   EquipmentScanRead,
@@ -332,6 +333,7 @@ export default function HomePage() {
   const [supplierSubmission, setSupplierSubmission] = useState<SupplierOrderSubmissionRead | null>(null);
   const [assetUtilization, setAssetUtilization] = useState<AssetUtilizationRecommendationRead[]>([]);
   const [leaseQuote, setLeaseQuote] = useState<EquipmentLeaseQuoteRead | null>(null);
+  const [leaseInvoice, setLeaseInvoice] = useState<EquipmentLeaseInvoiceRead | null>(null);
   const [sponsors, setSponsors] = useState<SponsorRead[]>([]);
   const [sponsorships, setSponsorships] = useState<SponsorshipAgreementRead[]>([]);
   const [campaigns, setCampaigns] = useState<FundraisingCampaignRead[]>([]);
@@ -1313,6 +1315,7 @@ export default function HomePage() {
       setSupplierSubmission(null);
       setAssetUtilization([]);
       setLeaseQuote(null);
+      setLeaseInvoice(null);
       setSponsors([]);
       setSponsorships([]);
       setCampaigns([]);
@@ -3128,6 +3131,40 @@ export default function HomePage() {
     );
   };
 
+  const billSelectedEquipmentLease = () => {
+    if (!selectedOrganizationId || !selectedEquipmentId) {
+      addLog("Select equipment first", "bad");
+      return;
+    }
+    runAction(
+      "equipment-lease-invoice",
+      () =>
+        apiRequest<EquipmentLeaseInvoiceRead>(`/assets/equipment/${selectedEquipmentId}/lease-invoice`, {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            quantity: checkoutForm.quantity,
+            term_months: 12,
+            person_id: selectedAthleteId || null,
+            team_id: selectedTeamId || null,
+            due_on: new Date().toISOString().slice(0, 10),
+            memo: `Lease billing created from asset operations for ${selectedEquipment?.name ?? equipmentForm.name}.`
+          }
+        }),
+      (leaseBilling) => {
+        setLeaseInvoice(leaseBilling);
+        setLeaseQuote(leaseBilling.lease_quote);
+        setInvoices((current) => [
+          leaseBilling.invoice,
+          ...current.filter((invoice) => invoice.id !== leaseBilling.invoice.id)
+        ]);
+        setSelectedInvoiceId(leaseBilling.invoice.id);
+        addLog(`${leaseBilling.invoice.invoice_number} opened for ${leaseBilling.lease_quote.item_name}`, "good");
+      }
+    );
+  };
+
   const checkoutEquipmentItem = () => {
     if (!selectedOrganizationId || !selectedEquipmentId) {
       addLog("Create or select equipment first", "bad");
@@ -4884,6 +4921,7 @@ export default function HomePage() {
                 <button type="button" onClick={updateSelectedEquipmentPhoto} disabled={busyAction !== null}>Photo</button>
                 <button type="button" onClick={uploadSelectedEquipmentFile} disabled={busyAction !== null}>Upload</button>
                 <button type="button" onClick={quoteSelectedEquipmentLease} disabled={busyAction !== null}>Lease</button>
+                <button type="button" onClick={billSelectedEquipmentLease} disabled={busyAction !== null}>Bill</button>
                 <button type="button" onClick={checkoutEquipmentItem} disabled={busyAction !== null}>Checkout</button>
                 <button type="button" onClick={returnSelectedCheckout} disabled={busyAction !== null}>Return</button>
               </div>
@@ -4997,6 +5035,13 @@ export default function HomePage() {
                 <strong>{leaseQuote.monthly_amount}</strong>
                 <span>{leaseQuote.item_name} lease estimate</span>
                 <small>{leaseQuote.term_months} months · total ${leaseQuote.total_amount}</small>
+              </div>
+            ) : null}
+            {leaseInvoice ? (
+              <div className="score-summary">
+                <strong>{leaseInvoice.invoice.amount_due}</strong>
+                <span>{leaseInvoice.invoice.invoice_number}</span>
+                <small>{leaseInvoice.invoice.title} · due {leaseInvoice.invoice.due_on ?? "now"}</small>
               </div>
             ) : null}
             <div className="task-list">
