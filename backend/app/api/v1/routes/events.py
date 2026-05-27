@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -31,6 +31,8 @@ from app.schemas.event import (
     EventTravelConsentReminderRunCreate,
     EventTravelConsentReminderRunRead,
     EventTravelConsentRequestCreate,
+    EventTravelDeviceLocationIngestCreate,
+    EventTravelDeviceLocationIngestRead,
     EventTravelExpenseCreate,
     EventTravelExpenseRead,
     EventTravelExpenseUpdate,
@@ -81,6 +83,7 @@ from app.services.events import (
     get_event,
     get_travel_manifest,
     get_travel_readiness,
+    ingest_travel_device_location,
     list_attendance,
     list_travel_carpool_rides,
     list_travel_checklist_items,
@@ -106,6 +109,7 @@ from app.services.events import (
     update_travel_plan,
     upload_travel_checklist_evidence,
     upload_travel_expense_receipt,
+    validate_travel_device_ingest_signature,
 )
 from app.services.safeguarding import medical_clearance_for_event
 
@@ -629,6 +633,33 @@ async def create_travel_location_update_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelLocationUpdateRead:
     return await create_travel_location_update(db, identity, travel_plan_id, payload, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/location-ingest",
+    response_model=EventTravelDeviceLocationIngestRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ingest_travel_device_location_route(
+    request: Request,
+    travel_plan_id: UUID,
+    payload: EventTravelDeviceLocationIngestCreate,
+    x_afrolete_travel_timestamp: str | None = Header(default=None, alias="X-Afrolete-Travel-Timestamp"),
+    x_afrolete_travel_signature: str | None = Header(default=None, alias="X-Afrolete-Travel-Signature"),
+    db: AsyncSession = Depends(get_db),
+) -> EventTravelDeviceLocationIngestRead:
+    signature_required, signature_validated = validate_travel_device_ingest_signature(
+        await request.body(),
+        x_afrolete_travel_timestamp,
+        x_afrolete_travel_signature,
+    )
+    return await ingest_travel_device_location(
+        db,
+        travel_plan_id,
+        payload,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+    )
 
 
 @router.post("/travel-plans/{travel_plan_id}/geofence-check", response_model=EventTravelGeofenceCheckRead)

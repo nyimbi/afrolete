@@ -431,6 +431,30 @@ class EventTravelLocationUpdateRead(BaseModel):
     notes: str | None
 
 
+class EventTravelDeviceLocationIngestCreate(BaseModel):
+    device_id: str = Field(min_length=2, max_length=120)
+    provider: str = Field(default="hardware-gps", min_length=2, max_length=80)
+    phase: str = Field(default="en_route", pattern="^(departed|en_route|delayed|arrived|returned)$")
+    recorded_at: datetime | None = None
+    latitude: Decimal = Field(ge=-90, le=90, max_digits=9, decimal_places=6)
+    longitude: Decimal = Field(ge=-180, le=180, max_digits=9, decimal_places=6)
+    speed_kph: Decimal | None = Field(default=None, ge=0, max_digits=6, decimal_places=2)
+    heading_degrees: Decimal | None = Field(default=None, ge=0, le=360, max_digits=6, decimal_places=2)
+    accuracy_meters: Decimal | None = Field(default=None, ge=0, max_digits=8, decimal_places=2)
+    battery_percent: Decimal | None = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2)
+    external_event_id: str | None = Field(default=None, max_length=160)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelDeviceLocationIngestRead(BaseModel):
+    travel_plan_id: UUID
+    device_id: str
+    provider: str
+    signature_required: bool
+    signature_validated: bool
+    update: EventTravelLocationUpdateRead
+
+
 class EventTravelGeofenceCheckCreate(BaseModel):
     center_latitude: Decimal = Field(ge=-90, le=90, max_digits=9, decimal_places=6)
     center_longitude: Decimal = Field(ge=-180, le=180, max_digits=9, decimal_places=6)

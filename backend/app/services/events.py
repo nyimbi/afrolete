@@ -75,6 +75,8 @@ from app.schemas.event import (
     EventTravelChecklistItemRead,
     EventTravelChecklistItemUpdate,
     EventTravelChecklistSeedCreate,
+    EventTravelDeviceLocationIngestCreate,
+    EventTravelDeviceLocationIngestRead,
     EventTravelExpenseCreate,
     EventTravelExpenseRead,
     EventTravelExpenseUpdate,
@@ -1193,15 +1195,7 @@ async def create_travel_location_update(
     db.add(update)
     await db.flush()
 
-    if payload.phase in {"departed", "en_route", "delayed"} and plan.status not in {
-        TravelPlanStatus.COMPLETED,
-        TravelPlanStatus.CANCELLED,
-    }:
-        plan.status = TravelPlanStatus.IN_PROGRESS
-    if payload.phase == "arrived":
-        plan.status = TravelPlanStatus.IN_PROGRESS
-    if payload.phase == "returned":
-        plan.status = TravelPlanStatus.COMPLETED
+    apply_travel_phase_status(plan, payload.phase)
 
     if payload.notify_guardians and payload.phase in {"departed", "delayed", "arrived", "returned"}:
         message = await create_message(
@@ -1229,6 +1223,74 @@ async def create_travel_location_update(
     await db.commit()
     await db.refresh(update)
     return await travel_location_update_read(db, update)
+
+
+async def ingest_travel_device_location(
+    db: AsyncSession,
+    travel_plan_id: UUID,
+    payload: EventTravelDeviceLocationIngestCreate,
+    *,
+    signature_required: bool = False,
+    signature_validated: bool = False,
+) -> EventTravelDeviceLocationIngestRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    update = EventTravelLocationUpdate(
+        organization_id=plan.organization_id,
+        travel_plan_id=plan.id,
+        phase=payload.phase,
+        source=f"{payload.provider}:{payload.device_id}"[:80],
+        recorded_at=payload.recorded_at or datetime.now(UTC),
+        recorded_by_person_id=None,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        speed_kph=payload.speed_kph,
+        heading_degrees=payload.heading_degrees,
+        notes=travel_device_location_notes(payload, signature_required, signature_validated),
+    )
+    db.add(update)
+    apply_travel_phase_status(plan, payload.phase)
+    await db.commit()
+    await db.refresh(update)
+    return EventTravelDeviceLocationIngestRead(
+        travel_plan_id=plan.id,
+        device_id=payload.device_id,
+        provider=payload.provider,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        update=await travel_location_update_read(db, update),
+    )
+
+
+def validate_travel_device_ingest_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> tuple[bool, bool]:
+    selected_settings = settings or get_settings()
+    signing_key = selected_settings.travel_device_ingest_key
+    if not signing_key:
+        return False, False
+    if not timestamp_header or not signature_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing travel device signature")
+    try:
+        timestamp = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel device timestamp") from exc
+    age = abs(int(time.time()) - timestamp)
+    if age > selected_settings.travel_device_ingest_tolerance_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Stale travel device signature")
+    expected = hmac.new(
+        signing_key.encode(),
+        timestamp_header.encode() + b"." + raw_body,
+        sha256,
+    ).hexdigest()
+    submitted = signature_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, submitted):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid travel device signature")
+    return True, True
 
 
 async def check_travel_geofence(
@@ -2256,6 +2318,36 @@ async def travel_location_update_read(
         notification_recipient_count=recipient_count,
         notes=update.notes,
     )
+
+
+def apply_travel_phase_status(plan: EventTravelPlan, phase: str) -> None:
+    if phase in {"departed", "en_route", "delayed", "arrived"} and plan.status not in {
+        TravelPlanStatus.COMPLETED,
+        TravelPlanStatus.CANCELLED,
+    }:
+        plan.status = TravelPlanStatus.IN_PROGRESS
+    if phase == "returned":
+        plan.status = TravelPlanStatus.COMPLETED
+
+
+def travel_device_location_notes(
+    payload: EventTravelDeviceLocationIngestCreate,
+    signature_required: bool,
+    signature_validated: bool,
+) -> str:
+    lines = [
+        f"Hardware GPS ingest from {payload.provider} device {payload.device_id}.",
+        f"Signature required: {signature_required}; validated: {signature_validated}.",
+    ]
+    if payload.accuracy_meters is not None:
+        lines.append(f"Accuracy: {payload.accuracy_meters}m.")
+    if payload.battery_percent is not None:
+        lines.append(f"Battery: {payload.battery_percent}%.")
+    if payload.external_event_id:
+        lines.append(f"External event: {payload.external_event_id}.")
+    if payload.notes:
+        lines.append(payload.notes)
+    return "\n".join(lines)[:2000]
 
 
 def travel_distance_km(
