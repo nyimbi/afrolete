@@ -733,6 +733,26 @@ class EventTravelBackupDriverDispatchRead(BaseModel):
     rationale: list[str]
 
 
+class EventTravelDriverMarketplaceCandidateRead(BaseModel):
+    driver: EventTravelBackupDriverRead
+    match_score: Decimal
+    verified: bool
+    rating_count: int
+    average_rating: Decimal | None
+    incident_reported_count: int
+    response_minutes: int | None
+    marketplace_status: str
+    rationale: list[str]
+
+
+class EventTravelDriverMarketplaceRead(BaseModel):
+    travel_plan_id: UUID
+    candidate_count: int
+    verified_candidate_count: int
+    recommended_driver_id: UUID | None
+    candidates: list[EventTravelDriverMarketplaceCandidateRead]
+
+
 class EventTravelExpenseCreate(BaseModel):
     category: str = Field(default="fuel", min_length=2, max_length=80)
     vendor: str | None = Field(default=None, max_length=180)

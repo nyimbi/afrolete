@@ -96,6 +96,8 @@ from app.schemas.event import (
     EventTravelDeviceRead,
     EventTravelDeviceSecretRead,
     EventTravelDeviceUpdate,
+    EventTravelDriverMarketplaceCandidateRead,
+    EventTravelDriverMarketplaceRead,
     EventTravelDriverRatingCreate,
     EventTravelDriverRatingRead,
     EventTravelDriverRatingSummaryRead,
@@ -2159,6 +2161,47 @@ async def dispatch_travel_backup_driver(
     )
 
 
+async def get_travel_driver_marketplace_matches(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> EventTravelDriverMarketplaceRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    drivers = (
+        await db.scalars(
+            select(EventTravelBackupDriver)
+            .where(EventTravelBackupDriver.travel_plan_id == plan.id)
+            .where(EventTravelBackupDriver.availability_status.in_(["available", "standby"]))
+            .order_by(EventTravelBackupDriver.priority, EventTravelBackupDriver.response_minutes.nulls_last())
+        )
+    ).all()
+    ratings = (
+        await db.scalars(
+            select(EventTravelDriverRating)
+            .where(EventTravelDriverRating.travel_plan_id == plan.id)
+            .order_by(EventTravelDriverRating.created_at.desc())
+        )
+    ).all()
+    rating_index = travel_driver_rating_index(ratings)
+    candidates = [
+        travel_driver_marketplace_candidate(driver, rating_index.get(travel_driver_rating_key(driver), []))
+        for driver in drivers
+    ]
+    candidates.sort(key=lambda candidate: candidate.match_score, reverse=True)
+    recommended = candidates[0].driver.id if candidates else None
+    return EventTravelDriverMarketplaceRead(
+        travel_plan_id=plan.id,
+        candidate_count=len(candidates),
+        verified_candidate_count=sum(1 for candidate in candidates if candidate.verified),
+        recommended_driver_id=recommended,
+        candidates=candidates,
+    )
+
+
 async def list_travel_driver_ratings(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3576,6 +3619,72 @@ def backup_driver_is_verified(driver: EventTravelBackupDriver) -> bool:
     license_ok = license_status in {"verified", "current", "cleared", "valid", "passed"}
     background_ok = background_status in {"verified", "current", "cleared", "valid", "passed"}
     return license_ok and background_ok
+
+
+def travel_driver_rating_key(driver: EventTravelBackupDriver) -> str:
+    return str(driver.driver_person_id or driver.driver_name).strip().lower()
+
+
+def travel_driver_rating_index(
+    ratings: list[EventTravelDriverRating],
+) -> dict[str, list[EventTravelDriverRating]]:
+    index: dict[str, list[EventTravelDriverRating]] = {}
+    for rating in ratings:
+        key = str(rating.driver_person_id or rating.driver_name).strip().lower()
+        index.setdefault(key, []).append(rating)
+    return index
+
+
+def travel_driver_marketplace_candidate(
+    driver: EventTravelBackupDriver,
+    ratings: list[EventTravelDriverRating],
+) -> EventTravelDriverMarketplaceCandidateRead:
+    verified = backup_driver_is_verified(driver)
+    average_rating = (
+        sum((Decimal(rating.overall_score) for rating in ratings), Decimal("0")) / Decimal(len(ratings))
+        if ratings
+        else None
+    )
+    incident_count = sum(1 for rating in ratings if rating.incident_reported)
+    score = Decimal("0")
+    rationale: list[str] = []
+    if verified:
+        score += Decimal("35")
+        rationale.append("License and background check are verified.")
+    else:
+        rationale.append("Credential verification is incomplete.")
+    if driver.availability_status == "available":
+        score += Decimal("20")
+        rationale.append("Driver is currently available.")
+    elif driver.availability_status == "standby":
+        score += Decimal("12")
+        rationale.append("Driver is on standby.")
+    score += min(Decimal(driver.capacity), Decimal("20"))
+    rationale.append(f"{driver.capacity} seats available.")
+    if driver.response_minutes is not None:
+        response_score = max(Decimal("0"), Decimal("15") - (Decimal(driver.response_minutes) / Decimal("10")))
+        score += response_score
+        rationale.append(f"{driver.response_minutes} minute response window.")
+    if average_rating is not None:
+        score += min(Decimal("20"), average_rating * Decimal("4"))
+        rationale.append(f"{average_rating.quantize(Decimal('0.01'))}/5 average driver rating.")
+    if incident_count:
+        score -= Decimal(incident_count * 10)
+        rationale.append(f"{incident_count} incident flag(s) reduce marketplace score.")
+    status_value = "recommended" if verified and score >= Decimal("65") else "review"
+    if not verified:
+        status_value = "credential_review"
+    return EventTravelDriverMarketplaceCandidateRead(
+        driver=travel_backup_driver_read(driver),
+        match_score=max(score, Decimal("0")).quantize(Decimal("0.01")),
+        verified=verified,
+        rating_count=len(ratings),
+        average_rating=average_rating.quantize(Decimal("0.01")) if average_rating is not None else None,
+        incident_reported_count=incident_count,
+        response_minutes=driver.response_minutes,
+        marketplace_status=status_value,
+        rationale=rationale,
+    )
 
 
 def travel_backup_driver_dispatch_body(plan: EventTravelPlan, driver: EventTravelBackupDriver, reason: str) -> str:

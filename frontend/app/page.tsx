@@ -85,6 +85,7 @@ import type {
   EventTravelDeviceRead,
   EventTravelDeviceSecretRead,
   EventTravelDeviceFleetInventoryRead,
+  EventTravelDriverMarketplaceRead,
   EventTravelDriverRatingRead,
   EventTravelDriverRatingSummaryRead,
   EventTravelExpensePayoutRead,
@@ -416,6 +417,7 @@ export default function HomePage() {
   const [travelBackupDrivers, setTravelBackupDrivers] = useState<EventTravelBackupDriverRead[]>([]);
   const [travelBackupDriverDispatch, setTravelBackupDriverDispatch] =
     useState<EventTravelBackupDriverDispatchRead | null>(null);
+  const [travelDriverMarketplace, setTravelDriverMarketplace] = useState<EventTravelDriverMarketplaceRead | null>(null);
   const [travelDriverRatings, setTravelDriverRatings] = useState<EventTravelDriverRatingRead[]>([]);
   const [travelDriverRatingSummary, setTravelDriverRatingSummary] = useState<EventTravelDriverRatingSummaryRead | null>(null);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
@@ -1736,6 +1738,7 @@ export default function HomePage() {
       setTravelDeviceFleetInventory(null);
       setTravelBackupDrivers([]);
       setTravelBackupDriverDispatch(null);
+      setTravelDriverMarketplace(null);
       setTravelDriverRatings([]);
       setTravelDriverRatingSummary(null);
       setTravelExpenses([]);
@@ -1966,6 +1969,7 @@ export default function HomePage() {
       setTravelDeviceFleetInventory(null);
       setTravelBackupDrivers([]);
       setTravelBackupDriverDispatch(null);
+      setTravelDriverMarketplace(null);
       setTravelDriverRatings([]);
       setTravelDriverRatingSummary(null);
       setTravelExpenses([]);
@@ -3272,6 +3276,23 @@ export default function HomePage() {
         if (selectedOrganizationId) {
           void loadCommunications(selectedOrganizationId);
         }
+      }
+    );
+  };
+
+  const loadTravelDriverMarketplace = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-driver-marketplace-${plan.id}`,
+      () =>
+        apiRequest<EventTravelDriverMarketplaceRead>(`/events/travel-plans/${plan.id}/driver-marketplace`, {
+          identity
+        }),
+      (marketplace) => {
+        setTravelDriverMarketplace(marketplace);
+        addLog(
+          `Driver marketplace: ${marketplace.verified_candidate_count}/${marketplace.candidate_count} verified`,
+          marketplace.verified_candidate_count ? "good" : "neutral"
+        );
       }
     );
   };
@@ -8505,6 +8526,21 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelDriverMarketplace ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Driver marketplace · {travelDriverMarketplace.candidate_count} candidates</strong>
+                    <span>
+                      {travelDriverMarketplace.verified_candidate_count} verified · recommended {travelDriverMarketplace.candidates[0]?.driver.driver_name ?? "none"}
+                    </span>
+                    <span>
+                      {travelDriverMarketplace.candidates[0]
+                        ? `${travelDriverMarketplace.candidates[0].match_score}% · ${travelDriverMarketplace.candidates[0].marketplace_status} · ${travelDriverMarketplace.candidates[0].rationale[0] ?? "No rationale"}`
+                        : "No available marketplace candidates"}
+                    </span>
+                  </div>
+                </article>
+              ) : null}
               {travelDriverRatingSummary ? (
                 <article className="task-card">
                   <div>
@@ -8681,6 +8717,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => createTravelBackupDriver(plan)}>Backup driver</button>
                     <button type="button" onClick={() => loadTravelBackupDrivers(plan)}>Backups</button>
                     <button type="button" onClick={() => dispatchTravelBackupDriver(plan)}>Dispatch backup</button>
+                    <button type="button" onClick={() => loadTravelDriverMarketplace(plan)}>Marketplace</button>
                     <button type="button" onClick={() => createTravelDriverRating(plan)}>Rate driver</button>
                     <button type="button" onClick={() => loadTravelDriverRatings(plan)}>Ratings</button>
                     <button type="button" onClick={() => checkTravelGeofence(plan)}>Geofence</button>

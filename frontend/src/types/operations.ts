@@ -872,6 +872,26 @@ export type EventTravelBackupDriverDispatchRead = {
   rationale: string[];
 };
 
+export type EventTravelDriverMarketplaceCandidateRead = {
+  driver: EventTravelBackupDriverRead;
+  match_score: string;
+  verified: boolean;
+  rating_count: number;
+  average_rating: string | null;
+  incident_reported_count: number;
+  response_minutes: number | null;
+  marketplace_status: string;
+  rationale: string[];
+};
+
+export type EventTravelDriverMarketplaceRead = {
+  travel_plan_id: UUID;
+  candidate_count: number;
+  verified_candidate_count: number;
+  recommended_driver_id: UUID | null;
+  candidates: EventTravelDriverMarketplaceCandidateRead[];
+};
+
 export type EventTravelExpenseRead = {
   id: UUID;
   organization_id: UUID;

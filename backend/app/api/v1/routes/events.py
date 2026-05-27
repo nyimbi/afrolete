@@ -20,6 +20,7 @@ from app.schemas.event import (
     EventTravelBackupDriverDispatchRead,
     EventTravelBackupDriverRead,
     EventTravelBackupDriverUpdate,
+    EventTravelDriverMarketplaceRead,
     EventTravelCarpoolAutoMatchCreate,
     EventTravelCarpoolAutoMatchRead,
     EventTravelCarpoolRideCreate,
@@ -108,6 +109,7 @@ from app.services.events import (
     generate_travel_fee_invoices,
     get_event,
     get_travel_device_fleet_inventory,
+    get_travel_driver_marketplace_matches,
     get_travel_driver_rating_summary,
     get_travel_manifest,
     get_travel_readiness,
@@ -786,6 +788,16 @@ async def dispatch_travel_backup_driver_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelBackupDriverDispatchRead:
     return await dispatch_travel_backup_driver(db, identity, travel_plan_id, payload, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/driver-marketplace", response_model=EventTravelDriverMarketplaceRead)
+async def get_travel_driver_marketplace_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelDriverMarketplaceRead:
+    return await get_travel_driver_marketplace_matches(db, identity, travel_plan_id, authz)
 
 
 @router.get("/travel-plans/{travel_plan_id}/driver-ratings", response_model=list[EventTravelDriverRatingRead])
