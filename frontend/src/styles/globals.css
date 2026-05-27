@@ -583,6 +583,89 @@ textarea:focus {
   border-radius: 50%;
 }
 
+.bracket-lanes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.bracket-lane {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfb;
+}
+
+.bracket-lane-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.bracket-lane-head strong {
+  color: var(--ink);
+}
+
+.bracket-lane-head span {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.bracket-match-list {
+  display: grid;
+  gap: 8px;
+}
+
+.bracket-match {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
+  gap: 8px;
+  align-items: stretch;
+  border-left: 3px solid var(--teal);
+  background: var(--surface);
+  padding: 8px;
+}
+
+.bracket-slot,
+.bracket-result {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bracket-slot span,
+.bracket-result small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bracket-slot span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.bracket-result {
+  text-align: right;
+}
+
+.bracket-result strong {
+  color: var(--blue);
+  font-size: 12px;
+}
+
+.bracket-result small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .score-summary {
   display: grid;
   grid-template-columns: auto 1fr;

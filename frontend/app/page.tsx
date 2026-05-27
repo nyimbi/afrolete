@@ -52,6 +52,7 @@ import type {
   CommercialRefundRead,
   CompetitionAdvancementRead,
   CompetitionBracketRead,
+  CompetitionBracketRoundRead,
   CompetitionConflictRead,
   CompetitionFixtureRead,
   CompetitionFixtureGenerationRead,
@@ -222,6 +223,31 @@ function ReportingChartCard({ chart }: { chart: ReportChartRead }) {
           })}
         </div>
       )}
+    </article>
+  );
+}
+
+function CompetitionBracketLane({ round }: { round: CompetitionBracketRoundRead }) {
+  return (
+    <article className="bracket-lane">
+      <div className="bracket-lane-head">
+        <strong>{round.round_label}</strong>
+        <span>{round.stage_label}</span>
+      </div>
+      <div className="bracket-match-list">
+        {round.matches.map((match) => (
+          <div className="bracket-match" key={`${match.fixture_id ?? "projected"}-${match.slot}`}>
+            <div className="bracket-slot">
+              <span>{match.home_team_name ?? "TBD"}</span>
+              <span>{match.away_team_name ?? "BYE"}</span>
+            </div>
+            <div className="bracket-result">
+              <strong>{match.winner_team_name ?? "Pending"}</strong>
+              <small>{match.status ?? "projected"} · slot {match.slot}</small>
+            </div>
+          </div>
+        ))}
+      </div>
     </article>
   );
 }
@@ -5593,14 +5619,16 @@ export default function HomePage() {
               </div>
             </div>
             <div className="task-list">
-              {competitionBracket?.rounds.slice(0, 2).map((round) => (
-                <article key={`${round.stage_label}-${round.round_label}`} className="task-card">
-                  <div>
-                    <strong>{round.stage_label} · {round.round_label}</strong>
-                    <span>{round.matches.map((match) => `${match.home_team_name ?? "TBD"} vs ${match.away_team_name ?? "BYE"}`).join(" · ")}</span>
-                  </div>
-                </article>
-              ))}
+              {competitionBracket ? (
+                <div className="bracket-lanes">
+                  {competitionBracket.rounds.map((round) => (
+                    <CompetitionBracketLane
+                      key={`${round.stage_label}-${round.round_label}`}
+                      round={round}
+                    />
+                  ))}
+                </div>
+              ) : null}
               {competitionConflicts.slice(0, 3).map((conflict) => (
                 <article key={`${conflict.conflict_key}-${conflict.fixture_id ?? "competition"}`} className="task-card">
                   <div>
