@@ -114,6 +114,30 @@ class EquipmentFile(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class EquipmentScanEvent(IdMixin, TimestampMixin, Base):
+    __tablename__ = "equipment_scan_events"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    equipment_item_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("equipment_items.id"), index=True
+    )
+    scanned_code: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    match_type: Mapped[str | None] = mapped_column(String(40), index=True)
+    item_name: Mapped[str | None] = mapped_column(String(180))
+    reader_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    reader_location: Mapped[str | None] = mapped_column(String(240), index=True)
+    source: Mapped[str] = mapped_column(String(40), default="rfid_reader", nullable=False, index=True)
+    movement: Mapped[str] = mapped_column(String(40), default="audit", nullable=False, index=True)
+    matched: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    scanned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class EquipmentCheckout(IdMixin, TimestampMixin, Base):
     __tablename__ = "equipment_checkouts"
 

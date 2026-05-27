@@ -366,6 +366,23 @@ export type EquipmentScanRead = {
   item: EquipmentItemRead;
 };
 
+export type EquipmentScanEventRead = {
+  id: UUID;
+  organization_id: UUID;
+  equipment_item_id: UUID | null;
+  scanned_code: string;
+  match_type: string | null;
+  item_name: string | null;
+  reader_id: string;
+  reader_location: string | null;
+  source: string;
+  movement: string;
+  matched: boolean;
+  scanned_at: string;
+  external_reference: string | null;
+  notes: string | null;
+};
+
 export type ProcurementRecommendationRead = {
   equipment_item_id: UUID;
   item_name: string;

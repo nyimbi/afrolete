@@ -16,6 +16,8 @@ from app.schemas.assets import (
     EquipmentItemRead,
     EquipmentLeaseQuoteRead,
     EquipmentPhotoUpdate,
+    EquipmentScanEventCreate,
+    EquipmentScanEventRead,
     EquipmentScanRead,
     FacilityBookingCreate,
     FacilityBookingRead,
@@ -40,6 +42,7 @@ from app.services.assets import (
     create_work_order,
     equipment_lease_quote,
     list_equipment_files,
+    list_equipment_scan_events,
     list_checkouts,
     list_equipment_items,
     list_facilities,
@@ -48,6 +51,7 @@ from app.services.assets import (
     list_work_orders,
     procurement_recommendations,
     receive_supplier_order,
+    record_equipment_scan_event,
     return_equipment,
     scan_equipment,
     supplier_scorecard,
@@ -275,6 +279,39 @@ async def scan_equipment_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EquipmentScanRead:
     return await scan_equipment(db, identity, organization_id, code, authz)
+
+
+@router.post(
+    "/equipment/rfid-scans",
+    response_model=EquipmentScanEventRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_equipment_scan_event_route(
+    payload: EquipmentScanEventCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EquipmentScanEventRead:
+    return await record_equipment_scan_event(db, identity, payload, authz)
+
+
+@router.get("/equipment/rfid-scans", response_model=list[EquipmentScanEventRead])
+async def list_equipment_scan_events_route(
+    organization_id: UUID = Query(),
+    equipment_item_id: UUID | None = Query(default=None),
+    matched: bool | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EquipmentScanEventRead]:
+    return await list_equipment_scan_events(
+        db,
+        identity,
+        organization_id,
+        authz,
+        equipment_item_id=equipment_item_id,
+        matched=matched,
+    )
 
 
 @router.patch("/equipment/{equipment_item_id}/photo", response_model=EquipmentItemRead)

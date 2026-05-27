@@ -72,6 +72,7 @@ import type {
   EquipmentFileRead,
   EquipmentItemRead,
   EquipmentLeaseQuoteRead,
+  EquipmentScanEventRead,
   EquipmentScanRead,
   FacilityBookingRead,
   FacilityRead,
@@ -319,6 +320,7 @@ export default function HomePage() {
   const [facilities, setFacilities] = useState<FacilityRead[]>([]);
   const [equipmentItems, setEquipmentItems] = useState<EquipmentItemRead[]>([]);
   const [equipmentFiles, setEquipmentFiles] = useState<EquipmentFileRead[]>([]);
+  const [equipmentScanEvents, setEquipmentScanEvents] = useState<EquipmentScanEventRead[]>([]);
   const [equipmentCheckouts, setEquipmentCheckouts] = useState<EquipmentCheckoutRead[]>([]);
   const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
@@ -611,6 +613,12 @@ export default function HomePage() {
     photo_url: "https://cdn.afrolete.local/assets/ball-set.jpg",
     storage_location: "Equipment Room A, Shelf 3",
     condition: "good" as AssetCondition
+  });
+  const [rfidForm, setRfidForm] = useState({
+    reader_id: "reader-main-gate",
+    reader_location: "Equipment Room A, Shelf 3",
+    movement: "audit",
+    source: "rfid_reader"
   });
   const [checkoutForm, setCheckoutForm] = useState({
     quantity: 6,
@@ -1016,7 +1024,8 @@ export default function HomePage() {
       procurementData,
       supplierOrderData,
       supplierData,
-      utilizationData
+      utilizationData,
+      scanEventData
     ] = await Promise.all([
       apiRequest<FacilityRead[]>(`/assets/facilities?organization_id=${organizationId}`),
       apiRequest<EquipmentItemRead[]>(`/assets/equipment?organization_id=${organizationId}${facilityQuery}`),
@@ -1031,6 +1040,10 @@ export default function HomePage() {
       apiRequest<SupplierScoreRead[]>(`/assets/suppliers/scorecard?organization_id=${organizationId}`),
       apiRequest<AssetUtilizationRecommendationRead[]>(
         `/assets/utilization/recommendations?organization_id=${organizationId}`
+      ),
+      apiRequest<EquipmentScanEventRead[]>(
+        `/assets/equipment/rfid-scans?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setFacilities(facilityData);
@@ -1043,6 +1056,7 @@ export default function HomePage() {
     setSupplierOrders(supplierOrderData);
     setSupplierScores(supplierData);
     setAssetUtilization(utilizationData);
+    setEquipmentScanEvents(scanEventData);
     setSelectedFacilityId((current) =>
       facilityData.some((facility) => facility.id === current) ? current : facilityData[0]?.id ?? ""
     );
@@ -1060,7 +1074,7 @@ export default function HomePage() {
     setSelectedSupplierOrderId((current) =>
       supplierOrderData.some((order) => order.id === current) ? current : supplierOrderData[0]?.id ?? ""
     );
-  }, []);
+  }, [identity]);
 
   const loadEquipmentFiles = useCallback(async (equipmentItemId: string) => {
     const data = await apiRequest<EquipmentFileRead[]>(`/assets/equipment/${equipmentItemId}/files`);
@@ -2991,6 +3005,49 @@ export default function HomePage() {
     );
   };
 
+  const recordRfidEquipmentScan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const code = selectedEquipment?.tag_code ?? selectedEquipment?.serial_number ?? equipmentForm.tag_code;
+    if (!code) {
+      addLog("Enter or select a tag or serial code first", "bad");
+      return;
+    }
+    runAction(
+      "record-rfid-scan",
+      () =>
+        apiRequest<EquipmentScanEventRead>("/assets/equipment/rfid-scans", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            scanned_code: code,
+            reader_id: rfidForm.reader_id,
+            reader_location: rfidForm.reader_location || equipmentForm.storage_location,
+            movement: rfidForm.movement,
+            source: rfidForm.source,
+            external_reference: `RFID-${Date.now()}`,
+            notes: `Recorded from operations console for ${selectedEquipment?.name ?? equipmentForm.name}.`
+          }
+        }),
+      (event) => {
+        setEquipmentScanEvents((current) => [
+          event,
+          ...current.filter((item) => item.id !== event.id)
+        ]);
+        addLog(
+          event.matched
+            ? `${event.reader_id} matched ${event.item_name ?? event.scanned_code}`
+            : `${event.reader_id} recorded unmatched code ${event.scanned_code}`,
+          event.matched ? "good" : "neutral"
+        );
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
   const updateSelectedEquipmentPhoto = () => {
     if (!selectedEquipmentId) {
       addLog("Select equipment first", "bad");
@@ -4790,6 +4847,7 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createEquipmentItem} disabled={busyAction !== null}>Item</button>
                 <button type="button" onClick={scanEquipmentItem} disabled={busyAction !== null}>Scan</button>
+                <button type="button" onClick={recordRfidEquipmentScan} disabled={busyAction !== null}>RFID</button>
                 <button type="button" onClick={updateSelectedEquipmentPhoto} disabled={busyAction !== null}>Photo</button>
                 <button type="button" onClick={uploadSelectedEquipmentFile} disabled={busyAction !== null}>Upload</button>
                 <button type="button" onClick={quoteSelectedEquipmentLease} disabled={busyAction !== null}>Lease</button>
@@ -4813,6 +4871,10 @@ export default function HomePage() {
               <div>
                 <span className="muted">Safety</span>
                 <strong>{assetSummary?.safety_work_orders ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">RFID scans</span>
+                <strong>{equipmentScanEvents.length}</strong>
               </div>
             </div>
             <div className="form-grid">
@@ -4847,6 +4909,23 @@ export default function HomePage() {
               <label>
                 Location
                 <input value={equipmentForm.storage_location} onChange={(event) => setEquipmentForm({ ...equipmentForm, storage_location: event.target.value })} />
+              </label>
+              <label>
+                Reader
+                <input value={rfidForm.reader_id} onChange={(event) => setRfidForm({ ...rfidForm, reader_id: event.target.value })} />
+              </label>
+              <label>
+                Reader location
+                <input value={rfidForm.reader_location} onChange={(event) => setRfidForm({ ...rfidForm, reader_location: event.target.value })} />
+              </label>
+              <label>
+                Movement
+                <select value={rfidForm.movement} onChange={(event) => setRfidForm({ ...rfidForm, movement: event.target.value })}>
+                  <option value="audit">Audit</option>
+                  <option value="in">In</option>
+                  <option value="out">Out</option>
+                  <option value="location">Location</option>
+                </select>
               </label>
               <label className="wide-field">
                 File
@@ -4888,6 +4967,14 @@ export default function HomePage() {
               </div>
             ) : null}
             <div className="task-list">
+              {equipmentScanEvents.slice(0, 3).map((scanEvent) => (
+                <article key={scanEvent.id} className="task-card">
+                  <div>
+                    <strong>{scanEvent.matched ? scanEvent.item_name ?? scanEvent.scanned_code : `Unmatched ${scanEvent.scanned_code}`}</strong>
+                    <span>{scanEvent.reader_id} · {scanEvent.movement} · {new Date(scanEvent.scanned_at).toLocaleString()}</span>
+                  </div>
+                </article>
+              ))}
               {equipmentFiles.slice(0, 3).map((fileRecord) => (
                 <article key={fileRecord.id} className="task-card">
                   <div>

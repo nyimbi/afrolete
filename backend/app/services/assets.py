@@ -15,6 +15,7 @@ from app.models.assets import (
     EquipmentCheckout,
     EquipmentFile,
     EquipmentItem,
+    EquipmentScanEvent,
     Facility,
     FacilityBooking,
     MaintenanceWorkOrder,
@@ -40,6 +41,8 @@ from app.schemas.assets import (
     EquipmentLeaseQuoteRead,
     EquipmentFileUploadCreate,
     EquipmentPhotoUpdate,
+    EquipmentScanEventCreate,
+    EquipmentScanEventRead,
     EquipmentScanRead,
     EquipmentItemCreate,
     FacilityBookingCreate,
@@ -154,18 +157,76 @@ async def scan_equipment(
 ) -> EquipmentScanRead:
     await ensure_manage_assets(authz, identity, organization_id)
     code = scanned_code.strip()
-    item = await db.scalar(
-        select(EquipmentItem)
-        .where(EquipmentItem.organization_id == organization_id)
-        .where((EquipmentItem.tag_code == code) | (EquipmentItem.serial_number == code))
-    )
+    item, match_type = await match_equipment_code(db, organization_id, code)
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipment not found")
     return EquipmentScanRead(
         scanned_code=code,
-        match_type="tag_code" if item.tag_code == code else "serial_number",
+        match_type=match_type or "unknown",
         item=equipment_item_read(item),
     )
+
+
+async def record_equipment_scan_event(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: EquipmentScanEventCreate,
+    authz: AuthorizationService,
+) -> EquipmentScanEventRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    code = payload.scanned_code.strip()
+    if not code:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Scan code is required")
+    item, match_type = await match_equipment_code(db, payload.organization_id, code)
+    scanned_at = payload.scanned_at or datetime.now(UTC)
+    reader_id = payload.reader_id.strip()
+    if not reader_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Reader ID is required")
+    reader_location = payload.reader_location.strip() if payload.reader_location else None
+    movement = payload.movement.strip().lower() or "audit"
+    source = payload.source.strip().lower() or "rfid_reader"
+    event = EquipmentScanEvent(
+        organization_id=payload.organization_id,
+        equipment_item_id=item.id if item else None,
+        scanned_code=code,
+        match_type=match_type,
+        item_name=item.name if item else None,
+        reader_id=reader_id,
+        reader_location=reader_location,
+        source=source,
+        movement=movement,
+        matched=item is not None,
+        scanned_at=scanned_at,
+        external_reference=payload.external_reference,
+        notes=payload.notes,
+    )
+    if item is not None:
+        item.last_audit_on = scanned_at.date()
+        if reader_location and movement in {"audit", "in", "location"}:
+            item.storage_location = reader_location
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    return equipment_scan_event_read(event)
+
+
+async def list_equipment_scan_events(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    equipment_item_id: UUID | None = None,
+    matched: bool | None = None,
+) -> list[EquipmentScanEventRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(EquipmentScanEvent).where(EquipmentScanEvent.organization_id == organization_id)
+    if equipment_item_id is not None:
+        statement = statement.where(EquipmentScanEvent.equipment_item_id == equipment_item_id)
+    if matched is not None:
+        statement = statement.where(EquipmentScanEvent.matched == matched)
+    events = await db.scalars(statement.order_by(EquipmentScanEvent.scanned_at.desc()))
+    return [equipment_scan_event_read(event) for event in events.all()]
 
 
 async def update_equipment_photo(
@@ -805,6 +866,21 @@ async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> Suppl
     return order
 
 
+async def match_equipment_code(
+    db: AsyncSession,
+    organization_id: UUID,
+    code: str,
+) -> tuple[EquipmentItem | None, str | None]:
+    item = await db.scalar(
+        select(EquipmentItem)
+        .where(EquipmentItem.organization_id == organization_id)
+        .where((EquipmentItem.tag_code == code) | (EquipmentItem.serial_number == code))
+    )
+    if item is None:
+        return None, None
+    return item, "tag_code" if item.tag_code == code else "serial_number"
+
+
 async def ensure_facility_available(
     db: AsyncSession,
     facility_id: UUID,
@@ -862,6 +938,25 @@ def equipment_item_read(item: EquipmentItem):
         last_audit_on=item.last_audit_on,
         photo_url=item.photo_url,
         notes=item.notes,
+    )
+
+
+def equipment_scan_event_read(event: EquipmentScanEvent) -> EquipmentScanEventRead:
+    return EquipmentScanEventRead(
+        id=event.id,
+        organization_id=event.organization_id,
+        equipment_item_id=event.equipment_item_id,
+        scanned_code=event.scanned_code,
+        match_type=event.match_type,
+        item_name=event.item_name,
+        reader_id=event.reader_id,
+        reader_location=event.reader_location,
+        source=event.source,
+        movement=event.movement,
+        matched=event.matched,
+        scanned_at=event.scanned_at,
+        external_reference=event.external_reference,
+        notes=event.notes,
     )
 
 

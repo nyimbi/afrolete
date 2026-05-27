@@ -131,6 +131,35 @@ class EquipmentScanRead(BaseModel):
     item: EquipmentItemRead
 
 
+class EquipmentScanEventCreate(BaseModel):
+    organization_id: UUID
+    scanned_code: str = Field(min_length=1, max_length=160)
+    reader_id: str = Field(default="manual-reader", min_length=1, max_length=160)
+    reader_location: str | None = Field(default=None, max_length=240)
+    source: str = Field(default="rfid_reader", min_length=2, max_length=40)
+    movement: str = Field(default="audit", min_length=2, max_length=40)
+    scanned_at: datetime | None = None
+    external_reference: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EquipmentScanEventRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    equipment_item_id: UUID | None
+    scanned_code: str
+    match_type: str | None
+    item_name: str | None
+    reader_id: str
+    reader_location: str | None
+    source: str
+    movement: str
+    matched: bool
+    scanned_at: datetime
+    external_reference: str | None
+    notes: str | None
+
+
 class ProcurementRecommendationRead(BaseModel):
     equipment_item_id: UUID
     item_name: str
