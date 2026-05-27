@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     travel_manifest_url_ttl_seconds: int = 900
     travel_device_ingest_key: str = ""
     travel_device_ingest_tolerance_seconds: int = 300
+    travel_device_ingest_event_retention_days: int = 30
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"

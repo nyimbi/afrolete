@@ -454,6 +454,8 @@ class EventTravelDeviceLocationIngestRead(BaseModel):
     device_status: str | None = None
     replay_protected: bool = False
     external_event_id: str | None = None
+    replay_retention_days: int | None = None
+    replay_events_pruned: int = 0
     signature_required: bool
     signature_validated: bool
     update: EventTravelLocationUpdateRead
