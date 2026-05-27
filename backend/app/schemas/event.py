@@ -245,6 +245,35 @@ class EventTravelFeeInvoiceBatchRead(BaseModel):
     invoices: list[EventTravelFeeInvoiceItemRead]
 
 
+class EventTravelFeeCheckoutCreate(BaseModel):
+    provider: str = Field(default="manual_gateway", min_length=2, max_length=80)
+    checkout_base_url: str = Field(default="/pay/invoices", min_length=2, max_length=500)
+    expires_at: datetime | None = None
+
+
+class EventTravelFeeCheckoutItemRead(BaseModel):
+    invoice_id: UUID
+    invoice_number: str
+    billed_person_id: UUID | None
+    amount_due: Decimal
+    amount_paid: Decimal
+    open_amount: Decimal
+    currency: str
+    status: str
+    provider: str
+    checkout_url: str
+    expires_at: datetime | None
+
+
+class EventTravelFeeCheckoutBatchRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    provider: str
+    checkout_count: int
+    total_open_amount: Decimal
+    checkouts: list[EventTravelFeeCheckoutItemRead]
+
+
 class EventTravelApprovalCreate(BaseModel):
     approval_level: str = Field(default="school", min_length=2, max_length=80)
     approver_person_id: UUID | None = None

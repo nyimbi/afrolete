@@ -77,6 +77,7 @@ import type {
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
   EventTravelExpenseRead,
+  EventTravelFeeCheckoutBatchRead,
   EventTravelFeeInvoiceBatchRead,
   EventTravelLocationUpdateRead,
   EventTravelManifestExportRead,
@@ -358,6 +359,7 @@ export default function HomePage() {
   const [travelManifest, setTravelManifest] = useState<EventTravelManifestRead | null>(null);
   const [travelManifestExport, setTravelManifestExport] = useState<EventTravelManifestExportRead | null>(null);
   const [travelFeeBatch, setTravelFeeBatch] = useState<EventTravelFeeInvoiceBatchRead | null>(null);
+  const [travelFeeCheckoutBatch, setTravelFeeCheckoutBatch] = useState<EventTravelFeeCheckoutBatchRead | null>(null);
   const [travelApprovals, setTravelApprovals] = useState<EventTravelApprovalRead[]>([]);
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
@@ -1618,6 +1620,7 @@ export default function HomePage() {
       setTravelManifest(null);
       setTravelManifestExport(null);
       setTravelFeeBatch(null);
+      setTravelFeeCheckoutBatch(null);
       setTravelApprovals([]);
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
@@ -1831,6 +1834,7 @@ export default function HomePage() {
       setTravelManifest(null);
       setTravelManifestExport(null);
       setTravelFeeBatch(null);
+      setTravelFeeCheckoutBatch(null);
       setTravelApprovals([]);
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
@@ -2561,6 +2565,26 @@ export default function HomePage() {
         if (selectedOrganizationId) {
           void loadCommercial(selectedOrganizationId);
         }
+      }
+    );
+  };
+
+  const createTravelFeeCheckouts = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-fee-checkouts-${plan.id}`,
+      () =>
+        apiRequest<EventTravelFeeCheckoutBatchRead>(`/events/travel-plans/${plan.id}/fee-checkouts`, {
+          method: "POST",
+          identity,
+          body: {
+            provider: "manual_gateway",
+            checkout_base_url: "/pay/invoices",
+            expires_at: travelForm.consent_due_at ? new Date(travelForm.consent_due_at).toISOString() : null
+          }
+        }),
+      (batch) => {
+        setTravelFeeCheckoutBatch(batch);
+        addLog(`Travel payment links ready: ${batch.checkout_count}`, batch.checkout_count > 0 ? "good" : "bad");
       }
     );
   };
@@ -7286,6 +7310,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelFeeCheckoutBatch ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelFeeCheckoutBatch.checkout_count} travel payment links</strong>
+                    <span>{travelFeeCheckoutBatch.total_open_amount} open · {travelFeeCheckoutBatch.provider}</span>
+                    <span>{travelFeeCheckoutBatch.checkouts[0]?.checkout_url ?? "No checkout links"}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelExpenses.slice(0, 3).map((expense) => (
                 <article className="task-card" key={expense.id}>
                   <div>
@@ -7365,6 +7398,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => checkTravelReadiness(plan)}>Gate</button>
                     <button type="button" onClick={() => optimizeTravelRoute(plan)}>Optimize</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
+                    <button type="button" onClick={() => createTravelFeeCheckouts(plan)}>Pay links</button>
                     <button type="button" onClick={() => createTravelApproval(plan)}>Require</button>
                     <button type="button" onClick={() => loadTravelApprovals(plan)}>Approvals</button>
                     <button type="button" onClick={() => seedTravelChecklist(plan)}>Inspect</button>

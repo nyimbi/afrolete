@@ -26,6 +26,8 @@ from app.schemas.event import (
     EventTravelExpenseCreate,
     EventTravelExpenseRead,
     EventTravelExpenseUpdate,
+    EventTravelFeeCheckoutBatchRead,
+    EventTravelFeeCheckoutCreate,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelLocationUpdateCreate,
@@ -55,6 +57,7 @@ from app.services.events import (
     create_travel_approval,
     create_travel_carpool_ride,
     create_travel_expense,
+    create_travel_fee_checkouts,
     create_travel_location_update,
     export_travel_manifest,
     generate_travel_fee_invoices,
@@ -414,6 +417,21 @@ async def generate_travel_fee_invoices_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelFeeInvoiceBatchRead:
     return await generate_travel_fee_invoices(db, identity, travel_plan_id, payload, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/fee-checkouts",
+    response_model=EventTravelFeeCheckoutBatchRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_travel_fee_checkouts_route(
+    travel_plan_id: UUID,
+    payload: EventTravelFeeCheckoutCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelFeeCheckoutBatchRead:
+    return await create_travel_fee_checkouts(db, identity, travel_plan_id, payload, authz)
 
 
 @router.get("/travel-plans/{travel_plan_id}/approvals", response_model=list[EventTravelApprovalRead])

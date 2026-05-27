@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from hashlib import sha256
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -57,6 +58,9 @@ from app.schemas.event import (
     EventTravelExpenseCreate,
     EventTravelExpenseRead,
     EventTravelExpenseUpdate,
+    EventTravelFeeCheckoutBatchRead,
+    EventTravelFeeCheckoutCreate,
+    EventTravelFeeCheckoutItemRead,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelFeeInvoiceItemRead,
@@ -654,6 +658,63 @@ async def generate_travel_fee_invoices(
         skipped_no_payer=skipped_no_payer,
         total_amount_due=total_amount_due.quantize(Decimal("0.01")),
         invoices=invoice_items,
+    )
+
+
+async def create_travel_fee_checkouts(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelFeeCheckoutCreate,
+    authz: AuthorizationService,
+) -> EventTravelFeeCheckoutBatchRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    invoice_prefix = f"TRAVEL-{str(plan.id)[:8]}".upper()
+    invoices = (
+        await db.scalars(
+            select(FinanceInvoice)
+            .where(
+                FinanceInvoice.organization_id == plan.organization_id,
+                FinanceInvoice.invoice_number.like(f"{invoice_prefix}-%"),
+            )
+            .order_by(FinanceInvoice.due_on, FinanceInvoice.invoice_number)
+        )
+    ).all()
+    if not invoices:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel fee invoices not found")
+
+    checkouts: list[EventTravelFeeCheckoutItemRead] = []
+    total_open_amount = Decimal("0.00")
+    for invoice in invoices:
+        open_amount = max(invoice.amount_due - invoice.amount_paid, Decimal("0.00")).quantize(Decimal("0.01"))
+        total_open_amount += open_amount
+        checkouts.append(
+            EventTravelFeeCheckoutItemRead(
+                invoice_id=invoice.id,
+                invoice_number=invoice.invoice_number,
+                billed_person_id=invoice.person_id,
+                amount_due=invoice.amount_due,
+                amount_paid=invoice.amount_paid,
+                open_amount=open_amount,
+                currency=invoice.currency,
+                status=invoice.status.value,
+                provider=payload.provider,
+                checkout_url=travel_fee_checkout_url(payload.checkout_base_url, invoice, payload.provider),
+                expires_at=payload.expires_at,
+            )
+        )
+
+    return EventTravelFeeCheckoutBatchRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        provider=payload.provider,
+        checkout_count=len(checkouts),
+        total_open_amount=total_open_amount.quantize(Decimal("0.01")),
+        checkouts=checkouts,
     )
 
 
@@ -1363,6 +1424,11 @@ async def travel_fee_payer_id(
 
 def travel_fee_invoice_number(plan: EventTravelPlan, billed_person_id: UUID, athlete_person_id: UUID) -> str:
     return f"TRAVEL-{str(plan.id)[:8]}-{str(billed_person_id)[:8]}-{str(athlete_person_id)[:8]}".upper()
+
+
+def travel_fee_checkout_url(base_url: str, invoice: FinanceInvoice, provider: str) -> str:
+    token = sha256(f"{invoice.id}:{invoice.invoice_number}:{invoice.amount_due}:{provider}".encode()).hexdigest()[:24]
+    return f"{base_url.rstrip('/')}/{invoice.id}?provider={provider}&token={token}"
 
 
 def travel_fee_invoice_memo(event: Event, plan: EventTravelPlan) -> str:
