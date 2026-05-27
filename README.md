@@ -73,6 +73,19 @@ capability areas include:
 
 - Multi-tenant organizations, clubs, schools, associations, teams, programs,
   groups, seasons, and inter-organization relationships.
+- Associations may contain other associations, organizations, teams, and
+  individuals. Clubs and schools are organizations that may own many teams and
+  may themselves be members of one or more associations or umbrella
+  organizations.
+- Associations at national, regional, local, and special-interest levels can
+  have committees, leaders, and members. Local organizations can also have
+  committees and leaders, and one person may serve across multiple committees at
+  different levels.
+- The sport model must support both team sports and individual sports. Clubs and
+  schools may own teams, squads, crews, training groups, or event groups.
+  Rosters must support captains, vice captains, starters, bench players,
+  substitutes, reserves, individual athletes, coaches, managers, medics, and
+  analysts. Teams may also have their own committees.
 - Player and person identity, athlete profiles, guardians, emergency contacts,
   medical visibility, membership, and lifecycle tracking.
 - Staff, coach, official, volunteer, scout, sponsor, parent, player, and admin
@@ -339,4 +352,3 @@ This repository is at the beginning of the V2 rebuild:
 3. Add infra setup docs for creating `afrolete` database/user on `db.lindela.io`.
 4. Add Keycloak client and SpiceDB schema starter files.
 5. Commit each verified slice as it lands.
-

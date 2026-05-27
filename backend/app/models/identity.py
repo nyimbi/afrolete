@@ -1,9 +1,10 @@
 from datetime import date
+from uuid import UUID
 
-from sqlalchemy import Date, String, Text
+from sqlalchemy import Date, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, IdMixin, TimestampMixin
+from app.models.base import Base, GUID, IdMixin, TimestampMixin
 
 
 class Person(IdMixin, TimestampMixin, Base):
@@ -23,9 +24,8 @@ class AppUser(IdMixin, TimestampMixin, Base):
     __tablename__ = "app_users"
 
     keycloak_sub: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
-    person_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
     display_name: Mapped[str | None] = mapped_column(String(240))
     locale: Mapped[str] = mapped_column(String(32), default="en")
     timezone: Mapped[str] = mapped_column(String(80), default="UTC")
-

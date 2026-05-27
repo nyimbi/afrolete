@@ -10,6 +10,13 @@ class OrganizationType(StrEnum):
     EVENT_OPERATOR = "event_operator"
 
 
+class AssociationLevel(StrEnum):
+    NATIONAL = "national"
+    REGIONAL = "regional"
+    LOCAL = "local"
+    SPECIAL = "special"
+
+
 class MembershipRole(StrEnum):
     OWNER = "owner"
     ADMIN = "admin"
@@ -19,6 +26,54 @@ class MembershipRole(StrEnum):
     GUARDIAN = "guardian"
     VIEWER = "viewer"
     AGENT = "agent"
+
+
+class CommitteeRole(StrEnum):
+    CHAIR = "chair"
+    VICE_CHAIR = "vice_chair"
+    SECRETARY = "secretary"
+    TREASURER = "treasurer"
+    MEMBER = "member"
+    ADVISOR = "advisor"
+    EX_OFFICIO = "ex_officio"
+
+
+class TeamRole(StrEnum):
+    PLAYER = "player"
+    CAPTAIN = "captain"
+    VICE_CAPTAIN = "vice_captain"
+    COACH = "coach"
+    ASSISTANT_COACH = "assistant_coach"
+    MANAGER = "manager"
+    MEDIC = "medic"
+    ANALYST = "analyst"
+    SUBSTITUTE = "substitute"
+    RESERVE = "reserve"
+    BENCH = "bench"
+    INDIVIDUAL_ATHLETE = "individual_athlete"
+
+
+class SportFormat(StrEnum):
+    TEAM = "team"
+    INDIVIDUAL = "individual"
+    MIXED = "mixed"
+
+
+class RosterStatus(StrEnum):
+    ACTIVE = "active"
+    STARTER = "starter"
+    BENCH = "bench"
+    SUBSTITUTE = "substitute"
+    RESERVE = "reserve"
+    INJURED = "injured"
+    SUSPENDED = "suspended"
+    INACTIVE = "inactive"
+
+
+class MemberSubjectType(StrEnum):
+    PERSON = "person"
+    ORGANIZATION = "organization"
+    TEAM = "team"
 
 
 class EventType(StrEnum):
@@ -56,4 +111,3 @@ class AgentTaskStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-

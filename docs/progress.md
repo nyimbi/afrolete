@@ -42,6 +42,25 @@ athlete-development platform:
     MinIO, Temporal, and systemd.
   - Verification: `uv run ruff check .`, `uv run pytest`,
     `pnpm --filter @afrolete/frontend typecheck`.
+- Implemented slice 002 tenant graph foundation:
+  - Membership model changed from person-only to polymorphic membership.
+  - Associations can have member associations, organizations, teams, and
+    individuals.
+  - Clubs and schools are organizations that can own teams and can themselves be
+    members of associations or other organizations.
+  - Association levels added: national, regional, local, and special.
+  - Committees added for associations and organizations, with person committee
+    memberships so one member can serve across multiple committees at different
+    levels.
+  - Teams broadened for both team sports and individual sports, with captains,
+    vice captains, starters, bench, substitutes, reserves, individual athletes,
+    support roles, and team committees.
+  - Added local identity bridge and in-memory authorization service boundaries
+    that can be replaced by Keycloak and SpiceDB adapters.
+  - Added organization, membership, committee, team, roster, and team committee
+    API routes.
+  - Verification: `uv run ruff check .`, `uv run pytest`,
+    `pnpm --filter @afrolete/frontend typecheck`.
 
 ## Implementation Slices
 
@@ -49,6 +68,7 @@ athlete-development platform:
 | --- | --- | --- | --- |
 | 000 - Fresh V2 repository | Complete | Commit `d723d61`; commit `0affab9` | Repo initialized, README charter pushed. |
 | 001 - Executable SaaS foundation | Complete | Slice 001 foundation commit | Backend/frontend/infra starter code added and verified. |
+| 002 - Identity, tenant, and authorization vertical | Partial | Backend tests 11/11 | Tenant graph, local identity bridge, authz boundary, organization APIs, team APIs, and committee APIs implemented; production Keycloak/SpiceDB adapters and migrations remain. |
 
 ## Capability Coverage
 
@@ -61,9 +81,9 @@ Status values:
 
 | Capability Area | Status | Notes |
 | --- | --- | --- |
-| Tenant organizations, clubs, schools, associations | foundation | `Organization`, `Membership`, and SpiceDB organization schema added. |
+| Tenant organizations, clubs, schools, associations | foundation | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph. |
 | Person identity and athlete profiles | foundation | `Person`, `AppUser`, and `AthleteProfile` models added. |
-| Teams, rosters, staff, guardians | foundation | `Team`, `TeamRosterEntry`, and `GuardianRelationship` models added. |
+| Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
 | Events, schedules, attendance | foundation | `Event` and `AttendanceRecord` models added. |
 | Performance metrics and assessments | not-started | To follow after core operating vertical. |
 | AI-assisted ingestion and analysis | foundation | `Agent`, `AgentAssignment`, `AgentTask`, and SpiceDB `agent` schema added. |
@@ -80,8 +100,11 @@ Status values:
 
 ## Next Actions
 
-1. Commit and push slice 001.
-2. Start slice 002: identity, tenant, and authorization vertical.
-3. Add Alembic baseline migration.
-4. Implement organization creation and membership APIs.
-5. Wire SpiceDB relationship writes behind service boundaries.
+1. Commit and push slice 002 tenant graph foundation.
+2. Add Alembic baseline migration for the current schema.
+3. Replace local/test identity bridge with Keycloak token validation and user
+   provisioning rules.
+4. Replace in-memory authorization with a live SpiceDB client adapter and
+   relationship writer.
+5. Continue the operating vertical into event scheduling, attendance, and
+   athlete profile workflows.

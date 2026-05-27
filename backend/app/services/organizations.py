@@ -1,0 +1,338 @@
+import re
+from uuid import UUID
+
+from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.enums import MemberSubjectType, MembershipRole
+from app.models.identity import Person
+from app.models.organization import Committee, CommitteeMembership, Membership, Organization
+from app.models.team import Team
+from app.schemas.organization import CommitteeCreate, CommitteeMemberAdd, MemberAdd, OrganizationCreate
+from app.services.auth.identity_bridge import CurrentIdentity
+from app.services.authz.service import AuthorizationService, Relationship
+
+
+def slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "organization"
+
+
+def organization_member_relation(subject_type: MemberSubjectType, role: MembershipRole) -> str:
+    if subject_type == MemberSubjectType.ORGANIZATION:
+        return "member_org"
+    if subject_type == MemberSubjectType.TEAM:
+        return "member_team"
+    return role.value
+
+
+async def create_organization(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: OrganizationCreate,
+    authz: AuthorizationService,
+) -> tuple[Organization, list[MembershipRole]]:
+    slug = payload.slug or slugify(payload.name)
+    existing = await db.scalar(select(Organization).where(Organization.slug == slug))
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Organization slug exists")
+
+    organization = Organization(
+        name=payload.name,
+        slug=slug,
+        organization_type=payload.organization_type,
+        association_level=payload.association_level,
+        country_code=payload.country_code,
+        primary_sport=payload.primary_sport,
+        mission=payload.mission,
+    )
+    db.add(organization)
+    await db.flush()
+
+    membership = Membership(
+        organization_id=organization.id,
+        subject_type=MemberSubjectType.PERSON,
+        subject_id=identity.person_id,
+        role=MembershipRole.OWNER,
+        title="Owner",
+    )
+    db.add(membership)
+
+    await authz.touch(
+        Relationship(
+            resource_type="organization",
+            resource_id=str(organization.id),
+            relation="owner",
+            subject_type="user",
+            subject_id=str(identity.user_id),
+        )
+    )
+    await db.commit()
+    await db.refresh(organization)
+    return organization, [MembershipRole.OWNER]
+
+
+async def list_organizations_for_identity(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+) -> list[tuple[Organization, list[MembershipRole]]]:
+    rows = (
+        await db.execute(
+            select(Organization, Membership.role)
+            .join(Membership, Membership.organization_id == Organization.id)
+            .where(Membership.subject_type == MemberSubjectType.PERSON)
+            .where(Membership.subject_id == identity.person_id)
+            .where(Membership.status == "active")
+            .order_by(Organization.name)
+        )
+    ).all()
+
+    grouped: dict[UUID, tuple[Organization, list[MembershipRole]]] = {}
+    for organization, role in rows:
+        if organization.id not in grouped:
+            grouped[organization.id] = (organization, [])
+        grouped[organization.id][1].append(role)
+    return list(grouped.values())
+
+
+async def get_organization_for_identity(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> tuple[Organization, list[MembershipRole]]:
+    rows = (
+        await db.execute(
+            select(Organization, Membership.role)
+            .join(Membership, Membership.organization_id == Organization.id)
+            .where(Organization.id == organization_id)
+            .where(Membership.subject_type == MemberSubjectType.PERSON)
+            .where(Membership.subject_id == identity.person_id)
+            .where(Membership.status == "active")
+        )
+    ).all()
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+
+    organization = rows[0][0]
+    return organization, [role for _, role in rows]
+
+
+async def add_member(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: MemberAdd,
+    authz: AuthorizationService,
+) -> Membership:
+    can_manage = await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    if not can_manage:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+
+    subject_id = payload.subject_id
+    if payload.subject_type == MemberSubjectType.PERSON:
+        if not payload.email and subject_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Person members require email or subject_id",
+            )
+        person = None
+        if subject_id is not None:
+            person = await db.get(Person, subject_id)
+            if person is None:
+                raise HTTPException(status_code=404, detail="Person not found")
+        elif payload.email:
+            person = await db.scalar(select(Person).where(Person.primary_email == payload.email))
+        if person is None:
+            person = Person(
+                display_name=payload.display_name or payload.email or "Member",
+                primary_email=payload.email,
+            )
+            db.add(person)
+            await db.flush()
+        subject_id = person.id
+    else:
+        if subject_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Organization and team members require subject_id",
+            )
+        if payload.subject_type == MemberSubjectType.ORGANIZATION:
+            subject_exists = await db.get(Organization, subject_id)
+            if subject_exists is None:
+                raise HTTPException(status_code=404, detail="Organization member not found")
+        if payload.subject_type == MemberSubjectType.TEAM:
+            subject_exists = await db.get(Team, subject_id)
+            if subject_exists is None:
+                raise HTTPException(status_code=404, detail="Team member not found")
+
+    if subject_id is None:
+        raise HTTPException(status_code=422, detail="Missing member subject")
+
+    existing = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == organization_id,
+            Membership.subject_type == payload.subject_type,
+            Membership.subject_id == subject_id,
+            Membership.role == payload.role,
+        )
+    )
+    if existing is not None:
+        return existing
+
+    membership = Membership(
+        organization_id=organization_id,
+        subject_type=payload.subject_type,
+        subject_id=subject_id,
+        role=payload.role,
+        title=payload.title,
+    )
+    db.add(membership)
+
+    await authz.touch(
+        Relationship(
+            resource_type="organization",
+            resource_id=str(organization_id),
+            relation=organization_member_relation(payload.subject_type, payload.role),
+            subject_type=payload.subject_type.value,
+            subject_id=str(subject_id),
+        )
+    )
+    await db.commit()
+    await db.refresh(membership)
+    return membership
+
+
+async def create_committee(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: CommitteeCreate,
+    authz: AuthorizationService,
+) -> Committee:
+    can_manage = await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    if not can_manage:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    committee = Committee(
+        organization_id=organization_id,
+        name=payload.name,
+        level=payload.level,
+        mandate=payload.mandate,
+    )
+    db.add(committee)
+    await db.flush()
+    await authz.touch(
+        Relationship(
+            resource_type="organization",
+            resource_id=str(organization_id),
+            relation="committee",
+            subject_type="committee",
+            subject_id=str(committee.id),
+        )
+    )
+    await db.commit()
+    await db.refresh(committee)
+    return committee
+
+
+async def list_committees(db: AsyncSession, organization_id: UUID) -> list[Committee]:
+    return list(
+        (
+            await db.scalars(
+                select(Committee)
+                .where(Committee.organization_id == organization_id)
+                .order_by(Committee.name)
+            )
+        ).all()
+    )
+
+
+async def add_committee_member(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    committee_id: UUID,
+    payload: CommitteeMemberAdd,
+    authz: AuthorizationService,
+) -> CommitteeMembership:
+    committee = await db.get(Committee, committee_id)
+    if committee is None:
+        raise HTTPException(status_code=404, detail="Committee not found")
+
+    can_manage = await authz.check(
+        resource_type="organization",
+        resource_id=str(committee.organization_id),
+        permission="manage",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    if not can_manage:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    person_id = payload.person_id
+    if person_id is not None:
+        person = await db.get(Person, person_id)
+        if person is None:
+            raise HTTPException(status_code=404, detail="Person not found")
+    else:
+        if not payload.email:
+            raise HTTPException(status_code=422, detail="Committee member requires email or person_id")
+        person = await db.scalar(select(Person).where(Person.primary_email == payload.email))
+        if person is None:
+            person = Person(
+                display_name=payload.display_name or payload.email,
+                primary_email=payload.email,
+            )
+            db.add(person)
+            await db.flush()
+        person_id = person.id
+
+    existing = await db.scalar(
+        select(CommitteeMembership).where(
+            CommitteeMembership.committee_id == committee_id,
+            CommitteeMembership.person_id == person_id,
+            CommitteeMembership.role == payload.role,
+        )
+    )
+    if existing is not None:
+        return existing
+
+    membership = CommitteeMembership(
+        committee_id=committee_id,
+        person_id=person_id,
+        role=payload.role,
+        title=payload.title,
+    )
+    db.add(membership)
+    await authz.touch(
+        Relationship(
+            resource_type="committee",
+            resource_id=str(committee_id),
+            relation=payload.role.value,
+            subject_type="person",
+            subject_id=str(person_id),
+        )
+    )
+    await db.commit()
+    await db.refresh(membership)
+    return membership

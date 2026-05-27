@@ -1,5 +1,7 @@
 definition user {}
 
+definition person {}
+
 definition agent {
   relation owner: user
   relation reviewer: user
@@ -8,33 +10,76 @@ definition agent {
   permission review = reviewer + owner
 }
 
+definition committee {
+  relation parent_org: organization
+  relation chair: user | person
+  relation vice_chair: user | person
+  relation secretary: user | person
+  relation treasurer: user | person
+  relation member: user | person
+  relation advisor: user | person
+  relation ex_officio: user | person
+
+  permission manage = parent_org->manage + chair + secretary
+  permission view = manage + member + advisor + ex_officio
+}
+
+definition team_committee {
+  relation parent_team: team
+  relation chair: user | person
+  relation vice_chair: user | person
+  relation secretary: user | person
+  relation treasurer: user | person
+  relation member: user | person
+  relation advisor: user | person
+  relation ex_officio: user | person
+
+  permission manage = parent_team->manage + chair + secretary
+  permission view = manage + member + advisor + ex_officio
+}
+
 definition organization {
-  relation owner: user
-  relation admin: user
-  relation coach: user
-  relation staff: user
-  relation guardian: user
-  relation athlete: user
-  relation viewer: user
+  relation owner: user | person
+  relation admin: user | person
+  relation coach: user | person
+  relation staff: user | person
+  relation guardian: user | person
+  relation athlete: user | person
+  relation viewer: user | person
+  relation member_org: organization
+  relation member_team: team
+  relation committee: committee
   relation assigned_agent: agent
 
   permission manage = owner + admin
   permission manage_roster = manage + coach + staff
-  permission view = manage_roster + guardian + athlete + viewer
+  permission view = manage_roster + guardian + athlete + viewer + member_org->view + member_team->view + committee->view
   permission use_agent = manage + assigned_agent->review
 }
 
 definition team {
   relation parent_org: organization
-  relation coach: user
-  relation staff: user
-  relation athlete: user
-  relation guardian: user
+  relation player: user | person
+  relation coach: user | person
+  relation assistant_coach: user | person
+  relation staff: user | person
+  relation manager: user | person
+  relation medic: user | person
+  relation analyst: user | person
+  relation athlete: user | person
+  relation captain: user | person
+  relation vice_captain: user | person
+  relation substitute: user | person
+  relation reserve: user | person
+  relation bench: user | person
+  relation individual_athlete: user | person
+  relation guardian: user | person
+  relation committee: team_committee
   relation assigned_agent: agent
 
   permission manage = parent_org->manage
-  permission manage_roster = manage + coach + staff + parent_org->manage_roster
-  permission view = manage_roster + athlete + guardian + parent_org->view
+  permission manage_roster = manage + coach + assistant_coach + staff + manager + captain + parent_org->manage_roster
+  permission view = manage_roster + player + athlete + vice_captain + substitute + reserve + bench + individual_athlete + medic + analyst + guardian + committee->view + parent_org->view
   permission use_agent = manage + assigned_agent->review + parent_org->use_agent
 }
 
@@ -77,4 +122,3 @@ definition report {
   permission view = manage + reader + parent_org->view
   permission generate = manage + assigned_agent->review
 }
-

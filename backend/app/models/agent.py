@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy import Enum, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -8,7 +10,7 @@ from app.models.enums import AgentKind, AgentTaskStatus
 class Agent(IdMixin, TimestampMixin, Base):
     __tablename__ = "agents"
 
-    organization_id: Mapped[str | None] = mapped_column(
+    organization_id: Mapped[UUID | None] = mapped_column(
         GUID(), ForeignKey("organizations.id"), index=True
     )
     name: Mapped[str] = mapped_column(String(180), nullable=False)
@@ -21,18 +23,18 @@ class Agent(IdMixin, TimestampMixin, Base):
 class AgentAssignment(IdMixin, TimestampMixin, Base):
     __tablename__ = "agent_assignments"
 
-    agent_id: Mapped[str] = mapped_column(GUID(), ForeignKey("agents.id"), index=True)
-    organization_id: Mapped[str] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    agent_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("agents.id"), index=True)
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
     scope_type: Mapped[str] = mapped_column(String(80), nullable=False)
     scope_id: Mapped[str] = mapped_column(String(120), nullable=False)
-    granted_by_person_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("persons.id"))
+    granted_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"))
 
 
 class AgentTask(IdMixin, TimestampMixin, Base):
     __tablename__ = "agent_tasks"
 
-    agent_id: Mapped[str] = mapped_column(GUID(), ForeignKey("agents.id"), index=True)
-    organization_id: Mapped[str] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    agent_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("agents.id"), index=True)
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
     task_type: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     status: Mapped[AgentTaskStatus] = mapped_column(
@@ -41,8 +43,7 @@ class AgentTask(IdMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
-    requested_by_person_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("persons.id"))
+    requested_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"))
     input_ref: Mapped[str | None] = mapped_column(String(500))
     output_ref: Mapped[str | None] = mapped_column(String(500))
     review_notes: Mapped[str | None] = mapped_column(Text)
-
