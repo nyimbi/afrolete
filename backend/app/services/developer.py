@@ -190,6 +190,8 @@ async def inspect_developer_api_key(
         scopes=unpack_list(api_key.scopes),
         rate_limit_per_minute=api_key.rate_limit_per_minute,
         usage_count=api_key.usage_count,
+        window_started_at=api_key.window_started_at,
+        window_request_count=api_key.window_request_count,
     )
 
 
@@ -223,7 +225,20 @@ async def authenticate_developer_api_key(
     application = await get_developer_application(db, api_key.application_id)
     if application.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Developer application is not active")
-    api_key.last_used_at = datetime.now(UTC)
+    now = datetime.now(UTC)
+    window_started_at = as_utc(api_key.window_started_at)
+    if window_started_at is None or (now - window_started_at).total_seconds() >= 60:
+        api_key.window_started_at = now
+        api_key.window_request_count = 0
+    if api_key.window_request_count >= api_key.rate_limit_per_minute:
+        api_key.last_rate_limited_at = now
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Developer API key rate limit exceeded",
+        )
+    api_key.window_request_count += 1
+    api_key.last_used_at = now
     api_key.last_used_ip = request_ip
     api_key.usage_count += 1
     await db.commit()
@@ -499,6 +514,14 @@ def unpack_list(value: str | None) -> list[str]:
     if not value:
         return []
     return [entry for entry in value.splitlines() if entry]
+
+
+def as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def build_api_key(organization_slug: str, environment: str) -> str:

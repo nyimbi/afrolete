@@ -11686,7 +11686,9 @@ export default function HomePage() {
                 <article key={apiKey.id} className="task-card">
                   <div>
                     <strong>{apiKey.name}</strong>
-                    <span>{apiKey.key_prefix} · {apiKey.environment} · {apiKey.status} · {apiKey.usage_count} calls</span>
+                    <span>
+                      {apiKey.key_prefix} · {apiKey.environment} · {apiKey.status} · {apiKey.window_request_count}/{apiKey.rate_limit_per_minute}/min · {apiKey.usage_count} calls
+                    </span>
                   </div>
                   <button type="button" onClick={() => revokeDeveloperApiKey(apiKey.id)} disabled={busyAction !== null || apiKey.status === "revoked"}>Revoke</button>
                 </article>

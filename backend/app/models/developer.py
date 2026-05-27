@@ -42,6 +42,9 @@ class DeveloperApiKey(IdMixin, TimestampMixin, Base):
     last_used_ip: Mapped[str | None] = mapped_column(String(80))
     usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     rate_limit_per_minute: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    window_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    window_request_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_rate_limited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

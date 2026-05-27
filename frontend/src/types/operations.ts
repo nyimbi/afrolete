@@ -2251,6 +2251,9 @@ export type DeveloperApiKeyRead = {
   last_used_ip: string | null;
   usage_count: number;
   rate_limit_per_minute: number;
+  window_started_at: string | null;
+  window_request_count: number;
+  last_rate_limited_at: string | null;
   notes: string | null;
 };
 

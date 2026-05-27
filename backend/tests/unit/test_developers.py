@@ -161,6 +161,32 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert denied_sdk_drill_response.status_code == 403
 
+    limited_key_response = client.post(
+        "/api/v1/developers/api-keys",
+        json={
+            "organization_id": organization["id"],
+            "application_id": application["id"],
+            "name": "Limited SDK Key",
+            "scopes": ["read:organization"],
+            "environment": "sandbox",
+            "rate_limit_per_minute": 1,
+        },
+        headers=identity_headers,
+    )
+    assert limited_key_response.status_code == 201
+    limited_raw_key = limited_key_response.json()["key"]
+    first_limited_response = client.get(
+        "/api/v1/sdk/me",
+        headers={"X-Afrolete-API-Key": limited_raw_key},
+    )
+    assert first_limited_response.status_code == 200
+    assert first_limited_response.json()["window_request_count"] == 1
+    second_limited_response = client.get(
+        "/api/v1/sdk/me",
+        headers={"X-Afrolete-API-Key": limited_raw_key},
+    )
+    assert second_limited_response.status_code == 429
+
     webhook_response = client.post(
         "/api/v1/developers/webhook-subscriptions",
         json={
@@ -228,8 +254,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert summary_response.status_code == 200
     summary = summary_response.json()
     assert summary["application_count"] == 1
-    assert summary["api_key_count"] == 2
-    assert summary["active_api_key_count"] == 2
+    assert summary["api_key_count"] == 3
+    assert summary["active_api_key_count"] == 3
     assert summary["webhook_subscription_count"] == 1
     assert summary["marketplace_listing_count"] == 1
     assert summary["approved_marketplace_listing_count"] == 1

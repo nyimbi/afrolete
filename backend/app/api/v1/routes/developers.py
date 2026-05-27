@@ -78,6 +78,9 @@ def api_key_read(api_key) -> DeveloperApiKeyRead:
         last_used_ip=api_key.last_used_ip,
         usage_count=api_key.usage_count,
         rate_limit_per_minute=api_key.rate_limit_per_minute,
+        window_started_at=api_key.window_started_at,
+        window_request_count=api_key.window_request_count,
+        last_rate_limited_at=api_key.last_rate_limited_at,
         notes=api_key.notes,
     )
 

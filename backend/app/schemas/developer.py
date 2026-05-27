@@ -60,6 +60,9 @@ class DeveloperApiKeyRead(BaseModel):
     last_used_ip: str | None
     usage_count: int
     rate_limit_per_minute: int
+    window_started_at: datetime | None
+    window_request_count: int
+    last_rate_limited_at: datetime | None
     notes: str | None
 
 
@@ -80,6 +83,8 @@ class DeveloperApiKeyInspectionRead(BaseModel):
     scopes: list[str]
     rate_limit_per_minute: int
     usage_count: int
+    window_started_at: datetime | None
+    window_request_count: int
 
 
 class DeveloperWebhookSubscriptionCreate(BaseModel):
