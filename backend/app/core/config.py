@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     agent_default_model: str = "afrolete-local-planner"
     agent_execution_timeout_seconds: float = 10.0
 
+    billing_payment_webhook_signing_key: str = ""
+    billing_payment_webhook_tolerance_seconds: int = 300
+
     report_artifact_dir: str = "data/report-artifacts"
     report_artifact_url_prefix: str = "local://reports"
     report_artifact_signing_key: str = "local-report-artifact-key"

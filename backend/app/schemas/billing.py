@@ -187,6 +187,8 @@ class BillingPaymentWebhookRead(BaseModel):
     provider: str
     event_type: str
     accepted: bool
+    signature_required: bool
+    signature_validated: bool
     payment_id: UUID | None
     invoice_status: BillingInvoiceStatus
     amount_paid: Decimal

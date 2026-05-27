@@ -2,7 +2,7 @@ from uuid import UUID
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -50,6 +50,7 @@ from app.services.billing import (
     record_payment,
     record_usage,
     proration_quote,
+    validate_payment_webhook_signature,
 )
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -173,10 +174,31 @@ async def record_payment_route(
 
 @router.post("/webhooks/payments", response_model=BillingPaymentWebhookRead)
 async def payment_webhook_route(
+    request: Request,
     payload: BillingPaymentWebhookCreate,
+    x_afrolete_billing_timestamp: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Billing-Timestamp",
+    ),
+    x_afrolete_billing_signature: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Billing-Signature",
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> BillingPaymentWebhookRead:
-    return BillingPaymentWebhookRead(**await ingest_payment_webhook(db, payload))
+    signature_required, signature_validated = validate_payment_webhook_signature(
+        await request.body(),
+        x_afrolete_billing_timestamp,
+        x_afrolete_billing_signature,
+    )
+    return BillingPaymentWebhookRead(
+        **await ingest_payment_webhook(
+            db,
+            payload,
+            signature_required=signature_required,
+            signature_validated=signature_validated,
+        )
+    )
 
 
 @router.post("/entitlements", response_model=BillingEntitlementRead, status_code=status.HTTP_201_CREATED)

@@ -972,6 +972,8 @@ export type BillingPaymentWebhookRead = {
   provider: string;
   event_type: string;
   accepted: boolean;
+  signature_required: boolean;
+  signature_validated: boolean;
   payment_id: UUID | null;
   invoice_status: BillingInvoiceStatus;
   amount_paid: string;

@@ -1,11 +1,15 @@
+import hmac
+import time
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from hashlib import sha256
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.models.billing import (
     BillingEntitlement,
     BillingPlan,
@@ -287,7 +291,12 @@ async def dunning_notice(
     }
 
 
-async def ingest_payment_webhook(db: AsyncSession, payload: BillingPaymentWebhookCreate) -> dict:
+async def ingest_payment_webhook(
+    db: AsyncSession,
+    payload: BillingPaymentWebhookCreate,
+    signature_required: bool = False,
+    signature_validated: bool = False,
+) -> dict:
     invoice = await get_invoice_for_organization(db, payload.invoice_id, payload.organization_id)
     accepted = payload.status == "succeeded" and payload.event_type in {
         "payment.succeeded",
@@ -322,11 +331,43 @@ async def ingest_payment_webhook(db: AsyncSession, payload: BillingPaymentWebhoo
         "provider": payload.provider,
         "event_type": payload.event_type,
         "accepted": accepted,
+        "signature_required": signature_required,
+        "signature_validated": signature_validated,
         "payment_id": payment.id if payment else None,
         "invoice_status": invoice.status,
         "amount_paid": invoice.amount_paid,
         "message": "Payment applied." if accepted else "Webhook event recorded as non-settling.",
     }
+
+
+def validate_payment_webhook_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> tuple[bool, bool]:
+    selected_settings = settings or get_settings()
+    signing_key = selected_settings.billing_payment_webhook_signing_key
+    if not signing_key:
+        return False, False
+    if not timestamp_header or not signature_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing webhook signature")
+    try:
+        timestamp = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook timestamp") from exc
+    age = abs(int(time.time()) - timestamp)
+    if age > selected_settings.billing_payment_webhook_tolerance_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Stale webhook signature")
+    expected = hmac.new(
+        signing_key.encode(),
+        timestamp_header.encode() + b"." + raw_body,
+        sha256,
+    ).hexdigest()
+    submitted = signature_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, submitted):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature")
+    return True, True
 
 
 async def create_entitlement(

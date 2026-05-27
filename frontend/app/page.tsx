@@ -5136,7 +5136,9 @@ export default function HomePage() {
                 <article className="task-card">
                   <div>
                     <strong>{billingWebhook.provider} webhook · {billingWebhook.invoice_status}</strong>
-                    <span>{billingWebhook.amount_paid} paid · {billingWebhook.message}</span>
+                    <span>
+                      {billingWebhook.amount_paid} paid · {billingWebhook.message} · signature {billingWebhook.signature_validated ? "validated" : billingWebhook.signature_required ? "required" : "not configured"}
+                    </span>
                   </div>
                 </article>
               ) : null}
