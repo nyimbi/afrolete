@@ -118,6 +118,7 @@ from app.schemas.event import (
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelFeeInvoiceItemRead,
+    EventTravelFeeReconciliationExceptionRead,
     EventTravelFeeReconciliationItemRead,
     EventTravelFeeReconciliationPaymentRead,
     EventTravelFeeReconciliationRead,
@@ -954,12 +955,15 @@ async def get_travel_fee_reconciliation(
         payments_by_invoice.setdefault(payment.invoice_id, []).append(payment)
 
     items: list[EventTravelFeeReconciliationItemRead] = []
+    exceptions: list[EventTravelFeeReconciliationExceptionRead] = []
     total_due = Decimal("0.00")
     total_paid = Decimal("0.00")
     total_open = Decimal("0.00")
     for invoice in invoices:
         invoice_payments = payments_by_invoice.get(invoice.id, [])
         open_amount = travel_fee_checkout_open_amount(invoice)
+        item_exceptions = travel_fee_reconciliation_exceptions(invoice, invoice_payments, open_amount)
+        exceptions.extend(item_exceptions)
         total_due += invoice.amount_due
         total_paid += invoice.amount_paid
         total_open += open_amount
@@ -988,6 +992,18 @@ async def get_travel_fee_reconciliation(
                     )
                     for payment in invoice_payments
                 ],
+                exceptions=item_exceptions,
+            )
+        )
+
+    payment_sum = sum((payment.amount for payment in payments), Decimal("0.00")).quantize(Decimal("0.01"))
+    if payment_sum != total_paid.quantize(Decimal("0.01")):
+        exceptions.append(
+            EventTravelFeeReconciliationExceptionRead(
+                code="ledger_total_mismatch",
+                severity="critical",
+                detail=f"Finance invoice paid total {total_paid.quantize(Decimal('0.01'))} does not match payment ledger total {payment_sum}.",
+                recommended_action="Review manual invoice edits and rebuild payment ledger totals before closing trip finance.",
             )
         )
 
@@ -1002,6 +1018,8 @@ async def get_travel_fee_reconciliation(
         total_due=total_due.quantize(Decimal("0.01")),
         total_paid=total_paid.quantize(Decimal("0.01")),
         total_open=total_open.quantize(Decimal("0.01")),
+        exception_count=len(exceptions),
+        exceptions=exceptions,
         reconciled_at=datetime.now(UTC),
         items=items,
     )
@@ -3490,6 +3508,83 @@ async def travel_fee_invoices_for_plan(db: AsyncSession, plan: EventTravelPlan) 
                 .order_by(FinanceInvoice.due_on, FinanceInvoice.invoice_number)
             )
         ).all()
+    )
+
+
+def travel_fee_reconciliation_exceptions(
+    invoice: FinanceInvoice,
+    payments: list[FinancePayment],
+    open_amount: Decimal,
+) -> list[EventTravelFeeReconciliationExceptionRead]:
+    exceptions: list[EventTravelFeeReconciliationExceptionRead] = []
+    if invoice.amount_paid > invoice.amount_due:
+        exceptions.append(
+            travel_fee_reconciliation_exception(
+                invoice,
+                "overpaid_invoice",
+                "critical",
+                f"Invoice is overpaid by {(invoice.amount_paid - invoice.amount_due).quantize(Decimal('0.01'))} {invoice.currency}.",
+                "Issue a refund, credit the payer, or correct duplicate provider callbacks.",
+            )
+        )
+    if invoice.amount_paid > 0 and not payments:
+        exceptions.append(
+            travel_fee_reconciliation_exception(
+                invoice,
+                "paid_without_payment_row",
+                "critical",
+                "Invoice shows paid amount but has no matching finance payment row.",
+                "Inspect manual invoice adjustments and add or repair the missing payment ledger entry.",
+            )
+        )
+    if open_amount > 0 and invoice.due_on is not None and invoice.due_on < datetime.now(UTC).date():
+        exceptions.append(
+            travel_fee_reconciliation_exception(
+                invoice,
+                "overdue_open_balance",
+                "warning",
+                f"Invoice has {open_amount} {invoice.currency} open after its due date.",
+                "Send a payment reminder or apply a waiver before departure clearance.",
+            )
+        )
+    for payment in payments:
+        if payment.currency != invoice.currency:
+            exceptions.append(
+                travel_fee_reconciliation_exception(
+                    invoice,
+                    "payment_currency_mismatch",
+                    "critical",
+                    f"Payment {payment.id} is {payment.currency}, but invoice currency is {invoice.currency}.",
+                    "Reverse or rebook the payment with the correct currency conversion.",
+                )
+            )
+        if not payment.external_reference:
+            exceptions.append(
+                travel_fee_reconciliation_exception(
+                    invoice,
+                    "missing_provider_reference",
+                    "warning",
+                    f"Payment {payment.id} has no provider reference.",
+                    "Attach the processor, mobile-money, bank, or office receipt reference for auditability.",
+                )
+            )
+    return exceptions
+
+
+def travel_fee_reconciliation_exception(
+    invoice: FinanceInvoice,
+    code: str,
+    severity: str,
+    detail: str,
+    recommended_action: str,
+) -> EventTravelFeeReconciliationExceptionRead:
+    return EventTravelFeeReconciliationExceptionRead(
+        code=code,
+        severity=severity,
+        invoice_id=invoice.id,
+        invoice_number=invoice.invoice_number,
+        detail=detail,
+        recommended_action=recommended_action,
     )
 
 

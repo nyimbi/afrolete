@@ -607,6 +607,15 @@ export type EventTravelFeeReconciliationPaymentRead = {
   received_at: string;
 };
 
+export type EventTravelFeeReconciliationExceptionRead = {
+  code: string;
+  severity: string;
+  invoice_id: UUID | null;
+  invoice_number: string | null;
+  detail: string;
+  recommended_action: string;
+};
+
 export type EventTravelFeeReconciliationItemRead = {
   invoice_id: UUID;
   invoice_number: string;
@@ -621,6 +630,7 @@ export type EventTravelFeeReconciliationItemRead = {
   payment_count: number;
   last_payment_reference: string | null;
   payments: EventTravelFeeReconciliationPaymentRead[];
+  exceptions: EventTravelFeeReconciliationExceptionRead[];
 };
 
 export type EventTravelFeeReconciliationRead = {
@@ -634,6 +644,8 @@ export type EventTravelFeeReconciliationRead = {
   total_due: string;
   total_paid: string;
   total_open: string;
+  exception_count: number;
+  exceptions: EventTravelFeeReconciliationExceptionRead[];
   reconciled_at: string;
   items: EventTravelFeeReconciliationItemRead[];
 };

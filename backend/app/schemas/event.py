@@ -336,6 +336,15 @@ class EventTravelFeeReconciliationPaymentRead(BaseModel):
     received_at: datetime
 
 
+class EventTravelFeeReconciliationExceptionRead(BaseModel):
+    code: str
+    severity: str
+    invoice_id: UUID | None = None
+    invoice_number: str | None = None
+    detail: str
+    recommended_action: str
+
+
 class EventTravelFeeReconciliationItemRead(BaseModel):
     invoice_id: UUID
     invoice_number: str
@@ -350,6 +359,7 @@ class EventTravelFeeReconciliationItemRead(BaseModel):
     payment_count: int
     last_payment_reference: str | None
     payments: list[EventTravelFeeReconciliationPaymentRead]
+    exceptions: list[EventTravelFeeReconciliationExceptionRead]
 
 
 class EventTravelFeeReconciliationRead(BaseModel):
@@ -363,6 +373,8 @@ class EventTravelFeeReconciliationRead(BaseModel):
     total_due: Decimal
     total_paid: Decimal
     total_open: Decimal
+    exception_count: int
+    exceptions: list[EventTravelFeeReconciliationExceptionRead]
     reconciled_at: datetime
     items: list[EventTravelFeeReconciliationItemRead]
 

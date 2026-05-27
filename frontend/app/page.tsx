@@ -3020,8 +3020,8 @@ export default function HomePage() {
       (reconciliation) => {
         setTravelFeeReconciliation(reconciliation);
         addLog(
-          `Travel fee reconciliation: ${reconciliation.paid_count} paid, ${reconciliation.total_open} open`,
-          Number(reconciliation.total_open) > 0 ? "neutral" : "good"
+          `Travel fee reconciliation: ${reconciliation.paid_count} paid, ${reconciliation.exception_count} exceptions`,
+          reconciliation.exception_count > 0 ? "bad" : Number(reconciliation.total_open) > 0 ? "neutral" : "good"
         );
       }
     );
@@ -8830,6 +8830,9 @@ export default function HomePage() {
                     </span>
                     <span>
                       {travelFeeReconciliation.total_paid} paid · {travelFeeReconciliation.total_open} open · {travelFeeReconciliation.invoice_count} invoices
+                    </span>
+                    <span>
+                      {travelFeeReconciliation.exception_count} exceptions · {travelFeeReconciliation.exceptions[0]?.recommended_action ?? "No payment reconciliation exceptions"}
                     </span>
                     <span>
                       {travelFeeReconciliation.items[0]?.last_payment_reference ?? travelFeeReconciliation.items[0]?.session_id ?? "No travel payments reconciled yet"}
