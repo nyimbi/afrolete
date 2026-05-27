@@ -356,6 +356,56 @@ class EventTravelExpenseRead(BaseModel):
     notes: str | None
 
 
+class EventTravelCarpoolRideCreate(BaseModel):
+    ride_type: str = Field(default="request", pattern="^(request|offer)$")
+    rider_person_id: UUID | None = None
+    driver_person_id: UUID | None = None
+    pickup_location: str = Field(min_length=2, max_length=240)
+    dropoff_location: str | None = Field(default=None, max_length=240)
+    seats_requested: int = Field(default=1, ge=1, le=20)
+    seats_available: int = Field(default=0, ge=0, le=20)
+    departure_window_start: datetime | None = None
+    departure_window_end: datetime | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def window_end_after_start(self) -> "EventTravelCarpoolRideCreate":
+        if (
+            self.departure_window_start is not None
+            and self.departure_window_end is not None
+            and self.departure_window_end <= self.departure_window_start
+        ):
+            raise ValueError("departure_window_end must be after departure_window_start")
+        return self
+
+
+class EventTravelCarpoolRideUpdate(BaseModel):
+    status: str = Field(pattern="^(open|matched|confirmed|cancelled)$")
+    rider_person_id: UUID | None = None
+    driver_person_id: UUID | None = None
+    match_score: Decimal | None = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelCarpoolRideRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    travel_plan_id: UUID
+    ride_type: str
+    status: str
+    rider_person_id: UUID | None
+    driver_person_id: UUID | None
+    pickup_location: str
+    dropoff_location: str | None
+    seats_requested: int
+    seats_available: int
+    departure_window_start: datetime | None
+    departure_window_end: datetime | None
+    match_score: Decimal | None
+    matched_at: datetime | None
+    notes: str | None
+
+
 class AttendanceRecordUpsert(BaseModel):
     person_id: UUID
     status: AttendanceStatus

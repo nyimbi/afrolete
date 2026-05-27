@@ -13,6 +13,9 @@ from app.schemas.event import (
     EventTravelApprovalCreate,
     EventTravelApprovalRead,
     EventTravelApprovalUpdate,
+    EventTravelCarpoolRideCreate,
+    EventTravelCarpoolRideRead,
+    EventTravelCarpoolRideUpdate,
     EventTravelChecklistItemRead,
     EventTravelChecklistItemUpdate,
     EventTravelChecklistSeedCreate,
@@ -47,6 +50,7 @@ from app.services.events import (
     create_event,
     dispatch_weather_assessment_alert,
     create_travel_approval,
+    create_travel_carpool_ride,
     create_travel_expense,
     create_travel_location_update,
     export_travel_manifest,
@@ -54,6 +58,7 @@ from app.services.events import (
     get_event,
     get_travel_manifest,
     list_attendance,
+    list_travel_carpool_rides,
     list_travel_checklist_items,
     list_travel_expenses,
     list_travel_location_updates,
@@ -67,6 +72,7 @@ from app.services.events import (
     seed_travel_checklist_items,
     send_travel_consent_reminders,
     update_travel_approval,
+    update_travel_carpool_ride,
     update_travel_checklist_item,
     update_travel_expense,
     update_travel_plan,
@@ -515,6 +521,42 @@ async def update_travel_expense_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelExpenseRead:
     return await update_travel_expense(db, identity, expense_id, payload, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/carpools", response_model=list[EventTravelCarpoolRideRead])
+async def list_travel_carpool_rides_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EventTravelCarpoolRideRead]:
+    return await list_travel_carpool_rides(db, identity, travel_plan_id, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/carpools",
+    response_model=EventTravelCarpoolRideRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_travel_carpool_ride_route(
+    travel_plan_id: UUID,
+    payload: EventTravelCarpoolRideCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelCarpoolRideRead:
+    return await create_travel_carpool_ride(db, identity, travel_plan_id, payload, authz)
+
+
+@router.patch("/travel-carpools/{carpool_ride_id}", response_model=EventTravelCarpoolRideRead)
+async def update_travel_carpool_ride_route(
+    carpool_ride_id: UUID,
+    payload: EventTravelCarpoolRideUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelCarpoolRideRead:
+    return await update_travel_carpool_ride(db, identity, carpool_ride_id, payload, authz)
 
 
 @router.get("/{event_id}/attendance", response_model=list[AttendanceRecordRead])

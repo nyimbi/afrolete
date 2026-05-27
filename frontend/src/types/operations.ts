@@ -598,6 +598,25 @@ export type EventTravelExpenseRead = {
   notes: string | null;
 };
 
+export type EventTravelCarpoolRideRead = {
+  id: UUID;
+  organization_id: UUID;
+  travel_plan_id: UUID;
+  ride_type: string;
+  status: string;
+  rider_person_id: UUID | null;
+  driver_person_id: UUID | null;
+  pickup_location: string;
+  dropoff_location: string | null;
+  seats_requested: number;
+  seats_available: number;
+  departure_window_start: string | null;
+  departure_window_end: string | null;
+  match_score: string | null;
+  matched_at: string | null;
+  notes: string | null;
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

@@ -3,7 +3,7 @@ from uuid import UUID
 
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -176,6 +176,26 @@ class EventTravelExpense(IdMixin, TimestampMixin, Base):
     approved_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     reimbursed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     receipt_url: Mapped[str | None] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class EventTravelCarpoolRide(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_carpool_rides"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    travel_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("event_travel_plans.id"), index=True)
+    ride_type: Mapped[str] = mapped_column(String(40), default="request", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
+    rider_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    driver_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    pickup_location: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    dropoff_location: Mapped[str | None] = mapped_column(String(240))
+    seats_requested: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    seats_available: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    departure_window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    departure_window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    match_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

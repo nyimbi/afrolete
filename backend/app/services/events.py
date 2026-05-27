@@ -26,6 +26,7 @@ from app.models.event import (
     ConsentRequest,
     Event,
     EventTravelApproval,
+    EventTravelCarpoolRide,
     EventTravelChecklistItem,
     EventTravelExpense,
     EventTravelLocationUpdate,
@@ -47,6 +48,9 @@ from app.schemas.event import (
     EventTravelApprovalCreate,
     EventTravelApprovalRead,
     EventTravelApprovalUpdate,
+    EventTravelCarpoolRideCreate,
+    EventTravelCarpoolRideRead,
+    EventTravelCarpoolRideUpdate,
     EventTravelChecklistItemRead,
     EventTravelChecklistItemUpdate,
     EventTravelChecklistSeedCreate,
@@ -124,6 +128,11 @@ async def ensure_manage_event_scope(
 ) -> None:
     if not await can_manage_event_scope(authz, organization_id, identity):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+async def ensure_optional_person(db: AsyncSession, person_id: UUID | None, detail: str) -> None:
+    if person_id is not None and await db.get(Person, person_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
 
 
 async def create_event(
@@ -966,6 +975,90 @@ async def update_travel_expense(
     return travel_expense_read(expense)
 
 
+async def list_travel_carpool_rides(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> list[EventTravelCarpoolRideRead]:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    rows = (
+        await db.scalars(
+            select(EventTravelCarpoolRide)
+            .where(EventTravelCarpoolRide.travel_plan_id == plan.id)
+            .order_by(EventTravelCarpoolRide.status, EventTravelCarpoolRide.departure_window_start)
+        )
+    ).all()
+    return [travel_carpool_ride_read(item) for item in rows]
+
+
+async def create_travel_carpool_ride(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelCarpoolRideCreate,
+    authz: AuthorizationService,
+) -> EventTravelCarpoolRideRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    await ensure_optional_person(db, payload.rider_person_id, "Rider not found")
+    await ensure_optional_person(db, payload.driver_person_id, "Driver not found")
+    if payload.ride_type == "offer" and payload.seats_available < 1:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Offer needs available seats")
+
+    ride = EventTravelCarpoolRide(
+        organization_id=plan.organization_id,
+        travel_plan_id=plan.id,
+        ride_type=payload.ride_type,
+        status="open",
+        rider_person_id=payload.rider_person_id,
+        driver_person_id=payload.driver_person_id,
+        pickup_location=payload.pickup_location,
+        dropoff_location=payload.dropoff_location,
+        seats_requested=payload.seats_requested,
+        seats_available=payload.seats_available,
+        departure_window_start=payload.departure_window_start,
+        departure_window_end=payload.departure_window_end,
+        notes=payload.notes,
+    )
+    db.add(ride)
+    await db.commit()
+    await db.refresh(ride)
+    return travel_carpool_ride_read(ride)
+
+
+async def update_travel_carpool_ride(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    carpool_ride_id: UUID,
+    payload: EventTravelCarpoolRideUpdate,
+    authz: AuthorizationService,
+) -> EventTravelCarpoolRideRead:
+    ride = await db.get(EventTravelCarpoolRide, carpool_ride_id)
+    if ride is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Carpool ride not found")
+    await ensure_manage_event_scope(authz, ride.organization_id, identity)
+    await ensure_optional_person(db, payload.rider_person_id, "Rider not found")
+    await ensure_optional_person(db, payload.driver_person_id, "Driver not found")
+    ride.status = payload.status
+    ride.rider_person_id = payload.rider_person_id if payload.rider_person_id is not None else ride.rider_person_id
+    ride.driver_person_id = payload.driver_person_id if payload.driver_person_id is not None else ride.driver_person_id
+    ride.match_score = payload.match_score if payload.match_score is not None else ride.match_score
+    ride.notes = payload.notes if payload.notes is not None else ride.notes
+    if payload.status in {"matched", "confirmed"}:
+        ride.matched_at = ride.matched_at or datetime.now(UTC)
+    elif payload.status in {"open", "cancelled"}:
+        ride.matched_at = None
+    await db.commit()
+    await db.refresh(ride)
+    return travel_carpool_ride_read(ride)
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -1161,6 +1254,27 @@ def travel_expense_read(expense: EventTravelExpense) -> EventTravelExpenseRead:
         reimbursed_at=expense.reimbursed_at,
         receipt_url=expense.receipt_url,
         notes=expense.notes,
+    )
+
+
+def travel_carpool_ride_read(ride: EventTravelCarpoolRide) -> EventTravelCarpoolRideRead:
+    return EventTravelCarpoolRideRead(
+        id=ride.id,
+        organization_id=ride.organization_id,
+        travel_plan_id=ride.travel_plan_id,
+        ride_type=ride.ride_type,
+        status=ride.status,
+        rider_person_id=ride.rider_person_id,
+        driver_person_id=ride.driver_person_id,
+        pickup_location=ride.pickup_location,
+        dropoff_location=ride.dropoff_location,
+        seats_requested=ride.seats_requested,
+        seats_available=ride.seats_available,
+        departure_window_start=ride.departure_window_start,
+        departure_window_end=ride.departure_window_end,
+        match_score=ride.match_score,
+        matched_at=ride.matched_at,
+        notes=ride.notes,
     )
 
 

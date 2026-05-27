@@ -72,6 +72,7 @@ import type {
   DonationRead,
   EventRead,
   EventTravelApprovalRead,
+  EventTravelCarpoolRideRead,
   EventTravelChecklistItemRead,
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
@@ -359,6 +360,7 @@ export default function HomePage() {
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
+  const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -600,6 +602,14 @@ export default function HomePage() {
     expense_amount: 75,
     expense_receipt_url: "https://receipts.example/travel-fuel.jpg",
     expense_notes: "Fuel and tolls for away match transport.",
+    carpool_type: "request",
+    carpool_pickup_location: "123 Main St",
+    carpool_dropoff_location: "City Sports Complex",
+    carpool_seats_requested: 1,
+    carpool_seats_available: 3,
+    carpool_window_start: "2026-05-28T07:00",
+    carpool_window_end: "2026-05-28T07:30",
+    carpool_notes: "Match families near the west side pickup zone.",
     notes: "Away match travel plan."
   });
   const [guardianForm, setGuardianForm] = useState({
@@ -1607,6 +1617,7 @@ export default function HomePage() {
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
       setTravelExpenses([]);
+      setTravelCarpoolRides([]);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1817,6 +1828,7 @@ export default function HomePage() {
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
       setTravelExpenses([]);
+      setTravelCarpoolRides([]);
       return;
     }
     runAction(
@@ -2728,6 +2740,79 @@ export default function HomePage() {
           `${updated.category} expense ${updated.reimbursement_status}`,
           updated.reimbursement_status === "rejected" ? "bad" : "good"
         );
+      }
+    );
+  };
+
+  const loadTravelCarpools = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-carpools-${plan.id}`,
+      () => apiRequest<EventTravelCarpoolRideRead[]>(`/events/travel-plans/${plan.id}/carpools`, { identity }),
+      (rides) => {
+        setTravelCarpoolRides(rides);
+        addLog(`Travel carpools loaded: ${rides.length}`, "good");
+      }
+    );
+  };
+
+  const createTravelCarpool = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-carpool-create-${plan.id}`,
+      () =>
+        apiRequest<EventTravelCarpoolRideRead>(`/events/travel-plans/${plan.id}/carpools`, {
+          method: "POST",
+          identity,
+          body: {
+            ride_type: travelForm.carpool_type,
+            rider_person_id: travelForm.carpool_type === "request" ? selectedAthleteId || null : null,
+            driver_person_id: null,
+            pickup_location: travelForm.carpool_pickup_location,
+            dropoff_location: travelForm.carpool_dropoff_location || null,
+            seats_requested: travelForm.carpool_seats_requested,
+            seats_available: travelForm.carpool_type === "offer" ? travelForm.carpool_seats_available : 0,
+            departure_window_start: travelForm.carpool_window_start
+              ? new Date(travelForm.carpool_window_start).toISOString()
+              : null,
+            departure_window_end: travelForm.carpool_window_end
+              ? new Date(travelForm.carpool_window_end).toISOString()
+              : null,
+            notes: travelForm.carpool_notes || null
+          }
+        }),
+      (ride) => {
+        setTravelCarpoolRides((current) => [
+          ride,
+          ...current.filter((item) => item.id !== ride.id)
+        ]);
+        addLog(`${ride.ride_type} carpool opened for ${ride.pickup_location}`, "good");
+      }
+    );
+  };
+
+  const updateTravelCarpoolStatus = (
+    ride: EventTravelCarpoolRideRead,
+    statusValue: "matched" | "confirmed" | "cancelled"
+  ) => {
+    runAction(
+      `travel-carpool-${ride.id}-${statusValue}`,
+      () =>
+        apiRequest<EventTravelCarpoolRideRead>(`/events/travel-carpools/${ride.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            rider_person_id: ride.rider_person_id,
+            driver_person_id: ride.driver_person_id,
+            match_score: statusValue === "matched" ? "87.50" : ride.match_score,
+            notes: ride.notes ?? `Carpool ${statusValue} from the operations console.`
+          }
+        }),
+      (updated) => {
+        setTravelCarpoolRides((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.ride_type} carpool ${updated.status}`, updated.status === "cancelled" ? "bad" : "good");
       }
     );
   };
@@ -7020,9 +7105,47 @@ export default function HomePage() {
                 Expense amount
                 <input type="number" min="0" value={travelForm.expense_amount} onChange={(event) => setTravelForm({ ...travelForm, expense_amount: Number(event.target.value) })} />
               </label>
+              <label>
+                Carpool type
+                <select value={travelForm.carpool_type} onChange={(event) => setTravelForm({ ...travelForm, carpool_type: event.target.value })}>
+                  <option value="request">Request</option>
+                  <option value="offer">Offer</option>
+                </select>
+              </label>
+              <label>
+                Pickup
+                <input value={travelForm.carpool_pickup_location} onChange={(event) => setTravelForm({ ...travelForm, carpool_pickup_location: event.target.value })} />
+              </label>
+              <label>
+                Carpool seats
+                <input
+                  type="number"
+                  min="1"
+                  value={travelForm.carpool_type === "offer" ? travelForm.carpool_seats_available : travelForm.carpool_seats_requested}
+                  onChange={(event) =>
+                    setTravelForm({
+                      ...travelForm,
+                      carpool_seats_requested: Number(event.target.value),
+                      carpool_seats_available: Number(event.target.value)
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Pickup start
+                <input type="datetime-local" value={travelForm.carpool_window_start} onChange={(event) => setTravelForm({ ...travelForm, carpool_window_start: event.target.value })} />
+              </label>
+              <label>
+                Pickup end
+                <input type="datetime-local" value={travelForm.carpool_window_end} onChange={(event) => setTravelForm({ ...travelForm, carpool_window_end: event.target.value })} />
+              </label>
               <label className="wide-field">
                 Route
                 <input value={travelForm.route_summary} onChange={(event) => setTravelForm({ ...travelForm, route_summary: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Carpool dropoff
+                <input value={travelForm.carpool_dropoff_location} onChange={(event) => setTravelForm({ ...travelForm, carpool_dropoff_location: event.target.value })} />
               </label>
               <label className="wide-field">
                 Receipt URL
@@ -7097,6 +7220,20 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {travelCarpoolRides.slice(0, 3).map((ride) => (
+                <article className="task-card" key={ride.id}>
+                  <div>
+                    <strong>{ride.ride_type} carpool · {ride.status}</strong>
+                    <span>{ride.pickup_location} to {ride.dropoff_location ?? "destination"} · {ride.seats_available || ride.seats_requested} seats</span>
+                    <span>{ride.match_score ? `${ride.match_score}% match` : ride.notes ?? "No match score yet"}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => updateTravelCarpoolStatus(ride, "matched")}>Match</button>
+                    <button type="button" onClick={() => updateTravelCarpoolStatus(ride, "confirmed")}>Confirm</button>
+                    <button type="button" onClick={() => updateTravelCarpoolStatus(ride, "cancelled")}>Cancel</button>
+                  </div>
+                </article>
+              ))}
               {travelApprovals.slice(0, 3).map((approval) => (
                 <article className="task-card" key={approval.id}>
                   <div>
@@ -7154,6 +7291,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => loadTravelLocationUpdates(plan)}>Route</button>
                     <button type="button" onClick={() => createTravelExpense(plan)}>Expense</button>
                     <button type="button" onClick={() => loadTravelExpenses(plan)}>Expenses</button>
+                    <button type="button" onClick={() => createTravelCarpool(plan)}>Carpool</button>
+                    <button type="button" onClick={() => loadTravelCarpools(plan)}>Carpools</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "completed")}>Complete</button>
