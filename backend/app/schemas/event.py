@@ -310,6 +310,40 @@ class EventTravelLocationUpdateRead(BaseModel):
     notes: str | None
 
 
+class EventTravelExpenseCreate(BaseModel):
+    category: str = Field(default="fuel", min_length=2, max_length=80)
+    vendor: str | None = Field(default=None, max_length=180)
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    incurred_at: datetime | None = None
+    paid_by_person_id: UUID | None = None
+    receipt_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelExpenseUpdate(BaseModel):
+    reimbursement_status: str = Field(pattern="^(draft|submitted|approved|reimbursed|rejected)$")
+    receipt_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelExpenseRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    travel_plan_id: UUID
+    category: str
+    vendor: str | None
+    amount: Decimal
+    currency: str
+    incurred_at: datetime
+    paid_by_person_id: UUID | None
+    reimbursement_status: str
+    approved_by_person_id: UUID | None
+    reimbursed_at: datetime | None
+    receipt_url: str | None
+    notes: str | None
+
+
 class AttendanceRecordUpsert(BaseModel):
     person_id: UUID
     status: AttendanceStatus

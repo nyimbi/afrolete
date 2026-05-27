@@ -75,6 +75,7 @@ import type {
   EventTravelChecklistItemRead,
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
+  EventTravelExpenseRead,
   EventTravelFeeInvoiceBatchRead,
   EventTravelLocationUpdateRead,
   EventTravelManifestRead,
@@ -355,6 +356,7 @@ export default function HomePage() {
   const [travelApprovals, setTravelApprovals] = useState<EventTravelApprovalRead[]>([]);
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
+  const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -591,6 +593,11 @@ export default function HomePage() {
     speed_kph: 45,
     heading_degrees: 90,
     tracking_channel: "push" as CommunicationChannel,
+    expense_category: "fuel",
+    expense_vendor: "Riverside Fuel",
+    expense_amount: 75,
+    expense_receipt_url: "https://receipts.example/travel-fuel.jpg",
+    expense_notes: "Fuel and tolls for away match transport.",
     notes: "Away match travel plan."
   });
   const [guardianForm, setGuardianForm] = useState({
@@ -1596,6 +1603,7 @@ export default function HomePage() {
       setTravelApprovals([]);
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
+      setTravelExpenses([]);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1804,6 +1812,7 @@ export default function HomePage() {
       setTravelApprovals([]);
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
+      setTravelExpenses([]);
       return;
     }
     runAction(
@@ -2629,6 +2638,74 @@ export default function HomePage() {
         if (selectedEventId) {
           void loadTravelPlans(selectedEventId);
         }
+      }
+    );
+  };
+
+  const loadTravelExpenses = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-expenses-${plan.id}`,
+      () => apiRequest<EventTravelExpenseRead[]>(`/events/travel-plans/${plan.id}/expenses`, { identity }),
+      (expenses) => {
+        setTravelExpenses(expenses);
+        addLog(`Travel expenses loaded: ${expenses.length}`, "good");
+      }
+    );
+  };
+
+  const createTravelExpense = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-expense-create-${plan.id}`,
+      () =>
+        apiRequest<EventTravelExpenseRead>(`/events/travel-plans/${plan.id}/expenses`, {
+          method: "POST",
+          identity,
+          body: {
+            category: travelForm.expense_category,
+            vendor: travelForm.expense_vendor || null,
+            amount: String(travelForm.expense_amount),
+            currency: "USD",
+            incurred_at: new Date().toISOString(),
+            paid_by_person_id: null,
+            receipt_url: travelForm.expense_receipt_url || null,
+            notes: travelForm.expense_notes || null
+          }
+        }),
+      (expense) => {
+        setTravelExpenses((current) => [
+          expense,
+          ...current.filter((item) => item.id !== expense.id)
+        ]);
+        addLog(`${expense.category} expense submitted for ${expense.amount} ${expense.currency}`, "good");
+      }
+    );
+  };
+
+  const updateTravelExpenseStatus = (
+    expense: EventTravelExpenseRead,
+    statusValue: "approved" | "reimbursed" | "rejected"
+  ) => {
+    runAction(
+      `travel-expense-${expense.id}-${statusValue}`,
+      () =>
+        apiRequest<EventTravelExpenseRead>(`/events/travel-expenses/${expense.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            reimbursement_status: statusValue,
+            receipt_url: expense.receipt_url,
+            notes: expense.notes ?? `Marked ${statusValue} from the operations console.`
+          }
+        }),
+      (updated) => {
+        setTravelExpenses((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(
+          `${updated.category} expense ${updated.reimbursement_status}`,
+          updated.reimbursement_status === "rejected" ? "bad" : "good"
+        );
       }
     );
   };
@@ -6900,9 +6977,34 @@ export default function HomePage() {
                 Speed kph
                 <input type="number" min="0" value={travelForm.speed_kph} onChange={(event) => setTravelForm({ ...travelForm, speed_kph: Number(event.target.value) })} />
               </label>
+              <label>
+                Expense
+                <select value={travelForm.expense_category} onChange={(event) => setTravelForm({ ...travelForm, expense_category: event.target.value })}>
+                  <option value="fuel">Fuel</option>
+                  <option value="tolls">Tolls</option>
+                  <option value="meals">Meals</option>
+                  <option value="lodging">Lodging</option>
+                  <option value="parking">Parking</option>
+                  <option value="driver">Driver</option>
+                  <option value="emergency">Emergency</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                Vendor
+                <input value={travelForm.expense_vendor} onChange={(event) => setTravelForm({ ...travelForm, expense_vendor: event.target.value })} />
+              </label>
+              <label>
+                Expense amount
+                <input type="number" min="0" value={travelForm.expense_amount} onChange={(event) => setTravelForm({ ...travelForm, expense_amount: Number(event.target.value) })} />
+              </label>
               <label className="wide-field">
                 Route
                 <input value={travelForm.route_summary} onChange={(event) => setTravelForm({ ...travelForm, route_summary: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Receipt URL
+                <input value={travelForm.expense_receipt_url} onChange={(event) => setTravelForm({ ...travelForm, expense_receipt_url: event.target.value })} />
               </label>
               <label className="wide-field">
                 Emergency and medical
@@ -6950,6 +7052,20 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelExpenses.slice(0, 3).map((expense) => (
+                <article className="task-card" key={expense.id}>
+                  <div>
+                    <strong>{expense.category} · {expense.amount} {expense.currency}</strong>
+                    <span>{expense.reimbursement_status} · {expense.vendor ?? "No vendor"} · {new Date(expense.incurred_at).toLocaleString()}</span>
+                    <span>{expense.receipt_url ?? expense.notes ?? "No receipt evidence"}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => updateTravelExpenseStatus(expense, "approved")}>Approve</button>
+                    <button type="button" onClick={() => updateTravelExpenseStatus(expense, "reimbursed")}>Reimburse</button>
+                    <button type="button" onClick={() => updateTravelExpenseStatus(expense, "rejected")}>Reject</button>
+                  </div>
+                </article>
+              ))}
               {travelApprovals.slice(0, 3).map((approval) => (
                 <article className="task-card" key={approval.id}>
                   <div>
@@ -7004,6 +7120,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => loadTravelChecklist(plan)}>Checklist</button>
                     <button type="button" onClick={() => recordTravelLocationUpdate(plan)}>Track</button>
                     <button type="button" onClick={() => loadTravelLocationUpdates(plan)}>Route</button>
+                    <button type="button" onClick={() => createTravelExpense(plan)}>Expense</button>
+                    <button type="button" onClick={() => loadTravelExpenses(plan)}>Expenses</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "completed")}>Complete</button>

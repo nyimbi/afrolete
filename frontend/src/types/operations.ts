@@ -573,6 +573,23 @@ export type EventTravelLocationUpdateRead = {
   notes: string | null;
 };
 
+export type EventTravelExpenseRead = {
+  id: UUID;
+  organization_id: UUID;
+  travel_plan_id: UUID;
+  category: string;
+  vendor: string | null;
+  amount: string;
+  currency: string;
+  incurred_at: string;
+  paid_by_person_id: UUID | null;
+  reimbursement_status: string;
+  approved_by_person_id: UUID | null;
+  reimbursed_at: string | null;
+  receipt_url: string | null;
+  notes: string | null;
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

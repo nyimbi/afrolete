@@ -27,6 +27,7 @@ from app.models.event import (
     Event,
     EventTravelApproval,
     EventTravelChecklistItem,
+    EventTravelExpense,
     EventTravelLocationUpdate,
     EventTravelPlan,
     EventWeatherAssessment,
@@ -49,6 +50,9 @@ from app.schemas.event import (
     EventTravelChecklistItemRead,
     EventTravelChecklistItemUpdate,
     EventTravelChecklistSeedCreate,
+    EventTravelExpenseCreate,
+    EventTravelExpenseRead,
+    EventTravelExpenseUpdate,
     EventTravelFeeInvoiceBatchRead,
     EventTravelFeeInvoiceCreate,
     EventTravelFeeInvoiceItemRead,
@@ -857,6 +861,84 @@ async def create_travel_location_update(
     return await travel_location_update_read(db, update)
 
 
+async def list_travel_expenses(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> list[EventTravelExpenseRead]:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    rows = (
+        await db.scalars(
+            select(EventTravelExpense)
+            .where(EventTravelExpense.travel_plan_id == plan.id)
+            .order_by(EventTravelExpense.incurred_at.desc(), EventTravelExpense.created_at.desc())
+        )
+    ).all()
+    return [travel_expense_read(item) for item in rows]
+
+
+async def create_travel_expense(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelExpenseCreate,
+    authz: AuthorizationService,
+) -> EventTravelExpenseRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    if payload.paid_by_person_id is not None and await db.get(Person, payload.paid_by_person_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paid-by person not found")
+
+    expense = EventTravelExpense(
+        organization_id=plan.organization_id,
+        travel_plan_id=plan.id,
+        category=payload.category,
+        vendor=payload.vendor,
+        amount=payload.amount,
+        currency=payload.currency.upper(),
+        incurred_at=payload.incurred_at or datetime.now(UTC),
+        paid_by_person_id=payload.paid_by_person_id,
+        reimbursement_status="submitted",
+        receipt_url=payload.receipt_url,
+        notes=payload.notes,
+    )
+    db.add(expense)
+    await db.commit()
+    await db.refresh(expense)
+    return travel_expense_read(expense)
+
+
+async def update_travel_expense(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    expense_id: UUID,
+    payload: EventTravelExpenseUpdate,
+    authz: AuthorizationService,
+) -> EventTravelExpenseRead:
+    expense = await db.get(EventTravelExpense, expense_id)
+    if expense is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel expense not found")
+    await ensure_manage_event_scope(authz, expense.organization_id, identity)
+    expense.reimbursement_status = payload.reimbursement_status
+    expense.receipt_url = payload.receipt_url if payload.receipt_url is not None else expense.receipt_url
+    expense.notes = payload.notes if payload.notes is not None else expense.notes
+    if payload.reimbursement_status in {"approved", "reimbursed", "rejected"}:
+        expense.approved_by_person_id = identity.person_id
+    if payload.reimbursement_status == "reimbursed":
+        expense.reimbursed_at = datetime.now(UTC)
+    elif payload.reimbursement_status in {"draft", "submitted", "approved", "rejected"}:
+        expense.reimbursed_at = None
+    await db.commit()
+    await db.refresh(expense)
+    return travel_expense_read(expense)
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -1033,6 +1115,25 @@ def travel_checklist_item_read(item: EventTravelChecklistItem) -> EventTravelChe
         completed_at=item.completed_at,
         evidence_url=item.evidence_url,
         notes=item.notes,
+    )
+
+
+def travel_expense_read(expense: EventTravelExpense) -> EventTravelExpenseRead:
+    return EventTravelExpenseRead(
+        id=expense.id,
+        organization_id=expense.organization_id,
+        travel_plan_id=expense.travel_plan_id,
+        category=expense.category,
+        vendor=expense.vendor,
+        amount=expense.amount,
+        currency=expense.currency,
+        incurred_at=expense.incurred_at,
+        paid_by_person_id=expense.paid_by_person_id,
+        reimbursement_status=expense.reimbursement_status,
+        approved_by_person_id=expense.approved_by_person_id,
+        reimbursed_at=expense.reimbursed_at,
+        receipt_url=expense.receipt_url,
+        notes=expense.notes,
     )
 
 

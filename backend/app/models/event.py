@@ -161,6 +161,24 @@ class EventTravelLocationUpdate(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class EventTravelExpense(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_expenses"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    travel_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("event_travel_plans.id"), index=True)
+    category: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    vendor: Mapped[str | None] = mapped_column(String(180), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    incurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    paid_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reimbursement_status: Mapped[str] = mapped_column(String(40), default="submitted", nullable=False, index=True)
+    approved_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reimbursed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    receipt_url: Mapped[str | None] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class AttendanceRecord(IdMixin, TimestampMixin, Base):
     __tablename__ = "attendance_records"
     __table_args__ = (UniqueConstraint("event_id", "person_id"),)
