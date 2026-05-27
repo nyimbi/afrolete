@@ -31,6 +31,8 @@ from app.schemas.agent import (
     AgentScorecardPublicationArtifactRead,
     AgentScorecardPublicationReadinessRead,
     AgentScorecardPublicationRead,
+    AgentScorecardPublicationReminderCreate,
+    AgentScorecardPublicationReminderRead,
     AgentCreate,
     AgentRead,
     AgentTaskCreate,
@@ -50,6 +52,7 @@ from app.services.agents import (
     create_agent,
     create_agent_model_registry,
     create_agent_scorecard_comment,
+    deliver_agent_scorecard_publication_reminder,
     execute_agent_task,
     get_agent_scorecard_publication_artifact,
     get_my_agent_decision_appeal_form,
@@ -412,6 +415,18 @@ async def agent_scorecard_publication_readiness_route(
 ) -> AgentScorecardPublicationReadinessRead:
     return AgentScorecardPublicationReadinessRead(
         **await agent_scorecard_publication_readiness(db, organization_id)
+    )
+
+
+@router.post("/ethical-scorecard/publications/reminder", response_model=AgentScorecardPublicationReminderRead)
+async def deliver_agent_scorecard_publication_reminder_route(
+    payload: AgentScorecardPublicationReminderCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentScorecardPublicationReminderRead:
+    return AgentScorecardPublicationReminderRead(
+        **await deliver_agent_scorecard_publication_reminder(db, identity, payload, authz)
     )
 
 

@@ -2678,6 +2678,22 @@ export type AgentScorecardPublicationArtifactRead = {
   content: string;
 };
 
+export type AgentScorecardPublicationReminderRead = {
+  organization_id: UUID;
+  period_label: string;
+  channel: CommunicationChannel;
+  readiness_status: string;
+  message_id: UUID | null;
+  message_status: string | null;
+  recipient_count: number;
+  recipient_person_ids: UUID[];
+  subject: string;
+  body: string;
+  scheduled_for: string | null;
+  delivered: boolean;
+  failure_reason: string | null;
+};
+
 export type AgentScorecardPublicationReadinessRead = {
   organization_id: UUID;
   current_period_label: string;

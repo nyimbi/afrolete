@@ -23,10 +23,16 @@ from app.models.agent import (
     AgentScorecardPublication,
     AgentTask,
 )
-from app.models.enums import AgentTaskStatus
+from app.models.enums import (
+    AgentTaskStatus,
+    CommunicationMessageType,
+    CommunicationScopeType,
+    MemberSubjectType,
+    MembershipRole,
+)
 from app.models.event import Event
 from app.models.identity import Person
-from app.models.organization import Organization
+from app.models.organization import Membership, Organization
 from app.models.team import AthleteProfile, GuardianRelationship, Team
 from app.schemas.agent import (
     AgentAssignmentCreate,
@@ -40,12 +46,15 @@ from app.schemas.agent import (
     AgentScorecardCommentCreate,
     AgentScorecardCommentUpdate,
     AgentScorecardPublicationCreate,
+    AgentScorecardPublicationReminderCreate,
     AgentTaskCreate,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
 )
+from app.schemas.communication import CommunicationMessageCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
+from app.services.communications import create_message
 
 ASSIGNABLE_SCOPES = {"organization", "team", "event", "athlete_profile"}
 
@@ -1086,6 +1095,75 @@ async def agent_scorecard_publication_readiness(
     }
 
 
+async def deliver_agent_scorecard_publication_reminder(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentScorecardPublicationReminderCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, payload.organization_id)
+    readiness = await agent_scorecard_publication_readiness(db, payload.organization_id)
+    recipient_ids = set(payload.recipient_person_ids)
+    if payload.send_to_managers:
+        recipient_ids.update(await organization_manager_person_ids(db, payload.organization_id))
+    if not recipient_ids and identity.person_id is not None:
+        recipient_ids.add(identity.person_id)
+
+    subject = f"AI scorecard publication reminder: {readiness['current_period_label']}"
+    body = render_scorecard_publication_reminder(readiness)
+    sorted_recipient_ids = sorted(recipient_ids, key=str)
+    if not sorted_recipient_ids:
+        return {
+            "organization_id": payload.organization_id,
+            "period_label": readiness["current_period_label"],
+            "channel": payload.channel,
+            "readiness_status": readiness["readiness_status"],
+            "message_id": None,
+            "message_status": None,
+            "recipient_count": 0,
+            "recipient_person_ids": [],
+            "subject": subject,
+            "body": body,
+            "scheduled_for": payload.scheduled_for,
+            "delivered": False,
+            "failure_reason": "No manager or explicit recipients were found.",
+        }
+
+    message = await create_message(
+        db,
+        identity,
+        CommunicationMessageCreate(
+            organization_id=payload.organization_id,
+            message_type=CommunicationMessageType.REMINDER,
+            channel=payload.channel,
+            scope_type=CommunicationScopeType.PERSON,
+            scope_id=sorted_recipient_ids[0],
+            recipient_person_ids=sorted_recipient_ids,
+            subject=subject,
+            body=body,
+            urgent=payload.urgent,
+            scheduled_for=payload.scheduled_for,
+            copy_guardians_for_minors=False,
+        ),
+        authz,
+    )
+    return {
+        "organization_id": payload.organization_id,
+        "period_label": readiness["current_period_label"],
+        "channel": payload.channel,
+        "readiness_status": readiness["readiness_status"],
+        "message_id": message.id,
+        "message_status": message.status,
+        "recipient_count": len(sorted_recipient_ids),
+        "recipient_person_ids": sorted_recipient_ids,
+        "subject": subject,
+        "body": body,
+        "scheduled_for": payload.scheduled_for,
+        "delivered": True,
+        "failure_reason": None,
+    }
+
+
 async def publish_agent_scorecard(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1193,6 +1271,19 @@ def scorecard_publication_readiness_state(
     return "on_track", "Publication is on track; keep audits, appeals, and comments current."
 
 
+async def organization_manager_person_ids(db: AsyncSession, organization_id: UUID) -> set[UUID]:
+    rows = (
+        await db.execute(
+            select(Membership.subject_id)
+            .where(Membership.organization_id == organization_id)
+            .where(Membership.subject_type == MemberSubjectType.PERSON)
+            .where(Membership.role.in_([MembershipRole.OWNER, MembershipRole.ADMIN, MembershipRole.STAFF]))
+            .where(Membership.status == "active")
+        )
+    ).all()
+    return {person_id for (person_id,) in rows}
+
+
 def scorecard_publication_actions(publication: AgentScorecardPublication) -> list[str]:
     try:
         parsed = json.loads(publication.improvement_actions)
@@ -1247,6 +1338,29 @@ def render_scorecard_publication_artifact(
             "",
             "This artifact is generated from a persisted AfroLete scorecard publication snapshot. "
             "Compare the snapshot hash above with the platform publication record to verify integrity.",
+        ]
+    )
+
+
+def render_scorecard_publication_reminder(readiness: dict[str, object]) -> str:
+    latest = "No previous publication has been recorded."
+    if readiness["latest_period_label"]:
+        latest = f"Latest publication: {readiness['latest_period_label']} at {readiness['latest_published_at']}."
+    return "\n".join(
+        [
+            f"AI scorecard publication status for {readiness['current_period_label']}",
+            "",
+            f"Readiness: {readiness['readiness_status']}",
+            f"Score: {readiness['score']}/100 ({readiness['grade']})",
+            f"Due: {readiness['next_publication_due_at']} ({readiness['days_until_due']} days remaining)",
+            f"Current period published: {'yes' if readiness['current_period_published'] else 'no'}",
+            latest,
+            "",
+            "Open governance checks:",
+            f"- Flagged scorecard comments: {readiness['flagged_comment_count']}",
+            f"- Pending AI appeals: {readiness['pending_appeal_count']}",
+            "",
+            f"Recommended action: {readiness['recommended_action']}",
         ]
     )
 

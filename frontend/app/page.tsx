@@ -26,6 +26,7 @@ import type {
   AgentScorecardPublicationArtifactRead,
   AgentScorecardPublicationRead,
   AgentScorecardPublicationReadinessRead,
+  AgentScorecardPublicationReminderRead,
   AgentTaskRead,
   AgentTaskStatus,
   AgentWorkerCallbackRead,
@@ -605,6 +606,7 @@ export default function HomePage() {
   const [agentScorecardComments, setAgentScorecardComments] = useState<AgentScorecardCommentModerationRead[]>([]);
   const [agentScorecardPublications, setAgentScorecardPublications] = useState<AgentScorecardPublicationRead[]>([]);
   const [agentScorecardReadiness, setAgentScorecardReadiness] = useState<AgentScorecardPublicationReadinessRead | null>(null);
+  const [agentScorecardReminder, setAgentScorecardReminder] = useState<AgentScorecardPublicationReminderRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1961,6 +1963,7 @@ export default function HomePage() {
       setAgentScorecardComments([]);
       setAgentScorecardPublications([]);
       setAgentScorecardReadiness(null);
+      setAgentScorecardReminder(null);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -5001,6 +5004,34 @@ export default function HomePage() {
       (artifact) => {
         downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
         addLog(`Downloaded ${artifact.period_label} scorecard artifact`, "good");
+      }
+    );
+  };
+
+  const deliverAgentScorecardReminder = () => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "agent-scorecard-reminder",
+      () =>
+        apiRequest<AgentScorecardPublicationReminderRead>("/agents/ethical-scorecard/publications/reminder", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            channel: "email" as CommunicationChannel,
+            send_to_managers: true
+          }
+        }),
+      (reminder) => {
+        setAgentScorecardReminder(reminder);
+        addLog(
+          reminder.delivered
+            ? `Sent ${reminder.period_label} scorecard reminder to ${reminder.recipient_count} people`
+            : `Prepared ${reminder.period_label} scorecard reminder without recipients`,
+          reminder.delivered ? "good" : "neutral"
+        );
       }
     );
   };
@@ -11894,6 +11925,21 @@ export default function HomePage() {
                       {agentScorecardReadiness.flagged_comment_count} flagged comments · {agentScorecardReadiness.pending_appeal_count} pending appeals · current {agentScorecardReadiness.current_period_published ? "published" : "unpublished"}
                     </span>
                     <span>{agentScorecardReadiness.recommended_action}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={deliverAgentScorecardReminder}>Send reminder</button>
+                  </div>
+                </article>
+              ) : null}
+              {agentScorecardReminder ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{agentScorecardReminder.period_label} reminder · {agentScorecardReminder.message_status ?? "not sent"}</strong>
+                    <span>
+                      {agentScorecardReminder.channel} · {agentScorecardReminder.recipient_count} recipients · {agentScorecardReminder.readiness_status}
+                    </span>
+                    <span>{agentScorecardReminder.failure_reason ?? agentScorecardReminder.subject}</span>
+                    <span>{agentScorecardReminder.body.split("\n")[0]}</span>
                   </div>
                 </article>
               ) : null}

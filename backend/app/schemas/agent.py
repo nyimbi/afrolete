@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.enums import AgentKind, AgentTaskStatus
+from app.models.enums import AgentKind, AgentTaskStatus, CommunicationChannel
 
 
 class AgentCreate(BaseModel):
@@ -410,6 +410,31 @@ class AgentScorecardPublicationArtifactRead(BaseModel):
     download_filename: str
     content_type: str
     content: str
+
+
+class AgentScorecardPublicationReminderCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    recipient_person_ids: list[UUID] = Field(default_factory=list)
+    send_to_managers: bool = True
+    scheduled_for: datetime | None = None
+    urgent: bool = False
+
+
+class AgentScorecardPublicationReminderRead(BaseModel):
+    organization_id: UUID
+    period_label: str
+    channel: CommunicationChannel
+    readiness_status: str
+    message_id: UUID | None
+    message_status: str | None
+    recipient_count: int
+    recipient_person_ids: list[UUID]
+    subject: str
+    body: str
+    scheduled_for: datetime | None
+    delivered: bool
+    failure_reason: str | None
 
 
 class AgentScorecardPublicationReadinessRead(BaseModel):
