@@ -16,6 +16,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.assets import (
+    EmergencyActionPlan,
+    EmergencyPlanActivation,
     EquipmentCheckout,
     EquipmentFile,
     EquipmentItem,
@@ -33,18 +35,23 @@ from app.models.enums import (
     AssetCondition,
     CheckoutStatus,
     EquipmentStatus,
+    EmergencyActivationStatus,
     FacilityBookingStatus,
     MemberSubjectType,
     WorkOrderStatus,
 )
 from app.models.enums import CommercialStatus
-from app.models.event import Event
+from app.models.event import Event, SafeguardingIncident
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.team import Team
 from app.core.config import Settings, get_settings
 from app.schemas.assets import (
     AssetSummaryRead,
+    EmergencyActionPlanCreate,
+    EmergencyActionPlanUpdate,
+    EmergencyPlanActivationCreate,
+    EmergencyPlanActivationUpdate,
     EquipmentCheckoutCreate,
     EquipmentCheckoutReturn,
     EquipmentLeaseQuoteRead,
@@ -131,6 +138,167 @@ async def list_facilities(db: AsyncSession, organization_id: UUID) -> list[Facil
             )
         ).all()
     )
+
+
+async def create_emergency_action_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: EmergencyActionPlanCreate,
+    authz: AuthorizationService,
+) -> EmergencyActionPlan:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    if payload.facility_id is not None:
+        await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    plan = EmergencyActionPlan(**payload.model_dump())
+    db.add(plan)
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
+async def list_emergency_action_plans(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> list[EmergencyActionPlan]:
+    statement = select(EmergencyActionPlan).where(EmergencyActionPlan.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(EmergencyActionPlan.facility_id == facility_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    EmergencyActionPlan.status,
+                    EmergencyActionPlan.review_due_on.nulls_last(),
+                    EmergencyActionPlan.title,
+                )
+            )
+        ).all()
+    )
+
+
+async def update_emergency_action_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    plan_id: UUID,
+    payload: EmergencyActionPlanUpdate,
+    authz: AuthorizationService,
+) -> EmergencyActionPlan:
+    plan = await db.get(EmergencyActionPlan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Emergency action plan not found")
+    await ensure_manage_assets(authz, identity, plan.organization_id)
+    for field in [
+        "status",
+        "review_due_on",
+        "emergency_contacts",
+        "evacuation_routes",
+        "medical_protocols",
+        "weather_protocols",
+        "communication_protocols",
+        "equipment_locations",
+        "assembly_points",
+        "special_needs_plan",
+        "notes",
+    ]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(plan, field, value)
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
+async def activate_emergency_action_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: EmergencyPlanActivationCreate,
+    authz: AuthorizationService,
+) -> EmergencyPlanActivation:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    plan = await db.get(EmergencyActionPlan, payload.plan_id)
+    if plan is None or plan.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Emergency action plan not found")
+    facility_id = payload.facility_id or plan.facility_id
+    if facility_id is not None:
+        await get_facility_for_organization(db, facility_id, payload.organization_id)
+    if payload.incident_id is not None:
+        incident = await db.get(SafeguardingIncident, payload.incident_id)
+        if incident is None or incident.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    activation = EmergencyPlanActivation(
+        facility_id=facility_id,
+        activated_by_person_id=identity.person_id,
+        activated_at=payload.activated_at or datetime.now(UTC),
+        guidance_steps=payload.guidance_steps or plan.medical_protocols or plan.evacuation_routes,
+        communication_log=payload.communication_log or plan.communication_protocols,
+        **payload.model_dump(exclude={"facility_id", "activated_at", "guidance_steps", "communication_log"}),
+    )
+    db.add(activation)
+    await db.commit()
+    await db.refresh(activation)
+    return activation
+
+
+async def list_emergency_plan_activations(
+    db: AsyncSession,
+    organization_id: UUID,
+    status_filter: EmergencyActivationStatus | None = None,
+) -> list[EmergencyPlanActivation]:
+    statement = select(EmergencyPlanActivation).where(
+        EmergencyPlanActivation.organization_id == organization_id
+    )
+    if status_filter is not None:
+        statement = statement.where(EmergencyPlanActivation.status == status_filter)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    EmergencyPlanActivation.status,
+                    EmergencyPlanActivation.activated_at.desc(),
+                )
+            )
+        ).all()
+    )
+
+
+async def update_emergency_plan_activation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    activation_id: UUID,
+    payload: EmergencyPlanActivationUpdate,
+    authz: AuthorizationService,
+) -> EmergencyPlanActivation:
+    activation = await db.get(EmergencyPlanActivation, activation_id)
+    if activation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Emergency activation not found")
+    await ensure_manage_assets(authz, identity, activation.organization_id)
+    if payload.status is not None:
+        activation.status = payload.status
+        if payload.status in {
+            EmergencyActivationStatus.RESOLVED,
+            EmergencyActivationStatus.CANCELLED,
+            EmergencyActivationStatus.REVIEWED,
+        }:
+            activation.closed_by_person_id = identity.person_id
+            activation.closed_at = payload.closed_at or activation.closed_at or datetime.now(UTC)
+    for field in [
+        "closed_at",
+        "assigned_responders",
+        "guidance_steps",
+        "communication_log",
+        "outcome_summary",
+        "response_time_seconds",
+        "notes",
+    ]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(activation, field, value)
+    await db.commit()
+    await db.refresh(activation)
+    return activation
 
 
 async def create_equipment_item(

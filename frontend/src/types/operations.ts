@@ -207,6 +207,16 @@ export type ChannelPreference = "app" | "email" | "sms" | "all";
 export type FacilityType = "field" | "court" | "stadium" | "gym" | "pool" | "clubhouse" | "storage" | "other";
 export type FacilityStatus = "available" | "booked" | "maintenance" | "closed" | "retired";
 export type AssetCondition = "new" | "good" | "fair" | "poor" | "unusable";
+export type EmergencyActionPlanStatus = "draft" | "active" | "under_review" | "retired";
+export type EmergencyActivationStatus = "active" | "resolved" | "cancelled" | "reviewed";
+export type EmergencyType =
+  | "medical"
+  | "fire"
+  | "weather"
+  | "security"
+  | "evacuation"
+  | "missing_person"
+  | "other";
 export type EquipmentStatus = "available" | "checked_out" | "maintenance" | "lost" | "retired";
 export type CheckoutStatus = "checked_out" | "returned" | "overdue" | "lost" | "damaged";
 export type WorkOrderPriority = "low" | "medium" | "high" | "critical";
@@ -505,6 +515,47 @@ export type FacilityRead = {
   condition: AssetCondition;
   insurance_policy_ref: string | null;
   last_inspection_on: string | null;
+  notes: string | null;
+};
+
+export type EmergencyActionPlanRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID | null;
+  title: string;
+  emergency_type: EmergencyType;
+  status: EmergencyActionPlanStatus;
+  effective_from: string | null;
+  review_due_on: string | null;
+  emergency_contacts: string;
+  evacuation_routes: string | null;
+  medical_protocols: string | null;
+  weather_protocols: string | null;
+  communication_protocols: string | null;
+  equipment_locations: string | null;
+  assembly_points: string | null;
+  special_needs_plan: string | null;
+  notes: string | null;
+};
+
+export type EmergencyPlanActivationRead = {
+  id: UUID;
+  organization_id: UUID;
+  plan_id: UUID;
+  facility_id: UUID | null;
+  incident_id: UUID | null;
+  activated_by_person_id: UUID | null;
+  closed_by_person_id: UUID | null;
+  emergency_type: EmergencyType;
+  status: EmergencyActivationStatus;
+  location_detail: string;
+  activated_at: string;
+  closed_at: string | null;
+  assigned_responders: string | null;
+  guidance_steps: string | null;
+  communication_log: string | null;
+  outcome_summary: string | null;
+  response_time_seconds: number | null;
   notes: string | null;
 };
 

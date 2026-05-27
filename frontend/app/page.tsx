@@ -70,6 +70,11 @@ import type {
   DonationRead,
   EventRead,
   EventType,
+  EmergencyActionPlanRead,
+  EmergencyActionPlanStatus,
+  EmergencyPlanActivationRead,
+  EmergencyActivationStatus,
+  EmergencyType,
   EquipmentCheckoutRead,
   EquipmentFileRead,
   EquipmentItemRead,
@@ -368,6 +373,8 @@ export default function HomePage() {
   const [draftPreview, setDraftPreview] = useState<CommunicationDraftRead | null>(null);
   const [notificationPreference, setNotificationPreference] = useState<NotificationPreferenceRead | null>(null);
   const [facilities, setFacilities] = useState<FacilityRead[]>([]);
+  const [emergencyPlans, setEmergencyPlans] = useState<EmergencyActionPlanRead[]>([]);
+  const [emergencyActivations, setEmergencyActivations] = useState<EmergencyPlanActivationRead[]>([]);
   const [equipmentItems, setEquipmentItems] = useState<EquipmentItemRead[]>([]);
   const [equipmentFiles, setEquipmentFiles] = useState<EquipmentFileRead[]>([]);
   const [equipmentScanEvents, setEquipmentScanEvents] = useState<EquipmentScanEventRead[]>([]);
@@ -718,6 +725,23 @@ export default function HomePage() {
     condition: "good" as AssetCondition,
     amenities: "Lights, changing rooms, scoreboard, secure storage",
     insurance_policy_ref: "LIAB-2026"
+  });
+  const [emergencyPlanForm, setEmergencyPlanForm] = useState({
+    title: "Main field medical emergency plan",
+    emergency_type: "medical" as EmergencyType,
+    effective_from: "2026-05-28",
+    review_due_on: "2026-08-28",
+    emergency_contacts: "Safety Officer x123; Medical lead x456; Emergency services 911",
+    evacuation_routes: "Primary: north gate. Secondary: east service gate. Accessible route: clubhouse ramp.",
+    medical_protocols: "Clear area, call medical lead, retrieve AED from clubhouse, begin first aid, log incident.",
+    weather_protocols: "Lightning shelter: gym. Extreme heat: cooling station at clubhouse.",
+    communication_protocols: "PA announcement, staff radio channel 3, mobile alert to staff and guardians.",
+    equipment_locations: "AED: clubhouse lobby. First aid: equipment room. Stretcher: tunnel entrance.",
+    assembly_points: "North car park and clubhouse lawn.",
+    special_needs_plan: "Assign accessibility marshal to ramp route and medical transport point.",
+    activation_location: "Section B, main touchline",
+    responders: "Safety Officer; Club medic; Security lead",
+    notes: "Reviewed before all tournament fixtures."
   });
   const [equipmentForm, setEquipmentForm] = useState({
     name: "Footballs Size 5",
@@ -1221,7 +1245,9 @@ export default function HomePage() {
       utilizationData,
       scanEventData,
       readerData,
-      leaseScheduleData
+      leaseScheduleData,
+      emergencyPlanData,
+      emergencyActivationData
     ] = await Promise.all([
       apiRequest<FacilityRead[]>(`/assets/facilities?organization_id=${organizationId}`),
       apiRequest<EquipmentItemRead[]>(`/assets/equipment?organization_id=${organizationId}${facilityQuery}`),
@@ -1245,7 +1271,11 @@ export default function HomePage() {
         `/assets/equipment/rfid-readers?organization_id=${organizationId}`,
         { identity }
       ),
-      apiRequest<EquipmentLeaseScheduleRead[]>(`/assets/lease-schedules?organization_id=${organizationId}`)
+      apiRequest<EquipmentLeaseScheduleRead[]>(`/assets/lease-schedules?organization_id=${organizationId}`),
+      apiRequest<EmergencyActionPlanRead[]>(`/assets/emergency-plans?organization_id=${organizationId}`),
+      apiRequest<EmergencyPlanActivationRead[]>(
+        `/assets/emergency-activations?organization_id=${organizationId}`
+      )
     ]);
     setFacilities(facilityData);
     setEquipmentItems(equipmentData);
@@ -1260,6 +1290,8 @@ export default function HomePage() {
     setEquipmentScanEvents(scanEventData);
     setEquipmentReaders(readerData);
     setLeaseSchedules(leaseScheduleData);
+    setEmergencyPlans(emergencyPlanData);
+    setEmergencyActivations(emergencyActivationData);
     setSelectedFacilityId((current) =>
       facilityData.some((facility) => facility.id === current) ? current : facilityData[0]?.id ?? ""
     );
@@ -3840,6 +3872,126 @@ export default function HomePage() {
     );
   };
 
+  const createEmergencyPlan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-emergency-plan",
+      () =>
+        apiRequest<EmergencyActionPlanRead>("/assets/emergency-plans", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId || null,
+            title: emergencyPlanForm.title,
+            emergency_type: emergencyPlanForm.emergency_type,
+            effective_from: emergencyPlanForm.effective_from || null,
+            review_due_on: emergencyPlanForm.review_due_on || null,
+            emergency_contacts: emergencyPlanForm.emergency_contacts,
+            evacuation_routes: emergencyPlanForm.evacuation_routes || null,
+            medical_protocols: emergencyPlanForm.medical_protocols || null,
+            weather_protocols: emergencyPlanForm.weather_protocols || null,
+            communication_protocols: emergencyPlanForm.communication_protocols || null,
+            equipment_locations: emergencyPlanForm.equipment_locations || null,
+            assembly_points: emergencyPlanForm.assembly_points || null,
+            special_needs_plan: emergencyPlanForm.special_needs_plan || null,
+            notes: emergencyPlanForm.notes || null
+          }
+        }),
+      (plan) => {
+        setEmergencyPlans((current) => [plan, ...current.filter((item) => item.id !== plan.id)]);
+        addLog(`${plan.title} emergency plan drafted`, "good");
+      }
+    );
+  };
+
+  const updateEmergencyPlan = (
+    plan: EmergencyActionPlanRead,
+    statusValue: EmergencyActionPlanStatus
+  ) => {
+    runAction(
+      `emergency-plan-${plan.id}-${statusValue}`,
+      () =>
+        apiRequest<EmergencyActionPlanRead>(`/assets/emergency-plans/${plan.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            review_due_on: emergencyPlanForm.review_due_on || null,
+            notes: `Marked ${statusValue} from the operations console.`
+          }
+        }),
+      (updated) => {
+        setEmergencyPlans((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        addLog(`${updated.title} moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
+  const activateEmergencyPlan = (plan: EmergencyActionPlanRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      `activate-emergency-plan-${plan.id}`,
+      () =>
+        apiRequest<EmergencyPlanActivationRead>("/assets/emergency-activations", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            plan_id: plan.id,
+            facility_id: plan.facility_id || selectedFacilityId || null,
+            emergency_type: plan.emergency_type,
+            location_detail: emergencyPlanForm.activation_location,
+            assigned_responders: emergencyPlanForm.responders || null,
+            notes: "Emergency mode activated from the operations console."
+          }
+        }),
+      (activation) => {
+        setEmergencyActivations((current) => [
+          activation,
+          ...current.filter((item) => item.id !== activation.id)
+        ]);
+        addLog(`${activation.emergency_type} emergency activated`, "bad");
+      }
+    );
+  };
+
+  const updateEmergencyActivation = (
+    activation: EmergencyPlanActivationRead,
+    statusValue: EmergencyActivationStatus
+  ) => {
+    runAction(
+      `emergency-activation-${activation.id}-${statusValue}`,
+      () =>
+        apiRequest<EmergencyPlanActivationRead>(`/assets/emergency-activations/${activation.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            outcome_summary:
+              statusValue === "resolved" || statusValue === "reviewed"
+                ? "Emergency response closed and queued for after-action review."
+                : null,
+            response_time_seconds: statusValue === "resolved" ? 180 : null,
+            notes: `Marked ${statusValue} from the operations console.`
+          }
+        }),
+      (updated) => {
+        setEmergencyActivations((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.emergency_type} activation moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
   const createEquipmentItem = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -6024,6 +6176,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createFacility} disabled={busyAction !== null}>Facility</button>
+                <button type="button" onClick={createEmergencyPlan} disabled={busyAction !== null}>EAP</button>
                 <button type="button" onClick={createFacilityBooking} disabled={busyAction !== null}>Book</button>
               </div>
             </div>
@@ -6089,6 +6242,48 @@ export default function HomePage() {
                 </button>
               ))}
             </div>
+            <div className="form-grid three">
+              <label>
+                EAP title
+                <input value={emergencyPlanForm.title} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, title: event.target.value })} />
+              </label>
+              <label>
+                Emergency type
+                <select value={emergencyPlanForm.emergency_type} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, emergency_type: event.target.value as EmergencyType })}>
+                  <option value="medical">Medical</option>
+                  <option value="fire">Fire</option>
+                  <option value="weather">Weather</option>
+                  <option value="security">Security</option>
+                  <option value="evacuation">Evacuation</option>
+                  <option value="missing_person">Missing person</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                Review due
+                <input type="date" value={emergencyPlanForm.review_due_on} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, review_due_on: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Contacts
+                <input value={emergencyPlanForm.emergency_contacts} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, emergency_contacts: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Medical protocol
+                <input value={emergencyPlanForm.medical_protocols} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, medical_protocols: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Communication
+                <input value={emergencyPlanForm.communication_protocols} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, communication_protocols: event.target.value })} />
+              </label>
+              <label>
+                Activation location
+                <input value={emergencyPlanForm.activation_location} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, activation_location: event.target.value })} />
+              </label>
+              <label>
+                Responders
+                <input value={emergencyPlanForm.responders} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, responders: event.target.value })} />
+              </label>
+            </div>
             <div className="form-grid">
               <label>
                 Booking
@@ -6108,6 +6303,35 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {emergencyActivations.slice(0, 3).map((activation) => (
+                <article key={activation.id} className="task-card">
+                  <div>
+                    <strong>{activation.emergency_type} emergency · {activation.status}</strong>
+                    <span>{activation.location_detail} · {new Date(activation.activated_at).toLocaleString()}</span>
+                    <span>{activation.outcome_summary ?? activation.guidance_steps ?? "Response in progress"}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => updateEmergencyActivation(activation, "resolved")}>Resolve</button>
+                    <button type="button" onClick={() => updateEmergencyActivation(activation, "reviewed")}>Review</button>
+                    <button type="button" onClick={() => updateEmergencyActivation(activation, "cancelled")}>Cancel</button>
+                  </div>
+                </article>
+              ))}
+              {emergencyPlans.slice(0, 4).map((plan) => (
+                <article key={plan.id} className="task-card">
+                  <div>
+                    <strong>{plan.title}</strong>
+                    <span>{plan.emergency_type} · {plan.status} · review {plan.review_due_on ?? "not set"}</span>
+                    <span>{plan.emergency_contacts}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => updateEmergencyPlan(plan, "active")}>Activate Plan</button>
+                    <button type="button" onClick={() => activateEmergencyPlan(plan)}>Emergency</button>
+                    <button type="button" onClick={() => updateEmergencyPlan(plan, "under_review")}>Review</button>
+                    <button type="button" onClick={() => updateEmergencyPlan(plan, "retired")}>Retire</button>
+                  </div>
+                </article>
+              ))}
               {facilityBookings.slice(0, 3).map((booking) => (
                 <article key={booking.id} className="task-card">
                   <div>

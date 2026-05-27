@@ -3,6 +3,8 @@ from app.models.base import Base
 # Import all models so Alembic can discover metadata.
 from app.models.agent import Agent, AgentAssignment, AgentRunRecord, AgentTask  # noqa: F401,E402
 from app.models.assets import (  # noqa: F401,E402
+    EmergencyActionPlan,
+    EmergencyPlanActivation,
     EquipmentCheckout,
     EquipmentFile,
     EquipmentItem,

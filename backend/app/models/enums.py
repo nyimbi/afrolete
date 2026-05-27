@@ -468,6 +468,30 @@ class FacilityBookingStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class EmergencyActionPlanStatus(StrEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    UNDER_REVIEW = "under_review"
+    RETIRED = "retired"
+
+
+class EmergencyActivationStatus(StrEnum):
+    ACTIVE = "active"
+    RESOLVED = "resolved"
+    CANCELLED = "cancelled"
+    REVIEWED = "reviewed"
+
+
+class EmergencyType(StrEnum):
+    MEDICAL = "medical"
+    FIRE = "fire"
+    WEATHER = "weather"
+    SECURITY = "security"
+    EVACUATION = "evacuation"
+    MISSING_PERSON = "missing_person"
+    OTHER = "other"
+
+
 class CommercialStatus(StrEnum):
     DRAFT = "draft"
     ACTIVE = "active"

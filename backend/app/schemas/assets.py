@@ -7,6 +7,9 @@ from pydantic import BaseModel, Field, model_validator
 from app.models.enums import (
     AssetCondition,
     CheckoutStatus,
+    EmergencyActionPlanStatus,
+    EmergencyActivationStatus,
+    EmergencyType,
     EquipmentStatus,
     FacilityBookingStatus,
     FacilityStatus,
@@ -38,6 +41,89 @@ class FacilityCreate(BaseModel):
 class FacilityRead(FacilityCreate):
     id: UUID
     status: FacilityStatus
+
+
+class EmergencyActionPlanCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID | None = None
+    title: str = Field(min_length=2, max_length=240)
+    emergency_type: EmergencyType
+    effective_from: date | None = None
+    review_due_on: date | None = None
+    emergency_contacts: str = Field(min_length=2, max_length=8000)
+    evacuation_routes: str | None = Field(default=None, max_length=8000)
+    medical_protocols: str | None = Field(default=None, max_length=8000)
+    weather_protocols: str | None = Field(default=None, max_length=8000)
+    communication_protocols: str | None = Field(default=None, max_length=8000)
+    equipment_locations: str | None = Field(default=None, max_length=8000)
+    assembly_points: str | None = Field(default=None, max_length=8000)
+    special_needs_plan: str | None = Field(default=None, max_length=8000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EmergencyActionPlanUpdate(BaseModel):
+    status: EmergencyActionPlanStatus | None = None
+    review_due_on: date | None = None
+    emergency_contacts: str | None = Field(default=None, max_length=8000)
+    evacuation_routes: str | None = Field(default=None, max_length=8000)
+    medical_protocols: str | None = Field(default=None, max_length=8000)
+    weather_protocols: str | None = Field(default=None, max_length=8000)
+    communication_protocols: str | None = Field(default=None, max_length=8000)
+    equipment_locations: str | None = Field(default=None, max_length=8000)
+    assembly_points: str | None = Field(default=None, max_length=8000)
+    special_needs_plan: str | None = Field(default=None, max_length=8000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EmergencyActionPlanRead(EmergencyActionPlanCreate):
+    id: UUID
+    status: EmergencyActionPlanStatus
+
+
+class EmergencyPlanActivationCreate(BaseModel):
+    organization_id: UUID
+    plan_id: UUID
+    facility_id: UUID | None = None
+    incident_id: UUID | None = None
+    emergency_type: EmergencyType
+    location_detail: str = Field(min_length=2, max_length=240)
+    activated_at: datetime | None = None
+    assigned_responders: str | None = Field(default=None, max_length=8000)
+    guidance_steps: str | None = Field(default=None, max_length=8000)
+    communication_log: str | None = Field(default=None, max_length=12000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EmergencyPlanActivationUpdate(BaseModel):
+    status: EmergencyActivationStatus | None = None
+    closed_at: datetime | None = None
+    assigned_responders: str | None = Field(default=None, max_length=8000)
+    guidance_steps: str | None = Field(default=None, max_length=8000)
+    communication_log: str | None = Field(default=None, max_length=12000)
+    outcome_summary: str | None = Field(default=None, max_length=8000)
+    response_time_seconds: int | None = Field(default=None, ge=0)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EmergencyPlanActivationRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    plan_id: UUID
+    facility_id: UUID | None
+    incident_id: UUID | None
+    activated_by_person_id: UUID | None
+    closed_by_person_id: UUID | None
+    emergency_type: EmergencyType
+    status: EmergencyActivationStatus
+    location_detail: str
+    activated_at: datetime
+    closed_at: datetime | None
+    assigned_responders: str | None
+    guidance_steps: str | None
+    communication_log: str | None
+    outcome_summary: str | None
+    response_time_seconds: int | None
+    notes: str | None
 
 
 class EquipmentItemCreate(BaseModel):

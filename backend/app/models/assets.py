@@ -9,6 +9,9 @@ from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
 from app.models.enums import (
     AssetCondition,
     CheckoutStatus,
+    EmergencyActionPlanStatus,
+    EmergencyActivationStatus,
+    EmergencyType,
     EquipmentStatus,
     FacilityBookingStatus,
     FacilityStatus,
@@ -50,6 +53,67 @@ class Facility(IdMixin, TimestampMixin, Base):
     )
     insurance_policy_ref: Mapped[str | None] = mapped_column(String(180))
     last_inspection_on: Mapped[date | None] = mapped_column(index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class EmergencyActionPlan(IdMixin, TimestampMixin, Base):
+    __tablename__ = "emergency_action_plans"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    facility_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("facilities.id"), index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    emergency_type: Mapped[EmergencyType] = mapped_column(
+        enum_type(EmergencyType), nullable=False, index=True
+    )
+    status: Mapped[EmergencyActionPlanStatus] = mapped_column(
+        enum_type(EmergencyActionPlanStatus),
+        default=EmergencyActionPlanStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    effective_from: Mapped[date | None] = mapped_column(Date, index=True)
+    review_due_on: Mapped[date | None] = mapped_column(Date, index=True)
+    emergency_contacts: Mapped[str] = mapped_column(Text, nullable=False)
+    evacuation_routes: Mapped[str | None] = mapped_column(Text)
+    medical_protocols: Mapped[str | None] = mapped_column(Text)
+    weather_protocols: Mapped[str | None] = mapped_column(Text)
+    communication_protocols: Mapped[str | None] = mapped_column(Text)
+    equipment_locations: Mapped[str | None] = mapped_column(Text)
+    assembly_points: Mapped[str | None] = mapped_column(Text)
+    special_needs_plan: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class EmergencyPlanActivation(IdMixin, TimestampMixin, Base):
+    __tablename__ = "emergency_plan_activations"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("emergency_action_plans.id"), index=True)
+    facility_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("facilities.id"), index=True)
+    incident_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("safeguarding_incidents.id"), index=True)
+    activated_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    closed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    emergency_type: Mapped[EmergencyType] = mapped_column(
+        enum_type(EmergencyType), nullable=False, index=True
+    )
+    status: Mapped[EmergencyActivationStatus] = mapped_column(
+        enum_type(EmergencyActivationStatus),
+        default=EmergencyActivationStatus.ACTIVE,
+        nullable=False,
+        index=True,
+    )
+    location_detail: Mapped[str] = mapped_column(String(240), nullable=False)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    assigned_responders: Mapped[str | None] = mapped_column(Text)
+    guidance_steps: Mapped[str | None] = mapped_column(Text)
+    communication_log: Mapped[str | None] = mapped_column(Text)
+    outcome_summary: Mapped[str | None] = mapped_column(Text)
+    response_time_seconds: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

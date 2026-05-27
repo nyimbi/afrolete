@@ -7,6 +7,12 @@ from app.db.session import get_db
 from app.schemas.assets import (
     AssetSummaryRead,
     AssetUtilizationRecommendationRead,
+    EmergencyActionPlanCreate,
+    EmergencyActionPlanRead,
+    EmergencyActionPlanUpdate,
+    EmergencyPlanActivationCreate,
+    EmergencyPlanActivationRead,
+    EmergencyPlanActivationUpdate,
     EquipmentCheckoutCreate,
     EquipmentCheckoutRead,
     EquipmentCheckoutReturn,
@@ -45,8 +51,10 @@ from app.schemas.assets import (
     SupplierScoreRead,
 )
 from app.services.assets import (
+    activate_emergency_action_plan,
     asset_summary,
     checkout_equipment,
+    create_emergency_action_plan,
     create_equipment_item,
     create_facility,
     create_facility_booking,
@@ -60,6 +68,8 @@ from app.services.assets import (
     list_equipment_files,
     list_equipment_scan_events,
     list_checkouts,
+    list_emergency_action_plans,
+    list_emergency_plan_activations,
     list_equipment_items,
     list_equipment_lease_schedules,
     list_facilities,
@@ -76,6 +86,8 @@ from app.services.assets import (
     submit_supplier_order,
     sync_supplier_invoice,
     supplier_scorecard,
+    update_emergency_action_plan,
+    update_emergency_plan_activation,
     update_equipment_photo,
     upload_equipment_file,
     provision_equipment_reader,
@@ -108,6 +120,51 @@ def to_facility_read(facility) -> FacilityRead:
         insurance_policy_ref=facility.insurance_policy_ref,
         last_inspection_on=facility.last_inspection_on,
         notes=facility.notes,
+    )
+
+
+def to_emergency_plan_read(plan) -> EmergencyActionPlanRead:
+    return EmergencyActionPlanRead(
+        id=plan.id,
+        organization_id=plan.organization_id,
+        facility_id=plan.facility_id,
+        title=plan.title,
+        emergency_type=plan.emergency_type,
+        status=plan.status,
+        effective_from=plan.effective_from,
+        review_due_on=plan.review_due_on,
+        emergency_contacts=plan.emergency_contacts,
+        evacuation_routes=plan.evacuation_routes,
+        medical_protocols=plan.medical_protocols,
+        weather_protocols=plan.weather_protocols,
+        communication_protocols=plan.communication_protocols,
+        equipment_locations=plan.equipment_locations,
+        assembly_points=plan.assembly_points,
+        special_needs_plan=plan.special_needs_plan,
+        notes=plan.notes,
+    )
+
+
+def to_emergency_activation_read(activation) -> EmergencyPlanActivationRead:
+    return EmergencyPlanActivationRead(
+        id=activation.id,
+        organization_id=activation.organization_id,
+        plan_id=activation.plan_id,
+        facility_id=activation.facility_id,
+        incident_id=activation.incident_id,
+        activated_by_person_id=activation.activated_by_person_id,
+        closed_by_person_id=activation.closed_by_person_id,
+        emergency_type=activation.emergency_type,
+        status=activation.status,
+        location_detail=activation.location_detail,
+        activated_at=activation.activated_at,
+        closed_at=activation.closed_at,
+        assigned_responders=activation.assigned_responders,
+        guidance_steps=activation.guidance_steps,
+        communication_log=activation.communication_log,
+        outcome_summary=activation.outcome_summary,
+        response_time_seconds=activation.response_time_seconds,
+        notes=activation.notes,
     )
 
 
@@ -262,6 +319,79 @@ async def list_facilities_route(
         to_facility_read(facility)
         for facility in await list_facilities(db, organization_id)
     ]
+
+
+@router.post("/emergency-plans", response_model=EmergencyActionPlanRead, status_code=status.HTTP_201_CREATED)
+async def create_emergency_plan_route(
+    payload: EmergencyActionPlanCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EmergencyActionPlanRead:
+    return to_emergency_plan_read(await create_emergency_action_plan(db, identity, payload, authz))
+
+
+@router.get("/emergency-plans", response_model=list[EmergencyActionPlanRead])
+async def list_emergency_plans_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[EmergencyActionPlanRead]:
+    return [
+        to_emergency_plan_read(plan)
+        for plan in await list_emergency_action_plans(db, organization_id, facility_id)
+    ]
+
+
+@router.patch("/emergency-plans/{plan_id}", response_model=EmergencyActionPlanRead)
+async def update_emergency_plan_route(
+    plan_id: UUID,
+    payload: EmergencyActionPlanUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EmergencyActionPlanRead:
+    return to_emergency_plan_read(
+        await update_emergency_action_plan(db, identity, plan_id, payload, authz)
+    )
+
+
+@router.post(
+    "/emergency-activations",
+    response_model=EmergencyPlanActivationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def activate_emergency_plan_route(
+    payload: EmergencyPlanActivationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EmergencyPlanActivationRead:
+    return to_emergency_activation_read(await activate_emergency_action_plan(db, identity, payload, authz))
+
+
+@router.get("/emergency-activations", response_model=list[EmergencyPlanActivationRead])
+async def list_emergency_activations_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[EmergencyPlanActivationRead]:
+    return [
+        to_emergency_activation_read(activation)
+        for activation in await list_emergency_plan_activations(db, organization_id)
+    ]
+
+
+@router.patch("/emergency-activations/{activation_id}", response_model=EmergencyPlanActivationRead)
+async def update_emergency_activation_route(
+    activation_id: UUID,
+    payload: EmergencyPlanActivationUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EmergencyPlanActivationRead:
+    return to_emergency_activation_read(
+        await update_emergency_plan_activation(db, identity, activation_id, payload, authz)
+    )
 
 
 @router.post("/equipment", response_model=EquipmentItemRead, status_code=status.HTTP_201_CREATED)
