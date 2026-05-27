@@ -9,6 +9,15 @@ from app.models.assets import (  # noqa: F401,E402
     FacilityBooking,
     MaintenanceWorkOrder,
 )
+from app.models.billing import (  # noqa: F401,E402
+    BillingEntitlement,
+    BillingPlan,
+    SaaSInvoice,
+    SaaSPayment,
+    TenantSubscription,
+    UsageMeter,
+    UsageRecord,
+)
 from app.models.commercial import (  # noqa: F401,E402
     Donation,
     FinanceInvoice,

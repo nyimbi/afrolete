@@ -435,3 +435,35 @@ class InsightStatus(StrEnum):
     ACKNOWLEDGED = "acknowledged"
     ACTIONED = "actioned"
     DISMISSED = "dismissed"
+
+
+class BillingCycle(StrEnum):
+    MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
+    ANNUAL = "annual"
+
+
+class SubscriptionStatus(StrEnum):
+    TRIALING = "trialing"
+    ACTIVE = "active"
+    PAST_DUE = "past_due"
+    PAUSED = "paused"
+    CANCELLED = "cancelled"
+
+
+class BillingInvoiceStatus(StrEnum):
+    DRAFT = "draft"
+    OPEN = "open"
+    PAID = "paid"
+    PARTIAL = "partial"
+    VOID = "void"
+    UNCOLLECTIBLE = "uncollectible"
+
+
+class UsageUnit(StrEnum):
+    ATHLETE = "athlete"
+    TEAM = "team"
+    AGENT_TASK = "agent_task"
+    REPORT = "report"
+    STORAGE_GB = "storage_gb"
+    MESSAGE = "message"

@@ -176,6 +176,10 @@ export type ReportFrequency = "on_demand" | "daily" | "weekly" | "monthly" | "qu
 export type ReportRunStatus = "queued" | "running" | "ready" | "failed";
 export type InsightSeverity = "info" | "watch" | "warning" | "critical";
 export type InsightStatus = "new" | "acknowledged" | "actioned" | "dismissed";
+export type BillingCycle = "monthly" | "quarterly" | "annual";
+export type SubscriptionStatus = "trialing" | "active" | "past_due" | "paused" | "cancelled";
+export type BillingInvoiceStatus = "draft" | "open" | "paid" | "partial" | "void" | "uncollectible";
+export type UsageUnit = "athlete" | "team" | "agent_task" | "report" | "storage_gb" | "message";
 
 export type LocalIdentity = {
   sub: string;
@@ -655,6 +659,121 @@ export type ReportingSummaryRead = {
   critical_insights: number;
   high_risk_scores: number;
   export_jobs: number;
+};
+
+export type BillingPlanRead = {
+  id: UUID;
+  code: string;
+  name: string;
+  description: string | null;
+  base_price: string;
+  currency: string;
+  billing_cycle: BillingCycle;
+  included_athletes: number;
+  included_teams: number;
+  included_agent_tasks: number;
+  included_storage_gb: number;
+  per_athlete_price: string;
+  per_agent_task_price: string;
+  features: string | null;
+  status: string;
+};
+
+export type SubscriptionRead = {
+  id: UUID;
+  organization_id: UUID;
+  billing_plan_id: UUID;
+  status: SubscriptionStatus;
+  billing_cycle: BillingCycle;
+  current_period_start: string;
+  current_period_end: string;
+  trial_ends_on: string | null;
+  next_billing_on: string | null;
+  seats_purchased: number;
+  negotiated_price: string | null;
+  discount_code: string | null;
+  external_customer_id: string | null;
+  external_subscription_id: string | null;
+  cancel_at_period_end: boolean;
+  notes: string | null;
+};
+
+export type UsageMeterRead = {
+  id: UUID;
+  code: string;
+  name: string;
+  unit: UsageUnit;
+  included_quantity: number;
+  overage_price: string;
+  aggregation: string;
+  status: string;
+};
+
+export type UsageRecordRead = {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  usage_meter_id: UUID;
+  quantity: number;
+  recorded_at: string;
+  source: string;
+  external_reference: string | null;
+  notes: string | null;
+};
+
+export type SaaSInvoiceRead = {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  invoice_number: string;
+  period_start: string;
+  period_end: string;
+  subtotal: string;
+  tax_amount: string;
+  discount_amount: string;
+  total: string;
+  amount_paid: string;
+  currency: string;
+  due_on: string | null;
+  status: BillingInvoiceStatus;
+  line_items: string | null;
+  external_invoice_id: string | null;
+};
+
+export type SaaSPaymentRead = {
+  id: UUID;
+  organization_id: UUID;
+  invoice_id: UUID;
+  amount: string;
+  currency: string;
+  provider: string;
+  external_payment_id: string | null;
+  received_at: string;
+  status: string;
+  notes: string | null;
+};
+
+export type BillingEntitlementRead = {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  feature_key: string;
+  limit_value: number | null;
+  used_value: number;
+  resets_on: string | null;
+  status: string;
+};
+
+export type BillingSummaryRead = {
+  organization_id: UUID;
+  active_subscriptions: number;
+  plans: number;
+  usage_meters: number;
+  usage_records: number;
+  open_invoices: number;
+  monthly_recurring_revenue: string;
+  invoice_outstanding: string;
+  entitlements: number;
 };
 
 export type ActivityConsentRead = {

@@ -16,6 +16,10 @@ import type {
   AttendanceRecordRead,
   AttendanceSeedRead,
   AttendanceStatus,
+  BillingCycle,
+  BillingEntitlementRead,
+  BillingPlanRead,
+  BillingSummaryRead,
   ChannelPreference,
   CommercialSummaryRead,
   CommunicationChannel,
@@ -70,10 +74,13 @@ import type {
   ReportFormat,
   ReportFrequency,
   ReportingSummaryRead,
+  SaaSInvoiceRead,
+  SaaSPaymentRead,
   ScheduledReportRead,
   SponsorRead,
   SponsorshipAgreementRead,
   SportFormat,
+  SubscriptionRead,
   TeamRead,
   TeamRosterEntryRead,
   TeamRole,
@@ -84,6 +91,9 @@ import type {
   TicketOrderRead,
   TicketProductRead,
   TicketRead,
+  UsageMeterRead,
+  UsageRecordRead,
+  UsageUnit,
   WorkOrderPriority,
   WorkOrderStatus,
   MaintenanceWorkOrderRead
@@ -159,6 +169,14 @@ export default function HomePage() {
   const [riskScores, setRiskScores] = useState<PredictiveRiskScoreRead[]>([]);
   const [reportExports, setReportExports] = useState<ReportExportJobRead[]>([]);
   const [reportingSummary, setReportingSummary] = useState<ReportingSummaryRead | null>(null);
+  const [billingPlans, setBillingPlans] = useState<BillingPlanRead[]>([]);
+  const [subscriptions, setSubscriptions] = useState<SubscriptionRead[]>([]);
+  const [usageMeters, setUsageMeters] = useState<UsageMeterRead[]>([]);
+  const [usageRecords, setUsageRecords] = useState<UsageRecordRead[]>([]);
+  const [saasInvoices, setSaasInvoices] = useState<SaaSInvoiceRead[]>([]);
+  const [saasPayments, setSaasPayments] = useState<SaaSPaymentRead[]>([]);
+  const [billingEntitlements, setBillingEntitlements] = useState<BillingEntitlementRead[]>([]);
+  const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -184,6 +202,10 @@ export default function HomePage() {
   const [selectedReportDefinitionId, setSelectedReportDefinitionId] = useState("");
   const [selectedGeneratedReportId, setSelectedGeneratedReportId] = useState("");
   const [selectedInsightId, setSelectedInsightId] = useState("");
+  const [selectedBillingPlanId, setSelectedBillingPlanId] = useState("");
+  const [selectedSubscriptionId, setSelectedSubscriptionId] = useState("");
+  const [selectedUsageMeterId, setSelectedUsageMeterId] = useState("");
+  const [selectedSaasInvoiceId, setSelectedSaasInvoiceId] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -469,6 +491,35 @@ export default function HomePage() {
     drivers: "High acute load, low recovery, match congestion.",
     recommendation: "Reduce session intensity and add wellness check before next match.",
     valid_for_date: "2026-06-08"
+  });
+  const [billingForm, setBillingForm] = useState({
+    plan_code: "growth",
+    plan_name: "Growth",
+    base_price: 199,
+    billing_cycle: "monthly" as BillingCycle,
+    included_athletes: 150,
+    included_teams: 10,
+    included_agent_tasks: 500,
+    included_storage_gb: 100,
+    per_athlete_price: 1.5,
+    per_agent_task_price: 0.05,
+    features: "Operations console, AI agents, reports, communications, safeguarding.",
+    period_start: "2026-06-01",
+    period_end: "2026-06-30",
+    seats_purchased: 150,
+    negotiated_price: 179,
+    meter_code: "agent_tasks",
+    meter_name: "AI agent tasks",
+    usage_unit: "agent_task" as UsageUnit,
+    included_quantity: 500,
+    overage_price: 0.05,
+    usage_quantity: 650,
+    invoice_number: "SAAS-2026-001",
+    tax_amount: 0,
+    discount_amount: 20,
+    payment_amount: 159,
+    entitlement_feature: "ai_agents",
+    entitlement_limit: 12
   });
 
   const selectedOrganization = useMemo(
@@ -783,6 +834,40 @@ export default function HomePage() {
     );
   }, []);
 
+  const loadBilling = useCallback(async (organizationId: string) => {
+    const [plans, subscriptionsData, meters, records, invoicesData, entitlements, summary] =
+      await Promise.all([
+        apiRequest<BillingPlanRead[]>("/billing/plans"),
+        apiRequest<SubscriptionRead[]>(`/billing/subscriptions?organization_id=${organizationId}`),
+        apiRequest<UsageMeterRead[]>("/billing/meters"),
+        apiRequest<UsageRecordRead[]>(`/billing/usage?organization_id=${organizationId}`),
+        apiRequest<SaaSInvoiceRead[]>(`/billing/invoices?organization_id=${organizationId}`),
+        apiRequest<BillingEntitlementRead[]>(`/billing/entitlements?organization_id=${organizationId}`),
+        apiRequest<BillingSummaryRead>(`/billing/summary?organization_id=${organizationId}`)
+      ]);
+    setBillingPlans(plans);
+    setSubscriptions(subscriptionsData);
+    setUsageMeters(meters);
+    setUsageRecords(records);
+    setSaasInvoices(invoicesData);
+    setBillingEntitlements(entitlements);
+    setBillingSummary(summary);
+    setSelectedBillingPlanId((current) =>
+      plans.some((plan) => plan.id === current) ? current : plans[0]?.id ?? ""
+    );
+    setSelectedSubscriptionId((current) =>
+      subscriptionsData.some((subscription) => subscription.id === current)
+        ? current
+        : subscriptionsData[0]?.id ?? ""
+    );
+    setSelectedUsageMeterId((current) =>
+      meters.some((meter) => meter.id === current) ? current : meters[0]?.id ?? ""
+    );
+    setSelectedSaasInvoiceId((current) =>
+      invoicesData.some((invoice) => invoice.id === current) ? current : invoicesData[0]?.id ?? ""
+    );
+  }, []);
+
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.localIdentity");
     if (stored) {
@@ -839,6 +924,14 @@ export default function HomePage() {
       setRiskScores([]);
       setReportExports([]);
       setReportingSummary(null);
+      setBillingPlans([]);
+      setSubscriptions([]);
+      setUsageMeters([]);
+      setUsageRecords([]);
+      setSaasInvoices([]);
+      setSaasPayments([]);
+      setBillingEntitlements([]);
+      setBillingSummary(null);
       return;
     }
     runAction("load-tenant-data", async () => {
@@ -853,6 +946,7 @@ export default function HomePage() {
       await loadAssets(selectedOrganizationId);
       await loadCommercial(selectedOrganizationId);
       await loadReporting(selectedOrganizationId);
+      await loadBilling(selectedOrganizationId);
     }, () => addLog("Organization workspace loaded", "good"));
   }, [
     selectedOrganizationId,
@@ -867,6 +961,7 @@ export default function HomePage() {
     loadAssets,
     loadCommercial,
     loadReporting,
+    loadBilling,
     runAction,
     addLog
   ]);
@@ -2462,6 +2557,187 @@ export default function HomePage() {
     );
   };
 
+  const createBillingPlanAndSubscription = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-billing-plan-subscription",
+      async () => {
+        const plan = await apiRequest<BillingPlanRead>("/billing/plans", {
+          method: "POST",
+          body: {
+            code: `${billingForm.plan_code}-${Date.now()}`,
+            name: billingForm.plan_name,
+            description: "Tiered SaaS plan for sports organizations.",
+            base_price: String(billingForm.base_price),
+            billing_cycle: billingForm.billing_cycle,
+            included_athletes: billingForm.included_athletes,
+            included_teams: billingForm.included_teams,
+            included_agent_tasks: billingForm.included_agent_tasks,
+            included_storage_gb: billingForm.included_storage_gb,
+            per_athlete_price: String(billingForm.per_athlete_price),
+            per_agent_task_price: String(billingForm.per_agent_task_price),
+            features: billingForm.features
+          }
+        });
+        const subscription = await apiRequest<SubscriptionRead>("/billing/subscriptions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            billing_plan_id: plan.id,
+            billing_cycle: billingForm.billing_cycle,
+            current_period_start: billingForm.period_start,
+            current_period_end: billingForm.period_end,
+            trial_ends_on: null,
+            next_billing_on: billingForm.period_end,
+            seats_purchased: billingForm.seats_purchased,
+            negotiated_price: String(billingForm.negotiated_price),
+            discount_code: "EARLY",
+            external_customer_id: `cus_${selectedOrganizationId.slice(0, 8)}`,
+            external_subscription_id: `sub_${Date.now()}`,
+            notes: "Created from AfroLete billing console."
+          }
+        });
+        return { plan, subscription };
+      },
+      ({ plan, subscription }) => {
+        setBillingPlans((current) => [plan, ...current.filter((item) => item.id !== plan.id)]);
+        setSubscriptions((current) => [
+          subscription,
+          ...current.filter((item) => item.id !== subscription.id)
+        ]);
+        setSelectedBillingPlanId(plan.id);
+        setSelectedSubscriptionId(subscription.id);
+        addLog(`${selectedOrganization?.name ?? "Tenant"} subscribed to ${plan.name}`, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createUsageMeterAndRecord = () => {
+    if (!selectedOrganizationId || !selectedSubscriptionId) {
+      addLog("Create or select a subscription first", "bad");
+      return;
+    }
+    runAction(
+      "create-usage-meter-record",
+      async () => {
+        const meter = await apiRequest<UsageMeterRead>("/billing/meters", {
+          method: "POST",
+          body: {
+            code: `${billingForm.meter_code}-${Date.now()}`,
+            name: billingForm.meter_name,
+            unit: billingForm.usage_unit,
+            included_quantity: billingForm.included_quantity,
+            overage_price: String(billingForm.overage_price),
+            aggregation: "sum"
+          }
+        });
+        const record = await apiRequest<UsageRecordRead>("/billing/usage", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            subscription_id: selectedSubscriptionId,
+            usage_meter_id: meter.id,
+            quantity: billingForm.usage_quantity,
+            source: "console",
+            external_reference: `usage-${Date.now()}`,
+            notes: "Usage recorded from local console."
+          }
+        });
+        return { meter, record };
+      },
+      ({ meter, record }) => {
+        setUsageMeters((current) => [meter, ...current.filter((item) => item.id !== meter.id)]);
+        setUsageRecords((current) => [record, ...current.filter((item) => item.id !== record.id)]);
+        setSelectedUsageMeterId(meter.id);
+        addLog(`${record.quantity} ${meter.unit} recorded`, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createSaaSInvoiceAndPayment = () => {
+    if (!selectedOrganizationId || !selectedSubscriptionId) {
+      addLog("Create or select a subscription first", "bad");
+      return;
+    }
+    runAction(
+      "create-saas-invoice-payment",
+      async () => {
+        const invoice = await apiRequest<SaaSInvoiceRead>("/billing/invoices", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            subscription_id: selectedSubscriptionId,
+            invoice_number: `${billingForm.invoice_number}-${Date.now()}`,
+            period_start: billingForm.period_start,
+            period_end: billingForm.period_end,
+            tax_amount: String(billingForm.tax_amount),
+            discount_amount: String(billingForm.discount_amount),
+            due_on: billingForm.period_end
+          }
+        });
+        const payment = await apiRequest<SaaSPaymentRead>("/billing/payments", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            invoice_id: invoice.id,
+            amount: String(billingForm.payment_amount),
+            provider: "manual",
+            external_payment_id: `pay_${Date.now()}`,
+            notes: "SaaS payment captured from billing console."
+          }
+        });
+        return { invoice, payment };
+      },
+      ({ invoice, payment }) => {
+        setSaasInvoices((current) => [invoice, ...current.filter((item) => item.id !== invoice.id)]);
+        setSaasPayments((current) => [payment, ...current.filter((item) => item.id !== payment.id)]);
+        setSelectedSaasInvoiceId(invoice.id);
+        addLog(`SaaS invoice ${invoice.invoice_number} paid ${payment.amount}`, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createBillingEntitlement = () => {
+    if (!selectedOrganizationId || !selectedSubscriptionId) {
+      addLog("Create or select a subscription first", "bad");
+      return;
+    }
+    runAction(
+      "create-billing-entitlement",
+      () =>
+        apiRequest<BillingEntitlementRead>("/billing/entitlements", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            subscription_id: selectedSubscriptionId,
+            feature_key: billingForm.entitlement_feature,
+            limit_value: billingForm.entitlement_limit,
+            used_value: agents.length,
+            resets_on: billingForm.period_end
+          }
+        }),
+      (entitlement) => {
+        setBillingEntitlements((current) => [
+          entitlement,
+          ...current.filter((item) => item.id !== entitlement.id)
+        ]);
+        addLog(`${entitlement.feature_key} entitlement active`, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -2484,6 +2760,7 @@ export default function HomePage() {
           <a href="#assets">Assets</a>
           <a href="#commercial">Commerce</a>
           <a href="#reports">Reports</a>
+          <a href="#billing">Billing</a>
           <a href="#competition">Competition</a>
           <a href="#communications">Comms</a>
           <a href="#performance">Performance</a>
@@ -2560,6 +2837,10 @@ export default function HomePage() {
             <div className="stat-row">
               <span>Insights</span>
               <strong>{reportingSummary?.open_insights ?? 0}</strong>
+            </div>
+            <div className="stat-row">
+              <span>MRR</span>
+              <strong>{billingSummary?.monthly_recurring_revenue ?? "0"}</strong>
             </div>
             <div className="stat-row">
               <span>Attendance</span>
@@ -3478,6 +3759,182 @@ export default function HomePage() {
                   <div>
                     <strong>{risk.score} · {risk.risk_band}</strong>
                     <span>{risk.model_name} · {risk.recommendation}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid" id="billing">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">SaaS billing</p>
+                <h2>Plans and subscriptions</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createBillingPlanAndSubscription} disabled={busyAction !== null}>Subscribe</button>
+                <button type="button" onClick={createBillingEntitlement} disabled={busyAction !== null}>Entitle</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{billingSummary?.monthly_recurring_revenue ?? "0.00"}</strong>
+              <span>MRR</span>
+              <small>{billingSummary ? `${billingSummary.active_subscriptions} active · ${billingSummary.entitlements} entitlements` : "No billing summary"}</small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Plan
+                <input value={billingForm.plan_name} onChange={(event) => setBillingForm({ ...billingForm, plan_name: event.target.value })} />
+              </label>
+              <label>
+                Cycle
+                <select value={billingForm.billing_cycle} onChange={(event) => setBillingForm({ ...billingForm, billing_cycle: event.target.value as BillingCycle })}>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="annual">Annual</option>
+                </select>
+              </label>
+              <label>
+                Base price
+                <input type="number" min="0" value={billingForm.base_price} onChange={(event) => setBillingForm({ ...billingForm, base_price: Number(event.target.value) })} />
+              </label>
+              <label>
+                Negotiated
+                <input type="number" min="0" value={billingForm.negotiated_price} onChange={(event) => setBillingForm({ ...billingForm, negotiated_price: Number(event.target.value) })} />
+              </label>
+              <label>
+                Athletes
+                <input type="number" min="0" value={billingForm.included_athletes} onChange={(event) => setBillingForm({ ...billingForm, included_athletes: Number(event.target.value) })} />
+              </label>
+              <label>
+                Agent tasks
+                <input type="number" min="0" value={billingForm.included_agent_tasks} onChange={(event) => setBillingForm({ ...billingForm, included_agent_tasks: Number(event.target.value) })} />
+              </label>
+              <label>
+                Period start
+                <input type="date" value={billingForm.period_start} onChange={(event) => setBillingForm({ ...billingForm, period_start: event.target.value })} />
+              </label>
+              <label>
+                Period end
+                <input type="date" value={billingForm.period_end} onChange={(event) => setBillingForm({ ...billingForm, period_end: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {subscriptions.slice(0, 3).map((subscription) => (
+                <button
+                  type="button"
+                  key={subscription.id}
+                  className={`task-card ${subscription.id === selectedSubscriptionId ? "selected" : ""}`}
+                  onClick={() => setSelectedSubscriptionId(subscription.id)}
+                >
+                  <div>
+                    <strong>{subscription.status} · {subscription.billing_cycle}</strong>
+                    <span>{subscription.current_period_start} to {subscription.current_period_end}</span>
+                  </div>
+                </button>
+              ))}
+              {billingEntitlements.slice(0, 3).map((entitlement) => (
+                <article key={entitlement.id} className="task-card">
+                  <div>
+                    <strong>{entitlement.feature_key}</strong>
+                    <span>{entitlement.used_value}/{entitlement.limit_value ?? "unlimited"} · {entitlement.status}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Usage and invoices</p>
+                <h2>Metering and collection</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createUsageMeterAndRecord} disabled={busyAction !== null}>Usage</button>
+                <button type="button" onClick={createSaaSInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
+              </div>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Meters</span>
+                <strong>{billingSummary?.usage_meters ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Usage</span>
+                <strong>{billingSummary?.usage_records ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Open invoices</span>
+                <strong>{billingSummary?.open_invoices ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Outstanding</span>
+                <strong>{billingSummary?.invoice_outstanding ?? "0.00"}</strong>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Meter
+                <input value={billingForm.meter_name} onChange={(event) => setBillingForm({ ...billingForm, meter_name: event.target.value })} />
+              </label>
+              <label>
+                Unit
+                <select value={billingForm.usage_unit} onChange={(event) => setBillingForm({ ...billingForm, usage_unit: event.target.value as UsageUnit })}>
+                  <option value="athlete">Athlete</option>
+                  <option value="team">Team</option>
+                  <option value="agent_task">Agent task</option>
+                  <option value="report">Report</option>
+                  <option value="storage_gb">Storage GB</option>
+                  <option value="message">Message</option>
+                </select>
+              </label>
+              <label>
+                Included
+                <input type="number" min="0" value={billingForm.included_quantity} onChange={(event) => setBillingForm({ ...billingForm, included_quantity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Used
+                <input type="number" min="0" value={billingForm.usage_quantity} onChange={(event) => setBillingForm({ ...billingForm, usage_quantity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Invoice
+                <input value={billingForm.invoice_number} onChange={(event) => setBillingForm({ ...billingForm, invoice_number: event.target.value })} />
+              </label>
+              <label>
+                Discount
+                <input type="number" min="0" value={billingForm.discount_amount} onChange={(event) => setBillingForm({ ...billingForm, discount_amount: Number(event.target.value) })} />
+              </label>
+              <label>
+                Payment
+                <input type="number" min="0" value={billingForm.payment_amount} onChange={(event) => setBillingForm({ ...billingForm, payment_amount: Number(event.target.value) })} />
+              </label>
+              <label>
+                Entitlement
+                <input value={billingForm.entitlement_feature} onChange={(event) => setBillingForm({ ...billingForm, entitlement_feature: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {saasInvoices.slice(0, 3).map((invoice) => (
+                <button
+                  type="button"
+                  key={invoice.id}
+                  className={`task-card ${invoice.id === selectedSaasInvoiceId ? "selected" : ""}`}
+                  onClick={() => setSelectedSaasInvoiceId(invoice.id)}
+                >
+                  <div>
+                    <strong>{invoice.invoice_number}</strong>
+                    <span>{invoice.amount_paid}/{invoice.total} · {invoice.status}</span>
+                  </div>
+                </button>
+              ))}
+              {usageRecords.slice(0, 3).map((record) => (
+                <article key={record.id} className="task-card">
+                  <div>
+                    <strong>{record.quantity} units</strong>
+                    <span>{record.source} · {new Date(record.recorded_at).toLocaleString()}</span>
                   </div>
                 </article>
               ))}

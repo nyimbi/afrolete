@@ -291,6 +291,31 @@ athlete-development platform:
   - Verification: `uv run ruff check .`, PostgreSQL `alembic upgrade head`,
     `pnpm --filter @afrolete/frontend typecheck`. Full test/build/screenshot
     verification deferred by user instruction during low-battery fast delivery.
+- Implemented slice 017 SaaS billing and subscription fast surface:
+  - Added SaaS billing plans with code, tier name, pricing, billing cycle,
+    included athletes, teams, AI-agent tasks, storage, per-athlete pricing,
+    per-agent-task pricing, feature text, and status.
+  - Added tenant subscriptions with organization linkage, plan, billing cycle,
+    active/trial/past-due/cancelled states, period dates, trial and next billing
+    dates, purchased seats, negotiated pricing, discount codes, external
+    customer/subscription IDs, and cancellation flags.
+  - Added usage meters and usage records for athletes, teams, agent tasks,
+    reports, storage, and messages with included quantities, overage pricing,
+    aggregation, sources, and external references.
+  - Added SaaS invoices and payments with line-item summaries, subtotal, tax,
+    discount, total, amount paid, status, due dates, external IDs, provider, and
+    collection metadata.
+  - Added billing entitlements for feature limits, usage, reset dates, and
+    status.
+  - Added a billing summary endpoint for active subscriptions, plans, usage
+    meters, usage records, open invoices, monthly recurring revenue,
+    outstanding invoice value, and entitlements.
+  - Added the Billing console lane for plan/subscription creation, usage
+    metering, invoice/payment capture, and entitlement assignment.
+  - Verification: `uv run ruff check .`, PostgreSQL `alembic upgrade head`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`. Full
+    test/build/screenshot verification deferred by user instruction during
+    low-battery fast delivery.
 
 ## Implementation Slices
 
@@ -313,6 +338,7 @@ athlete-development platform:
 | 014 - Equipment, facilities, and asset operations | Partial | Backend tests 42/42; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Facility profiles, equipment inventory, checkout/return, maintenance work orders, facility bookings, overlap rejection, asset summary metrics, and console workflows are implemented; procurement, supplier scoring, RFID scanning, photo uploads, lease billing, and AI optimization remain. |
 | 015 - Commercial operations fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, commercial summary, and console workflows are implemented; payment gateway settlement, refunds, tax, accounting exports, sponsorship dashboards, and full verification remain. |
 | 016 - Reporting and intelligence fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, and console workflows are implemented; real AI model execution, rendered PDF/Excel generation, charts, benchmark models, and full verification remain. |
+| 017 - SaaS billing and subscription fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, and console workflows are implemented; Stripe/processor webhooks, dunning automation, tax localization, plan-change proration, and full verification remain. |
 
 ## Capability Coverage
 
@@ -339,8 +365,8 @@ Status values:
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, commercial summary, and console workflows are implemented; payment gateway settlement, refunds, tax, accounting exports, sponsorship dashboards, and full verification remain. |
 | Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, and console workflows are implemented; real AI model execution, rendered PDF/Excel generation, charts, benchmark models, and full verification remain. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation and SpiceDB gRPC authorization adapter are implemented; other integrations remain future slices. |
-| SaaS billing/subscriptions | not-started | Future slice. |
-| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, commerce, reports, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
+| SaaS billing/subscriptions | partial | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, and console workflows are implemented; Stripe/processor webhooks, dunning automation, tax localization, plan-change proration, and full verification remain. |
+| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, commerce, reports, billing, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
 
 ## Next Actions
 
@@ -356,11 +382,13 @@ Status values:
    sponsorship dashboards, and commercial reporting verification.
 6. Add rendered PDF/Excel report generation, chart visualizations, benchmark
    models, live AI-generated insights, and report verification coverage.
-7. Add automated fixture generation, bracket visualization, and scheduling
+7. Add Stripe/payment-processor webhooks, dunning automation, tax localization,
+   plan-change proration, and full billing verification coverage.
+8. Add automated fixture generation, bracket visualization, and scheduling
    conflict checks for leagues and tournaments.
-8. Add automated training-plan generation from performance trends, readiness,
+9. Add automated training-plan generation from performance trends, readiness,
    upcoming competitions, and availability constraints.
-9. Add automated ingestion pipelines for video, audio narration, text
+10. Add automated ingestion pipelines for video, audio narration, text
    evaluation, wearable feeds, and agent-extracted metric review.
 6. Add real AI execution workers, model/provider configuration, and AI
    governance telemetry.
