@@ -89,6 +89,7 @@ import type {
   OrganizationType,
   ParticipationClearanceRead,
   PaymentSettlementRead,
+  PerformanceIngestionRead,
   PerformanceObservationRead,
   NotificationFrequency,
   NotificationPreferenceRead,
@@ -163,6 +164,7 @@ export default function HomePage() {
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
+  const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
   const [assessments, setAssessments] = useState<AthleteAssessmentRead[]>([]);
   const [performanceSummary, setPerformanceSummary] =
     useState<AthletePerformanceSummaryRead | null>(null);
@@ -244,6 +246,7 @@ export default function HomePage() {
   const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
+  const [selectedObservationId, setSelectedObservationId] = useState("");
   const [selectedTrainingPlanId, setSelectedTrainingPlanId] = useState("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState("");
   const [selectedFixtureId, setSelectedFixtureId] = useState("");
@@ -332,6 +335,8 @@ export default function HomePage() {
     value: 8,
     raw_value: "8/10",
     source: "coach_evaluation" as MetricSource,
+    evidence_ref: "video://matchday/clip-001",
+    evidence_text: "Clip analysis: first touch quality 8.4, pressure scan before receiving.",
     confidence: 0.9,
     notes: "Improved under pressure."
   });
@@ -742,6 +747,11 @@ export default function HomePage() {
       setObservations(observationData);
       setAssessments(assessmentData);
       setPerformanceSummary(summaryData);
+      setSelectedObservationId((current) =>
+        observationData.some((observation) => observation.id === current)
+          ? current
+          : observationData[0]?.id ?? ""
+      );
     },
     []
   );
@@ -1058,6 +1068,11 @@ export default function HomePage() {
     if (!selectedOrganizationId) {
       setTeams([]);
       setEvents([]);
+      setMetricDefinitions([]);
+      setObservations([]);
+      setPerformanceIngestion(null);
+      setAssessments([]);
+      setPerformanceSummary(null);
       setTrainingDrills([]);
       setTrainingPlans([]);
       setTrainingSessions([]);
@@ -1700,7 +1715,11 @@ export default function HomePage() {
               organization_id: selectedOrganizationId,
               metric_definition_id: metric.id,
               event_id: selectedEventId || null,
-              ...observationForm
+              value: observationForm.value,
+              raw_value: observationForm.raw_value,
+              source: observationForm.source,
+              confidence: observationForm.confidence,
+              notes: observationForm.notes
             }
           }
         ),
@@ -1710,6 +1729,74 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== observation.id)
         ]);
         addLog(`Observation recorded: ${observation.value}`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const ingestPerformanceEvidence = () => {
+    const metric = metricDefinitions[0];
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || !metric) {
+      addLog("Select an athlete and create a metric first", "bad");
+      return;
+    }
+    runAction(
+      "ingest-performance-evidence",
+      () =>
+        apiRequest<PerformanceIngestionRead>("/performance/ingest", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            athlete_profile_id: selectedAthlete.athleteProfileId,
+            metric_definition_id: metric.id,
+            event_id: selectedEventId || null,
+            source: observationForm.source,
+            evidence_ref: observationForm.evidence_ref,
+            evidence_text: observationForm.evidence_text,
+            extracted_value: observationForm.value,
+            confidence: observationForm.confidence
+          }
+        }),
+      (ingestion) => {
+        setPerformanceIngestion(ingestion);
+        setObservations((current) => [
+          ingestion.observation,
+          ...current.filter((item) => item.id !== ingestion.observation.id)
+        ]);
+        setSelectedObservationId(ingestion.observation.id);
+        addLog(`${ingestion.extractor} queued observation review`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const reviewSelectedObservation = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || !selectedObservationId) {
+      addLog("Select an ingested observation first", "bad");
+      return;
+    }
+    runAction(
+      "review-performance-observation",
+      () =>
+        apiRequest<PerformanceObservationRead>(
+          `/performance/observations/${selectedObservationId}/review`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              verification_status: "verified",
+              value: observationForm.value,
+              notes: `Human reviewed from console. ${observationForm.notes}`
+            }
+          }
+        ),
+      (observation) => {
+        setObservations((current) => [
+          observation,
+          ...current.filter((item) => item.id !== observation.id)
+        ]);
+        addLog(`Observation verified: ${observation.value}`, "good");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
       }
     );
@@ -5384,6 +5471,8 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createMetricDefinition} disabled={busyAction !== null}>Metric</button>
                 <button type="button" onClick={recordObservation} disabled={busyAction !== null}>Observe</button>
+                <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
+                <button type="button" onClick={reviewSelectedObservation} disabled={busyAction !== null}>Review</button>
               </div>
             </div>
             <div className="form-grid">
@@ -5427,8 +5516,37 @@ export default function HomePage() {
                   <option value="agent_extracted">Agent extracted</option>
                 </select>
               </label>
+              <label className="wide-field">
+                Evidence ref
+                <input value={observationForm.evidence_ref} onChange={(event) => setObservationForm({ ...observationForm, evidence_ref: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Evidence text
+                <input value={observationForm.evidence_text} onChange={(event) => setObservationForm({ ...observationForm, evidence_text: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
+              {performanceIngestion ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{performanceIngestion.extractor}</strong>
+                    <span>{performanceIngestion.summary} · confidence {Math.round(performanceIngestion.confidence * 100)}%</span>
+                  </div>
+                </article>
+              ) : null}
+              {observations.slice(0, 4).map((observation) => (
+                <button
+                  type="button"
+                  key={observation.id}
+                  className={`task-card ${observation.id === selectedObservationId ? "selected" : ""}`}
+                  onClick={() => setSelectedObservationId(observation.id)}
+                >
+                  <div>
+                    <strong>{observation.source} · {observation.value}</strong>
+                    <span>{observation.verification_status} · {observation.notes ?? "Observation recorded"}</span>
+                  </div>
+                </button>
+              ))}
               {metricDefinitions.slice(0, 4).map((metric) => (
                 <article key={metric.id} className="task-card">
                   <div>

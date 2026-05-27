@@ -71,6 +71,34 @@ class PerformanceObservationRead(BaseModel):
     notes: str | None
 
 
+class PerformanceIngestionCreate(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID
+    metric_definition_id: UUID
+    event_id: UUID | None = None
+    source: MetricSource
+    evidence_ref: str = Field(min_length=2, max_length=500)
+    evidence_text: str | None = Field(default=None, max_length=8000)
+    extracted_value: float | None = None
+    observed_at: datetime | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class PerformanceIngestionRead(BaseModel):
+    observation: PerformanceObservationRead
+    evidence_ref: str
+    extractor: str
+    confidence: float
+    review_required: bool
+    summary: str
+
+
+class PerformanceObservationReviewCreate(BaseModel):
+    verification_status: MetricVerificationStatus
+    value: float | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 class AthleteAssessmentCreate(BaseModel):
     organization_id: UUID
     event_id: UUID | None = None

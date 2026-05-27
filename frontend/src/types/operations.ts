@@ -1081,6 +1081,15 @@ export type PerformanceObservationRead = {
   notes: string | null;
 };
 
+export type PerformanceIngestionRead = {
+  observation: PerformanceObservationRead;
+  evidence_ref: string;
+  extractor: string;
+  confidence: number;
+  review_required: boolean;
+  summary: string;
+};
+
 export type AthleteAssessmentRead = {
   id: UUID;
   organization_id: UUID;

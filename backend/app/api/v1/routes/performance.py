@@ -10,8 +10,11 @@ from app.schemas.performance import (
     AthletePerformanceSummaryRead,
     MetricDefinitionCreate,
     MetricDefinitionRead,
+    PerformanceIngestionCreate,
+    PerformanceIngestionRead,
     PerformanceObservationCreate,
     PerformanceObservationRead,
+    PerformanceObservationReviewCreate,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -20,10 +23,12 @@ from app.services.performance import (
     create_assessment,
     create_metric_definition,
     create_observation,
+    ingest_performance_evidence,
     list_assessments,
     list_metric_definitions,
     list_observations,
     performance_summary,
+    review_observation,
 )
 
 router = APIRouter(prefix="/performance", tags=["performance"])
@@ -120,6 +125,44 @@ async def create_observation_route(
 ) -> PerformanceObservationRead:
     return to_observation_read(
         await create_observation(db, identity, athlete_profile_id, payload, authz)
+    )
+
+
+@router.post(
+    "/ingest",
+    response_model=PerformanceIngestionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ingest_performance_evidence_route(
+    payload: PerformanceIngestionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceIngestionRead:
+    result = await ingest_performance_evidence(db, identity, payload, authz)
+    return PerformanceIngestionRead(
+        observation=to_observation_read(result["observation"]),
+        evidence_ref=result["evidence_ref"],
+        extractor=result["extractor"],
+        confidence=result["confidence"],
+        review_required=result["review_required"],
+        summary=result["summary"],
+    )
+
+
+@router.patch(
+    "/observations/{observation_id}/review",
+    response_model=PerformanceObservationRead,
+)
+async def review_observation_route(
+    observation_id: UUID,
+    payload: PerformanceObservationReviewCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceObservationRead:
+    return to_observation_read(
+        await review_observation(db, identity, observation_id, payload, authz)
     )
 
 

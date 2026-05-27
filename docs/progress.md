@@ -493,6 +493,23 @@ athlete-development platform:
   - Not tested in this fast slice: full backend test suite, frontend production
     build, Playwright screenshots, live model generation, availability
     calendars, and post-session feedback loops.
+- Implemented slice 028 performance ingestion and review:
+  - Added provider-neutral performance evidence ingestion for video analysis,
+    audio narration, text/manual evidence, wearable feeds, official stats, and
+    agent-extracted observations.
+  - Added deterministic metric value extraction, source-specific confidence,
+    extractor naming, evidence references, pending-review observations, and
+    ingestion summaries without adding new storage tables.
+  - Added human review workflow for ingested observations, including value
+    correction, verification status promotion/rejection, and review notes.
+  - Extended the operations console with evidence reference/text fields,
+    Ingest and Review controls, ingestion summary cards, and selectable
+    observation review cards.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, frontend production
+    build, Playwright screenshots, real video/audio/wearable provider parsing,
+    and model-backed extraction accuracy.
 
 ## Implementation Slices
 
@@ -526,6 +543,7 @@ athlete-development platform:
 | 025 - SaaS billing operations | Partial | Backend ruff; frontend typecheck; diff check | SaaS tax quotes, plan-change proration quotes, dunning notice preparation, payment webhook intake, invoice status mutation, and console controls are implemented; webhook signature validation, external dunning delivery, tax filing integrations, and full verification remain. |
 | 026 - Competition automation | Partial | Backend ruff; frontend typecheck; diff check | Round-robin fixture generation, bracket projections, conflict detection, and console controls are implemented; advanced tournament advancement, bracket visualization polish, optimization algorithms, and full verification remain. |
 | 027 - AI training plan generation | Partial | Backend ruff; frontend typecheck; diff check | AI-assisted plan generation from readiness, assessments, observations, drills, and upcoming competition fixtures is implemented with generated blocks and console controls; live model generation, availability calendars, post-session feedback, and full verification remain. |
+| 028 - Performance ingestion and review | Partial | Backend ruff; frontend typecheck; diff check | Provider-neutral evidence ingestion, deterministic value extraction, pending-review observations, human review/correction, and console controls are implemented; real provider parsers, model-backed extraction, and full verification remain. |
 
 ## Capability Coverage
 
@@ -542,8 +560,8 @@ Status values:
 | Person identity and athlete profiles | partial | `Person`, `AppUser`, and `AthleteProfile` models added; Keycloak token claims provision `AppUser` and `Person` identities. |
 | Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
-| Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, and console workflows are implemented. |
-| AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, and console workflows are implemented; live provider workers, model credential vaulting, run history tables, and model governance remain. |
+| Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, provider-neutral evidence ingestion, pending-review observations, human review/correction, and console workflows are implemented. |
+| AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, provider-neutral performance evidence ingestion, and console workflows are implemented; live provider workers, model credential vaulting, run history tables, model-backed extraction, and model governance remain. |
 | Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, AI-assisted plan generation from readiness/performance/competition context, and console workflows are implemented; live model generation, availability calendars, and post-session feedback loops remain. |
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, round-robin fixture generation, bracket projections, conflict detection, and console workflows are implemented; advanced tournament advancement, bracket visualization polish, optimization algorithms, ticketing, and broadcast operations remain. |
 | Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, digest generation, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, background digest scheduler, and full parent portal remain. |
@@ -578,7 +596,7 @@ Status values:
    leagues and tournaments.
 9. Add live-model training-plan generation, availability calendars, readiness
    check-ins, and post-session feedback loops.
-10. Add automated ingestion pipelines for video, audio narration, text
-   evaluation, wearable feeds, and agent-extracted metric review.
+10. Add real provider parsers for video, audio narration, text evaluation, and
+   wearable feeds, plus model-backed extraction accuracy evaluation.
 11. Add live AI provider workers, credential vaulting, run history tables, and
    AI governance telemetry.
