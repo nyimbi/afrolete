@@ -18,6 +18,11 @@ normalizes plain PostgreSQL URLs to the async driver required by FastAPI at
 runtime. Unit tests override persistence to an in-memory SQLite database for
 fast isolated test runs.
 
+Local development uses `AFROLETE_AUTH_MODE=local`, which accepts explicit
+`X-Afrolete-*` identity headers from tests and trusted local tools. Set
+`AFROLETE_AUTH_MODE=keycloak` in deployed environments so the API requires a
+Bearer token signed by the configured Keycloak realm and audience.
+
 ## Responsibilities
 
 - Domain API and OpenAPI contract.

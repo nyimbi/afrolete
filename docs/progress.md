@@ -96,6 +96,17 @@ athlete-development platform:
   - SpiceDB event participant and guardian relations now support `person`
     subjects, not only application users.
   - Verification: `uv run ruff check .`, `uv run pytest`.
+- Implemented slice 006 Keycloak bearer-token authentication:
+  - Added `AFROLETE_AUTH_MODE=keycloak` so deployed APIs require bearer tokens
+    instead of local identity headers.
+  - Added Keycloak JWKS retrieval, signing-key selection by token `kid`, fixed
+    algorithm allow-listing, issuer validation, audience validation, and
+    required `exp`/`iat`/`sub` claims.
+  - User provisioning now remains behind the existing identity bridge, fed by
+    verified token claims instead of test headers.
+  - Local development keeps `AFROLETE_AUTH_MODE=local` for trusted local tools
+    and unit tests.
+  - Verification: `uv run ruff check .`, `uv run pytest`.
 
 ## Implementation Slices
 
@@ -103,10 +114,11 @@ athlete-development platform:
 | --- | --- | --- | --- |
 | 000 - Fresh V2 repository | Complete | Commit `d723d61`; commit `0affab9` | Repo initialized, README charter pushed. |
 | 001 - Executable SaaS foundation | Complete | Slice 001 foundation commit | Backend/frontend/infra starter code added and verified. |
-| 002 - Identity, tenant, and authorization vertical | Partial | Backend tests 11/11 | Tenant graph, local identity bridge, authz boundary, organization APIs, team APIs, and committee APIs implemented; production Keycloak/SpiceDB adapters and migrations remain. |
+| 002 - Identity, tenant, and authorization vertical | Partial | Backend tests 22/22 | Tenant graph, authz boundary, Keycloak bearer-token validation, user provisioning, organization APIs, team APIs, and committee APIs implemented; production SpiceDB adapter remains. |
 | 003 - Database migration baseline | Complete | Alembic upgrade/downgrade; backend tests 11/11 | Baseline revision captures the current schema; production execution against `db.lindela.io` remains a deployment task. |
 | 004 - Safeguarding, consent, and tenant branding | Partial | Local PostgreSQL migration verified; backend tests 14/14 | Backend model/API support for guardians, consent requests, consent capture channels, minor event clearance, and branded organization sites. |
 | 005 - Event scheduling and attendance | Partial | Backend tests 16/16 | Event APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in implemented; frontend event workflows remain. |
+| 006 - Keycloak authentication | Partial | Backend tests 22/22 | Keycloak JWT validation and user provisioning are implemented behind runtime mode; frontend sign-in and live realm smoke test remain. |
 
 ## Capability Coverage
 
@@ -120,7 +132,7 @@ Status values:
 | Capability Area | Status | Notes |
 | --- | --- | --- |
 | Tenant organizations, clubs, schools, associations | partial | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph; organization branding/contact/subdomain fields support owned public sites. |
-| Person identity and athlete profiles | foundation | `Person`, `AppUser`, and `AthleteProfile` models added. |
+| Person identity and athlete profiles | partial | `Person`, `AppUser`, and `AthleteProfile` models added; Keycloak token claims provision `AppUser` and `Person` identities. |
 | Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
 | Performance metrics and assessments | not-started | To follow after core operating vertical. |
@@ -132,17 +144,16 @@ Status values:
 | Equipment, facilities, assets | not-started | Future slice. |
 | Finance, sponsorship, fundraising, ticketing | not-started | Future slice. |
 | Reports and intelligence | not-started | Future slice. |
-| Integrations and webhooks | not-started | Future slice. |
+| Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation is implemented; other integrations remain future slices. |
 | SaaS billing/subscriptions | not-started | Future slice. |
 | Beautiful operational UI/UX | foundation | First command-center UI shell added. |
 
 ## Next Actions
 
-1. Commit and push slice 005 event scheduling and attendance.
-2. Replace local/test identity bridge with Keycloak token validation and user
-   provisioning rules.
-3. Replace in-memory authorization with a live SpiceDB client adapter and
+1. Commit and push slice 006 Keycloak bearer-token authentication.
+2. Replace in-memory authorization with a live SpiceDB client adapter and
    relationship writer.
-4. Add frontend flows for organization branding, event scheduling, roster
+3. Add frontend flows for organization branding, event scheduling, roster
    attendance, guardian consent links, and event clearance review.
+4. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
 5. Continue athlete profile workflows into performance metrics and assessments.
