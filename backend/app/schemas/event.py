@@ -423,6 +423,37 @@ class EventTravelReadinessRead(BaseModel):
     pending_consent_request_count: int
 
 
+class EventTravelRouteOptimizationCreate(BaseModel):
+    strategy: str = Field(default="balanced", pattern="^(balanced|fastest|safest|carpool_dense)$")
+    include_carpools: bool = True
+    avoid_weather_risk: bool = True
+
+
+class EventTravelRouteStopRead(BaseModel):
+    sequence: int
+    stop_type: str
+    label: str
+    location: str
+    pickup_window_start: datetime | None = None
+    pickup_window_end: datetime | None = None
+    seats: int = 0
+    notes: str | None = None
+
+
+class EventTravelRouteOptimizationRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    strategy: str
+    destination: str
+    stop_count: int
+    recommended_departure_at: datetime | None
+    estimated_duration_minutes: int
+    risk_level: TravelRiskLevel
+    warnings: list[str]
+    route_summary: str
+    stops: list[EventTravelRouteStopRead]
+
+
 class AttendanceRecordUpsert(BaseModel):
     person_id: UUID
     status: AttendanceStatus

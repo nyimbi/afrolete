@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -69,6 +69,9 @@ from app.schemas.event import (
     EventTravelPlanCreate,
     EventTravelPlanUpdate,
     EventTravelReadinessRead,
+    EventTravelRouteOptimizationCreate,
+    EventTravelRouteOptimizationRead,
+    EventTravelRouteStopRead,
     EventWeatherAlertCreate,
     EventWeatherAssessmentCreate,
     AttendanceRecordUpsert,
@@ -1134,6 +1137,99 @@ async def get_travel_readiness(
     )
 
 
+async def optimize_travel_route(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelRouteOptimizationCreate,
+    authz: AuthorizationService,
+) -> EventTravelRouteOptimizationRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+
+    risk_level, risk_assessment = classify_travel_plan(plan)
+    warnings = [
+        line
+        for line in risk_assessment.splitlines()
+        if line and not line.startswith("Passenger manifest, staff manifest")
+    ]
+    stops: list[EventTravelRouteStopRead] = [
+        EventTravelRouteStopRead(
+            sequence=1,
+            stop_type="origin",
+            label="Team departure",
+            location=travel_origin_label(plan),
+            pickup_window_start=plan.departure_at,
+            seats=0,
+            notes=plan.route_summary,
+        )
+    ]
+
+    if payload.include_carpools:
+        rides = (
+            await db.scalars(
+                select(EventTravelCarpoolRide)
+                .where(
+                    EventTravelCarpoolRide.travel_plan_id == plan.id,
+                    EventTravelCarpoolRide.status.in_(["open", "matched", "confirmed"]),
+                )
+                .order_by(
+                    EventTravelCarpoolRide.departure_window_start,
+                    EventTravelCarpoolRide.pickup_location,
+                )
+            )
+        ).all()
+        for ride in rides:
+            stops.append(
+                EventTravelRouteStopRead(
+                    sequence=len(stops) + 1,
+                    stop_type=f"carpool_{ride.ride_type}",
+                    label=f"{ride.ride_type.title()} pickup",
+                    location=ride.pickup_location,
+                    pickup_window_start=ride.departure_window_start,
+                    pickup_window_end=ride.departure_window_end,
+                    seats=ride.seats_available or ride.seats_requested,
+                    notes=ride.notes,
+                )
+            )
+        if not rides:
+            warnings.append("No open, matched, or confirmed carpool stops are available for route optimization.")
+
+    stops.append(
+        EventTravelRouteStopRead(
+            sequence=len(stops) + 1,
+            stop_type="destination",
+            label="Destination",
+            location=plan.destination,
+            pickup_window_start=plan.return_at,
+            seats=0,
+            notes=plan.medical_access_plan,
+        )
+    )
+    stops = resequence_stops(stops)
+    estimated_duration_minutes = estimate_travel_duration_minutes(payload.strategy, len(stops), risk_level)
+    recommended_departure_at = optimized_departure_time(plan.departure_at, stops, estimated_duration_minutes)
+    if payload.avoid_weather_risk and risk_level in {TravelRiskLevel.HIGH, TravelRiskLevel.CRITICAL}:
+        warnings.append("Use safest routing with weather monitoring, backup stops, and guardian updates before departure.")
+
+    return EventTravelRouteOptimizationRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        strategy=payload.strategy,
+        destination=plan.destination,
+        stop_count=len(stops),
+        recommended_departure_at=recommended_departure_at,
+        estimated_duration_minutes=estimated_duration_minutes,
+        risk_level=risk_level,
+        warnings=warnings,
+        route_summary=route_optimization_summary(payload.strategy, stops, estimated_duration_minutes, risk_level),
+        stops=stops,
+    )
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -1365,6 +1461,70 @@ async def count_travel_checklist_items(db: AsyncSession, travel_plan_id: UUID, s
     if status_value is not None:
         query = query.where(EventTravelChecklistItem.status == status_value)
     return int(await db.scalar(query) or 0)
+
+
+def travel_origin_label(plan: EventTravelPlan) -> str:
+    if plan.route_summary:
+        return plan.route_summary.splitlines()[0][:240]
+    if plan.staff_manifest:
+        return "Team assembly point from staff manifest"
+    return "Team assembly point"
+
+
+def resequence_stops(stops: list[EventTravelRouteStopRead]) -> list[EventTravelRouteStopRead]:
+    carpool_stops = sorted(
+        [stop for stop in stops if stop.stop_type.startswith("carpool")],
+        key=lambda stop: (stop.pickup_window_start or datetime.max.replace(tzinfo=UTC), stop.location),
+    )
+    ordered = [
+        *[stop for stop in stops if stop.stop_type == "origin"],
+        *carpool_stops,
+        *[stop for stop in stops if stop.stop_type == "destination"],
+    ]
+    return [stop.model_copy(update={"sequence": index}) for index, stop in enumerate(ordered, start=1)]
+
+
+def estimate_travel_duration_minutes(strategy: str, stop_count: int, risk_level: TravelRiskLevel) -> int:
+    base_minutes = 30 if strategy == "fastest" else 45
+    per_stop_minutes = 6 if strategy == "fastest" else 10
+    if strategy == "safest":
+        base_minutes += 20
+        per_stop_minutes += 4
+    if strategy == "carpool_dense":
+        per_stop_minutes += 8
+    if risk_level == TravelRiskLevel.HIGH:
+        base_minutes += 20
+    if risk_level == TravelRiskLevel.CRITICAL:
+        base_minutes += 45
+    return base_minutes + max(stop_count - 1, 0) * per_stop_minutes
+
+
+def optimized_departure_time(
+    planned_departure_at: datetime | None,
+    stops: list[EventTravelRouteStopRead],
+    estimated_duration_minutes: int,
+) -> datetime | None:
+    pickup_times = [stop.pickup_window_start for stop in stops if stop.pickup_window_start is not None]
+    if pickup_times:
+        return min(pickup_times)
+    if planned_departure_at is None:
+        return None
+    return planned_departure_at - timedelta(minutes=max(estimated_duration_minutes - 30, 0))
+
+
+def route_optimization_summary(
+    strategy: str,
+    stops: list[EventTravelRouteStopRead],
+    estimated_duration_minutes: int,
+    risk_level: TravelRiskLevel,
+) -> str:
+    stop_labels = " -> ".join(stop.location for stop in stops[:5])
+    if len(stops) > 5:
+        stop_labels += f" -> +{len(stops) - 5} more"
+    return (
+        f"{strategy.replace('_', ' ')} route with {len(stops)} stops, "
+        f"estimated {estimated_duration_minutes} minutes, {risk_level.value} travel risk: {stop_labels}"
+    )
 
 
 async def travel_location_update_read(

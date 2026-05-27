@@ -634,6 +634,31 @@ export type EventTravelReadinessRead = {
   pending_consent_request_count: number;
 };
 
+export type EventTravelRouteStopRead = {
+  sequence: number;
+  stop_type: string;
+  label: string;
+  location: string;
+  pickup_window_start: string | null;
+  pickup_window_end: string | null;
+  seats: number;
+  notes: string | null;
+};
+
+export type EventTravelRouteOptimizationRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  strategy: string;
+  destination: string;
+  stop_count: number;
+  recommended_departure_at: string | null;
+  estimated_duration_minutes: number;
+  risk_level: TravelRiskLevel;
+  warnings: string[];
+  route_summary: string;
+  stops: EventTravelRouteStopRead[];
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

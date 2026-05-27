@@ -83,6 +83,7 @@ import type {
   EventTravelManifestRead,
   EventTravelPlanRead,
   EventTravelReadinessRead,
+  EventTravelRouteOptimizationRead,
   EventWeatherAlertRead,
   EventWeatherAssessmentRead,
   EventType,
@@ -363,6 +364,7 @@ export default function HomePage() {
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
   const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
   const [travelReadiness, setTravelReadiness] = useState<EventTravelReadinessRead | null>(null);
+  const [travelRouteOptimization, setTravelRouteOptimization] = useState<EventTravelRouteOptimizationRead | null>(null);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -612,6 +614,7 @@ export default function HomePage() {
     carpool_window_start: "2026-05-28T07:00",
     carpool_window_end: "2026-05-28T07:30",
     carpool_notes: "Match families near the west side pickup zone.",
+    route_strategy: "balanced",
     notes: "Away match travel plan."
   });
   const [guardianForm, setGuardianForm] = useState({
@@ -1621,6 +1624,7 @@ export default function HomePage() {
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
       setTravelReadiness(null);
+      setTravelRouteOptimization(null);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1833,6 +1837,7 @@ export default function HomePage() {
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
       setTravelReadiness(null);
+      setTravelRouteOptimization(null);
       return;
     }
     runAction(
@@ -2401,6 +2406,29 @@ export default function HomePage() {
             ? `${plan.destination} is ready for departure`
             : `${readiness.blockers.length} departure blocker(s) found`,
           readiness.ready ? "good" : "bad"
+        );
+      }
+    );
+  };
+
+  const optimizeTravelRoute = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-route-optimization-${plan.id}`,
+      () =>
+        apiRequest<EventTravelRouteOptimizationRead>(`/events/travel-plans/${plan.id}/route-optimization`, {
+          method: "POST",
+          identity,
+          body: {
+            strategy: travelForm.route_strategy,
+            include_carpools: true,
+            avoid_weather_risk: true
+          }
+        }),
+      (optimization) => {
+        setTravelRouteOptimization(optimization);
+        addLog(
+          `Route optimized: ${optimization.stop_count} stops, ${optimization.estimated_duration_minutes} min`,
+          optimization.risk_level === "high" || optimization.risk_level === "critical" ? "bad" : "good"
         );
       }
     );
@@ -7162,6 +7190,15 @@ export default function HomePage() {
                 Pickup end
                 <input type="datetime-local" value={travelForm.carpool_window_end} onChange={(event) => setTravelForm({ ...travelForm, carpool_window_end: event.target.value })} />
               </label>
+              <label>
+                Route strategy
+                <select value={travelForm.route_strategy} onChange={(event) => setTravelForm({ ...travelForm, route_strategy: event.target.value })}>
+                  <option value="balanced">Balanced</option>
+                  <option value="fastest">Fastest</option>
+                  <option value="safest">Safest</option>
+                  <option value="carpool_dense">Carpool dense</option>
+                </select>
+              </label>
               <label className="wide-field">
                 Route
                 <input value={travelForm.route_summary} onChange={(event) => setTravelForm({ ...travelForm, route_summary: event.target.value })} />
@@ -7228,6 +7265,15 @@ export default function HomePage() {
                       {travelReadiness.pending_approval_count} approvals · {travelReadiness.pending_checklist_count} checklist · {travelReadiness.pending_consent_request_count} consents pending
                     </span>
                     <span>{travelReadiness.blockers[0] ?? travelReadiness.warnings[0] ?? "No readiness warnings"}</span>
+                  </div>
+                </article>
+              ) : null}
+              {travelRouteOptimization ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelRouteOptimization.strategy} route · {travelRouteOptimization.stop_count} stops</strong>
+                    <span>{travelRouteOptimization.estimated_duration_minutes} min · depart {travelRouteOptimization.recommended_departure_at ? new Date(travelRouteOptimization.recommended_departure_at).toLocaleString() : "not set"}</span>
+                    <span>{travelRouteOptimization.route_summary}</span>
                   </div>
                 </article>
               ) : null}
@@ -7317,6 +7363,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => loadTravelManifest(plan)}>Manifest</button>
                     <button type="button" onClick={() => exportTravelManifest(plan)}>Export</button>
                     <button type="button" onClick={() => checkTravelReadiness(plan)}>Gate</button>
+                    <button type="button" onClick={() => optimizeTravelRoute(plan)}>Optimize</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
                     <button type="button" onClick={() => createTravelApproval(plan)}>Require</button>
                     <button type="button" onClick={() => loadTravelApprovals(plan)}>Approvals</button>

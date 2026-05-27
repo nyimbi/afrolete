@@ -37,6 +37,8 @@ from app.schemas.event import (
     EventTravelPlanRead,
     EventTravelPlanUpdate,
     EventTravelReadinessRead,
+    EventTravelRouteOptimizationCreate,
+    EventTravelRouteOptimizationRead,
     EventWeatherAlertCreate,
     EventWeatherAlertRead,
     EventWeatherAssessmentCreate,
@@ -68,6 +70,7 @@ from app.services.events import (
     list_events,
     list_travel_plans,
     list_weather_assessments,
+    optimize_travel_route,
     record_attendance,
     request_travel_consents,
     seed_attendance_from_team_roster,
@@ -334,6 +337,17 @@ async def get_travel_readiness_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelReadinessRead:
     return await get_travel_readiness(db, identity, travel_plan_id, authz)
+
+
+@router.post("/travel-plans/{travel_plan_id}/route-optimization", response_model=EventTravelRouteOptimizationRead)
+async def optimize_travel_route_route(
+    travel_plan_id: UUID,
+    payload: EventTravelRouteOptimizationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelRouteOptimizationRead:
+    return await optimize_travel_route(db, identity, travel_plan_id, payload, authz)
 
 
 @router.post(
