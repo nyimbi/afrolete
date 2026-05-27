@@ -10,6 +10,7 @@ import {
   type AuthSession
 } from "@/lib/auth";
 import { afroleteAuthMode, apiBaseUrl, keycloakClientId, keycloakIssuer } from "@/lib/config";
+import type { InfrastructureComponent, InfrastructureStatus } from "@/types/platform";
 import type {
   AgentAssignmentRead,
   AgentBiasAuditRead,
@@ -424,6 +425,16 @@ type InquiryReviewForm = {
 };
 
 const chartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--red)", "var(--violet)"];
+
+function infrastructureTone(component: InfrastructureComponent) {
+  if (component.configured || component.status === "local") {
+    return "ready";
+  }
+  if (component.status === "standby") {
+    return "standby";
+  }
+  return "attention";
+}
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -843,6 +854,7 @@ export default function HomePage() {
   const [selectedSaasInvoiceId, setSelectedSaasInvoiceId] = useState("");
   const [emergencyAlert, setEmergencyAlert] = useState<EmergencyActivationAlertRead | null>(null);
   const [selectedEquipmentFile, setSelectedEquipmentFile] = useState<File | null>(null);
+  const [infrastructureStatus, setInfrastructureStatus] = useState<InfrastructureStatus | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -1425,6 +1437,10 @@ export default function HomePage() {
     [equipmentItems, selectedEquipmentId]
   );
   const keycloakEnabled = afroleteAuthMode === "keycloak";
+  const infrastructureReadyCount =
+    infrastructureStatus?.components.filter((component) => infrastructureTone(component) === "ready").length ?? 0;
+  const infrastructureAttentionCount =
+    infrastructureStatus?.components.filter((component) => infrastructureTone(component) === "attention").length ?? 0;
 
   const addLog = useCallback((message: string, tone: LogEntry["tone"] = "neutral") => {
     setLogs((current) => [
@@ -1952,6 +1968,12 @@ export default function HomePage() {
     );
   }, []);
 
+  const loadInfrastructure = useCallback(async () => {
+    const data = await apiRequest<InfrastructureStatus>("/infrastructure");
+    setInfrastructureStatus(data);
+    return data;
+  }, []);
+
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.localIdentity");
     if (stored) {
@@ -2011,6 +2033,18 @@ export default function HomePage() {
     }
     runAction("load-organizations", loadOrganizations, () => addLog("Workspace synchronized", "good"));
   }, [authSession, keycloakEnabled, loadOrganizations, runAction, addLog]);
+
+  useEffect(() => {
+    runAction("load-infrastructure", loadInfrastructure, (status) => {
+      const attentionCount = status.components.filter((component) => infrastructureTone(component) === "attention").length;
+      addLog(
+        attentionCount > 0
+          ? `${attentionCount} infrastructure dependency needs configuration`
+          : "Infrastructure readiness synchronized",
+        attentionCount > 0 ? "bad" : "good"
+      );
+    });
+  }, [loadInfrastructure, runAction, addLog]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -8430,6 +8464,64 @@ export default function HomePage() {
             </button>
           </div>
         </header>
+
+        <section className="infrastructure-ribbon" aria-label="Infrastructure readiness">
+          <div className="infra-summary">
+            <p className="section-label">Infrastructure</p>
+            <strong>
+              {infrastructureStatus
+                ? `${infrastructureReadyCount}/${infrastructureStatus.components.length} ready`
+                : "Checking runtime"}
+            </strong>
+            <span>
+              {infrastructureStatus
+                ? `${infrastructureStatus.environment} · ${infrastructureAttentionCount} attention`
+                : "Postgres, Keycloak, SpiceDB, OpenBao, object storage, Redis, Temporal"}
+            </span>
+          </div>
+          <div className="infra-strip">
+            {(infrastructureStatus?.components ?? []).map((component) => {
+              const tone = infrastructureTone(component);
+              return (
+                <article className={`infra-chip ${tone}`} key={component.key}>
+                  <div>
+                    <strong>{component.name}</strong>
+                    <span>{component.mode} · {component.status}</span>
+                  </div>
+                  <small>{component.endpoint ?? component.details[0] ?? "not set"}</small>
+                </article>
+              );
+            })}
+            {!infrastructureStatus ? (
+              <article className="infra-chip standby">
+                <div>
+                  <strong>Runtime</strong>
+                  <span>loading · configuration</span>
+                </div>
+                <small>{apiBaseUrl.replace("http://", "")}</small>
+              </article>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              void runAction("load-infrastructure", loadInfrastructure, (status) => {
+                const attentionCount = status.components.filter(
+                  (component) => infrastructureTone(component) === "attention"
+                ).length;
+                addLog(
+                  attentionCount > 0
+                    ? `${attentionCount} infrastructure dependency needs configuration`
+                    : "Infrastructure readiness synchronized",
+                  attentionCount > 0 ? "bad" : "good"
+                );
+              })
+            }
+            disabled={busyAction !== null}
+          >
+            Refresh
+          </button>
+        </section>
 
         <section className="operator-grid" aria-label="Workspace summary">
           <form className="panel identity-panel" onSubmit={(event) => event.preventDefault()}>
