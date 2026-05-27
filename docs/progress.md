@@ -444,6 +444,22 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
   - Not tested in this fast slice: full backend test suite, frontend production
     build, Playwright screenshots, and real binary PDF/Excel file generation.
+- Implemented slice 025 SaaS billing operations:
+  - Added localized SaaS tax quote estimates with jurisdiction rates,
+    reverse-charge support, totals, and filing hints.
+  - Added subscription plan-change proration quotes with remaining-period
+    credits, new charges, net amount, and recommendations.
+  - Added dunning notice preparation for overdue SaaS invoices with severity,
+    channel, amount due, message, and next action.
+  - Added provider-neutral payment webhook intake for succeeded invoice payment
+    events, including invoice status mutation and payment records.
+  - Extended the operations console with Tax, Prorate, Dunning, and Webhook
+    controls plus result cards for tax, proration, dunning, and webhook intake.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, frontend production
+    build, Playwright screenshots, real Stripe/webhook signature validation,
+    external dunning delivery, and jurisdiction-specific filing integrations.
 
 ## Implementation Slices
 
@@ -474,6 +490,7 @@ athlete-development platform:
 | 022 - Asset procurement and utilization intelligence | Partial | Backend tests 45/45; frontend typecheck/build | Scan lookup, photo metadata updates, procurement recommendations, supplier scorecards, lease quotes, utilization recommendations, and console controls are implemented; supplier ordering workflows, file uploads, RFID hardware integration, and accounting lease billing remain. |
 | 023 - Commercial finance controls | Partial | Backend tests 46/46; frontend typecheck/build | Tax quote estimates, settlement summaries, ticket refunds, invoice refunds, accounting export rows, sponsorship dashboard metrics, and console controls are implemented; live payment provider webhooks, tax authority filing, accounting API sync, and sponsor-facing dashboards remain. |
 | 024 - Reporting output intelligence | Partial | Backend ruff; frontend typecheck; diff check | Report artifact rendering metadata, verification scoring, chart-ready summaries, benchmark models, deterministic AI review insights, and console controls are implemented; real binary PDF/Excel generation, report file storage, visual chart rendering, and full verification remain. |
+| 025 - SaaS billing operations | Partial | Backend ruff; frontend typecheck; diff check | SaaS tax quotes, plan-change proration quotes, dunning notice preparation, payment webhook intake, invoice status mutation, and console controls are implemented; webhook signature validation, external dunning delivery, tax filing integrations, and full verification remain. |
 
 ## Capability Coverage
 
@@ -500,7 +517,7 @@ Status values:
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, settlement summaries, refunds, tax quotes, accounting exports, sponsorship dashboards, commercial summary, and console workflows are implemented; live payment provider webhooks, tax authority filing, accounting API sync, and sponsor-facing dashboards remain. |
 | Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, artifact rendering metadata, verification scoring, chart-ready summaries, benchmark models, deterministic AI review insights, and console workflows are implemented; real AI model execution, binary PDF/Excel generation, file storage, visual chart rendering, and full verification remain. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation, frontend PKCE session handling, and SpiceDB gRPC authorization adapter are implemented; live service smoke tests and other integrations remain future slices. |
-| SaaS billing/subscriptions | partial | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, and console workflows are implemented; Stripe/processor webhooks, dunning automation, tax localization, plan-change proration, and full verification remain. |
+| SaaS billing/subscriptions | partial | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, tax quotes, proration quotes, dunning notice preparation, payment webhook intake, and console workflows are implemented; webhook signature validation, external dunning delivery, tax filing integrations, and full verification remain. |
 | Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, commerce, reports, billing, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
 
 ## Next Actions
@@ -518,8 +535,9 @@ Status values:
 6. Replace deterministic report artifact previews with real PDF/Excel file
    generation, report file storage, chart visualization components, live
    AI-generated insights, and report verification coverage.
-7. Add Stripe/payment-processor webhooks, dunning automation, tax localization,
-   plan-change proration, and full billing verification coverage.
+7. Add payment webhook signature validation, external dunning delivery,
+   jurisdiction-specific tax filing integrations, plan-change application
+   workflows, and full billing verification coverage.
 8. Add automated fixture generation, bracket visualization, and scheduling
    conflict checks for leagues and tournaments.
 9. Add automated training-plan generation from performance trends, readiness,

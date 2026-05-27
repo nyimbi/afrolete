@@ -131,6 +131,68 @@ class SaaSPaymentRead(SaaSPaymentCreate):
     status: str
 
 
+class BillingTaxQuoteRead(BaseModel):
+    organization_id: UUID
+    jurisdiction: str
+    subtotal: Decimal
+    tax_rate: Decimal
+    tax_amount: Decimal
+    total: Decimal
+    reverse_charge: bool
+    filing_hint: str
+
+
+class BillingProrationQuoteRead(BaseModel):
+    organization_id: UUID
+    subscription_id: UUID
+    current_price: Decimal
+    new_price: Decimal
+    effective_on: date
+    period_start: date
+    period_end: date
+    remaining_days: int
+    total_days: int
+    unused_credit: Decimal
+    new_charge: Decimal
+    net_amount: Decimal
+    recommendation: str
+
+
+class BillingDunningNoticeRead(BaseModel):
+    organization_id: UUID
+    invoice_id: UUID
+    invoice_number: str
+    days_overdue: int
+    amount_due: Decimal
+    severity: str
+    channel: str
+    message: str
+    next_action: str
+
+
+class BillingPaymentWebhookCreate(BaseModel):
+    organization_id: UUID
+    invoice_id: UUID
+    provider: str = Field(min_length=2, max_length=80)
+    event_type: str = Field(min_length=2, max_length=120)
+    status: str = Field(default="succeeded", min_length=2, max_length=40)
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    external_payment_id: str = Field(min_length=2, max_length=180)
+    raw_reference: str | None = Field(default=None, max_length=500)
+
+
+class BillingPaymentWebhookRead(BaseModel):
+    organization_id: UUID
+    invoice_id: UUID
+    provider: str
+    event_type: str
+    accepted: bool
+    payment_id: UUID | None
+    invoice_status: BillingInvoiceStatus
+    amount_paid: Decimal
+    message: str
+
+
 class BillingEntitlementCreate(BaseModel):
     organization_id: UUID
     subscription_id: UUID

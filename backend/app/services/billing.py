@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -19,6 +19,7 @@ from app.models.enums import BillingInvoiceStatus, SubscriptionStatus
 from app.models.organization import Organization
 from app.schemas.billing import (
     BillingEntitlementCreate,
+    BillingPaymentWebhookCreate,
     BillingPlanCreate,
     SaaSInvoiceCreate,
     SaaSPaymentCreate,
@@ -197,6 +198,137 @@ async def record_payment(
     return payment
 
 
+async def billing_tax_quote(
+    organization_id: UUID,
+    subtotal: Decimal,
+    jurisdiction: str,
+    reverse_charge: bool,
+) -> dict:
+    normalized = jurisdiction.upper()
+    tax_rate = Decimal("0") if reverse_charge else localized_tax_rate(normalized)
+    tax_amount = money(subtotal * tax_rate / Decimal("100"))
+    return {
+        "organization_id": organization_id,
+        "jurisdiction": normalized,
+        "subtotal": money(subtotal),
+        "tax_rate": tax_rate,
+        "tax_amount": tax_amount,
+        "total": money(subtotal + tax_amount),
+        "reverse_charge": reverse_charge,
+        "filing_hint": filing_hint(normalized, reverse_charge),
+    }
+
+
+async def proration_quote(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    subscription_id: UUID,
+    new_price: Decimal,
+    effective_on: date,
+    authz: AuthorizationService,
+) -> dict:
+    await ensure_manage_billing(authz, identity, organization_id)
+    subscription = await get_subscription_for_organization(db, subscription_id, organization_id)
+    plan = await get_plan(db, subscription.billing_plan_id)
+    current_price = subscription.negotiated_price or plan.base_price
+    period_days = max((subscription.current_period_end - subscription.current_period_start).days + 1, 1)
+    bounded_effective = min(max(effective_on, subscription.current_period_start), subscription.current_period_end)
+    remaining_days = max((subscription.current_period_end - bounded_effective).days + 1, 0)
+    ratio = Decimal(remaining_days) / Decimal(period_days)
+    unused_credit = money(current_price * ratio)
+    new_charge = money(new_price * ratio)
+    net_amount = money(new_charge - unused_credit)
+    return {
+        "organization_id": organization_id,
+        "subscription_id": subscription.id,
+        "current_price": money(current_price),
+        "new_price": money(new_price),
+        "effective_on": bounded_effective,
+        "period_start": subscription.current_period_start,
+        "period_end": subscription.current_period_end,
+        "remaining_days": remaining_days,
+        "total_days": period_days,
+        "unused_credit": unused_credit,
+        "new_charge": new_charge,
+        "net_amount": net_amount,
+        "recommendation": proration_recommendation(net_amount),
+    }
+
+
+async def dunning_notice(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    invoice_id: UUID,
+    authz: AuthorizationService,
+) -> dict:
+    await ensure_manage_billing(authz, identity, organization_id)
+    invoice = await get_invoice_for_organization(db, invoice_id, organization_id)
+    amount_due = money(max(invoice.total - invoice.amount_paid, Decimal("0")))
+    today = date.today()
+    days_overdue = max((today - invoice.due_on).days, 0) if invoice.due_on else 0
+    severity = "final" if days_overdue >= 30 else "urgent" if days_overdue >= 14 else "reminder"
+    channel = "email+in_app" if severity == "reminder" else "email+sms+in_app"
+    next_action = "pause_nonessential_entitlements" if severity == "final" else "retry_payment"
+    return {
+        "organization_id": organization_id,
+        "invoice_id": invoice.id,
+        "invoice_number": invoice.invoice_number,
+        "days_overdue": days_overdue,
+        "amount_due": amount_due,
+        "severity": severity,
+        "channel": channel,
+        "message": (
+            f"Invoice {invoice.invoice_number} has {amount_due} {invoice.currency} outstanding. "
+            f"Please settle to keep AfroLete services active."
+        ),
+        "next_action": next_action,
+    }
+
+
+async def ingest_payment_webhook(db: AsyncSession, payload: BillingPaymentWebhookCreate) -> dict:
+    invoice = await get_invoice_for_organization(db, payload.invoice_id, payload.organization_id)
+    accepted = payload.status == "succeeded" and payload.event_type in {
+        "payment.succeeded",
+        "invoice.paid",
+        "charge.succeeded",
+    }
+    payment: SaaSPayment | None = None
+    if accepted:
+        payment = SaaSPayment(
+            organization_id=payload.organization_id,
+            invoice_id=payload.invoice_id,
+            amount=payload.amount,
+            currency=invoice.currency,
+            provider=payload.provider,
+            external_payment_id=payload.external_payment_id,
+            received_at=datetime.now(UTC),
+            status="succeeded",
+            notes=payload.raw_reference,
+        )
+        invoice.amount_paid += payload.amount
+        invoice.status = (
+            BillingInvoiceStatus.PAID
+            if invoice.amount_paid >= invoice.total
+            else BillingInvoiceStatus.PARTIAL
+        )
+        db.add(payment)
+        await db.commit()
+        await db.refresh(payment)
+    return {
+        "organization_id": payload.organization_id,
+        "invoice_id": payload.invoice_id,
+        "provider": payload.provider,
+        "event_type": payload.event_type,
+        "accepted": accepted,
+        "payment_id": payment.id if payment else None,
+        "invoice_status": invoice.status,
+        "amount_paid": invoice.amount_paid,
+        "message": "Payment applied." if accepted else "Webhook event recorded as non-settling.",
+    }
+
+
 async def create_entitlement(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -293,3 +425,38 @@ async def get_invoice_for_organization(db: AsyncSession, invoice_id: UUID, organ
     if invoice is None or invoice.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
     return invoice
+
+
+def money(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"))
+
+
+def localized_tax_rate(jurisdiction: str) -> Decimal:
+    return {
+        "KE": Decimal("16.00"),
+        "NG": Decimal("7.50"),
+        "ZA": Decimal("15.00"),
+        "EU": Decimal("20.00"),
+        "GB": Decimal("20.00"),
+        "US": Decimal("0.00"),
+    }.get(jurisdiction, Decimal("0.00"))
+
+
+def filing_hint(jurisdiction: str, reverse_charge: bool) -> str:
+    if reverse_charge:
+        return "Customer reverse-charge treatment; retain tax evidence with the invoice."
+    if jurisdiction == "KE":
+        return "Apply Kenyan VAT handling and prepare tax invoice evidence."
+    if jurisdiction in {"EU", "GB"}:
+        return "Validate buyer tax location before filing VAT return lines."
+    if jurisdiction == "US":
+        return "Sales tax not applied by this generic quote; configure state rules before filing."
+    return "No localized rule configured; review jurisdiction settings before filing."
+
+
+def proration_recommendation(net_amount: Decimal) -> str:
+    if net_amount > 0:
+        return "Charge the prorated upgrade amount on the next invoice."
+    if net_amount < 0:
+        return "Apply the prorated credit to the next invoice."
+    return "No prorated balance is due for this period."

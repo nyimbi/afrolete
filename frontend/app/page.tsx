@@ -26,9 +26,13 @@ import type {
   AttendanceSeedRead,
   AttendanceStatus,
   BillingCycle,
+  BillingDunningNoticeRead,
   BillingEntitlementRead,
+  BillingPaymentWebhookRead,
   BillingPlanRead,
+  BillingProrationQuoteRead,
   BillingSummaryRead,
+  BillingTaxQuoteRead,
   ChannelPreference,
   CommunicationDigestRead,
   CommunicationDispatchSummary,
@@ -218,6 +222,10 @@ export default function HomePage() {
   const [saasInvoices, setSaasInvoices] = useState<SaaSInvoiceRead[]>([]);
   const [saasPayments, setSaasPayments] = useState<SaaSPaymentRead[]>([]);
   const [billingEntitlements, setBillingEntitlements] = useState<BillingEntitlementRead[]>([]);
+  const [billingTaxQuote, setBillingTaxQuote] = useState<BillingTaxQuoteRead | null>(null);
+  const [billingProration, setBillingProration] = useState<BillingProrationQuoteRead | null>(null);
+  const [billingDunning, setBillingDunning] = useState<BillingDunningNoticeRead | null>(null);
+  const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
@@ -560,8 +568,11 @@ export default function HomePage() {
     usage_quantity: 650,
     invoice_number: "SAAS-2026-001",
     tax_amount: 0,
+    tax_jurisdiction: "KE",
     discount_amount: 20,
     payment_amount: 159,
+    prorated_price: 249,
+    webhook_provider: "stripe",
     entitlement_feature: "ai_agents",
     entitlement_limit: 12
   });
@@ -1093,6 +1104,10 @@ export default function HomePage() {
       setSaasInvoices([]);
       setSaasPayments([]);
       setBillingEntitlements([]);
+      setBillingTaxQuote(null);
+      setBillingProration(null);
+      setBillingDunning(null);
+      setBillingWebhook(null);
       setBillingSummary(null);
       return;
     }
@@ -3267,6 +3282,92 @@ export default function HomePage() {
     );
   };
 
+  const quoteBillingTax = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "billing-tax-quote",
+      () =>
+        apiRequest<BillingTaxQuoteRead>(
+          `/billing/tax-quote?organization_id=${selectedOrganizationId}&subtotal=${billingForm.negotiated_price}&jurisdiction=${billingForm.tax_jurisdiction}`
+        ),
+      (quote) => {
+        setBillingTaxQuote(quote);
+        setBillingForm((current) => ({ ...current, tax_amount: Number(quote.tax_amount) }));
+        addLog(`${quote.jurisdiction} SaaS tax quote ${quote.tax_amount}`, "good");
+      }
+    );
+  };
+
+  const quoteBillingProration = () => {
+    if (!selectedOrganizationId || !selectedSubscriptionId) {
+      addLog("Create or select a subscription first", "bad");
+      return;
+    }
+    runAction(
+      "billing-proration",
+      () =>
+        apiRequest<BillingProrationQuoteRead>(
+          `/billing/subscriptions/${selectedSubscriptionId}/proration?organization_id=${selectedOrganizationId}&new_price=${billingForm.prorated_price}&effective_on=${billingForm.period_start}`,
+          { identity }
+        ),
+      (quote) => {
+        setBillingProration(quote);
+        addLog(`Proration net ${quote.net_amount}`, "good");
+      }
+    );
+  };
+
+  const prepareDunningNotice = () => {
+    if (!selectedOrganizationId || !selectedSaasInvoiceId) {
+      addLog("Create or select a SaaS invoice first", "bad");
+      return;
+    }
+    runAction(
+      "billing-dunning",
+      () =>
+        apiRequest<BillingDunningNoticeRead>(
+          `/billing/invoices/${selectedSaasInvoiceId}/dunning?organization_id=${selectedOrganizationId}`,
+          { method: "POST", identity }
+        ),
+      (notice) => {
+        setBillingDunning(notice);
+        addLog(`${notice.severity} dunning notice prepared`, "good");
+      }
+    );
+  };
+
+  const ingestBillingWebhook = () => {
+    if (!selectedOrganizationId || !selectedSaasInvoiceId) {
+      addLog("Create or select a SaaS invoice first", "bad");
+      return;
+    }
+    runAction(
+      "billing-payment-webhook",
+      () =>
+        apiRequest<BillingPaymentWebhookRead>("/billing/webhooks/payments", {
+          method: "POST",
+          body: {
+            organization_id: selectedOrganizationId,
+            invoice_id: selectedSaasInvoiceId,
+            provider: billingForm.webhook_provider,
+            event_type: "payment.succeeded",
+            status: "succeeded",
+            amount: String(billingForm.payment_amount),
+            external_payment_id: `webhook_${Date.now()}`,
+            raw_reference: "Console simulated payment processor webhook."
+          }
+        }),
+      (webhook) => {
+        setBillingWebhook(webhook);
+        addLog(webhook.message, webhook.accepted ? "good" : "neutral");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -4469,6 +4570,8 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createBillingPlanAndSubscription} disabled={busyAction !== null}>Subscribe</button>
+                <button type="button" onClick={quoteBillingTax} disabled={busyAction !== null}>Tax</button>
+                <button type="button" onClick={quoteBillingProration} disabled={busyAction !== null}>Prorate</button>
                 <button type="button" onClick={createBillingEntitlement} disabled={busyAction !== null}>Entitle</button>
               </div>
             </div>
@@ -4499,6 +4602,14 @@ export default function HomePage() {
                 <input type="number" min="0" value={billingForm.negotiated_price} onChange={(event) => setBillingForm({ ...billingForm, negotiated_price: Number(event.target.value) })} />
               </label>
               <label>
+                Tax country
+                <input value={billingForm.tax_jurisdiction} onChange={(event) => setBillingForm({ ...billingForm, tax_jurisdiction: event.target.value.toUpperCase() })} />
+              </label>
+              <label>
+                New price
+                <input type="number" min="0" value={billingForm.prorated_price} onChange={(event) => setBillingForm({ ...billingForm, prorated_price: Number(event.target.value) })} />
+              </label>
+              <label>
                 Athletes
                 <input type="number" min="0" value={billingForm.included_athletes} onChange={(event) => setBillingForm({ ...billingForm, included_athletes: Number(event.target.value) })} />
               </label>
@@ -4516,6 +4627,22 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {billingTaxQuote ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{billingTaxQuote.jurisdiction} tax · {billingTaxQuote.tax_amount}</strong>
+                    <span>{billingTaxQuote.tax_rate}% · total {billingTaxQuote.total} · {billingTaxQuote.filing_hint}</span>
+                  </div>
+                </article>
+              ) : null}
+              {billingProration ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Proration net {billingProration.net_amount}</strong>
+                    <span>{billingProration.remaining_days}/{billingProration.total_days} days · {billingProration.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
               {subscriptions.slice(0, 3).map((subscription) => (
                 <button
                   type="button"
@@ -4549,6 +4676,8 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createUsageMeterAndRecord} disabled={busyAction !== null}>Usage</button>
                 <button type="button" onClick={createSaaSInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
+                <button type="button" onClick={prepareDunningNotice} disabled={busyAction !== null}>Dunning</button>
+                <button type="button" onClick={ingestBillingWebhook} disabled={busyAction !== null}>Webhook</button>
               </div>
             </div>
             <div className="consent-grid">
@@ -4606,11 +4735,31 @@ export default function HomePage() {
                 <input type="number" min="0" value={billingForm.payment_amount} onChange={(event) => setBillingForm({ ...billingForm, payment_amount: Number(event.target.value) })} />
               </label>
               <label>
+                Provider
+                <input value={billingForm.webhook_provider} onChange={(event) => setBillingForm({ ...billingForm, webhook_provider: event.target.value })} />
+              </label>
+              <label>
                 Entitlement
                 <input value={billingForm.entitlement_feature} onChange={(event) => setBillingForm({ ...billingForm, entitlement_feature: event.target.value })} />
               </label>
             </div>
             <div className="task-list">
+              {billingDunning ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{billingDunning.severity} · {billingDunning.amount_due}</strong>
+                    <span>{billingDunning.days_overdue} days overdue · {billingDunning.next_action}</span>
+                  </div>
+                </article>
+              ) : null}
+              {billingWebhook ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{billingWebhook.provider} webhook · {billingWebhook.invoice_status}</strong>
+                    <span>{billingWebhook.amount_paid} paid · {billingWebhook.message}</span>
+                  </div>
+                </article>
+              ) : null}
               {saasInvoices.slice(0, 3).map((invoice) => (
                 <button
                   type="button"

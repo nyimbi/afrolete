@@ -914,6 +914,57 @@ export type SaaSPaymentRead = {
   notes: string | null;
 };
 
+export type BillingTaxQuoteRead = {
+  organization_id: UUID;
+  jurisdiction: string;
+  subtotal: string;
+  tax_rate: string;
+  tax_amount: string;
+  total: string;
+  reverse_charge: boolean;
+  filing_hint: string;
+};
+
+export type BillingProrationQuoteRead = {
+  organization_id: UUID;
+  subscription_id: UUID;
+  current_price: string;
+  new_price: string;
+  effective_on: string;
+  period_start: string;
+  period_end: string;
+  remaining_days: number;
+  total_days: number;
+  unused_credit: string;
+  new_charge: string;
+  net_amount: string;
+  recommendation: string;
+};
+
+export type BillingDunningNoticeRead = {
+  organization_id: UUID;
+  invoice_id: UUID;
+  invoice_number: string;
+  days_overdue: number;
+  amount_due: string;
+  severity: string;
+  channel: string;
+  message: string;
+  next_action: string;
+};
+
+export type BillingPaymentWebhookRead = {
+  organization_id: UUID;
+  invoice_id: UUID;
+  provider: string;
+  event_type: string;
+  accepted: boolean;
+  payment_id: UUID | null;
+  invoice_status: BillingInvoiceStatus;
+  amount_paid: string;
+  message: string;
+};
+
 export type BillingEntitlementRead = {
   id: UUID;
   organization_id: UUID;

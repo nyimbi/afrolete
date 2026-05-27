@@ -1,4 +1,6 @@
 from uuid import UUID
+from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,9 +9,14 @@ from app.db.session import get_db
 from app.schemas.billing import (
     BillingEntitlementCreate,
     BillingEntitlementRead,
+    BillingDunningNoticeRead,
+    BillingPaymentWebhookCreate,
+    BillingPaymentWebhookRead,
     BillingPlanCreate,
     BillingPlanRead,
+    BillingProrationQuoteRead,
     BillingSummaryRead,
+    BillingTaxQuoteRead,
     SaaSInvoiceCreate,
     SaaSInvoiceRead,
     SaaSPaymentCreate,
@@ -26,11 +33,14 @@ from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.billing import (
     billing_summary,
+    billing_tax_quote,
     create_entitlement,
     create_invoice,
     create_plan,
     create_subscription,
     create_usage_meter,
+    dunning_notice,
+    ingest_payment_webhook,
     list_entitlements,
     list_invoices,
     list_plans,
@@ -39,6 +49,7 @@ from app.services.billing import (
     list_usage_records,
     record_payment,
     record_usage,
+    proration_quote,
 )
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -74,6 +85,21 @@ async def list_subscriptions_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[SubscriptionRead]:
     return [read(subscription, SubscriptionRead) for subscription in await list_subscriptions(db, organization_id)]
+
+
+@router.get("/subscriptions/{subscription_id}/proration", response_model=BillingProrationQuoteRead)
+async def proration_route(
+    subscription_id: UUID,
+    organization_id: UUID = Query(),
+    new_price: Decimal = Query(ge=0),
+    effective_on: date = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BillingProrationQuoteRead:
+    return BillingProrationQuoteRead(
+        **await proration_quote(db, identity, organization_id, subscription_id, new_price, effective_on, authz)
+    )
 
 
 @router.post("/meters", response_model=UsageMeterRead, status_code=status.HTTP_201_CREATED)
@@ -122,6 +148,19 @@ async def list_invoices_route(
     return [read(invoice, SaaSInvoiceRead) for invoice in await list_invoices(db, organization_id)]
 
 
+@router.post("/invoices/{invoice_id}/dunning", response_model=BillingDunningNoticeRead)
+async def dunning_route(
+    invoice_id: UUID,
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BillingDunningNoticeRead:
+    return BillingDunningNoticeRead(
+        **await dunning_notice(db, identity, organization_id, invoice_id, authz)
+    )
+
+
 @router.post("/payments", response_model=SaaSPaymentRead, status_code=status.HTTP_201_CREATED)
 async def record_payment_route(
     payload: SaaSPaymentCreate,
@@ -130,6 +169,14 @@ async def record_payment_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> SaaSPaymentRead:
     return read(await record_payment(db, identity, payload, authz), SaaSPaymentRead)
+
+
+@router.post("/webhooks/payments", response_model=BillingPaymentWebhookRead)
+async def payment_webhook_route(
+    payload: BillingPaymentWebhookCreate,
+    db: AsyncSession = Depends(get_db),
+) -> BillingPaymentWebhookRead:
+    return BillingPaymentWebhookRead(**await ingest_payment_webhook(db, payload))
 
 
 @router.post("/entitlements", response_model=BillingEntitlementRead, status_code=status.HTTP_201_CREATED)
@@ -148,6 +195,18 @@ async def list_entitlements_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[BillingEntitlementRead]:
     return [read(entitlement, BillingEntitlementRead) for entitlement in await list_entitlements(db, organization_id)]
+
+
+@router.get("/tax-quote", response_model=BillingTaxQuoteRead)
+async def tax_quote_route(
+    organization_id: UUID = Query(),
+    subtotal: Decimal = Query(ge=0),
+    jurisdiction: str = Query(default="KE", min_length=2, max_length=8),
+    reverse_charge: bool = Query(default=False),
+) -> BillingTaxQuoteRead:
+    return BillingTaxQuoteRead(
+        **await billing_tax_quote(organization_id, subtotal, jurisdiction, reverse_charge)
+    )
 
 
 @router.get("/summary", response_model=BillingSummaryRead)
