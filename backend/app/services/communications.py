@@ -236,6 +236,30 @@ async def update_recipient_status(
     return recipient
 
 
+async def mark_inbox_item_read(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    recipient_id: UUID,
+    authz: AuthorizationService,
+) -> MessageRecipient:
+    recipient = await db.get(MessageRecipient, recipient_id)
+    if recipient is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipient not found")
+    message = await get_message(db, recipient.message_id)
+    if identity.person_id != recipient.person_id:
+        await ensure_manage_communications(authz, identity, message.organization_id)
+
+    now = datetime.now(UTC)
+    recipient.delivery_status = MessageDeliveryStatus.READ
+    recipient.delivered_at = recipient.delivered_at or now
+    recipient.read_at = now
+    recipient.failure_reason = None
+
+    await db.commit()
+    await db.refresh(recipient)
+    return recipient
+
+
 async def create_digest(
     db: AsyncSession,
     identity: CurrentIdentity,

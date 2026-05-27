@@ -776,10 +776,140 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.family-page {
+  place-items: start center;
+}
+
+.family-shell {
+  width: min(1120px, 100%);
+}
+
+.family-toolbar {
+  display: grid;
+  grid-template-columns: 1.1fr 0.8fr 1fr 0.9fr auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 26px;
+}
+
+.family-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.family-metrics div,
+.family-message {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.family-metrics div {
+  padding: 12px;
+}
+
+.family-metrics span {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.family-metrics strong {
+  display: block;
+  font-size: 24px;
+  margin-top: 4px;
+}
+
+.family-layout {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.family-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.family-list button,
+.family-empty {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 12px;
+  text-align: left;
+}
+
+.family-list button.selected {
+  border-color: var(--teal);
+  box-shadow: inset 3px 0 0 var(--teal);
+}
+
+.family-list strong,
+.family-list span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.family-list span,
+.family-empty {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 5px;
+}
+
+.family-message {
+  min-height: 360px;
+  padding: 18px;
+}
+
+.family-message h1 {
+  font-size: 30px;
+  margin: 0;
+}
+
+.family-message p {
+  white-space: pre-wrap;
+}
+
+.family-message dl {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0 0;
+}
+
+.family-message dl div {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.family-message dt {
+  color: var(--muted);
+}
+
+.family-message dd {
+  margin: 0;
+}
+
 @media (max-width: 1180px) {
   .operator-grid,
   .work-grid,
   .consent-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .family-toolbar,
+  .family-layout {
     grid-template-columns: 1fr;
   }
 }
@@ -787,6 +917,10 @@ textarea:focus {
 @media (max-width: 760px) {
   .app-shell {
     display: block;
+  }
+
+  .family-metrics {
+    grid-template-columns: 1fr;
   }
 
   .app-rail {

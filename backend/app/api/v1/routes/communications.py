@@ -37,6 +37,7 @@ from app.services.communications import (
     list_messages,
     list_recipients,
     list_templates,
+    mark_inbox_item_read,
     record_delivery_event,
     run_digest_scheduler,
     update_recipient_status,
@@ -194,6 +195,38 @@ async def list_inbox_route(
             authz,
         )
     ]
+
+
+@router.get("/my-inbox", response_model=list[CommunicationInboxItemRead])
+async def list_my_inbox_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[CommunicationInboxItemRead]:
+    return [
+        to_inbox_item_read(recipient, message)
+        for recipient, message in await list_inbox_items(
+            db,
+            identity,
+            organization_id,
+            identity.person_id,
+            authz,
+        )
+    ]
+
+
+@router.post("/inbox/{recipient_id}/read", response_model=MessageRecipientRead)
+async def mark_inbox_item_read_route(
+    recipient_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MessageRecipientRead:
+    recipient = await mark_inbox_item_read(db, identity, recipient_id, authz)
+    rows = await list_recipients(db, recipient.message_id)
+    _, person = next(row for row in rows if row[0].id == recipient.id)
+    return to_recipient_read(recipient, person)
 
 
 @router.post("/digests", response_model=CommunicationDigestRead, status_code=201)

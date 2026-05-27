@@ -568,6 +568,17 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
   - Not tested in this fast slice: full backend test suite, frontend
     production build, browser QA, and real cron/background worker execution.
+- Implemented slice 056 family inbox portal:
+  - Added an authenticated my-inbox API so guardians, parents, athletes, and
+    members can load their own messages without supplying a person id.
+  - Added a self-service inbox read endpoint that lets recipients mark their
+    own messages read while preserving manager override for operators.
+  - Added a `/family` portal page with organization/account controls, unread
+    metrics, message list, message detail, and read acknowledgement.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, frontend
+    production build, browser QA, and live Keycloak guardian-account mapping.
 
 ## Implementation Slices
 
@@ -629,6 +640,7 @@ athlete-development platform:
 | 053 - Supplier invoice sync | Partial | Backend ruff; frontend typecheck; diff check | Received, submitted, and ordered supplier orders can now be packaged for supplier invoice/accounting sync through record-only mode or a provider-neutral webhook, update order sync status and notes, and expose Sync controls/results in the asset console; supplier-specific adapters and full verification remain. |
 | 054 - Partial lease installment allocation | Partial | Backend ruff; frontend typecheck; diff check | Lease installment rows now persist amount paid, reject overpayment beyond invoice balance, allocate payments across installments including partial fills, update partial/paid installment status, and show paid/partial counts in the console; full verification remains. |
 | 055 - Background communication digest scheduler | Partial | Backend ruff; frontend typecheck; diff check | Daily/weekly notification preferences can now be processed in batch through a manager-triggered API and console control, skipping empty inboxes and reusing per-person digest creation; real cron/background worker execution and full verification remain. |
+| 056 - Family inbox portal | Partial | Backend ruff; frontend typecheck; diff check | Authenticated users can now load their own communication inbox, mark messages read, and use a dedicated `/family` portal surface with inbox metrics and message detail; live Keycloak guardian mapping and full verification remain. |
 
 ## Capability Coverage
 
@@ -649,7 +661,7 @@ Status values:
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, provider-neutral performance evidence ingestion, derived run records, governance summary metrics, credential-boundary status, and console workflows are implemented; live provider workers, OpenBao secret fetch, persisted run history tables, model-backed extraction, audit immutability, and deeper model governance remain. |
 | Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, AI-assisted plan generation from readiness/performance/competition context, readiness check-ins, post-session feedback, load-delta recommendations, schedule availability suggestions, and console workflows are implemented; live model generation, external calendar sync, and full verification remain. |
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, round-robin fixture generation, bracket projections, source-round winner advancement, visual bracket lanes, schedule optimization, competition broadcasts, fixture ticketing, conflict detection, and console workflows are implemented; full verification remains. |
-| Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, digest generation, batch digest scheduler trigger, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, real worker/cron execution, and full parent portal remain. |
+| Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, self-service family inbox portal, digest generation, batch digest scheduler trigger, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, real worker/cron execution, and deeper parent dashboards remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, scan lookup, RFID scan intake/history, RFID reader provisioning and keyed gateway intake, photo metadata, equipment file uploads, procurement recommendations, supplier scorecards, supplier orders/receiving/submission/invoice sync, lease quotes, lease invoice creation, lease payment schedules/installments, lease payment reconciliation with partial installment allocation, utilization recommendations, and console workflows are implemented; MinIO persistence, live device fleet rollout, supplier-specific adapters, accounting API sync, and full verification remain. |
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, settlement summaries, refunds, tax quotes, accounting exports, sponsorship dashboards, commercial summary, and console workflows are implemented; live payment provider webhooks, tax authority filing, accounting API sync, and sponsor-facing dashboards remain. |
@@ -665,7 +677,7 @@ Status values:
 2. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
    SpiceDB key.
 3. Add provider-specific communication credentials, real communication worker
-   scheduling, and full parent portal/inbox experience.
+   scheduling, live guardian account mapping, and deeper parent dashboards.
 4. Add MinIO-backed equipment storage, live RFID device fleet rollout,
    supplier-specific adapters, accounting API sync, and full verification for
    assets and facilities.
