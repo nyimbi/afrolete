@@ -60,6 +60,9 @@ from app.schemas.event import (
     EventTravelApprovalRoutingCreate,
     EventTravelApprovalRoutingRead,
     EventTravelApprovalUpdate,
+    EventTravelCarpoolAutoMatchCreate,
+    EventTravelCarpoolAutoMatchPairRead,
+    EventTravelCarpoolAutoMatchRead,
     EventTravelCarpoolRideCreate,
     EventTravelCarpoolRideRead,
     EventTravelCarpoolRideUpdate,
@@ -1405,6 +1408,84 @@ async def create_travel_carpool_ride(
     return travel_carpool_ride_read(ride)
 
 
+async def auto_match_travel_carpools(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelCarpoolAutoMatchCreate,
+    authz: AuthorizationService,
+) -> EventTravelCarpoolAutoMatchRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    rides = list(
+        (
+            await db.scalars(
+                select(EventTravelCarpoolRide)
+                .where(EventTravelCarpoolRide.travel_plan_id == plan.id)
+                .where(EventTravelCarpoolRide.status.in_(["open", "matched"]))
+                .order_by(EventTravelCarpoolRide.created_at, EventTravelCarpoolRide.departure_window_start)
+            )
+        ).all()
+    )
+    requests = [ride for ride in rides if ride.ride_type == "request" and ride.status == "open"]
+    offers = [ride for ride in rides if ride.ride_type == "offer" and ride.status == "open"]
+    available_seats = {offer.id: offer.seats_available for offer in offers}
+    pairs: list[EventTravelCarpoolAutoMatchPairRead] = []
+    used_requests: set[UUID] = set()
+    for request in requests:
+        ranked = sorted(
+            [
+                (travel_carpool_match_score(request, offer), offer)
+                for offer in offers
+                if available_seats.get(offer.id, 0) >= request.seats_requested
+            ],
+            key=lambda item: item[0],
+            reverse=True,
+        )
+        if not ranked:
+            continue
+        score, offer = ranked[0]
+        if score < payload.minimum_score:
+            continue
+        now = datetime.now(UTC)
+        request.status = "confirmed" if payload.confirm_matches else "matched"
+        offer.status = "confirmed" if payload.confirm_matches else "matched"
+        request.match_score = score
+        offer.match_score = max(offer.match_score or Decimal("0"), score)
+        request.matched_at = request.matched_at or now
+        offer.matched_at = offer.matched_at or now
+        request.driver_person_id = request.driver_person_id or offer.driver_person_id
+        request.notes = append_note(request.notes, f"Auto-matched to offer {offer.id} with score {score}.")
+        offer.notes = append_note(offer.notes, f"Auto-matched request {request.id} with score {score}.")
+        available_seats[offer.id] = available_seats[offer.id] - request.seats_requested
+        offer.seats_available = available_seats[offer.id]
+        used_requests.add(request.id)
+        pairs.append(
+            EventTravelCarpoolAutoMatchPairRead(
+                request_id=request.id,
+                offer_id=offer.id,
+                score=score,
+                seats_requested=request.seats_requested,
+                seats_available=offer.seats_available,
+                pickup_match=location_match_summary(request, offer),
+                window_match=window_match_summary(request, offer),
+            )
+        )
+    if pairs:
+        await db.commit()
+    refreshed_rides = await list_travel_carpool_rides(db, identity, travel_plan_id, authz)
+    return EventTravelCarpoolAutoMatchRead(
+        travel_plan_id=plan.id,
+        matched_count=len(used_requests),
+        request_count=len(requests),
+        offer_count=len(offers),
+        pairs=pairs,
+        rides=refreshed_rides,
+    )
+
+
 async def update_travel_carpool_ride(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1908,6 +1989,81 @@ def travel_carpool_ride_read(ride: EventTravelCarpoolRide) -> EventTravelCarpool
         matched_at=ride.matched_at,
         notes=ride.notes,
     )
+
+
+def travel_carpool_match_score(request: EventTravelCarpoolRide, offer: EventTravelCarpoolRide) -> Decimal:
+    pickup_score = token_overlap_score(request.pickup_location, offer.pickup_location)
+    dropoff_score = token_overlap_score(request.dropoff_location or "", offer.dropoff_location or "")
+    if not request.dropoff_location or not offer.dropoff_location:
+        dropoff_score = Decimal("0.50")
+    location_score = (pickup_score * Decimal("0.75")) + (dropoff_score * Decimal("0.25"))
+    seats_score = Decimal("1.00") if offer.seats_available >= request.seats_requested else Decimal("0.00")
+    window_score = carpool_window_score(request, offer)
+    score = (
+        location_score * Decimal("55")
+        + window_score * Decimal("30")
+        + seats_score * Decimal("15")
+    )
+    return score.quantize(Decimal("0.01"))
+
+
+def token_overlap_score(left: str, right: str) -> Decimal:
+    left_tokens = location_tokens(left)
+    right_tokens = location_tokens(right)
+    if not left_tokens or not right_tokens:
+        return Decimal("0.25")
+    overlap = len(left_tokens & right_tokens)
+    union = len(left_tokens | right_tokens)
+    if union == 0:
+        return Decimal("0")
+    return Decimal(overlap) / Decimal(union)
+
+
+def location_tokens(value: str) -> set[str]:
+    cleaned = sub(r"[^a-z0-9]+", " ", value.lower())
+    return {token for token in cleaned.split() if len(token) > 2}
+
+
+def carpool_window_score(request: EventTravelCarpoolRide, offer: EventTravelCarpoolRide) -> Decimal:
+    if (
+        request.departure_window_start is None
+        or request.departure_window_end is None
+        or offer.departure_window_start is None
+        or offer.departure_window_end is None
+    ):
+        return Decimal("0.50")
+    latest_start = max(request.departure_window_start, offer.departure_window_start)
+    earliest_end = min(request.departure_window_end, offer.departure_window_end)
+    if latest_start <= earliest_end:
+        return Decimal("1.00")
+    gap_minutes = abs((latest_start - earliest_end).total_seconds()) / 60
+    if gap_minutes <= 15:
+        return Decimal("0.80")
+    if gap_minutes <= 30:
+        return Decimal("0.60")
+    if gap_minutes <= 60:
+        return Decimal("0.35")
+    return Decimal("0.10")
+
+
+def location_match_summary(request: EventTravelCarpoolRide, offer: EventTravelCarpoolRide) -> str:
+    overlap = location_tokens(request.pickup_location) & location_tokens(offer.pickup_location)
+    if overlap:
+        return f"Shared pickup terms: {', '.join(sorted(overlap))}"
+    return "Pickup locations require manual review."
+
+
+def window_match_summary(request: EventTravelCarpoolRide, offer: EventTravelCarpoolRide) -> str:
+    if request.departure_window_start is None or offer.departure_window_start is None:
+        return "One or both rides have no pickup window."
+    score = carpool_window_score(request, offer)
+    if score == Decimal("1.00"):
+        return "Pickup windows overlap."
+    return "Pickup windows are near but do not overlap."
+
+
+def append_note(existing: str | None, addition: str) -> str:
+    return f"{existing}\n{addition}"[:2000] if existing else addition[:2000]
 
 
 async def count_travel_approvals(db: AsyncSession, travel_plan_id: UUID, status_value: str | None = None) -> int:

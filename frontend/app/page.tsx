@@ -73,6 +73,7 @@ import type {
   EventRead,
   EventTravelApprovalRead,
   EventTravelApprovalRoutingRead,
+  EventTravelCarpoolAutoMatchRead,
   EventTravelCarpoolRideRead,
   EventTravelChecklistEvidenceUploadRead,
   EventTravelChecklistItemRead,
@@ -375,6 +376,7 @@ export default function HomePage() {
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
   const [selectedTravelReceiptFile, setSelectedTravelReceiptFile] = useState<File | null>(null);
   const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
+  const [travelCarpoolAutoMatch, setTravelCarpoolAutoMatch] = useState<EventTravelCarpoolAutoMatchRead | null>(null);
   const [travelReadiness, setTravelReadiness] = useState<EventTravelReadinessRead | null>(null);
   const [travelRouteOptimization, setTravelRouteOptimization] = useState<EventTravelRouteOptimizationRead | null>(null);
   const [travelGeofenceCheck, setTravelGeofenceCheck] = useState<EventTravelGeofenceCheckRead | null>(null);
@@ -1644,6 +1646,7 @@ export default function HomePage() {
       setTravelLocationUpdates([]);
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
+      setTravelCarpoolAutoMatch(null);
       setTravelReadiness(null);
       setTravelRouteOptimization(null);
       setTravelGeofenceCheck(null);
@@ -1861,6 +1864,7 @@ export default function HomePage() {
       setTravelLocationUpdates([]);
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
+      setTravelCarpoolAutoMatch(null);
       setTravelReadiness(null);
       setTravelRouteOptimization(null);
       setTravelGeofenceCheck(null);
@@ -3041,6 +3045,29 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== ride.id)
         ]);
         addLog(`${ride.ride_type} carpool opened for ${ride.pickup_location}`, "good");
+      }
+    );
+  };
+
+  const autoMatchTravelCarpools = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-carpool-auto-match-${plan.id}`,
+      () =>
+        apiRequest<EventTravelCarpoolAutoMatchRead>(`/events/travel-plans/${plan.id}/carpools/auto-match`, {
+          method: "POST",
+          identity,
+          body: {
+            minimum_score: "55.00",
+            confirm_matches: false
+          }
+        }),
+      (result) => {
+        setTravelCarpoolAutoMatch(result);
+        setTravelCarpoolRides(result.rides);
+        addLog(
+          `Carpool auto-match: ${result.matched_count}/${result.request_count} requests matched`,
+          result.matched_count > 0 ? "good" : "neutral"
+        );
       }
     );
   };
@@ -7596,6 +7623,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {travelCarpoolAutoMatch ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Carpool auto-match · {travelCarpoolAutoMatch.matched_count} matched</strong>
+                    <span>{travelCarpoolAutoMatch.request_count} requests · {travelCarpoolAutoMatch.offer_count} offers</span>
+                    <span>{travelCarpoolAutoMatch.pairs[0]?.pickup_match ?? "No automatic matches above threshold"}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelApprovals.slice(0, 3).map((approval) => (
                 <article className="task-card" key={approval.id}>
                   <div>
@@ -7660,6 +7696,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => createTravelExpense(plan)}>Expense</button>
                     <button type="button" onClick={() => loadTravelExpenses(plan)}>Expenses</button>
                     <button type="button" onClick={() => createTravelCarpool(plan)}>Carpool</button>
+                    <button type="button" onClick={() => autoMatchTravelCarpools(plan)}>Auto match</button>
                     <button type="button" onClick={() => loadTravelCarpools(plan)}>Carpools</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "ready")}>Ready</button>
                     <button type="button" onClick={() => updateTravelPlan(plan, "in_progress")}>Depart</button>

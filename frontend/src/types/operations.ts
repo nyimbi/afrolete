@@ -705,6 +705,25 @@ export type EventTravelCarpoolRideRead = {
   notes: string | null;
 };
 
+export type EventTravelCarpoolAutoMatchPairRead = {
+  request_id: UUID;
+  offer_id: UUID;
+  score: string;
+  seats_requested: number;
+  seats_available: number;
+  pickup_match: string;
+  window_match: string;
+};
+
+export type EventTravelCarpoolAutoMatchRead = {
+  travel_plan_id: UUID;
+  matched_count: number;
+  request_count: number;
+  offer_count: number;
+  pairs: EventTravelCarpoolAutoMatchPairRead[];
+  rides: EventTravelCarpoolRideRead[];
+};
+
 export type EventTravelReadinessRead = {
   event_id: UUID;
   travel_plan_id: UUID;

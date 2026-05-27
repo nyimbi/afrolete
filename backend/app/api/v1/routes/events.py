@@ -15,6 +15,8 @@ from app.schemas.event import (
     EventTravelApprovalRoutingCreate,
     EventTravelApprovalRoutingRead,
     EventTravelApprovalUpdate,
+    EventTravelCarpoolAutoMatchCreate,
+    EventTravelCarpoolAutoMatchRead,
     EventTravelCarpoolRideCreate,
     EventTravelCarpoolRideRead,
     EventTravelCarpoolRideUpdate,
@@ -65,6 +67,7 @@ from app.services.events import (
     create_event,
     dispatch_weather_assessment_alert,
     create_travel_approval,
+    auto_match_travel_carpools,
     create_travel_carpool_ride,
     create_travel_expense,
     create_travel_fee_checkouts,
@@ -676,6 +679,20 @@ async def create_travel_carpool_ride_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelCarpoolRideRead:
     return await create_travel_carpool_ride(db, identity, travel_plan_id, payload, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/carpools/auto-match",
+    response_model=EventTravelCarpoolAutoMatchRead,
+)
+async def auto_match_travel_carpools_route(
+    travel_plan_id: UUID,
+    payload: EventTravelCarpoolAutoMatchCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelCarpoolAutoMatchRead:
+    return await auto_match_travel_carpools(db, identity, travel_plan_id, payload, authz)
 
 
 @router.patch("/travel-carpools/{carpool_ride_id}", response_model=EventTravelCarpoolRideRead)

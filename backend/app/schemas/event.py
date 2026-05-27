@@ -541,6 +541,30 @@ class EventTravelCarpoolRideRead(BaseModel):
     notes: str | None
 
 
+class EventTravelCarpoolAutoMatchCreate(BaseModel):
+    minimum_score: Decimal = Field(default=Decimal("55.00"), ge=0, le=100, max_digits=5, decimal_places=2)
+    confirm_matches: bool = False
+
+
+class EventTravelCarpoolAutoMatchPairRead(BaseModel):
+    request_id: UUID
+    offer_id: UUID
+    score: Decimal
+    seats_requested: int
+    seats_available: int
+    pickup_match: str
+    window_match: str
+
+
+class EventTravelCarpoolAutoMatchRead(BaseModel):
+    travel_plan_id: UUID
+    matched_count: int
+    request_count: int
+    offer_count: int
+    pairs: list[EventTravelCarpoolAutoMatchPairRead]
+    rides: list[EventTravelCarpoolRideRead]
+
+
 class EventTravelReadinessRead(BaseModel):
     event_id: UUID
     travel_plan_id: UUID
