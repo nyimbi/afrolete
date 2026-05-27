@@ -41,6 +41,14 @@ from app.models.performance import (  # noqa: F401,E402
     AthletePerformanceObservation,
     PerformanceMetricDefinition,
 )
+from app.models.reporting import (  # noqa: F401,E402
+    GeneratedReport,
+    IntelligenceInsight,
+    PredictiveRiskScore,
+    ReportDefinition,
+    ReportExportJob,
+    ScheduledReport,
+)
 from app.models.team import (  # noqa: F401,E402
     AthleteProfile,
     GuardianRelationship,

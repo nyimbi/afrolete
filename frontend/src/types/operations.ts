@@ -164,6 +164,18 @@ export type CommercialStatus =
   | "completed"
   | "cancelled";
 export type TicketStatus = "issued" | "checked_in" | "void" | "refunded";
+export type ReportCategory =
+  | "performance"
+  | "administrative"
+  | "operational"
+  | "financial"
+  | "compliance"
+  | "intelligence";
+export type ReportFormat = "online" | "pdf" | "excel" | "csv" | "api";
+export type ReportFrequency = "on_demand" | "daily" | "weekly" | "monthly" | "quarterly" | "on_trigger";
+export type ReportRunStatus = "queued" | "running" | "ready" | "failed";
+export type InsightSeverity = "info" | "watch" | "warning" | "critical";
+export type InsightStatus = "new" | "acknowledged" | "actioned" | "dismissed";
 
 export type LocalIdentity = {
   sub: string;
@@ -542,6 +554,107 @@ export type CommercialSummaryRead = {
   active_campaigns: number;
   tickets_sold: number;
   tickets_checked_in: number;
+};
+
+export type ReportDefinitionRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  category: ReportCategory;
+  description: string | null;
+  default_format: ReportFormat;
+  parameter_schema: string | null;
+  template: string | null;
+  ai_assisted: boolean;
+  status: string;
+};
+
+export type GeneratedReportRead = {
+  id: UUID;
+  organization_id: UUID;
+  report_definition_id: UUID;
+  requested_by_person_id: UUID | null;
+  team_id: UUID | null;
+  athlete_profile_id: UUID | null;
+  competition_id: UUID | null;
+  event_id: UUID | null;
+  title: string;
+  output_format: ReportFormat;
+  status: ReportRunStatus;
+  period_start: string | null;
+  period_end: string | null;
+  parameters: string | null;
+  summary: string;
+  findings: string | null;
+  recommendations: string | null;
+  artifact_url: string | null;
+  shared_token: string | null;
+  expires_at: string | null;
+};
+
+export type ScheduledReportRead = {
+  id: UUID;
+  organization_id: UUID;
+  report_definition_id: UUID;
+  name: string;
+  frequency: ReportFrequency;
+  delivery_channels: string;
+  recipients: string | null;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  status: string;
+};
+
+export type IntelligenceInsightRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID | null;
+  team_id: UUID | null;
+  event_id: UUID | null;
+  agent_id: UUID | null;
+  title: string;
+  insight_type: string;
+  severity: InsightSeverity;
+  status: InsightStatus;
+  confidence: number;
+  evidence: string | null;
+  recommendation: string | null;
+  model_name: string | null;
+  reviewed_by_person_id: UUID | null;
+};
+
+export type PredictiveRiskScoreRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  model_name: string;
+  score: number;
+  risk_band: string;
+  drivers: string | null;
+  recommendation: string | null;
+  valid_for_date: string;
+};
+
+export type ReportExportJobRead = {
+  id: UUID;
+  organization_id: UUID;
+  generated_report_id: UUID;
+  output_format: ReportFormat;
+  destination: string;
+  webhook_url: string | null;
+  status: ReportRunStatus;
+  completed_at: string | null;
+};
+
+export type ReportingSummaryRead = {
+  organization_id: UUID;
+  definitions: number;
+  generated_reports: number;
+  scheduled_reports: number;
+  open_insights: number;
+  critical_insights: number;
+  high_risk_scores: number;
+  export_jobs: number;
 };
 
 export type ActivityConsentRead = {

@@ -388,3 +388,50 @@ class TicketStatus(StrEnum):
     CHECKED_IN = "checked_in"
     VOID = "void"
     REFUNDED = "refunded"
+
+
+class ReportCategory(StrEnum):
+    PERFORMANCE = "performance"
+    ADMINISTRATIVE = "administrative"
+    OPERATIONAL = "operational"
+    FINANCIAL = "financial"
+    COMPLIANCE = "compliance"
+    INTELLIGENCE = "intelligence"
+
+
+class ReportFormat(StrEnum):
+    ONLINE = "online"
+    PDF = "pdf"
+    EXCEL = "excel"
+    CSV = "csv"
+    API = "api"
+
+
+class ReportFrequency(StrEnum):
+    ON_DEMAND = "on_demand"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
+    ON_TRIGGER = "on_trigger"
+
+
+class ReportRunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class InsightSeverity(StrEnum):
+    INFO = "info"
+    WATCH = "watch"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class InsightStatus(StrEnum):
+    NEW = "new"
+    ACKNOWLEDGED = "acknowledged"
+    ACTIONED = "actioned"
+    DISMISSED = "dismissed"

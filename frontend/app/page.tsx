@@ -43,7 +43,11 @@ import type {
   FixtureMatchEventRead,
   FixtureOfficialAssignmentRead,
   FundraisingCampaignRead,
+  GeneratedReportRead,
   GuardianRelationshipRead,
+  InsightSeverity,
+  InsightStatus,
+  IntelligenceInsightRead,
   LocalIdentity,
   MatchEventType,
   MessageDeliveryStatus,
@@ -59,6 +63,14 @@ import type {
   PerformanceObservationRead,
   NotificationFrequency,
   NotificationPreferenceRead,
+  PredictiveRiskScoreRead,
+  ReportCategory,
+  ReportDefinitionRead,
+  ReportExportJobRead,
+  ReportFormat,
+  ReportFrequency,
+  ReportingSummaryRead,
+  ScheduledReportRead,
   SponsorRead,
   SponsorshipAgreementRead,
   SportFormat,
@@ -140,6 +152,13 @@ export default function HomePage() {
   const [invoices, setInvoices] = useState<FinanceInvoiceRead[]>([]);
   const [payments, setPayments] = useState<FinancePaymentRead[]>([]);
   const [commercialSummary, setCommercialSummary] = useState<CommercialSummaryRead | null>(null);
+  const [reportDefinitions, setReportDefinitions] = useState<ReportDefinitionRead[]>([]);
+  const [generatedReports, setGeneratedReports] = useState<GeneratedReportRead[]>([]);
+  const [scheduledReports, setScheduledReports] = useState<ScheduledReportRead[]>([]);
+  const [insights, setInsights] = useState<IntelligenceInsightRead[]>([]);
+  const [riskScores, setRiskScores] = useState<PredictiveRiskScoreRead[]>([]);
+  const [reportExports, setReportExports] = useState<ReportExportJobRead[]>([]);
+  const [reportingSummary, setReportingSummary] = useState<ReportingSummaryRead | null>(null);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -162,6 +181,9 @@ export default function HomePage() {
   const [selectedTicketProductId, setSelectedTicketProductId] = useState("");
   const [selectedTicketId, setSelectedTicketId] = useState("");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
+  const [selectedReportDefinitionId, setSelectedReportDefinitionId] = useState("");
+  const [selectedGeneratedReportId, setSelectedGeneratedReportId] = useState("");
+  const [selectedInsightId, setSelectedInsightId] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -419,6 +441,34 @@ export default function HomePage() {
     memo: "Membership, facility, and program participation.",
     payment_amount: 250,
     method: "card"
+  });
+  const [reportForm, setReportForm] = useState({
+    name: "Weekly intelligence brief",
+    category: "intelligence" as ReportCategory,
+    default_format: "online" as ReportFormat,
+    description: "Performance, attendance, compliance, and commercial signals in one review.",
+    title: "Weekly operating intelligence",
+    period_start: "2026-06-01",
+    period_end: "2026-06-07",
+    frequency: "weekly" as ReportFrequency,
+    delivery_channels: "in_app,email",
+    recipients: "board@example.com,coach@example.com"
+  });
+  const [insightForm, setInsightForm] = useState({
+    title: "Late-match performance drop",
+    insight_type: "pattern_detection",
+    severity: "warning" as InsightSeverity,
+    confidence: 0.82,
+    evidence: "Team output drops in final match phases and high-RPE sessions cluster before fixtures.",
+    recommendation: "Reduce late-week load and add final-20-minute conditioning scenarios.",
+    model_name: "afrolete-insight-fast"
+  });
+  const [riskForm, setRiskForm] = useState({
+    model_name: "injury-risk-v1",
+    score: 78,
+    drivers: "High acute load, low recovery, match congestion.",
+    recommendation: "Reduce session intensity and add wellness check before next match.",
+    valid_for_date: "2026-06-08"
   });
 
   const selectedOrganization = useMemo(
@@ -702,6 +752,37 @@ export default function HomePage() {
     );
   }, []);
 
+  const loadReporting = useCallback(async (organizationId: string) => {
+    const [definitions, reports, schedules, insightData, riskData, exports, summary] =
+      await Promise.all([
+        apiRequest<ReportDefinitionRead[]>(`/reporting/definitions?organization_id=${organizationId}`),
+        apiRequest<GeneratedReportRead[]>(`/reporting/reports?organization_id=${organizationId}`),
+        apiRequest<ScheduledReportRead[]>(`/reporting/schedules?organization_id=${organizationId}`),
+        apiRequest<IntelligenceInsightRead[]>(`/reporting/insights?organization_id=${organizationId}`),
+        apiRequest<PredictiveRiskScoreRead[]>(`/reporting/risk-scores?organization_id=${organizationId}`),
+        apiRequest<ReportExportJobRead[]>(`/reporting/exports?organization_id=${organizationId}`),
+        apiRequest<ReportingSummaryRead>(`/reporting/summary?organization_id=${organizationId}`)
+      ]);
+    setReportDefinitions(definitions);
+    setGeneratedReports(reports);
+    setScheduledReports(schedules);
+    setInsights(insightData);
+    setRiskScores(riskData);
+    setReportExports(exports);
+    setReportingSummary(summary);
+    setSelectedReportDefinitionId((current) =>
+      definitions.some((definition) => definition.id === current)
+        ? current
+        : definitions[0]?.id ?? ""
+    );
+    setSelectedGeneratedReportId((current) =>
+      reports.some((report) => report.id === current) ? current : reports[0]?.id ?? ""
+    );
+    setSelectedInsightId((current) =>
+      insightData.some((insight) => insight.id === current) ? current : insightData[0]?.id ?? ""
+    );
+  }, []);
+
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.localIdentity");
     if (stored) {
@@ -751,6 +832,13 @@ export default function HomePage() {
       setInvoices([]);
       setPayments([]);
       setCommercialSummary(null);
+      setReportDefinitions([]);
+      setGeneratedReports([]);
+      setScheduledReports([]);
+      setInsights([]);
+      setRiskScores([]);
+      setReportExports([]);
+      setReportingSummary(null);
       return;
     }
     runAction("load-tenant-data", async () => {
@@ -764,6 +852,7 @@ export default function HomePage() {
       await loadCommunications(selectedOrganizationId);
       await loadAssets(selectedOrganizationId);
       await loadCommercial(selectedOrganizationId);
+      await loadReporting(selectedOrganizationId);
     }, () => addLog("Organization workspace loaded", "good"));
   }, [
     selectedOrganizationId,
@@ -777,6 +866,7 @@ export default function HomePage() {
     loadCommunications,
     loadAssets,
     loadCommercial,
+    loadReporting,
     runAction,
     addLog
   ]);
@@ -2193,6 +2283,185 @@ export default function HomePage() {
     );
   };
 
+  const createReportDefinitionAndRun = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-report-run",
+      async () => {
+        const definition = await apiRequest<ReportDefinitionRead>("/reporting/definitions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: reportForm.name,
+            category: reportForm.category,
+            description: reportForm.description,
+            default_format: reportForm.default_format,
+            parameter_schema: "date_range,team,athlete,competition,event",
+            template: "summary,findings,recommendations,next_actions",
+            ai_assisted: true
+          }
+        });
+        const report = await apiRequest<GeneratedReportRead>("/reporting/reports", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            report_definition_id: definition.id,
+            team_id: selectedTeamId || null,
+            athlete_profile_id: selectedAthlete?.athleteProfileId ?? null,
+            competition_id: selectedCompetitionId || null,
+            event_id: selectedEventId || null,
+            title: reportForm.title,
+            output_format: reportForm.default_format,
+            period_start: reportForm.period_start,
+            period_end: reportForm.period_end,
+            parameters: "scope=current_console_selection"
+          }
+        });
+        return { definition, report };
+      },
+      ({ definition, report }) => {
+        setReportDefinitions((current) => [
+          definition,
+          ...current.filter((item) => item.id !== definition.id)
+        ]);
+        setGeneratedReports((current) => [report, ...current.filter((item) => item.id !== report.id)]);
+        setSelectedReportDefinitionId(definition.id);
+        setSelectedGeneratedReportId(report.id);
+        addLog(`${report.title} generated`, "good");
+        void loadReporting(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createScheduledReport = () => {
+    if (!selectedOrganizationId || !selectedReportDefinitionId) {
+      addLog("Create or select a report definition first", "bad");
+      return;
+    }
+    runAction(
+      "create-report-schedule",
+      () =>
+        apiRequest<ScheduledReportRead>("/reporting/schedules", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            report_definition_id: selectedReportDefinitionId,
+            name: `${reportForm.name} delivery`,
+            frequency: reportForm.frequency,
+            delivery_channels: reportForm.delivery_channels,
+            recipients: reportForm.recipients,
+            next_run_at: new Date("2026-06-08T08:00:00").toISOString()
+          }
+        }),
+      (schedule) => {
+        setScheduledReports((current) => [
+          schedule,
+          ...current.filter((item) => item.id !== schedule.id)
+        ]);
+        addLog(`${schedule.name} scheduled`, "good");
+        void loadReporting(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createInsightAndRisk = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete first", "bad");
+      return;
+    }
+    runAction(
+      "create-insight-risk",
+      async () => {
+        const insight = await apiRequest<IntelligenceInsightRead>("/reporting/insights", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            athlete_profile_id: selectedAthlete.athleteProfileId,
+            team_id: selectedTeamId || null,
+            event_id: selectedEventId || null,
+            agent_id: selectedAgentId || null,
+            ...insightForm
+          }
+        });
+        const risk = await apiRequest<PredictiveRiskScoreRead>("/reporting/risk-scores", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            athlete_profile_id: selectedAthlete.athleteProfileId,
+            ...riskForm
+          }
+        });
+        return { insight, risk };
+      },
+      ({ insight, risk }) => {
+        setInsights((current) => [insight, ...current.filter((item) => item.id !== insight.id)]);
+        setRiskScores((current) => [risk, ...current.filter((item) => item.id !== risk.id)]);
+        setSelectedInsightId(insight.id);
+        addLog(`Insight and risk score ${risk.score} recorded`, "good");
+        void loadReporting(selectedOrganizationId);
+      }
+    );
+  };
+
+  const updateInsight = (status: InsightStatus) => {
+    if (!selectedInsightId || !selectedOrganizationId) {
+      addLog("Select an insight first", "bad");
+      return;
+    }
+    runAction(
+      `insight-${status}`,
+      () =>
+        apiRequest<IntelligenceInsightRead>(`/reporting/insights/${selectedInsightId}`, {
+          method: "PATCH",
+          identity,
+          body: { status }
+        }),
+      (insight) => {
+        setInsights((current) => [insight, ...current.filter((item) => item.id !== insight.id)]);
+        addLog(`Insight marked ${insight.status}`, "good");
+        void loadReporting(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createReportExport = () => {
+    if (!selectedOrganizationId || !selectedGeneratedReportId) {
+      addLog("Generate or select a report first", "bad");
+      return;
+    }
+    runAction(
+      "create-report-export",
+      () =>
+        apiRequest<ReportExportJobRead>("/reporting/exports", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            generated_report_id: selectedGeneratedReportId,
+            output_format: "pdf",
+            destination: "board-packages/weekly-intelligence.pdf",
+            webhook_url: "https://analytics.example.com/webhooks/report-ready"
+          }
+        }),
+      (exportJob) => {
+        setReportExports((current) => [
+          exportJob,
+          ...current.filter((item) => item.id !== exportJob.id)
+        ]);
+        addLog(`${exportJob.output_format} export ready`, "good");
+        void loadReporting(selectedOrganizationId);
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -2214,6 +2483,7 @@ export default function HomePage() {
           <a href="#events">Events</a>
           <a href="#assets">Assets</a>
           <a href="#commercial">Commerce</a>
+          <a href="#reports">Reports</a>
           <a href="#competition">Competition</a>
           <a href="#communications">Comms</a>
           <a href="#performance">Performance</a>
@@ -2286,6 +2556,10 @@ export default function HomePage() {
             <div className="stat-row">
               <span>Revenue</span>
               <strong>{commercialSummary?.tickets_sold ?? 0}</strong>
+            </div>
+            <div className="stat-row">
+              <span>Insights</span>
+              <strong>{reportingSummary?.open_insights ?? 0}</strong>
             </div>
             <div className="stat-row">
               <span>Attendance</span>
@@ -3028,6 +3302,184 @@ export default function HomePage() {
                     <span>{invoice.amount_paid}/{invoice.amount_due} · {invoice.status}</span>
                   </div>
                 </button>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid" id="reports">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Reporting</p>
+                <h2>Reports and scheduled delivery</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createReportDefinitionAndRun} disabled={busyAction !== null}>Generate</button>
+                <button type="button" onClick={createScheduledReport} disabled={busyAction !== null}>Schedule</button>
+                <button type="button" onClick={createReportExport} disabled={busyAction !== null}>Export</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{reportingSummary?.generated_reports ?? 0}</strong>
+              <span>Reports generated</span>
+              <small>{reportingSummary ? `${reportingSummary.scheduled_reports} scheduled · ${reportingSummary.export_jobs} exports` : "No reporting summary"}</small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Report
+                <input value={reportForm.name} onChange={(event) => setReportForm({ ...reportForm, name: event.target.value })} />
+              </label>
+              <label>
+                Category
+                <select value={reportForm.category} onChange={(event) => setReportForm({ ...reportForm, category: event.target.value as ReportCategory })}>
+                  <option value="performance">Performance</option>
+                  <option value="administrative">Administrative</option>
+                  <option value="operational">Operational</option>
+                  <option value="financial">Financial</option>
+                  <option value="compliance">Compliance</option>
+                  <option value="intelligence">Intelligence</option>
+                </select>
+              </label>
+              <label>
+                Format
+                <select value={reportForm.default_format} onChange={(event) => setReportForm({ ...reportForm, default_format: event.target.value as ReportFormat })}>
+                  <option value="online">Online</option>
+                  <option value="pdf">PDF</option>
+                  <option value="excel">Excel</option>
+                  <option value="csv">CSV</option>
+                  <option value="api">API</option>
+                </select>
+              </label>
+              <label>
+                Frequency
+                <select value={reportForm.frequency} onChange={(event) => setReportForm({ ...reportForm, frequency: event.target.value as ReportFrequency })}>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="on_trigger">On trigger</option>
+                </select>
+              </label>
+              <label>
+                Starts
+                <input type="date" value={reportForm.period_start} onChange={(event) => setReportForm({ ...reportForm, period_start: event.target.value })} />
+              </label>
+              <label>
+                Ends
+                <input type="date" value={reportForm.period_end} onChange={(event) => setReportForm({ ...reportForm, period_end: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Recipients
+                <input value={reportForm.recipients} onChange={(event) => setReportForm({ ...reportForm, recipients: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {generatedReports.slice(0, 3).map((report) => (
+                <button
+                  type="button"
+                  key={report.id}
+                  className={`task-card ${report.id === selectedGeneratedReportId ? "selected" : ""}`}
+                  onClick={() => setSelectedGeneratedReportId(report.id)}
+                >
+                  <div>
+                    <strong>{report.title}</strong>
+                    <span>{report.status} · {report.output_format} · {report.summary}</span>
+                  </div>
+                </button>
+              ))}
+              {scheduledReports.slice(0, 2).map((schedule) => (
+                <article key={schedule.id} className="task-card">
+                  <div>
+                    <strong>{schedule.name}</strong>
+                    <span>{schedule.frequency} · {schedule.delivery_channels}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Intelligence</p>
+                <h2>AI insights and predictive risk</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createInsightAndRisk} disabled={busyAction !== null}>Insight</button>
+                <button type="button" onClick={() => updateInsight("actioned")} disabled={busyAction !== null}>Action</button>
+              </div>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Open insights</span>
+                <strong>{reportingSummary?.open_insights ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Warnings</span>
+                <strong>{reportingSummary?.critical_insights ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">High risk</span>
+                <strong>{reportingSummary?.high_risk_scores ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Definitions</span>
+                <strong>{reportingSummary?.definitions ?? 0}</strong>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Insight
+                <input value={insightForm.title} onChange={(event) => setInsightForm({ ...insightForm, title: event.target.value })} />
+              </label>
+              <label>
+                Severity
+                <select value={insightForm.severity} onChange={(event) => setInsightForm({ ...insightForm, severity: event.target.value as InsightSeverity })}>
+                  <option value="info">Info</option>
+                  <option value="watch">Watch</option>
+                  <option value="warning">Warning</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
+              <label>
+                Confidence
+                <input type="number" min="0" max="1" step="0.01" value={insightForm.confidence} onChange={(event) => setInsightForm({ ...insightForm, confidence: Number(event.target.value) })} />
+              </label>
+              <label>
+                Risk score
+                <input type="number" min="0" max="100" value={riskForm.score} onChange={(event) => setRiskForm({ ...riskForm, score: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Evidence
+                <input value={insightForm.evidence} onChange={(event) => setInsightForm({ ...insightForm, evidence: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Recommendation
+                <input value={riskForm.recommendation} onChange={(event) => setRiskForm({ ...riskForm, recommendation: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {insights.slice(0, 3).map((insight) => (
+                <button
+                  type="button"
+                  key={insight.id}
+                  className={`task-card ${insight.id === selectedInsightId ? "selected" : ""}`}
+                  onClick={() => setSelectedInsightId(insight.id)}
+                >
+                  <div>
+                    <strong>{insight.title}</strong>
+                    <span>{insight.severity} · {insight.status} · {Math.round(insight.confidence * 100)}%</span>
+                  </div>
+                </button>
+              ))}
+              {riskScores.slice(0, 3).map((risk) => (
+                <article key={risk.id} className="task-card">
+                  <div>
+                    <strong>{risk.score} · {risk.risk_band}</strong>
+                    <span>{risk.model_name} · {risk.recommendation}</span>
+                  </div>
+                </article>
               ))}
             </div>
           </div>
