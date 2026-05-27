@@ -87,10 +87,14 @@ import type {
   PredictiveRiskScoreRead,
   ProcurementRecommendationRead,
   ReportCategory,
+  ReportChartRead,
   ReportDefinitionRead,
   ReportExportJobRead,
   ReportFormat,
   ReportFrequency,
+  RenderedReportRead,
+  ReportVerificationRead,
+  ReportingBenchmarkRead,
   ReportingSummaryRead,
   SaaSInvoiceRead,
   SaaSPaymentRead,
@@ -202,6 +206,10 @@ export default function HomePage() {
   const [insights, setInsights] = useState<IntelligenceInsightRead[]>([]);
   const [riskScores, setRiskScores] = useState<PredictiveRiskScoreRead[]>([]);
   const [reportExports, setReportExports] = useState<ReportExportJobRead[]>([]);
+  const [renderedReport, setRenderedReport] = useState<RenderedReportRead | null>(null);
+  const [reportVerification, setReportVerification] = useState<ReportVerificationRead | null>(null);
+  const [reportCharts, setReportCharts] = useState<ReportChartRead[]>([]);
+  const [reportingBenchmarks, setReportingBenchmarks] = useState<ReportingBenchmarkRead[]>([]);
   const [reportingSummary, setReportingSummary] = useState<ReportingSummaryRead | null>(null);
   const [billingPlans, setBillingPlans] = useState<BillingPlanRead[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRead[]>([]);
@@ -893,7 +901,7 @@ export default function HomePage() {
   }, []);
 
   const loadReporting = useCallback(async (organizationId: string) => {
-    const [definitions, reports, schedules, insightData, riskData, exports, summary] =
+    const [definitions, reports, schedules, insightData, riskData, exports, charts, benchmarks, summary] =
       await Promise.all([
         apiRequest<ReportDefinitionRead[]>(`/reporting/definitions?organization_id=${organizationId}`),
         apiRequest<GeneratedReportRead[]>(`/reporting/reports?organization_id=${organizationId}`),
@@ -901,6 +909,8 @@ export default function HomePage() {
         apiRequest<IntelligenceInsightRead[]>(`/reporting/insights?organization_id=${organizationId}`),
         apiRequest<PredictiveRiskScoreRead[]>(`/reporting/risk-scores?organization_id=${organizationId}`),
         apiRequest<ReportExportJobRead[]>(`/reporting/exports?organization_id=${organizationId}`),
+        apiRequest<ReportChartRead[]>(`/reporting/charts?organization_id=${organizationId}`),
+        apiRequest<ReportingBenchmarkRead[]>(`/reporting/benchmarks?organization_id=${organizationId}`),
         apiRequest<ReportingSummaryRead>(`/reporting/summary?organization_id=${organizationId}`)
       ]);
     setReportDefinitions(definitions);
@@ -909,6 +919,8 @@ export default function HomePage() {
     setInsights(insightData);
     setRiskScores(riskData);
     setReportExports(exports);
+    setReportCharts(charts);
+    setReportingBenchmarks(benchmarks);
     setReportingSummary(summary);
     setSelectedReportDefinitionId((current) =>
       definitions.some((definition) => definition.id === current)
@@ -1069,6 +1081,10 @@ export default function HomePage() {
       setInsights([]);
       setRiskScores([]);
       setReportExports([]);
+      setRenderedReport(null);
+      setReportVerification(null);
+      setReportCharts([]);
+      setReportingBenchmarks([]);
       setReportingSummary(null);
       setBillingPlans([]);
       setSubscriptions([]);
@@ -3010,6 +3026,66 @@ export default function HomePage() {
     );
   };
 
+  const renderSelectedReport = () => {
+    if (!selectedOrganizationId || !selectedGeneratedReportId) {
+      addLog("Generate or select a report first", "bad");
+      return;
+    }
+    runAction(
+      "render-report",
+      () =>
+        apiRequest<RenderedReportRead>(
+          `/reporting/reports/${selectedGeneratedReportId}/render?output_format=${reportForm.default_format}`,
+          { method: "POST", identity }
+        ),
+      (artifact) => {
+        setRenderedReport(artifact);
+        addLog(`${artifact.output_format} artifact rendered: ${artifact.size_bytes} bytes`, "good");
+        void loadReporting(selectedOrganizationId);
+      }
+    );
+  };
+
+  const verifySelectedReport = () => {
+    if (!selectedOrganizationId || !selectedGeneratedReportId) {
+      addLog("Generate or select a report first", "bad");
+      return;
+    }
+    runAction(
+      "verify-report",
+      () =>
+        apiRequest<ReportVerificationRead>(
+          `/reporting/reports/${selectedGeneratedReportId}/verify`,
+          { method: "POST", identity }
+        ),
+      (verification) => {
+        setReportVerification(verification);
+        addLog(`Report verification ${verification.score}/100`, verification.passed ? "good" : "bad");
+      }
+    );
+  };
+
+  const generateReportingInsight = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "generate-reporting-insight",
+      () =>
+        apiRequest<IntelligenceInsightRead>(
+          `/reporting/insights/generate?organization_id=${selectedOrganizationId}`,
+          { method: "POST", identity }
+        ),
+      (insight) => {
+        setInsights((current) => [insight, ...current.filter((item) => item.id !== insight.id)]);
+        setSelectedInsightId(insight.id);
+        addLog(`${insight.title} generated`, "good");
+        void loadReporting(selectedOrganizationId);
+      }
+    );
+  };
+
   const createBillingPlanAndSubscription = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -4181,6 +4257,8 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createReportDefinitionAndRun} disabled={busyAction !== null}>Generate</button>
                 <button type="button" onClick={createScheduledReport} disabled={busyAction !== null}>Schedule</button>
+                <button type="button" onClick={renderSelectedReport} disabled={busyAction !== null}>Render</button>
+                <button type="button" onClick={verifySelectedReport} disabled={busyAction !== null}>Verify</button>
                 <button type="button" onClick={createReportExport} disabled={busyAction !== null}>Export</button>
               </div>
             </div>
@@ -4239,6 +4317,22 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {renderedReport ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{renderedReport.output_format} artifact · {renderedReport.size_bytes} bytes</strong>
+                    <span>{renderedReport.artifact_url} · {renderedReport.content_type}</span>
+                  </div>
+                </article>
+              ) : null}
+              {reportVerification ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Verification {reportVerification.score}/100 · {reportVerification.passed ? "passed" : "needs work"}</strong>
+                    <span>{reportVerification.findings[0]} · {reportVerification.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
               {generatedReports.slice(0, 3).map((report) => (
                 <button
                   type="button"
@@ -4260,6 +4354,14 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {reportCharts.slice(0, 3).map((chart) => (
+                <article key={chart.chart_key} className="task-card">
+                  <div>
+                    <strong>{chart.title} · {chart.chart_type}</strong>
+                    <span>{chart.labels.map((label, index) => `${label}: ${chart.values[index] ?? 0}`).join(" · ")}</span>
+                  </div>
+                </article>
+              ))}
             </div>
           </div>
 
@@ -4271,6 +4373,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createInsightAndRisk} disabled={busyAction !== null}>Insight</button>
+                <button type="button" onClick={generateReportingInsight} disabled={busyAction !== null}>AI Review</button>
                 <button type="button" onClick={() => updateInsight("actioned")} disabled={busyAction !== null}>Action</button>
               </div>
             </div>
@@ -4342,6 +4445,14 @@ export default function HomePage() {
                   <div>
                     <strong>{risk.score} · {risk.risk_band}</strong>
                     <span>{risk.model_name} · {risk.recommendation}</span>
+                  </div>
+                </article>
+              ))}
+              {reportingBenchmarks.slice(0, 3).map((benchmark) => (
+                <article key={benchmark.model_name} className="task-card">
+                  <div>
+                    <strong>{benchmark.model_name} · {benchmark.average_score}</strong>
+                    <span>{benchmark.sample_size} samples · {benchmark.high_risk_count} high risk · {benchmark.recommendation}</span>
                   </div>
                 </article>
               ))}

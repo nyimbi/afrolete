@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent import Agent
 from app.models.commercial import FinanceInvoice, Ticket
 from app.models.competition import Competition
-from app.models.enums import InsightSeverity, InsightStatus, ReportRunStatus
+from app.models.enums import InsightSeverity, InsightStatus, ReportFormat, ReportRunStatus
 from app.models.event import AttendanceRecord, ConsentRequest, Event
 from app.models.organization import Membership, Organization
 from app.models.performance import AthleteAssessment, AthletePerformanceObservation
@@ -279,6 +280,198 @@ async def reporting_summary(db: AsyncSession, organization_id: UUID) -> dict:
     }
 
 
+async def render_report_artifact(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    report_id: UUID,
+    output_format: ReportFormat | None,
+    authz: AuthorizationService,
+) -> dict:
+    report = await get_report(db, report_id)
+    await ensure_manage_reporting(authz, identity, report.organization_id)
+    selected_format = output_format or report.output_format
+    now = datetime.now(UTC)
+    body = render_body(report, selected_format)
+    checksum = sha256(body.encode()).hexdigest()
+    artifact_url = f"artifact://reports/{report.id}/{checksum[:16]}.{selected_format.value}"
+    report.output_format = selected_format
+    report.artifact_url = artifact_url
+    report.status = ReportRunStatus.READY
+    await db.commit()
+    await db.refresh(report)
+    return {
+        "report_id": report.id,
+        "organization_id": report.organization_id,
+        "output_format": selected_format,
+        "artifact_url": artifact_url,
+        "content_type": report_content_type(selected_format),
+        "size_bytes": len(body.encode()),
+        "page_count": 1 if selected_format == ReportFormat.PDF else None,
+        "sheet_count": 2 if selected_format == ReportFormat.EXCEL else None,
+        "checksum": checksum,
+        "body_preview": body[:600],
+        "rendered_at": now,
+    }
+
+
+async def verify_report_artifact(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    report_id: UUID,
+    authz: AuthorizationService,
+) -> dict:
+    report = await get_report(db, report_id)
+    await ensure_manage_reporting(authz, identity, report.organization_id)
+    findings: list[str] = []
+    score = 100
+    if report.status != ReportRunStatus.READY:
+        findings.append("Report is not marked ready.")
+        score -= 25
+    if not report.summary or len(report.summary) < 40:
+        findings.append("Summary is too thin for stakeholder delivery.")
+        score -= 20
+    if not report.findings:
+        findings.append("Findings are missing.")
+        score -= 15
+    if not report.recommendations:
+        findings.append("Recommendations are missing.")
+        score -= 15
+    if report.period_start and report.period_end and report.period_start > report.period_end:
+        findings.append("Report period is invalid.")
+        score -= 25
+    if not report.shared_token or not report.expires_at:
+        findings.append("Share token or expiry is missing.")
+        score -= 10
+    elif report.expires_at < datetime.now(UTC):
+        findings.append("Share token is expired.")
+        score -= 15
+    if not report.artifact_url:
+        findings.append("Rendered artifact is missing.")
+        score -= 10
+    if not findings:
+        findings.append("Report is ready for stakeholder review and export.")
+    score = max(score, 0)
+    return {
+        "report_id": report.id,
+        "organization_id": report.organization_id,
+        "passed": score >= 80,
+        "score": score,
+        "findings": findings,
+        "recommendation": "Publish or schedule delivery." if score >= 80 else "Render and complete missing narrative fields before delivery.",
+        "verified_at": datetime.now(UTC),
+    }
+
+
+async def report_charts(db: AsyncSession, organization_id: UUID) -> list[dict]:
+    summary = await reporting_summary(db, organization_id)
+    risks = await list_risk_scores(db, organization_id)
+    insights = await list_insights(db, organization_id)
+    severity_counts = {
+        "info": sum(1 for insight in insights if insight.severity == InsightSeverity.INFO),
+        "watch": sum(1 for insight in insights if insight.severity == InsightSeverity.WATCH),
+        "warning": sum(1 for insight in insights if insight.severity == InsightSeverity.WARNING),
+        "critical": sum(1 for insight in insights if insight.severity == InsightSeverity.CRITICAL),
+    }
+    risk_counts = {
+        "normal": sum(1 for risk in risks if risk.risk_band == "normal"),
+        "watch": sum(1 for risk in risks if risk.risk_band == "watch"),
+        "warning": sum(1 for risk in risks if risk.risk_band == "warning"),
+        "high": sum(1 for risk in risks if risk.risk_band == "high"),
+    }
+    return [
+        {
+            "chart_key": "reporting-throughput",
+            "title": "Reporting throughput",
+            "chart_type": "bar",
+            "labels": ["Definitions", "Generated", "Scheduled", "Exports"],
+            "values": [
+                float(summary["definitions"]),
+                float(summary["generated_reports"]),
+                float(summary["scheduled_reports"]),
+                float(summary["export_jobs"]),
+            ],
+            "insight": "Use this to spot whether teams are creating reports without delivery automation.",
+        },
+        {
+            "chart_key": "insight-severity",
+            "title": "Insight severity",
+            "chart_type": "donut",
+            "labels": list(severity_counts),
+            "values": [float(value) for value in severity_counts.values()],
+            "insight": "Critical and warning insights should drive review queues before routine reports.",
+        },
+        {
+            "chart_key": "risk-bands",
+            "title": "Predictive risk bands",
+            "chart_type": "stacked_bar",
+            "labels": list(risk_counts),
+            "values": [float(value) for value in risk_counts.values()],
+            "insight": "High and warning risk bands should trigger training-load and safeguarding follow-ups.",
+        },
+    ]
+
+
+async def reporting_benchmarks(db: AsyncSession, organization_id: UUID) -> list[dict]:
+    risks = await list_risk_scores(db, organization_id)
+    grouped: dict[str, list[PredictiveRiskScore]] = {}
+    for risk in risks:
+        grouped.setdefault(risk.model_name, []).append(risk)
+    benchmarks: list[dict] = []
+    for model_name, scores in sorted(grouped.items()):
+        average = sum(score.score for score in scores) / len(scores)
+        high_risk_count = sum(1 for score in scores if score.score >= 70)
+        band = risk_band(round(average))
+        benchmarks.append(
+            {
+                "model_name": model_name,
+                "sample_size": len(scores),
+                "average_score": round(average, 2),
+                "high_risk_count": high_risk_count,
+                "benchmark_band": band,
+                "recommendation": benchmark_recommendation(band, high_risk_count),
+            }
+        )
+    return benchmarks
+
+
+async def generate_live_insight(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> IntelligenceInsight:
+    await ensure_manage_reporting(authz, identity, organization_id)
+    reports = await list_generated_reports(db, organization_id)
+    risks = await list_risk_scores(db, organization_id)
+    summary = await reporting_summary(db, organization_id)
+    highest_risk = max((risk.score for risk in risks), default=0)
+    severity = InsightSeverity.CRITICAL if highest_risk >= 85 else InsightSeverity.WARNING if highest_risk >= 70 else InsightSeverity.WATCH
+    title = "AI reporting review: delivery and risk signals"
+    evidence = (
+        f"{summary['generated_reports']} reports, {summary['export_jobs']} exports, "
+        f"{summary['open_insights']} open insights, highest risk score {highest_risk}."
+    )
+    recommendation = (
+        "Prioritize high-risk athlete review before publishing the next stakeholder packet."
+        if highest_risk >= 70
+        else "Convert the latest report into scheduled delivery and keep monitoring trend changes."
+    )
+    insight = IntelligenceInsight(
+        organization_id=organization_id,
+        title=title,
+        insight_type="ai_generated_reporting_review",
+        severity=severity,
+        confidence=0.82 if reports else 0.66,
+        evidence=evidence,
+        recommendation=recommendation,
+        model_name="afrolete-deterministic-insight-v1",
+    )
+    db.add(insight)
+    await db.commit()
+    await db.refresh(insight)
+    return insight
+
+
 async def synthesize_report_text(
     db: AsyncSession,
     payload: GeneratedReportCreate,
@@ -338,6 +531,13 @@ async def get_definition_for_organization(db: AsyncSession, definition_id: UUID,
     return definition
 
 
+async def get_report(db: AsyncSession, report_id: UUID) -> GeneratedReport:
+    report = await db.get(GeneratedReport, report_id)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    return report
+
+
 async def get_athlete_for_organization(db: AsyncSession, athlete_profile_id: UUID, organization_id: UUID) -> AthleteProfile:
     athlete = await db.get(AthleteProfile, athlete_profile_id)
     if athlete is None or athlete.organization_id != organization_id:
@@ -377,3 +577,40 @@ def risk_band(score: int) -> str:
     if score >= 40:
         return "watch"
     return "normal"
+
+
+def render_body(report: GeneratedReport, output_format: ReportFormat) -> str:
+    fields = [
+        ("Title", report.title),
+        ("Format", output_format.value),
+        ("Summary", report.summary),
+        ("Findings", report.findings or ""),
+        ("Recommendations", report.recommendations or ""),
+        ("Period", f"{report.period_start or 'open'} to {report.period_end or 'open'}"),
+        ("Share", report.shared_token or ""),
+    ]
+    if output_format == ReportFormat.CSV:
+        return "\n".join(f"{key},{value}" for key, value in fields)
+    if output_format == ReportFormat.API:
+        return str({key.lower(): value for key, value in fields})
+    return "\n\n".join(f"{key}: {value}" for key, value in fields)
+
+
+def report_content_type(output_format: ReportFormat) -> str:
+    return {
+        ReportFormat.PDF: "application/pdf",
+        ReportFormat.EXCEL: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ReportFormat.CSV: "text/csv",
+        ReportFormat.API: "application/json",
+        ReportFormat.ONLINE: "text/html",
+    }[output_format]
+
+
+def benchmark_recommendation(band: str, high_risk_count: int) -> str:
+    if band == "high":
+        return "Escalate this model cohort for immediate coaching and welfare review."
+    if band == "warning" or high_risk_count:
+        return "Schedule targeted review for warning cohorts before the next fixture cycle."
+    if band == "watch":
+        return "Keep the cohort on routine monitoring and compare after the next assessment."
+    return "Use this benchmark as the current healthy baseline."

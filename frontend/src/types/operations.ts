@@ -769,6 +769,48 @@ export type ReportExportJobRead = {
   completed_at: string | null;
 };
 
+export type RenderedReportRead = {
+  report_id: UUID;
+  organization_id: UUID;
+  output_format: ReportFormat;
+  artifact_url: string;
+  content_type: string;
+  size_bytes: number;
+  page_count: number | null;
+  sheet_count: number | null;
+  checksum: string;
+  body_preview: string;
+  rendered_at: string;
+};
+
+export type ReportVerificationRead = {
+  report_id: UUID;
+  organization_id: UUID;
+  passed: boolean;
+  score: number;
+  findings: string[];
+  recommendation: string;
+  verified_at: string;
+};
+
+export type ReportChartRead = {
+  chart_key: string;
+  title: string;
+  chart_type: string;
+  labels: string[];
+  values: number[];
+  insight: string;
+};
+
+export type ReportingBenchmarkRead = {
+  model_name: string;
+  sample_size: number;
+  average_score: number;
+  high_risk_count: number;
+  benchmark_band: string;
+  recommendation: string;
+};
+
 export type ReportingSummaryRead = {
   organization_id: UUID;
   definitions: number;

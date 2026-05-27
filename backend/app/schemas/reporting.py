@@ -125,6 +125,48 @@ class ReportExportJobRead(ReportExportJobCreate):
     completed_at: datetime | None
 
 
+class RenderedReportRead(BaseModel):
+    report_id: UUID
+    organization_id: UUID
+    output_format: ReportFormat
+    artifact_url: str
+    content_type: str
+    size_bytes: int
+    page_count: int | None
+    sheet_count: int | None
+    checksum: str
+    body_preview: str
+    rendered_at: datetime
+
+
+class ReportVerificationRead(BaseModel):
+    report_id: UUID
+    organization_id: UUID
+    passed: bool
+    score: int
+    findings: list[str]
+    recommendation: str
+    verified_at: datetime
+
+
+class ReportChartRead(BaseModel):
+    chart_key: str
+    title: str
+    chart_type: str
+    labels: list[str]
+    values: list[float]
+    insight: str
+
+
+class ReportingBenchmarkRead(BaseModel):
+    model_name: str
+    sample_size: int
+    average_score: float
+    high_risk_count: int
+    benchmark_band: str
+    recommendation: str
+
+
 class ReportingSummaryRead(BaseModel):
     organization_id: UUID
     definitions: int

@@ -12,14 +12,19 @@ from app.schemas.reporting import (
     IntelligenceInsightUpdate,
     PredictiveRiskScoreCreate,
     PredictiveRiskScoreRead,
+    RenderedReportRead,
+    ReportChartRead,
     ReportDefinitionCreate,
     ReportDefinitionRead,
     ReportExportJobCreate,
     ReportExportJobRead,
+    ReportVerificationRead,
+    ReportingBenchmarkRead,
     ReportingSummaryRead,
     ScheduledReportCreate,
     ScheduledReportRead,
 )
+from app.models.enums import ReportFormat
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
@@ -29,6 +34,7 @@ from app.services.reporting import (
     create_report_definition,
     create_risk_score,
     create_scheduled_report,
+    generate_live_insight,
     generate_report,
     list_export_jobs,
     list_generated_reports,
@@ -36,8 +42,12 @@ from app.services.reporting import (
     list_report_definitions,
     list_risk_scores,
     list_scheduled_reports,
+    render_report_artifact,
+    report_charts,
+    reporting_benchmarks,
     reporting_summary,
     update_insight_status,
+    verify_report_artifact,
 )
 
 router = APIRouter(prefix="/reporting", tags=["reporting"])
@@ -89,6 +99,29 @@ async def list_reports_route(
     ]
 
 
+@router.post("/reports/{report_id}/render", response_model=RenderedReportRead)
+async def render_report_route(
+    report_id: UUID,
+    output_format: ReportFormat | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RenderedReportRead:
+    return RenderedReportRead(
+        **await render_report_artifact(db, identity, report_id, output_format, authz)
+    )
+
+
+@router.post("/reports/{report_id}/verify", response_model=ReportVerificationRead)
+async def verify_report_route(
+    report_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ReportVerificationRead:
+    return ReportVerificationRead(**await verify_report_artifact(db, identity, report_id, authz))
+
+
 @router.post("/schedules", response_model=ScheduledReportRead, status_code=status.HTTP_201_CREATED)
 async def create_schedule_route(
     payload: ScheduledReportCreate,
@@ -126,6 +159,19 @@ async def list_insights_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[IntelligenceInsightRead]:
     return [read(insight, IntelligenceInsightRead) for insight in await list_insights(db, organization_id)]
+
+
+@router.post("/insights/generate", response_model=IntelligenceInsightRead, status_code=status.HTTP_201_CREATED)
+async def generate_insight_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IntelligenceInsightRead:
+    return read(
+        await generate_live_insight(db, identity, organization_id, authz),
+        IntelligenceInsightRead,
+    )
 
 
 @router.patch("/insights/{insight_id}", response_model=IntelligenceInsightRead)
@@ -173,6 +219,25 @@ async def list_exports_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[ReportExportJobRead]:
     return [read(export, ReportExportJobRead) for export in await list_export_jobs(db, organization_id)]
+
+
+@router.get("/charts", response_model=list[ReportChartRead])
+async def charts_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[ReportChartRead]:
+    return [ReportChartRead(**chart) for chart in await report_charts(db, organization_id)]
+
+
+@router.get("/benchmarks", response_model=list[ReportingBenchmarkRead])
+async def benchmarks_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[ReportingBenchmarkRead]:
+    return [
+        ReportingBenchmarkRead(**benchmark)
+        for benchmark in await reporting_benchmarks(db, organization_id)
+    ]
 
 
 @router.get("/summary", response_model=ReportingSummaryRead)

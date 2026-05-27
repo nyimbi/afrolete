@@ -425,6 +425,25 @@ athlete-development platform:
     `uv run pytest tests/unit/test_commercial.py -q` (1/1),
     `uv run pytest` (46/46), `pnpm --filter @afrolete/frontend typecheck`,
     `pnpm --filter @afrolete/frontend build`, `git diff --check`.
+- Implemented slice 024 reporting output intelligence:
+  - Added report artifact rendering endpoints with selected output format,
+    content type, artifact reference, checksum, body preview, and PDF/Excel
+    page/sheet metadata.
+  - Added report verification scoring for readiness, narrative completeness,
+    share expiry, period validity, and rendered artifact presence.
+  - Added chart-ready reporting summaries for throughput, insight severity,
+    and predictive risk bands.
+  - Added benchmark model summaries from predictive risk scores, including
+    sample size, average score, high-risk counts, banding, and recommended
+    follow-up.
+  - Added deterministic AI-generated reporting review insights from the latest
+    report/export/open-insight/risk signals.
+  - Extended the operations console with Render, Verify, AI Review, chart cards,
+    artifact cards, verification cards, and benchmark cards.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, frontend production
+    build, Playwright screenshots, and real binary PDF/Excel file generation.
 
 ## Implementation Slices
 
@@ -454,6 +473,7 @@ athlete-development platform:
 | 021 - Communication inbox, digests, and AI drafting | Partial | Backend tests 44/44; frontend typecheck/build | Person inbox, manager/self access, digest generation, notification-preference channel selection, deterministic AI-assisted drafts, console draft/digest/inbox controls, and read actions are implemented; provider-specific credentials, background digest scheduler, and full parent portal remain. |
 | 022 - Asset procurement and utilization intelligence | Partial | Backend tests 45/45; frontend typecheck/build | Scan lookup, photo metadata updates, procurement recommendations, supplier scorecards, lease quotes, utilization recommendations, and console controls are implemented; supplier ordering workflows, file uploads, RFID hardware integration, and accounting lease billing remain. |
 | 023 - Commercial finance controls | Partial | Backend tests 46/46; frontend typecheck/build | Tax quote estimates, settlement summaries, ticket refunds, invoice refunds, accounting export rows, sponsorship dashboard metrics, and console controls are implemented; live payment provider webhooks, tax authority filing, accounting API sync, and sponsor-facing dashboards remain. |
+| 024 - Reporting output intelligence | Partial | Backend ruff; frontend typecheck; diff check | Report artifact rendering metadata, verification scoring, chart-ready summaries, benchmark models, deterministic AI review insights, and console controls are implemented; real binary PDF/Excel generation, report file storage, visual chart rendering, and full verification remain. |
 
 ## Capability Coverage
 
@@ -478,7 +498,7 @@ Status values:
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, scan lookup, photo metadata, procurement recommendations, supplier scorecards, lease quotes, utilization recommendations, and console workflows are implemented; supplier ordering workflows, real file uploads, RFID hardware integration, and accounting lease billing remain. |
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, settlement summaries, refunds, tax quotes, accounting exports, sponsorship dashboards, commercial summary, and console workflows are implemented; live payment provider webhooks, tax authority filing, accounting API sync, and sponsor-facing dashboards remain. |
-| Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, and console workflows are implemented; real AI model execution, rendered PDF/Excel generation, charts, benchmark models, and full verification remain. |
+| Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, artifact rendering metadata, verification scoring, chart-ready summaries, benchmark models, deterministic AI review insights, and console workflows are implemented; real AI model execution, binary PDF/Excel generation, file storage, visual chart rendering, and full verification remain. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation, frontend PKCE session handling, and SpiceDB gRPC authorization adapter are implemented; live service smoke tests and other integrations remain future slices. |
 | SaaS billing/subscriptions | partial | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, and console workflows are implemented; Stripe/processor webhooks, dunning automation, tax localization, plan-change proration, and full verification remain. |
 | Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, commerce, reports, billing, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
@@ -495,8 +515,9 @@ Status values:
    integration, and accounting lease billing for assets and facilities.
 5. Add live payment provider webhooks, tax authority filing, accounting API
    sync, and sponsor-facing dashboard portals.
-6. Add rendered PDF/Excel report generation, chart visualizations, benchmark
-   models, live AI-generated insights, and report verification coverage.
+6. Replace deterministic report artifact previews with real PDF/Excel file
+   generation, report file storage, chart visualization components, live
+   AI-generated insights, and report verification coverage.
 7. Add Stripe/payment-processor webhooks, dunning automation, tax localization,
    plan-change proration, and full billing verification coverage.
 8. Add automated fixture generation, bracket visualization, and scheduling
