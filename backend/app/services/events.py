@@ -1,11 +1,14 @@
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.enums import (
     AttendanceStatus,
+    CommunicationMessageType,
+    CommunicationScopeType,
     MedicalClearanceStatus,
     ParticipationClearanceStatus,
     WeatherAlertLevel,
@@ -15,9 +18,16 @@ from app.models.event import AttendanceRecord, Event, EventWeatherAssessment
 from app.models.identity import Person
 from app.models.organization import Organization
 from app.models.team import AthleteProfile, Team, TeamRosterEntry
-from app.schemas.event import EventCreate, EventWeatherAssessmentCreate, AttendanceRecordUpsert
+from app.schemas.communication import CommunicationMessageCreate
+from app.schemas.event import (
+    EventCreate,
+    EventWeatherAlertCreate,
+    EventWeatherAssessmentCreate,
+    AttendanceRecordUpsert,
+)
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
+from app.services.communications import create_message
 from app.services.safeguarding import clearance_for_event, medical_clearance_for_event
 
 
@@ -184,6 +194,42 @@ async def list_weather_assessments(db: AsyncSession, event_id: UUID) -> list[Eve
     return list(rows.all())
 
 
+async def dispatch_weather_assessment_alert(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    event_id: UUID,
+    assessment_id: UUID,
+    payload: EventWeatherAlertCreate,
+    authz: AuthorizationService,
+) -> tuple[CommunicationMessage, int]:
+    event = await get_event(db, event_id)
+    await ensure_manage_event_scope(authz, event.organization_id, identity)
+    assessment = await db.get(EventWeatherAssessment, assessment_id)
+    if assessment is None or assessment.event_id != event.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Weather assessment not found")
+    message = await create_message(
+        db,
+        identity,
+        CommunicationMessageCreate(
+            organization_id=event.organization_id,
+            message_type=CommunicationMessageType.ALERT,
+            channel=payload.channel,
+            scope_type=CommunicationScopeType.EVENT,
+            scope_id=event.id,
+            subject=payload.subject or weather_alert_subject(event, assessment),
+            body=payload.body or weather_alert_body(event, assessment),
+            urgent=True,
+            quiet_hours_override=True,
+            copy_guardians_for_minors=payload.copy_guardians_for_minors,
+        ),
+        authz,
+    )
+    recipient_count = await db.scalar(
+        select(func.count(MessageRecipient.id)).where(MessageRecipient.message_id == message.id)
+    )
+    return message, int(recipient_count or 0)
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -245,6 +291,39 @@ def classify_weather_risk(
     if advisories:
         return WeatherAlertLevel.ADVISORY, WeatherDecision.MONITOR, "\n".join(advisories)
     return WeatherAlertLevel.INFORMATION, WeatherDecision.PROCEED, "Conditions are within normal operating thresholds."
+
+
+def weather_alert_subject(event: Event, assessment: EventWeatherAssessment) -> str:
+    return f"Weather {assessment.alert_level.value}: {event.title}"[:240]
+
+
+def weather_alert_body(event: Event, assessment: EventWeatherAssessment) -> str:
+    lines = [
+        f"Event: {event.title}",
+        f"Venue: {event.venue_name or 'not specified'}",
+        f"Weather alert: {assessment.alert_level.value}",
+        f"Decision: {assessment.decision.value}",
+        f"Observed at: {assessment.observed_at.isoformat()}",
+    ]
+    metrics = [
+        f"WBGT {assessment.wbgt_c}C" if assessment.wbgt_c is not None else None,
+        f"Heat index {assessment.heat_index_c}C" if assessment.heat_index_c is not None else None,
+        f"AQI {assessment.aqi}" if assessment.aqi is not None else None,
+        f"Lightning {assessment.lightning_distance_km} km" if assessment.lightning_distance_km is not None else None,
+        f"Wind gust {assessment.wind_gust_kph} kph" if assessment.wind_gust_kph is not None else None,
+        (
+            f"Precipitation {assessment.precipitation_mm_per_hr} mm/hr"
+            if assessment.precipitation_mm_per_hr is not None
+            else None
+        ),
+    ]
+    metric_line = "; ".join(metric for metric in metrics if metric)
+    if metric_line:
+        lines.append(f"Conditions: {metric_line}")
+    lines.append(f"Actions: {assessment.recommended_actions}")
+    if assessment.notes:
+        lines.append(f"Notes: {assessment.notes}")
+    return "\n".join(lines)[:8000]
 
 
 async def record_attendance(

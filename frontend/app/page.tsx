@@ -69,6 +69,7 @@ import type {
   ConsentRequestRead,
   DonationRead,
   EventRead,
+  EventWeatherAlertRead,
   EventWeatherAssessmentRead,
   EventType,
   EmergencyActivationAlertRead,
@@ -334,6 +335,7 @@ export default function HomePage() {
   const [events, setEvents] = useState<EventRead[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
   const [weatherAssessments, setWeatherAssessments] = useState<EventWeatherAssessmentRead[]>([]);
+  const [weatherAlert, setWeatherAlert] = useState<EventWeatherAlertRead | null>(null);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -534,6 +536,7 @@ export default function HomePage() {
     wind_speed_kph: 18,
     wind_gust_kph: 30,
     precipitation_mm_per_hr: 0,
+    alert_channel: "push" as CommunicationChannel,
     notes: "Pre-match venue and weather safety check."
   });
   const [guardianForm, setGuardianForm] = useState({
@@ -1525,6 +1528,7 @@ export default function HomePage() {
       setTeams([]);
       setEvents([]);
       setWeatherAssessments([]);
+      setWeatherAlert(null);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1724,6 +1728,7 @@ export default function HomePage() {
     if (!selectedEventId) {
       setAttendance([]);
       setWeatherAssessments([]);
+      setWeatherAlert(null);
       return;
     }
     runAction(
@@ -2179,6 +2184,32 @@ export default function HomePage() {
           `Weather ${assessment.alert_level}: ${assessment.decision}`,
           assessment.alert_level === "critical" || assessment.alert_level === "warning" ? "bad" : "good"
         );
+      }
+    );
+  };
+
+  const dispatchWeatherAlert = (assessment: EventWeatherAssessmentRead) => {
+    runAction(
+      `weather-alert-${assessment.id}`,
+      () =>
+        apiRequest<EventWeatherAlertRead>(
+          `/events/${assessment.event_id}/weather-assessments/${assessment.id}/alerts`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              channel: weatherForm.alert_channel,
+              copy_guardians_for_minors: true
+            }
+          }
+        ),
+      (alert) => {
+        setWeatherAlert(alert);
+        setSelectedMessageId(alert.message_id);
+        addLog(`Weather alert sent to ${alert.recipient_count} recipients`, "bad");
+        if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
+        }
       }
     );
   };
@@ -6298,8 +6329,28 @@ export default function HomePage() {
                 Rain mm/hr
                 <input type="number" step="0.1" min="0" value={weatherForm.precipitation_mm_per_hr} onChange={(event) => setWeatherForm({ ...weatherForm, precipitation_mm_per_hr: Number(event.target.value) })} />
               </label>
+              <label>
+                Alert channel
+                <select value={weatherForm.alert_channel} onChange={(event) => setWeatherForm({ ...weatherForm, alert_channel: event.target.value as CommunicationChannel })}>
+                  <option value="push">Push</option>
+                  <option value="in_app">In app</option>
+                  <option value="sms">SMS</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="email">Email</option>
+                </select>
+              </label>
             </div>
             <div className="task-list">
+              {weatherAlert ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{weatherAlert.subject}</strong>
+                    <span>{weatherAlert.channel} · {weatherAlert.recipient_count} recipients</span>
+                    <span>Message {weatherAlert.message_id}</span>
+                  </div>
+                </article>
+              ) : null}
               {weatherAssessments.slice(0, 2).map((assessment) => (
                 <article key={assessment.id} className="task-card">
                   <div>
@@ -6308,6 +6359,9 @@ export default function HomePage() {
                       WBGT {assessment.wbgt_c ?? assessment.heat_index_c ?? "n/a"}C · AQI {assessment.aqi ?? "n/a"} · lightning {assessment.lightning_distance_km ?? "n/a"} km
                     </span>
                     <span>{assessment.recommended_actions}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => dispatchWeatherAlert(assessment)}>Alert</button>
                   </div>
                 </article>
               ))}

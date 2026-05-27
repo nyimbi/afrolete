@@ -10,6 +10,8 @@ from app.schemas.event import (
     AttendanceSeedRead,
     EventCreate,
     EventRead,
+    EventWeatherAlertCreate,
+    EventWeatherAlertRead,
     EventWeatherAssessmentCreate,
     EventWeatherAssessmentRead,
 )
@@ -19,6 +21,7 @@ from app.services.authz.service import AuthorizationService, get_authorization_s
 from app.services.events import (
     create_weather_assessment,
     create_event,
+    dispatch_weather_assessment_alert,
     get_event,
     list_attendance,
     list_events,
@@ -70,6 +73,18 @@ def to_weather_assessment_read(assessment) -> EventWeatherAssessmentRead:
         decision=assessment.decision,
         recommended_actions=assessment.recommended_actions,
         notes=assessment.notes,
+    )
+
+
+def to_weather_alert_read(message, recipient_count: int, event_id: UUID, assessment_id: UUID) -> EventWeatherAlertRead:
+    return EventWeatherAlertRead(
+        event_id=event_id,
+        assessment_id=assessment_id,
+        message_id=message.id,
+        recipient_count=recipient_count,
+        channel=message.channel,
+        subject=message.subject,
+        urgent=message.urgent,
     )
 
 
@@ -148,6 +163,30 @@ async def list_weather_assessments_route(
         to_weather_assessment_read(assessment)
         for assessment in await list_weather_assessments(db, event_id)
     ]
+
+
+@router.post(
+    "/{event_id}/weather-assessments/{assessment_id}/alerts",
+    response_model=EventWeatherAlertRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def dispatch_weather_alert_route(
+    event_id: UUID,
+    assessment_id: UUID,
+    payload: EventWeatherAlertCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventWeatherAlertRead:
+    message, recipient_count = await dispatch_weather_assessment_alert(
+        db,
+        identity,
+        event_id,
+        assessment_id,
+        payload,
+        authz,
+    )
+    return to_weather_alert_read(message, recipient_count, event_id, assessment_id)
 
 
 @router.post("/{event_id}/attendance", response_model=AttendanceRecordRead, status_code=201)

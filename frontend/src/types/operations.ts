@@ -424,6 +424,16 @@ export type EventWeatherAssessmentRead = {
   notes: string | null;
 };
 
+export type EventWeatherAlertRead = {
+  event_id: UUID;
+  assessment_id: UUID;
+  message_id: UUID;
+  recipient_count: number;
+  channel: CommunicationChannel;
+  subject: string;
+  urgent: boolean;
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

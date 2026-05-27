@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import (
     AttendanceStatus,
+    CommunicationChannel,
     EventType,
     MedicalClearanceStatus,
     ParticipationClearanceStatus,
@@ -66,6 +67,23 @@ class EventWeatherAssessmentRead(EventWeatherAssessmentCreate):
     alert_level: WeatherAlertLevel
     decision: WeatherDecision
     recommended_actions: str
+
+
+class EventWeatherAlertCreate(BaseModel):
+    channel: CommunicationChannel = CommunicationChannel.PUSH
+    subject: str | None = Field(default=None, min_length=2, max_length=240)
+    body: str | None = Field(default=None, min_length=2, max_length=8000)
+    copy_guardians_for_minors: bool = True
+
+
+class EventWeatherAlertRead(BaseModel):
+    event_id: UUID
+    assessment_id: UUID
+    message_id: UUID
+    recipient_count: int
+    channel: CommunicationChannel
+    subject: str
+    urgent: bool
 
 
 class AttendanceRecordUpsert(BaseModel):
