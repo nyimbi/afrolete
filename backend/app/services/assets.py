@@ -81,6 +81,7 @@ from app.schemas.assets import (
 from app.schemas.commercial import FinanceInvoiceRead, FinancePaymentRead
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.storage.objects import put_object
 
 
 async def ensure_manage_assets(
@@ -383,11 +384,15 @@ async def upload_equipment_file(
     checksum = sha256(content).hexdigest()
     safe_name = safe_upload_filename(payload.filename)
     storage_name = f"{checksum[:16]}-{safe_name}"
-    relative_path = Path(str(item.organization_id)) / str(item.id) / storage_name
-    destination = Path(selected_settings.equipment_file_dir) / relative_path
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(content)
-    storage_url = f"{selected_settings.equipment_file_url_prefix}/{relative_path.as_posix()}"
+    relative_path = (Path(str(item.organization_id)) / str(item.id) / storage_name).as_posix()
+    stored = put_object(
+        selected_settings,
+        local_root=selected_settings.equipment_file_dir,
+        local_url_prefix=selected_settings.equipment_file_url_prefix,
+        key=relative_path,
+        content=content,
+        content_type=payload.content_type or "application/octet-stream",
+    )
     file_record = EquipmentFile(
         organization_id=item.organization_id,
         equipment_item_id=item.id,
@@ -396,12 +401,12 @@ async def upload_equipment_file(
         content_type=payload.content_type or "application/octet-stream",
         size_bytes=len(content),
         checksum=checksum,
-        storage_url=storage_url,
-        storage_path=str(destination),
+        storage_url=stored.url,
+        storage_path=stored.path,
         notes=payload.notes,
     )
     if payload.mark_as_photo or payload.content_type.startswith("image/"):
-        item.photo_url = storage_url
+        item.photo_url = stored.url
     db.add(file_record)
     await db.commit()
     await db.refresh(file_record)

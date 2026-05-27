@@ -44,6 +44,7 @@ from app.schemas.reporting import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.storage.objects import get_object, put_object
 
 
 async def ensure_manage_reporting(
@@ -407,10 +408,11 @@ def read_signed_report_artifact(
     if not hmac.compare_digest(expected, signature):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid artifact signature")
 
-    artifact_path = Path(selected_settings.report_artifact_dir) / str(organization_id) / str(report_id) / filename
-    if not artifact_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
-    content = artifact_path.read_bytes()
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.report_artifact_dir,
+        key=(Path(str(organization_id)) / str(report_id) / filename).as_posix(),
+    )
     return {
         "content": content,
         "content_type": report_content_type_for_filename(filename),
@@ -744,14 +746,18 @@ def persist_report_artifact(
     checksum = str(artifact["checksum"])
     filename = str(artifact["filename"])
     storage_name = f"{checksum[:16]}-{filename}"
-    relative_path = Path(str(report.organization_id)) / str(report.id) / storage_name
-    destination = Path(settings.report_artifact_dir) / relative_path
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(bytes(artifact["content"]))
-    artifact_url = f"{settings.report_artifact_url_prefix}/{relative_path.as_posix()}"
+    relative_path = (Path(str(report.organization_id)) / str(report.id) / storage_name).as_posix()
+    stored = put_object(
+        settings,
+        local_root=settings.report_artifact_dir,
+        local_url_prefix=settings.report_artifact_url_prefix,
+        key=relative_path,
+        content=bytes(artifact["content"]),
+        content_type=str(artifact["content_type"]),
+    )
     return {
-        "artifact_url": artifact_url,
-        "storage_path": str(destination),
+        "artifact_url": stored.url,
+        "storage_path": stored.path,
         "storage_name": storage_name,
     }
 
