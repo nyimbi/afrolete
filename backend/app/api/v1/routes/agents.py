@@ -28,6 +28,7 @@ from app.schemas.agent import (
     AgentScorecardCommentRead,
     AgentScorecardCommentUpdate,
     AgentScorecardArtifactAccessRead,
+    AgentScorecardArtifactAccessSummaryRead,
     AgentScorecardPublicationCreate,
     AgentScorecardPublicationArtifactLinkRead,
     AgentScorecardPublicationArtifactRead,
@@ -78,6 +79,7 @@ from app.services.agents import (
     record_scorecard_artifact_access,
     run_agent_scorecard_publication_reminder,
     run_agent_bias_audit,
+    scorecard_artifact_access_summary,
     signed_agent_scorecard_publication_artifact_access,
     submit_agent_decision_appeal,
     submit_my_agent_decision_appeal,
@@ -464,6 +466,18 @@ async def list_scorecard_artifact_accesses_route(
         to_scorecard_artifact_access_read(access)
         for access in await list_scorecard_artifact_accesses(db, identity, organization_id, authz)
     ]
+
+
+@router.get("/ethical-scorecard/artifact-accesses/summary", response_model=AgentScorecardArtifactAccessSummaryRead)
+async def scorecard_artifact_access_summary_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentScorecardArtifactAccessSummaryRead:
+    return AgentScorecardArtifactAccessSummaryRead(
+        **await scorecard_artifact_access_summary(db, identity, organization_id, authz)
+    )
 
 
 @router.get("/ethical-scorecard/publications/readiness", response_model=AgentScorecardPublicationReadinessRead)

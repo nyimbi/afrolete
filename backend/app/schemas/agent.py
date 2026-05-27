@@ -450,6 +450,23 @@ class AgentScorecardArtifactAccessRead(BaseModel):
     accessed_at: datetime
 
 
+class AgentScorecardArtifactAccessBucketRead(BaseModel):
+    label: str
+    count: int
+
+
+class AgentScorecardArtifactAccessSummaryRead(BaseModel):
+    organization_id: UUID
+    total_events: int
+    link_created_count: int
+    artifact_opened_count: int
+    pdf_count: int
+    markdown_count: int
+    unique_requester_count: int
+    last_accessed_at: datetime | None
+    by_source: list[AgentScorecardArtifactAccessBucketRead]
+
+
 class AgentScorecardPublicationReminderCreate(BaseModel):
     organization_id: UUID
     channel: CommunicationChannel = CommunicationChannel.EMAIL

@@ -1218,6 +1218,42 @@ async def list_scorecard_artifact_accesses(
     )
 
 
+async def scorecard_artifact_access_summary(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    accesses = list(
+        (
+            await db.scalars(
+                select(AgentScorecardArtifactAccess).where(
+                    AgentScorecardArtifactAccess.organization_id == organization_id
+                )
+            )
+        ).all()
+    )
+    source_counts: dict[str, int] = {}
+    for access in accesses:
+        source = access.request_source or access.event_type
+        source_counts[source] = source_counts.get(source, 0) + 1
+    return {
+        "organization_id": organization_id,
+        "total_events": len(accesses),
+        "link_created_count": sum(1 for access in accesses if access.event_type == "link_created"),
+        "artifact_opened_count": sum(1 for access in accesses if access.event_type == "artifact_opened"),
+        "pdf_count": sum(1 for access in accesses if access.artifact_format == "pdf"),
+        "markdown_count": sum(1 for access in accesses if access.artifact_format == "markdown"),
+        "unique_requester_count": len({access.request_ip for access in accesses if access.request_ip}),
+        "last_accessed_at": max((access.accessed_at for access in accesses), default=None),
+        "by_source": [
+            {"label": label, "count": count}
+            for label, count in sorted(source_counts.items(), key=lambda item: (-item[1], item[0]))
+        ],
+    }
+
+
 async def agent_scorecard_publication_readiness(
     db: AsyncSession,
     organization_id: UUID,

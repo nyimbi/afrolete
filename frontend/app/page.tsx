@@ -23,6 +23,7 @@ import type {
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
   AgentScorecardArtifactAccessRead,
+  AgentScorecardArtifactAccessSummaryRead,
   AgentScorecardCommentModerationRead,
   AgentScorecardPublicationArtifactLinkRead,
   AgentScorecardPublicationArtifactRead,
@@ -633,6 +634,8 @@ export default function HomePage() {
     useState<AgentScorecardPublicationArtifactLinkRead | null>(null);
   const [agentScorecardArtifactAccesses, setAgentScorecardArtifactAccesses] =
     useState<AgentScorecardArtifactAccessRead[]>([]);
+  const [agentScorecardArtifactAccessSummary, setAgentScorecardArtifactAccessSummary] =
+    useState<AgentScorecardArtifactAccessSummaryRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1516,7 +1519,7 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
@@ -1538,6 +1541,10 @@ export default function HomePage() {
       apiRequest<AgentScorecardArtifactAccessRead[]>(
         `/agents/ethical-scorecard/artifact-accesses?organization_id=${organizationId}`,
         { identity }
+      ),
+      apiRequest<AgentScorecardArtifactAccessSummaryRead>(
+        `/agents/ethical-scorecard/artifact-accesses/summary?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setAgentTasks(tasks);
@@ -1553,6 +1560,7 @@ export default function HomePage() {
     setAgentScorecardPublications(publications);
     setAgentScorecardReadiness(readiness);
     setAgentScorecardArtifactAccesses(artifactAccesses);
+    setAgentScorecardArtifactAccessSummary(artifactAccessSummary);
   }, [identity]);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1998,6 +2006,7 @@ export default function HomePage() {
       setAgentScorecardReminderRun(null);
       setAgentScorecardArtifactLink(null);
       setAgentScorecardArtifactAccesses([]);
+      setAgentScorecardArtifactAccessSummary(null);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -12070,6 +12079,22 @@ export default function HomePage() {
                   >
                     Open
                   </a>
+                </article>
+              ) : null}
+              {agentScorecardArtifactAccessSummary ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Artifact access · {agentScorecardArtifactAccessSummary.total_events} events</strong>
+                    <span>
+                      {agentScorecardArtifactAccessSummary.link_created_count} links · {agentScorecardArtifactAccessSummary.artifact_opened_count} opens · {agentScorecardArtifactAccessSummary.unique_requester_count} requesters
+                    </span>
+                    <span>
+                      {agentScorecardArtifactAccessSummary.pdf_count} PDF · {agentScorecardArtifactAccessSummary.markdown_count} Markdown · last {agentScorecardArtifactAccessSummary.last_accessed_at ? new Date(agentScorecardArtifactAccessSummary.last_accessed_at).toLocaleString() : "never"}
+                    </span>
+                    <span>
+                      {agentScorecardArtifactAccessSummary.by_source.slice(0, 2).map((bucket) => `${bucket.label.replaceAll("_", " ")} ${bucket.count}`).join(" · ") || "No source activity"}
+                    </span>
+                  </div>
                 </article>
               ) : null}
               {agentScorecardArtifactAccesses.slice(0, 3).map((access) => (

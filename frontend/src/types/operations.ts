@@ -2716,6 +2716,23 @@ export type AgentScorecardArtifactAccessRead = {
   accessed_at: string;
 };
 
+export type AgentScorecardArtifactAccessBucketRead = {
+  label: string;
+  count: number;
+};
+
+export type AgentScorecardArtifactAccessSummaryRead = {
+  organization_id: UUID;
+  total_events: number;
+  link_created_count: number;
+  artifact_opened_count: number;
+  pdf_count: number;
+  markdown_count: number;
+  unique_requester_count: number;
+  last_accessed_at: string | null;
+  by_source: AgentScorecardArtifactAccessBucketRead[];
+};
+
 export type AgentScorecardPublicationReminderRead = {
   organization_id: UUID;
   period_label: string;
