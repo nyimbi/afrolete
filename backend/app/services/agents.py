@@ -1,5 +1,7 @@
 import hashlib
+import hmac
 import json
+import time
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -628,10 +630,12 @@ async def execute_with_webhook(
 
     try:
         async with httpx.AsyncClient(timeout=settings.agent_execution_timeout_seconds) as client:
+            payload = agent_execution_payload(agent, task, identity, settings)
+            body = agent_execution_body(payload)
             response = await client.post(
                 settings.agent_webhook_url,
-                json=agent_execution_payload(agent, task, identity, settings),
-                headers=agent_execution_headers(settings),
+                content=body,
+                headers=agent_execution_headers(settings, body),
             )
         if not 200 <= response.status_code < 300:
             task.status = AgentTaskStatus.FAILED
@@ -653,6 +657,7 @@ def agent_execution_payload(
         "event": "afrolete.agent.execute",
         "provider": "webhook",
         "model": agent.model_policy or settings.agent_default_model,
+        "idempotency_key": f"{task.id}:execute",
         "agent": {
             "id": str(agent.id),
             "organization_id": str(agent.organization_id),
@@ -674,11 +679,26 @@ def agent_execution_payload(
     }
 
 
-def agent_execution_headers(settings: Settings) -> dict[str, str]:
-    headers = {"User-Agent": "AfroLete-Agent-Executor/1.0"}
+def agent_execution_headers(settings: Settings, body: bytes) -> dict[str, str]:
+    headers = {
+        "User-Agent": "AfroLete-Agent-Executor/1.0",
+        "Content-Type": "application/json",
+    }
     if settings.agent_webhook_key:
+        timestamp = str(int(time.time()))
         headers["X-Afrolete-Agent-Key"] = settings.agent_webhook_key
+        headers["X-Afrolete-Agent-Timestamp"] = timestamp
+        headers["X-Afrolete-Agent-Signature"] = agent_execution_signature(settings.agent_webhook_key, timestamp, body)
     return headers
+
+
+def agent_execution_body(payload: dict[str, object]) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+
+
+def agent_execution_signature(signing_key: str, timestamp: str, body: bytes) -> str:
+    digest = hmac.new(signing_key.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return f"sha256={digest}"
 
 
 def apply_agent_webhook_response(task: AgentTask, response: httpx.Response) -> None:
