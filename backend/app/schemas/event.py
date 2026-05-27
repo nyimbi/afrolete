@@ -245,6 +245,22 @@ class EventTravelManifestExportRead(BaseModel):
     content: str
 
 
+class EventTravelManifestOfflineLinkCreate(BaseModel):
+    format: str = Field(default="csv", pattern="^(csv|text)$")
+    ttl_seconds: int | None = Field(default=None, ge=60, le=604800)
+
+
+class EventTravelManifestOfflineLinkRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
+    checksum: str
+    signed_url: str
+    expires_at: datetime
+
+
 class EventTravelFeeInvoiceCreate(BaseModel):
     amount_per_participant: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
     currency: str = Field(default="USD", min_length=3, max_length=3)

@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -45,6 +45,8 @@ from app.schemas.event import (
     EventTravelManifestExportCreate,
     EventTravelManifestExportRead,
     EventTravelManifestRead,
+    EventTravelManifestOfflineLinkCreate,
+    EventTravelManifestOfflineLinkRead,
     EventTravelPlanCreate,
     EventTravelPlanRead,
     EventTravelPlanUpdate,
@@ -73,6 +75,7 @@ from app.services.events import (
     create_travel_fee_checkouts,
     check_travel_geofence,
     create_travel_location_update,
+    create_travel_manifest_offline_link,
     export_travel_manifest,
     generate_travel_fee_invoices,
     get_event,
@@ -90,6 +93,7 @@ from app.services.events import (
     optimize_travel_route,
     record_attendance,
     request_travel_consents,
+    read_signed_travel_manifest,
     route_travel_approvals,
     run_event_travel_consent_reminders,
     seed_attendance_from_team_roster,
@@ -435,6 +439,39 @@ async def export_travel_manifest_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelManifestExportRead:
     return await export_travel_manifest(db, identity, travel_plan_id, payload, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/manifest/offline-link",
+    response_model=EventTravelManifestOfflineLinkRead,
+)
+async def create_travel_manifest_offline_link_route(
+    travel_plan_id: UUID,
+    payload: EventTravelManifestOfflineLinkCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelManifestOfflineLinkRead:
+    return await create_travel_manifest_offline_link(db, identity, travel_plan_id, payload, authz)
+
+
+@router.get("/travel-manifests/{organization_id}/{travel_plan_id}/{filename}")
+async def read_travel_manifest_route(
+    organization_id: UUID,
+    travel_plan_id: UUID,
+    filename: str,
+    expires: int = Query(),
+    signature: str = Query(),
+) -> Response:
+    manifest = read_signed_travel_manifest(organization_id, travel_plan_id, filename, expires, signature)
+    return Response(
+        content=manifest["content"],
+        media_type=str(manifest["content_type"]),
+        headers={
+            "Content-Disposition": f"inline; filename={manifest['filename']}",
+            "X-Afrolete-Travel-Manifest-Checksum": str(manifest["checksum"]),
+        },
+    )
 
 
 @router.post(

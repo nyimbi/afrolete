@@ -1,4 +1,6 @@
-from base64 import b64decode
+import hmac
+import time
+from base64 import b64decode, urlsafe_b64encode
 from binascii import Error as Base64Error
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -6,6 +8,7 @@ from hashlib import sha256
 from math import asin, cos, radians, sin, sqrt
 from pathlib import Path
 from re import sub
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -86,6 +89,8 @@ from app.schemas.event import (
     EventTravelLocationUpdateRead,
     EventTravelManifestExportCreate,
     EventTravelManifestExportRead,
+    EventTravelManifestOfflineLinkCreate,
+    EventTravelManifestOfflineLinkRead,
     EventTravelManifestParticipantRead,
     EventTravelManifestRead,
     EventTravelPlanCreate,
@@ -109,7 +114,7 @@ from app.services.safeguarding import (
     is_minor_on,
     medical_clearance_for_event,
 )
-from app.services.storage.objects import put_object
+from app.services.storage.objects import get_object, put_object
 
 
 PARTICIPATION_STATUSES = {AttendanceStatus.CONFIRMED, AttendanceStatus.PRESENT}
@@ -664,6 +669,88 @@ async def export_travel_manifest(
         content_type=content_type,
         content=content,
     )
+
+
+async def create_travel_manifest_offline_link(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelManifestOfflineLinkCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> EventTravelManifestOfflineLinkRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    selected_settings = settings or get_settings()
+    manifest_export = await export_travel_manifest(
+        db,
+        identity,
+        travel_plan_id,
+        EventTravelManifestExportCreate(format=payload.format),
+        authz,
+    )
+    content = manifest_export.content.encode()
+    checksum = sha256(content).hexdigest()
+    storage_name = f"{checksum[:16]}-{safe_upload_filename(manifest_export.filename, fallback='travel-manifest')}"
+    relative_path = (Path(str(plan.organization_id)) / str(plan.id) / storage_name).as_posix()
+    put_object(
+        selected_settings,
+        local_root=selected_settings.travel_manifest_file_dir,
+        local_url_prefix=selected_settings.travel_manifest_file_url_prefix,
+        key=relative_path,
+        content=content,
+        content_type=manifest_export.content_type,
+    )
+    ttl_seconds = payload.ttl_seconds or selected_settings.travel_manifest_url_ttl_seconds
+    expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
+    signed_url = signed_travel_manifest_url(
+        selected_settings,
+        plan.organization_id,
+        plan.id,
+        storage_name,
+        expires_at,
+    )
+    return EventTravelManifestOfflineLinkRead(
+        event_id=manifest_export.event_id,
+        travel_plan_id=plan.id,
+        filename=manifest_export.filename,
+        content_type=manifest_export.content_type,
+        size_bytes=len(content),
+        checksum=checksum,
+        signed_url=signed_url,
+        expires_at=expires_at,
+    )
+
+
+def read_signed_travel_manifest(
+    organization_id: UUID,
+    travel_plan_id: UUID,
+    filename: str,
+    expires: int,
+    signature: str,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    selected_settings = settings or get_settings()
+    if "/" in filename or "\\" in filename or filename in {"", ".", ".."}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid manifest name")
+    if expires < int(time.time()):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Manifest link expired")
+    expected = travel_manifest_signature(selected_settings, organization_id, travel_plan_id, filename, expires)
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid manifest signature")
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.travel_manifest_file_dir,
+        key=(Path(str(organization_id)) / str(travel_plan_id) / filename).as_posix(),
+    )
+    return {
+        "content": content,
+        "content_type": travel_manifest_content_type(filename),
+        "filename": public_manifest_filename(filename),
+        "checksum": sha256(content).hexdigest(),
+    }
 
 
 async def generate_travel_fee_invoices(
@@ -2366,6 +2453,50 @@ def travel_manifest_text(manifest: EventTravelManifestRead) -> str:
             ]
         )
     return "\n".join(lines)
+
+
+def signed_travel_manifest_url(
+    settings: Settings,
+    organization_id: UUID,
+    travel_plan_id: UUID,
+    storage_name: str,
+    expires_at: datetime,
+) -> str:
+    expires = int(expires_at.timestamp())
+    signature = travel_manifest_signature(settings, organization_id, travel_plan_id, storage_name, expires)
+    safe_name = quote(storage_name, safe="")
+    return (
+        f"{settings.api_prefix}/events/travel-manifests/{organization_id}/{travel_plan_id}/{safe_name}"
+        f"?expires={expires}&signature={signature}"
+    )
+
+
+def travel_manifest_signature(
+    settings: Settings,
+    organization_id: UUID,
+    travel_plan_id: UUID,
+    storage_name: str,
+    expires: int,
+) -> str:
+    payload = f"{organization_id}/{travel_plan_id}/{storage_name}:{expires}"
+    digest = hmac.new(travel_manifest_signing_key(settings), payload.encode(), sha256).digest()
+    return urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def travel_manifest_signing_key(settings: Settings) -> bytes:
+    key = settings.travel_manifest_signing_key or settings.report_artifact_signing_key or settings.agent_webhook_key
+    return (key or "local-travel-manifest-key").encode()
+
+
+def travel_manifest_content_type(storage_name: str) -> str:
+    if storage_name.endswith(".csv"):
+        return "text/csv"
+    return "text/plain"
+
+
+def public_manifest_filename(storage_name: str) -> str:
+    parts = storage_name.split("-", 1)
+    return parts[1] if len(parts) == 2 else storage_name
 
 
 def classify_travel_risk(payload: EventTravelPlanCreate) -> tuple[TravelRiskLevel, str]:

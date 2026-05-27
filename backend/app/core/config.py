@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     travel_receipt_file_url_prefix: str = "local://travel-receipts"
     travel_checklist_file_dir: str = "data/travel-checklist-files"
     travel_checklist_file_url_prefix: str = "local://travel-checklist-files"
+    travel_manifest_file_dir: str = "data/travel-manifests"
+    travel_manifest_file_url_prefix: str = "local://travel-manifests"
+    travel_manifest_signing_key: str = "local-travel-manifest-key"
+    travel_manifest_url_ttl_seconds: int = 900
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"

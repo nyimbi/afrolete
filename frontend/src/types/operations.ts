@@ -539,6 +539,17 @@ export type EventTravelManifestExportRead = {
   content: string;
 };
 
+export type EventTravelManifestOfflineLinkRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  checksum: string;
+  signed_url: string;
+  expires_at: string;
+};
+
 export type EventTravelFeeInvoiceItemRead = {
   invoice_id: UUID;
   invoice_number: string;

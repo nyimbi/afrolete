@@ -87,6 +87,7 @@ import type {
   EventTravelLocationUpdateRead,
   EventTravelManifestExportRead,
   EventTravelManifestRead,
+  EventTravelManifestOfflineLinkRead,
   EventTravelPlanRead,
   EventTravelReadinessRead,
   EventTravelReceiptUploadRead,
@@ -366,6 +367,8 @@ export default function HomePage() {
     useState<EventTravelConsentReminderRunRead | null>(null);
   const [travelManifest, setTravelManifest] = useState<EventTravelManifestRead | null>(null);
   const [travelManifestExport, setTravelManifestExport] = useState<EventTravelManifestExportRead | null>(null);
+  const [travelManifestOfflineLink, setTravelManifestOfflineLink] =
+    useState<EventTravelManifestOfflineLinkRead | null>(null);
   const [travelFeeBatch, setTravelFeeBatch] = useState<EventTravelFeeInvoiceBatchRead | null>(null);
   const [travelFeeCheckoutBatch, setTravelFeeCheckoutBatch] = useState<EventTravelFeeCheckoutBatchRead | null>(null);
   const [travelApprovals, setTravelApprovals] = useState<EventTravelApprovalRead[]>([]);
@@ -1638,6 +1641,7 @@ export default function HomePage() {
       setTravelConsentReminderRun(null);
       setTravelManifest(null);
       setTravelManifestExport(null);
+      setTravelManifestOfflineLink(null);
       setTravelFeeBatch(null);
       setTravelFeeCheckoutBatch(null);
       setTravelApprovals([]);
@@ -1856,6 +1860,7 @@ export default function HomePage() {
       setTravelConsentReminderRun(null);
       setTravelManifest(null);
       setTravelManifestExport(null);
+      setTravelManifestOfflineLink(null);
       setTravelFeeBatch(null);
       setTravelFeeCheckoutBatch(null);
       setTravelApprovals([]);
@@ -2578,6 +2583,25 @@ export default function HomePage() {
       (manifestExport) => {
         setTravelManifestExport(manifestExport);
         addLog(`Travel manifest export ready: ${manifestExport.filename}`, "good");
+      }
+    );
+  };
+
+  const createTravelManifestOfflineLink = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-manifest-offline-link-${plan.id}`,
+      () =>
+        apiRequest<EventTravelManifestOfflineLinkRead>(`/events/travel-plans/${plan.id}/manifest/offline-link`, {
+          method: "POST",
+          identity,
+          body: {
+            format: "csv",
+            ttl_seconds: 3600
+          }
+        }),
+      (link) => {
+        setTravelManifestOfflineLink(link);
+        addLog(`Travel manifest signed link ready until ${new Date(link.expires_at).toLocaleTimeString()}`, "good");
       }
     );
   };
@@ -7536,6 +7560,20 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelManifestOfflineLink ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelManifestOfflineLink.filename} offline link</strong>
+                    <span>{travelManifestOfflineLink.size_bytes} bytes · expires {new Date(travelManifestOfflineLink.expires_at).toLocaleString()}</span>
+                    <span>{travelManifestOfflineLink.checksum.slice(0, 12)} · signed manifest access</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <a className="button-link" href={`${apiBaseUrl}${travelManifestOfflineLink.signed_url}`} target="_blank" rel="noreferrer">
+                      Open
+                    </a>
+                  </div>
+                </article>
+              ) : null}
               {travelReadiness ? (
                 <article className="task-card">
                   <div>
@@ -7681,6 +7719,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => remindTravelConsents(plan)}>Remind</button>
                     <button type="button" onClick={() => loadTravelManifest(plan)}>Manifest</button>
                     <button type="button" onClick={() => exportTravelManifest(plan)}>Export</button>
+                    <button type="button" onClick={() => createTravelManifestOfflineLink(plan)}>Offline link</button>
                     <button type="button" onClick={() => checkTravelReadiness(plan)}>Gate</button>
                     <button type="button" onClick={() => optimizeTravelRoute(plan)}>Optimize</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
