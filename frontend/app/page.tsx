@@ -3047,24 +3047,31 @@ export default function HomePage() {
       return;
     }
     const unresolvedPayment = item.payments.find((payment) => !payment.external_reference);
+    const currencyMismatchPayment = item.payments.find((payment) => payment.currency !== item.currency);
     const action =
       exception.code === "missing_provider_reference"
         ? "attach_payment_reference"
-        : exception.code === "paid_without_payment_row"
-          ? "rebuild_missing_payment"
-          : exception.code === "overpaid_invoice"
-            ? "refund_overpayment"
-            : exception.code === "overdue_open_balance"
-              ? "apply_waiver"
-              : exception.code === "invoice_payment_total_mismatch" || exception.code === "ledger_total_mismatch"
-                ? "sync_invoice_paid_total"
-                : "";
+        : exception.code === "payment_currency_mismatch"
+          ? "rebook_payment_currency"
+          : exception.code === "paid_without_payment_row"
+            ? "rebuild_missing_payment"
+            : exception.code === "overpaid_invoice"
+              ? "refund_overpayment"
+              : exception.code === "overdue_open_balance"
+                ? "apply_waiver"
+                : exception.code === "invoice_payment_total_mismatch" || exception.code === "ledger_total_mismatch"
+                  ? "sync_invoice_paid_total"
+                  : "";
     if (!action) {
       addLog(`${exception.code} requires finance review before automatic resolution`, "neutral");
       return;
     }
     if (action === "attach_payment_reference" && !unresolvedPayment) {
       addLog("No payment row needs a provider reference", "neutral");
+      return;
+    }
+    if (action === "rebook_payment_currency" && !currencyMismatchPayment) {
+      addLog("No payment row needs currency rebooking", "neutral");
       return;
     }
     runAction(
@@ -3078,7 +3085,12 @@ export default function HomePage() {
             body: {
               invoice_id: item.invoice_id,
               action,
-              payment_id: action === "attach_payment_reference" ? unresolvedPayment?.payment_id ?? null : null,
+              payment_id:
+                action === "attach_payment_reference"
+                  ? unresolvedPayment?.payment_id ?? null
+                  : action === "rebook_payment_currency"
+                    ? currencyMismatchPayment?.payment_id ?? null
+                    : null,
               amount: action === "apply_waiver" ? item.open_amount : null,
               external_reference: `TRAVEL-RES-${Date.now()}`,
               notes: `Resolved ${exception.code} from operations console.`

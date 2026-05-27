@@ -1075,6 +1075,34 @@ async def resolve_travel_fee_reconciliation_exception(
         if payload.notes:
             payment.notes = f"{payment.notes or ''}\n{payload.notes}".strip()
         message = f"Attached provider reference {payload.external_reference}."
+    elif payload.action == "rebook_payment_currency":
+        if payload.payment_id is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment ID required")
+        payment = await db.get(FinancePayment, payload.payment_id)
+        if payment is None or payment.organization_id != invoice.organization_id or payment.invoice_id != invoice.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found for travel fee invoice")
+        amount = (payload.amount or payment.amount).quantize(Decimal("0.01"))
+        if amount <= 0:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid rebooked payment amount")
+        previous_amount = payment.amount.quantize(Decimal("0.01"))
+        previous_currency = payment.currency
+        payment.amount = amount
+        payment.currency = invoice.currency
+        payment.notes = (
+            f"{payment.notes or ''}\n"
+            f"{payload.notes or 'Rebooked payment currency during travel fee reconciliation.'} "
+            f"Previous amount: {previous_amount} {previous_currency}."
+        ).strip()
+        invoice_payments = (
+            await db.scalars(
+                select(FinancePayment)
+                .where(FinancePayment.organization_id == invoice.organization_id)
+                .where(FinancePayment.invoice_id == invoice.id)
+            )
+        ).all()
+        invoice.amount_paid = sum((item.amount for item in invoice_payments), Decimal("0.00")).quantize(Decimal("0.01"))
+        travel_fee_update_invoice_status(invoice)
+        message = f"Rebooked payment from {previous_amount} {previous_currency} to {amount} {invoice.currency}."
     elif payload.action == "rebuild_missing_payment":
         amount = (payload.amount or invoice.amount_paid).quantize(Decimal("0.01"))
         if amount <= 0 or amount > invoice.amount_paid:
