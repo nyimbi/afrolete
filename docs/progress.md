@@ -161,6 +161,23 @@ athlete-development platform:
     `alembic upgrade head`, PostgreSQL `alembic downgrade 6138f95a6b16`,
     PostgreSQL `alembic upgrade head`, `pnpm --filter @afrolete/frontend
     typecheck`, `pnpm --filter @afrolete/frontend build`.
+- Implemented slice 011 training and coaching plans:
+  - Added a training drill library with sport, focus area, category, equipment,
+    age suitability, duration, intensity, description, and coaching points.
+  - Added training plans that can be scoped to an organization, team, and/or
+    athlete profile, with AI-generated provenance, source summary, load
+    guidance, recovery protocol, and progress checkpoints.
+  - Added weekly training plan items/blocks linked to drills and carrying
+    sequence, day label, focus area, duration, intensity, and coaching notes.
+  - Added session planning with team/event/plan scope validation and target
+    training load computed as `duration_minutes * rpe_target`.
+  - Added the Training console lane for drill creation, plan creation, weekly
+    block creation, and load-aware session planning.
+  - Verification: `uv run ruff check .`, `uv run pytest`, PostgreSQL
+    `alembic upgrade head`, PostgreSQL `alembic downgrade dea9ca28416e`,
+    PostgreSQL `alembic upgrade head`, `pnpm --filter @afrolete/frontend
+    typecheck`, `pnpm --filter @afrolete/frontend build`, production
+    Playwright screenshot at `/private/tmp/afrolete-training-console.png`.
 
 ## Implementation Slices
 
@@ -177,6 +194,7 @@ athlete-development platform:
 | 008 - Operational SaaS console | Partial | Frontend typecheck/build; desktop/mobile screenshots | Console now drives tenant, team, roster, event, attendance, guardian consent, and clearance workflows in local mode; production Keycloak session UX remains. |
 | 009 - AI agent operations | Partial | Backend tests 29/29; frontend build | Agents can be created, permissioned, assigned to scopes, queued for work, and reviewed from the console; real model execution and AI governance dashboards remain. |
 | 010 - Athlete performance metrics and assessments | Partial | Backend tests 31/31; PostgreSQL migration upgrade/downgrade; frontend build | Metric definitions, observations, ALS-style assessments, summaries, and console recording flows are implemented; automated video/audio/wearable ingestion remains. |
+| 011 - Training and coaching plans | Partial | Backend tests 34/34; PostgreSQL migration upgrade/downgrade; frontend build; Playwright screenshot | Drill library, scoped plans, weekly plan blocks, session load planning, and console workflows are implemented; automatic AI plan generation, readiness check-ins, and post-session feedback loops remain. |
 
 ## Capability Coverage
 
@@ -195,7 +213,7 @@ Status values:
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
 | Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, and console workflows are implemented. |
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, task review, and console workflows are implemented; real AI execution pipelines and model governance remain. |
-| Training and coaching plans | not-started | Future slice. |
+| Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, and console workflows are implemented; automatic AI generation/readiness/feedback loops remain. |
 | Competition, fixtures, officials, tournaments | not-started | Future slice. |
 | Communications and notifications | foundation | Service boundary exists; workflow pending. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
@@ -204,15 +222,15 @@ Status values:
 | Reports and intelligence | not-started | Future slice. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation and SpiceDB gRPC authorization adapter are implemented; other integrations remain future slices. |
 | SaaS billing/subscriptions | not-started | Future slice. |
-| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, attendance, and safeguarding workflows. |
+| Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, attendance, performance, training, agent, and safeguarding workflows. |
 
 ## Next Actions
 
-1. Run full verification, then commit and push slice 008 operational SaaS
-   console.
-2. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
-3. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
+1. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
+2. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
    SpiceDB key.
+3. Add automated training-plan generation from performance trends, readiness,
+   upcoming competitions, and availability constraints.
 4. Add automated ingestion pipelines for video, audio narration, text
    evaluation, wearable feeds, and agent-extracted metric review.
 5. Add real AI execution workers, model/provider configuration, and AI

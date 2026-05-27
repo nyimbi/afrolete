@@ -105,6 +105,8 @@ export type MetricSource =
   | "agent_extracted";
 
 export type MetricVerificationStatus = "pending_review" | "verified" | "rejected";
+export type TrainingPlanStatus = "draft" | "active" | "completed" | "archived";
+export type TrainingSessionStatus = "planned" | "in_progress" | "completed" | "cancelled";
 
 export type LocalIdentity = {
   sub: string;
@@ -342,4 +344,67 @@ export type AthletePerformanceSummaryRead = {
   assessment_count: number;
   latest_assessment_id: UUID | null;
   rating: string | null;
+};
+
+export type TrainingDrillRead = {
+  id: UUID;
+  organization_id: UUID;
+  sport: string | null;
+  name: string;
+  focus_area: string;
+  category: string;
+  min_age: number | null;
+  max_age: number | null;
+  equipment: string | null;
+  description: string;
+  coaching_points: string | null;
+  default_duration_minutes: number;
+  default_intensity: number;
+  status: string;
+};
+
+export type TrainingPlanRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  athlete_profile_id: UUID | null;
+  created_by_person_id: UUID | null;
+  title: string;
+  focus_area: string;
+  period_start: string;
+  period_end: string;
+  status: TrainingPlanStatus;
+  ai_generated: boolean;
+  source_summary: string | null;
+  load_guidance: string | null;
+  recovery_protocol: string | null;
+  progress_checkpoints: string | null;
+};
+
+export type TrainingPlanItemRead = {
+  id: UUID;
+  plan_id: UUID;
+  drill_id: UUID | null;
+  sequence: number;
+  day_label: string;
+  title: string;
+  focus_area: string;
+  duration_minutes: number;
+  intensity: number;
+  notes: string | null;
+};
+
+export type TrainingSessionPlanRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID;
+  plan_id: UUID | null;
+  event_id: UUID | null;
+  title: string;
+  scheduled_for: string;
+  duration_minutes: number;
+  rpe_target: number;
+  load_score: number;
+  objectives: string | null;
+  status: TrainingSessionStatus;
 };

@@ -183,3 +183,17 @@ class MetricVerificationStatus(StrEnum):
     PENDING_REVIEW = "pending_review"
     VERIFIED = "verified"
     REJECTED = "rejected"
+
+
+class TrainingPlanStatus(StrEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
+
+
+class TrainingSessionStatus(StrEnum):
+    PLANNED = "planned"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"

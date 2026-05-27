@@ -18,5 +18,11 @@ from app.models.team import (  # noqa: F401,E402
     TeamCommitteeMembership,
     TeamRosterEntry,
 )
+from app.models.training import (  # noqa: F401,E402
+    TrainingDrill,
+    TrainingPlan,
+    TrainingPlanItem,
+    TrainingSessionPlan,
+)
 
 __all__ = ["Base"]

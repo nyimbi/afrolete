@@ -30,7 +30,11 @@ import type {
   SportFormat,
   TeamRead,
   TeamRosterEntryRead,
-  TeamRole
+  TeamRole,
+  TrainingDrillRead,
+  TrainingPlanItemRead,
+  TrainingPlanRead,
+  TrainingSessionPlanRead
 } from "@/types/operations";
 
 const defaultIdentity: LocalIdentity = {
@@ -66,6 +70,10 @@ export default function HomePage() {
   const [assessments, setAssessments] = useState<AthleteAssessmentRead[]>([]);
   const [performanceSummary, setPerformanceSummary] =
     useState<AthletePerformanceSummaryRead | null>(null);
+  const [trainingDrills, setTrainingDrills] = useState<TrainingDrillRead[]>([]);
+  const [trainingPlans, setTrainingPlans] = useState<TrainingPlanRead[]>([]);
+  const [trainingPlanItems, setTrainingPlanItems] = useState<TrainingPlanItemRead[]>([]);
+  const [trainingSessions, setTrainingSessions] = useState<TrainingSessionPlanRead[]>([]);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -75,6 +83,7 @@ export default function HomePage() {
   const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
+  const [selectedTrainingPlanId, setSelectedTrainingPlanId] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -154,6 +163,38 @@ export default function HomePage() {
     summary: "Strong technical day with good decision speed.",
     recommendations: "Add weak-foot finishing and transition scanning."
   });
+  const [drillForm, setDrillForm] = useState({
+    name: "Scanning rondo",
+    focus_area: "Awareness",
+    category: "technical",
+    description: "Possession drill requiring shoulder checks before receiving.",
+    coaching_points: "Check both shoulders and open the body before the first touch.",
+    default_duration_minutes: 18,
+    default_intensity: 6
+  });
+  const [trainingPlanForm, setTrainingPlanForm] = useState({
+    title: "Four-week awareness block",
+    focus_area: "Scanning and first touch",
+    period_start: "2026-06-01",
+    period_end: "2026-06-28",
+    load_guidance: "Keep acute load below 1.3x the four-week baseline.",
+    recovery_protocol: "Mobility, hydration, and wellness check after high-intensity days.",
+    progress_checkpoints: "Weekly coach review and first-touch score."
+  });
+  const [trainingItemForm, setTrainingItemForm] = useState({
+    day_label: "Week 1 Day 1",
+    title: "Scanning rondo block",
+    duration_minutes: 18,
+    intensity: 6,
+    notes: "Progress from 4v2 to 5v2 if tempo stays high."
+  });
+  const [trainingSessionForm, setTrainingSessionForm] = useState({
+    title: "Awareness session",
+    scheduled_for: "2026-06-03T15:00",
+    duration_minutes: 75,
+    rpe_target: 7,
+    objectives: "Improve scanning before receiving under pressure."
+  });
 
   const selectedOrganization = useMemo(
     () => organizations.find((organization) => organization.id === selectedOrganizationId) ?? null,
@@ -174,6 +215,10 @@ export default function HomePage() {
   const selectedAthlete = useMemo(
     () => athletes.find((athlete) => athlete.personId === selectedAthleteId) ?? null,
     [athletes, selectedAthleteId]
+  );
+  const selectedTrainingPlan = useMemo(
+    () => trainingPlans.find((plan) => plan.id === selectedTrainingPlanId) ?? null,
+    [trainingPlans, selectedTrainingPlanId]
   );
 
   const addLog = useCallback((message: string, tone: LogEntry["tone"] = "neutral") => {
@@ -270,6 +315,28 @@ export default function HomePage() {
     []
   );
 
+  const loadTraining = useCallback(async (organizationId: string, teamId?: string) => {
+    const teamQuery = teamId ? `&team_id=${teamId}` : "";
+    const [drills, plans, sessions] = await Promise.all([
+      apiRequest<TrainingDrillRead[]>(`/training/drills?organization_id=${organizationId}`),
+      apiRequest<TrainingPlanRead[]>(`/training/plans?organization_id=${organizationId}${teamQuery}`),
+      apiRequest<TrainingSessionPlanRead[]>(
+        `/training/sessions?organization_id=${organizationId}${teamQuery}`
+      )
+    ]);
+    setTrainingDrills(drills);
+    setTrainingPlans(plans);
+    setTrainingSessions(sessions);
+    setSelectedTrainingPlanId((current) =>
+      plans.some((plan) => plan.id === current) ? current : plans[0]?.id ?? ""
+    );
+  }, []);
+
+  const loadTrainingPlanItems = useCallback(async (planId: string) => {
+    const data = await apiRequest<TrainingPlanItemRead[]>(`/training/plans/${planId}/items`);
+    setTrainingPlanItems(data);
+  }, []);
+
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.localIdentity");
     if (stored) {
@@ -289,6 +356,10 @@ export default function HomePage() {
     if (!selectedOrganizationId) {
       setTeams([]);
       setEvents([]);
+      setTrainingDrills([]);
+      setTrainingPlans([]);
+      setTrainingSessions([]);
+      setTrainingPlanItems([]);
       return;
     }
     runAction("load-tenant-data", async () => {
@@ -297,6 +368,7 @@ export default function HomePage() {
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
+      await loadTraining(selectedOrganizationId);
     }, () => addLog("Organization workspace loaded", "good"));
   }, [
     selectedOrganizationId,
@@ -305,6 +377,7 @@ export default function HomePage() {
     loadAgents,
     loadAgentTasks,
     loadMetricDefinitions,
+    loadTraining,
     runAction,
     addLog
   ]);
@@ -315,10 +388,13 @@ export default function HomePage() {
     }
     runAction(
       "load-team-events",
-      () => loadEvents(selectedOrganizationId, selectedTeamId || undefined),
-      () => addLog("Event lane refreshed", "good")
+      async () => {
+        await loadEvents(selectedOrganizationId, selectedTeamId || undefined);
+        await loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+      },
+      () => addLog("Team lanes refreshed", "good")
     );
-  }, [selectedTeamId, selectedOrganizationId, loadEvents, runAction, addLog]);
+  }, [selectedTeamId, selectedOrganizationId, loadEvents, loadTraining, runAction, addLog]);
 
   useEffect(() => {
     if (!selectedEventId) {
@@ -353,6 +429,18 @@ export default function HomePage() {
       () => undefined
     );
   }, [selectedAthlete, selectedOrganizationId, loadAthletePerformance, runAction]);
+
+  useEffect(() => {
+    if (!selectedTrainingPlanId) {
+      setTrainingPlanItems([]);
+      return;
+    }
+    runAction(
+      "load-training-plan-items",
+      () => loadTrainingPlanItems(selectedTrainingPlanId),
+      () => undefined
+    );
+  }, [selectedTrainingPlanId, loadTrainingPlanItems, runAction]);
 
   const createOrganization = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -801,6 +889,127 @@ export default function HomePage() {
     );
   };
 
+  const createTrainingDrill = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-training-drill",
+      () =>
+        apiRequest<TrainingDrillRead>("/training/drills", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sport: selectedTeam?.sport ?? organizationForm.primary_sport,
+            ...drillForm
+          }
+        }),
+      (drill) => {
+        setTrainingDrills((current) => [
+          drill,
+          ...current.filter((item) => item.id !== drill.id)
+        ]);
+        addLog(`${drill.name} added to the drill library`, "good");
+      }
+    );
+  };
+
+  const createTrainingPlan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-training-plan",
+      () =>
+        apiRequest<TrainingPlanRead>("/training/plans", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            athlete_profile_id: selectedAthlete?.athleteProfileId ?? null,
+            ai_generated: true,
+            source_summary:
+              typeof performanceSummary?.latest_overall_score === "number"
+                ? `Latest ALS ${performanceSummary.latest_overall_score} informs this plan.`
+                : "Plan created from coach inputs.",
+            ...trainingPlanForm
+          }
+        }),
+      (plan) => {
+        setTrainingPlans((current) => [plan, ...current.filter((item) => item.id !== plan.id)]);
+        setSelectedTrainingPlanId(plan.id);
+        addLog(`${plan.title} opened for session planning`, "good");
+      }
+    );
+  };
+
+  const addTrainingPlanItem = () => {
+    if (!selectedTrainingPlanId) {
+      addLog("Create or select a training plan first", "bad");
+      return;
+    }
+    const drill = trainingDrills[0];
+    runAction(
+      "add-training-plan-item",
+      () =>
+        apiRequest<TrainingPlanItemRead>(`/training/plans/${selectedTrainingPlanId}/items`, {
+          method: "POST",
+          identity,
+          body: {
+            drill_id: drill?.id ?? null,
+            sequence: trainingPlanItems.length + 1,
+            focus_area: drill?.focus_area ?? trainingPlanForm.focus_area,
+            ...trainingItemForm
+          }
+        }),
+      (item) => {
+        setTrainingPlanItems((current) => [
+          item,
+          ...current.filter((planItem) => planItem.id !== item.id)
+        ]);
+        addLog(`${item.title} added to the weekly structure`, "good");
+      }
+    );
+  };
+
+  const createTrainingSession = () => {
+    if (!selectedOrganizationId || !selectedTeamId) {
+      addLog("Select an organization and team first", "bad");
+      return;
+    }
+    const scheduledFor = new Date(trainingSessionForm.scheduled_for);
+    runAction(
+      "create-training-session",
+      () =>
+        apiRequest<TrainingSessionPlanRead>("/training/sessions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId,
+            plan_id: selectedTrainingPlanId || null,
+            event_id: selectedEvent?.event_type === "training" ? selectedEvent.id : null,
+            title: trainingSessionForm.title,
+            scheduled_for: scheduledFor.toISOString(),
+            duration_minutes: trainingSessionForm.duration_minutes,
+            rpe_target: trainingSessionForm.rpe_target,
+            objectives: trainingSessionForm.objectives
+          }
+        }),
+      (sessionPlan) => {
+        setTrainingSessions((current) => [
+          sessionPlan,
+          ...current.filter((item) => item.id !== sessionPlan.id)
+        ]);
+        addLog(`Session load ${sessionPlan.load_score} planned`, "good");
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -821,6 +1030,7 @@ export default function HomePage() {
           <a href="#roster">Roster</a>
           <a href="#events">Events</a>
           <a href="#performance">Performance</a>
+          <a href="#training">Training</a>
           <a href="#agents">Agents</a>
           <a href="#safeguarding">Safeguarding</a>
         </nav>
@@ -885,6 +1095,10 @@ export default function HomePage() {
             <div className="stat-row">
               <span>ALS</span>
               <strong>{performanceSummary?.latest_overall_score ?? "—"}</strong>
+            </div>
+            <div className="stat-row">
+              <span>Training</span>
+              <strong>{trainingPlans.length}</strong>
             </div>
           </div>
 
@@ -1246,6 +1460,138 @@ export default function HomePage() {
                   <div>
                     <strong>ALS {assessment.overall_score}</strong>
                     <span>{assessment.summary ?? "Assessment recorded"}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid" id="training">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Training</p>
+                <h2>Drill library and plan builder</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createTrainingDrill} disabled={busyAction !== null}>Drill</button>
+                <button type="button" onClick={createTrainingPlan} disabled={busyAction !== null}>Plan</button>
+                <button type="button" onClick={addTrainingPlanItem} disabled={busyAction !== null}>Block</button>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Drill
+                <input value={drillForm.name} onChange={(event) => setDrillForm({ ...drillForm, name: event.target.value })} />
+              </label>
+              <label>
+                Focus
+                <input value={drillForm.focus_area} onChange={(event) => setDrillForm({ ...drillForm, focus_area: event.target.value })} />
+              </label>
+              <label>
+                Category
+                <input value={drillForm.category} onChange={(event) => setDrillForm({ ...drillForm, category: event.target.value })} />
+              </label>
+              <label>
+                Minutes
+                <input type="number" min="1" max="240" value={drillForm.default_duration_minutes} onChange={(event) => setDrillForm({ ...drillForm, default_duration_minutes: Number(event.target.value) })} />
+              </label>
+              <label>
+                Intensity
+                <input type="number" min="1" max="10" value={drillForm.default_intensity} onChange={(event) => setDrillForm({ ...drillForm, default_intensity: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Coaching points
+                <input value={drillForm.coaching_points} onChange={(event) => setDrillForm({ ...drillForm, coaching_points: event.target.value })} />
+              </label>
+              <label>
+                Plan
+                <input value={trainingPlanForm.title} onChange={(event) => setTrainingPlanForm({ ...trainingPlanForm, title: event.target.value })} />
+              </label>
+              <label>
+                Plan focus
+                <input value={trainingPlanForm.focus_area} onChange={(event) => setTrainingPlanForm({ ...trainingPlanForm, focus_area: event.target.value })} />
+              </label>
+              <label>
+                Starts
+                <input type="date" value={trainingPlanForm.period_start} onChange={(event) => setTrainingPlanForm({ ...trainingPlanForm, period_start: event.target.value })} />
+              </label>
+              <label>
+                Ends
+                <input type="date" value={trainingPlanForm.period_end} onChange={(event) => setTrainingPlanForm({ ...trainingPlanForm, period_end: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Load guidance
+                <input value={trainingPlanForm.load_guidance} onChange={(event) => setTrainingPlanForm({ ...trainingPlanForm, load_guidance: event.target.value })} />
+              </label>
+            </div>
+            <div className="selection-list compact">
+              {trainingPlans.map((plan) => (
+                <button
+                  type="button"
+                  key={plan.id}
+                  className={plan.id === selectedTrainingPlanId ? "selected" : ""}
+                  onClick={() => setSelectedTrainingPlanId(plan.id)}
+                >
+                  <span>{plan.title}</span>
+                  <small>{plan.focus_area} · {plan.period_start} to {plan.period_end}</small>
+                </button>
+              ))}
+            </div>
+            <div className="task-list">
+              {trainingPlanItems.slice(0, 4).map((item) => (
+                <article key={item.id} className="task-card">
+                  <div>
+                    <strong>{item.day_label}: {item.title}</strong>
+                    <span>{item.focus_area} · {item.duration_minutes} min · RPE {item.intensity}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Load management</p>
+                <h2>Session planner</h2>
+              </div>
+              <button type="button" onClick={createTrainingSession} disabled={busyAction !== null}>Session</button>
+            </div>
+            <div className="score-summary">
+              <strong>{trainingSessionForm.duration_minutes * trainingSessionForm.rpe_target}</strong>
+              <span>Target load</span>
+              <small>{selectedTrainingPlan?.title ?? "No plan selected"}</small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Session
+                <input value={trainingSessionForm.title} onChange={(event) => setTrainingSessionForm({ ...trainingSessionForm, title: event.target.value })} />
+              </label>
+              <label>
+                Scheduled
+                <input type="datetime-local" value={trainingSessionForm.scheduled_for} onChange={(event) => setTrainingSessionForm({ ...trainingSessionForm, scheduled_for: event.target.value })} />
+              </label>
+              <label>
+                Minutes
+                <input type="number" min="1" max="360" value={trainingSessionForm.duration_minutes} onChange={(event) => setTrainingSessionForm({ ...trainingSessionForm, duration_minutes: Number(event.target.value) })} />
+              </label>
+              <label>
+                RPE
+                <input type="number" min="1" max="10" value={trainingSessionForm.rpe_target} onChange={(event) => setTrainingSessionForm({ ...trainingSessionForm, rpe_target: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Objectives
+                <input value={trainingSessionForm.objectives} onChange={(event) => setTrainingSessionForm({ ...trainingSessionForm, objectives: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {trainingSessions.slice(0, 4).map((sessionPlan) => (
+                <article key={sessionPlan.id} className="task-card">
+                  <div>
+                    <strong>{sessionPlan.title}</strong>
+                    <span>{new Date(sessionPlan.scheduled_for).toLocaleString()} · load {sessionPlan.load_score}</span>
                   </div>
                 </article>
               ))}
