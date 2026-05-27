@@ -22,6 +22,8 @@ from app.schemas.safeguarding import (
     ActivityConsentCreate,
     ConsentRequestCreate,
     FamilyAthleteSummaryRead,
+    FamilyConsentRequestRead,
+    FamilyConsentResponseCreate,
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
     GuardianRelationshipCreate,
@@ -357,6 +359,112 @@ async def respond_to_family_event(
     await db.commit()
     await db.refresh(attendance)
     return await family_event_summary(db, relationship, event, attendance)
+
+
+async def list_my_family_consent_requests(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> list[FamilyConsentRequestRead]:
+    rows = (
+        await db.execute(
+            select(ConsentRequest, Person)
+            .join(Person, Person.id == ConsentRequest.athlete_person_id)
+            .join(
+                GuardianRelationship,
+                and_(
+                    GuardianRelationship.athlete_person_id == ConsentRequest.athlete_person_id,
+                    GuardianRelationship.guardian_person_id == ConsentRequest.guardian_person_id,
+                ),
+            )
+            .where(ConsentRequest.organization_id == organization_id)
+            .where(ConsentRequest.guardian_person_id == identity.person_id)
+            .where(ConsentRequest.status == ConsentRequestStatus.PENDING)
+            .where(GuardianRelationship.can_sign_consent.is_(True))
+            .order_by(ConsentRequest.sent_at.desc())
+        )
+    ).all()
+    now = utc_now()
+    pending: list[FamilyConsentRequestRead] = []
+    expired = False
+    for request, athlete in rows:
+        if request.expires_at is not None and request.expires_at < now:
+            request.status = ConsentRequestStatus.EXPIRED
+            expired = True
+            continue
+        pending.append(family_consent_request_read(request, athlete.display_name))
+    if expired:
+        await db.commit()
+    return pending
+
+
+async def respond_to_family_consent_request(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    request_id: UUID,
+    payload: FamilyConsentResponseCreate,
+) -> ActivityConsent:
+    request = await db.get(ConsentRequest, request_id)
+    if request is None or request.guardian_person_id != identity.person_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consent request not found")
+    if request.status != ConsentRequestStatus.PENDING:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Consent request already used")
+    relationship = await db.scalar(
+        select(GuardianRelationship).where(
+            GuardianRelationship.athlete_person_id == request.athlete_person_id,
+            GuardianRelationship.guardian_person_id == identity.person_id,
+            GuardianRelationship.can_sign_consent.is_(True),
+        )
+    )
+    if relationship is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    now = utc_now()
+    if request.expires_at is not None and request.expires_at < now:
+        request.status = ConsentRequestStatus.EXPIRED
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Consent request expired")
+
+    consent = await upsert_activity_consent(
+        db,
+        organization_id=request.organization_id,
+        athlete_person_id=request.athlete_person_id,
+        guardian_person_id=request.guardian_person_id,
+        scope_type=request.scope_type,
+        scope_id=request.scope_id,
+        status_value=payload.status,
+        capture_channel=ConsentCaptureChannel.WEB_LINK,
+        identity=identity,
+        source_request_id=request.id,
+        consent_text=f"Guardian responded {payload.status.value} in the family portal.",
+        notes=payload.notes,
+    )
+    request.status = ConsentRequestStatus.FULFILLED
+    request.fulfilled_at = now
+    request.response_payload = payload.notes
+    await db.commit()
+    await db.refresh(consent)
+    return consent
+
+
+def family_consent_request_read(
+    request: ConsentRequest,
+    athlete_name: str,
+) -> FamilyConsentRequestRead:
+    return FamilyConsentRequestRead(
+        id=request.id,
+        organization_id=request.organization_id,
+        athlete_person_id=request.athlete_person_id,
+        athlete_name=athlete_name,
+        scope_type=request.scope_type,
+        scope_id=request.scope_id,
+        channel=request.channel,
+        destination=request.destination,
+        status=request.status,
+        expires_at=request.expires_at,
+        sent_at=request.sent_at,
+        notes=request.notes,
+    )
 
 
 async def family_event_applies_to_athlete(

@@ -848,6 +848,45 @@ textarea:focus {
   color: var(--muted);
 }
 
+.family-consents {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.family-consents article {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  background: #fffaf0;
+  padding: 12px;
+}
+
+.family-consents strong,
+.family-consents span,
+.family-consents small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.family-consents span,
+.family-consents small {
+  color: var(--muted);
+}
+
+.family-consents article > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.family-consents button {
+  min-height: 32px;
+  padding: 7px 10px;
+}
+
 .family-events {
   display: grid;
   gap: 8px;
@@ -989,6 +1028,10 @@ textarea:focus {
   }
 
   .family-events article {
+    display: grid;
+  }
+
+  .family-consents article {
     display: grid;
   }
 

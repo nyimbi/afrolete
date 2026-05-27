@@ -3,9 +3,12 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import type {
+  ActivityConsentRead,
   AttendanceStatus,
   CommunicationInboxItemRead,
+  ConsentStatus,
   FamilyAthleteSummaryRead,
+  FamilyConsentRequestRead,
   FamilyEventSummaryRead,
   LocalIdentity,
   MessageRecipientRead
@@ -22,6 +25,7 @@ export default function FamilyPortalPage() {
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
   const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
+  const [consentRequests, setConsentRequests] = useState<FamilyConsentRequestRead[]>([]);
   const [items, setItems] = useState<CommunicationInboxItemRead[]>([]);
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -51,7 +55,7 @@ export default function FamilyPortalPage() {
   );
 
   const unreadCount = items.filter((item) => item.delivery_status !== "read").length;
-  const pendingConsentCount = family.reduce((total, athlete) => total + athlete.pending_consent_requests, 0);
+  const pendingConsentCount = consentRequests.length;
 
   const loadWorkspace = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -63,19 +67,24 @@ export default function FamilyPortalPage() {
     setError("");
     try {
       const organizationQuery = encodeURIComponent(organizationId);
-      const [familyRows, eventRows, inbox] = await Promise.all([
+      const [familyRows, eventRows, pendingRequests, inbox] = await Promise.all([
         apiRequest<FamilyAthleteSummaryRead[]>(`/safeguarding/my-family?organization_id=${organizationQuery}`, {
           identity
         }),
         apiRequest<FamilyEventSummaryRead[]>(`/safeguarding/my-family/events?organization_id=${organizationQuery}`, {
           identity
         }),
+        apiRequest<FamilyConsentRequestRead[]>(
+          `/safeguarding/my-family/consent-requests?organization_id=${organizationQuery}`,
+          { identity }
+        ),
         apiRequest<CommunicationInboxItemRead[]>(`/communications/my-inbox?organization_id=${organizationQuery}`, {
           identity
         })
       ]);
       setFamily(familyRows);
       setEvents(eventRows);
+      setConsentRequests(pendingRequests);
       setItems(inbox);
       setSelectedRecipientId((current) =>
         inbox.some((item) => item.recipient_id === current) ? current : inbox[0]?.recipient_id ?? ""
@@ -144,6 +153,47 @@ export default function FamilyPortalPage() {
     }
   };
 
+  const respondToConsent = async (request: FamilyConsentRequestRead, status: ConsentStatus) => {
+    setBusy(true);
+    setError("");
+    try {
+      const consent = await apiRequest<ActivityConsentRead>(
+        `/safeguarding/my-family/consent-requests/${request.id}/response`,
+        {
+          method: "POST",
+          identity,
+          body: {
+            status,
+            notes: `Family portal response: ${status}`
+          }
+        }
+      );
+      const eventRows = await apiRequest<FamilyEventSummaryRead[]>(
+        `/safeguarding/my-family/events?organization_id=${encodeURIComponent(organizationId)}`,
+        { identity }
+      );
+      setConsentRequests((current) => current.filter((item) => item.id !== request.id));
+      setEvents(eventRows);
+      setFamily((current) =>
+        current.map((athlete) =>
+          athlete.athlete_person_id === consent.athlete_person_id
+            ? {
+                ...athlete,
+                pending_consent_requests: Math.max(athlete.pending_consent_requests - 1, 0),
+                latest_consent_status: consent.status,
+                latest_consent_scope_type: consent.scope_type,
+                latest_consent_signed_at: consent.signed_at
+              }
+            : athlete
+        )
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Consent response failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="consent-page family-page">
       <section className="consent-shell family-shell">
@@ -207,6 +257,26 @@ export default function FamilyPortalPage() {
               <small>
                 {athlete.pending_consent_requests} pending · {athlete.latest_consent_status ?? "no consent"}
               </small>
+            </article>
+          ))}
+        </div>
+
+        <div className="family-consents">
+          {consentRequests.map((request) => (
+            <article key={request.id}>
+              <div>
+                <strong>{request.athlete_name}</strong>
+                <span>{request.scope_type} consent · {request.channel}</span>
+                {request.expires_at ? <small>Expires {formatDate(request.expires_at)}</small> : null}
+              </div>
+              <span>
+                <button type="button" onClick={() => respondToConsent(request, "granted")} disabled={busy}>
+                  Grant
+                </button>
+                <button type="button" onClick={() => respondToConsent(request, "denied")} disabled={busy}>
+                  Deny
+                </button>
+              </span>
             </article>
           ))}
         </div>

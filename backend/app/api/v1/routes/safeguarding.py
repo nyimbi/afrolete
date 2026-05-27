@@ -10,6 +10,8 @@ from app.schemas.safeguarding import (
     ConsentRequestCreate,
     ConsentRequestRead,
     FamilyAthleteSummaryRead,
+    FamilyConsentRequestRead,
+    FamilyConsentResponseCreate,
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
     GuardianRelationshipCreate,
@@ -29,8 +31,10 @@ from app.services.safeguarding import (
     create_consent_request,
     create_guardian_relationship,
     list_guardians_for_athlete,
+    list_my_family_consent_requests,
     list_my_family,
     list_my_family_events,
+    respond_to_family_consent_request,
     respond_to_family_event,
 )
 
@@ -133,6 +137,25 @@ async def list_my_family_events_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[FamilyEventSummaryRead]:
     return await list_my_family_events(db, identity, organization_id, limit)
+
+
+@router.get("/my-family/consent-requests", response_model=list[FamilyConsentRequestRead])
+async def list_my_family_consent_requests_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> list[FamilyConsentRequestRead]:
+    return await list_my_family_consent_requests(db, identity, organization_id)
+
+
+@router.post("/my-family/consent-requests/{request_id}/response", response_model=ActivityConsentRead)
+async def respond_to_family_consent_request_route(
+    request_id: UUID,
+    payload: FamilyConsentResponseCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> ActivityConsentRead:
+    return to_consent_read(await respond_to_family_consent_request(db, identity, request_id, payload))
 
 
 @router.post(

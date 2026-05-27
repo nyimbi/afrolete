@@ -156,6 +156,32 @@ class ConsentRequestRead(BaseModel):
     one_time_token: str | None = None
 
 
+class FamilyConsentRequestRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    athlete_person_id: UUID
+    athlete_name: str
+    scope_type: ConsentScopeType
+    scope_id: UUID | None
+    channel: ConsentCaptureChannel
+    destination: str
+    status: ConsentRequestStatus
+    expires_at: datetime | None
+    sent_at: datetime | None
+    notes: str | None
+
+
+class FamilyConsentResponseCreate(BaseModel):
+    status: ConsentStatus = ConsentStatus.GRANTED
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def response_status_allowed(self) -> "FamilyConsentResponseCreate":
+        if self.status not in {ConsentStatus.GRANTED, ConsentStatus.DENIED}:
+            raise ValueError("family consent response must be granted or denied")
+        return self
+
+
 class TokenConsentCapture(BaseModel):
     token: str = Field(min_length=16, max_length=200)
     status: ConsentStatus = ConsentStatus.GRANTED

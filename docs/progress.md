@@ -627,6 +627,18 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
   - Not tested in this fast slice: full backend test suite, frontend
     production build, browser QA, and live guardian account smoke.
+- Implemented slice 061 family portal consent responses:
+  - Added guardian-owned pending consent request listing for `/family`, scoped
+    to the authenticated guardian and linked athletes with consent authority.
+  - Added direct family portal consent responses for grant/deny decisions,
+    including expiry handling, request fulfillment, and consent upsert through
+    the existing safeguarding consent path.
+  - Extended `/family` with pending consent cards and Grant/Deny controls that
+    update child consent summaries in place.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, frontend
+    production build, browser QA, and live guardian account smoke.
 
 ## Implementation Slices
 
@@ -693,6 +705,7 @@ athlete-development platform:
 | 058 - Guardian account email binding | Partial | Backend ruff; diff check | First login now binds an `AppUser` to an existing `Person` with the same verified email, so guardian/member accounts can access their linked family data without duplicate person records; live Keycloak smoke and full verification remain. |
 | 059 - Family schedule and clearance view | Partial | Backend ruff; frontend typecheck; diff check | Guardian accounts can now see upcoming linked-athlete events with attendance and safeguarding clearance state in `/family`; live guardian account smoke and full verification remain. |
 | 060 - Family event RSVP | Partial | Backend ruff; frontend typecheck; diff check | Guardians can confirm or decline linked child events from `/family`, with confirmations gated by the same safeguarding clearance logic as operator check-in; live guardian account smoke and full verification remain. |
+| 061 - Family portal consent responses | Partial | Backend ruff; frontend typecheck; diff check | Guardians can now list pending consent requests and grant or deny them from `/family`, fulfilling requests and updating consent records through existing safeguarding flows; live guardian smoke and full verification remain. |
 
 ## Capability Coverage
 
@@ -713,8 +726,8 @@ Status values:
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, provider-neutral performance evidence ingestion, derived run records, governance summary metrics, credential-boundary status, and console workflows are implemented; live provider workers, OpenBao secret fetch, persisted run history tables, model-backed extraction, audit immutability, and deeper model governance remain. |
 | Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, AI-assisted plan generation from readiness/performance/competition context, readiness check-ins, post-session feedback, load-delta recommendations, schedule availability suggestions, and console workflows are implemented; live model generation, external calendar sync, and full verification remain. |
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, round-robin fixture generation, bracket projections, source-round winner advancement, visual bracket lanes, schedule optimization, competition broadcasts, fixture ticketing, conflict detection, and console workflows are implemented; full verification remains. |
-| Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, self-service family inbox portal, family athlete consent dashboard, family schedule/clearance view, family event RSVP, digest generation, batch digest scheduler trigger, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, real worker/cron execution, and deeper parent dashboards remain. |
-| Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
+| Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, self-service family inbox portal, family athlete consent dashboard, family schedule/clearance view, family event RSVP, family portal consent responses, digest generation, batch digest scheduler trigger, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, real worker/cron execution, and deeper parent dashboards remain. |
+| Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, family portal consent responses, and minor event clearance are implemented. |
 | Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, scan lookup, RFID scan intake/history, RFID reader provisioning and keyed gateway intake, photo metadata, equipment file uploads, procurement recommendations, supplier scorecards, supplier orders/receiving/submission/invoice sync, lease quotes, lease invoice creation, lease payment schedules/installments, lease payment reconciliation with partial installment allocation, utilization recommendations, and console workflows are implemented; MinIO persistence, live device fleet rollout, supplier-specific adapters, accounting API sync, and full verification remain. |
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, settlement summaries, refunds, tax quotes, accounting exports, sponsorship dashboards, commercial summary, and console workflows are implemented; live payment provider webhooks, tax authority filing, accounting API sync, and sponsor-facing dashboards remain. |
 | Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, artifact rendering metadata, authenticated PDF/XLSX/CSV/API/HTML artifact download, local artifact persistence, stored artifact URLs, short-lived signed artifact links, verification scoring, chart-ready summaries, visual chart cards, benchmark models, deterministic AI review insights, and console workflows are implemented; real AI model execution, MinIO persistence, visual report QA, deeper chart interactions, and full verification remain. |

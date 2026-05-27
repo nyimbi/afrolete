@@ -315,6 +315,21 @@ export type FamilyEventSummaryRead = {
   reason: string;
 };
 
+export type FamilyConsentRequestRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_person_id: UUID;
+  athlete_name: string;
+  scope_type: ConsentScopeType;
+  scope_id: UUID | null;
+  channel: ConsentCaptureChannel;
+  destination: string;
+  status: string;
+  expires_at: string | null;
+  sent_at: string | null;
+  notes: string | null;
+};
+
 export type ConsentRequestRead = {
   id: UUID;
   organization_id: UUID;
