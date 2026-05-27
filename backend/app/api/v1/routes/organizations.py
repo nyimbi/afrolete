@@ -14,8 +14,10 @@ from app.schemas.organization import (
     OrganizationCreate,
     OrganizationPublicSiteRead,
     OrganizationRead,
+    PublicRegistrationInquiryCreate,
     PublicSiteEventRead,
     PublicSiteTeamRead,
+    RegistrationInquiryRead,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -23,12 +25,14 @@ from app.services.authz.service import AuthorizationService, get_authorization_s
 from app.services.organizations import (
     add_committee_member,
     add_member,
+    create_public_registration_inquiry,
     create_committee,
     create_organization,
     get_organization_for_identity,
     get_public_site,
     list_committees,
     list_organizations_for_identity,
+    list_registration_inquiries,
 )
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
@@ -102,6 +106,24 @@ def to_public_site_read(item) -> OrganizationPublicSiteRead:
     )
 
 
+def to_registration_inquiry_read(inquiry) -> RegistrationInquiryRead:
+    return RegistrationInquiryRead(
+        id=inquiry.id,
+        organization_id=inquiry.organization_id,
+        team_id=inquiry.team_id,
+        athlete_name=inquiry.athlete_name,
+        guardian_name=inquiry.guardian_name,
+        email=inquiry.email,
+        phone=inquiry.phone,
+        age_group=inquiry.age_group,
+        sport_interest=inquiry.sport_interest,
+        message=inquiry.message,
+        source_url=inquiry.source_url,
+        status=inquiry.status,
+        created_at=inquiry.created_at,
+    )
+
+
 @router.post("", response_model=OrganizationRead, status_code=status.HTTP_201_CREATED)
 async def create_organization_route(
     payload: OrganizationCreate,
@@ -130,6 +152,15 @@ async def get_public_site_route(
     return to_public_site_read(await get_public_site(db, site))
 
 
+@router.post("/public/{site}/registration-inquiries", response_model=RegistrationInquiryRead, status_code=201)
+async def create_public_registration_inquiry_route(
+    site: str,
+    payload: PublicRegistrationInquiryCreate,
+    db: AsyncSession = Depends(get_db),
+) -> RegistrationInquiryRead:
+    return to_registration_inquiry_read(await create_public_registration_inquiry(db, site, payload))
+
+
 @router.get("/{organization_id}", response_model=OrganizationRead)
 async def get_organization_route(
     organization_id: UUID,
@@ -137,6 +168,19 @@ async def get_organization_route(
     db: AsyncSession = Depends(get_db),
 ) -> OrganizationRead:
     return to_organization_read(await get_organization_for_identity(db, identity, organization_id))
+
+
+@router.get("/{organization_id}/registration-inquiries", response_model=list[RegistrationInquiryRead])
+async def list_registration_inquiries_route(
+    organization_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[RegistrationInquiryRead]:
+    return [
+        to_registration_inquiry_read(inquiry)
+        for inquiry in await list_registration_inquiries(db, identity, organization_id, authz)
+    ]
 
 
 @router.post("/{organization_id}/members", response_model=MembershipRead, status_code=201)

@@ -1132,6 +1132,46 @@ textarea:focus {
   color: var(--muted);
 }
 
+.public-site-inquiry {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 18px;
+  padding: 0 20px 48px;
+}
+
+.public-site-inquiry form,
+.public-site-success {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.public-site-inquiry form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.public-site-inquiry button {
+  background: var(--site-primary);
+}
+
+.public-site-wide {
+  grid-column: 1 / -1;
+}
+
+.public-site-success strong,
+.public-site-success span {
+  display: block;
+}
+
+.public-site-success span {
+  color: var(--muted);
+  margin-top: 5px;
+}
+
 @media (max-width: 1180px) {
   .operator-grid,
   .work-grid,
@@ -1166,6 +1206,11 @@ textarea:focus {
   }
 
   .public-site-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .public-site-inquiry,
+  .public-site-inquiry form {
     grid-template-columns: 1fr;
   }
 }

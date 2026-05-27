@@ -50,7 +50,13 @@ from app.models.competition import (  # noqa: F401,E402
 )
 from app.models.event import ActivityConsent, AttendanceRecord, ConsentRequest, Event  # noqa: F401,E402
 from app.models.identity import AppUser, Person  # noqa: F401,E402
-from app.models.organization import Committee, CommitteeMembership, Membership, Organization  # noqa: F401,E402
+from app.models.organization import (  # noqa: F401,E402
+    Committee,
+    CommitteeMembership,
+    Membership,
+    Organization,
+    RegistrationInquiry,
+)
 from app.models.performance import (  # noqa: F401,E402
     AthleteAssessment,
     AthletePerformanceObservation,

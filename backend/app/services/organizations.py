@@ -9,13 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.enums import MemberSubjectType, MembershipRole
 from app.models.event import Event
 from app.models.identity import Person
-from app.models.organization import Committee, CommitteeMembership, Membership, Organization
+from app.models.organization import Committee, CommitteeMembership, Membership, Organization, RegistrationInquiry
 from app.models.team import Team
 from app.schemas.organization import (
     CommitteeCreate,
     CommitteeMemberAdd,
     MemberAdd,
     OrganizationCreate,
+    PublicRegistrationInquiryCreate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
@@ -175,6 +176,66 @@ async def get_public_site(
         ).all()
     )
     return organization, teams, upcoming_events
+
+
+async def create_public_registration_inquiry(
+    db: AsyncSession,
+    site: str,
+    payload: PublicRegistrationInquiryCreate,
+) -> RegistrationInquiry:
+    organization = await db.scalar(
+        select(Organization).where(
+            (Organization.slug == site) | (Organization.subdomain == site)
+        )
+    )
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    if payload.team_id is not None:
+        team = await db.get(Team, payload.team_id)
+        if team is None or team.organization_id != organization.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    inquiry = RegistrationInquiry(
+        organization_id=organization.id,
+        **payload.model_dump(),
+    )
+    db.add(inquiry)
+    await db.commit()
+    await db.refresh(inquiry)
+    return inquiry
+
+
+async def list_registration_inquiries(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> list[RegistrationInquiry]:
+    can_manage = await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage_roster",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    ) or await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    if not can_manage:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return list(
+        (
+            await db.scalars(
+                select(RegistrationInquiry)
+                .where(RegistrationInquiry.organization_id == organization_id)
+                .order_by(RegistrationInquiry.created_at.desc())
+                .limit(200)
+            )
+        ).all()
+    )
 
 
 async def add_member(

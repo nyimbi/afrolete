@@ -247,6 +247,22 @@ export type OrganizationPublicSiteRead = {
   upcoming_events: PublicSiteEventRead[];
 };
 
+export type RegistrationInquiryRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  athlete_name: string;
+  guardian_name: string | null;
+  email: string;
+  phone: string | null;
+  age_group: string | null;
+  sport_interest: string | null;
+  message: string | null;
+  source_url: string | null;
+  status: string;
+  created_at: string;
+};
+
 export type MembershipRead = {
   id: UUID;
   organization_id: UUID;

@@ -67,6 +67,24 @@ class Membership(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
 
 
+class RegistrationInquiry(IdMixin, TimestampMixin, Base):
+    __tablename__ = "registration_inquiries"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    athlete_name: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    guardian_name: Mapped[str | None] = mapped_column(String(240))
+    email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    phone: Mapped[str | None] = mapped_column(String(64), index=True)
+    age_group: Mapped[str | None] = mapped_column(String(80), index=True)
+    sport_interest: Mapped[str | None] = mapped_column(String(120), index=True)
+    message: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(40), default="new", nullable=False, index=True)
+
+
 class Committee(IdMixin, TimestampMixin, Base):
     __tablename__ = "committees"
     __table_args__ = (UniqueConstraint("organization_id", "name"),)

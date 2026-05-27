@@ -90,6 +90,34 @@ class OrganizationPublicSiteRead(BaseModel):
     upcoming_events: list[PublicSiteEventRead]
 
 
+class PublicRegistrationInquiryCreate(BaseModel):
+    team_id: UUID | None = None
+    athlete_name: str = Field(min_length=2, max_length=240)
+    guardian_name: str | None = Field(default=None, max_length=240)
+    email: str = Field(min_length=3, max_length=320)
+    phone: str | None = Field(default=None, max_length=64)
+    age_group: str | None = Field(default=None, max_length=80)
+    sport_interest: str | None = Field(default=None, max_length=120)
+    message: str | None = Field(default=None, max_length=2000)
+    source_url: str | None = Field(default=None, max_length=500)
+
+
+class RegistrationInquiryRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    team_id: UUID | None
+    athlete_name: str
+    guardian_name: str | None
+    email: str
+    phone: str | None
+    age_group: str | None
+    sport_interest: str | None
+    message: str | None
+    source_url: str | None
+    status: str
+    created_at: datetime
+
+
 class MemberAdd(BaseModel):
     subject_type: MemberSubjectType = MemberSubjectType.PERSON
     subject_id: UUID | None = None

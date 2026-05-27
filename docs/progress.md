@@ -649,6 +649,19 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
   - Not tested in this fast slice: full backend test suite, frontend
     production build, browser QA, and live subdomain routing.
+- Implemented slice 063 public registration inquiry funnel:
+  - Added persisted registration inquiries for public organization sites,
+    including athlete, guardian, contact, team, age-group, sport-interest,
+    source URL, and review status fields.
+  - Added public inquiry submission by organization slug/subdomain and an
+    authenticated operator inquiry list for organization managers.
+  - Extended `/site/[slug]` with a branded registration inquiry form tied to
+    the site's team list.
+  - Added Alembic migration `f2d4c6a8b901_add_registration_inquiries.py`.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, migration
+    upgrade/downgrade execution, frontend production build, and browser QA.
 
 ## Implementation Slices
 
@@ -717,6 +730,7 @@ athlete-development platform:
 | 060 - Family event RSVP | Partial | Backend ruff; frontend typecheck; diff check | Guardians can confirm or decline linked child events from `/family`, with confirmations gated by the same safeguarding clearance logic as operator check-in; live guardian account smoke and full verification remain. |
 | 061 - Family portal consent responses | Partial | Backend ruff; frontend typecheck; diff check | Guardians can now list pending consent requests and grant or deny them from `/family`, fulfilling requests and updating consent records through existing safeguarding flows; live guardian smoke and full verification remain. |
 | 062 - Branded public organization sites | Partial | Backend ruff; frontend typecheck; diff check | Organization slugs/subdomains now expose public branded site profiles and `/site/[slug]` renders tenant colors, logo/name, mission, contact links, teams, and upcoming events; live subdomain routing and full verification remain. |
+| 063 - Public registration inquiry funnel | Partial | Backend ruff; frontend typecheck; diff check | Public organization sites now collect persisted player/parent registration inquiries and operators can list them through an authenticated organization API; full verification remains. |
 
 ## Capability Coverage
 
@@ -729,9 +743,9 @@ Status values:
 
 | Capability Area | Status | Notes |
 | --- | --- | --- |
-| Tenant organizations, clubs, schools, associations | partial | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph; organization branding/contact/subdomain fields now feed public branded site profiles and `/site/[slug]` pages. |
+| Tenant organizations, clubs, schools, associations | partial | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph; organization branding/contact/subdomain fields now feed public branded site profiles and `/site/[slug]` pages with registration inquiry capture. |
 | Person identity and athlete profiles | partial | `Person`, `AppUser`, and `AthleteProfile` models added; Keycloak token claims provision `AppUser` identities and bind them to existing `Person` records by verified email before creating new people. |
-| Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
+| Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees; public site inquiries can now feed player/parent onboarding review. |
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
 | Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, provider-neutral evidence ingestion, pending-review observations, human review/correction, and console workflows are implemented. |
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, provider-neutral performance evidence ingestion, derived run records, governance summary metrics, credential-boundary status, and console workflows are implemented; live provider workers, OpenBao secret fetch, persisted run history tables, model-backed extraction, audit immutability, and deeper model governance remain. |
