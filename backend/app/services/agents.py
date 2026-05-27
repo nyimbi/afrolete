@@ -50,6 +50,7 @@ from app.schemas.agent import (
     AgentScorecardCommentCreate,
     AgentScorecardCommentUpdate,
     AgentScorecardArtifactAnomalyAlertCreate,
+    AgentScorecardArtifactAnomalyAlertRunCreate,
     AgentScorecardPublicationCreate,
     AgentScorecardPublicationReminderCreate,
     AgentScorecardPublicationReminderRunCreate,
@@ -1418,6 +1419,46 @@ def render_scorecard_artifact_anomaly_alert(summary: dict[str, object]) -> str:
             ]
         )
     return "\n".join(lines)
+
+
+async def run_scorecard_artifact_anomaly_alert(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentScorecardArtifactAnomalyAlertRunCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, payload.organization_id)
+    summary = await scorecard_artifact_access_summary(db, identity, payload.organization_id, authz)
+    anomaly_count = len(list(summary["anomalies"]))
+    skipped_reason: str | None = None
+    alert: dict[str, object] | None = None
+    if anomaly_count > 0 and payload.send_alerts:
+        alert = await deliver_scorecard_artifact_anomaly_alert(
+            db,
+            identity,
+            AgentScorecardArtifactAnomalyAlertCreate(
+                organization_id=payload.organization_id,
+                channel=payload.channel,
+                send_to_managers=True,
+            ),
+            authz,
+        )
+    elif anomaly_count == 0:
+        skipped_reason = "No scorecard artifact access anomalies were detected."
+    elif not payload.send_alerts:
+        skipped_reason = "Artifact anomaly alert run was evaluated without sending messages."
+
+    return {
+        "organization_id": payload.organization_id,
+        "channel": payload.channel,
+        "anomaly_count": anomaly_count,
+        "evaluated": True,
+        "sent": bool(alert and alert["delivered"]),
+        "skipped_reason": skipped_reason or (alert["failure_reason"] if alert else None),
+        "recipient_count": int(alert["recipient_count"]) if alert else 0,
+        "message_id": alert["message_id"] if alert else None,
+        "alert": alert,
+    }
 
 
 async def agent_scorecard_publication_readiness(

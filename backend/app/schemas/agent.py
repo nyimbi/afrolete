@@ -497,6 +497,24 @@ class AgentScorecardArtifactAnomalyAlertRead(BaseModel):
     failure_reason: str | None
 
 
+class AgentScorecardArtifactAnomalyAlertRunCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    send_alerts: bool = True
+
+
+class AgentScorecardArtifactAnomalyAlertRunRead(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel
+    anomaly_count: int
+    evaluated: bool
+    sent: bool
+    skipped_reason: str | None
+    recipient_count: int
+    message_id: UUID | None
+    alert: AgentScorecardArtifactAnomalyAlertRead | None
+
+
 class AgentScorecardPublicationReminderCreate(BaseModel):
     organization_id: UUID
     channel: CommunicationChannel = CommunicationChannel.EMAIL

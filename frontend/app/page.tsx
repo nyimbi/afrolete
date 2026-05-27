@@ -23,6 +23,7 @@ import type {
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
   AgentScorecardArtifactAnomalyAlertRead,
+  AgentScorecardArtifactAnomalyAlertRunRead,
   AgentScorecardArtifactAccessRead,
   AgentScorecardArtifactAccessSummaryRead,
   AgentScorecardCommentModerationRead,
@@ -639,6 +640,8 @@ export default function HomePage() {
     useState<AgentScorecardArtifactAccessSummaryRead | null>(null);
   const [agentScorecardArtifactAnomalyAlert, setAgentScorecardArtifactAnomalyAlert] =
     useState<AgentScorecardArtifactAnomalyAlertRead | null>(null);
+  const [agentScorecardArtifactAnomalyAlertRun, setAgentScorecardArtifactAnomalyAlertRun] =
+    useState<AgentScorecardArtifactAnomalyAlertRunRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -2011,6 +2014,7 @@ export default function HomePage() {
       setAgentScorecardArtifactAccesses([]);
       setAgentScorecardArtifactAccessSummary(null);
       setAgentScorecardArtifactAnomalyAlert(null);
+      setAgentScorecardArtifactAnomalyAlertRun(null);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -5145,6 +5149,43 @@ export default function HomePage() {
             ? `Sent ${alert.anomaly_count} artifact anomaly alerts to ${alert.recipient_count} people`
             : alert.failure_reason ?? "No scorecard artifact anomaly alert was sent",
           alert.delivered ? "bad" : "neutral"
+        );
+      }
+    );
+  };
+
+  const runAgentScorecardArtifactAnomalyAlertAutomation = () => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "agent-scorecard-artifact-anomaly-alert-run",
+      () =>
+        apiRequest<AgentScorecardArtifactAnomalyAlertRunRead>(
+          "/agents/ethical-scorecard/artifact-accesses/anomaly-alert-run",
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "email" as CommunicationChannel,
+              send_alerts: true
+            }
+          }
+        ),
+      (run) => {
+        setAgentScorecardArtifactAnomalyAlertRun(run);
+        if (run.alert) {
+          setAgentScorecardArtifactAnomalyAlert(run.alert);
+        }
+        if (run.message_id) {
+          setSelectedMessageId(run.message_id);
+        }
+        addLog(
+          run.sent
+            ? `Artifact anomaly run sent ${run.recipient_count} alerts`
+            : run.skipped_reason ?? "Artifact anomaly run completed without sending",
+          run.sent ? "bad" : "neutral"
         );
       }
     );
@@ -12149,6 +12190,26 @@ export default function HomePage() {
                     >
                       Alert managers
                     </button>
+                    <button
+                      type="button"
+                      onClick={runAgentScorecardArtifactAnomalyAlertAutomation}
+                      disabled={busyAction !== null}
+                    >
+                      Run alert check
+                    </button>
+                  </div>
+                </article>
+              ) : null}
+              {agentScorecardArtifactAnomalyAlertRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>
+                      Artifact anomaly run · {agentScorecardArtifactAnomalyAlertRun.sent ? "sent" : "skipped"}
+                    </strong>
+                    <span>
+                      {agentScorecardArtifactAnomalyAlertRun.anomaly_count} anomalies · {agentScorecardArtifactAnomalyAlertRun.recipient_count} recipients · {agentScorecardArtifactAnomalyAlertRun.channel}
+                    </span>
+                    <span>{agentScorecardArtifactAnomalyAlertRun.skipped_reason ?? "Artifact anomaly alert run delivered messages."}</span>
                   </div>
                 </article>
               ) : null}

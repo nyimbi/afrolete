@@ -31,6 +31,8 @@ from app.schemas.agent import (
     AgentScorecardArtifactAccessSummaryRead,
     AgentScorecardArtifactAnomalyAlertCreate,
     AgentScorecardArtifactAnomalyAlertRead,
+    AgentScorecardArtifactAnomalyAlertRunCreate,
+    AgentScorecardArtifactAnomalyAlertRunRead,
     AgentScorecardPublicationCreate,
     AgentScorecardPublicationArtifactLinkRead,
     AgentScorecardPublicationArtifactRead,
@@ -82,6 +84,7 @@ from app.services.agents import (
     record_scorecard_artifact_access,
     run_agent_scorecard_publication_reminder,
     run_agent_bias_audit,
+    run_scorecard_artifact_anomaly_alert,
     scorecard_artifact_access_summary,
     signed_agent_scorecard_publication_artifact_access,
     submit_agent_decision_appeal,
@@ -492,6 +495,21 @@ async def deliver_scorecard_artifact_anomaly_alert_route(
 ) -> AgentScorecardArtifactAnomalyAlertRead:
     return AgentScorecardArtifactAnomalyAlertRead(
         **await deliver_scorecard_artifact_anomaly_alert(db, identity, payload, authz)
+    )
+
+
+@router.post(
+    "/ethical-scorecard/artifact-accesses/anomaly-alert-run",
+    response_model=AgentScorecardArtifactAnomalyAlertRunRead,
+)
+async def run_scorecard_artifact_anomaly_alert_route(
+    payload: AgentScorecardArtifactAnomalyAlertRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentScorecardArtifactAnomalyAlertRunRead:
+    return AgentScorecardArtifactAnomalyAlertRunRead(
+        **await run_scorecard_artifact_anomaly_alert(db, identity, payload, authz)
     )
 
 

@@ -2756,6 +2756,18 @@ export type AgentScorecardArtifactAnomalyAlertRead = {
   failure_reason: string | null;
 };
 
+export type AgentScorecardArtifactAnomalyAlertRunRead = {
+  organization_id: UUID;
+  channel: CommunicationChannel;
+  anomaly_count: number;
+  evaluated: boolean;
+  sent: boolean;
+  skipped_reason: string | null;
+  recipient_count: number;
+  message_id: UUID | null;
+  alert: AgentScorecardArtifactAnomalyAlertRead | null;
+};
+
 export type AgentScorecardPublicationReminderRead = {
   organization_id: UUID;
   period_label: string;
