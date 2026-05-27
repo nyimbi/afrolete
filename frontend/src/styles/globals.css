@@ -1145,6 +1145,86 @@ textarea:focus {
   color: var(--muted);
 }
 
+.public-site-scorecard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) 120px minmax(0, 1.5fr);
+  gap: 16px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--site-primary) 24%, var(--line));
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  margin-bottom: 40px;
+  padding: 20px;
+}
+
+.public-site-scorecard h2 {
+  margin: 4px 0 8px;
+}
+
+.public-site-scorecard p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.public-site-score {
+  border-radius: 8px;
+  background: var(--site-primary);
+  color: #fff;
+  min-height: 112px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.public-site-score strong,
+.public-site-score span {
+  display: block;
+}
+
+.public-site-score strong {
+  font-size: 42px;
+  line-height: 1;
+}
+
+.public-site-score span {
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.public-site-score-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.public-site-score-grid div,
+.public-site-score-actions span {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.public-site-score-grid strong,
+.public-site-score-grid span,
+.public-site-score-actions span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.public-site-score-grid span,
+.public-site-score-actions span {
+  color: var(--muted);
+}
+
+.public-site-score-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .public-site-inquiry {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
@@ -1368,6 +1448,12 @@ textarea:focus {
   }
 
   .public-site-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .public-site-scorecard,
+  .public-site-score-grid,
+  .public-site-score-actions {
     grid-template-columns: 1fr;
   }
 

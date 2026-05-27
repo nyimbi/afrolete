@@ -3,10 +3,15 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { apiRequest } from "@/lib/api";
-import type { OrganizationPublicSiteRead, RegistrationInquiryRead } from "@/types/operations";
+import type {
+  AgentEthicalScorecardRead,
+  OrganizationPublicSiteRead,
+  RegistrationInquiryRead
+} from "@/types/operations";
 
 export default function PublicOrganizationSitePage({ params }: { params: { slug: string } }) {
   const [site, setSite] = useState<OrganizationPublicSiteRead | null>(null);
+  const [scorecard, setScorecard] = useState<AgentEthicalScorecardRead | null>(null);
   const [inquiry, setInquiry] = useState({
     team_id: "",
     athlete_name: "",
@@ -29,6 +34,17 @@ export default function PublicOrganizationSitePage({ params }: { params: { slug:
         if (!cancelled) {
           setSite(data);
           setError("");
+          void apiRequest<AgentEthicalScorecardRead>(`/agents/ethical-scorecard?organization_id=${data.id}`)
+            .then((scorecardData) => {
+              if (!cancelled) {
+                setScorecard(scorecardData);
+              }
+            })
+            .catch(() => {
+              if (!cancelled) {
+                setScorecard(null);
+              }
+            });
         }
       })
       .catch((caught) => {
@@ -176,6 +192,43 @@ export default function PublicOrganizationSitePage({ params }: { params: { slug:
           </div>
         </article>
       </section>
+
+      {scorecard ? (
+        <section className="public-site-shell public-site-scorecard">
+          <div>
+            <p className="section-label">Ethical AI</p>
+            <h2>Public AI scorecard</h2>
+            <p>{scorecard.public_summary}</p>
+          </div>
+          <div className="public-site-score">
+            <strong>{scorecard.score}</strong>
+            <span>{scorecard.grade}</span>
+          </div>
+          <div className="public-site-score-grid">
+            <div>
+              <strong>{scorecard.approved_models}/{scorecard.total_models}</strong>
+              <span>Models approved</span>
+            </div>
+            <div>
+              <strong>{scorecard.bias_audits}</strong>
+              <span>Fairness audits</span>
+            </div>
+            <div>
+              <strong>{scorecard.pending_appeals}</strong>
+              <span>Open appeals</span>
+            </div>
+            <div>
+              <strong>{scorecard.ledger_valid ? "Valid" : "Review"}</strong>
+              <span>Audit ledger</span>
+            </div>
+          </div>
+          <div className="public-site-score-actions">
+            {scorecard.improvement_actions.slice(0, 3).map((action) => (
+              <span key={action}>{action}</span>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="public-site-shell public-site-inquiry">
         <div>
