@@ -755,6 +755,7 @@ export type EventTravelDeviceLocationIngestRead = {
   replay_protected: boolean;
   external_event_id: string | null;
   replay_retention_days: number | null;
+  replay_retention_source: string | null;
   replay_events_pruned: number;
   signature_required: boolean;
   signature_validated: boolean;

@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     travel_device_ingest_key: str = ""
     travel_device_ingest_tolerance_seconds: int = 300
     travel_device_ingest_event_retention_days: int = 30
+    travel_device_provider_idempotency_days: dict[str, int] = Field(default_factory=dict)
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"
@@ -115,6 +116,20 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @field_validator("travel_device_provider_idempotency_days", mode="before")
+    @classmethod
+    def parse_provider_idempotency_days(cls, value: str | dict[str, int]) -> dict[str, int]:
+        if isinstance(value, str):
+            windows: dict[str, int] = {}
+            for entry in value.split(","):
+                if not entry.strip():
+                    continue
+                provider, _, days = entry.partition("=")
+                if provider.strip() and days.strip():
+                    windows[provider.strip().lower()] = max(int(days.strip()), 1)
+            return windows
+        return {provider.lower(): max(int(days), 1) for provider, days in value.items()}
 
 
 @lru_cache(maxsize=1)

@@ -1411,7 +1411,7 @@ async def ingest_travel_device_location(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
     device = await travel_device_for_ingest(db, plan, payload)
     settings = get_settings()
-    ingest_event, pruned_count = await register_travel_device_ingest_event(
+    ingest_event, pruned_count, replay_retention_days = await register_travel_device_ingest_event(
         db,
         plan,
         device,
@@ -1454,7 +1454,10 @@ async def ingest_travel_device_location(
         device_status=device.status if device is not None else None,
         replay_protected=ingest_event is not None,
         external_event_id=payload.external_event_id,
-        replay_retention_days=settings.travel_device_ingest_event_retention_days if ingest_event is not None else None,
+        replay_retention_days=replay_retention_days if ingest_event is not None else None,
+        replay_retention_source=travel_device_replay_retention_source(settings, payload.provider)
+        if ingest_event is not None
+        else None,
         replay_events_pruned=pruned_count,
         signature_required=signature_required,
         signature_validated=signature_validated,
@@ -1509,10 +1512,11 @@ async def register_travel_device_ingest_event(
     payload: EventTravelDeviceLocationIngestCreate,
     signature_validated: bool,
     settings: Settings,
-) -> tuple[EventTravelDeviceIngestEvent | None, int]:
+) -> tuple[EventTravelDeviceIngestEvent | None, int, int | None]:
     if not payload.external_event_id:
-        return None, 0
-    pruned_count = await prune_travel_device_ingest_events(db, plan.id, settings)
+        return None, 0, None
+    retention_days = travel_device_replay_retention_days(settings, payload.provider)
+    pruned_count = await prune_travel_device_ingest_events(db, plan.id, payload.provider, retention_days)
     existing = await db.scalar(
         select(EventTravelDeviceIngestEvent)
         .where(EventTravelDeviceIngestEvent.travel_plan_id == plan.id)
@@ -1534,22 +1538,37 @@ async def register_travel_device_ingest_event(
     )
     db.add(ingest_event)
     await db.flush()
-    return ingest_event, pruned_count
+    return ingest_event, pruned_count, retention_days
 
 
 async def prune_travel_device_ingest_events(
     db: AsyncSession,
     travel_plan_id: UUID,
-    settings: Settings,
+    provider: str,
+    retention_days: int,
 ) -> int:
-    retention_days = max(settings.travel_device_ingest_event_retention_days, 1)
-    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    cutoff = datetime.now(UTC) - timedelta(days=max(retention_days, 1))
     result = await db.execute(
         delete(EventTravelDeviceIngestEvent)
         .where(EventTravelDeviceIngestEvent.travel_plan_id == travel_plan_id)
+        .where(EventTravelDeviceIngestEvent.provider == provider)
         .where(EventTravelDeviceIngestEvent.received_at < cutoff)
     )
     return int(result.rowcount or 0)
+
+
+def travel_device_replay_retention_days(settings: Settings, provider: str) -> int:
+    return max(
+        settings.travel_device_provider_idempotency_days.get(
+            provider.lower(),
+            settings.travel_device_ingest_event_retention_days,
+        ),
+        1,
+    )
+
+
+def travel_device_replay_retention_source(settings: Settings, provider: str) -> str:
+    return "provider" if provider.lower() in settings.travel_device_provider_idempotency_days else "default"
 
 
 async def travel_device_for_ingest(
