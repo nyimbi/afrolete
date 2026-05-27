@@ -9,6 +9,8 @@ import type {
   AgentRead,
   AgentTaskRead,
   AgentTaskStatus,
+  AthleteAssessmentRead,
+  AthletePerformanceSummaryRead,
   AttendanceRecordRead,
   AttendanceSeedRead,
   AttendanceStatus,
@@ -18,11 +20,16 @@ import type {
   GuardianRelationshipRead,
   LocalIdentity,
   MembershipRead,
+  MetricCategory,
+  MetricDefinitionRead,
+  MetricSource,
   OrganizationRead,
   OrganizationType,
   ParticipationClearanceRead,
+  PerformanceObservationRead,
   SportFormat,
   TeamRead,
+  TeamRosterEntryRead,
   TeamRole
 } from "@/types/operations";
 
@@ -40,6 +47,7 @@ type LogEntry = {
 
 type AthleteEntry = {
   personId: string;
+  athleteProfileId: string;
   name: string;
   email: string;
   rosterEntryId?: string;
@@ -53,6 +61,11 @@ export default function HomePage() {
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
+  const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
+  const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
+  const [assessments, setAssessments] = useState<AthleteAssessmentRead[]>([]);
+  const [performanceSummary, setPerformanceSummary] =
+    useState<AthletePerformanceSummaryRead | null>(null);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -116,6 +129,30 @@ export default function HomePage() {
     task_type: "consent_gap_review",
     title: "Review missing consent before matchday",
     input_ref: "event-clearance"
+  });
+  const [metricForm, setMetricForm] = useState({
+    code: "first_touch",
+    name: "First Touch",
+    category: "technical" as MetricCategory,
+    unit: "score",
+    min_value: 0,
+    max_value: 10,
+    weight: 1.2
+  });
+  const [observationForm, setObservationForm] = useState({
+    value: 8,
+    raw_value: "8/10",
+    source: "coach_evaluation" as MetricSource,
+    confidence: 0.9,
+    notes: "Improved under pressure."
+  });
+  const [assessmentForm, setAssessmentForm] = useState({
+    physical_score: 70,
+    technical_score: 80,
+    tactical_score: 66,
+    mental_score: 86,
+    summary: "Strong technical day with good decision speed.",
+    recommendations: "Add weak-foot finishing and transition scanning."
   });
 
   const selectedOrganization = useMemo(
@@ -206,6 +243,33 @@ export default function HomePage() {
     setAgentTasks(data);
   }, []);
 
+  const loadMetricDefinitions = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<MetricDefinitionRead[]>(
+      `/performance/metrics?organization_id=${organizationId}`
+    );
+    setMetricDefinitions(data);
+  }, []);
+
+  const loadAthletePerformance = useCallback(
+    async (organizationId: string, athleteProfileId: string) => {
+      const [observationData, assessmentData, summaryData] = await Promise.all([
+        apiRequest<PerformanceObservationRead[]>(
+          `/performance/athletes/${athleteProfileId}/observations?organization_id=${organizationId}`
+        ),
+        apiRequest<AthleteAssessmentRead[]>(
+          `/performance/athletes/${athleteProfileId}/assessments?organization_id=${organizationId}`
+        ),
+        apiRequest<AthletePerformanceSummaryRead>(
+          `/performance/athletes/${athleteProfileId}/summary?organization_id=${organizationId}`
+        )
+      ]);
+      setObservations(observationData);
+      setAssessments(assessmentData);
+      setPerformanceSummary(summaryData);
+    },
+    []
+  );
+
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.localIdentity");
     if (stored) {
@@ -232,8 +296,18 @@ export default function HomePage() {
       await loadEvents(selectedOrganizationId);
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
+      await loadMetricDefinitions(selectedOrganizationId);
     }, () => addLog("Organization workspace loaded", "good"));
-  }, [selectedOrganizationId, loadTeams, loadEvents, loadAgents, loadAgentTasks, runAction, addLog]);
+  }, [
+    selectedOrganizationId,
+    loadTeams,
+    loadEvents,
+    loadAgents,
+    loadAgentTasks,
+    loadMetricDefinitions,
+    runAction,
+    addLog
+  ]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -265,6 +339,20 @@ export default function HomePage() {
       () => undefined
     );
   }, [selectedAgentId, selectedOrganizationId, loadAgentTasks, runAction]);
+
+  useEffect(() => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      setObservations([]);
+      setAssessments([]);
+      setPerformanceSummary(null);
+      return;
+    }
+    runAction(
+      "load-athlete-performance",
+      () => loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId),
+      () => undefined
+    );
+  }, [selectedAthlete, selectedOrganizationId, loadAthletePerformance, runAction]);
 
   const createOrganization = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -332,7 +420,7 @@ export default function HomePage() {
             title: athleteForm.primary_position
           }
         });
-        const roster = await apiRequest<{ id: string }>(`/teams/${selectedTeamId}/members`, {
+        const roster = await apiRequest<TeamRosterEntryRead>(`/teams/${selectedTeamId}/members`, {
           method: "POST",
           identity,
           body: {
@@ -349,6 +437,7 @@ export default function HomePage() {
       ({ member, roster }) => {
         const athlete = {
           personId: member.subject_id,
+          athleteProfileId: roster.athlete_profile_id,
           name: athleteForm.display_name,
           email: athleteForm.email,
           rosterEntryId: roster.id
@@ -620,6 +709,98 @@ export default function HomePage() {
     );
   };
 
+  const createMetricDefinition = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-metric",
+      () =>
+        apiRequest<MetricDefinitionRead>("/performance/metrics", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sport: selectedTeam?.sport ?? organizationForm.primary_sport,
+            ...metricForm,
+            description: `${metricForm.name} tracked from the command console.`
+          }
+        }),
+      (metric) => {
+        setMetricDefinitions((current) => [
+          metric,
+          ...current.filter((item) => item.id !== metric.id)
+        ]);
+        addLog(`${metric.name} metric is available`, "good");
+      }
+    );
+  };
+
+  const recordObservation = () => {
+    const metric = metricDefinitions[0];
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || !metric) {
+      addLog("Select an athlete and create a metric first", "bad");
+      return;
+    }
+    runAction(
+      "record-observation",
+      () =>
+        apiRequest<PerformanceObservationRead>(
+          `/performance/athletes/${selectedAthlete.athleteProfileId}/observations`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              metric_definition_id: metric.id,
+              event_id: selectedEventId || null,
+              ...observationForm
+            }
+          }
+        ),
+      (observation) => {
+        setObservations((current) => [
+          observation,
+          ...current.filter((item) => item.id !== observation.id)
+        ]);
+        addLog(`Observation recorded: ${observation.value}`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const recordAssessment = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete first", "bad");
+      return;
+    }
+    runAction(
+      "record-assessment",
+      () =>
+        apiRequest<AthleteAssessmentRead>(
+          `/performance/athletes/${selectedAthlete.athleteProfileId}/assessments`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              event_id: selectedEventId || null,
+              ...assessmentForm
+            }
+          }
+        ),
+      (assessment) => {
+        setAssessments((current) => [
+          assessment,
+          ...current.filter((item) => item.id !== assessment.id)
+        ]);
+        addLog(`Assessment ALS ${assessment.overall_score}`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -639,6 +820,7 @@ export default function HomePage() {
           <a href="#tenant">Tenant</a>
           <a href="#roster">Roster</a>
           <a href="#events">Events</a>
+          <a href="#performance">Performance</a>
           <a href="#agents">Agents</a>
           <a href="#safeguarding">Safeguarding</a>
         </nav>
@@ -699,6 +881,10 @@ export default function HomePage() {
             <div className="stat-row">
               <span>Agents</span>
               <strong>{agents.length}</strong>
+            </div>
+            <div className="stat-row">
+              <span>ALS</span>
+              <strong>{performanceSummary?.latest_overall_score ?? "—"}</strong>
             </div>
           </div>
 
@@ -951,6 +1137,120 @@ export default function HomePage() {
               ))}
             </div>
           </form>
+        </section>
+
+        <section className="work-grid">
+          <div className="panel form-panel" id="performance">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Performance</p>
+                <h2>Metric library and observations</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createMetricDefinition} disabled={busyAction !== null}>Metric</button>
+                <button type="button" onClick={recordObservation} disabled={busyAction !== null}>Observe</button>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Code
+                <input value={metricForm.code} onChange={(event) => setMetricForm({ ...metricForm, code: event.target.value })} />
+              </label>
+              <label>
+                Metric
+                <input value={metricForm.name} onChange={(event) => setMetricForm({ ...metricForm, name: event.target.value })} />
+              </label>
+              <label>
+                Category
+                <select value={metricForm.category} onChange={(event) => setMetricForm({ ...metricForm, category: event.target.value as MetricCategory })}>
+                  <option value="physical">Physical</option>
+                  <option value="technical">Technical</option>
+                  <option value="tactical">Tactical</option>
+                  <option value="mental">Mental</option>
+                  <option value="wellness">Wellness</option>
+                  <option value="competition">Competition</option>
+                </select>
+              </label>
+              <label>
+                Value
+                <input type="number" value={observationForm.value} onChange={(event) => setObservationForm({ ...observationForm, value: Number(event.target.value) })} />
+              </label>
+              <label>
+                Raw value
+                <input value={observationForm.raw_value} onChange={(event) => setObservationForm({ ...observationForm, raw_value: event.target.value })} />
+              </label>
+              <label>
+                Source
+                <select value={observationForm.source} onChange={(event) => setObservationForm({ ...observationForm, source: event.target.value as MetricSource })}>
+                  <option value="coach_evaluation">Coach evaluation</option>
+                  <option value="manual">Manual</option>
+                  <option value="self_assessment">Self assessment</option>
+                  <option value="official_stats">Official stats</option>
+                  <option value="video_analysis">Video analysis</option>
+                  <option value="audio_narration">Audio narration</option>
+                  <option value="wearable">Wearable</option>
+                  <option value="agent_extracted">Agent extracted</option>
+                </select>
+              </label>
+            </div>
+            <div className="task-list">
+              {metricDefinitions.slice(0, 4).map((metric) => (
+                <article key={metric.id} className="task-card">
+                  <div>
+                    <strong>{metric.name}</strong>
+                    <span>{metric.category} · {metric.unit ?? "unitless"} · weight {metric.weight}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Assessment</p>
+                <h2>AfroLete score</h2>
+              </div>
+              <button type="button" onClick={recordAssessment} disabled={busyAction !== null}>Record</button>
+            </div>
+            <div className="score-summary">
+              <strong>{performanceSummary?.latest_overall_score ?? "—"}</strong>
+              <span>{performanceSummary?.rating ?? "No assessment"}</span>
+              <small>{performanceSummary?.observation_count ?? 0} observations · {performanceSummary?.assessment_count ?? 0} assessments</small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Physical
+                <input type="number" min="0" max="100" value={assessmentForm.physical_score} onChange={(event) => setAssessmentForm({ ...assessmentForm, physical_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Technical
+                <input type="number" min="0" max="100" value={assessmentForm.technical_score} onChange={(event) => setAssessmentForm({ ...assessmentForm, technical_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Tactical
+                <input type="number" min="0" max="100" value={assessmentForm.tactical_score} onChange={(event) => setAssessmentForm({ ...assessmentForm, tactical_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Mental
+                <input type="number" min="0" max="100" value={assessmentForm.mental_score} onChange={(event) => setAssessmentForm({ ...assessmentForm, mental_score: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Summary
+                <input value={assessmentForm.summary} onChange={(event) => setAssessmentForm({ ...assessmentForm, summary: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {assessments.slice(0, 3).map((assessment) => (
+                <article key={assessment.id} className="task-card">
+                  <div>
+                    <strong>ALS {assessment.overall_score}</strong>
+                    <span>{assessment.summary ?? "Assessment recorded"}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section className="work-grid">

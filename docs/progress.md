@@ -146,6 +146,21 @@ athlete-development platform:
   - Verification: `uv run ruff check .`, `uv run pytest`,
     `uv run alembic upgrade head`, `pnpm --filter @afrolete/frontend
     typecheck`, `pnpm --filter @afrolete/frontend build`.
+- Implemented slice 010 athlete performance metrics and assessments:
+  - Added performance metric definitions with sport, category, units, value
+    ranges, weights, and directionality.
+  - Added athlete performance observations with event context, source,
+    confidence, verification status, raw value, notes, and recorder provenance.
+  - Added athlete assessments with physical, technical, tactical, mental, and
+    computed AfroLete Score components using the PRD weighting model.
+  - Added summary APIs for latest score, rating, observation count, and
+    assessment count.
+  - Added the performance lane to the console for metric creation, observation
+    recording, assessment recording, and score review.
+  - Verification: `uv run ruff check .`, `uv run pytest`, PostgreSQL
+    `alembic upgrade head`, PostgreSQL `alembic downgrade 6138f95a6b16`,
+    PostgreSQL `alembic upgrade head`, `pnpm --filter @afrolete/frontend
+    typecheck`, `pnpm --filter @afrolete/frontend build`.
 
 ## Implementation Slices
 
@@ -161,6 +176,7 @@ athlete-development platform:
 | 007 - SpiceDB authorization adapter | Partial | Adapter tests 4/4 | Official Python gRPC client wired behind runtime mode; live schema/write/check smoke test remains. |
 | 008 - Operational SaaS console | Partial | Frontend typecheck/build; desktop/mobile screenshots | Console now drives tenant, team, roster, event, attendance, guardian consent, and clearance workflows in local mode; production Keycloak session UX remains. |
 | 009 - AI agent operations | Partial | Backend tests 29/29; frontend build | Agents can be created, permissioned, assigned to scopes, queued for work, and reviewed from the console; real model execution and AI governance dashboards remain. |
+| 010 - Athlete performance metrics and assessments | Partial | Backend tests 31/31; PostgreSQL migration upgrade/downgrade; frontend build | Metric definitions, observations, ALS-style assessments, summaries, and console recording flows are implemented; automated video/audio/wearable ingestion remains. |
 
 ## Capability Coverage
 
@@ -177,7 +193,7 @@ Status values:
 | Person identity and athlete profiles | partial | `Person`, `AppUser`, and `AthleteProfile` models added; Keycloak token claims provision `AppUser` and `Person` identities. |
 | Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
-| Performance metrics and assessments | not-started | To follow after core operating vertical. |
+| Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, and console workflows are implemented. |
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, task review, and console workflows are implemented; real AI execution pipelines and model governance remain. |
 | Training and coaching plans | not-started | Future slice. |
 | Competition, fixtures, officials, tournaments | not-started | Future slice. |
@@ -197,6 +213,7 @@ Status values:
 2. Add frontend Keycloak sign-in/session handling for `afrolete-web`.
 3. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
    SpiceDB key.
-4. Continue athlete profile workflows into performance metrics and assessments.
+4. Add automated ingestion pipelines for video, audio narration, text
+   evaluation, wearable feeds, and agent-extracted metric review.
 5. Add real AI execution workers, model/provider configuration, and AI
    governance telemetry.

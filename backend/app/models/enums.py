@@ -157,3 +157,29 @@ class AgentTaskStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class MetricCategory(StrEnum):
+    PHYSICAL = "physical"
+    TECHNICAL = "technical"
+    TACTICAL = "tactical"
+    MENTAL = "mental"
+    WELLNESS = "wellness"
+    COMPETITION = "competition"
+
+
+class MetricSource(StrEnum):
+    MANUAL = "manual"
+    COACH_EVALUATION = "coach_evaluation"
+    SELF_ASSESSMENT = "self_assessment"
+    OFFICIAL_STATS = "official_stats"
+    VIDEO_ANALYSIS = "video_analysis"
+    AUDIO_NARRATION = "audio_narration"
+    WEARABLE = "wearable"
+    AGENT_EXTRACTED = "agent_extracted"
+
+
+class MetricVerificationStatus(StrEnum):
+    PENDING_REVIEW = "pending_review"
+    VERIFIED = "verified"
+    REJECTED = "rejected"

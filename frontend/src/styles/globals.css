@@ -443,6 +443,33 @@ textarea:focus {
   margin-top: 3px;
 }
 
+.score-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #eef8f5;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.score-summary strong {
+  grid-row: span 2;
+  font-size: 42px;
+  line-height: 1;
+}
+
+.score-summary span {
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.score-summary small {
+  color: var(--muted);
+}
+
 .safeguarding-panel {
   margin-bottom: 18px;
 }

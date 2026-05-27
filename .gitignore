@@ -8,6 +8,7 @@ Thumbs.db
 
 # Local agent/runtime state
 .omx/
+.omc/
 .serena/
 .serena.gone-*/
 

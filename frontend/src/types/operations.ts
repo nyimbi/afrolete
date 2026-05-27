@@ -86,6 +86,26 @@ export type AgentTaskStatus =
   | "failed"
   | "cancelled";
 
+export type MetricCategory =
+  | "physical"
+  | "technical"
+  | "tactical"
+  | "mental"
+  | "wellness"
+  | "competition";
+
+export type MetricSource =
+  | "manual"
+  | "coach_evaluation"
+  | "self_assessment"
+  | "official_stats"
+  | "video_analysis"
+  | "audio_narration"
+  | "wearable"
+  | "agent_extracted";
+
+export type MetricVerificationStatus = "pending_review" | "verified" | "rejected";
+
 export type LocalIdentity = {
   sub: string;
   email: string;
@@ -264,4 +284,62 @@ export type AgentTaskRead = {
   input_ref: string | null;
   output_ref: string | null;
   review_notes: string | null;
+};
+
+export type MetricDefinitionRead = {
+  id: UUID;
+  organization_id: UUID;
+  sport: string | null;
+  code: string;
+  name: string;
+  category: MetricCategory;
+  unit: string | null;
+  description: string | null;
+  min_value: number | null;
+  max_value: number | null;
+  weight: number;
+  higher_is_better: boolean;
+  status: string;
+};
+
+export type PerformanceObservationRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  metric_definition_id: UUID;
+  event_id: UUID | null;
+  recorded_by_person_id: UUID | null;
+  value: number;
+  raw_value: string | null;
+  observed_at: string;
+  source: MetricSource;
+  confidence: number | null;
+  verification_status: MetricVerificationStatus;
+  notes: string | null;
+};
+
+export type AthleteAssessmentRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  event_id: UUID | null;
+  assessed_by_person_id: UUID | null;
+  assessed_at: string;
+  physical_score: number;
+  technical_score: number;
+  tactical_score: number;
+  mental_score: number;
+  overall_score: number;
+  summary: string | null;
+  recommendations: string | null;
+  verification_status: MetricVerificationStatus;
+};
+
+export type AthletePerformanceSummaryRead = {
+  athlete_profile_id: UUID;
+  latest_overall_score: number | null;
+  observation_count: number;
+  assessment_count: number;
+  latest_assessment_id: UUID | null;
+  rating: string | null;
 };
