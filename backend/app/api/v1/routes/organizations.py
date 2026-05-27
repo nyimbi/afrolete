@@ -20,6 +20,7 @@ from app.schemas.organization import (
     RegistrationInquiryConversionCreate,
     RegistrationInquiryConversionRead,
     RegistrationInquiryRead,
+    RegistrationInquiryUpdate,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -36,6 +37,7 @@ from app.services.organizations import (
     list_committees,
     list_organizations_for_identity,
     list_registration_inquiries,
+    update_registration_inquiry,
 )
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
@@ -123,6 +125,10 @@ def to_registration_inquiry_read(inquiry) -> RegistrationInquiryRead:
         message=inquiry.message,
         source_url=inquiry.source_url,
         status=inquiry.status,
+        review_notes=inquiry.review_notes,
+        follow_up_at=inquiry.follow_up_at,
+        reviewed_by_person_id=inquiry.reviewed_by_person_id,
+        reviewed_at=inquiry.reviewed_at,
         created_at=inquiry.created_at,
     )
 
@@ -195,6 +201,20 @@ async def list_registration_inquiries_route(
         to_registration_inquiry_read(inquiry)
         for inquiry in await list_registration_inquiries(db, identity, organization_id, authz)
     ]
+
+
+@router.patch("/{organization_id}/registration-inquiries/{inquiry_id}", response_model=RegistrationInquiryRead)
+async def update_registration_inquiry_route(
+    organization_id: UUID,
+    inquiry_id: UUID,
+    payload: RegistrationInquiryUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RegistrationInquiryRead:
+    return to_registration_inquiry_read(
+        await update_registration_inquiry(db, identity, organization_id, inquiry_id, payload, authz)
+    )
 
 
 @router.post(

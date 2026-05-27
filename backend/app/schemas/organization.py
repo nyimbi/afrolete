@@ -116,7 +116,17 @@ class RegistrationInquiryRead(BaseModel):
     message: str | None
     source_url: str | None
     status: str
+    review_notes: str | None
+    follow_up_at: datetime | None
+    reviewed_by_person_id: UUID | None
+    reviewed_at: datetime | None
     created_at: datetime
+
+
+class RegistrationInquiryUpdate(BaseModel):
+    status: str | None = Field(default=None, max_length=40)
+    review_notes: str | None = Field(default=None, max_length=4000)
+    follow_up_at: datetime | None = None
 
 
 class RegistrationInquiryConversionCreate(BaseModel):

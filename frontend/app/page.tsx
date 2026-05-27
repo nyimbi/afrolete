@@ -179,6 +179,12 @@ type AthleteEntry = {
   rosterEntryId?: string;
 };
 
+type InquiryReviewForm = {
+  status: string;
+  review_notes: string;
+  follow_up_at: string;
+};
+
 const chartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--red)", "var(--violet)"];
 
 function fileToBase64(file: File): Promise<string> {
@@ -191,6 +197,17 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("File read failed"));
     reader.readAsDataURL(file);
   });
+}
+
+function toDateTimeLocalValue(value: string | null): string {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 function ReportingChartCard({ chart }: { chart: ReportChartRead }) {
@@ -392,6 +409,7 @@ export default function HomePage() {
   const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
   const [registrationInquiries, setRegistrationInquiries] = useState<RegistrationInquiryRead[]>([]);
+  const [inquiryReviewForms, setInquiryReviewForms] = useState<Record<string, InquiryReviewForm>>({});
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -1684,6 +1702,74 @@ export default function HomePage() {
     );
   };
 
+  const updateInquiryReviewForm = (
+    inquiry: RegistrationInquiryRead,
+    field: keyof InquiryReviewForm,
+    value: string
+  ) => {
+    setInquiryReviewForms((current) => {
+      const existing = current[inquiry.id] ?? {
+        status: inquiry.status,
+        review_notes: inquiry.review_notes ?? "",
+        follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at)
+      };
+      return {
+        ...current,
+        [inquiry.id]: {
+          ...existing,
+          [field]: value
+        }
+      };
+    });
+  };
+
+  const updateRegistrationInquiryReview = (inquiry: RegistrationInquiryRead, statusOverride?: string) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const form = inquiryReviewForms[inquiry.id];
+    const nextStatus = statusOverride ?? form?.status ?? inquiry.status;
+    const followUpValue = form ? form.follow_up_at : toDateTimeLocalValue(inquiry.follow_up_at);
+    const body: {
+      status?: string;
+      review_notes: string | null;
+      follow_up_at: string | null;
+    } = {
+      review_notes: form ? form.review_notes || null : inquiry.review_notes,
+      follow_up_at: followUpValue ? new Date(followUpValue).toISOString() : null
+    };
+    if (nextStatus !== "converted") {
+      body.status = nextStatus;
+    }
+    runAction(
+      `review-registration-inquiry-${inquiry.id}`,
+      () =>
+        apiRequest<RegistrationInquiryRead>(
+          `/organizations/${selectedOrganizationId}/registration-inquiries/${inquiry.id}`,
+          {
+            method: "PATCH",
+            identity,
+            body
+          }
+        ),
+      (updated) => {
+        setRegistrationInquiries((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item))
+        );
+        setInquiryReviewForms((current) => ({
+          ...current,
+          [updated.id]: {
+            status: updated.status,
+            review_notes: updated.review_notes ?? "",
+            follow_up_at: toDateTimeLocalValue(updated.follow_up_at)
+          }
+        }));
+        addLog(`${updated.athlete_name} inquiry moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
   const convertRegistrationInquiry = (inquiry: RegistrationInquiryRead) => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -1708,6 +1794,14 @@ export default function HomePage() {
         setRegistrationInquiries((current) =>
           current.map((item) => (item.id === conversion.inquiry.id ? conversion.inquiry : item))
         );
+        setInquiryReviewForms((current) => ({
+          ...current,
+          [conversion.inquiry.id]: {
+            status: conversion.inquiry.status,
+            review_notes: conversion.inquiry.review_notes ?? "",
+            follow_up_at: toDateTimeLocalValue(conversion.inquiry.follow_up_at)
+          }
+        }));
         setAthletes((current) => [
           {
             personId: conversion.athlete_person_id,
@@ -4925,23 +5019,85 @@ export default function HomePage() {
               ))}
             </div>
             <div className="task-list">
-              {registrationInquiries.slice(0, 4).map((inquiry) => (
-                <article key={inquiry.id} className="task-card">
-                  <div>
-                    <strong>{inquiry.athlete_name}</strong>
-                    <span>{inquiry.email} · {inquiry.age_group ?? "age open"} · {inquiry.status}</span>
-                  </div>
-                  <div className="event-toolbar">
-                    <button
-                      type="button"
-                      onClick={() => convertRegistrationInquiry(inquiry)}
-                      disabled={busyAction !== null || inquiry.status === "converted"}
-                    >
-                      Convert
-                    </button>
-                  </div>
-                </article>
-              ))}
+              {registrationInquiries.slice(0, 4).map((inquiry) => {
+                const reviewForm = inquiryReviewForms[inquiry.id];
+                const reviewStatus = reviewForm?.status ?? inquiry.status;
+                const reviewNotes = reviewForm?.review_notes ?? inquiry.review_notes ?? "";
+                const followUpAt = reviewForm?.follow_up_at ?? toDateTimeLocalValue(inquiry.follow_up_at);
+                return (
+                  <article key={inquiry.id} className="task-card inquiry-review-card">
+                    <div>
+                      <strong>{inquiry.athlete_name}</strong>
+                      <span>{inquiry.email} · {inquiry.age_group ?? "age open"} · {inquiry.status}</span>
+                      {inquiry.phone ? <small>{inquiry.phone}</small> : null}
+                      {inquiry.message ? <small>{inquiry.message}</small> : null}
+                    </div>
+                    <div className="form-grid compact-form-grid">
+                      <label>
+                        Review
+                        <select
+                          value={reviewStatus}
+                          onChange={(event) => updateInquiryReviewForm(inquiry, "status", event.target.value)}
+                          disabled={inquiry.status === "converted"}
+                        >
+                          <option value="new">New</option>
+                          <option value="reviewing">Reviewing</option>
+                          <option value="contacted">Contacted</option>
+                          <option value="waitlisted">Waitlisted</option>
+                          <option value="rejected">Rejected</option>
+                          {inquiry.status === "converted" ? <option value="converted">Converted</option> : null}
+                        </select>
+                      </label>
+                      <label>
+                        Follow-up
+                        <input
+                          type="datetime-local"
+                          value={followUpAt}
+                          onChange={(event) => updateInquiryReviewForm(inquiry, "follow_up_at", event.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <label>
+                      Notes
+                      <textarea
+                        value={reviewNotes}
+                        onChange={(event) => updateInquiryReviewForm(inquiry, "review_notes", event.target.value)}
+                        placeholder="Contact attempts, eligibility notes, waitlist reason"
+                      />
+                    </label>
+                    <div className="event-toolbar">
+                      <button
+                        type="button"
+                        onClick={() => updateRegistrationInquiryReview(inquiry)}
+                        disabled={busyAction !== null}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateRegistrationInquiryReview(inquiry, "contacted")}
+                        disabled={busyAction !== null || inquiry.status === "converted"}
+                      >
+                        Contacted
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateRegistrationInquiryReview(inquiry, "waitlisted")}
+                        disabled={busyAction !== null || inquiry.status === "converted"}
+                      >
+                        Waitlist
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => convertRegistrationInquiry(inquiry)}
+                        disabled={busyAction !== null || inquiry.status === "converted"}
+                      >
+                        Convert
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </form>
 

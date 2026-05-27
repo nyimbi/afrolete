@@ -18,6 +18,7 @@ from app.schemas.organization import (
     OrganizationCreate,
     RegistrationInquiryConversionCreate,
     PublicRegistrationInquiryCreate,
+    RegistrationInquiryUpdate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
@@ -34,6 +35,29 @@ def organization_member_relation(subject_type: MemberSubjectType, role: Membersh
     if subject_type == MemberSubjectType.TEAM:
         return "member_team"
     return role.value
+
+
+INQUIRY_REVIEW_STATUSES = {"new", "reviewing", "contacted", "waitlisted", "rejected"}
+
+
+async def can_manage_registration_inquiries(
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> bool:
+    return await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage_roster",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    ) or await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
 
 
 async def create_organization(
@@ -212,20 +236,7 @@ async def list_registration_inquiries(
     organization_id: UUID,
     authz: AuthorizationService,
 ) -> list[RegistrationInquiry]:
-    can_manage = await authz.check(
-        resource_type="organization",
-        resource_id=str(organization_id),
-        permission="manage_roster",
-        subject_type="user",
-        subject_id=str(identity.user_id),
-    ) or await authz.check(
-        resource_type="organization",
-        resource_id=str(organization_id),
-        permission="manage",
-        subject_type="user",
-        subject_id=str(identity.user_id),
-    )
-    if not can_manage:
+    if not await can_manage_registration_inquiries(identity, organization_id, authz):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     return list(
         (
@@ -239,6 +250,63 @@ async def list_registration_inquiries(
     )
 
 
+async def update_registration_inquiry(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    inquiry_id: UUID,
+    payload: RegistrationInquiryUpdate,
+    authz: AuthorizationService,
+) -> RegistrationInquiry:
+    if not await can_manage_registration_inquiries(identity, organization_id, authz):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    inquiry = await db.get(RegistrationInquiry, inquiry_id)
+    if inquiry is None or inquiry.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
+
+    changed = False
+    if "status" in payload.model_fields_set:
+        if payload.status is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Inquiry status cannot be empty",
+            )
+        normalized_status = payload.status.strip().lower()
+        if normalized_status == "converted":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Use the conversion workflow to mark inquiries converted",
+            )
+        if normalized_status not in INQUIRY_REVIEW_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Status must be one of: {', '.join(sorted(INQUIRY_REVIEW_STATUSES))}",
+            )
+        if inquiry.status == "converted" and normalized_status != "converted":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Converted inquiries cannot be reopened",
+            )
+        inquiry.status = normalized_status
+        changed = True
+
+    if "review_notes" in payload.model_fields_set:
+        inquiry.review_notes = payload.review_notes
+        changed = True
+    if "follow_up_at" in payload.model_fields_set:
+        inquiry.follow_up_at = payload.follow_up_at
+        changed = True
+
+    if changed:
+        inquiry.reviewed_by_person_id = identity.person_id
+        inquiry.reviewed_at = datetime.now(UTC)
+
+    await db.commit()
+    await db.refresh(inquiry)
+    return inquiry
+
+
 async def convert_registration_inquiry(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -247,20 +315,7 @@ async def convert_registration_inquiry(
     payload: RegistrationInquiryConversionCreate,
     authz: AuthorizationService,
 ) -> tuple[RegistrationInquiry, Person, AthleteProfile, TeamRosterEntry | None, Person | None]:
-    can_manage = await authz.check(
-        resource_type="organization",
-        resource_id=str(organization_id),
-        permission="manage_roster",
-        subject_type="user",
-        subject_id=str(identity.user_id),
-    ) or await authz.check(
-        resource_type="organization",
-        resource_id=str(organization_id),
-        permission="manage",
-        subject_type="user",
-        subject_id=str(identity.user_id),
-    )
-    if not can_manage:
+    if not await can_manage_registration_inquiries(identity, organization_id, authz):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     inquiry = await db.get(RegistrationInquiry, inquiry_id)
@@ -362,6 +417,8 @@ async def convert_registration_inquiry(
             )
 
     inquiry.status = "converted"
+    inquiry.reviewed_by_person_id = identity.person_id
+    inquiry.reviewed_at = datetime.now(UTC)
     await authz.touch(
         Relationship(
             resource_type="organization",

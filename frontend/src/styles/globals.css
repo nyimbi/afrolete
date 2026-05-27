@@ -491,6 +491,19 @@ textarea:focus {
   margin-top: 3px;
 }
 
+.inquiry-review-card {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.compact-form-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.inquiry-review-card textarea {
+  min-height: 76px;
+}
+
 .chart-card {
   grid-template-columns: minmax(0, 1fr);
   align-items: start;

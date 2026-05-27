@@ -260,6 +260,10 @@ export type RegistrationInquiryRead = {
   message: string | null;
   source_url: string | null;
   status: string;
+  review_notes: string | null;
+  follow_up_at: string | null;
+  reviewed_by_person_id: UUID | null;
+  reviewed_at: string | null;
   created_at: string;
 };
 
