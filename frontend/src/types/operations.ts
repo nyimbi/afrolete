@@ -835,8 +835,24 @@ export type EventTravelExpenseRead = {
   reimbursement_status: string;
   approved_by_person_id: UUID | null;
   reimbursed_at: string | null;
+  payout_provider: string | null;
+  payout_reference: string | null;
+  payout_status: string | null;
+  payout_requested_at: string | null;
+  payout_processed_by_person_id: UUID | null;
   receipt_url: string | null;
   notes: string | null;
+};
+
+export type EventTravelExpensePayoutRead = {
+  expense_id: UUID;
+  provider: string;
+  payout_reference: string;
+  payout_status: string;
+  amount: string;
+  currency: string;
+  processed_at: string;
+  expense: EventTravelExpenseRead;
 };
 
 export type EventTravelReceiptUploadRead = {

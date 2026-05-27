@@ -87,6 +87,7 @@ import type {
   EventTravelDeviceFleetInventoryRead,
   EventTravelDriverRatingRead,
   EventTravelDriverRatingSummaryRead,
+  EventTravelExpensePayoutRead,
   EventTravelExpenseRead,
   EventTravelFeeCheckoutBatchRead,
   EventTravelFeeInvoiceBatchRead,
@@ -394,6 +395,7 @@ export default function HomePage() {
   const [travelDriverRatings, setTravelDriverRatings] = useState<EventTravelDriverRatingRead[]>([]);
   const [travelDriverRatingSummary, setTravelDriverRatingSummary] = useState<EventTravelDriverRatingSummaryRead | null>(null);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
+  const [travelExpensePayout, setTravelExpensePayout] = useState<EventTravelExpensePayoutRead | null>(null);
   const [selectedTravelReceiptFile, setSelectedTravelReceiptFile] = useState<File | null>(null);
   const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
   const [travelCarpoolAutoMatch, setTravelCarpoolAutoMatch] = useState<EventTravelCarpoolAutoMatchRead | null>(null);
@@ -1703,6 +1705,7 @@ export default function HomePage() {
       setTravelDriverRatings([]);
       setTravelDriverRatingSummary(null);
       setTravelExpenses([]);
+      setTravelExpensePayout(null);
       setTravelCarpoolRides([]);
       setTravelCarpoolAutoMatch(null);
       setTravelReadiness(null);
@@ -1930,6 +1933,7 @@ export default function HomePage() {
       setTravelDriverRatings([]);
       setTravelDriverRatingSummary(null);
       setTravelExpenses([]);
+      setTravelExpensePayout(null);
       setTravelCarpoolRides([]);
       setTravelCarpoolAutoMatch(null);
       setTravelReadiness(null);
@@ -3442,6 +3446,31 @@ export default function HomePage() {
           `${updated.category} expense ${updated.reimbursement_status}`,
           updated.reimbursement_status === "rejected" ? "bad" : "good"
         );
+      }
+    );
+  };
+
+  const executeTravelExpensePayout = (expense: EventTravelExpenseRead) => {
+    runAction(
+      `travel-expense-payout-${expense.id}`,
+      () =>
+        apiRequest<EventTravelExpensePayoutRead>(`/events/travel-expenses/${expense.id}/payout`, {
+          method: "POST",
+          identity,
+          body: {
+            provider: "manual_reimbursement",
+            external_reference: null,
+            mark_reimbursed: true,
+            notes: `Payout executed from the operations console for ${expense.category}.`
+          }
+        }),
+      (payout) => {
+        setTravelExpensePayout(payout);
+        setTravelExpenses((current) => [
+          payout.expense,
+          ...current.filter((item) => item.id !== payout.expense.id)
+        ]);
+        addLog(`Payout ${payout.payout_reference} ${payout.payout_status}`, "good");
       }
     );
   };
@@ -8341,16 +8370,25 @@ export default function HomePage() {
                   <div>
                     <strong>{expense.category} · {expense.amount} {expense.currency}</strong>
                     <span>{expense.reimbursement_status} · {expense.vendor ?? "No vendor"} · {new Date(expense.incurred_at).toLocaleString()}</span>
-                    <span>{expense.receipt_url ?? expense.notes ?? "No receipt evidence"}</span>
+                    <span>{expense.payout_reference ?? expense.receipt_url ?? expense.notes ?? "No receipt evidence"}</span>
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={() => uploadTravelReceipt(expense)}>Receipt</button>
                     <button type="button" onClick={() => updateTravelExpenseStatus(expense, "approved")}>Approve</button>
-                    <button type="button" onClick={() => updateTravelExpenseStatus(expense, "reimbursed")}>Reimburse</button>
+                    <button type="button" onClick={() => executeTravelExpensePayout(expense)}>Payout</button>
                     <button type="button" onClick={() => updateTravelExpenseStatus(expense, "rejected")}>Reject</button>
                   </div>
                 </article>
               ))}
+              {travelExpensePayout ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelExpensePayout.payout_reference}</strong>
+                    <span>{travelExpensePayout.amount} {travelExpensePayout.currency} · {travelExpensePayout.provider} · {travelExpensePayout.payout_status}</span>
+                    <span>{new Date(travelExpensePayout.processed_at).toLocaleString()}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelCarpoolRides.slice(0, 3).map((ride) => (
                 <article className="task-card" key={ride.id}>
                   <div>

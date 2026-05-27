@@ -47,6 +47,8 @@ from app.schemas.event import (
     EventTravelDriverRatingRead,
     EventTravelDriverRatingSummaryRead,
     EventTravelExpenseCreate,
+    EventTravelExpensePayoutCreate,
+    EventTravelExpensePayoutRead,
     EventTravelExpenseRead,
     EventTravelExpenseUpdate,
     EventTravelFeeCheckoutBatchRead,
@@ -87,6 +89,7 @@ from app.services.events import (
     create_event,
     dispatch_weather_assessment_alert,
     dispatch_travel_backup_driver,
+    execute_travel_expense_payout,
     create_travel_approval,
     auto_match_travel_carpools,
     create_travel_backup_driver,
@@ -932,6 +935,20 @@ async def update_travel_expense_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelExpenseRead:
     return await update_travel_expense(db, identity, expense_id, payload, authz)
+
+
+@router.post(
+    "/travel-expenses/{expense_id}/payout",
+    response_model=EventTravelExpensePayoutRead,
+)
+async def execute_travel_expense_payout_route(
+    expense_id: UUID,
+    payload: EventTravelExpensePayoutCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelExpensePayoutRead:
+    return await execute_travel_expense_payout(db, identity, expense_id, payload, authz)
 
 
 @router.post(

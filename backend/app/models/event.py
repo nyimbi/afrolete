@@ -273,6 +273,11 @@ class EventTravelExpense(IdMixin, TimestampMixin, Base):
     reimbursement_status: Mapped[str] = mapped_column(String(40), default="submitted", nullable=False, index=True)
     approved_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     reimbursed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    payout_provider: Mapped[str | None] = mapped_column(String(80), index=True)
+    payout_reference: Mapped[str | None] = mapped_column(String(180), index=True)
+    payout_status: Mapped[str | None] = mapped_column(String(40), index=True)
+    payout_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    payout_processed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     receipt_url: Mapped[str | None] = mapped_column(String(500))
     notes: Mapped[str | None] = mapped_column(Text)
 

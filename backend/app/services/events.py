@@ -99,6 +99,8 @@ from app.schemas.event import (
     EventTravelDriverRatingRead,
     EventTravelDriverRatingSummaryRead,
     EventTravelExpenseCreate,
+    EventTravelExpensePayoutCreate,
+    EventTravelExpensePayoutRead,
     EventTravelExpenseRead,
     EventTravelExpenseUpdate,
     EventTravelFeeCheckoutBatchRead,
@@ -2104,6 +2106,51 @@ async def update_travel_expense(
     return travel_expense_read(expense)
 
 
+async def execute_travel_expense_payout(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    expense_id: UUID,
+    payload: EventTravelExpensePayoutCreate,
+    authz: AuthorizationService,
+) -> EventTravelExpensePayoutRead:
+    expense = await db.get(EventTravelExpense, expense_id)
+    if expense is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel expense not found")
+    await ensure_manage_event_scope(authz, expense.organization_id, identity)
+    if expense.reimbursement_status not in {"approved", "reimbursed"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Approve the travel expense before executing payout",
+        )
+    if expense.payout_status == "paid":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Travel expense payout already executed")
+
+    processed_at = datetime.now(UTC)
+    payout_reference = payload.external_reference or travel_expense_payout_reference(expense, payload.provider, processed_at)
+    expense.payout_provider = payload.provider
+    expense.payout_reference = payout_reference
+    expense.payout_status = "paid" if payload.mark_reimbursed else "queued"
+    expense.payout_requested_at = processed_at
+    expense.payout_processed_by_person_id = identity.person_id
+    if payload.mark_reimbursed:
+        expense.reimbursement_status = "reimbursed"
+        expense.reimbursed_at = processed_at
+    if payload.notes is not None:
+        expense.notes = append_note(expense.notes, payload.notes)
+    await db.commit()
+    await db.refresh(expense)
+    return EventTravelExpensePayoutRead(
+        expense_id=expense.id,
+        provider=payload.provider,
+        payout_reference=payout_reference,
+        payout_status=expense.payout_status or "queued",
+        amount=expense.amount,
+        currency=expense.currency,
+        processed_at=processed_at,
+        expense=travel_expense_read(expense),
+    )
+
+
 async def upload_travel_expense_receipt(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -2617,6 +2664,15 @@ def travel_fee_invoice_number(plan: EventTravelPlan, billed_person_id: UUID, ath
     return f"TRAVEL-{str(plan.id)[:8]}-{str(billed_person_id)[:8]}-{str(athlete_person_id)[:8]}".upper()
 
 
+def travel_expense_payout_reference(
+    expense: EventTravelExpense,
+    provider: str,
+    processed_at: datetime,
+) -> str:
+    provider_token = sub(r"[^A-Z0-9]+", "-", provider.upper()).strip("-")[:24] or "PAYOUT"
+    return f"TRAVEL-PAYOUT-{provider_token}-{processed_at.strftime('%Y%m%d')}-{str(expense.id)[:8]}".upper()
+
+
 def travel_fee_checkout_url(base_url: str, invoice: FinanceInvoice, provider: str) -> str:
     token = sha256(f"{invoice.id}:{invoice.invoice_number}:{invoice.amount_due}:{provider}".encode()).hexdigest()[:24]
     return f"{base_url.rstrip('/')}/{invoice.id}?provider={provider}&token={token}"
@@ -2767,6 +2823,11 @@ def travel_expense_read(expense: EventTravelExpense) -> EventTravelExpenseRead:
         reimbursement_status=expense.reimbursement_status,
         approved_by_person_id=expense.approved_by_person_id,
         reimbursed_at=expense.reimbursed_at,
+        payout_provider=expense.payout_provider,
+        payout_reference=expense.payout_reference,
+        payout_status=expense.payout_status,
+        payout_requested_at=expense.payout_requested_at,
+        payout_processed_by_person_id=expense.payout_processed_by_person_id,
         receipt_url=expense.receipt_url,
         notes=expense.notes,
     )

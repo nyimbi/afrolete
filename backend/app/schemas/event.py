@@ -701,8 +701,31 @@ class EventTravelExpenseRead(BaseModel):
     reimbursement_status: str
     approved_by_person_id: UUID | None
     reimbursed_at: datetime | None
+    payout_provider: str | None = None
+    payout_reference: str | None = None
+    payout_status: str | None = None
+    payout_requested_at: datetime | None = None
+    payout_processed_by_person_id: UUID | None = None
     receipt_url: str | None
     notes: str | None
+
+
+class EventTravelExpensePayoutCreate(BaseModel):
+    provider: str = Field(default="manual_reimbursement", min_length=2, max_length=80)
+    external_reference: str | None = Field(default=None, max_length=180)
+    mark_reimbursed: bool = True
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelExpensePayoutRead(BaseModel):
+    expense_id: UUID
+    provider: str
+    payout_reference: str
+    payout_status: str
+    amount: Decimal
+    currency: str
+    processed_at: datetime
+    expense: EventTravelExpenseRead
 
 
 class EventTravelReceiptUploadCreate(BaseModel):
