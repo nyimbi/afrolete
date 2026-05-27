@@ -14,7 +14,7 @@ from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import Integer, cast, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -43,6 +43,7 @@ from app.models.event import (
     EventTravelChecklistItem,
     EventTravelDevice,
     EventTravelDeviceIngestEvent,
+    EventTravelDriverRating,
     EventTravelExpense,
     EventTravelGeofenceZone,
     EventTravelLocationUpdate,
@@ -86,6 +87,9 @@ from app.schemas.event import (
     EventTravelDeviceRead,
     EventTravelDeviceSecretRead,
     EventTravelDeviceUpdate,
+    EventTravelDriverRatingCreate,
+    EventTravelDriverRatingRead,
+    EventTravelDriverRatingSummaryRead,
     EventTravelExpenseCreate,
     EventTravelExpenseRead,
     EventTravelExpenseUpdate,
@@ -1734,6 +1738,92 @@ def travel_geofence_zone_read(zone: EventTravelGeofenceZone) -> EventTravelGeofe
     )
 
 
+async def list_travel_driver_ratings(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> list[EventTravelDriverRatingRead]:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    rows = (
+        await db.scalars(
+            select(EventTravelDriverRating)
+            .where(EventTravelDriverRating.travel_plan_id == plan.id)
+            .order_by(EventTravelDriverRating.reviewed_at.desc(), EventTravelDriverRating.created_at.desc())
+        )
+    ).all()
+    return [travel_driver_rating_read(item) for item in rows]
+
+
+async def create_travel_driver_rating(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelDriverRatingCreate,
+    authz: AuthorizationService,
+) -> EventTravelDriverRatingRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    await ensure_optional_person(db, payload.driver_person_id, "Driver not found")
+    await ensure_optional_person(db, payload.reviewer_person_id, "Reviewer not found")
+
+    rating = EventTravelDriverRating(
+        organization_id=plan.organization_id,
+        travel_plan_id=plan.id,
+        driver_person_id=payload.driver_person_id,
+        reviewer_person_id=payload.reviewer_person_id or identity.person_id,
+        driver_name=payload.driver_name,
+        vehicle_label=payload.vehicle_label,
+        overall_score=payload.overall_score,
+        safety_score=payload.safety_score,
+        punctuality_score=payload.punctuality_score,
+        communication_score=payload.communication_score,
+        vehicle_condition_score=payload.vehicle_condition_score,
+        would_use_again=payload.would_use_again,
+        incident_reported=payload.incident_reported,
+        reviewed_at=payload.reviewed_at or datetime.now(UTC),
+        notes=payload.notes,
+    )
+    db.add(rating)
+    await db.commit()
+    await db.refresh(rating)
+    return travel_driver_rating_read(rating)
+
+
+async def get_travel_driver_rating_summary(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> EventTravelDriverRatingSummaryRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    count, average, would_use_again_count, incident_count = (
+        await db.execute(
+            select(
+                func.count(EventTravelDriverRating.id),
+                func.avg(EventTravelDriverRating.overall_score),
+                func.sum(cast(EventTravelDriverRating.would_use_again, Integer)),
+                func.sum(cast(EventTravelDriverRating.incident_reported, Integer)),
+            ).where(EventTravelDriverRating.travel_plan_id == plan.id)
+        )
+    ).one()
+    return EventTravelDriverRatingSummaryRead(
+        travel_plan_id=plan.id,
+        rating_count=int(count or 0),
+        average_overall_score=Decimal(str(round(float(average), 2))) if average is not None else None,
+        would_use_again_count=int(would_use_again_count or 0),
+        incident_reported_count=int(incident_count or 0),
+    )
+
+
 async def list_travel_expenses(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -2706,6 +2796,29 @@ def travel_device_read(device: EventTravelDevice) -> EventTravelDeviceRead:
         notes=device.notes,
         created_at=device.created_at,
         updated_at=device.updated_at,
+    )
+
+
+def travel_driver_rating_read(rating: EventTravelDriverRating) -> EventTravelDriverRatingRead:
+    return EventTravelDriverRatingRead(
+        id=rating.id,
+        organization_id=rating.organization_id,
+        travel_plan_id=rating.travel_plan_id,
+        driver_name=rating.driver_name,
+        driver_person_id=rating.driver_person_id,
+        vehicle_label=rating.vehicle_label,
+        overall_score=rating.overall_score,
+        safety_score=rating.safety_score,
+        punctuality_score=rating.punctuality_score,
+        communication_score=rating.communication_score,
+        vehicle_condition_score=rating.vehicle_condition_score,
+        would_use_again=rating.would_use_again,
+        incident_reported=rating.incident_reported,
+        reviewer_person_id=rating.reviewer_person_id,
+        reviewed_at=rating.reviewed_at,
+        notes=rating.notes,
+        created_at=rating.created_at,
+        updated_at=rating.updated_at,
     )
 
 

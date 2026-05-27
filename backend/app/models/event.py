@@ -217,6 +217,26 @@ class EventTravelDeviceIngestEvent(IdMixin, TimestampMixin, Base):
     signature_validated: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
 
 
+class EventTravelDriverRating(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_driver_ratings"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    travel_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("event_travel_plans.id"), index=True)
+    driver_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reviewer_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    driver_name: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    vehicle_label: Mapped[str | None] = mapped_column(String(180), index=True)
+    overall_score: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    safety_score: Mapped[int | None] = mapped_column(Integer)
+    punctuality_score: Mapped[int | None] = mapped_column(Integer)
+    communication_score: Mapped[int | None] = mapped_column(Integer)
+    vehicle_condition_score: Mapped[int | None] = mapped_column(Integer)
+    would_use_again: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    incident_reported: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class EventTravelExpense(IdMixin, TimestampMixin, Base):
     __tablename__ = "event_travel_expenses"
 

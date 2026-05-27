@@ -552,6 +552,38 @@ class EventTravelGeofenceCheckRead(BaseModel):
     recommendation: str
 
 
+class EventTravelDriverRatingCreate(BaseModel):
+    driver_name: str = Field(min_length=2, max_length=160)
+    driver_person_id: UUID | None = None
+    vehicle_label: str | None = Field(default=None, max_length=180)
+    overall_score: int = Field(ge=1, le=5)
+    safety_score: int | None = Field(default=None, ge=1, le=5)
+    punctuality_score: int | None = Field(default=None, ge=1, le=5)
+    communication_score: int | None = Field(default=None, ge=1, le=5)
+    vehicle_condition_score: int | None = Field(default=None, ge=1, le=5)
+    would_use_again: bool = True
+    incident_reported: bool = False
+    reviewer_person_id: UUID | None = None
+    reviewed_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelDriverRatingRead(EventTravelDriverRatingCreate):
+    id: UUID
+    organization_id: UUID
+    travel_plan_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class EventTravelDriverRatingSummaryRead(BaseModel):
+    travel_plan_id: UUID
+    rating_count: int
+    average_overall_score: Decimal | None
+    would_use_again_count: int
+    incident_reported_count: int
+
+
 class EventTravelExpenseCreate(BaseModel):
     category: str = Field(default="fuel", min_length=2, max_length=80)
     vendor: str | None = Field(default=None, max_length=180)

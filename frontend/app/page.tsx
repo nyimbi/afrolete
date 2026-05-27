@@ -82,6 +82,8 @@ import type {
   EventTravelConsentReminderRunRead,
   EventTravelDeviceRead,
   EventTravelDeviceSecretRead,
+  EventTravelDriverRatingRead,
+  EventTravelDriverRatingSummaryRead,
   EventTravelExpenseRead,
   EventTravelFeeCheckoutBatchRead,
   EventTravelFeeInvoiceBatchRead,
@@ -381,6 +383,8 @@ export default function HomePage() {
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
   const [travelDevices, setTravelDevices] = useState<EventTravelDeviceRead[]>([]);
   const [travelDeviceSecret, setTravelDeviceSecret] = useState<EventTravelDeviceSecretRead | null>(null);
+  const [travelDriverRatings, setTravelDriverRatings] = useState<EventTravelDriverRatingRead[]>([]);
+  const [travelDriverRatingSummary, setTravelDriverRatingSummary] = useState<EventTravelDriverRatingSummaryRead | null>(null);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
   const [selectedTravelReceiptFile, setSelectedTravelReceiptFile] = useState<File | null>(null);
   const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
@@ -630,6 +634,16 @@ export default function HomePage() {
     device_label: "Minibus #3 tracker",
     device_status: "active" as EventTravelDeviceRead["status"],
     device_vehicle: "Minibus #3",
+    driver_rating_name: "James Wilson",
+    driver_rating_vehicle: "Minibus #3",
+    driver_rating_overall: 5,
+    driver_rating_safety: 5,
+    driver_rating_punctuality: 4,
+    driver_rating_communication: 5,
+    driver_rating_vehicle_condition: 4,
+    driver_rating_would_use_again: true,
+    driver_rating_incident_reported: false,
+    driver_rating_notes: "Safe driving, clear communication, and punctual arrival.",
     geofence_label: "planned route corridor",
     geofence_latitude: -1.2921,
     geofence_longitude: 36.8219,
@@ -1661,6 +1675,8 @@ export default function HomePage() {
       setTravelLocationUpdates([]);
       setTravelDevices([]);
       setTravelDeviceSecret(null);
+      setTravelDriverRatings([]);
+      setTravelDriverRatingSummary(null);
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
       setTravelCarpoolAutoMatch(null);
@@ -1883,6 +1899,8 @@ export default function HomePage() {
       setTravelLocationUpdates([]);
       setTravelDevices([]);
       setTravelDeviceSecret(null);
+      setTravelDriverRatings([]);
+      setTravelDriverRatingSummary(null);
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
       setTravelCarpoolAutoMatch(null);
@@ -2992,6 +3010,60 @@ export default function HomePage() {
           )
         );
         addLog(`Rotated ingest secret for ${secret.label}`, "good");
+      }
+    );
+  };
+
+  const loadTravelDriverRatings = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-driver-ratings-${plan.id}`,
+      async () => {
+        const [ratings, summary] = await Promise.all([
+          apiRequest<EventTravelDriverRatingRead[]>(`/events/travel-plans/${plan.id}/driver-ratings`, { identity }),
+          apiRequest<EventTravelDriverRatingSummaryRead>(`/events/travel-plans/${plan.id}/driver-rating-summary`, {
+            identity
+          })
+        ]);
+        return { ratings, summary };
+      },
+      ({ ratings, summary }) => {
+        setTravelDriverRatings(ratings);
+        setTravelDriverRatingSummary(summary);
+        addLog(`Driver ratings loaded: ${summary.rating_count}`, "neutral");
+      }
+    );
+  };
+
+  const createTravelDriverRating = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-driver-rating-create-${plan.id}`,
+      () =>
+        apiRequest<EventTravelDriverRatingRead>(`/events/travel-plans/${plan.id}/driver-ratings`, {
+          method: "POST",
+          identity,
+          body: {
+            driver_name: travelForm.driver_rating_name,
+            driver_person_id: null,
+            vehicle_label: travelForm.driver_rating_vehicle || null,
+            overall_score: travelForm.driver_rating_overall,
+            safety_score: travelForm.driver_rating_safety,
+            punctuality_score: travelForm.driver_rating_punctuality,
+            communication_score: travelForm.driver_rating_communication,
+            vehicle_condition_score: travelForm.driver_rating_vehicle_condition,
+            would_use_again: travelForm.driver_rating_would_use_again,
+            incident_reported: travelForm.driver_rating_incident_reported,
+            reviewer_person_id: null,
+            reviewed_at: new Date().toISOString(),
+            notes: travelForm.driver_rating_notes || null
+          }
+        }),
+      (rating) => {
+        setTravelDriverRatings((current) => [
+          rating,
+          ...current.filter((item) => item.id !== rating.id)
+        ]);
+        void loadTravelDriverRatings(plan);
+        addLog(`Driver ${rating.driver_name} rated ${rating.overall_score}/5`, rating.incident_reported ? "bad" : "good");
       }
     );
   };
@@ -7642,6 +7714,51 @@ export default function HomePage() {
                 <input value={travelForm.device_vehicle} onChange={(event) => setTravelForm({ ...travelForm, device_vehicle: event.target.value })} />
               </label>
               <label>
+                Driver rating
+                <input value={travelForm.driver_rating_name} onChange={(event) => setTravelForm({ ...travelForm, driver_rating_name: event.target.value })} />
+              </label>
+              <label>
+                Rating vehicle
+                <input value={travelForm.driver_rating_vehicle} onChange={(event) => setTravelForm({ ...travelForm, driver_rating_vehicle: event.target.value })} />
+              </label>
+              <label>
+                Overall score
+                <input type="number" min="1" max="5" value={travelForm.driver_rating_overall} onChange={(event) => setTravelForm({ ...travelForm, driver_rating_overall: Number(event.target.value) })} />
+              </label>
+              <label>
+                Safety score
+                <input type="number" min="1" max="5" value={travelForm.driver_rating_safety} onChange={(event) => setTravelForm({ ...travelForm, driver_rating_safety: Number(event.target.value) })} />
+              </label>
+              <label>
+                Punctuality
+                <input type="number" min="1" max="5" value={travelForm.driver_rating_punctuality} onChange={(event) => setTravelForm({ ...travelForm, driver_rating_punctuality: Number(event.target.value) })} />
+              </label>
+              <label>
+                Communication
+                <input type="number" min="1" max="5" value={travelForm.driver_rating_communication} onChange={(event) => setTravelForm({ ...travelForm, driver_rating_communication: Number(event.target.value) })} />
+              </label>
+              <label>
+                Vehicle condition
+                <input type="number" min="1" max="5" value={travelForm.driver_rating_vehicle_condition} onChange={(event) => setTravelForm({ ...travelForm, driver_rating_vehicle_condition: Number(event.target.value) })} />
+              </label>
+              <label>
+                Driver outcome
+                <select
+                  value={travelForm.driver_rating_incident_reported ? "incident" : travelForm.driver_rating_would_use_again ? "use_again" : "avoid"}
+                  onChange={(event) =>
+                    setTravelForm({
+                      ...travelForm,
+                      driver_rating_would_use_again: event.target.value === "use_again",
+                      driver_rating_incident_reported: event.target.value === "incident"
+                    })
+                  }
+                >
+                  <option value="use_again">Use again</option>
+                  <option value="avoid">Avoid next trip</option>
+                  <option value="incident">Incident reported</option>
+                </select>
+              </label>
+              <label>
                 Geofence label
                 <input value={travelForm.geofence_label} onChange={(event) => setTravelForm({ ...travelForm, geofence_label: event.target.value })} />
               </label>
@@ -7739,6 +7856,10 @@ export default function HomePage() {
               <label className="wide-field">
                 Carpool dropoff
                 <input value={travelForm.carpool_dropoff_location} onChange={(event) => setTravelForm({ ...travelForm, carpool_dropoff_location: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Driver notes
+                <input value={travelForm.driver_rating_notes} onChange={(event) => setTravelForm({ ...travelForm, driver_rating_notes: event.target.value })} />
               </label>
               <label className="wide-field">
                 Receipt URL
@@ -7899,6 +8020,28 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelDriverRatingSummary ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Driver ratings · {travelDriverRatingSummary.rating_count}</strong>
+                    <span>
+                      {travelDriverRatingSummary.average_overall_score ?? "n/a"}/5 average · {travelDriverRatingSummary.would_use_again_count} use again
+                    </span>
+                    <span>{travelDriverRatingSummary.incident_reported_count} incident flag(s)</span>
+                  </div>
+                </article>
+              ) : null}
+              {travelDriverRatings.slice(0, 3).map((rating) => (
+                <article className="task-card" key={rating.id}>
+                  <div>
+                    <strong>{rating.driver_name} · {rating.overall_score}/5</strong>
+                    <span>
+                      Safety {rating.safety_score ?? "n/a"} · punctuality {rating.punctuality_score ?? "n/a"} · communication {rating.communication_score ?? "n/a"}
+                    </span>
+                    <span>{rating.incident_reported ? "Incident reported" : rating.would_use_again ? "Use again" : "Avoid next trip"} · {rating.notes ?? "No driver notes"}</span>
+                  </div>
+                </article>
+              ))}
               {travelFeeBatch ? (
                 <article className="task-card">
                   <div>
@@ -8026,6 +8169,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => recordTravelLocationUpdate(plan)}>Track</button>
                     <button type="button" onClick={() => createTravelDevice(plan)}>Device</button>
                     <button type="button" onClick={() => loadTravelDevices(plan)}>Devices</button>
+                    <button type="button" onClick={() => createTravelDriverRating(plan)}>Rate driver</button>
+                    <button type="button" onClick={() => loadTravelDriverRatings(plan)}>Ratings</button>
                     <button type="button" onClick={() => checkTravelGeofence(plan)}>Geofence</button>
                     <button type="button" onClick={() => createTravelGeofenceZone(plan)}>Save zone</button>
                     <button type="button" onClick={() => loadTravelGeofenceZones(plan)}>Zones</button>

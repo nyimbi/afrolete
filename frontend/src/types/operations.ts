@@ -732,6 +732,35 @@ export type EventTravelDeviceLocationIngestRead = {
   update: EventTravelLocationUpdateRead;
 };
 
+export type EventTravelDriverRatingRead = {
+  id: UUID;
+  organization_id: UUID;
+  travel_plan_id: UUID;
+  driver_name: string;
+  driver_person_id: UUID | null;
+  vehicle_label: string | null;
+  overall_score: number;
+  safety_score: number | null;
+  punctuality_score: number | null;
+  communication_score: number | null;
+  vehicle_condition_score: number | null;
+  would_use_again: boolean;
+  incident_reported: boolean;
+  reviewer_person_id: UUID | null;
+  reviewed_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EventTravelDriverRatingSummaryRead = {
+  travel_plan_id: UUID;
+  rating_count: number;
+  average_overall_score: string | null;
+  would_use_again_count: number;
+  incident_reported_count: number;
+};
+
 export type EventTravelExpenseRead = {
   id: UUID;
   organization_id: UUID;

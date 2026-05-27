@@ -37,6 +37,9 @@ from app.schemas.event import (
     EventTravelDeviceRead,
     EventTravelDeviceSecretRead,
     EventTravelDeviceUpdate,
+    EventTravelDriverRatingCreate,
+    EventTravelDriverRatingRead,
+    EventTravelDriverRatingSummaryRead,
     EventTravelExpenseCreate,
     EventTravelExpenseRead,
     EventTravelExpenseUpdate,
@@ -81,6 +84,7 @@ from app.services.events import (
     auto_match_travel_carpools,
     create_travel_carpool_ride,
     create_travel_device,
+    create_travel_driver_rating,
     create_travel_expense,
     create_travel_fee_checkouts,
     check_travel_geofence,
@@ -91,6 +95,7 @@ from app.services.events import (
     export_travel_manifest,
     generate_travel_fee_invoices,
     get_event,
+    get_travel_driver_rating_summary,
     get_travel_manifest,
     get_travel_readiness,
     ingest_travel_device_location,
@@ -98,6 +103,7 @@ from app.services.events import (
     list_travel_carpool_rides,
     list_travel_checklist_items,
     list_travel_devices,
+    list_travel_driver_ratings,
     list_travel_expenses,
     list_travel_geofence_zones,
     list_travel_location_updates,
@@ -694,6 +700,44 @@ async def rotate_travel_device_secret_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelDeviceSecretRead:
     return await rotate_travel_device_secret(db, identity, travel_device_id, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/driver-ratings", response_model=list[EventTravelDriverRatingRead])
+async def list_travel_driver_ratings_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EventTravelDriverRatingRead]:
+    return await list_travel_driver_ratings(db, identity, travel_plan_id, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/driver-ratings",
+    response_model=EventTravelDriverRatingRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_travel_driver_rating_route(
+    travel_plan_id: UUID,
+    payload: EventTravelDriverRatingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelDriverRatingRead:
+    return await create_travel_driver_rating(db, identity, travel_plan_id, payload, authz)
+
+
+@router.get(
+    "/travel-plans/{travel_plan_id}/driver-rating-summary",
+    response_model=EventTravelDriverRatingSummaryRead,
+)
+async def get_travel_driver_rating_summary_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelDriverRatingSummaryRead:
+    return await get_travel_driver_rating_summary(db, identity, travel_plan_id, authz)
 
 
 @router.post(
