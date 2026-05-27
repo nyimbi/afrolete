@@ -8,6 +8,7 @@ from app.schemas.agent import (
     AgentAssignmentCreate,
     AgentAssignmentRead,
     AgentGovernanceSummaryRead,
+    AgentModelTransparencyReportRead,
     AgentRunLedgerVerificationRead,
     AgentRunRecordRead,
     AgentCreate,
@@ -18,6 +19,7 @@ from app.schemas.agent import (
 )
 from app.services.agents import (
     agent_governance_summary,
+    agent_model_transparency_report,
     agent_run_records,
     assign_agent,
     create_agent,
@@ -160,6 +162,14 @@ async def agent_governance_route(
     db: AsyncSession = Depends(get_db),
 ) -> AgentGovernanceSummaryRead:
     return AgentGovernanceSummaryRead(**await agent_governance_summary(db, organization_id))
+
+
+@router.get("/model-transparency", response_model=AgentModelTransparencyReportRead)
+async def agent_model_transparency_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> AgentModelTransparencyReportRead:
+    return AgentModelTransparencyReportRead(**await agent_model_transparency_report(db, organization_id))
 
 
 @router.post("/tasks/{task_id}/execute", response_model=AgentTaskRead)

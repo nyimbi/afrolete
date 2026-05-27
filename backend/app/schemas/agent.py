@@ -125,3 +125,31 @@ class AgentRunLedgerVerificationRead(BaseModel):
     broken_records: list[UUID]
     latest_record_hash: str | None
     valid: bool
+
+
+class AgentModelTransparencyItemRead(BaseModel):
+    model_policy: str
+    agent_count: int
+    run_count: int
+    completed_runs: int
+    failed_runs: int
+    human_review_runs: int
+    execution_modes: list[str]
+    latest_run_at: datetime | None
+    risk_band: str
+    transparency_notes: str
+
+
+class AgentModelTransparencyReportRead(BaseModel):
+    organization_id: UUID
+    generated_at: datetime
+    total_models: int
+    total_runs: int
+    human_review_required: int
+    local_model_count: int
+    webhook_model_count: int
+    ledger_valid: bool
+    latest_record_hash: str | None
+    credential_boundary: str
+    recommendations: list[str]
+    models: list[AgentModelTransparencyItemRead]

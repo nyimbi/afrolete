@@ -14,6 +14,7 @@ import type {
   AgentAssignmentRead,
   AgentGovernanceSummaryRead,
   AgentKind,
+  AgentModelTransparencyReportRead,
   AgentRead,
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
@@ -575,6 +576,7 @@ export default function HomePage() {
   const [agentLedgerVerification, setAgentLedgerVerification] =
     useState<AgentRunLedgerVerificationRead | null>(null);
   const [agentGovernance, setAgentGovernance] = useState<AgentGovernanceSummaryRead | null>(null);
+  const [agentTransparency, setAgentTransparency] = useState<AgentModelTransparencyReportRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1458,16 +1460,18 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification, transparency] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
-      apiRequest<AgentRunLedgerVerificationRead>(`/agents/runs/verify?organization_id=${organizationId}`)
+      apiRequest<AgentRunLedgerVerificationRead>(`/agents/runs/verify?organization_id=${organizationId}`),
+      apiRequest<AgentModelTransparencyReportRead>(`/agents/model-transparency?organization_id=${organizationId}`)
     ]);
     setAgentTasks(tasks);
     setAgentRuns(runs);
     setAgentGovernance(governance);
     setAgentLedgerVerification(ledgerVerification);
+    setAgentTransparency(transparency);
   }, []);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1901,6 +1905,7 @@ export default function HomePage() {
       setAgentRuns([]);
       setAgentLedgerVerification(null);
       setAgentGovernance(null);
+      setAgentTransparency(null);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -11549,6 +11554,26 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {agentTransparency ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Model transparency · {agentTransparency.total_models} policies · {agentTransparency.total_runs} runs</strong>
+                    <span>
+                      {agentTransparency.credential_boundary} · ledger {agentTransparency.ledger_valid ? "valid" : "broken"} · review {agentTransparency.human_review_required}
+                    </span>
+                    <span>{agentTransparency.recommendations[0] ?? "Transparency report ready"}</span>
+                  </div>
+                </article>
+              ) : null}
+              {agentTransparency?.models.slice(0, 3).map((model) => (
+                <article key={model.model_policy} className="task-card">
+                  <div>
+                    <strong>{model.model_policy} · {model.risk_band}</strong>
+                    <span>{model.agent_count} agents · {model.run_count} runs · {model.execution_modes.join(", ") || "not run"}</span>
+                    <span>{model.transparency_notes}</span>
+                  </div>
+                </article>
+              ))}
               {agentRuns.slice(0, 3).map((run) => (
                 <article key={run.id} className="task-card">
                   <div>

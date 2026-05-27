@@ -303,6 +303,51 @@ async def verify_agent_run_ledger(
     }
 
 
+async def agent_model_transparency_report(
+    db: AsyncSession,
+    organization_id: UUID,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    settings = settings or get_settings()
+    agents = await list_agents(db, organization_id)
+    records = list(
+        (
+            await db.scalars(
+                select(AgentRunRecord)
+                .where(AgentRunRecord.organization_id == organization_id)
+                .order_by(AgentRunRecord.created_at.desc())
+            )
+        ).all()
+    )
+    ledger = await verify_agent_run_ledger(db, organization_id)
+    credential_status = agent_credential_status(settings)
+    model_names = sorted(
+        {
+            *(agent.model_policy or settings.agent_default_model for agent in agents),
+            *(record.model_policy for record in records),
+        }
+    )
+    model_items = [
+        agent_model_transparency_item(model_name, agents, records, settings.agent_default_model)
+        for model_name in model_names
+    ]
+    recommendations = agent_transparency_recommendations(model_items, credential_status, bool(ledger["valid"]))
+    return {
+        "organization_id": organization_id,
+        "generated_at": datetime.now(UTC),
+        "total_models": len(model_items),
+        "total_runs": len(records),
+        "human_review_required": sum(item["human_review_runs"] for item in model_items),
+        "local_model_count": sum(1 for item in model_items if "deterministic" in item["execution_modes"]),
+        "webhook_model_count": sum(1 for item in model_items if "webhook" in item["execution_modes"]),
+        "ledger_valid": ledger["valid"],
+        "latest_record_hash": ledger["latest_record_hash"],
+        "credential_boundary": credential_status["credential_boundary"],
+        "recommendations": recommendations,
+        "models": model_items,
+    }
+
+
 async def update_agent_task(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -675,6 +720,85 @@ def agent_credential_status(settings: Settings) -> dict[str, object]:
         "credential_boundary": "openbao/env" if webhook_key_configured else "local-deterministic",
         "recommendation": recommendation,
     }
+
+
+def agent_model_transparency_item(
+    model_policy: str,
+    agents: list[Agent],
+    records: list[AgentRunRecord],
+    default_model: str,
+) -> dict[str, object]:
+    model_agents = [agent for agent in agents if (agent.model_policy or default_model) == model_policy]
+    model_records = [record for record in records if record.model_policy == model_policy]
+    execution_modes = sorted({record.execution_mode for record in model_records})
+    completed_runs = sum(1 for record in model_records if record.status == AgentTaskStatus.COMPLETED)
+    failed_runs = sum(1 for record in model_records if record.status == AgentTaskStatus.FAILED)
+    review_runs = sum(1 for record in model_records if record.status == AgentTaskStatus.WAITING_FOR_REVIEW)
+    latest_run_at = max(
+        (record.finished_at or record.started_at or record.created_at for record in model_records),
+        default=None,
+    )
+    risk_band = agent_model_risk_band(model_records, execution_modes)
+    return {
+        "model_policy": model_policy,
+        "agent_count": len(model_agents),
+        "run_count": len(model_records),
+        "completed_runs": completed_runs,
+        "failed_runs": failed_runs,
+        "human_review_runs": review_runs,
+        "execution_modes": execution_modes,
+        "latest_run_at": latest_run_at,
+        "risk_band": risk_band,
+        "transparency_notes": agent_model_transparency_notes(model_policy, model_records, execution_modes, risk_band),
+    }
+
+
+def agent_model_risk_band(records: list[AgentRunRecord], execution_modes: list[str]) -> str:
+    if not records:
+        return "unproven"
+    failed = sum(1 for record in records if record.status == AgentTaskStatus.FAILED)
+    waiting = sum(1 for record in records if record.status == AgentTaskStatus.WAITING_FOR_REVIEW)
+    if failed > 0 or "webhook" in execution_modes:
+        return "high_review"
+    if waiting > 0:
+        return "human_review"
+    return "controlled"
+
+
+def agent_model_transparency_notes(
+    model_policy: str,
+    records: list[AgentRunRecord],
+    execution_modes: list[str],
+    risk_band: str,
+) -> str:
+    if not records:
+        return f"{model_policy} is assigned but has no recorded runs yet; collect governed evidence before automation."
+    if "webhook" in execution_modes:
+        return f"{model_policy} uses external webhook execution; keep OpenBao-backed credentials and human review active."
+    if risk_band == "high_review":
+        return f"{model_policy} has failed runs or external execution and needs operator review before applied actions."
+    if risk_band == "human_review":
+        return f"{model_policy} has outputs waiting for review; do not apply recommendations without sign-off."
+    return f"{model_policy} is operating inside the controlled local governance boundary."
+
+
+def agent_transparency_recommendations(
+    model_items: list[dict[str, object]],
+    credential_status: dict[str, object],
+    ledger_valid: bool,
+) -> list[str]:
+    recommendations: list[str] = []
+    if not ledger_valid:
+        recommendations.append("Freeze agent automation until the run ledger hash chain is repaired.")
+    if not credential_status["webhook_key_configured"] and credential_status["execution_mode"] == "webhook":
+        recommendations.append("Configure an OpenBao-injected agent webhook key before live model execution.")
+    if any(item["risk_band"] == "unproven" for item in model_items):
+        recommendations.append("Run low-risk evaluation tasks for assigned models that have no ledger evidence.")
+    if any(item["human_review_runs"] for item in model_items):
+        recommendations.append("Clear human review queues before enabling downstream side effects.")
+    if not recommendations:
+        recommendations.append("Continue periodic transparency review and preserve the hash-chained run ledger.")
+    return recommendations
 
 
 def governance_notes(agent: Agent, task: AgentTask) -> str:

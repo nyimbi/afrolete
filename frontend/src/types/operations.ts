@@ -2478,6 +2478,34 @@ export type AgentRunLedgerVerificationRead = {
   valid: boolean;
 };
 
+export type AgentModelTransparencyItemRead = {
+  model_policy: string;
+  agent_count: number;
+  run_count: number;
+  completed_runs: number;
+  failed_runs: number;
+  human_review_runs: number;
+  execution_modes: string[];
+  latest_run_at: string | null;
+  risk_band: string;
+  transparency_notes: string;
+};
+
+export type AgentModelTransparencyReportRead = {
+  organization_id: UUID;
+  generated_at: string;
+  total_models: number;
+  total_runs: number;
+  human_review_required: number;
+  local_model_count: number;
+  webhook_model_count: number;
+  ledger_valid: boolean;
+  latest_record_hash: string | null;
+  credential_boundary: string;
+  recommendations: string[];
+  models: AgentModelTransparencyItemRead[];
+};
+
 export type AgentRunRecordRead = {
   id: UUID;
   task_id: UUID;
