@@ -660,6 +660,16 @@ export type EventTravelLocationUpdateRead = {
   notes: string | null;
 };
 
+export type EventTravelTelemetryStreamRead = {
+  travel_plan_id: UUID;
+  stream_url: string;
+  content_type: string;
+  update_count: number;
+  latest_update_id: UUID | null;
+  latest_recorded_at: string | null;
+  replay_window_seconds: number;
+};
+
 export type EventTravelMapPathRead = {
   sequence: number;
   latitude: string;

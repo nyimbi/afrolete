@@ -124,6 +124,7 @@ from app.schemas.event import (
     EventTravelMapMarkerRead,
     EventTravelMapPathRead,
     EventTravelMapRead,
+    EventTravelTelemetryStreamRead,
     EventTravelManifestExportCreate,
     EventTravelManifestExportRead,
     EventTravelManifestOfflineLinkCreate,
@@ -1205,6 +1206,23 @@ async def list_travel_location_updates(
         )
     ).all()
     return [await travel_location_update_read(db, item) for item in rows]
+
+
+async def get_travel_location_stream_info(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> EventTravelTelemetryStreamRead:
+    updates = await list_travel_location_updates(db, identity, travel_plan_id, authz)
+    latest_update = updates[0] if updates else None
+    return EventTravelTelemetryStreamRead(
+        travel_plan_id=travel_plan_id,
+        stream_url=f"/events/travel-plans/{travel_plan_id}/location-stream",
+        update_count=len(updates),
+        latest_update_id=latest_update.id if latest_update is not None else None,
+        latest_recorded_at=latest_update.recorded_at if latest_update is not None else None,
+    )
 
 
 async def create_travel_location_update(

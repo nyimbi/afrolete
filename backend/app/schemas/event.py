@@ -440,6 +440,16 @@ class EventTravelLocationUpdateRead(BaseModel):
     notes: str | None
 
 
+class EventTravelTelemetryStreamRead(BaseModel):
+    travel_plan_id: UUID
+    stream_url: str
+    content_type: str = "application/x-ndjson"
+    update_count: int
+    latest_update_id: UUID | None = None
+    latest_recorded_at: datetime | None = None
+    replay_window_seconds: int = 300
+
+
 class EventTravelMapPathRead(BaseModel):
     sequence: int
     latitude: Decimal

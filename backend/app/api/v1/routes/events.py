@@ -1,6 +1,8 @@
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -64,6 +66,7 @@ from app.schemas.event import (
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
     EventTravelMapRead,
+    EventTravelTelemetryStreamRead,
     EventTravelManifestExportCreate,
     EventTravelManifestExportRead,
     EventTravelManifestRead,
@@ -113,6 +116,7 @@ from app.services.events import (
     get_travel_driver_rating_summary,
     get_travel_manifest,
     get_travel_readiness,
+    get_travel_location_stream_info,
     get_travel_route_map,
     ingest_travel_device_location,
     list_attendance,
@@ -657,6 +661,40 @@ async def list_travel_location_updates_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> list[EventTravelLocationUpdateRead]:
     return await list_travel_location_updates(db, identity, travel_plan_id, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/location-stream-info", response_model=EventTravelTelemetryStreamRead)
+async def get_travel_location_stream_info_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelTelemetryStreamRead:
+    return await get_travel_location_stream_info(db, identity, travel_plan_id, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/location-stream")
+async def stream_travel_location_updates_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> StreamingResponse:
+    updates = await list_travel_location_updates(db, identity, travel_plan_id, authz)
+
+    async def stream_rows():
+        for update in reversed(updates):
+            yield json.dumps(update.model_dump(mode="json"), sort_keys=True) + "\n"
+
+    return StreamingResponse(
+        stream_rows(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Afrolete-Travel-Plan-Id": str(travel_plan_id),
+            "X-Afrolete-Stream-Transport": "ndjson",
+        },
+    )
 
 
 @router.get("/travel-plans/{travel_plan_id}/route-map", response_model=EventTravelMapRead)

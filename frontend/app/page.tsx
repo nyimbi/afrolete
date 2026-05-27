@@ -96,6 +96,7 @@ import type {
   EventTravelGeofenceZoneRead,
   EventTravelLocationUpdateRead,
   EventTravelMapRead,
+  EventTravelTelemetryStreamRead,
   EventTravelManifestExportRead,
   EventTravelManifestRead,
   EventTravelManifestOfflineLinkRead,
@@ -410,6 +411,7 @@ export default function HomePage() {
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
   const [selectedTravelChecklistFile, setSelectedTravelChecklistFile] = useState<File | null>(null);
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
+  const [travelTelemetryStream, setTravelTelemetryStream] = useState<EventTravelTelemetryStreamRead | null>(null);
   const [travelDevices, setTravelDevices] = useState<EventTravelDeviceRead[]>([]);
   const [travelDeviceSecret, setTravelDeviceSecret] = useState<EventTravelDeviceSecretRead | null>(null);
   const [travelDeviceFleetInventory, setTravelDeviceFleetInventory] =
@@ -1736,6 +1738,7 @@ export default function HomePage() {
       setTravelApprovalRouting(null);
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
+      setTravelTelemetryStream(null);
       setTravelDevices([]);
       setTravelDeviceSecret(null);
       setTravelDeviceFleetInventory(null);
@@ -1967,6 +1970,7 @@ export default function HomePage() {
       setTravelApprovalRouting(null);
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
+      setTravelTelemetryStream(null);
       setTravelDevices([]);
       setTravelDeviceSecret(null);
       setTravelDeviceFleetInventory(null);
@@ -3030,6 +3034,20 @@ export default function HomePage() {
       (updates) => {
         setTravelLocationUpdates(updates);
         addLog(`Travel tracking loaded: ${updates.length} updates`, "good");
+      }
+    );
+  };
+
+  const loadTravelTelemetryStream = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-telemetry-stream-${plan.id}`,
+      () =>
+        apiRequest<EventTravelTelemetryStreamRead>(`/events/travel-plans/${plan.id}/location-stream-info`, {
+          identity
+        }),
+      (stream) => {
+        setTravelTelemetryStream(stream);
+        addLog(`Telemetry stream ready: ${stream.update_count} replay rows`, stream.update_count ? "good" : "neutral");
       }
     );
   };
@@ -8446,6 +8464,18 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelTelemetryStream ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Telemetry stream · {travelTelemetryStream.update_count} replay rows</strong>
+                    <span>{travelTelemetryStream.content_type} · {travelTelemetryStream.replay_window_seconds}s replay window</span>
+                    <span>
+                      {travelTelemetryStream.latest_recorded_at ? new Date(travelTelemetryStream.latest_recorded_at).toLocaleString() : "No telemetry yet"}
+                      {` · ${travelTelemetryStream.stream_url}`}
+                    </span>
+                  </div>
+                </article>
+              ) : null}
               {travelGeofenceCheck ? (
                 <article className="task-card">
                   <div>
@@ -8729,6 +8759,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => checkTravelReadiness(plan)}>Gate</button>
                     <button type="button" onClick={() => optimizeTravelRoute(plan)}>Optimize</button>
                     <button type="button" onClick={() => loadTravelRouteMap(plan)}>Map</button>
+                    <button type="button" onClick={() => loadTravelTelemetryStream(plan)}>Stream</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
                     <button type="button" onClick={() => createTravelFeeCheckouts(plan)}>Pay links</button>
                     <button type="button" onClick={() => routeTravelApprovals(plan)}>Route approvals</button>
