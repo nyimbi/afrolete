@@ -116,6 +116,10 @@ from app.schemas.event import (
     EventTravelGeofenceZoneUpdate,
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
+    EventTravelMapBoundsRead,
+    EventTravelMapMarkerRead,
+    EventTravelMapPathRead,
+    EventTravelMapRead,
     EventTravelManifestExportCreate,
     EventTravelManifestExportRead,
     EventTravelManifestOfflineLinkCreate,
@@ -1251,6 +1255,58 @@ async def create_travel_location_update(
     return await travel_location_update_read(db, update)
 
 
+async def get_travel_route_map(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> EventTravelMapRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    updates = (
+        await db.scalars(
+            select(EventTravelLocationUpdate)
+            .where(EventTravelLocationUpdate.travel_plan_id == plan.id)
+            .order_by(EventTravelLocationUpdate.recorded_at, EventTravelLocationUpdate.created_at)
+        )
+    ).all()
+    zones = (
+        await db.scalars(
+            select(EventTravelGeofenceZone)
+            .where(EventTravelGeofenceZone.travel_plan_id == plan.id)
+            .where(EventTravelGeofenceZone.active.is_(True))
+            .order_by(EventTravelGeofenceZone.label)
+        )
+    ).all()
+    path = [
+        EventTravelMapPathRead(
+            sequence=index,
+            latitude=update.latitude,
+            longitude=update.longitude,
+            recorded_at=update.recorded_at,
+            phase=update.phase,
+            source=update.source,
+        )
+        for index, update in enumerate(updates, start=1)
+    ]
+    markers = travel_route_map_markers(updates, zones, plan)
+    bounds = travel_route_map_bounds(path, markers)
+    latest_update = updates[-1] if updates else None
+    return EventTravelMapRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        destination=plan.destination,
+        path=path,
+        markers=markers,
+        bounds=bounds,
+        latest_phase=latest_update.phase if latest_update is not None else None,
+        latest_recorded_at=latest_update.recorded_at if latest_update is not None else None,
+    )
+
+
 async def list_travel_devices(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1802,6 +1858,64 @@ def travel_geofence_zone_read(zone: EventTravelGeofenceZone) -> EventTravelGeofe
         notes=zone.notes,
         created_at=zone.created_at,
         updated_at=zone.updated_at,
+    )
+
+
+def travel_route_map_markers(
+    updates: list[EventTravelLocationUpdate],
+    zones: list[EventTravelGeofenceZone],
+    plan: EventTravelPlan,
+) -> list[EventTravelMapMarkerRead]:
+    markers: list[EventTravelMapMarkerRead] = []
+    if updates:
+        first = updates[0]
+        markers.append(
+            EventTravelMapMarkerRead(
+                label="Route start",
+                marker_type="origin",
+                latitude=first.latitude,
+                longitude=first.longitude,
+                recorded_at=first.recorded_at,
+                status=first.phase,
+            )
+        )
+        latest = updates[-1]
+        markers.append(
+            EventTravelMapMarkerRead(
+                label=plan.destination,
+                marker_type="latest_position",
+                latitude=latest.latitude,
+                longitude=latest.longitude,
+                recorded_at=latest.recorded_at,
+                status=latest.phase,
+            )
+        )
+    for zone in zones:
+        markers.append(
+            EventTravelMapMarkerRead(
+                label=zone.label,
+                marker_type="geofence_zone",
+                latitude=zone.center_latitude,
+                longitude=zone.center_longitude,
+                status=f"{zone.radius_km} km radius",
+            )
+        )
+    return markers
+
+
+def travel_route_map_bounds(
+    path: list[EventTravelMapPathRead],
+    markers: list[EventTravelMapMarkerRead],
+) -> EventTravelMapBoundsRead:
+    latitudes = [point.latitude for point in path] + [marker.latitude for marker in markers]
+    longitudes = [point.longitude for point in path] + [marker.longitude for marker in markers]
+    if not latitudes or not longitudes:
+        return EventTravelMapBoundsRead()
+    return EventTravelMapBoundsRead(
+        min_latitude=min(latitudes),
+        max_latitude=max(latitudes),
+        min_longitude=min(longitudes),
+        max_longitude=max(longitudes),
     )
 
 

@@ -62,6 +62,7 @@ from app.schemas.event import (
     EventTravelGeofenceZoneUpdate,
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
+    EventTravelMapRead,
     EventTravelManifestExportCreate,
     EventTravelManifestExportRead,
     EventTravelManifestRead,
@@ -110,6 +111,7 @@ from app.services.events import (
     get_travel_driver_rating_summary,
     get_travel_manifest,
     get_travel_readiness,
+    get_travel_route_map,
     ingest_travel_device_location,
     list_attendance,
     list_travel_backup_drivers,
@@ -653,6 +655,16 @@ async def list_travel_location_updates_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> list[EventTravelLocationUpdateRead]:
     return await list_travel_location_updates(db, identity, travel_plan_id, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/route-map", response_model=EventTravelMapRead)
+async def get_travel_route_map_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelMapRead:
+    return await get_travel_route_map(db, identity, travel_plan_id, authz)
 
 
 @router.post(

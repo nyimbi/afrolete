@@ -654,6 +654,43 @@ export type EventTravelLocationUpdateRead = {
   notes: string | null;
 };
 
+export type EventTravelMapPathRead = {
+  sequence: number;
+  latitude: string;
+  longitude: string;
+  recorded_at: string;
+  phase: string;
+  source: string;
+};
+
+export type EventTravelMapMarkerRead = {
+  label: string;
+  marker_type: string;
+  latitude: string;
+  longitude: string;
+  recorded_at: string | null;
+  status: string | null;
+};
+
+export type EventTravelMapBoundsRead = {
+  min_latitude: string | null;
+  max_latitude: string | null;
+  min_longitude: string | null;
+  max_longitude: string | null;
+};
+
+export type EventTravelMapRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  destination: string;
+  provider_hint: string;
+  path: EventTravelMapPathRead[];
+  markers: EventTravelMapMarkerRead[];
+  bounds: EventTravelMapBoundsRead;
+  latest_phase: string | null;
+  latest_recorded_at: string | null;
+};
+
 export type EventTravelGeofenceCheckRead = {
   event_id: UUID;
   travel_plan_id: UUID;

@@ -431,6 +431,43 @@ class EventTravelLocationUpdateRead(BaseModel):
     notes: str | None
 
 
+class EventTravelMapPathRead(BaseModel):
+    sequence: int
+    latitude: Decimal
+    longitude: Decimal
+    recorded_at: datetime
+    phase: str
+    source: str
+
+
+class EventTravelMapMarkerRead(BaseModel):
+    label: str
+    marker_type: str
+    latitude: Decimal
+    longitude: Decimal
+    recorded_at: datetime | None = None
+    status: str | None = None
+
+
+class EventTravelMapBoundsRead(BaseModel):
+    min_latitude: Decimal | None = None
+    max_latitude: Decimal | None = None
+    min_longitude: Decimal | None = None
+    max_longitude: Decimal | None = None
+
+
+class EventTravelMapRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    destination: str
+    provider_hint: str = "provider-neutral"
+    path: list[EventTravelMapPathRead]
+    markers: list[EventTravelMapMarkerRead]
+    bounds: EventTravelMapBoundsRead
+    latest_phase: str | None = None
+    latest_recorded_at: datetime | None = None
+
+
 class EventTravelDeviceLocationIngestCreate(BaseModel):
     device_id: str = Field(min_length=2, max_length=120)
     provider: str = Field(default="hardware-gps", min_length=2, max_length=80)

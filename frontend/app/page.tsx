@@ -94,6 +94,7 @@ import type {
   EventTravelGeofenceCheckRead,
   EventTravelGeofenceZoneRead,
   EventTravelLocationUpdateRead,
+  EventTravelMapRead,
   EventTravelManifestExportRead,
   EventTravelManifestRead,
   EventTravelManifestOfflineLinkRead,
@@ -401,6 +402,7 @@ export default function HomePage() {
   const [travelCarpoolAutoMatch, setTravelCarpoolAutoMatch] = useState<EventTravelCarpoolAutoMatchRead | null>(null);
   const [travelReadiness, setTravelReadiness] = useState<EventTravelReadinessRead | null>(null);
   const [travelRouteOptimization, setTravelRouteOptimization] = useState<EventTravelRouteOptimizationRead | null>(null);
+  const [travelRouteMap, setTravelRouteMap] = useState<EventTravelMapRead | null>(null);
   const [travelGeofenceCheck, setTravelGeofenceCheck] = useState<EventTravelGeofenceCheckRead | null>(null);
   const [travelGeofenceZones, setTravelGeofenceZones] = useState<EventTravelGeofenceZoneRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
@@ -1710,6 +1712,7 @@ export default function HomePage() {
       setTravelCarpoolAutoMatch(null);
       setTravelReadiness(null);
       setTravelRouteOptimization(null);
+      setTravelRouteMap(null);
       setTravelGeofenceCheck(null);
       setTravelGeofenceZones([]);
       setAgents([]);
@@ -1938,6 +1941,7 @@ export default function HomePage() {
       setTravelCarpoolAutoMatch(null);
       setTravelReadiness(null);
       setTravelRouteOptimization(null);
+      setTravelRouteMap(null);
       setTravelGeofenceCheck(null);
       setTravelGeofenceZones([]);
       return;
@@ -2531,6 +2535,23 @@ export default function HomePage() {
         addLog(
           `Route optimized: ${optimization.stop_count} stops, ${optimization.estimated_duration_minutes} min`,
           optimization.risk_level === "high" || optimization.risk_level === "critical" ? "bad" : "good"
+        );
+      }
+    );
+  };
+
+  const loadTravelRouteMap = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-route-map-${plan.id}`,
+      () =>
+        apiRequest<EventTravelMapRead>(`/events/travel-plans/${plan.id}/route-map`, {
+          identity
+        }),
+      (routeMap) => {
+        setTravelRouteMap(routeMap);
+        addLog(
+          `Route map loaded: ${routeMap.path.length} points, ${routeMap.markers.length} markers`,
+          routeMap.path.length ? "good" : "neutral"
         );
       }
     );
@@ -8219,6 +8240,21 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelRouteMap ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelRouteMap.destination} map · {travelRouteMap.path.length} points</strong>
+                    <span>
+                      {travelRouteMap.provider_hint} · {travelRouteMap.latest_phase ?? "no position"}
+                      {travelRouteMap.latest_recorded_at ? ` · ${new Date(travelRouteMap.latest_recorded_at).toLocaleString()}` : ""}
+                    </span>
+                    <span>
+                      Bounds {travelRouteMap.bounds.min_latitude ?? "n/a"}, {travelRouteMap.bounds.min_longitude ?? "n/a"} to {travelRouteMap.bounds.max_latitude ?? "n/a"}, {travelRouteMap.bounds.max_longitude ?? "n/a"}
+                    </span>
+                    <span>{travelRouteMap.markers.map((marker) => `${marker.label} (${marker.marker_type})`).slice(0, 3).join(" · ") || "No map markers yet"}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelGeofenceCheck ? (
                 <article className="task-card">
                   <div>
@@ -8464,6 +8500,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => createTravelManifestOfflineLink(plan)}>PDF link</button>
                     <button type="button" onClick={() => checkTravelReadiness(plan)}>Gate</button>
                     <button type="button" onClick={() => optimizeTravelRoute(plan)}>Optimize</button>
+                    <button type="button" onClick={() => loadTravelRouteMap(plan)}>Map</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
                     <button type="button" onClick={() => createTravelFeeCheckouts(plan)}>Pay links</button>
                     <button type="button" onClick={() => routeTravelApprovals(plan)}>Route approvals</button>
