@@ -464,6 +464,19 @@ class EventTravelGeofenceCheckCreate(BaseModel):
     channel: CommunicationChannel = CommunicationChannel.PUSH
 
 
+class EventTravelGeofenceZoneCreate(EventTravelGeofenceCheckCreate):
+    active: bool = True
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelGeofenceZoneRead(EventTravelGeofenceZoneCreate):
+    id: UUID
+    organization_id: UUID
+    travel_plan_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
 class EventTravelGeofenceCheckRead(BaseModel):
     event_id: UUID
     travel_plan_id: UUID

@@ -21,6 +21,7 @@ from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.commercial import FinanceInvoice
 from app.models.enums import (
     AttendanceStatus,
+    CommunicationChannel,
     ConsentRequestStatus,
     ConsentScopeType,
     CommunicationMessageType,
@@ -40,6 +41,7 @@ from app.models.event import (
     EventTravelCarpoolRide,
     EventTravelChecklistItem,
     EventTravelExpense,
+    EventTravelGeofenceZone,
     EventTravelLocationUpdate,
     EventTravelPlan,
     EventWeatherAssessment,
@@ -88,6 +90,8 @@ from app.schemas.event import (
     EventTravelFeeInvoiceItemRead,
     EventTravelGeofenceCheckCreate,
     EventTravelGeofenceCheckRead,
+    EventTravelGeofenceZoneCreate,
+    EventTravelGeofenceZoneRead,
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
     EventTravelManifestExportCreate,
@@ -1365,6 +1369,102 @@ async def check_travel_geofence(
         message_id=message_id,
         recipient_count=recipient_count,
         recommendation=travel_geofence_recommendation(breached, payload.radius_km, distance_km),
+    )
+
+
+async def list_travel_geofence_zones(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> list[EventTravelGeofenceZoneRead]:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    zones = (
+        await db.scalars(
+            select(EventTravelGeofenceZone)
+            .where(EventTravelGeofenceZone.travel_plan_id == plan.id)
+            .order_by(EventTravelGeofenceZone.active.desc(), EventTravelGeofenceZone.label)
+        )
+    ).all()
+    return [travel_geofence_zone_read(zone) for zone in zones]
+
+
+async def create_travel_geofence_zone(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelGeofenceZoneCreate,
+    authz: AuthorizationService,
+) -> EventTravelGeofenceZoneRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+    existing = await db.scalar(
+        select(EventTravelGeofenceZone)
+        .where(EventTravelGeofenceZone.travel_plan_id == plan.id)
+        .where(EventTravelGeofenceZone.label == payload.label)
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Travel geofence zone already exists")
+    zone = EventTravelGeofenceZone(
+        organization_id=plan.organization_id,
+        travel_plan_id=plan.id,
+        label=payload.label,
+        center_latitude=payload.center_latitude,
+        center_longitude=payload.center_longitude,
+        radius_km=payload.radius_km,
+        alert_on_breach=payload.alert_on_breach,
+        channel=payload.channel.value,
+        active=payload.active,
+        notes=payload.notes,
+    )
+    db.add(zone)
+    await db.commit()
+    await db.refresh(zone)
+    return travel_geofence_zone_read(zone)
+
+
+async def check_travel_geofence_zone(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    geofence_zone_id: UUID,
+    authz: AuthorizationService,
+) -> EventTravelGeofenceCheckRead:
+    zone = await db.get(EventTravelGeofenceZone, geofence_zone_id)
+    if zone is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel geofence zone not found")
+    if not zone.active:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Travel geofence zone is inactive")
+    payload = EventTravelGeofenceCheckCreate(
+        center_latitude=zone.center_latitude,
+        center_longitude=zone.center_longitude,
+        radius_km=zone.radius_km,
+        label=zone.label,
+        alert_on_breach=zone.alert_on_breach,
+        channel=CommunicationChannel(zone.channel),
+    )
+    return await check_travel_geofence(db, identity, zone.travel_plan_id, payload, authz)
+
+
+def travel_geofence_zone_read(zone: EventTravelGeofenceZone) -> EventTravelGeofenceZoneRead:
+    return EventTravelGeofenceZoneRead(
+        id=zone.id,
+        organization_id=zone.organization_id,
+        travel_plan_id=zone.travel_plan_id,
+        label=zone.label,
+        center_latitude=zone.center_latitude,
+        center_longitude=zone.center_longitude,
+        radius_km=zone.radius_km,
+        alert_on_breach=zone.alert_on_breach,
+        channel=CommunicationChannel(zone.channel),
+        active=zone.active,
+        notes=zone.notes,
+        created_at=zone.created_at,
+        updated_at=zone.updated_at,
     )
 
 

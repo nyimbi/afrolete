@@ -61,6 +61,7 @@ from app.models.event import (  # noqa: F401,E402
     EventTravelCarpoolRide,
     EventTravelChecklistItem,
     EventTravelExpense,
+    EventTravelGeofenceZone,
     EventTravelLocationUpdate,
     EventTravelPlan,
     EventWeatherAssessment,

@@ -161,6 +161,22 @@ class EventTravelLocationUpdate(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class EventTravelGeofenceZone(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_travel_geofence_zones"
+    __table_args__ = (UniqueConstraint("travel_plan_id", "label"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    travel_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("event_travel_plans.id"), index=True)
+    label: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    center_latitude: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
+    center_longitude: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
+    radius_km: Mapped[Decimal] = mapped_column(Numeric(8, 3), nullable=False)
+    alert_on_breach: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(40), default="push", nullable=False, index=True)
+    active: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class EventTravelExpense(IdMixin, TimestampMixin, Base):
     __tablename__ = "event_travel_expenses"
 

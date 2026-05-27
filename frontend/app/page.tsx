@@ -84,6 +84,7 @@ import type {
   EventTravelFeeCheckoutBatchRead,
   EventTravelFeeInvoiceBatchRead,
   EventTravelGeofenceCheckRead,
+  EventTravelGeofenceZoneRead,
   EventTravelLocationUpdateRead,
   EventTravelManifestExportRead,
   EventTravelManifestRead,
@@ -383,6 +384,7 @@ export default function HomePage() {
   const [travelReadiness, setTravelReadiness] = useState<EventTravelReadinessRead | null>(null);
   const [travelRouteOptimization, setTravelRouteOptimization] = useState<EventTravelRouteOptimizationRead | null>(null);
   const [travelGeofenceCheck, setTravelGeofenceCheck] = useState<EventTravelGeofenceCheckRead | null>(null);
+  const [travelGeofenceZones, setTravelGeofenceZones] = useState<EventTravelGeofenceZoneRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -1654,6 +1656,7 @@ export default function HomePage() {
       setTravelReadiness(null);
       setTravelRouteOptimization(null);
       setTravelGeofenceCheck(null);
+      setTravelGeofenceZones([]);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1873,6 +1876,7 @@ export default function HomePage() {
       setTravelReadiness(null);
       setTravelRouteOptimization(null);
       setTravelGeofenceCheck(null);
+      setTravelGeofenceZones([]);
       return;
     }
     runAction(
@@ -2936,6 +2940,75 @@ export default function HomePage() {
       (expenses) => {
         setTravelExpenses(expenses);
         addLog(`Travel expenses loaded: ${expenses.length}`, "good");
+      }
+    );
+  };
+
+  const loadTravelGeofenceZones = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-geofence-zones-${plan.id}`,
+      () =>
+        apiRequest<EventTravelGeofenceZoneRead[]>(`/events/travel-plans/${plan.id}/geofence-zones`, {
+          method: "GET",
+          identity
+        }),
+      (zones) => {
+        setTravelGeofenceZones(zones);
+        addLog(`${zones.length} travel geofence zones loaded for ${plan.destination}`, "neutral");
+      }
+    );
+  };
+
+  const createTravelGeofenceZone = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-geofence-zone-create-${plan.id}`,
+      () =>
+        apiRequest<EventTravelGeofenceZoneRead>(`/events/travel-plans/${plan.id}/geofence-zones`, {
+          method: "POST",
+          identity,
+          body: {
+            center_latitude: String(travelForm.geofence_latitude),
+            center_longitude: String(travelForm.geofence_longitude),
+            radius_km: String(travelForm.geofence_radius_km),
+            label: travelForm.geofence_label,
+            alert_on_breach: true,
+            channel: travelForm.geofence_channel,
+            active: true,
+            notes: `Saved from operations console for ${plan.destination}.`
+          }
+        }),
+      (zone) => {
+        setTravelGeofenceZones((current) => [
+          zone,
+          ...current.filter((item) => item.id !== zone.id)
+        ]);
+        addLog(`Travel geofence zone saved: ${zone.label}`, "good");
+      }
+    );
+  };
+
+  const checkTravelGeofenceZone = (zone: EventTravelGeofenceZoneRead) => {
+    runAction(
+      `travel-geofence-zone-check-${zone.id}`,
+      () =>
+        apiRequest<EventTravelGeofenceCheckRead>(`/events/travel-geofence-zones/${zone.id}/check`, {
+          method: "POST",
+          identity
+        }),
+      (check) => {
+        setTravelGeofenceCheck(check);
+        addLog(
+          check.breached
+            ? `Saved zone breached: ${check.label}`
+            : `Latest update is inside saved zone: ${check.label}`,
+          check.breached ? "bad" : "good"
+        );
+        if (check.message_id) {
+          setSelectedMessageId(check.message_id);
+        }
+        if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
+        }
       }
     );
   };
@@ -7605,6 +7678,18 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelGeofenceZones.slice(0, 3).map((zone) => (
+                <article className="task-card" key={zone.id}>
+                  <div>
+                    <strong>{zone.label} · {zone.active ? "active" : "inactive"}</strong>
+                    <span>{zone.center_latitude}, {zone.center_longitude} · {zone.radius_km} km radius</span>
+                    <span>{zone.channel} alerts · {zone.alert_on_breach ? "alerts on breach" : "monitor only"}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => checkTravelGeofenceZone(zone)}>Check zone</button>
+                  </div>
+                </article>
+              ))}
               {travelFeeBatch ? (
                 <article className="task-card">
                   <div>
@@ -7731,6 +7816,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => loadTravelChecklist(plan)}>Checklist</button>
                     <button type="button" onClick={() => recordTravelLocationUpdate(plan)}>Track</button>
                     <button type="button" onClick={() => checkTravelGeofence(plan)}>Geofence</button>
+                    <button type="button" onClick={() => createTravelGeofenceZone(plan)}>Save zone</button>
+                    <button type="button" onClick={() => loadTravelGeofenceZones(plan)}>Zones</button>
                     <button type="button" onClick={() => loadTravelLocationUpdates(plan)}>Route</button>
                     <button type="button" onClick={() => createTravelExpense(plan)}>Expense</button>
                     <button type="button" onClick={() => loadTravelExpenses(plan)}>Expenses</button>

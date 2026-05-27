@@ -42,6 +42,8 @@ from app.schemas.event import (
     EventTravelFeeInvoiceCreate,
     EventTravelGeofenceCheckCreate,
     EventTravelGeofenceCheckRead,
+    EventTravelGeofenceZoneCreate,
+    EventTravelGeofenceZoneRead,
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
     EventTravelManifestExportCreate,
@@ -76,7 +78,9 @@ from app.services.events import (
     create_travel_expense,
     create_travel_fee_checkouts,
     check_travel_geofence,
+    check_travel_geofence_zone,
     create_travel_location_update,
+    create_travel_geofence_zone,
     create_travel_manifest_offline_link,
     export_travel_manifest,
     generate_travel_fee_invoices,
@@ -88,6 +92,7 @@ from app.services.events import (
     list_travel_carpool_rides,
     list_travel_checklist_items,
     list_travel_expenses,
+    list_travel_geofence_zones,
     list_travel_location_updates,
     list_travel_approvals,
     list_events,
@@ -671,6 +676,41 @@ async def check_travel_geofence_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelGeofenceCheckRead:
     return await check_travel_geofence(db, identity, travel_plan_id, payload, authz)
+
+
+@router.get("/travel-plans/{travel_plan_id}/geofence-zones", response_model=list[EventTravelGeofenceZoneRead])
+async def list_travel_geofence_zones_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EventTravelGeofenceZoneRead]:
+    return await list_travel_geofence_zones(db, identity, travel_plan_id, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/geofence-zones",
+    response_model=EventTravelGeofenceZoneRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_travel_geofence_zone_route(
+    travel_plan_id: UUID,
+    payload: EventTravelGeofenceZoneCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelGeofenceZoneRead:
+    return await create_travel_geofence_zone(db, identity, travel_plan_id, payload, authz)
+
+
+@router.post("/travel-geofence-zones/{geofence_zone_id}/check", response_model=EventTravelGeofenceCheckRead)
+async def check_travel_geofence_zone_route(
+    geofence_zone_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelGeofenceCheckRead:
+    return await check_travel_geofence_zone(db, identity, geofence_zone_id, authz)
 
 
 @router.get("/travel-plans/{travel_plan_id}/expenses", response_model=list[EventTravelExpenseRead])

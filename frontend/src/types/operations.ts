@@ -670,6 +670,22 @@ export type EventTravelGeofenceCheckRead = {
   recommendation: string;
 };
 
+export type EventTravelGeofenceZoneRead = {
+  id: UUID;
+  organization_id: UUID;
+  travel_plan_id: UUID;
+  label: string;
+  center_latitude: string;
+  center_longitude: string;
+  radius_km: string;
+  alert_on_breach: boolean;
+  channel: CommunicationChannel;
+  active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type EventTravelExpenseRead = {
   id: UUID;
   organization_id: UUID;
