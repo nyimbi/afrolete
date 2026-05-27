@@ -192,3 +192,21 @@ class AgentScorecardPublication(IdMixin, TimestampMixin, Base):
     snapshot_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     published_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class AgentScorecardArtifactAccess(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_scorecard_artifact_accesses"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    publication_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("agent_scorecard_publications.id"), index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    artifact_format: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    signed_url: Mapped[str | None] = mapped_column(String(1000))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

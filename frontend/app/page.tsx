@@ -22,6 +22,7 @@ import type {
   AgentRead,
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
+  AgentScorecardArtifactAccessRead,
   AgentScorecardCommentModerationRead,
   AgentScorecardPublicationArtifactLinkRead,
   AgentScorecardPublicationArtifactRead,
@@ -630,6 +631,8 @@ export default function HomePage() {
     useState<AgentScorecardPublicationReminderRunRead | null>(null);
   const [agentScorecardArtifactLink, setAgentScorecardArtifactLink] =
     useState<AgentScorecardPublicationArtifactLinkRead | null>(null);
+  const [agentScorecardArtifactAccesses, setAgentScorecardArtifactAccesses] =
+    useState<AgentScorecardArtifactAccessRead[]>([]);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1513,7 +1516,7 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
@@ -1531,6 +1534,10 @@ export default function HomePage() {
       ),
       apiRequest<AgentScorecardPublicationReadinessRead>(
         `/agents/ethical-scorecard/publications/readiness?organization_id=${organizationId}`
+      ),
+      apiRequest<AgentScorecardArtifactAccessRead[]>(
+        `/agents/ethical-scorecard/artifact-accesses?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setAgentTasks(tasks);
@@ -1545,7 +1552,8 @@ export default function HomePage() {
     setAgentScorecardComments(comments);
     setAgentScorecardPublications(publications);
     setAgentScorecardReadiness(readiness);
-  }, []);
+    setAgentScorecardArtifactAccesses(artifactAccesses);
+  }, [identity]);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
     const data = await apiRequest<MetricDefinitionRead[]>(
@@ -1989,6 +1997,7 @@ export default function HomePage() {
       setAgentScorecardReminder(null);
       setAgentScorecardReminderRun(null);
       setAgentScorecardArtifactLink(null);
+      setAgentScorecardArtifactAccesses([]);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -5055,6 +5064,9 @@ export default function HomePage() {
         ),
       (link) => {
         setAgentScorecardArtifactLink(link);
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
         addLog(
           `Created ${link.period_label} ${link.artifact_format} scorecard link`,
           "good"
@@ -12060,6 +12072,15 @@ export default function HomePage() {
                   </a>
                 </article>
               ) : null}
+              {agentScorecardArtifactAccesses.slice(0, 3).map((access) => (
+                <article key={access.id} className="task-card">
+                  <div>
+                    <strong>{access.event_type.replace("_", " ")} · {access.artifact_format}</strong>
+                    <span>{new Date(access.accessed_at).toLocaleString()} · {access.size_bytes} bytes · {access.content_type}</span>
+                    <span>{access.filename} · {access.checksum.slice(0, 16)}</span>
+                  </div>
+                </article>
+              ))}
               {agentScorecardPublications.slice(0, 2).map((publication) => (
                 <article key={publication.id} className="task-card">
                   <div>

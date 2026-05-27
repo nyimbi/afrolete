@@ -22,6 +22,7 @@ from app.models.agent import (
     AgentDecisionAppeal,
     AgentModelRegistry,
     AgentRunRecord,
+    AgentScorecardArtifactAccess,
     AgentScorecardComment,
     AgentScorecardPublication,
     AgentTask,
@@ -1089,6 +1090,19 @@ async def signed_agent_scorecard_publication_artifact_access(
         storage_name,
         expires_at,
     )
+    await record_scorecard_artifact_access(
+        db,
+        organization_id=UUID(str(artifact["organization_id"])),
+        publication_id=UUID(str(artifact["publication_id"])),
+        event_type="link_created",
+        artifact_format=str(artifact["artifact_format"]),
+        filename=str(artifact["download_filename"]),
+        content_type=str(artifact["content_type"]),
+        checksum=str(artifact["checksum"]),
+        size_bytes=int(artifact["size_bytes"]),
+        signed_url=signed_url,
+        expires_at=expires_at,
+    )
     return {
         "publication_id": artifact["publication_id"],
         "organization_id": artifact["organization_id"],
@@ -1138,6 +1152,58 @@ def read_signed_agent_scorecard_publication_artifact(
         "filename": public_scorecard_artifact_filename(filename),
         "checksum": hashlib.sha256(content).hexdigest(),
     }
+
+
+async def record_scorecard_artifact_access(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    publication_id: UUID,
+    event_type: str,
+    artifact_format: str,
+    filename: str,
+    content_type: str,
+    checksum: str,
+    size_bytes: int,
+    signed_url: str | None = None,
+    expires_at: datetime | None = None,
+) -> AgentScorecardArtifactAccess:
+    access = AgentScorecardArtifactAccess(
+        organization_id=organization_id,
+        publication_id=publication_id,
+        event_type=event_type,
+        artifact_format=artifact_format,
+        filename=filename,
+        content_type=content_type,
+        checksum=checksum,
+        size_bytes=size_bytes,
+        signed_url=signed_url,
+        expires_at=expires_at,
+        accessed_at=datetime.now(UTC),
+    )
+    db.add(access)
+    await db.commit()
+    await db.refresh(access)
+    return access
+
+
+async def list_scorecard_artifact_accesses(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> list[AgentScorecardArtifactAccess]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    return list(
+        (
+            await db.scalars(
+                select(AgentScorecardArtifactAccess)
+                .where(AgentScorecardArtifactAccess.organization_id == organization_id)
+                .order_by(AgentScorecardArtifactAccess.accessed_at.desc())
+                .limit(20)
+            )
+        ).all()
+    )
 
 
 async def agent_scorecard_publication_readiness(

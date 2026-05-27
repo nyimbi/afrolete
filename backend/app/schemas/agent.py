@@ -432,6 +432,21 @@ class AgentScorecardPublicationArtifactLinkRead(BaseModel):
     size_bytes: int
 
 
+class AgentScorecardArtifactAccessRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    publication_id: UUID
+    event_type: str
+    artifact_format: str
+    filename: str
+    content_type: str
+    checksum: str
+    size_bytes: int
+    signed_url: str | None
+    expires_at: datetime | None
+    accessed_at: datetime
+
+
 class AgentScorecardPublicationReminderCreate(BaseModel):
     organization_id: UUID
     channel: CommunicationChannel = CommunicationChannel.EMAIL

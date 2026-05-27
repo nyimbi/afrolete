@@ -27,6 +27,7 @@ from app.schemas.agent import (
     AgentScorecardCommentModerationRead,
     AgentScorecardCommentRead,
     AgentScorecardCommentUpdate,
+    AgentScorecardArtifactAccessRead,
     AgentScorecardPublicationCreate,
     AgentScorecardPublicationArtifactLinkRead,
     AgentScorecardPublicationArtifactRead,
@@ -59,6 +60,7 @@ from app.services.agents import (
     execute_agent_task,
     get_agent_scorecard_publication_artifact,
     get_my_agent_decision_appeal_form,
+    list_scorecard_artifact_accesses,
     list_agent_assignments,
     list_agent_bias_audits,
     list_agent_decision_appeals,
@@ -73,6 +75,7 @@ from app.services.agents import (
     queue_agent_task,
     publish_agent_scorecard,
     read_signed_agent_scorecard_publication_artifact,
+    record_scorecard_artifact_access,
     run_agent_scorecard_publication_reminder,
     run_agent_bias_audit,
     signed_agent_scorecard_publication_artifact_access,
@@ -250,6 +253,23 @@ def to_scorecard_publication_read(publication) -> AgentScorecardPublicationRead:
     )
 
 
+def to_scorecard_artifact_access_read(access) -> AgentScorecardArtifactAccessRead:
+    return AgentScorecardArtifactAccessRead(
+        id=access.id,
+        organization_id=access.organization_id,
+        publication_id=access.publication_id,
+        event_type=access.event_type,
+        artifact_format=access.artifact_format,
+        filename=access.filename,
+        content_type=access.content_type,
+        checksum=access.checksum,
+        size_bytes=access.size_bytes,
+        signed_url=access.signed_url,
+        expires_at=access.expires_at,
+        accessed_at=access.accessed_at,
+    )
+
+
 @router.post("", response_model=AgentRead, status_code=status.HTTP_201_CREATED)
 async def create_agent_route(
     payload: AgentCreate,
@@ -414,6 +434,19 @@ async def list_agent_scorecard_publications_route(
     ]
 
 
+@router.get("/ethical-scorecard/artifact-accesses", response_model=list[AgentScorecardArtifactAccessRead])
+async def list_scorecard_artifact_accesses_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[AgentScorecardArtifactAccessRead]:
+    return [
+        to_scorecard_artifact_access_read(access)
+        for access in await list_scorecard_artifact_accesses(db, identity, organization_id, authz)
+    ]
+
+
 @router.get("/ethical-scorecard/publications/readiness", response_model=AgentScorecardPublicationReadinessRead)
 async def agent_scorecard_publication_readiness_route(
     organization_id: UUID = Query(),
@@ -486,6 +519,7 @@ async def read_agent_scorecard_artifact_route(
     filename: str,
     expires: int = Query(),
     signature: str = Query(),
+    db: AsyncSession = Depends(get_db),
 ) -> Response:
     artifact = read_signed_agent_scorecard_publication_artifact(
         organization_id,
@@ -493,6 +527,19 @@ async def read_agent_scorecard_artifact_route(
         filename,
         expires,
         signature,
+    )
+    await record_scorecard_artifact_access(
+        db,
+        organization_id=organization_id,
+        publication_id=publication_id,
+        event_type="artifact_opened",
+        artifact_format="pdf" if filename.endswith(".pdf") else "markdown",
+        filename=str(artifact["filename"]),
+        content_type=str(artifact["content_type"]),
+        checksum=str(artifact["checksum"]),
+        size_bytes=len(bytes(artifact["content"])),
+        signed_url=None,
+        expires_at=None,
     )
     return Response(
         content=artifact["content"],

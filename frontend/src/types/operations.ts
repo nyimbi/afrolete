@@ -2698,6 +2698,21 @@ export type AgentScorecardPublicationArtifactLinkRead = {
   size_bytes: number;
 };
 
+export type AgentScorecardArtifactAccessRead = {
+  id: UUID;
+  organization_id: UUID;
+  publication_id: UUID;
+  event_type: string;
+  artifact_format: string;
+  filename: string;
+  content_type: string;
+  checksum: string;
+  size_bytes: number;
+  signed_url: string | null;
+  expires_at: string | null;
+  accessed_at: string;
+};
+
 export type AgentScorecardPublicationReminderRead = {
   organization_id: UUID;
   period_label: string;
