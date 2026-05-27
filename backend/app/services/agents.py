@@ -49,6 +49,7 @@ from app.schemas.agent import (
     AgentModelRegistryUpdate,
     AgentScorecardCommentCreate,
     AgentScorecardCommentUpdate,
+    AgentScorecardArtifactAnomalyAlertCreate,
     AgentScorecardPublicationCreate,
     AgentScorecardPublicationReminderCreate,
     AgentScorecardPublicationReminderRunCreate,
@@ -1311,6 +1312,112 @@ def scorecard_artifact_access_anomalies(
             }
         )
     return anomalies
+
+
+async def deliver_scorecard_artifact_anomaly_alert(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentScorecardArtifactAnomalyAlertCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, payload.organization_id)
+    summary = await scorecard_artifact_access_summary(db, identity, payload.organization_id, authz)
+    anomalies = list(summary["anomalies"])
+    subject = "AI scorecard artifact access anomalies"
+    body = render_scorecard_artifact_anomaly_alert(summary)
+    if not anomalies:
+        return {
+            "organization_id": payload.organization_id,
+            "channel": payload.channel,
+            "anomaly_count": 0,
+            "message_id": None,
+            "message_status": None,
+            "recipient_count": 0,
+            "recipient_person_ids": [],
+            "subject": subject,
+            "body": body,
+            "delivered": False,
+            "failure_reason": "No scorecard artifact access anomalies were detected.",
+        }
+
+    recipient_ids = set(payload.recipient_person_ids)
+    if payload.send_to_managers:
+        recipient_ids.update(await organization_manager_person_ids(db, payload.organization_id))
+    if not recipient_ids and identity.person_id is not None:
+        recipient_ids.add(identity.person_id)
+    sorted_recipient_ids = sorted(recipient_ids, key=str)
+    if not sorted_recipient_ids:
+        return {
+            "organization_id": payload.organization_id,
+            "channel": payload.channel,
+            "anomaly_count": len(anomalies),
+            "message_id": None,
+            "message_status": None,
+            "recipient_count": 0,
+            "recipient_person_ids": [],
+            "subject": subject,
+            "body": body,
+            "delivered": False,
+            "failure_reason": "No manager or explicit recipients were found.",
+        }
+
+    message = await create_message(
+        db,
+        identity,
+        CommunicationMessageCreate(
+            organization_id=payload.organization_id,
+            message_type=CommunicationMessageType.ALERT,
+            channel=payload.channel,
+            scope_type=CommunicationScopeType.PERSON,
+            scope_id=sorted_recipient_ids[0],
+            recipient_person_ids=sorted_recipient_ids,
+            subject=subject,
+            body=body,
+            urgent=any(str(anomaly["severity"]) == "warning" for anomaly in anomalies),
+            copy_guardians_for_minors=False,
+        ),
+        authz,
+    )
+    return {
+        "organization_id": payload.organization_id,
+        "channel": payload.channel,
+        "anomaly_count": len(anomalies),
+        "message_id": message.id,
+        "message_status": message.status,
+        "recipient_count": len(sorted_recipient_ids),
+        "recipient_person_ids": sorted_recipient_ids,
+        "subject": subject,
+        "body": body,
+        "delivered": True,
+        "failure_reason": None,
+    }
+
+
+def render_scorecard_artifact_anomaly_alert(summary: dict[str, object]) -> str:
+    anomalies = list(summary["anomalies"])
+    lines = [
+        "AI scorecard artifact access anomaly review",
+        "",
+        f"Total events: {summary['total_events']}",
+        f"Links created: {summary['link_created_count']}",
+        f"Artifact opens: {summary['artifact_opened_count']}",
+        f"Unique requesters: {summary['unique_requester_count']}",
+        f"Last access: {summary['last_accessed_at'] or 'never'}",
+        "",
+    ]
+    if not anomalies:
+        lines.append("No current scorecard artifact access anomalies were detected.")
+        return "\n".join(lines)
+    lines.append("Anomalies")
+    for anomaly in anomalies:
+        lines.extend(
+            [
+                f"- {anomaly['severity']}: {anomaly['title']}",
+                f"  Evidence: {anomaly['evidence']}",
+                f"  Action: {anomaly['recommended_action']}",
+            ]
+        )
+    return "\n".join(lines)
 
 
 async def agent_scorecard_publication_readiness(

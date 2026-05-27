@@ -476,6 +476,27 @@ class AgentScorecardArtifactAccessSummaryRead(BaseModel):
     anomalies: list[AgentScorecardArtifactAccessAnomalyRead]
 
 
+class AgentScorecardArtifactAnomalyAlertCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    send_to_managers: bool = True
+    recipient_person_ids: list[UUID] = Field(default_factory=list)
+
+
+class AgentScorecardArtifactAnomalyAlertRead(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel
+    anomaly_count: int
+    message_id: UUID | None
+    message_status: str | None
+    recipient_count: int
+    recipient_person_ids: list[UUID]
+    subject: str
+    body: str
+    delivered: bool
+    failure_reason: str | None
+
+
 class AgentScorecardPublicationReminderCreate(BaseModel):
     organization_id: UUID
     channel: CommunicationChannel = CommunicationChannel.EMAIL

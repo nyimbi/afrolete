@@ -2742,6 +2742,20 @@ export type AgentScorecardArtifactAccessSummaryRead = {
   anomalies: AgentScorecardArtifactAccessAnomalyRead[];
 };
 
+export type AgentScorecardArtifactAnomalyAlertRead = {
+  organization_id: UUID;
+  channel: CommunicationChannel;
+  anomaly_count: number;
+  message_id: UUID | null;
+  message_status: string | null;
+  recipient_count: number;
+  recipient_person_ids: UUID[];
+  subject: string;
+  body: string;
+  delivered: boolean;
+  failure_reason: string | null;
+};
+
 export type AgentScorecardPublicationReminderRead = {
   organization_id: UUID;
   period_label: string;

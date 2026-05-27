@@ -22,6 +22,7 @@ import type {
   AgentRead,
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
+  AgentScorecardArtifactAnomalyAlertRead,
   AgentScorecardArtifactAccessRead,
   AgentScorecardArtifactAccessSummaryRead,
   AgentScorecardCommentModerationRead,
@@ -636,6 +637,8 @@ export default function HomePage() {
     useState<AgentScorecardArtifactAccessRead[]>([]);
   const [agentScorecardArtifactAccessSummary, setAgentScorecardArtifactAccessSummary] =
     useState<AgentScorecardArtifactAccessSummaryRead | null>(null);
+  const [agentScorecardArtifactAnomalyAlert, setAgentScorecardArtifactAnomalyAlert] =
+    useState<AgentScorecardArtifactAnomalyAlertRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -2007,6 +2010,7 @@ export default function HomePage() {
       setAgentScorecardArtifactLink(null);
       setAgentScorecardArtifactAccesses([]);
       setAgentScorecardArtifactAccessSummary(null);
+      setAgentScorecardArtifactAnomalyAlert(null);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -5107,6 +5111,40 @@ export default function HomePage() {
             ? `Sent ${reminder.period_label} scorecard reminder to ${reminder.recipient_count} people`
             : `Prepared ${reminder.period_label} scorecard reminder without recipients`,
           reminder.delivered ? "good" : "neutral"
+        );
+      }
+    );
+  };
+
+  const deliverAgentScorecardArtifactAnomalyAlert = () => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "agent-scorecard-artifact-anomaly-alert",
+      () =>
+        apiRequest<AgentScorecardArtifactAnomalyAlertRead>(
+          "/agents/ethical-scorecard/artifact-accesses/anomaly-alert",
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "email" as CommunicationChannel,
+              send_to_managers: true
+            }
+          }
+        ),
+      (alert) => {
+        setAgentScorecardArtifactAnomalyAlert(alert);
+        if (alert.message_id) {
+          setSelectedMessageId(alert.message_id);
+        }
+        addLog(
+          alert.delivered
+            ? `Sent ${alert.anomaly_count} artifact anomaly alerts to ${alert.recipient_count} people`
+            : alert.failure_reason ?? "No scorecard artifact anomaly alert was sent",
+          alert.delivered ? "bad" : "neutral"
         );
       }
     );
@@ -12099,6 +12137,32 @@ export default function HomePage() {
                         ? `${agentScorecardArtifactAccessSummary.anomalies[0].severity}: ${agentScorecardArtifactAccessSummary.anomalies[0].title}`
                         : "No artifact access anomalies"}
                     </span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button
+                      type="button"
+                      onClick={deliverAgentScorecardArtifactAnomalyAlert}
+                      disabled={
+                        busyAction !== null ||
+                        agentScorecardArtifactAccessSummary.anomalies.length === 0
+                      }
+                    >
+                      Alert managers
+                    </button>
+                  </div>
+                </article>
+              ) : null}
+              {agentScorecardArtifactAnomalyAlert ? (
+                <article className="task-card">
+                  <div>
+                    <strong>
+                      Artifact anomaly alert · {agentScorecardArtifactAnomalyAlert.delivered ? "sent" : "skipped"}
+                    </strong>
+                    <span>
+                      {agentScorecardArtifactAnomalyAlert.channel} · {agentScorecardArtifactAnomalyAlert.anomaly_count} anomalies · {agentScorecardArtifactAnomalyAlert.recipient_count} recipients
+                    </span>
+                    <span>{agentScorecardArtifactAnomalyAlert.failure_reason ?? agentScorecardArtifactAnomalyAlert.subject}</span>
+                    <span>{agentScorecardArtifactAnomalyAlert.body.split("\n")[0]}</span>
                   </div>
                 </article>
               ) : null}

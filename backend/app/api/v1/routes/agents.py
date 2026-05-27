@@ -29,6 +29,8 @@ from app.schemas.agent import (
     AgentScorecardCommentUpdate,
     AgentScorecardArtifactAccessRead,
     AgentScorecardArtifactAccessSummaryRead,
+    AgentScorecardArtifactAnomalyAlertCreate,
+    AgentScorecardArtifactAnomalyAlertRead,
     AgentScorecardPublicationCreate,
     AgentScorecardPublicationArtifactLinkRead,
     AgentScorecardPublicationArtifactRead,
@@ -57,6 +59,7 @@ from app.services.agents import (
     create_agent,
     create_agent_model_registry,
     create_agent_scorecard_comment,
+    deliver_scorecard_artifact_anomaly_alert,
     deliver_agent_scorecard_publication_reminder,
     execute_agent_task,
     get_agent_scorecard_publication_artifact,
@@ -477,6 +480,18 @@ async def scorecard_artifact_access_summary_route(
 ) -> AgentScorecardArtifactAccessSummaryRead:
     return AgentScorecardArtifactAccessSummaryRead(
         **await scorecard_artifact_access_summary(db, identity, organization_id, authz)
+    )
+
+
+@router.post("/ethical-scorecard/artifact-accesses/anomaly-alert", response_model=AgentScorecardArtifactAnomalyAlertRead)
+async def deliver_scorecard_artifact_anomaly_alert_route(
+    payload: AgentScorecardArtifactAnomalyAlertCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentScorecardArtifactAnomalyAlertRead:
+    return AgentScorecardArtifactAnomalyAlertRead(
+        **await deliver_scorecard_artifact_anomaly_alert(db, identity, payload, authz)
     )
 
 
