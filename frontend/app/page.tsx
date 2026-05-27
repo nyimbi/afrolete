@@ -4788,6 +4788,37 @@ export default function HomePage() {
     );
   };
 
+  const updateAgentModelRegistryStatus = (
+    registry: AgentModelRegistryRead,
+    reviewStatus: AgentModelRegistryRead["review_status"]
+  ) => {
+    runAction(
+      `agent-model-registry-${registry.id}-${reviewStatus}`,
+      () =>
+        apiRequest<AgentModelRegistryRead>(`/agents/model-registry/${registry.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            review_status: reviewStatus,
+            evaluation_summary:
+              reviewStatus === "approved"
+                ? "Approved from the operations console after governance review."
+                : `Marked ${reviewStatus} from the operations console.`
+          }
+        }),
+      (updatedRegistry) => {
+        setAgentModelRegistry((current) => [
+          updatedRegistry,
+          ...current.filter((item) => item.id !== updatedRegistry.id)
+        ]);
+        addLog(`${updatedRegistry.model_policy} is ${updatedRegistry.review_status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
+      }
+    );
+  };
+
   const queueAgentTask = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selectedOrganizationId || !selectedAgentId) {
@@ -11669,6 +11700,11 @@ export default function HomePage() {
                     <strong>{registry.model_policy} · {registry.review_status}</strong>
                     <span>{registry.provider} · {registry.risk_tier} · {registry.data_residency ?? "residency unset"}</span>
                     <span>{registry.use_case}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => updateAgentModelRegistryStatus(registry, "approved")}>Approve</button>
+                    <button type="button" onClick={() => updateAgentModelRegistryStatus(registry, "blocked")}>Block</button>
+                    <button type="button" onClick={() => updateAgentModelRegistryStatus(registry, "retired")}>Retire</button>
                   </div>
                 </article>
               ))}
