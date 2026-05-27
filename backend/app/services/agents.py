@@ -16,7 +16,7 @@ from app.models.enums import AgentTaskStatus
 from app.models.event import Event
 from app.models.organization import Organization
 from app.models.team import AthleteProfile, Team
-from app.schemas.agent import AgentAssignmentCreate, AgentCreate, AgentTaskCreate, AgentTaskUpdate
+from app.schemas.agent import AgentAssignmentCreate, AgentCreate, AgentTaskCreate, AgentTaskUpdate, AgentWorkerCallbackCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 
@@ -385,6 +385,48 @@ async def update_agent_task(
     return task
 
 
+async def apply_agent_worker_callback(
+    db: AsyncSession,
+    payload: AgentWorkerCallbackCreate,
+    settings: Settings | None = None,
+) -> tuple[AgentTask, bool, str, UUID | None]:
+    existing = await db.scalar(
+        select(AgentRunRecord).where(AgentRunRecord.idempotency_key == payload.idempotency_key)
+    )
+    if existing is not None:
+        existing_task = await db.get(AgentTask, existing.task_id)
+        if existing_task is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+        return existing_task, True, "Duplicate agent worker callback ignored.", existing.id
+    task = await db.get(AgentTask, payload.task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+    agent = await db.get(Agent, task.agent_id)
+    if agent is None or agent.organization_id != task.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    task.status = payload.status
+    if payload.output_ref is not None:
+        task.output_ref = payload.output_ref
+    if payload.review_notes is not None:
+        task.review_notes = payload.review_notes
+    record = await append_agent_run_record(
+        db,
+        agent,
+        task,
+        None,
+        event_type="worker_callback",
+        settings=settings or get_settings(),
+        finished_at=datetime.now(UTC),
+        idempotency_key=payload.idempotency_key,
+        governance_note=agent_worker_callback_governance_note(payload),
+    )
+    await db.commit()
+    await db.refresh(task)
+    await db.refresh(record)
+    return task, False, "Agent worker callback accepted.", record.id
+
+
 async def execute_agent_task(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -443,19 +485,21 @@ async def append_agent_run_record(
     db: AsyncSession,
     agent: Agent,
     task: AgentTask,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     event_type: str,
     settings: Settings,
     started_at: datetime | None = None,
     finished_at: datetime | None = None,
     duration_ms: int | None = None,
+    idempotency_key: str | None = None,
+    governance_note: str | None = None,
 ) -> AgentRunRecord:
     sequence = await agent_task_record_sequence(db, task.id)
     ledger_sequence = await next_agent_ledger_sequence(db, task.organization_id)
     previous_hash = await latest_agent_record_hash(db, task.organization_id)
     model_policy = agent.model_policy or settings.agent_default_model
-    note = governance_notes(agent, task)
-    idempotency_key = f"{task.id}:{event_type}:{sequence}"
+    note = governance_note or governance_notes(agent, task)
+    selected_idempotency_key = idempotency_key or f"{task.id}:{event_type}:{sequence}"
     record_hash = agent_record_hash(
         {
             "organization_id": str(task.organization_id),
@@ -471,10 +515,10 @@ async def append_agent_run_record(
             "started_at": datetime_digest(started_at),
             "finished_at": datetime_digest(finished_at),
             "duration_ms": duration_ms,
-            "executed_by_person_id": str(identity.person_id) if identity.person_id else None,
+            "executed_by_person_id": str(identity.person_id) if identity and identity.person_id else None,
             "ledger_sequence": ledger_sequence,
             "governance_notes": note,
-            "idempotency_key": idempotency_key,
+            "idempotency_key": selected_idempotency_key,
             "previous_record_hash": previous_hash,
         }
     )
@@ -492,10 +536,10 @@ async def append_agent_run_record(
         started_at=started_at,
         finished_at=finished_at,
         duration_ms=duration_ms,
-        executed_by_person_id=identity.person_id,
+        executed_by_person_id=identity.person_id if identity else None,
         ledger_sequence=ledger_sequence,
         governance_notes=note,
-        idempotency_key=idempotency_key,
+        idempotency_key=selected_idempotency_key,
         previous_record_hash=previous_hash,
         record_hash=record_hash,
     )
@@ -701,6 +745,30 @@ def agent_execution_signature(signing_key: str, timestamp: str, body: bytes) -> 
     return f"sha256={digest}"
 
 
+def validate_agent_worker_callback_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> tuple[bool, bool]:
+    selected_settings = settings or get_settings()
+    signing_key = selected_settings.agent_webhook_key
+    if not signing_key:
+        return False, False
+    if not timestamp_header or not signature_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing agent worker callback signature")
+    try:
+        timestamp = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent worker callback timestamp") from exc
+    if abs(int(time.time()) - timestamp) > selected_settings.agent_webhook_tolerance_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Stale agent worker callback signature")
+    expected = agent_execution_signature(signing_key, timestamp_header, raw_body)
+    if not hmac.compare_digest(expected, signature_header):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent worker callback signature")
+    return True, True
+
+
 def apply_agent_webhook_response(task: AgentTask, response: httpx.Response) -> None:
     try:
         payload = response.json()
@@ -829,3 +897,13 @@ def governance_notes(agent: Agent, task: AgentTask) -> str:
     if task.status == AgentTaskStatus.COMPLETED:
         return "Task completed after review or explicit operator action."
     return "Task is tracked in the governance ledger for audit and billing."
+
+
+def agent_worker_callback_governance_note(payload: AgentWorkerCallbackCreate) -> str:
+    if payload.status == AgentTaskStatus.FAILED:
+        return "External worker reported failure; operator review is required before retry."
+    if payload.status == AgentTaskStatus.WAITING_FOR_REVIEW:
+        return "External worker returned output that requires human review before side effects are applied."
+    if payload.status == AgentTaskStatus.COMPLETED:
+        return "External worker marked the task complete through a signed callback."
+    return "External worker callback updated the governed agent task state."

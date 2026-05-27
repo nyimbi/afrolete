@@ -71,6 +71,26 @@ class AgentTaskUpdate(BaseModel):
         return self
 
 
+class AgentWorkerCallbackCreate(BaseModel):
+    task_id: UUID
+    status: AgentTaskStatus = AgentTaskStatus.WAITING_FOR_REVIEW
+    output_ref: str | None = Field(default=None, max_length=500)
+    review_notes: str | None = Field(default=None, max_length=4000)
+    idempotency_key: str = Field(min_length=8, max_length=180)
+    external_event_id: str | None = Field(default=None, max_length=180)
+    raw_payload: dict[str, object] | None = None
+
+
+class AgentWorkerCallbackRead(BaseModel):
+    accepted: bool
+    duplicate: bool
+    signature_required: bool
+    signature_validated: bool
+    run_record_id: UUID | None
+    message: str
+    task: AgentTaskRead
+
+
 class AgentRunRecordRead(BaseModel):
     id: UUID
     task_id: UUID

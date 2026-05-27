@@ -2447,6 +2447,16 @@ export type AgentTaskRead = {
   review_notes: string | null;
 };
 
+export type AgentWorkerCallbackRead = {
+  accepted: boolean;
+  duplicate: boolean;
+  signature_required: boolean;
+  signature_validated: boolean;
+  run_record_id: UUID | null;
+  message: string;
+  task: AgentTaskRead;
+};
+
 export type AgentCredentialStatusRead = {
   execution_mode: string;
   default_model: string;

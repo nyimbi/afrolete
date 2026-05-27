@@ -20,6 +20,7 @@ import type {
   AgentRunRecordRead,
   AgentTaskRead,
   AgentTaskStatus,
+  AgentWorkerCallbackRead,
   AccountingExportRead,
   AssetCondition,
   AssetSummaryRead,
@@ -4778,6 +4779,38 @@ export default function HomePage() {
       (task) => {
         setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
         addLog(`Task moved to ${task.status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
+      }
+    );
+  };
+
+  const applyAgentWorkerCallback = (task: AgentTaskRead) => {
+    runAction(
+      `agent-worker-callback-${task.id}`,
+      () =>
+        apiRequest<AgentWorkerCallbackRead>("/agents/worker-callbacks", {
+          method: "POST",
+          body: {
+            task_id: task.id,
+            status: "waiting_for_review",
+            output_ref: `agent://tasks/${task.id}/outputs/worker-callback`,
+            review_notes: `External worker callback returned a governed draft for ${task.title}.`,
+            idempotency_key: `console-worker-callback-${task.id}`,
+            external_event_id: `console-${Date.now()}`,
+            raw_payload: {
+              source: "operations_console",
+              task_type: task.task_type
+            }
+          }
+        }),
+      (callback) => {
+        setAgentTasks((current) => [
+          callback.task,
+          ...current.filter((item) => item.id !== callback.task.id)
+        ]);
+        addLog(callback.message, callback.duplicate ? "neutral" : "good");
         if (selectedOrganizationId) {
           void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
         }
@@ -11593,6 +11626,7 @@ export default function HomePage() {
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={() => executeAgentTask(task.id)}>Run</button>
+                    <button type="button" onClick={() => applyAgentWorkerCallback(task)}>Callback</button>
                     <button type="button" onClick={() => updateAgentTask(task.id, "waiting_for_review")}>Review</button>
                     <button type="button" onClick={() => updateAgentTask(task.id, "completed")}>Done</button>
                   </div>

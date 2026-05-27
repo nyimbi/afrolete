@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -16,8 +16,11 @@ from app.schemas.agent import (
     AgentTaskCreate,
     AgentTaskRead,
     AgentTaskUpdate,
+    AgentWorkerCallbackCreate,
+    AgentWorkerCallbackRead,
 )
 from app.services.agents import (
+    apply_agent_worker_callback,
     agent_governance_summary,
     agent_model_transparency_report,
     agent_run_records,
@@ -29,6 +32,7 @@ from app.services.agents import (
     list_agents,
     queue_agent_task,
     update_agent_task,
+    validate_agent_worker_callback_signature,
     verify_agent_run_ledger,
 )
 from app.services.auth.dependencies import get_current_identity
@@ -170,6 +174,31 @@ async def agent_model_transparency_route(
     db: AsyncSession = Depends(get_db),
 ) -> AgentModelTransparencyReportRead:
     return AgentModelTransparencyReportRead(**await agent_model_transparency_report(db, organization_id))
+
+
+@router.post("/worker-callbacks", response_model=AgentWorkerCallbackRead)
+async def agent_worker_callback_route(
+    request: Request,
+    payload: AgentWorkerCallbackCreate,
+    x_afrolete_agent_timestamp: str | None = Header(default=None, alias="X-Afrolete-Agent-Timestamp"),
+    x_afrolete_agent_signature: str | None = Header(default=None, alias="X-Afrolete-Agent-Signature"),
+    db: AsyncSession = Depends(get_db),
+) -> AgentWorkerCallbackRead:
+    signature_required, signature_validated = validate_agent_worker_callback_signature(
+        await request.body(),
+        x_afrolete_agent_timestamp,
+        x_afrolete_agent_signature,
+    )
+    task, duplicate, message, run_record_id = await apply_agent_worker_callback(db, payload)
+    return AgentWorkerCallbackRead(
+        accepted=not duplicate,
+        duplicate=duplicate,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        run_record_id=run_record_id,
+        message=message,
+        task=to_task_read(task),
+    )
 
 
 @router.post("/tasks/{task_id}/execute", response_model=AgentTaskRead)
