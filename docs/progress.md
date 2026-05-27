@@ -606,6 +606,7 @@ athlete-development platform:
 | 041 - Competition broadcast operations | Partial | Backend ruff; frontend typecheck; diff check | Competition updates can now be broadcast to rostered participants and guardians through the existing communications delivery pipeline, with generated status/fixture summaries, channel selection, dispatch counts, and console visibility; ticketing and full verification remain. |
 | 042 - Competition ticketing integration | Partial | Backend ruff; frontend typecheck; diff check | League and tournament fixtures can now open ticket sales through the existing commercial ticket product system, auto-create linked match events when needed, show ticket capacity/sales in the competition console, and feed the commerce summary/check-in/refund workflows; full competition verification remains. |
 | 043 - Training readiness and feedback loops | Partial | Backend ruff; frontend typecheck; diff check | Training sessions now collect readiness, soreness, sleep, mood, actual RPE, duration, completion, athlete feedback, coach notes, load deltas, and recommendations from the console; live model generation, availability calendars, and full verification remain. |
+| 044 - Training availability suggestions | Partial | Backend ruff; frontend typecheck; diff check | Coaches can now request ranked training slots that account for existing events, training sessions, competition fixtures, and facility bookings, then apply the best slot to the session planner; live calendar sync and full verification remain. |
 
 ## Capability Coverage
 
@@ -624,7 +625,7 @@ Status values:
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
 | Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, provider-neutral evidence ingestion, pending-review observations, human review/correction, and console workflows are implemented. |
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, provider-neutral performance evidence ingestion, derived run records, governance summary metrics, credential-boundary status, and console workflows are implemented; live provider workers, OpenBao secret fetch, persisted run history tables, model-backed extraction, audit immutability, and deeper model governance remain. |
-| Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, AI-assisted plan generation from readiness/performance/competition context, readiness check-ins, post-session feedback, load-delta recommendations, and console workflows are implemented; live model generation, availability calendars, and full verification remain. |
+| Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, AI-assisted plan generation from readiness/performance/competition context, readiness check-ins, post-session feedback, load-delta recommendations, schedule availability suggestions, and console workflows are implemented; live model generation, external calendar sync, and full verification remain. |
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, round-robin fixture generation, bracket projections, source-round winner advancement, visual bracket lanes, schedule optimization, competition broadcasts, fixture ticketing, conflict detection, and console workflows are implemented; full verification remains. |
 | Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, digest generation, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, background digest scheduler, and full parent portal remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
@@ -653,7 +654,7 @@ Status values:
 7. Add full billing verification coverage with provider replay tests,
    tax-filing delivery tests, proration application tests, and browser QA.
 8. Add full competition verification for leagues, tournaments, ticketing, broadcasts, and advancement flows.
-9. Add live-model training-plan generation, availability calendars, and full
+9. Add live-model training-plan generation, external calendar sync, and full
    training verification.
 10. Add real provider parsers for video, audio narration, text evaluation, and
    wearable feeds, plus model-backed extraction accuracy evaluation.

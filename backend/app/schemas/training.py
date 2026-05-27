@@ -194,3 +194,35 @@ class TrainingSessionFeedbackRead(BaseModel):
     readiness_band: str
     load_delta: float | None
     recommendation: str
+
+
+class TrainingAvailabilityCreate(BaseModel):
+    organization_id: UUID
+    team_id: UUID
+    starts_at: datetime
+    days: int = Field(default=7, ge=1, le=30)
+    duration_minutes: int = Field(default=75, ge=15, le=360)
+    earliest_hour: int = Field(default=6, ge=0, le=23)
+    latest_hour: int = Field(default=20, ge=1, le=23)
+
+    @model_validator(mode="after")
+    def valid_hours(self) -> "TrainingAvailabilityCreate":
+        if self.latest_hour <= self.earliest_hour:
+            raise ValueError("latest_hour must be after earliest_hour")
+        return self
+
+
+class TrainingAvailabilitySlotRead(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+    conflict_count: int
+    conflicts: list[str]
+    score: int
+    recommendation: str
+
+
+class TrainingAvailabilityRead(BaseModel):
+    organization_id: UUID
+    team_id: UUID
+    duration_minutes: int
+    slots: list[TrainingAvailabilitySlotRead]

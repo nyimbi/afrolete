@@ -1,13 +1,14 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.assets import FacilityBooking
 from app.models.competition import CompetitionFixture
 from app.models.event import Event
-from app.models.enums import TrainingSessionStatus
+from app.models.enums import FacilityBookingStatus, TrainingSessionStatus
 from app.models.organization import Organization
 from app.models.performance import AthleteAssessment, AthletePerformanceObservation
 from app.models.team import AthleteProfile, Team
@@ -19,6 +20,7 @@ from app.models.training import (
     TrainingSessionPlan,
 )
 from app.schemas.training import (
+    TrainingAvailabilityCreate,
     TrainingDrillCreate,
     TrainingPlanGenerateCreate,
     TrainingPlanCreate,
@@ -384,6 +386,121 @@ async def list_training_session_feedback(
     return [training_feedback_read(feedback, session_plan) for feedback in rows]
 
 
+async def suggest_training_availability(
+    db: AsyncSession,
+    payload: TrainingAvailabilityCreate,
+) -> dict[str, object]:
+    await get_organization(db, payload.organization_id)
+    await get_team_for_organization(db, payload.team_id, payload.organization_id)
+    search_start = payload.starts_at
+    search_end = payload.starts_at + timedelta(days=payload.days)
+    busy_windows = await team_busy_windows(db, payload.organization_id, payload.team_id, search_start, search_end)
+    slots = []
+    for day_offset in range(payload.days):
+        day = payload.starts_at + timedelta(days=day_offset)
+        for hour in range(payload.earliest_hour, payload.latest_hour, 2):
+            candidate_start = day.replace(hour=hour, minute=0, second=0, microsecond=0)
+            if candidate_start < payload.starts_at:
+                continue
+            candidate_end = candidate_start + timedelta(minutes=payload.duration_minutes)
+            conflicts = [
+                label
+                for starts_at, ends_at, label in busy_windows
+                if starts_at < candidate_end and ends_at > candidate_start
+            ]
+            score = max(0, 100 - (len(conflicts) * 35))
+            slots.append(
+                {
+                    "starts_at": candidate_start,
+                    "ends_at": candidate_end,
+                    "conflict_count": len(conflicts),
+                    "conflicts": conflicts[:5],
+                    "score": score,
+                    "recommendation": availability_recommendation(score, conflicts),
+                }
+            )
+    slots.sort(key=lambda slot: (-int(slot["score"]), slot["starts_at"]))
+    return {
+        "organization_id": payload.organization_id,
+        "team_id": payload.team_id,
+        "duration_minutes": payload.duration_minutes,
+        "slots": slots[:8],
+    }
+
+
+async def team_busy_windows(
+    db: AsyncSession,
+    organization_id: UUID,
+    team_id: UUID,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> list[tuple[datetime, datetime, str]]:
+    windows: list[tuple[datetime, datetime, str]] = []
+    events = (
+        await db.scalars(
+            select(Event).where(
+                Event.organization_id == organization_id,
+                Event.team_id == team_id,
+                Event.starts_at < ends_at,
+            )
+        )
+    ).all()
+    for event in events:
+        event_end = event.ends_at or event.starts_at + timedelta(hours=2)
+        if event_end > starts_at:
+            windows.append((event.starts_at, event_end, f"event:{event.title}"))
+
+    sessions = (
+        await db.scalars(
+            select(TrainingSessionPlan).where(
+                TrainingSessionPlan.organization_id == organization_id,
+                TrainingSessionPlan.team_id == team_id,
+                TrainingSessionPlan.scheduled_for < ends_at,
+            )
+        )
+    ).all()
+    for session_plan in sessions:
+        session_end = session_plan.scheduled_for + timedelta(minutes=session_plan.duration_minutes)
+        if session_end > starts_at:
+            windows.append((session_plan.scheduled_for, session_end, f"training:{session_plan.title}"))
+
+    fixtures = (
+        await db.scalars(
+            select(CompetitionFixture).where(
+                CompetitionFixture.organization_id == organization_id,
+                CompetitionFixture.scheduled_at < ends_at,
+                (CompetitionFixture.home_team_id == team_id) | (CompetitionFixture.away_team_id == team_id),
+            )
+        )
+    ).all()
+    for fixture in fixtures:
+        fixture_end = fixture.scheduled_at + timedelta(hours=2)
+        if fixture_end > starts_at:
+            windows.append((fixture.scheduled_at, fixture_end, f"fixture:{fixture.round_label or 'match'}"))
+
+    bookings = (
+        await db.scalars(
+            select(FacilityBooking).where(
+                FacilityBooking.organization_id == organization_id,
+                FacilityBooking.team_id == team_id,
+                FacilityBooking.starts_at < ends_at,
+                FacilityBooking.status.in_(
+                    [
+                        FacilityBookingStatus.REQUESTED,
+                        FacilityBookingStatus.APPROVED,
+                        FacilityBookingStatus.CONFIRMED,
+                        FacilityBookingStatus.CHECKED_IN,
+                    ]
+                ),
+            )
+        )
+    ).all()
+    for booking in bookings:
+        if booking.ends_at > starts_at:
+            windows.append((booking.starts_at, booking.ends_at, f"facility:{booking.title}"))
+    return windows
+
+
 async def get_organization(db: AsyncSession, organization_id: UUID) -> Organization:
     organization = await db.get(Organization, organization_id)
     if organization is None:
@@ -483,6 +600,14 @@ def training_feedback_recommendation(
     if feedback.completed:
         return "Session completed within acceptable readiness range; continue progression if next-day check remains stable."
     return "Readiness is acceptable; proceed with planned session and capture post-session RPE."
+
+
+def availability_recommendation(score: int, conflicts: list[str]) -> str:
+    if score == 100:
+        return "Clear slot with no known team, fixture, training, or facility conflicts."
+    if score >= 65:
+        return f"Usable with review; check {', '.join(conflicts[:2])}."
+    return "Avoid this slot unless conflicts are moved or the session is split."
 
 
 def infer_focus_area(assessments: list[AthleteAssessment], readiness_score: int) -> str:

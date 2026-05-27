@@ -129,6 +129,7 @@ import type {
   TeamRead,
   TeamRosterEntryRead,
   TeamRole,
+  TrainingAvailabilityRead,
   TrainingDrillRead,
   TrainingPlanItemRead,
   TrainingPlanRead,
@@ -278,6 +279,7 @@ export default function HomePage() {
   const [trainingPlanItems, setTrainingPlanItems] = useState<TrainingPlanItemRead[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSessionPlanRead[]>([]);
   const [trainingFeedback, setTrainingFeedback] = useState<TrainingSessionFeedbackRead[]>([]);
+  const [trainingAvailability, setTrainingAvailability] = useState<TrainingAvailabilityRead | null>(null);
   const [generatedTrainingPlan, setGeneratedTrainingPlan] = useState<GeneratedTrainingPlanRead | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionRead[]>([]);
   const [competitionParticipants, setCompetitionParticipants] = useState<CompetitionParticipantRead[]>([]);
@@ -1230,6 +1232,7 @@ export default function HomePage() {
       setTrainingSessions([]);
       setTrainingPlanItems([]);
       setTrainingFeedback([]);
+      setTrainingAvailability(null);
       setGeneratedTrainingPlan(null);
       setCompetitions([]);
       setCompetitionParticipants([]);
@@ -2233,6 +2236,42 @@ export default function HomePage() {
         addLog(`${feedback.readiness_band} readiness · ${feedback.recommendation}`, "good");
         if (selectedOrganizationId) {
           void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+        }
+      }
+    );
+  };
+
+  const suggestTrainingAvailability = () => {
+    if (!selectedOrganizationId || !selectedTeamId) {
+      addLog("Select an organization and team first", "bad");
+      return;
+    }
+    runAction(
+      "suggest-training-availability",
+      () =>
+        apiRequest<TrainingAvailabilityRead>("/training/availability", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId,
+            starts_at: new Date(trainingSessionForm.scheduled_for).toISOString(),
+            days: 7,
+            duration_minutes: trainingSessionForm.duration_minutes,
+            earliest_hour: 6,
+            latest_hour: 20
+          }
+        }),
+      (availability) => {
+        setTrainingAvailability(availability);
+        const best = availability.slots[0];
+        if (best) {
+          const localDate = new Date(best.starts_at);
+          setTrainingSessionForm((current) => ({
+            ...current,
+            scheduled_for: localDate.toISOString().slice(0, 16)
+          }));
+          addLog(`Best training slot scored ${best.score}`, "good");
         }
       }
     );
@@ -6310,6 +6349,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createTrainingSession} disabled={busyAction !== null}>Session</button>
+                <button type="button" onClick={suggestTrainingAvailability} disabled={busyAction !== null}>Availability</button>
                 <button type="button" onClick={recordTrainingFeedback} disabled={busyAction !== null}>Feedback</button>
               </div>
             </div>
@@ -6361,6 +6401,14 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {trainingAvailability?.slots.slice(0, 3).map((slot) => (
+                <article key={slot.starts_at} className="task-card">
+                  <div>
+                    <strong>Slot score {slot.score} · {new Date(slot.starts_at).toLocaleString()}</strong>
+                    <span>{slot.recommendation}{slot.conflicts.length ? ` · ${slot.conflicts.join(", ")}` : ""}</span>
+                  </div>
+                </article>
+              ))}
               {trainingSessions.slice(0, 4).map((sessionPlan) => (
                 <article
                   key={sessionPlan.id}

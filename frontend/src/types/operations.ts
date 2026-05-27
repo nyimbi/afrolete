@@ -1302,6 +1302,22 @@ export type TrainingSessionFeedbackRead = {
   recommendation: string;
 };
 
+export type TrainingAvailabilitySlotRead = {
+  starts_at: string;
+  ends_at: string;
+  conflict_count: number;
+  conflicts: string[];
+  score: number;
+  recommendation: string;
+};
+
+export type TrainingAvailabilityRead = {
+  organization_id: UUID;
+  team_id: UUID;
+  duration_minutes: number;
+  slots: TrainingAvailabilitySlotRead[];
+};
+
 export type CompetitionRead = {
   id: UUID;
   organization_id: UUID;

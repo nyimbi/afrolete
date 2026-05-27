@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.training import (
     GeneratedTrainingPlanRead,
+    TrainingAvailabilityCreate,
+    TrainingAvailabilityRead,
     TrainingDrillCreate,
     TrainingDrillRead,
     TrainingPlanGenerateCreate,
@@ -33,6 +35,7 @@ from app.services.training import (
     list_training_session_feedback,
     list_training_session_plans,
     record_training_session_feedback,
+    suggest_training_availability,
 )
 
 router = APIRouter(prefix="/training", tags=["training"])
@@ -234,6 +237,14 @@ async def list_training_session_plans_route(
         to_session_plan_read(session_plan)
         for session_plan in await list_training_session_plans(db, organization_id, team_id=team_id)
     ]
+
+
+@router.post("/availability", response_model=TrainingAvailabilityRead)
+async def suggest_training_availability_route(
+    payload: TrainingAvailabilityCreate,
+    db: AsyncSession = Depends(get_db),
+) -> TrainingAvailabilityRead:
+    return TrainingAvailabilityRead(**await suggest_training_availability(db, payload))
 
 
 @router.post(
