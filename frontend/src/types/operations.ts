@@ -1337,6 +1337,19 @@ export type CompetitionFixtureGenerationRead = {
   fixtures: CompetitionFixtureRead[];
 };
 
+export type CompetitionAdvancementRead = {
+  competition_id: UUID;
+  source_stage_label: string;
+  source_round_label: string;
+  next_stage_label: string;
+  next_round_label: string;
+  winners: string[];
+  byes: string[];
+  created: number;
+  skipped: number;
+  fixtures: CompetitionFixtureRead[];
+};
+
 export type CompetitionBracketMatchRead = {
   round_label: string;
   stage_label: string;

@@ -18,6 +18,7 @@ from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.team import AthleteProfile, Team
 from app.schemas.competition import (
+    CompetitionAdvanceCreate,
     CompetitionCreate,
     CompetitionFixtureCreate,
     CompetitionFixtureGenerateCreate,
@@ -385,6 +386,103 @@ async def competition_conflicts(db: AsyncSession, competition_id: UUID) -> list[
     return conflicts
 
 
+async def advance_competition_round(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    competition_id: UUID,
+    payload: CompetitionAdvanceCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    competition = await get_competition(db, competition_id)
+    await ensure_manage_competition(authz, identity, competition.organization_id)
+    team_names = {
+        team.id: team.name
+        for _, team in await list_competition_participants(db, competition_id)
+    }
+    source_fixtures = (
+        await db.scalars(
+            select(CompetitionFixture)
+            .where(CompetitionFixture.competition_id == competition_id)
+            .where(CompetitionFixture.stage_label == payload.source_stage_label)
+            .where(CompetitionFixture.round_label == payload.source_round_label)
+            .order_by(CompetitionFixture.scheduled_at, CompetitionFixture.created_at)
+        )
+    ).all()
+    if not source_fixtures:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No source fixtures found")
+
+    winners: list[UUID] = []
+    for fixture in source_fixtures:
+        winner_id = fixture_winner_team_id(fixture)
+        if winner_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="All source fixtures need confirmed non-draw winners before advancement",
+            )
+        winners.append(winner_id)
+    if len(winners) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least two winners are required to create the next round",
+        )
+
+    existing_next = (
+        await db.scalars(
+            select(CompetitionFixture)
+            .where(CompetitionFixture.competition_id == competition_id)
+            .where(CompetitionFixture.stage_label == payload.next_stage_label)
+            .where(CompetitionFixture.round_label == payload.next_round_label)
+        )
+    ).all()
+    existing_matchups = {
+        frozenset((fixture.home_team_id, fixture.away_team_id))
+        for fixture in existing_next
+    }
+    byes: list[UUID] = []
+    created: list[CompetitionFixture] = []
+    skipped = 0
+    for slot_index, (home_team_id, away_team_id) in enumerate(advance_pairings(winners)):
+        if away_team_id is None:
+            byes.append(home_team_id)
+            continue
+        matchup = frozenset((home_team_id, away_team_id))
+        if matchup in existing_matchups:
+            skipped += 1
+            continue
+        fixture = CompetitionFixture(
+            organization_id=competition.organization_id,
+            competition_id=competition_id,
+            home_team_id=home_team_id,
+            away_team_id=away_team_id,
+            round_label=payload.next_round_label,
+            stage_label=payload.next_stage_label,
+            scheduled_at=payload.scheduled_at + timedelta(minutes=slot_index * payload.match_spacing_minutes),
+            venue_name=payload.venue_name,
+            notes=(
+                f"Advanced from {payload.source_stage_label} {payload.source_round_label} "
+                "by AfroLete tournament automation."
+            ),
+        )
+        db.add(fixture)
+        created.append(fixture)
+        existing_matchups.add(matchup)
+    await db.commit()
+    for fixture in created:
+        await db.refresh(fixture)
+    return {
+        "competition_id": competition_id,
+        "source_stage_label": payload.source_stage_label,
+        "source_round_label": payload.source_round_label,
+        "next_stage_label": payload.next_stage_label,
+        "next_round_label": payload.next_round_label,
+        "winners": [team_names.get(team_id, str(team_id)) for team_id in winners],
+        "byes": [team_names.get(team_id, str(team_id)) for team_id in byes],
+        "created": len(created),
+        "skipped": skipped,
+        "fixtures": created,
+    }
+
+
 async def update_fixture_result(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -593,10 +691,30 @@ def seed_pairings(teams: list[Team]) -> list[tuple[Team | None, Team | None]]:
 
 
 def fixture_winner_name(fixture: CompetitionFixture, team_names: dict[UUID, str]) -> str | None:
-    if fixture.home_score is None or fixture.away_score is None or fixture.home_score == fixture.away_score:
+    winner_id = fixture_winner_team_id(fixture)
+    return team_names.get(winner_id) if winner_id is not None else None
+
+
+def fixture_winner_team_id(fixture: CompetitionFixture) -> UUID | None:
+    if (
+        fixture.status != FixtureStatus.FINAL
+        or fixture.home_score is None
+        or fixture.away_score is None
+        or fixture.home_score == fixture.away_score
+    ):
         return None
-    winner_id = fixture.home_team_id if fixture.home_score > fixture.away_score else fixture.away_team_id
-    return team_names.get(winner_id)
+    return fixture.home_team_id if fixture.home_score > fixture.away_score else fixture.away_team_id
+
+
+def advance_pairings(team_ids: list[UUID]) -> list[tuple[UUID, UUID | None]]:
+    pairs: list[tuple[UUID, UUID | None]] = []
+    index = 0
+    while index < len(team_ids):
+        home = team_ids[index]
+        away = team_ids[index + 1] if index + 1 < len(team_ids) else None
+        pairs.append((home, away))
+        index += 2
+    return pairs
 
 
 def conflict(

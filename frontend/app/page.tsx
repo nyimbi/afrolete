@@ -50,6 +50,7 @@ import type {
   CommunicationScopeType,
   CommunicationTemplateRead,
   CommercialRefundRead,
+  CompetitionAdvancementRead,
   CompetitionBracketRead,
   CompetitionConflictRead,
   CompetitionFixtureRead,
@@ -252,6 +253,7 @@ export default function HomePage() {
   const [competitionFixtures, setCompetitionFixtures] = useState<CompetitionFixtureRead[]>([]);
   const [competitionStandings, setCompetitionStandings] = useState<CompetitionStandingRead[]>([]);
   const [fixtureGeneration, setFixtureGeneration] = useState<CompetitionFixtureGenerationRead | null>(null);
+  const [competitionAdvancement, setCompetitionAdvancement] = useState<CompetitionAdvancementRead | null>(null);
   const [competitionBracket, setCompetitionBracket] = useState<CompetitionBracketRead | null>(null);
   const [competitionConflicts, setCompetitionConflicts] = useState<CompetitionConflictRead[]>([]);
   const [matchEvents, setMatchEvents] = useState<FixtureMatchEventRead[]>([]);
@@ -1170,6 +1172,7 @@ export default function HomePage() {
       setCompetitionFixtures([]);
       setCompetitionStandings([]);
       setFixtureGeneration(null);
+      setCompetitionAdvancement(null);
       setCompetitionBracket(null);
       setCompetitionConflicts([]);
       setMatchEvents([]);
@@ -1343,6 +1346,7 @@ export default function HomePage() {
       setCompetitionFixtures([]);
       setCompetitionStandings([]);
       setFixtureGeneration(null);
+      setCompetitionAdvancement(null);
       setCompetitionBracket(null);
       setCompetitionConflicts([]);
       setMatchEvents([]);
@@ -2242,6 +2246,38 @@ export default function HomePage() {
       "review-competition-conflicts",
       () => loadCompetitionWorkspace(selectedCompetitionId),
       () => addLog("Competition conflicts refreshed", "good")
+    );
+  };
+
+  const advanceCompetitionRound = () => {
+    if (!selectedCompetitionId) {
+      addLog("Select a competition first", "bad");
+      return;
+    }
+    runAction(
+      "advance-competition-round",
+      () =>
+        apiRequest<CompetitionAdvancementRead>(
+          `/competitions/${selectedCompetitionId}/advance`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              source_stage_label: fixtureForm.stage_label,
+              source_round_label: fixtureForm.round_label,
+              next_stage_label: "Knockout",
+              next_round_label: "Next round",
+              scheduled_at: new Date(fixtureForm.scheduled_at).toISOString(),
+              match_spacing_minutes: 120,
+              venue_name: fixtureForm.venue_name
+            }
+          }
+        ),
+      (advancement) => {
+        setCompetitionAdvancement(advancement);
+        addLog(`${advancement.created} advancement fixtures created`, "good");
+        void loadCompetitionWorkspace(selectedCompetitionId);
+      }
     );
   };
 
@@ -5370,6 +5406,7 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createCompetitionFixture} disabled={busyAction !== null}>Fixture</button>
                 <button type="button" onClick={generateCompetitionFixtures} disabled={busyAction !== null}>Auto fixtures</button>
+                <button type="button" onClick={advanceCompetitionRound} disabled={busyAction !== null}>Advance</button>
                 <button type="button" onClick={recordFixtureResult} disabled={busyAction !== null}>Result</button>
               </div>
             </div>
@@ -5410,6 +5447,14 @@ export default function HomePage() {
                   <div>
                     <strong>{fixtureGeneration.created} generated · {fixtureGeneration.rounds} rounds</strong>
                     <span>{fixtureGeneration.existing} existing fixtures skipped by the planner.</span>
+                  </div>
+                </article>
+              ) : null}
+              {competitionAdvancement ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{competitionAdvancement.created} advanced · {competitionAdvancement.next_round_label}</strong>
+                    <span>{competitionAdvancement.winners.join(", ")}{competitionAdvancement.byes.length ? ` · byes: ${competitionAdvancement.byes.join(", ")}` : ""}</span>
                   </div>
                 </article>
               ) : null}

@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.competition import (
+    CompetitionAdvanceCreate,
+    CompetitionAdvancementRead,
     CompetitionCreate,
     CompetitionBracketRead,
     CompetitionConflictRead,
@@ -27,6 +29,7 @@ from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.competitions import (
     add_competition_participant,
+    advance_competition_round,
     competition_bracket,
     competition_conflicts,
     assign_fixture_official,
@@ -211,6 +214,35 @@ async def generate_competition_fixtures_route(
         created=result["created"],
         existing=result["existing"],
         rounds=result["rounds"],
+        fixtures=[to_fixture_read(row) for row in rows if row[0].id in created_ids],
+    )
+
+
+@router.post(
+    "/{competition_id}/advance",
+    response_model=CompetitionAdvancementRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def advance_competition_route(
+    competition_id: UUID,
+    payload: CompetitionAdvanceCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CompetitionAdvancementRead:
+    result = await advance_competition_round(db, identity, competition_id, payload, authz)
+    created_ids = {fixture.id for fixture in result["fixtures"]}
+    rows = await list_competition_fixtures(db, competition_id)
+    return CompetitionAdvancementRead(
+        competition_id=result["competition_id"],
+        source_stage_label=result["source_stage_label"],
+        source_round_label=result["source_round_label"],
+        next_stage_label=result["next_stage_label"],
+        next_round_label=result["next_round_label"],
+        winners=result["winners"],
+        byes=result["byes"],
+        created=result["created"],
+        skipped=result["skipped"],
         fixtures=[to_fixture_read(row) for row in rows if row[0].id in created_ids],
     )
 

@@ -600,6 +600,7 @@ athlete-development platform:
 | 035 - Billing dunning delivery | Partial | Backend ruff; frontend typecheck; diff check | Overdue invoice dunning notices can now be delivered through a configurable provider-neutral webhook, record-only mode stays usable locally, delivery keys and timeouts are configurable, and the console shows delivery outcomes; tax filing integrations, plan-change application, and full verification remain. |
 | 036 - Billing plan-change application | Partial | Backend ruff; frontend typecheck; diff check | Proration quotes can now be applied to tenant subscriptions, updating negotiated price, optional plan identity, billing cycle, subscription status, and plan-change notes from the console; tax filing integrations and full verification remain. |
 | 037 - Billing tax filing delivery | Partial | Backend ruff; frontend typecheck; diff check | Invoice tax totals can now be packaged by jurisdiction and period, prepared in record-only mode, or delivered through a configurable tax filing webhook with separate keys/timeouts and console result visibility; full billing verification remains. |
+| 038 - Tournament round advancement | Partial | Backend ruff; frontend typecheck; diff check | Confirmed non-draw winners from a source stage/round can now be advanced into the next knockout round with duplicate protection, bye reporting, generated fixture visibility, and console controls; bracket visualization polish, scheduling optimization, broadcast operations, and full verification remain. |
 
 ## Capability Coverage
 
@@ -619,7 +620,7 @@ Status values:
 | Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, provider-neutral evidence ingestion, pending-review observations, human review/correction, and console workflows are implemented. |
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, provider-neutral performance evidence ingestion, derived run records, governance summary metrics, credential-boundary status, and console workflows are implemented; live provider workers, OpenBao secret fetch, persisted run history tables, model-backed extraction, audit immutability, and deeper model governance remain. |
 | Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, AI-assisted plan generation from readiness/performance/competition context, and console workflows are implemented; live model generation, availability calendars, and post-session feedback loops remain. |
-| Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, round-robin fixture generation, bracket projections, conflict detection, and console workflows are implemented; advanced tournament advancement, bracket visualization polish, optimization algorithms, ticketing, and broadcast operations remain. |
+| Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, round-robin fixture generation, bracket projections, source-round winner advancement, conflict detection, and console workflows are implemented; bracket visualization polish, optimization algorithms, ticketing, broadcast operations, and full verification remain. |
 | Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, person inbox, digest generation, AI-assisted drafts, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; provider credentials, background digest scheduler, and full parent portal remain. |
 | Consent, safeguarding, compliance, incidents | partial | Guardian relationships, consent requests, one-use web links, SMS/WhatsApp/Telegram/email/manual consent capture, and minor event clearance are implemented. |
 | Equipment, facilities, assets | partial | Facility profiles, equipment inventory, checkout/return, maintenance work orders, booking overlap checks, asset readiness metrics, scan lookup, photo metadata, procurement recommendations, supplier scorecards, lease quotes, utilization recommendations, and console workflows are implemented; supplier ordering workflows, real file uploads, RFID hardware integration, and accounting lease billing remain. |
@@ -646,9 +647,9 @@ Status values:
    verification coverage.
 7. Add full billing verification coverage with provider replay tests,
    tax-filing delivery tests, proration application tests, and browser QA.
-8. Add advanced tournament advancement, bracket visualization polish,
-   scheduling optimization algorithms, ticketing, and broadcast operations for
-   leagues and tournaments.
+8. Add bracket visualization polish, scheduling optimization algorithms,
+   ticketing, broadcast operations, and full verification for leagues and
+   tournaments.
 9. Add live-model training-plan generation, availability calendars, readiness
    check-ins, and post-session feedback loops.
 10. Add real provider parsers for video, audio narration, text evaluation, and

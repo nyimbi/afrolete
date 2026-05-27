@@ -96,6 +96,16 @@ class CompetitionFixtureGenerateCreate(BaseModel):
     double_round_robin: bool = False
 
 
+class CompetitionAdvanceCreate(BaseModel):
+    source_stage_label: str = Field(default="League", max_length=80)
+    source_round_label: str = Field(default="Round 1", max_length=80)
+    next_stage_label: str = Field(default="Knockout", max_length=80)
+    next_round_label: str = Field(default="Next round", max_length=80)
+    scheduled_at: datetime
+    match_spacing_minutes: int = Field(default=120, ge=30, le=720)
+    venue_name: str | None = Field(default=None, max_length=200)
+
+
 class CompetitionFixtureRead(BaseModel):
     id: UUID
     organization_id: UUID
@@ -121,6 +131,19 @@ class CompetitionFixtureGenerationRead(BaseModel):
     created: int
     existing: int
     rounds: int
+    fixtures: list[CompetitionFixtureRead]
+
+
+class CompetitionAdvancementRead(BaseModel):
+    competition_id: UUID
+    source_stage_label: str
+    source_round_label: str
+    next_stage_label: str
+    next_round_label: str
+    winners: list[str]
+    byes: list[str]
+    created: int
+    skipped: int
     fixtures: list[CompetitionFixtureRead]
 
 
