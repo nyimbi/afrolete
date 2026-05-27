@@ -469,6 +469,17 @@ class EventTravelGeofenceZoneCreate(EventTravelGeofenceCheckCreate):
     notes: str | None = Field(default=None, max_length=2000)
 
 
+class EventTravelGeofenceZoneUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=2, max_length=160)
+    center_latitude: Decimal | None = Field(default=None, ge=-90, le=90, max_digits=9, decimal_places=6)
+    center_longitude: Decimal | None = Field(default=None, ge=-180, le=180, max_digits=9, decimal_places=6)
+    radius_km: Decimal | None = Field(default=None, gt=0, le=20000, max_digits=8, decimal_places=3)
+    alert_on_breach: bool | None = None
+    channel: CommunicationChannel | None = None
+    active: bool | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 class EventTravelGeofenceZoneRead(EventTravelGeofenceZoneCreate):
     id: UUID
     organization_id: UUID

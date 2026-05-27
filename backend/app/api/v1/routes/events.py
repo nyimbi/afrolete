@@ -44,6 +44,7 @@ from app.schemas.event import (
     EventTravelGeofenceCheckRead,
     EventTravelGeofenceZoneCreate,
     EventTravelGeofenceZoneRead,
+    EventTravelGeofenceZoneUpdate,
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
     EventTravelManifestExportCreate,
@@ -111,6 +112,7 @@ from app.services.events import (
     update_travel_carpool_ride,
     update_travel_checklist_item,
     update_travel_expense,
+    update_travel_geofence_zone,
     update_travel_plan,
     upload_travel_checklist_evidence,
     upload_travel_expense_receipt,
@@ -711,6 +713,17 @@ async def check_travel_geofence_zone_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelGeofenceCheckRead:
     return await check_travel_geofence_zone(db, identity, geofence_zone_id, authz)
+
+
+@router.patch("/travel-geofence-zones/{geofence_zone_id}", response_model=EventTravelGeofenceZoneRead)
+async def update_travel_geofence_zone_route(
+    geofence_zone_id: UUID,
+    payload: EventTravelGeofenceZoneUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelGeofenceZoneRead:
+    return await update_travel_geofence_zone(db, identity, geofence_zone_id, payload, authz)
 
 
 @router.get("/travel-plans/{travel_plan_id}/expenses", response_model=list[EventTravelExpenseRead])

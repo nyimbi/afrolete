@@ -92,6 +92,7 @@ from app.schemas.event import (
     EventTravelGeofenceCheckRead,
     EventTravelGeofenceZoneCreate,
     EventTravelGeofenceZoneRead,
+    EventTravelGeofenceZoneUpdate,
     EventTravelLocationUpdateCreate,
     EventTravelLocationUpdateRead,
     EventTravelManifestExportCreate,
@@ -1423,6 +1424,46 @@ async def create_travel_geofence_zone(
         notes=payload.notes,
     )
     db.add(zone)
+    await db.commit()
+    await db.refresh(zone)
+    return travel_geofence_zone_read(zone)
+
+
+async def update_travel_geofence_zone(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    geofence_zone_id: UUID,
+    payload: EventTravelGeofenceZoneUpdate,
+    authz: AuthorizationService,
+) -> EventTravelGeofenceZoneRead:
+    zone = await db.get(EventTravelGeofenceZone, geofence_zone_id)
+    if zone is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel geofence zone not found")
+    await ensure_manage_event_scope(authz, zone.organization_id, identity)
+    if payload.label is not None and payload.label != zone.label:
+        existing = await db.scalar(
+            select(EventTravelGeofenceZone)
+            .where(EventTravelGeofenceZone.travel_plan_id == zone.travel_plan_id)
+            .where(EventTravelGeofenceZone.label == payload.label)
+            .where(EventTravelGeofenceZone.id != zone.id)
+        )
+        if existing is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Travel geofence zone already exists")
+        zone.label = payload.label
+    if payload.center_latitude is not None:
+        zone.center_latitude = payload.center_latitude
+    if payload.center_longitude is not None:
+        zone.center_longitude = payload.center_longitude
+    if payload.radius_km is not None:
+        zone.radius_km = payload.radius_km
+    if payload.alert_on_breach is not None:
+        zone.alert_on_breach = payload.alert_on_breach
+    if payload.channel is not None:
+        zone.channel = payload.channel.value
+    if payload.active is not None:
+        zone.active = payload.active
+    if "notes" in payload.model_fields_set:
+        zone.notes = payload.notes
     await db.commit()
     await db.refresh(zone)
     return travel_geofence_zone_read(zone)

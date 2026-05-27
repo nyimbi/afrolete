@@ -3013,6 +3013,59 @@ export default function HomePage() {
     );
   };
 
+  const editTravelGeofenceZone = (zone: EventTravelGeofenceZoneRead) => {
+    setTravelForm((current) => ({
+      ...current,
+      geofence_label: zone.label,
+      geofence_latitude: Number(zone.center_latitude),
+      geofence_longitude: Number(zone.center_longitude),
+      geofence_radius_km: Number(zone.radius_km),
+      geofence_channel: zone.channel
+    }));
+    addLog(`Loaded ${zone.label} into the geofence form`, "neutral");
+  };
+
+  const updateTravelGeofenceZone = (zone: EventTravelGeofenceZoneRead) => {
+    runAction(
+      `travel-geofence-zone-update-${zone.id}`,
+      () =>
+        apiRequest<EventTravelGeofenceZoneRead>(`/events/travel-geofence-zones/${zone.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            center_latitude: String(travelForm.geofence_latitude),
+            center_longitude: String(travelForm.geofence_longitude),
+            radius_km: String(travelForm.geofence_radius_km),
+            label: travelForm.geofence_label,
+            alert_on_breach: true,
+            channel: travelForm.geofence_channel,
+            active: zone.active,
+            notes: `Updated from operations console for ${zone.label}.`
+          }
+        }),
+      (updatedZone) => {
+        setTravelGeofenceZones((current) => current.map((item) => (item.id === updatedZone.id ? updatedZone : item)));
+        addLog(`${updatedZone.label} ${updatedZone.active ? "updated" : "deactivated"}`, updatedZone.active ? "good" : "neutral");
+      }
+    );
+  };
+
+  const setTravelGeofenceZoneActive = (zone: EventTravelGeofenceZoneRead, active: boolean) => {
+    runAction(
+      `travel-geofence-zone-active-${zone.id}-${active ? "active" : "inactive"}`,
+      () =>
+        apiRequest<EventTravelGeofenceZoneRead>(`/events/travel-geofence-zones/${zone.id}`, {
+          method: "PATCH",
+          identity,
+          body: { active }
+        }),
+      (updatedZone) => {
+        setTravelGeofenceZones((current) => current.map((item) => (item.id === updatedZone.id ? updatedZone : item)));
+        addLog(`${updatedZone.label} ${updatedZone.active ? "activated" : "deactivated"}`, updatedZone.active ? "good" : "neutral");
+      }
+    );
+  };
+
   const createTravelExpense = (plan: EventTravelPlanRead) => {
     runAction(
       `travel-expense-create-${plan.id}`,
@@ -7687,6 +7740,11 @@ export default function HomePage() {
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={() => checkTravelGeofenceZone(zone)}>Check zone</button>
+                    <button type="button" onClick={() => editTravelGeofenceZone(zone)}>Edit</button>
+                    <button type="button" onClick={() => updateTravelGeofenceZone(zone)}>Update</button>
+                    <button type="button" onClick={() => setTravelGeofenceZoneActive(zone, !zone.active)}>
+                      {zone.active ? "Deactivate" : "Activate"}
+                    </button>
                   </div>
                 </article>
               ))}
