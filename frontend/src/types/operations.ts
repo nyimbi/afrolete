@@ -775,9 +775,22 @@ export type EventTravelBackupDriverRead = {
   availability_status: "standby" | "available" | "dispatched" | "unavailable";
   response_minutes: number | null;
   priority: number;
+  dispatched_at: string | null;
+  dispatched_by_person_id: UUID | null;
+  dispatch_message_id: UUID | null;
+  dispatch_reason: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type EventTravelBackupDriverDispatchRead = {
+  travel_plan_id: UUID;
+  driver: EventTravelBackupDriverRead;
+  eligible_driver_count: number;
+  message_id: UUID | null;
+  recipient_count: number;
+  rationale: string[];
 };
 
 export type EventTravelExpenseRead = {

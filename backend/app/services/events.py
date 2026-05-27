@@ -72,6 +72,8 @@ from app.schemas.event import (
     EventTravelApprovalRoutingRead,
     EventTravelApprovalUpdate,
     EventTravelBackupDriverCreate,
+    EventTravelBackupDriverDispatchCreate,
+    EventTravelBackupDriverDispatchRead,
     EventTravelBackupDriverRead,
     EventTravelBackupDriverUpdate,
     EventTravelCarpoolAutoMatchCreate,
@@ -1822,6 +1824,82 @@ async def update_travel_backup_driver(
     return travel_backup_driver_read(driver)
 
 
+async def dispatch_travel_backup_driver(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelBackupDriverDispatchCreate,
+    authz: AuthorizationService,
+) -> EventTravelBackupDriverDispatchRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+
+    candidates = (
+        await db.scalars(
+            select(EventTravelBackupDriver)
+            .where(EventTravelBackupDriver.travel_plan_id == plan.id)
+            .where(EventTravelBackupDriver.availability_status.in_(["available", "standby"]))
+            .where(EventTravelBackupDriver.capacity >= payload.minimum_capacity)
+            .order_by(
+                EventTravelBackupDriver.availability_status,
+                EventTravelBackupDriver.priority,
+                EventTravelBackupDriver.response_minutes.nulls_last(),
+                EventTravelBackupDriver.driver_name,
+            )
+        )
+    ).all()
+    if payload.require_verified:
+        candidates = [candidate for candidate in candidates if backup_driver_is_verified(candidate)]
+    if not candidates:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No eligible backup driver available")
+
+    driver = candidates[0]
+    driver.availability_status = "dispatched"
+    driver.dispatched_at = datetime.now(UTC)
+    driver.dispatched_by_person_id = identity.person_id
+    driver.dispatch_reason = payload.reason
+    message_id: UUID | None = None
+    recipient_count = 0
+    if payload.notify_driver and driver.driver_person_id is not None:
+        message = await create_message(
+            db,
+            identity,
+            CommunicationMessageCreate(
+                organization_id=plan.organization_id,
+                message_type=CommunicationMessageType.ALERT,
+                channel=payload.channel,
+                scope_type=CommunicationScopeType.EVENT,
+                scope_id=event.id,
+                recipient_person_ids=[driver.driver_person_id],
+                subject=f"Backup driver dispatch: {plan.destination}",
+                body=travel_backup_driver_dispatch_body(plan, driver, payload.reason),
+                urgent=True,
+                quiet_hours_override=True,
+                copy_guardians_for_minors=False,
+            ),
+            authz,
+        )
+        driver.dispatch_message_id = message.id
+        message_id = message.id
+        recipient_count = int(
+            await db.scalar(select(func.count(MessageRecipient.id)).where(MessageRecipient.message_id == message.id))
+            or 0
+        )
+    await db.commit()
+    await db.refresh(driver)
+    return EventTravelBackupDriverDispatchRead(
+        travel_plan_id=plan.id,
+        driver=travel_backup_driver_read(driver),
+        eligible_driver_count=len(candidates),
+        message_id=message_id,
+        recipient_count=recipient_count,
+        rationale=backup_driver_dispatch_rationale(driver, payload, len(candidates)),
+    )
+
+
 async def list_travel_driver_ratings(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -2921,10 +2999,50 @@ def travel_backup_driver_read(driver: EventTravelBackupDriver) -> EventTravelBac
         availability_status=driver.availability_status,
         response_minutes=driver.response_minutes,
         priority=driver.priority,
+        dispatched_at=driver.dispatched_at,
+        dispatched_by_person_id=driver.dispatched_by_person_id,
+        dispatch_message_id=driver.dispatch_message_id,
+        dispatch_reason=driver.dispatch_reason,
         notes=driver.notes,
         created_at=driver.created_at,
         updated_at=driver.updated_at,
     )
+
+
+def backup_driver_is_verified(driver: EventTravelBackupDriver) -> bool:
+    license_status = driver.license_status.lower()
+    background_status = driver.background_check_status.lower()
+    license_ok = license_status in {"verified", "current", "cleared", "valid", "passed"}
+    background_ok = background_status in {"verified", "current", "cleared", "valid", "passed"}
+    return license_ok and background_ok
+
+
+def travel_backup_driver_dispatch_body(plan: EventTravelPlan, driver: EventTravelBackupDriver, reason: str) -> str:
+    response = f"{driver.response_minutes} min response" if driver.response_minutes is not None else "response time not set"
+    return (
+        f"You have been dispatched as backup driver for {plan.destination}.\n"
+        f"Reason: {reason}\n"
+        f"Vehicle: {driver.vehicle_label or 'not assigned'}\n"
+        f"Capacity: {driver.capacity}\n"
+        f"Expected response: {response}\n"
+        f"Trip route: {plan.route_summary or 'route not set'}"
+    )[:8000]
+
+
+def backup_driver_dispatch_rationale(
+    driver: EventTravelBackupDriver,
+    payload: EventTravelBackupDriverDispatchCreate,
+    eligible_count: int,
+) -> list[str]:
+    rationale = [
+        f"Selected from {eligible_count} eligible backup driver(s).",
+        f"Priority {driver.priority}, {driver.availability_status} status, capacity {driver.capacity}.",
+    ]
+    if payload.require_verified:
+        rationale.append(f"License {driver.license_status}; background {driver.background_check_status}.")
+    if driver.response_minutes is not None:
+        rationale.append(f"Expected response within {driver.response_minutes} minutes.")
+    return rationale
 
 
 def apply_travel_phase_status(plan: EventTravelPlan, phase: str) -> None:

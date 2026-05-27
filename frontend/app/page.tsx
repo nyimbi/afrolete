@@ -73,6 +73,7 @@ import type {
   EventRead,
   EventTravelApprovalRead,
   EventTravelApprovalRoutingRead,
+  EventTravelBackupDriverDispatchRead,
   EventTravelBackupDriverRead,
   EventTravelCarpoolAutoMatchRead,
   EventTravelCarpoolRideRead,
@@ -385,6 +386,8 @@ export default function HomePage() {
   const [travelDevices, setTravelDevices] = useState<EventTravelDeviceRead[]>([]);
   const [travelDeviceSecret, setTravelDeviceSecret] = useState<EventTravelDeviceSecretRead | null>(null);
   const [travelBackupDrivers, setTravelBackupDrivers] = useState<EventTravelBackupDriverRead[]>([]);
+  const [travelBackupDriverDispatch, setTravelBackupDriverDispatch] =
+    useState<EventTravelBackupDriverDispatchRead | null>(null);
   const [travelDriverRatings, setTravelDriverRatings] = useState<EventTravelDriverRatingRead[]>([]);
   const [travelDriverRatingSummary, setTravelDriverRatingSummary] = useState<EventTravelDriverRatingSummaryRead | null>(null);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
@@ -646,6 +649,10 @@ export default function HomePage() {
     backup_driver_response_minutes: 25,
     backup_driver_priority: 1,
     backup_driver_notes: "On call during away fixtures and cleared for minor transport.",
+    backup_dispatch_reason: "Primary driver reported a vehicle issue.",
+    backup_dispatch_minimum_capacity: 8,
+    backup_dispatch_require_verified: true,
+    backup_dispatch_channel: "sms" as CommunicationChannel,
     driver_rating_name: "James Wilson",
     driver_rating_vehicle: "Minibus #3",
     driver_rating_overall: 5,
@@ -1688,6 +1695,7 @@ export default function HomePage() {
       setTravelDevices([]);
       setTravelDeviceSecret(null);
       setTravelBackupDrivers([]);
+      setTravelBackupDriverDispatch(null);
       setTravelDriverRatings([]);
       setTravelDriverRatingSummary(null);
       setTravelExpenses([]);
@@ -1913,6 +1921,7 @@ export default function HomePage() {
       setTravelDevices([]);
       setTravelDeviceSecret(null);
       setTravelBackupDrivers([]);
+      setTravelBackupDriverDispatch(null);
       setTravelDriverRatings([]);
       setTravelDriverRatingSummary(null);
       setTravelExpenses([]);
@@ -3093,6 +3102,41 @@ export default function HomePage() {
           `${updatedDriver.driver_name} ${updatedDriver.availability_status}`,
           updatedDriver.availability_status === "available" ? "good" : "neutral"
         );
+      }
+    );
+  };
+
+  const dispatchTravelBackupDriver = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-backup-driver-dispatch-${plan.id}`,
+      () =>
+        apiRequest<EventTravelBackupDriverDispatchRead>(`/events/travel-plans/${plan.id}/backup-drivers/dispatch`, {
+          method: "POST",
+          identity,
+          body: {
+            minimum_capacity: travelForm.backup_dispatch_minimum_capacity,
+            require_verified: travelForm.backup_dispatch_require_verified,
+            channel: travelForm.backup_dispatch_channel,
+            reason: travelForm.backup_dispatch_reason,
+            notify_driver: true
+          }
+        }),
+      (dispatch) => {
+        setTravelBackupDriverDispatch(dispatch);
+        setTravelBackupDrivers((current) => [
+          dispatch.driver,
+          ...current.filter((item) => item.id !== dispatch.driver.id)
+        ]);
+        if (dispatch.message_id) {
+          setSelectedMessageId(dispatch.message_id);
+        }
+        addLog(
+          `Backup driver dispatched: ${dispatch.driver.driver_name}`,
+          dispatch.recipient_count > 0 || !dispatch.driver.driver_person_id ? "good" : "neutral"
+        );
+        if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
+        }
       }
     );
   };
@@ -7838,6 +7882,28 @@ export default function HomePage() {
                 <input type="number" min="1" max="20" value={travelForm.backup_driver_priority} onChange={(event) => setTravelForm({ ...travelForm, backup_driver_priority: Number(event.target.value) })} />
               </label>
               <label>
+                Dispatch seats
+                <input type="number" min="0" max="80" value={travelForm.backup_dispatch_minimum_capacity} onChange={(event) => setTravelForm({ ...travelForm, backup_dispatch_minimum_capacity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Dispatch channel
+                <select value={travelForm.backup_dispatch_channel} onChange={(event) => setTravelForm({ ...travelForm, backup_dispatch_channel: event.target.value as CommunicationChannel })}>
+                  <option value="sms">SMS</option>
+                  <option value="push">Push</option>
+                  <option value="in_app">In app</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="email">Email</option>
+                </select>
+              </label>
+              <label>
+                Verified only
+                <select value={travelForm.backup_dispatch_require_verified ? "yes" : "no"} onChange={(event) => setTravelForm({ ...travelForm, backup_dispatch_require_verified: event.target.value === "yes" })}>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </label>
+              <label>
                 Driver rating
                 <input value={travelForm.driver_rating_name} onChange={(event) => setTravelForm({ ...travelForm, driver_rating_name: event.target.value })} />
               </label>
@@ -7988,6 +8054,10 @@ export default function HomePage() {
               <label className="wide-field">
                 Backup notes
                 <input value={travelForm.backup_driver_notes} onChange={(event) => setTravelForm({ ...travelForm, backup_driver_notes: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Dispatch reason
+                <input value={travelForm.backup_dispatch_reason} onChange={(event) => setTravelForm({ ...travelForm, backup_dispatch_reason: event.target.value })} />
               </label>
               <label className="wide-field">
                 Receipt URL
@@ -8165,6 +8235,17 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {travelBackupDriverDispatch ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Dispatched backup · {travelBackupDriverDispatch.driver.driver_name}</strong>
+                    <span>
+                      {travelBackupDriverDispatch.eligible_driver_count} eligible · {travelBackupDriverDispatch.recipient_count} notified · {travelBackupDriverDispatch.driver.vehicle_label ?? "No vehicle"}
+                    </span>
+                    <span>{travelBackupDriverDispatch.rationale[0] ?? travelBackupDriverDispatch.driver.dispatch_reason ?? "Backup dispatch complete"}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelDriverRatingSummary ? (
                 <article className="task-card">
                   <div>
@@ -8316,6 +8397,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => loadTravelDevices(plan)}>Devices</button>
                     <button type="button" onClick={() => createTravelBackupDriver(plan)}>Backup driver</button>
                     <button type="button" onClick={() => loadTravelBackupDrivers(plan)}>Backups</button>
+                    <button type="button" onClick={() => dispatchTravelBackupDriver(plan)}>Dispatch backup</button>
                     <button type="button" onClick={() => createTravelDriverRating(plan)}>Rate driver</button>
                     <button type="button" onClick={() => loadTravelDriverRatings(plan)}>Ratings</button>
                     <button type="button" onClick={() => checkTravelGeofence(plan)}>Geofence</button>

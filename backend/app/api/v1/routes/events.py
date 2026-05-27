@@ -16,6 +16,8 @@ from app.schemas.event import (
     EventTravelApprovalRoutingRead,
     EventTravelApprovalUpdate,
     EventTravelBackupDriverCreate,
+    EventTravelBackupDriverDispatchCreate,
+    EventTravelBackupDriverDispatchRead,
     EventTravelBackupDriverRead,
     EventTravelBackupDriverUpdate,
     EventTravelCarpoolAutoMatchCreate,
@@ -83,6 +85,7 @@ from app.services.events import (
     create_weather_assessment,
     create_event,
     dispatch_weather_assessment_alert,
+    dispatch_travel_backup_driver,
     create_travel_approval,
     auto_match_travel_carpools,
     create_travel_backup_driver,
@@ -742,6 +745,20 @@ async def update_travel_backup_driver_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelBackupDriverRead:
     return await update_travel_backup_driver(db, identity, backup_driver_id, payload, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/backup-drivers/dispatch",
+    response_model=EventTravelBackupDriverDispatchRead,
+)
+async def dispatch_travel_backup_driver_route(
+    travel_plan_id: UUID,
+    payload: EventTravelBackupDriverDispatchCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelBackupDriverDispatchRead:
+    return await dispatch_travel_backup_driver(db, identity, travel_plan_id, payload, authz)
 
 
 @router.get("/travel-plans/{travel_plan_id}/driver-ratings", response_model=list[EventTravelDriverRatingRead])

@@ -232,6 +232,10 @@ class EventTravelBackupDriver(IdMixin, TimestampMixin, Base):
     availability_status: Mapped[str] = mapped_column(String(40), default="standby", nullable=False, index=True)
     response_minutes: Mapped[int | None] = mapped_column(Integer)
     priority: Mapped[int] = mapped_column(Integer, default=1, nullable=False, index=True)
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    dispatched_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    dispatch_message_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("communication_messages.id"), index=True)
+    dispatch_reason: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

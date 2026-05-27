@@ -617,8 +617,29 @@ class EventTravelBackupDriverRead(EventTravelBackupDriverCreate):
     id: UUID
     organization_id: UUID
     travel_plan_id: UUID
+    dispatched_at: datetime | None
+    dispatched_by_person_id: UUID | None
+    dispatch_message_id: UUID | None
+    dispatch_reason: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class EventTravelBackupDriverDispatchCreate(BaseModel):
+    minimum_capacity: int = Field(default=1, ge=0, le=80)
+    require_verified: bool = True
+    channel: CommunicationChannel = CommunicationChannel.SMS
+    reason: str = Field(default="Primary driver unavailable", min_length=2, max_length=500)
+    notify_driver: bool = True
+
+
+class EventTravelBackupDriverDispatchRead(BaseModel):
+    travel_plan_id: UUID
+    driver: EventTravelBackupDriverRead
+    eligible_driver_count: int
+    message_id: UUID | None
+    recipient_count: int = 0
+    rationale: list[str]
 
 
 class EventTravelExpenseCreate(BaseModel):
