@@ -607,6 +607,72 @@ async def agent_model_transparency_report(
     }
 
 
+async def agent_ethical_scorecard(
+    db: AsyncSession,
+    organization_id: UUID,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    settings = settings or get_settings()
+    registry = await list_agent_model_registry(db, organization_id)
+    audits = await list_agent_bias_audits(db, organization_id)
+    appeals = await list_agent_decision_appeals(db, organization_id)
+    tasks = await list_agent_tasks(db, organization_id)
+    ledger = await verify_agent_run_ledger(db, organization_id)
+    approved_models = sum(1 for item in registry if item.review_status == "approved")
+    blocked_models = sum(1 for item in registry if item.review_status == "blocked")
+    undocumented_models = sum(1 for item in registry if not item.documentation_url)
+    passing_bias_audits = sum(1 for audit in audits if audit.status == "pass")
+    failing_bias_audits = sum(1 for audit in audits if audit.status == "fail")
+    open_mitigations = sum(1 for audit in audits if audit.mitigation_status == "open")
+    pending_appeals = sum(1 for appeal in appeals if appeal.status in {"pending", "under_review"})
+    resolved_appeals = sum(1 for appeal in appeals if appeal.resolved_at is not None)
+    human_review_required = count_tasks(tasks, AgentTaskStatus.WAITING_FOR_REVIEW)
+    score = agent_ethics_score(
+        total_models=len(registry),
+        approved_models=approved_models,
+        undocumented_models=undocumented_models,
+        audits=audits,
+        failing_bias_audits=failing_bias_audits,
+        open_mitigations=open_mitigations,
+        pending_appeals=pending_appeals,
+        human_review_required=human_review_required,
+        ledger_valid=bool(ledger["valid"]),
+        webhook_key_configured=bool(agent_credential_status(settings)["webhook_key_configured"]),
+    )
+    actions = agent_ethics_improvement_actions(
+        total_models=len(registry),
+        approved_models=approved_models,
+        undocumented_models=undocumented_models,
+        audits=audits,
+        failing_bias_audits=failing_bias_audits,
+        open_mitigations=open_mitigations,
+        pending_appeals=pending_appeals,
+        human_review_required=human_review_required,
+        ledger_valid=bool(ledger["valid"]),
+    )
+    grade = agent_ethics_grade(score)
+    return {
+        "organization_id": organization_id,
+        "generated_at": datetime.now(UTC),
+        "score": score,
+        "grade": grade,
+        "total_models": len(registry),
+        "approved_models": approved_models,
+        "blocked_models": blocked_models,
+        "undocumented_models": undocumented_models,
+        "bias_audits": len(audits),
+        "passing_bias_audits": passing_bias_audits,
+        "failing_bias_audits": failing_bias_audits,
+        "open_mitigations": open_mitigations,
+        "pending_appeals": pending_appeals,
+        "resolved_appeals": resolved_appeals,
+        "human_review_required": human_review_required,
+        "ledger_valid": ledger["valid"],
+        "public_summary": agent_ethics_public_summary(score, grade, len(registry), len(audits), pending_appeals),
+        "improvement_actions": actions,
+    }
+
+
 async def update_agent_task(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1150,6 +1216,97 @@ def agent_transparency_recommendations(
     if not recommendations:
         recommendations.append("Continue periodic transparency review and preserve the hash-chained run ledger.")
     return recommendations
+
+
+def agent_ethics_score(
+    total_models: int,
+    approved_models: int,
+    undocumented_models: int,
+    audits: list[AgentBiasAudit],
+    failing_bias_audits: int,
+    open_mitigations: int,
+    pending_appeals: int,
+    human_review_required: int,
+    ledger_valid: bool,
+    webhook_key_configured: bool,
+) -> int:
+    score = 100
+    if total_models == 0:
+        score -= 30
+    else:
+        score -= int(((total_models - approved_models) / total_models) * 25)
+        score -= int((undocumented_models / total_models) * 15)
+    if not audits:
+        score -= 20
+    score -= min(failing_bias_audits * 12, 24)
+    score -= min(open_mitigations * 8, 24)
+    score -= min(pending_appeals * 5, 20)
+    score -= min(human_review_required * 2, 16)
+    if not ledger_valid:
+        score -= 30
+    if not webhook_key_configured:
+        score -= 4
+    return max(score, 0)
+
+
+def agent_ethics_grade(score: int) -> str:
+    if score >= 90:
+        return "excellent"
+    if score >= 75:
+        return "strong"
+    if score >= 60:
+        return "watch"
+    if score >= 40:
+        return "risk"
+    return "critical"
+
+
+def agent_ethics_public_summary(
+    score: int,
+    grade: str,
+    total_models: int,
+    bias_audits: int,
+    pending_appeals: int,
+) -> str:
+    return (
+        f"Ethical AI score {score}/100 ({grade}) across {total_models} registered model policies, "
+        f"{bias_audits} fairness audits, and {pending_appeals} pending appeals."
+    )
+
+
+def agent_ethics_improvement_actions(
+    total_models: int,
+    approved_models: int,
+    undocumented_models: int,
+    audits: list[AgentBiasAudit],
+    failing_bias_audits: int,
+    open_mitigations: int,
+    pending_appeals: int,
+    human_review_required: int,
+    ledger_valid: bool,
+) -> list[str]:
+    actions: list[str] = []
+    if total_models == 0:
+        actions.append("Register active model policies before public AI claims.")
+    elif approved_models < total_models:
+        actions.append("Approve, block, or retire every registered model policy.")
+    if undocumented_models:
+        actions.append("Attach model documentation URLs for public transparency.")
+    if not audits:
+        actions.append("Run fairness audits for each active model policy.")
+    if failing_bias_audits:
+        actions.append("Block or mitigate models with failing bias audits.")
+    if open_mitigations:
+        actions.append("Close open bias-mitigation actions with documented evidence.")
+    if pending_appeals:
+        actions.append("Resolve pending AI decision appeals within the due window.")
+    if human_review_required:
+        actions.append("Clear human-review queues before enabling downstream automation.")
+    if not ledger_valid:
+        actions.append("Freeze applied AI actions until the run ledger verifies cleanly.")
+    if not actions:
+        actions.append("Publish the scorecard and keep quarterly fairness monitoring active.")
+    return actions
 
 
 def agent_bias_disparity_score(records: list[AgentRunRecord], registry: AgentModelRegistry) -> float:

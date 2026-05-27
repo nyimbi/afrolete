@@ -12,6 +12,7 @@ from app.schemas.agent import (
     AgentDecisionAppealCreate,
     AgentDecisionAppealRead,
     AgentDecisionAppealUpdate,
+    AgentEthicalScorecardRead,
     AgentGovernanceSummaryRead,
     AgentModelRegistryCreate,
     AgentModelRegistryRead,
@@ -29,6 +30,7 @@ from app.schemas.agent import (
 )
 from app.services.agents import (
     apply_agent_worker_callback,
+    agent_ethical_scorecard,
     agent_governance_summary,
     agent_model_transparency_report,
     agent_run_records,
@@ -212,6 +214,14 @@ async def list_agent_decision_appeals_route(
         to_decision_appeal_read(appeal)
         for appeal in await list_agent_decision_appeals(db, organization_id, status_value)
     ]
+
+
+@router.get("/ethical-scorecard", response_model=AgentEthicalScorecardRead)
+async def agent_ethical_scorecard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> AgentEthicalScorecardRead:
+    return AgentEthicalScorecardRead(**await agent_ethical_scorecard(db, organization_id))
 
 
 @router.post("/model-registry", response_model=AgentModelRegistryRead, status_code=status.HTTP_201_CREATED)

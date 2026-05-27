@@ -287,3 +287,24 @@ class AgentModelTransparencyReportRead(BaseModel):
     credential_boundary: str
     recommendations: list[str]
     models: list[AgentModelTransparencyItemRead]
+
+
+class AgentEthicalScorecardRead(BaseModel):
+    organization_id: UUID
+    generated_at: datetime
+    score: int
+    grade: str
+    total_models: int
+    approved_models: int
+    blocked_models: int
+    undocumented_models: int
+    bias_audits: int
+    passing_bias_audits: int
+    failing_bias_audits: int
+    open_mitigations: int
+    pending_appeals: int
+    resolved_appeals: int
+    human_review_required: int
+    ledger_valid: bool
+    public_summary: str
+    improvement_actions: list[str]

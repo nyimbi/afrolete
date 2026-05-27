@@ -14,6 +14,7 @@ import type {
   AgentAssignmentRead,
   AgentBiasAuditRead,
   AgentDecisionAppealRead,
+  AgentEthicalScorecardRead,
   AgentGovernanceSummaryRead,
   AgentKind,
   AgentModelRegistryRead,
@@ -584,6 +585,7 @@ export default function HomePage() {
   const [agentModelRegistry, setAgentModelRegistry] = useState<AgentModelRegistryRead[]>([]);
   const [agentBiasAudits, setAgentBiasAudits] = useState<AgentBiasAuditRead[]>([]);
   const [agentDecisionAppeals, setAgentDecisionAppeals] = useState<AgentDecisionAppealRead[]>([]);
+  const [agentEthicalScorecard, setAgentEthicalScorecard] = useState<AgentEthicalScorecardRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1467,7 +1469,7 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
@@ -1475,7 +1477,8 @@ export default function HomePage() {
       apiRequest<AgentModelTransparencyReportRead>(`/agents/model-transparency?organization_id=${organizationId}`),
       apiRequest<AgentModelRegistryRead[]>(`/agents/model-registry?organization_id=${organizationId}`),
       apiRequest<AgentBiasAuditRead[]>(`/agents/bias-audits?organization_id=${organizationId}`),
-      apiRequest<AgentDecisionAppealRead[]>(`/agents/appeals?organization_id=${organizationId}`)
+      apiRequest<AgentDecisionAppealRead[]>(`/agents/appeals?organization_id=${organizationId}`),
+      apiRequest<AgentEthicalScorecardRead>(`/agents/ethical-scorecard?organization_id=${organizationId}`)
     ]);
     setAgentTasks(tasks);
     setAgentRuns(runs);
@@ -1485,6 +1488,7 @@ export default function HomePage() {
     setAgentModelRegistry(registry);
     setAgentBiasAudits(biasAudits);
     setAgentDecisionAppeals(appeals);
+    setAgentEthicalScorecard(scorecard);
   }, []);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1922,6 +1926,7 @@ export default function HomePage() {
       setAgentModelRegistry([]);
       setAgentBiasAudits([]);
       setAgentDecisionAppeals([]);
+      setAgentEthicalScorecard(null);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -11767,6 +11772,16 @@ export default function HomePage() {
                       {agentTransparency.credential_boundary} · ledger {agentTransparency.ledger_valid ? "valid" : "broken"} · review {agentTransparency.human_review_required}
                     </span>
                     <span>{agentTransparency.recommendations[0] ?? "Transparency report ready"}</span>
+                  </div>
+                </article>
+              ) : null}
+              {agentEthicalScorecard ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Ethical AI scorecard · {agentEthicalScorecard.score}/100 · {agentEthicalScorecard.grade}</strong>
+                    <span>{agentEthicalScorecard.approved_models}/{agentEthicalScorecard.total_models} models approved · {agentEthicalScorecard.bias_audits} audits · {agentEthicalScorecard.pending_appeals} appeals</span>
+                    <span>{agentEthicalScorecard.public_summary}</span>
+                    <span>{agentEthicalScorecard.improvement_actions[0] ?? "Publish-ready"}</span>
                   </div>
                 </article>
               ) : null}

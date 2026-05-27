@@ -2578,6 +2578,27 @@ export type AgentModelTransparencyReportRead = {
   models: AgentModelTransparencyItemRead[];
 };
 
+export type AgentEthicalScorecardRead = {
+  organization_id: UUID;
+  generated_at: string;
+  score: number;
+  grade: string;
+  total_models: number;
+  approved_models: number;
+  blocked_models: number;
+  undocumented_models: number;
+  bias_audits: number;
+  passing_bias_audits: number;
+  failing_bias_audits: number;
+  open_mitigations: number;
+  pending_appeals: number;
+  resolved_appeals: number;
+  human_review_required: number;
+  ledger_valid: boolean;
+  public_summary: string;
+  improvement_actions: string[];
+};
+
 export type AgentRunRecordRead = {
   id: UUID;
   task_id: UUID;
