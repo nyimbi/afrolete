@@ -16,6 +16,7 @@ from app.schemas.agent import (
 from app.services.agents import (
     assign_agent,
     create_agent,
+    execute_agent_task,
     list_agent_assignments,
     list_agent_tasks,
     list_agents,
@@ -129,6 +130,16 @@ async def list_agent_tasks_route(
         to_task_read(task)
         for task in await list_agent_tasks(db, organization_id, agent_id=agent_id)
     ]
+
+
+@router.post("/tasks/{task_id}/execute", response_model=AgentTaskRead)
+async def execute_agent_task_route(
+    task_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentTaskRead:
+    return to_task_read(await execute_agent_task(db, identity, task_id, authz))
 
 
 @router.patch("/tasks/{task_id}", response_model=AgentTaskRead)

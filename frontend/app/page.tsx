@@ -1503,6 +1503,21 @@ export default function HomePage() {
     );
   };
 
+  const executeAgentTask = (taskId: string) => {
+    runAction(
+      `agent-task-${taskId}-execute`,
+      () =>
+        apiRequest<AgentTaskRead>(`/agents/tasks/${taskId}/execute`, {
+          method: "POST",
+          identity
+        }),
+      (task) => {
+        setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
+        addLog(`Agent output is ${task.status}`, task.status === "failed" ? "bad" : "good");
+      }
+    );
+  };
+
   const createMetricDefinition = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -4833,9 +4848,11 @@ export default function HomePage() {
                   <div>
                     <strong>{task.title}</strong>
                     <span>{task.task_type} · {task.status}</span>
+                    {task.output_ref ? <span>{task.output_ref}</span> : null}
+                    {task.review_notes ? <span>{task.review_notes}</span> : null}
                   </div>
                   <div className="event-toolbar">
-                    <button type="button" onClick={() => updateAgentTask(task.id, "running")}>Run</button>
+                    <button type="button" onClick={() => executeAgentTask(task.id)}>Run</button>
                     <button type="button" onClick={() => updateAgentTask(task.id, "waiting_for_review")}>Review</button>
                     <button type="button" onClick={() => updateAgentTask(task.id, "completed")}>Done</button>
                   </div>

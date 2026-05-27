@@ -351,6 +351,24 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`. Full
     suite/build/screenshot verification deferred by user instruction during
     low-battery fast delivery.
+- Implemented slice 020 agent task execution fast surface:
+  - Added backend configuration for deterministic local agent execution,
+    optional provider-neutral webhook execution, webhook keys, default model
+    policy, and execution timeouts.
+  - Added an agent task execution endpoint that moves queued tasks through a
+    real run boundary, generates deterministic review-ready output by default,
+    or posts provider-neutral payloads to an external agent worker when
+    configured.
+  - Webhook execution captures output references, review notes, returned
+    statuses, HTTP failures, and transport errors on the task record.
+  - The console Run control now invokes the execution endpoint and displays
+    output references and review notes instead of only manually setting a task
+    to running.
+  - Verification: `uv run ruff check .`,
+    `uv run pytest tests/unit/test_agents.py -q` (2/2),
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`. Full
+    suite/build/screenshot and live provider execution deferred by user
+    instruction during low-battery fast delivery.
 
 ## Implementation Slices
 
@@ -376,6 +394,7 @@ athlete-development platform:
 | 017 - SaaS billing and subscription fast surface | Partial | Backend ruff; PostgreSQL migration upgrade; frontend typecheck | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, and console workflows are implemented; Stripe/processor webhooks, dunning automation, tax localization, plan-change proration, and full verification remain. |
 | 018 - Frontend Keycloak session handling | Partial | Frontend typecheck; diff check | Browser OIDC authorization-code + PKCE login, bearer-token API attachment, session display, logout URL wiring, and local-mode fallback are implemented; live Keycloak redirect and deployed smoke test remain. |
 | 019 - Communication delivery adapters | Partial | Backend ruff; communications tests 4/4; frontend typecheck | Configurable HTTP webhook dispatch, channel-specific adapter URLs, secured provider delivery callbacks, in-app delivery handling, failure capture, and console dispatch are implemented; real provider credentials, digest jobs, parent inbox, AI drafting, and full verification remain. |
+| 020 - Agent task execution fast surface | Partial | Backend ruff; agent tests 2/2; frontend typecheck | Agent tasks can now execute through a deterministic local executor or provider-neutral webhook boundary, produce output refs/review notes, and update console task state; live provider workers, model credential vaulting, run history tables, and governance telemetry remain. |
 
 ## Capability Coverage
 
@@ -393,7 +412,7 @@ Status values:
 | Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
 | Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, and console workflows are implemented. |
-| AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, task review, and console workflows are implemented; real AI execution pipelines and model governance remain. |
+| AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, and console workflows are implemented; live provider workers, model credential vaulting, run history tables, and model governance remain. |
 | Training and coaching plans | partial | Drill library, scoped plans, weekly plan blocks, session load formula, and console workflows are implemented; automatic AI generation/readiness/feedback loops remain. |
 | Competition, fixtures, officials, tournaments | partial | Competition records, participant registration, fixtures/results, officials, match events, standings, and console workflows are implemented; automated fixture generation, bracket visualization, advanced conflict resolution, ticketing, and broadcast operations remain. |
 | Communications and notifications | partial | Templates, scoped broadcasts, recipient expansion, configurable email/SMS/WhatsApp/Telegram/push webhook dispatch, delivery/read callback capture, notification preferences, quiet-hours controls, emergency override, guardian copy for minors, and console workflows are implemented; digest jobs, parent inbox, provider credentials, and AI drafting remain. |
@@ -427,5 +446,5 @@ Status values:
    upcoming competitions, and availability constraints.
 10. Add automated ingestion pipelines for video, audio narration, text
    evaluation, wearable feeds, and agent-extracted metric review.
-11. Add real AI execution workers, model/provider configuration, and AI
-   governance telemetry.
+11. Add live AI provider workers, credential vaulting, run history tables, and
+   AI governance telemetry.

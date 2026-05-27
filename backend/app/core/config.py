@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     communication_webhook_key: str = ""
     communication_delivery_timeout_seconds: float = 5.0
 
+    agent_execution_mode: Literal["deterministic", "webhook"] = "deterministic"
+    agent_webhook_url: str = ""
+    agent_webhook_key: str = ""
+    agent_default_model: str = "afrolete-local-planner"
+    agent_execution_timeout_seconds: float = 10.0
+
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, value: str) -> str:

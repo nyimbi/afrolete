@@ -1,10 +1,13 @@
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.models.agent import Agent, AgentAssignment, AgentTask
+from app.models.enums import AgentTaskStatus
 from app.models.event import Event
 from app.models.organization import Organization
 from app.models.team import AthleteProfile, Team
@@ -218,6 +221,38 @@ async def update_agent_task(
     return task
 
 
+async def execute_agent_task(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    task_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> AgentTask:
+    task = await db.get(AgentTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+    await ensure_manage_organization(authz, identity, task.organization_id)
+    if task.status == AgentTaskStatus.CANCELLED:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Task cancelled")
+
+    agent = await db.get(Agent, task.agent_id)
+    if agent is None or agent.organization_id != task.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    settings = settings or get_settings()
+    task.status = AgentTaskStatus.RUNNING
+    await db.flush()
+
+    if settings.agent_execution_mode == "webhook":
+        await execute_with_webhook(settings, agent, task, identity)
+    else:
+        execute_with_deterministic_planner(settings, agent, task)
+
+    await db.commit()
+    await db.refresh(task)
+    return task
+
+
 async def validate_assignment_scope(
     db: AsyncSession,
     organization_id: UUID,
@@ -253,3 +288,102 @@ async def validate_assignment_scope(
         raise HTTPException(status_code=404, detail="Assignment scope not found")
     if item.organization_id != organization_id:
         raise HTTPException(status_code=422, detail="Assignment scope belongs to another organization")
+
+
+def execute_with_deterministic_planner(
+    settings: Settings,
+    agent: Agent,
+    task: AgentTask,
+) -> None:
+    model_name = agent.model_policy or settings.agent_default_model
+    task.status = AgentTaskStatus.WAITING_FOR_REVIEW
+    task.output_ref = f"agent://tasks/{task.id}/outputs/deterministic"
+    task.review_notes = (
+        f"{agent.name} prepared a deterministic draft using {model_name}. "
+        f"Task: {task.title}. Input: {task.input_ref or 'none'}. "
+        "Review before applying the recommendation."
+    )
+
+
+async def execute_with_webhook(
+    settings: Settings,
+    agent: Agent,
+    task: AgentTask,
+    identity: CurrentIdentity,
+) -> None:
+    if not settings.agent_webhook_url:
+        task.status = AgentTaskStatus.FAILED
+        task.review_notes = "Agent webhook execution mode is enabled but no webhook URL is configured."
+        return
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.agent_execution_timeout_seconds) as client:
+            response = await client.post(
+                settings.agent_webhook_url,
+                json=agent_execution_payload(agent, task, identity, settings),
+                headers=agent_execution_headers(settings),
+            )
+        if not 200 <= response.status_code < 300:
+            task.status = AgentTaskStatus.FAILED
+            task.review_notes = f"Agent webhook returned {response.status_code}: {response.text[:600]}"
+            return
+        apply_agent_webhook_response(task, response)
+    except httpx.HTTPError as error:
+        task.status = AgentTaskStatus.FAILED
+        task.review_notes = str(error)[:600]
+
+
+def agent_execution_payload(
+    agent: Agent,
+    task: AgentTask,
+    identity: CurrentIdentity,
+    settings: Settings,
+) -> dict[str, object]:
+    return {
+        "event": "afrolete.agent.execute",
+        "provider": "webhook",
+        "model": agent.model_policy or settings.agent_default_model,
+        "agent": {
+            "id": str(agent.id),
+            "organization_id": str(agent.organization_id),
+            "name": agent.name,
+            "kind": agent.kind.value,
+            "purpose": agent.purpose,
+        },
+        "task": {
+            "id": str(task.id),
+            "organization_id": str(task.organization_id),
+            "type": task.task_type,
+            "title": task.title,
+            "input_ref": task.input_ref,
+        },
+        "requested_by": {
+            "user_id": str(identity.user_id),
+            "person_id": str(identity.person_id) if identity.person_id else None,
+        },
+    }
+
+
+def agent_execution_headers(settings: Settings) -> dict[str, str]:
+    headers = {"User-Agent": "AfroLete-Agent-Executor/1.0"}
+    if settings.agent_webhook_key:
+        headers["X-Afrolete-Agent-Key"] = settings.agent_webhook_key
+    return headers
+
+
+def apply_agent_webhook_response(task: AgentTask, response: httpx.Response) -> None:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    task.output_ref = str(payload.get("output_ref") or f"agent://tasks/{task.id}/outputs/webhook")
+    notes = payload.get("review_notes") or payload.get("summary") or "Agent webhook completed."
+    task.review_notes = str(notes)[:4000]
+    raw_status = payload.get("status") or AgentTaskStatus.WAITING_FOR_REVIEW.value
+    try:
+        task.status = AgentTaskStatus(str(raw_status))
+    except ValueError:
+        task.status = AgentTaskStatus.WAITING_FOR_REVIEW

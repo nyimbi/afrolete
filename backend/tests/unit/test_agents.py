@@ -96,6 +96,17 @@ def test_agent_assignment_and_task_review_workflow(client, identity_headers) -> 
     ).json()
     assert [item["id"] for item in task_list] == [task["id"]]
 
+    execution_response = client.post(
+        f"/api/v1/agents/tasks/{task['id']}/execute",
+        headers=identity_headers,
+    )
+
+    assert execution_response.status_code == 200
+    executed = execution_response.json()
+    assert executed["status"] == "waiting_for_review"
+    assert executed["output_ref"] == f"agent://tasks/{task['id']}/outputs/deterministic"
+    assert "deterministic draft" in executed["review_notes"]
+
     review_response = client.patch(
         f"/api/v1/agents/tasks/{task['id']}",
         headers=identity_headers,
