@@ -44,6 +44,7 @@ from app.schemas.communication import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.secrets import read_openbao_kv_secret
 
 
 async def ensure_manage_communications(
@@ -860,10 +861,15 @@ async def deliver_recipient(
     now: datetime,
 ) -> None:
     try:
+        headers = await delivery_headers(settings)
+        if headers.failure_reason:
+            recipient.delivery_status = MessageDeliveryStatus.FAILED
+            recipient.failure_reason = headers.failure_reason
+            return
         response = await client.post(
             webhook_url,
             json=delivery_payload(message, recipient, person),
-            headers=delivery_headers(settings),
+            headers=headers.headers,
         )
         if 200 <= response.status_code < 300:
             recipient.delivery_status = MessageDeliveryStatus.SENT
@@ -907,11 +913,53 @@ def delivery_payload(
     }
 
 
-def delivery_headers(settings: Settings) -> dict[str, str]:
+class DeliveryHeaderResolution:
+    def __init__(self, headers: dict[str, str], failure_reason: str | None = None) -> None:
+        self.headers = headers
+        self.failure_reason = failure_reason
+
+
+async def delivery_headers(settings: Settings) -> DeliveryHeaderResolution:
     headers = {"User-Agent": "AfroLete-Communications/1.0"}
+    key_resolution = await resolve_communication_webhook_key(settings)
+    if key_resolution["failure_reason"]:
+        return DeliveryHeaderResolution(headers, str(key_resolution["failure_reason"]))
+    if key_resolution["key"]:
+        headers["X-Afrolete-Delivery-Key"] = str(key_resolution["key"])
+        headers["X-Afrolete-Delivery-Key-Source"] = str(key_resolution["source"])
+    return DeliveryHeaderResolution(headers)
+
+
+async def resolve_communication_webhook_key(settings: Settings) -> dict[str, str | None]:
     if settings.communication_webhook_key:
-        headers["X-Afrolete-Delivery-Key"] = settings.communication_webhook_key
-    return headers
+        return {"key": settings.communication_webhook_key, "source": "env", "failure_reason": None}
+    if not settings.communication_webhook_key_secret_path:
+        return {"key": None, "source": "unset", "failure_reason": None}
+    if not settings.openbao_addr or not settings.openbao_token:
+        return {
+            "key": None,
+            "source": "openbao",
+            "failure_reason": "Communication webhook key is configured for OpenBao but OpenBao address/token is missing.",
+        }
+    try:
+        secret = await read_openbao_kv_secret(
+            settings,
+            settings.communication_webhook_key_secret_path,
+            settings.communication_webhook_key_secret_field,
+        )
+    except httpx.HTTPError as error:
+        return {
+            "key": None,
+            "source": "openbao",
+            "failure_reason": f"OpenBao communication webhook key fetch failed: {error}",
+        }
+    if not secret:
+        return {
+            "key": None,
+            "source": "openbao",
+            "failure_reason": "OpenBao communication webhook key secret field is empty.",
+        }
+    return {"key": secret, "source": "openbao", "failure_reason": None}
 
 
 def delivery_webhook_url_for(settings: Settings, channel: CommunicationChannel) -> str | None:

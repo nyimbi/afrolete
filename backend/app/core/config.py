@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     communication_telegram_webhook_url: str = ""
     communication_push_webhook_url: str = ""
     communication_webhook_key: str = ""
+    communication_webhook_key_secret_path: str = ""
+    communication_webhook_key_secret_field: str = "value"
     communication_delivery_timeout_seconds: float = 5.0
 
     agent_execution_mode: Literal["deterministic", "webhook"] = "deterministic"

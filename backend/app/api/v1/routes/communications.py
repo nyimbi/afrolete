@@ -41,6 +41,7 @@ from app.services.communications import (
     list_templates,
     mark_inbox_item_read,
     record_delivery_event,
+    resolve_communication_webhook_key,
     run_message_escalation,
     run_digest_scheduler,
     update_recipient_status,
@@ -304,8 +305,12 @@ async def record_delivery_event_route(
     settings: Settings = Depends(get_settings),
     db: AsyncSession = Depends(get_db),
 ) -> MessageRecipientRead:
-    if settings.communication_webhook_key:
-        if x_afrolete_delivery_key != settings.communication_webhook_key:
+    key_resolution = await resolve_communication_webhook_key(settings)
+    if key_resolution["failure_reason"]:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Delivery webhook key is unavailable")
+    resolved_key = key_resolution["key"]
+    if resolved_key:
+        if x_afrolete_delivery_key != resolved_key:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     elif settings.env != "local":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
