@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -71,19 +72,27 @@ class AgentTaskUpdate(BaseModel):
 
 
 class AgentRunRecordRead(BaseModel):
+    id: UUID
     task_id: UUID
     agent_id: UUID
     agent_name: str
     agent_kind: AgentKind
     organization_id: UUID
+    event_type: str
     task_type: str
     title: str
     status: AgentTaskStatus
     model_policy: str
+    execution_mode: str
     input_ref: str | None
     output_ref: str | None
     review_required: bool
     governance_notes: str
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_ms: int | None
+    record_hash: str
+    previous_record_hash: str | None
 
 
 class AgentCredentialStatusRead(BaseModel):

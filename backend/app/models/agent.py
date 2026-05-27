@@ -1,6 +1,7 @@
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -51,3 +52,35 @@ class AgentTask(IdMixin, TimestampMixin, Base):
     input_ref: Mapped[str | None] = mapped_column(String(500))
     output_ref: Mapped[str | None] = mapped_column(String(500))
     review_notes: Mapped[str | None] = mapped_column(Text)
+
+
+class AgentRunRecord(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_run_records"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_agent_run_records_idempotency_key"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    agent_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("agents.id"), index=True)
+    task_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("agent_tasks.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[AgentTaskStatus] = mapped_column(
+        enum_type(AgentTaskStatus),
+        nullable=False,
+        index=True,
+    )
+    model_policy: Mapped[str] = mapped_column(String(120), nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    input_ref: Mapped[str | None] = mapped_column(String(500))
+    output_ref: Mapped[str | None] = mapped_column(String(500))
+    review_notes: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    executed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    governance_notes: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    previous_record_hash: Mapped[str | None] = mapped_column(String(128))
+    record_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)

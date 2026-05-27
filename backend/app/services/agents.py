@@ -1,12 +1,15 @@
+import hashlib
+import json
+from datetime import UTC, datetime
 from uuid import UUID
 
 import httpx
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.models.agent import Agent, AgentAssignment, AgentTask
+from app.models.agent import Agent, AgentAssignment, AgentRunRecord, AgentTask
 from app.models.enums import AgentTaskStatus
 from app.models.event import Event
 from app.models.organization import Organization
@@ -175,6 +178,15 @@ async def queue_agent_task(
         input_ref=payload.input_ref,
     )
     db.add(task)
+    await db.flush()
+    await append_agent_run_record(
+        db,
+        agent,
+        task,
+        identity,
+        event_type="queued",
+        settings=get_settings(),
+    )
     await db.commit()
     await db.refresh(task)
     return task
@@ -203,29 +215,38 @@ async def agent_run_records(
 ) -> list[dict[str, object]]:
     rows = (
         await db.execute(
-            select(AgentTask, Agent)
-            .join(Agent, Agent.id == AgentTask.agent_id)
-            .where(AgentTask.organization_id == organization_id)
-            .order_by(AgentTask.created_at.desc())
+            select(AgentRunRecord, AgentTask, Agent)
+            .join(AgentTask, AgentTask.id == AgentRunRecord.task_id)
+            .join(Agent, Agent.id == AgentRunRecord.agent_id)
+            .where(AgentRunRecord.organization_id == organization_id)
+            .order_by(AgentRunRecord.created_at.desc())
         )
     ).all()
     return [
         {
+            "id": record.id,
             "task_id": task.id,
             "agent_id": agent.id,
             "agent_name": agent.name,
             "agent_kind": agent.kind,
             "organization_id": task.organization_id,
+            "event_type": record.event_type,
             "task_type": task.task_type,
             "title": task.title,
-            "status": task.status,
-            "model_policy": agent.model_policy or get_settings().agent_default_model,
-            "input_ref": task.input_ref,
-            "output_ref": task.output_ref,
-            "review_required": task.status == AgentTaskStatus.WAITING_FOR_REVIEW,
-            "governance_notes": governance_notes(agent, task),
+            "status": record.status,
+            "model_policy": record.model_policy,
+            "execution_mode": record.execution_mode,
+            "input_ref": record.input_ref,
+            "output_ref": record.output_ref,
+            "review_required": record.status == AgentTaskStatus.WAITING_FOR_REVIEW,
+            "governance_notes": record.governance_notes,
+            "started_at": record.started_at,
+            "finished_at": record.finished_at,
+            "duration_ms": record.duration_ms,
+            "record_hash": record.record_hash,
+            "previous_record_hash": record.previous_record_hash,
         }
-        for task, agent in rows
+        for record, task, agent in rows
     ]
 
 
@@ -270,6 +291,17 @@ async def update_agent_task(
     if payload.review_notes is not None:
         task.review_notes = payload.review_notes
 
+    agent = await db.get(Agent, task.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    await append_agent_run_record(
+        db,
+        agent,
+        task,
+        identity,
+        event_type="manual_update",
+        settings=get_settings(),
+    )
     await db.commit()
     await db.refresh(task)
     return task
@@ -296,15 +328,120 @@ async def execute_agent_task(
     settings = settings or get_settings()
     task.status = AgentTaskStatus.RUNNING
     await db.flush()
+    started_at = datetime.now(UTC)
+    await append_agent_run_record(
+        db,
+        agent,
+        task,
+        identity,
+        event_type="execution_started",
+        settings=settings,
+        started_at=started_at,
+    )
 
     if settings.agent_execution_mode == "webhook":
         await execute_with_webhook(settings, agent, task, identity)
     else:
         execute_with_deterministic_planner(settings, agent, task)
 
+    finished_at = datetime.now(UTC)
+    await append_agent_run_record(
+        db,
+        agent,
+        task,
+        identity,
+        event_type="execution_finished",
+        settings=settings,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_ms=int((finished_at - started_at).total_seconds() * 1000),
+    )
     await db.commit()
     await db.refresh(task)
     return task
+
+
+async def append_agent_run_record(
+    db: AsyncSession,
+    agent: Agent,
+    task: AgentTask,
+    identity: CurrentIdentity,
+    event_type: str,
+    settings: Settings,
+    started_at: datetime | None = None,
+    finished_at: datetime | None = None,
+    duration_ms: int | None = None,
+) -> AgentRunRecord:
+    sequence = await agent_task_record_sequence(db, task.id)
+    previous_hash = await latest_agent_record_hash(db, task.organization_id)
+    model_policy = agent.model_policy or settings.agent_default_model
+    note = governance_notes(agent, task)
+    idempotency_key = f"{task.id}:{event_type}:{sequence}"
+    record_hash = agent_record_hash(
+        {
+            "organization_id": str(task.organization_id),
+            "agent_id": str(agent.id),
+            "task_id": str(task.id),
+            "event_type": event_type,
+            "status": task.status.value,
+            "model_policy": model_policy,
+            "execution_mode": settings.agent_execution_mode,
+            "input_ref": task.input_ref,
+            "output_ref": task.output_ref,
+            "review_notes": task.review_notes,
+            "started_at": started_at.isoformat() if started_at else None,
+            "finished_at": finished_at.isoformat() if finished_at else None,
+            "duration_ms": duration_ms,
+            "executed_by_person_id": str(identity.person_id) if identity.person_id else None,
+            "governance_notes": note,
+            "idempotency_key": idempotency_key,
+            "previous_record_hash": previous_hash,
+        }
+    )
+    record = AgentRunRecord(
+        organization_id=task.organization_id,
+        agent_id=agent.id,
+        task_id=task.id,
+        event_type=event_type,
+        status=task.status,
+        model_policy=model_policy,
+        execution_mode=settings.agent_execution_mode,
+        input_ref=task.input_ref,
+        output_ref=task.output_ref,
+        review_notes=task.review_notes,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_ms=duration_ms,
+        executed_by_person_id=identity.person_id,
+        governance_notes=note,
+        idempotency_key=idempotency_key,
+        previous_record_hash=previous_hash,
+        record_hash=record_hash,
+    )
+    db.add(record)
+    await db.flush()
+    return record
+
+
+async def agent_task_record_sequence(db: AsyncSession, task_id: UUID) -> int:
+    count = await db.scalar(
+        select(func.count(AgentRunRecord.id)).where(AgentRunRecord.task_id == task_id)
+    )
+    return int(count or 0) + 1
+
+
+async def latest_agent_record_hash(db: AsyncSession, organization_id: UUID) -> str | None:
+    return await db.scalar(
+        select(AgentRunRecord.record_hash)
+        .where(AgentRunRecord.organization_id == organization_id)
+        .order_by(AgentRunRecord.created_at.desc(), AgentRunRecord.id.desc())
+        .limit(1)
+    )
+
+
+def agent_record_hash(payload: dict[str, object]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 async def validate_assignment_scope(

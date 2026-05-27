@@ -1381,19 +1381,27 @@ export type AgentGovernanceSummaryRead = {
 };
 
 export type AgentRunRecordRead = {
+  id: UUID;
   task_id: UUID;
   agent_id: UUID;
   agent_name: string;
   agent_kind: AgentKind;
   organization_id: UUID;
+  event_type: string;
   task_type: string;
   title: string;
   status: AgentTaskStatus;
   model_policy: string;
+  execution_mode: string;
   input_ref: string | null;
   output_ref: string | null;
   review_required: boolean;
   governance_notes: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  record_hash: string;
+  previous_record_hash: string | null;
 };
 
 export type MetricDefinitionRead = {

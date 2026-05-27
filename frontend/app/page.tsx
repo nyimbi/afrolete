@@ -7537,10 +7537,11 @@ export default function HomePage() {
                 </article>
               ) : null}
               {agentRuns.slice(0, 3).map((run) => (
-                <article key={run.task_id} className="task-card">
+                <article key={run.id} className="task-card">
                   <div>
-                    <strong>{run.agent_name} · {run.status}</strong>
-                    <span>{run.model_policy} · {run.governance_notes}</span>
+                    <strong>{run.agent_name} · {run.event_type} · {run.status}</strong>
+                    <span>{run.execution_mode} · {run.model_policy} · {run.governance_notes}</span>
+                    <span>{run.record_hash.slice(0, 12)}{run.previous_record_hash ? ` <- ${run.previous_record_hash.slice(0, 12)}` : ""}</span>
                   </div>
                 </article>
               ))}
