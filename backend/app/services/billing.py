@@ -225,6 +225,88 @@ async def billing_tax_quote(
     }
 
 
+async def deliver_tax_filing(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    period_start: date,
+    period_end: date,
+    jurisdiction: str,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> dict:
+    await ensure_manage_billing(authz, identity, organization_id)
+    if period_end < period_start:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="period_end must be on or after period_start")
+    selected_settings = settings or get_settings()
+    invoices = [
+        invoice
+        for invoice in await list_invoices(db, organization_id)
+        if invoice.period_start <= period_end and invoice.period_end >= period_start
+    ]
+    currency = filing_currency(invoices)
+    filed_at = datetime.now(UTC)
+    result = {
+        "organization_id": organization_id,
+        "jurisdiction": jurisdiction.upper(),
+        "period_start": period_start,
+        "period_end": period_end,
+        "invoice_count": len(invoices),
+        "taxable_subtotal": money(sum((invoice.subtotal for invoice in invoices), Decimal("0"))),
+        "tax_amount": money(sum((invoice.tax_amount for invoice in invoices), Decimal("0"))),
+        "gross_total": money(sum((invoice.total for invoice in invoices), Decimal("0"))),
+        "outstanding_total": money(
+            sum((invoice.total - invoice.amount_paid for invoice in invoices), Decimal("0"))
+        ),
+        "currency": currency,
+        "filing_reference": tax_filing_reference(organization_id, jurisdiction, period_start, period_end),
+        "delivery_mode": selected_settings.billing_tax_filing_delivery_mode,
+        "delivery_attempted": False,
+        "delivered": False,
+        "destination": selected_settings.billing_tax_filing_webhook_url or None,
+        "provider_status_code": None,
+        "failure_reason": None,
+        "filed_at": filed_at,
+    }
+    if selected_settings.billing_tax_filing_delivery_mode == "record_only":
+        result["failure_reason"] = "Record-only filing mode; tax package prepared for manual submission."
+        return result
+    if not selected_settings.billing_tax_filing_webhook_url:
+        result["failure_reason"] = "Tax filing webhook mode is enabled but no webhook URL is configured."
+        return result
+
+    result["delivery_attempted"] = True
+    payload = {
+        "event_type": "billing.tax_filing",
+        "organization_id": str(organization_id),
+        "jurisdiction": result["jurisdiction"],
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+        "invoice_count": result["invoice_count"],
+        "taxable_subtotal": str(result["taxable_subtotal"]),
+        "tax_amount": str(result["tax_amount"]),
+        "gross_total": str(result["gross_total"]),
+        "outstanding_total": str(result["outstanding_total"]),
+        "currency": currency,
+        "filing_reference": result["filing_reference"],
+        "filed_at": filed_at.isoformat(),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=selected_settings.billing_tax_filing_timeout_seconds) as client:
+            response = await client.post(
+                selected_settings.billing_tax_filing_webhook_url,
+                json=payload,
+                headers=billing_tax_filing_headers(selected_settings),
+            )
+        result["provider_status_code"] = response.status_code
+        result["delivered"] = 200 <= response.status_code < 300
+        if not result["delivered"]:
+            result["failure_reason"] = f"Tax filing webhook returned {response.status_code}: {response.text[:500]}"
+    except httpx.HTTPError as error:
+        result["failure_reason"] = f"Tax filing webhook failed: {error}"
+    return result
+
+
 async def proration_quote(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -404,6 +486,13 @@ def billing_dunning_headers(settings: Settings) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
     if settings.billing_dunning_webhook_key:
         headers["X-Afrolete-Billing-Dunning-Key"] = settings.billing_dunning_webhook_key
+    return headers
+
+
+def billing_tax_filing_headers(settings: Settings) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if settings.billing_tax_filing_webhook_key:
+        headers["X-Afrolete-Billing-Tax-Filing-Key"] = settings.billing_tax_filing_webhook_key
     return headers
 
 
@@ -609,6 +698,25 @@ def filing_hint(jurisdiction: str, reverse_charge: bool) -> str:
     if jurisdiction == "US":
         return "Sales tax not applied by this generic quote; configure state rules before filing."
     return "No localized rule configured; review jurisdiction settings before filing."
+
+
+def filing_currency(invoices: list[SaaSInvoice]) -> str:
+    currencies = {invoice.currency for invoice in invoices}
+    if len(currencies) == 1:
+        return next(iter(currencies))
+    return "mixed" if currencies else "USD"
+
+
+def tax_filing_reference(
+    organization_id: UUID,
+    jurisdiction: str,
+    period_start: date,
+    period_end: date,
+) -> str:
+    return (
+        f"TAX-{jurisdiction.upper()}-{str(organization_id)[:8]}-"
+        f"{period_start.strftime('%Y%m%d')}-{period_end.strftime('%Y%m%d')}"
+    )
 
 
 def proration_recommendation(net_amount: Decimal) -> str:

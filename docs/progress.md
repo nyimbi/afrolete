@@ -599,6 +599,7 @@ athlete-development platform:
 | 034 - Billing webhook signature boundary | Partial | Backend ruff; frontend typecheck; diff check | SaaS payment webhook intake now supports timestamped HMAC signature enforcement, configurable tolerance, signature result reporting, and console visibility; external dunning delivery, tax filing integrations, plan-change application, and full verification remain. |
 | 035 - Billing dunning delivery | Partial | Backend ruff; frontend typecheck; diff check | Overdue invoice dunning notices can now be delivered through a configurable provider-neutral webhook, record-only mode stays usable locally, delivery keys and timeouts are configurable, and the console shows delivery outcomes; tax filing integrations, plan-change application, and full verification remain. |
 | 036 - Billing plan-change application | Partial | Backend ruff; frontend typecheck; diff check | Proration quotes can now be applied to tenant subscriptions, updating negotiated price, optional plan identity, billing cycle, subscription status, and plan-change notes from the console; tax filing integrations and full verification remain. |
+| 037 - Billing tax filing delivery | Partial | Backend ruff; frontend typecheck; diff check | Invoice tax totals can now be packaged by jurisdiction and period, prepared in record-only mode, or delivered through a configurable tax filing webhook with separate keys/timeouts and console result visibility; full billing verification remains. |
 
 ## Capability Coverage
 
@@ -625,7 +626,7 @@ Status values:
 | Finance, sponsorship, fundraising, ticketing | partial | Sponsors, sponsorship agreements, fundraising campaigns, donations, ticket products/orders/QR tickets/check-in, invoices, payments, settlement summaries, refunds, tax quotes, accounting exports, sponsorship dashboards, commercial summary, and console workflows are implemented; live payment provider webhooks, tax authority filing, accounting API sync, and sponsor-facing dashboards remain. |
 | Reports and intelligence | partial | Report definitions, generated reports, scheduled delivery, intelligence insights, predictive risk scores, export jobs, reporting summary, artifact rendering metadata, authenticated PDF/XLSX/CSV/API/HTML artifact download, local artifact persistence, stored artifact URLs, short-lived signed artifact links, verification scoring, chart-ready summaries, visual chart cards, benchmark models, deterministic AI review insights, and console workflows are implemented; real AI model execution, MinIO persistence, visual report QA, deeper chart interactions, and full verification remain. |
 | Integrations and webhooks | foundation | Keycloak OIDC bearer-token validation, frontend PKCE session handling, and SpiceDB gRPC authorization adapter are implemented; live service smoke tests and other integrations remain future slices. |
-| SaaS billing/subscriptions | partial | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, tax quotes, proration quotes, plan-change application, dunning notice preparation and webhook delivery, signed payment webhook intake, and console workflows are implemented; tax filing integrations and full verification remain. |
+| SaaS billing/subscriptions | partial | Billing plans, tenant subscriptions, usage meters/records, SaaS invoices/payments, entitlements, billing summary, tax quotes, tax filing packages/delivery, proration quotes, plan-change application, dunning notice preparation and webhook delivery, signed payment webhook intake, and console workflows are implemented; full billing verification remains. |
 | Beautiful operational UI/UX | partial | First screen is now an operational console with responsive tenant, roster, event, assets, commerce, reports, billing, competition, communications, attendance, performance, training, agent, and safeguarding workflows. |
 
 ## Next Actions
@@ -643,8 +644,8 @@ Status values:
 6. Add MinIO object persistence, lifecycle policy, visual report layout QA,
    deeper chart interactions, live AI-generated insights, and report
    verification coverage.
-7. Add jurisdiction-specific tax filing integrations and full billing
-   verification coverage.
+7. Add full billing verification coverage with provider replay tests,
+   tax-filing delivery tests, proration application tests, and browser QA.
 8. Add advanced tournament advancement, bracket visualization polish,
    scheduling optimization algorithms, ticketing, and broadcast operations for
    leagues and tournaments.

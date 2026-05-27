@@ -954,6 +954,27 @@ export type BillingProrationQuoteRead = {
   recommendation: string;
 };
 
+export type BillingTaxFilingRead = {
+  organization_id: UUID;
+  jurisdiction: string;
+  period_start: string;
+  period_end: string;
+  invoice_count: number;
+  taxable_subtotal: string;
+  tax_amount: string;
+  gross_total: string;
+  outstanding_total: string;
+  currency: string;
+  filing_reference: string;
+  delivery_mode: string;
+  delivery_attempted: boolean;
+  delivered: boolean;
+  destination: string | null;
+  provider_status_code: number | null;
+  failure_reason: string | null;
+  filed_at: string;
+};
+
 export type BillingPlanChangeRead = BillingProrationQuoteRead & {
   previous_billing_plan_id: UUID;
   new_billing_plan_id: UUID;

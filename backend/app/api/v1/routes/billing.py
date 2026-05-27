@@ -19,6 +19,7 @@ from app.schemas.billing import (
     BillingPlanRead,
     BillingProrationQuoteRead,
     BillingSummaryRead,
+    BillingTaxFilingRead,
     BillingTaxQuoteRead,
     SaaSInvoiceCreate,
     SaaSInvoiceRead,
@@ -44,6 +45,7 @@ from app.services.billing import (
     create_subscription,
     create_usage_meter,
     deliver_dunning_notice,
+    deliver_tax_filing,
     dunning_notice,
     ingest_payment_webhook,
     list_entitlements,
@@ -259,6 +261,29 @@ async def tax_quote_route(
 ) -> BillingTaxQuoteRead:
     return BillingTaxQuoteRead(
         **await billing_tax_quote(organization_id, subtotal, jurisdiction, reverse_charge)
+    )
+
+
+@router.post("/tax-filing/deliver", response_model=BillingTaxFilingRead)
+async def tax_filing_route(
+    organization_id: UUID = Query(),
+    period_start: date = Query(),
+    period_end: date = Query(),
+    jurisdiction: str = Query(default="KE", min_length=2, max_length=8),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BillingTaxFilingRead:
+    return BillingTaxFilingRead(
+        **await deliver_tax_filing(
+            db,
+            identity,
+            organization_id,
+            period_start,
+            period_end,
+            jurisdiction,
+            authz,
+        )
     )
 
 

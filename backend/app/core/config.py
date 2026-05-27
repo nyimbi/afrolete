@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     billing_dunning_webhook_url: str = ""
     billing_dunning_webhook_key: str = ""
     billing_dunning_timeout_seconds: float = 5.0
+    billing_tax_filing_delivery_mode: Literal["record_only", "webhook"] = "record_only"
+    billing_tax_filing_webhook_url: str = ""
+    billing_tax_filing_webhook_key: str = ""
+    billing_tax_filing_timeout_seconds: float = 5.0
 
     report_artifact_dir: str = "data/report-artifacts"
     report_artifact_url_prefix: str = "local://reports"

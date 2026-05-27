@@ -142,6 +142,27 @@ class BillingTaxQuoteRead(BaseModel):
     filing_hint: str
 
 
+class BillingTaxFilingRead(BaseModel):
+    organization_id: UUID
+    jurisdiction: str
+    period_start: date
+    period_end: date
+    invoice_count: int
+    taxable_subtotal: Decimal
+    tax_amount: Decimal
+    gross_total: Decimal
+    outstanding_total: Decimal
+    currency: str
+    filing_reference: str
+    delivery_mode: str
+    delivery_attempted: bool
+    delivered: bool
+    destination: str | None
+    provider_status_code: int | None
+    failure_reason: str | None
+    filed_at: datetime
+
+
 class BillingProrationQuoteRead(BaseModel):
     organization_id: UUID
     subscription_id: UUID

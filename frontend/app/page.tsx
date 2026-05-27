@@ -36,6 +36,7 @@ import type {
   BillingPlanRead,
   BillingProrationQuoteRead,
   BillingSummaryRead,
+  BillingTaxFilingRead,
   BillingTaxQuoteRead,
   ChannelPreference,
   CommunicationDigestRead,
@@ -307,6 +308,7 @@ export default function HomePage() {
   const [saasPayments, setSaasPayments] = useState<SaaSPaymentRead[]>([]);
   const [billingEntitlements, setBillingEntitlements] = useState<BillingEntitlementRead[]>([]);
   const [billingTaxQuote, setBillingTaxQuote] = useState<BillingTaxQuoteRead | null>(null);
+  const [billingTaxFiling, setBillingTaxFiling] = useState<BillingTaxFilingRead | null>(null);
   const [billingProration, setBillingProration] = useState<BillingProrationQuoteRead | null>(null);
   const [billingPlanChange, setBillingPlanChange] = useState<BillingPlanChangeRead | null>(null);
   const [billingDunning, setBillingDunning] = useState<BillingDunningNoticeRead | null>(null);
@@ -1224,6 +1226,7 @@ export default function HomePage() {
       setSaasPayments([]);
       setBillingEntitlements([]);
       setBillingTaxQuote(null);
+      setBillingTaxFiling(null);
       setBillingProration(null);
       setBillingPlanChange(null);
       setBillingDunning(null);
@@ -3673,6 +3676,28 @@ export default function HomePage() {
     );
   };
 
+  const deliverBillingTaxFiling = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "billing-tax-filing",
+      () =>
+        apiRequest<BillingTaxFilingRead>(
+          `/billing/tax-filing/deliver?organization_id=${selectedOrganizationId}&period_start=${billingForm.period_start}&period_end=${billingForm.period_end}&jurisdiction=${billingForm.tax_jurisdiction}`,
+          { method: "POST", identity }
+        ),
+      (filing) => {
+        setBillingTaxFiling(filing);
+        addLog(
+          filing.delivered ? "Tax filing delivered" : filing.failure_reason ?? "Tax filing package prepared",
+          filing.delivered ? "good" : "neutral"
+        );
+      }
+    );
+  };
+
   const quoteBillingProration = () => {
     if (!selectedOrganizationId || !selectedSubscriptionId) {
       addLog("Create or select a subscription first", "bad");
@@ -5012,6 +5037,7 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createBillingPlanAndSubscription} disabled={busyAction !== null}>Subscribe</button>
                 <button type="button" onClick={quoteBillingTax} disabled={busyAction !== null}>Tax</button>
+                <button type="button" onClick={deliverBillingTaxFiling} disabled={busyAction !== null}>File Tax</button>
                 <button type="button" onClick={quoteBillingProration} disabled={busyAction !== null}>Prorate</button>
                 <button type="button" onClick={applyBillingPlanChange} disabled={busyAction !== null}>Apply</button>
                 <button type="button" onClick={createBillingEntitlement} disabled={busyAction !== null}>Entitle</button>
@@ -5074,6 +5100,14 @@ export default function HomePage() {
                   <div>
                     <strong>{billingTaxQuote.jurisdiction} tax · {billingTaxQuote.tax_amount}</strong>
                     <span>{billingTaxQuote.tax_rate}% · total {billingTaxQuote.total} · {billingTaxQuote.filing_hint}</span>
+                  </div>
+                </article>
+              ) : null}
+              {billingTaxFiling ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{billingTaxFiling.jurisdiction} filing · {billingTaxFiling.tax_amount}</strong>
+                    <span>{billingTaxFiling.invoice_count} invoices · {billingTaxFiling.delivery_mode} · {billingTaxFiling.delivered ? "delivered" : billingTaxFiling.failure_reason ?? "prepared"}</span>
                   </div>
                 </article>
               ) : null}
