@@ -74,6 +74,7 @@ import type {
   EventTravelApprovalRead,
   EventTravelApprovalRoutingRead,
   EventTravelCarpoolRideRead,
+  EventTravelChecklistEvidenceUploadRead,
   EventTravelChecklistItemRead,
   EventTravelConsentBatchRead,
   EventTravelConsentReminderRead,
@@ -366,6 +367,7 @@ export default function HomePage() {
   const [travelApprovals, setTravelApprovals] = useState<EventTravelApprovalRead[]>([]);
   const [travelApprovalRouting, setTravelApprovalRouting] = useState<EventTravelApprovalRoutingRead | null>(null);
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
+  const [selectedTravelChecklistFile, setSelectedTravelChecklistFile] = useState<File | null>(null);
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
   const [selectedTravelReceiptFile, setSelectedTravelReceiptFile] = useState<File | null>(null);
@@ -2739,6 +2741,38 @@ export default function HomePage() {
           ...current.filter((entry) => entry.id !== updated.id)
         ]);
         addLog(`${updated.item_label}: ${updated.status}`, updated.status === "completed" ? "good" : "bad");
+      }
+    );
+  };
+
+  const uploadTravelChecklistEvidence = (item: EventTravelChecklistItemRead) => {
+    if (!selectedTravelChecklistFile) {
+      addLog("Choose a checklist evidence file first", "bad");
+      return;
+    }
+    runAction(
+      `travel-checklist-evidence-${item.id}`,
+      async () => {
+        const contentBase64 = await fileToBase64(selectedTravelChecklistFile);
+        return apiRequest<EventTravelChecklistEvidenceUploadRead>(`/events/travel-checklist-items/${item.id}/evidence`, {
+          method: "POST",
+          identity,
+          body: {
+            filename: selectedTravelChecklistFile.name,
+            content_type: selectedTravelChecklistFile.type || "application/octet-stream",
+            content_base64: contentBase64,
+            status: "completed",
+            notes: item.notes ?? `Evidence uploaded for ${item.item_label}.`
+          }
+        });
+      },
+      (upload) => {
+        setTravelChecklistItems((current) => [
+          upload.checklist_item,
+          ...current.filter((entry) => entry.id !== upload.checklist_item.id)
+        ]);
+        setSelectedTravelChecklistFile(null);
+        addLog(`${upload.filename} checklist evidence stored (${upload.size_bytes} bytes)`, "good");
       }
     );
   };
@@ -7374,6 +7408,10 @@ export default function HomePage() {
                 <input type="file" accept="image/*,.pdf" onChange={(event) => setSelectedTravelReceiptFile(event.target.files?.[0] ?? null)} />
               </label>
               <label className="wide-field">
+                Checklist evidence
+                <input type="file" accept="image/*,.pdf" onChange={(event) => setSelectedTravelChecklistFile(event.target.files?.[0] ?? null)} />
+              </label>
+              <label className="wide-field">
                 Emergency and medical
                 <input value={travelForm.medical_access_plan} onChange={(event) => setTravelForm({ ...travelForm, medical_access_plan: event.target.value })} />
               </label>
@@ -7527,6 +7565,7 @@ export default function HomePage() {
                     <span>{item.notes ?? item.evidence_url ?? "No evidence recorded"}</span>
                   </div>
                   <div className="event-toolbar">
+                    <button type="button" onClick={() => uploadTravelChecklistEvidence(item)}>Evidence</button>
                     <button type="button" onClick={() => updateTravelChecklistItem(item, "completed")}>Done</button>
                     <button type="button" onClick={() => updateTravelChecklistItem(item, "blocked")}>Block</button>
                     <button type="button" onClick={() => updateTravelChecklistItem(item, "pending")}>Reset</button>

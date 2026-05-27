@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     equipment_file_url_prefix: str = "local://equipment-files"
     travel_receipt_file_dir: str = "data/travel-receipts"
     travel_receipt_file_url_prefix: str = "local://travel-receipts"
+    travel_checklist_file_dir: str = "data/travel-checklist-files"
+    travel_checklist_file_url_prefix: str = "local://travel-checklist-files"
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"

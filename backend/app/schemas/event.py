@@ -340,6 +340,24 @@ class EventTravelChecklistItemRead(BaseModel):
     notes: str | None
 
 
+class EventTravelChecklistEvidenceUploadCreate(BaseModel):
+    filename: str = Field(min_length=1, max_length=240)
+    content_type: str = Field(default="application/octet-stream", max_length=120)
+    content_base64: str = Field(min_length=1)
+    status: str = Field(default="completed", pattern="^(pending|completed|blocked|not_applicable)$")
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelChecklistEvidenceUploadRead(BaseModel):
+    checklist_item_id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
+    checksum: str
+    evidence_url: str
+    checklist_item: EventTravelChecklistItemRead
+
+
 class EventTravelLocationUpdateCreate(BaseModel):
     phase: str = Field(default="en_route", pattern="^(departed|en_route|delayed|arrived|returned)$")
     source: str = Field(default="manual", min_length=2, max_length=80)

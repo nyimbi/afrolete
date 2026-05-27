@@ -18,6 +18,8 @@ from app.schemas.event import (
     EventTravelCarpoolRideCreate,
     EventTravelCarpoolRideRead,
     EventTravelCarpoolRideUpdate,
+    EventTravelChecklistEvidenceUploadCreate,
+    EventTravelChecklistEvidenceUploadRead,
     EventTravelChecklistItemRead,
     EventTravelChecklistItemUpdate,
     EventTravelChecklistSeedCreate,
@@ -92,6 +94,7 @@ from app.services.events import (
     update_travel_checklist_item,
     update_travel_expense,
     update_travel_plan,
+    upload_travel_checklist_evidence,
     upload_travel_expense_receipt,
 )
 from app.services.safeguarding import medical_clearance_for_event
@@ -528,6 +531,21 @@ async def update_travel_checklist_item_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelChecklistItemRead:
     return await update_travel_checklist_item(db, identity, checklist_item_id, payload, authz)
+
+
+@router.post(
+    "/travel-checklist-items/{checklist_item_id}/evidence",
+    response_model=EventTravelChecklistEvidenceUploadRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_travel_checklist_evidence_route(
+    checklist_item_id: UUID,
+    payload: EventTravelChecklistEvidenceUploadCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelChecklistEvidenceUploadRead:
+    return await upload_travel_checklist_evidence(db, identity, checklist_item_id, payload, authz)
 
 
 @router.get("/travel-plans/{travel_plan_id}/location-updates", response_model=list[EventTravelLocationUpdateRead])

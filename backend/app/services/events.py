@@ -60,6 +60,8 @@ from app.schemas.event import (
     EventTravelCarpoolRideCreate,
     EventTravelCarpoolRideRead,
     EventTravelCarpoolRideUpdate,
+    EventTravelChecklistEvidenceUploadCreate,
+    EventTravelChecklistEvidenceUploadRead,
     EventTravelChecklistItemRead,
     EventTravelChecklistItemUpdate,
     EventTravelChecklistSeedCreate,
@@ -935,6 +937,61 @@ async def update_travel_checklist_item(
     await db.commit()
     await db.refresh(item)
     return travel_checklist_item_read(item)
+
+
+async def upload_travel_checklist_evidence(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    checklist_item_id: UUID,
+    payload: EventTravelChecklistEvidenceUploadCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> EventTravelChecklistEvidenceUploadRead:
+    item = await db.get(EventTravelChecklistItem, checklist_item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel checklist item not found")
+    await ensure_manage_event_scope(authz, item.organization_id, identity)
+    content = decode_upload_content(payload.content_base64)
+    if not content:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Evidence file is empty")
+    selected_settings = settings or get_settings()
+    checksum = sha256(content).hexdigest()
+    safe_name = safe_upload_filename(payload.filename, fallback="travel-checklist-evidence")
+    storage_name = f"{checksum[:16]}-{safe_name}"
+    relative_path = (
+        Path(str(item.organization_id))
+        / str(item.travel_plan_id)
+        / str(item.id)
+        / storage_name
+    ).as_posix()
+    stored = put_object(
+        selected_settings,
+        local_root=selected_settings.travel_checklist_file_dir,
+        local_url_prefix=selected_settings.travel_checklist_file_url_prefix,
+        key=relative_path,
+        content=content,
+        content_type=payload.content_type or "application/octet-stream",
+    )
+    item.evidence_url = stored.url
+    item.status = payload.status
+    item.notes = payload.notes if payload.notes is not None else item.notes
+    if payload.status in {"completed", "blocked", "not_applicable"}:
+        item.completed_by_person_id = identity.person_id
+        item.completed_at = datetime.now(UTC)
+    elif payload.status == "pending":
+        item.completed_by_person_id = None
+        item.completed_at = None
+    await db.commit()
+    await db.refresh(item)
+    return EventTravelChecklistEvidenceUploadRead(
+        checklist_item_id=item.id,
+        filename=safe_name,
+        content_type=payload.content_type or "application/octet-stream",
+        size_bytes=len(content),
+        checksum=checksum,
+        evidence_url=stored.url,
+        checklist_item=travel_checklist_item_read(item),
+    )
 
 
 async def list_travel_location_updates(

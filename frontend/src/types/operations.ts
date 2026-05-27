@@ -597,6 +597,16 @@ export type EventTravelChecklistItemRead = {
   notes: string | null;
 };
 
+export type EventTravelChecklistEvidenceUploadRead = {
+  checklist_item_id: UUID;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  checksum: string;
+  evidence_url: string;
+  checklist_item: EventTravelChecklistItemRead;
+};
+
 export type EventTravelLocationUpdateRead = {
   id: UUID;
   organization_id: UUID;
