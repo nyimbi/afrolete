@@ -298,6 +298,10 @@ textarea:focus {
   height: 18px;
 }
 
+.wide-field {
+  grid-column: 1 / -1;
+}
+
 .status-panel {
   display: grid;
   gap: 10px;
@@ -409,6 +413,34 @@ textarea:focus {
   color: var(--blue);
   font-size: 13px;
   text-transform: uppercase;
+}
+
+.task-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.task-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfb;
+}
+
+.task-card strong,
+.task-card span {
+  display: block;
+}
+
+.task-card span {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
 }
 
 .safeguarding-panel {
@@ -537,5 +569,9 @@ textarea:focus {
 
   .attendance-row {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .task-card {
+    grid-template-columns: 1fr;
   }
 }

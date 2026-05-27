@@ -70,6 +70,22 @@ export type ParticipationClearanceStatus =
   | "consent_expired"
   | "no_guardian";
 
+export type AgentKind =
+  | "coaching"
+  | "operations"
+  | "safeguarding"
+  | "analytics"
+  | "communications"
+  | "scouting";
+
+export type AgentTaskStatus =
+  | "queued"
+  | "running"
+  | "waiting_for_review"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
 export type LocalIdentity = {
   sub: string;
   email: string;
@@ -216,4 +232,36 @@ export type ParticipationClearanceRead = {
   status: ParticipationClearanceStatus;
   consent_id: UUID | null;
   reason: string;
+};
+
+export type AgentRead = {
+  id: UUID;
+  organization_id: UUID | null;
+  name: string;
+  kind: AgentKind;
+  purpose: string;
+  status: string;
+  model_policy: string | null;
+};
+
+export type AgentAssignmentRead = {
+  id: UUID;
+  agent_id: UUID;
+  organization_id: UUID;
+  scope_type: string;
+  scope_id: string;
+  granted_by_person_id: UUID | null;
+};
+
+export type AgentTaskRead = {
+  id: UUID;
+  agent_id: UUID;
+  organization_id: UUID;
+  task_type: string;
+  title: string;
+  status: AgentTaskStatus;
+  requested_by_person_id: UUID | null;
+  input_ref: string | null;
+  output_ref: string | null;
+  review_notes: string | null;
 };

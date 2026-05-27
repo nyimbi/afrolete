@@ -4,6 +4,11 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react
 import { apiRequest } from "@/lib/api";
 import { apiBaseUrl } from "@/lib/config";
 import type {
+  AgentAssignmentRead,
+  AgentKind,
+  AgentRead,
+  AgentTaskRead,
+  AgentTaskStatus,
   AttendanceRecordRead,
   AttendanceSeedRead,
   AttendanceStatus,
@@ -46,6 +51,8 @@ export default function HomePage() {
   const [teams, setTeams] = useState<TeamRead[]>([]);
   const [events, setEvents] = useState<EventRead[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
+  const [agents, setAgents] = useState<AgentRead[]>([]);
+  const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -53,6 +60,7 @@ export default function HomePage() {
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
+  const [selectedAgentId, setSelectedAgentId] = useState("");
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -98,6 +106,17 @@ export default function HomePage() {
     guardian_email: "parent@example.com",
     guardian_phone: "+254700000000"
   });
+  const [agentForm, setAgentForm] = useState({
+    name: "Safeguarding Watch",
+    kind: "safeguarding" as AgentKind,
+    purpose: "Monitor consent gaps, unsafe participation, and review tasks before messages go out.",
+    model_policy: "human_review_required"
+  });
+  const [taskForm, setTaskForm] = useState({
+    task_type: "consent_gap_review",
+    title: "Review missing consent before matchday",
+    input_ref: "event-clearance"
+  });
 
   const selectedOrganization = useMemo(
     () => organizations.find((organization) => organization.id === selectedOrganizationId) ?? null,
@@ -110,6 +129,10 @@ export default function HomePage() {
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === selectedEventId) ?? null,
     [events, selectedEventId]
+  );
+  const selectedAgent = useMemo(
+    () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
+    [agents, selectedAgentId]
   );
   const selectedAthlete = useMemo(
     () => athletes.find((athlete) => athlete.personId === selectedAthleteId) ?? null,
@@ -167,6 +190,22 @@ export default function HomePage() {
     setAttendance(data);
   }, []);
 
+  const loadAgents = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<AgentRead[]>(`/agents?organization_id=${organizationId}`);
+    setAgents(data);
+    setSelectedAgentId((current) =>
+      data.some((agent) => agent.id === current) ? current : data[0]?.id ?? ""
+    );
+  }, []);
+
+  const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
+    const query = agentId ? `&agent_id=${agentId}` : "";
+    const data = await apiRequest<AgentTaskRead[]>(
+      `/agents/tasks?organization_id=${organizationId}${query}`
+    );
+    setAgentTasks(data);
+  }, []);
+
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.localIdentity");
     if (stored) {
@@ -191,8 +230,10 @@ export default function HomePage() {
     runAction("load-tenant-data", async () => {
       await loadTeams(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
+      await loadAgents(selectedOrganizationId);
+      await loadAgentTasks(selectedOrganizationId);
     }, () => addLog("Organization workspace loaded", "good"));
-  }, [selectedOrganizationId, loadTeams, loadEvents, runAction, addLog]);
+  }, [selectedOrganizationId, loadTeams, loadEvents, loadAgents, loadAgentTasks, runAction, addLog]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -212,6 +253,18 @@ export default function HomePage() {
     }
     runAction("load-attendance", () => loadAttendance(selectedEventId), () => undefined);
   }, [selectedEventId, loadAttendance, runAction]);
+
+  useEffect(() => {
+    if (!selectedOrganizationId) {
+      setAgentTasks([]);
+      return;
+    }
+    runAction(
+      "load-agent-tasks",
+      () => loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined),
+      () => undefined
+    );
+  }, [selectedAgentId, selectedOrganizationId, loadAgentTasks, runAction]);
 
   const createOrganization = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -463,6 +516,110 @@ export default function HomePage() {
     );
   };
 
+  const createAgent = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-agent",
+      () =>
+        apiRequest<AgentRead>("/agents", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            ...agentForm
+          }
+        }),
+      (agent) => {
+        setAgents((current) => [agent, ...current.filter((item) => item.id !== agent.id)]);
+        setSelectedAgentId(agent.id);
+        addLog(`${agent.name} is active`, "good");
+      }
+    );
+  };
+
+  const assignAgent = (scopeType: "organization" | "team" | "event") => {
+    if (!selectedOrganizationId || !selectedAgentId) {
+      addLog("Select an organization and agent first", "bad");
+      return;
+    }
+    const scopeId =
+      scopeType === "organization"
+        ? selectedOrganizationId
+        : scopeType === "team"
+          ? selectedTeamId
+          : selectedEventId;
+    if (!scopeId) {
+      addLog(`Select a ${scopeType} first`, "bad");
+      return;
+    }
+    runAction(
+      `assign-agent-${scopeType}`,
+      () =>
+        apiRequest<AgentAssignmentRead>(`/agents/${selectedAgentId}/assignments`, {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            scope_type: scopeType,
+            scope_id: scopeId
+          }
+        }),
+      (assignment) => addLog(`Agent assigned to ${assignment.scope_type}`, "good")
+    );
+  };
+
+  const queueAgentTask = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedOrganizationId || !selectedAgentId) {
+      addLog("Select an organization and agent first", "bad");
+      return;
+    }
+    runAction(
+      "queue-agent-task",
+      () =>
+        apiRequest<AgentTaskRead>(`/agents/${selectedAgentId}/tasks`, {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            ...taskForm,
+            input_ref: selectedEventId ? `event:${selectedEventId}` : taskForm.input_ref
+          }
+        }),
+      (task) => {
+        setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
+        addLog(`${selectedAgent?.name ?? "Agent"} task queued`, "good");
+      }
+    );
+  };
+
+  const updateAgentTask = (taskId: string, status: AgentTaskStatus) => {
+    runAction(
+      `agent-task-${taskId}-${status}`,
+      () =>
+        apiRequest<AgentTaskRead>(`/agents/tasks/${taskId}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            output_ref: status === "completed" ? `reviewed:${taskId}` : undefined,
+            review_notes:
+              status === "waiting_for_review"
+                ? "Agent output needs human review before action."
+                : `Marked ${status} from the command console.`
+          }
+        }),
+      (task) => {
+        setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
+        addLog(`Task moved to ${task.status}`, "good");
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -482,6 +639,7 @@ export default function HomePage() {
           <a href="#tenant">Tenant</a>
           <a href="#roster">Roster</a>
           <a href="#events">Events</a>
+          <a href="#agents">Agents</a>
           <a href="#safeguarding">Safeguarding</a>
         </nav>
         <div className="rail-status">
@@ -537,6 +695,10 @@ export default function HomePage() {
             <div className="stat-row">
               <span>Attendance</span>
               <strong>{attendance.length}</strong>
+            </div>
+            <div className="stat-row">
+              <span>Agents</span>
+              <strong>{agents.length}</strong>
             </div>
           </div>
 
@@ -786,6 +948,100 @@ export default function HomePage() {
                     Confirm
                   </button>
                 </div>
+              ))}
+            </div>
+          </form>
+        </section>
+
+        <section className="work-grid">
+          <form className="panel form-panel" id="agents" onSubmit={createAgent}>
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Agents</p>
+                <h2>Agent identity and scope</h2>
+              </div>
+              <button type="submit" disabled={busyAction !== null}>Create</button>
+            </div>
+            <div className="form-grid">
+              <label>
+                Agent
+                <input value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} />
+              </label>
+              <label>
+                Kind
+                <select value={agentForm.kind} onChange={(event) => setAgentForm({ ...agentForm, kind: event.target.value as AgentKind })}>
+                  <option value="safeguarding">Safeguarding</option>
+                  <option value="coaching">Coaching</option>
+                  <option value="operations">Operations</option>
+                  <option value="analytics">Analytics</option>
+                  <option value="communications">Communications</option>
+                  <option value="scouting">Scouting</option>
+                </select>
+              </label>
+              <label>
+                Model policy
+                <input value={agentForm.model_policy} onChange={(event) => setAgentForm({ ...agentForm, model_policy: event.target.value })} />
+              </label>
+              <label>
+                Purpose
+                <textarea value={agentForm.purpose} onChange={(event) => setAgentForm({ ...agentForm, purpose: event.target.value })} />
+              </label>
+            </div>
+            <div className="event-toolbar">
+              <button type="button" onClick={() => assignAgent("organization")} disabled={busyAction !== null}>Assign org</button>
+              <button type="button" onClick={() => assignAgent("team")} disabled={busyAction !== null}>Assign team</button>
+              <button type="button" onClick={() => assignAgent("event")} disabled={busyAction !== null}>Assign event</button>
+            </div>
+            <div className="selection-list compact">
+              {agents.map((agent) => (
+                <button
+                  type="button"
+                  key={agent.id}
+                  className={agent.id === selectedAgentId ? "selected" : ""}
+                  onClick={() => setSelectedAgentId(agent.id)}
+                >
+                  <span>{agent.name}</span>
+                  <small>{agent.kind} · {agent.model_policy ?? "default policy"}</small>
+                </button>
+              ))}
+            </div>
+          </form>
+
+          <form className="panel form-panel" onSubmit={queueAgentTask}>
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Task inbox</p>
+                <h2>Human-reviewed agent work</h2>
+              </div>
+              <button type="submit" disabled={busyAction !== null}>Queue</button>
+            </div>
+            <div className="form-grid">
+              <label>
+                Task type
+                <input value={taskForm.task_type} onChange={(event) => setTaskForm({ ...taskForm, task_type: event.target.value })} />
+              </label>
+              <label>
+                Input
+                <input value={taskForm.input_ref} onChange={(event) => setTaskForm({ ...taskForm, input_ref: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Title
+                <input value={taskForm.title} onChange={(event) => setTaskForm({ ...taskForm, title: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {agentTasks.map((task) => (
+                <article key={task.id} className="task-card">
+                  <div>
+                    <strong>{task.title}</strong>
+                    <span>{task.task_type} · {task.status}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => updateAgentTask(task.id, "running")}>Run</button>
+                    <button type="button" onClick={() => updateAgentTask(task.id, "waiting_for_review")}>Review</button>
+                    <button type="button" onClick={() => updateAgentTask(task.id, "completed")}>Done</button>
+                  </div>
+                </article>
               ))}
             </div>
           </form>

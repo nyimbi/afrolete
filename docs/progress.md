@@ -132,6 +132,20 @@ athlete-development platform:
   - Verification: `pnpm --filter @afrolete/frontend typecheck`,
     `pnpm --filter @afrolete/frontend build`, production Playwright screenshots
     at desktop and mobile sizes.
+- Implemented slice 009 first-class AI agent operations:
+  - Added agent APIs for organization-scoped agent creation, assignment to
+    organization/team/event/athlete-profile scopes, task queueing, task listing,
+    and human review/status updates.
+  - Agent creation now writes the agent owner relationship; assignment writes
+    `assigned_agent` relationships to SpiceDB-compatible resources.
+  - Added cross-organization scope validation so agents cannot be assigned to
+    resources outside their tenant.
+  - Added the agent identity and task inbox lane to the operational console,
+    including agent creation, assignment buttons, task queueing, and review
+    status transitions.
+  - Verification: `uv run ruff check .`, `uv run pytest`,
+    `uv run alembic upgrade head`, `pnpm --filter @afrolete/frontend
+    typecheck`, `pnpm --filter @afrolete/frontend build`.
 
 ## Implementation Slices
 
@@ -146,6 +160,7 @@ athlete-development platform:
 | 006 - Keycloak authentication | Partial | Backend tests 22/22 | Keycloak JWT validation and user provisioning are implemented behind runtime mode; frontend sign-in and live realm smoke test remain. |
 | 007 - SpiceDB authorization adapter | Partial | Adapter tests 4/4 | Official Python gRPC client wired behind runtime mode; live schema/write/check smoke test remains. |
 | 008 - Operational SaaS console | Partial | Frontend typecheck/build; desktop/mobile screenshots | Console now drives tenant, team, roster, event, attendance, guardian consent, and clearance workflows in local mode; production Keycloak session UX remains. |
+| 009 - AI agent operations | Partial | Backend tests 29/29; frontend build | Agents can be created, permissioned, assigned to scopes, queued for work, and reviewed from the console; real model execution and AI governance dashboards remain. |
 
 ## Capability Coverage
 
@@ -163,7 +178,7 @@ Status values:
 | Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees. |
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
 | Performance metrics and assessments | not-started | To follow after core operating vertical. |
-| AI-assisted ingestion and analysis | foundation | `Agent`, `AgentAssignment`, `AgentTask`, and SpiceDB `agent` schema added. |
+| AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, task review, and console workflows are implemented; real AI execution pipelines and model governance remain. |
 | Training and coaching plans | not-started | Future slice. |
 | Competition, fixtures, officials, tournaments | not-started | Future slice. |
 | Communications and notifications | foundation | Service boundary exists; workflow pending. |
@@ -183,4 +198,5 @@ Status values:
 3. Run a live SpiceDB schema/write/check smoke test with the OpenBao-managed
    SpiceDB key.
 4. Continue athlete profile workflows into performance metrics and assessments.
-5. Add AI agent management APIs and task inbox UI.
+5. Add real AI execution workers, model/provider configuration, and AI
+   governance telemetry.
