@@ -532,6 +532,9 @@ export type EmergencyActionPlanRead = {
   medical_protocols: string | null;
   weather_protocols: string | null;
   communication_protocols: string | null;
+  incident_command_roles: string | null;
+  escalation_matrix: string | null;
+  external_agency_contacts: string | null;
   equipment_locations: string | null;
   assembly_points: string | null;
   special_needs_plan: string | null;
@@ -551,6 +554,7 @@ export type EmergencyPlanActivationRead = {
   location_detail: string;
   activated_at: string;
   closed_at: string | null;
+  escalation_level: number;
   assigned_responders: string | null;
   guidance_steps: string | null;
   communication_log: string | null;

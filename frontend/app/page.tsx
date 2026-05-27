@@ -738,6 +738,9 @@ export default function HomePage() {
     medical_protocols: "Clear area, call medical lead, retrieve AED from clubhouse, begin first aid, log incident.",
     weather_protocols: "Lightning shelter: gym. Extreme heat: cooling station at clubhouse.",
     communication_protocols: "PA announcement, staff radio channel 3, mobile alert to staff and guardians.",
+    incident_command_roles: "Incident commander: Safety Officer. Medical lead: Club medic. Communications: Team manager.",
+    escalation_matrix: "Level 1: staff push. Level 2: guardians and venue operations. Level 3: emergency services and association leadership.",
+    external_agency_contacts: "Emergency services 911; Venue security x789; County health duty desk.",
     equipment_locations: "AED: clubhouse lobby. First aid: equipment room. Stretcher: tunnel entrance.",
     assembly_points: "North car park and clubhouse lawn.",
     special_needs_plan: "Assign accessibility marshal to ramp route and medical transport point.",
@@ -3899,6 +3902,9 @@ export default function HomePage() {
             medical_protocols: emergencyPlanForm.medical_protocols || null,
             weather_protocols: emergencyPlanForm.weather_protocols || null,
             communication_protocols: emergencyPlanForm.communication_protocols || null,
+            incident_command_roles: emergencyPlanForm.incident_command_roles || null,
+            escalation_matrix: emergencyPlanForm.escalation_matrix || null,
+            external_agency_contacts: emergencyPlanForm.external_agency_contacts || null,
             equipment_locations: emergencyPlanForm.equipment_locations || null,
             assembly_points: emergencyPlanForm.assembly_points || null,
             special_needs_plan: emergencyPlanForm.special_needs_plan || null,
@@ -3925,6 +3931,9 @@ export default function HomePage() {
           body: {
             status: statusValue,
             review_due_on: emergencyPlanForm.review_due_on || null,
+            incident_command_roles: emergencyPlanForm.incident_command_roles || null,
+            escalation_matrix: emergencyPlanForm.escalation_matrix || null,
+            external_agency_contacts: emergencyPlanForm.external_agency_contacts || null,
             notes: `Marked ${statusValue} from the operations console.`
           }
         }),
@@ -3952,6 +3961,7 @@ export default function HomePage() {
             facility_id: plan.facility_id || selectedFacilityId || null,
             emergency_type: plan.emergency_type,
             location_detail: emergencyPlanForm.activation_location,
+            escalation_level: 1,
             assigned_responders: emergencyPlanForm.responders || null,
             notes: "Emergency mode activated from the operations console."
           }
@@ -3968,22 +3978,26 @@ export default function HomePage() {
 
   const updateEmergencyActivation = (
     activation: EmergencyPlanActivationRead,
-    statusValue: EmergencyActivationStatus
+    statusValue: EmergencyActivationStatus | null,
+    escalationLevel = activation.escalation_level
   ) => {
     runAction(
-      `emergency-activation-${activation.id}-${statusValue}`,
+      `emergency-activation-${activation.id}-${statusValue ?? `level-${escalationLevel}`}`,
       () =>
         apiRequest<EmergencyPlanActivationRead>(`/assets/emergency-activations/${activation.id}`, {
           method: "PATCH",
           identity,
           body: {
             status: statusValue,
+            escalation_level: escalationLevel,
             outcome_summary:
               statusValue === "resolved" || statusValue === "reviewed"
                 ? "Emergency response closed and queued for after-action review."
                 : null,
             response_time_seconds: statusValue === "resolved" ? 180 : null,
-            notes: `Marked ${statusValue} from the operations console.`
+            notes: statusValue
+              ? `Marked ${statusValue} from the operations console.`
+              : `Escalated to level ${escalationLevel} from the operations console.`
           }
         }),
       (updated) => {
@@ -3991,7 +4005,7 @@ export default function HomePage() {
           updated,
           ...current.filter((item) => item.id !== updated.id)
         ]);
-        addLog(`${updated.emergency_type} activation moved to ${updated.status}`, "good");
+        addLog(`${updated.emergency_type} activation is ${updated.status} at level ${updated.escalation_level}`, "good");
       }
     );
   };
@@ -6303,6 +6317,18 @@ export default function HomePage() {
                 Communication
                 <input value={emergencyPlanForm.communication_protocols} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, communication_protocols: event.target.value })} />
               </label>
+              <label className="wide-field">
+                Command roles
+                <input value={emergencyPlanForm.incident_command_roles} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, incident_command_roles: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Escalation matrix
+                <input value={emergencyPlanForm.escalation_matrix} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, escalation_matrix: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                External agencies
+                <input value={emergencyPlanForm.external_agency_contacts} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, external_agency_contacts: event.target.value })} />
+              </label>
               <label>
                 Activation location
                 <input value={emergencyPlanForm.activation_location} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, activation_location: event.target.value })} />
@@ -6359,11 +6385,12 @@ export default function HomePage() {
                 <article key={activation.id} className="task-card">
                   <div>
                     <strong>{activation.emergency_type} emergency · {activation.status}</strong>
-                    <span>{activation.location_detail} · {new Date(activation.activated_at).toLocaleString()}</span>
+                    <span>{activation.location_detail} · level {activation.escalation_level} · {new Date(activation.activated_at).toLocaleString()}</span>
                     <span>{activation.outcome_summary ?? activation.guidance_steps ?? "Response in progress"}</span>
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={() => dispatchEmergencyAlert(activation)}>Alert</button>
+                    <button type="button" onClick={() => updateEmergencyActivation(activation, null, Math.min(5, activation.escalation_level + 1))}>Escalate</button>
                     <button type="button" onClick={() => updateEmergencyActivation(activation, "resolved")}>Resolve</button>
                     <button type="button" onClick={() => updateEmergencyActivation(activation, "reviewed")}>Review</button>
                     <button type="button" onClick={() => updateEmergencyActivation(activation, "cancelled")}>Cancel</button>
@@ -6375,7 +6402,7 @@ export default function HomePage() {
                   <div>
                     <strong>{plan.title}</strong>
                     <span>{plan.emergency_type} · {plan.status} · review {plan.review_due_on ?? "not set"}</span>
-                    <span>{plan.emergency_contacts}</span>
+                    <span>{plan.escalation_matrix ?? plan.emergency_contacts}</span>
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={() => updateEmergencyPlan(plan, "active")}>Activate Plan</button>

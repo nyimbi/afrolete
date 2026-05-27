@@ -203,6 +203,9 @@ async def update_emergency_action_plan(
         "medical_protocols",
         "weather_protocols",
         "communication_protocols",
+        "incident_command_roles",
+        "escalation_matrix",
+        "external_agency_contacts",
         "equipment_locations",
         "assembly_points",
         "special_needs_plan",
@@ -239,7 +242,7 @@ async def activate_emergency_action_plan(
         activated_by_person_id=identity.person_id,
         activated_at=payload.activated_at or datetime.now(UTC),
         guidance_steps=payload.guidance_steps or plan.medical_protocols or plan.evacuation_routes,
-        communication_log=payload.communication_log or plan.communication_protocols,
+        communication_log=payload.communication_log or emergency_communication_plan(plan),
         **payload.model_dump(exclude={"facility_id", "activated_at", "guidance_steps", "communication_log"}),
     )
     db.add(activation)
@@ -292,6 +295,7 @@ async def update_emergency_plan_activation(
             activation.closed_at = payload.closed_at or activation.closed_at or datetime.now(UTC)
     for field in [
         "closed_at",
+        "escalation_level",
         "assigned_responders",
         "guidance_steps",
         "communication_log",
@@ -329,7 +333,8 @@ async def dispatch_emergency_activation_alert(
         )
 
     subject = payload.subject or emergency_alert_subject(activation)
-    body = payload.body or emergency_alert_body(activation)
+    plan = await db.get(EmergencyActionPlan, activation.plan_id)
+    body = payload.body or emergency_alert_body(activation, plan)
     message = await create_message(
         db,
         identity,
@@ -358,10 +363,14 @@ def emergency_alert_subject(activation: EmergencyPlanActivation) -> str:
     return f"Emergency alert: {activation.emergency_type.value} at {activation.location_detail}"[:240]
 
 
-def emergency_alert_body(activation: EmergencyPlanActivation) -> str:
+def emergency_alert_body(
+    activation: EmergencyPlanActivation,
+    plan: EmergencyActionPlan | None = None,
+) -> str:
     lines = [
         f"Emergency type: {activation.emergency_type.value}",
         f"Status: {activation.status.value}",
+        f"Escalation level: {activation.escalation_level}",
         f"Location: {activation.location_detail}",
     ]
     if activation.assigned_responders:
@@ -370,10 +379,26 @@ def emergency_alert_body(activation: EmergencyPlanActivation) -> str:
         lines.append(f"Guidance: {activation.guidance_steps}")
     if activation.communication_log:
         lines.append(f"Communication plan: {activation.communication_log}")
+    if plan is not None and plan.incident_command_roles:
+        lines.append(f"Incident command: {plan.incident_command_roles}")
+    if plan is not None and plan.escalation_matrix:
+        lines.append(f"Escalation matrix: {plan.escalation_matrix}")
+    if plan is not None and plan.external_agency_contacts:
+        lines.append(f"External agencies: {plan.external_agency_contacts}")
     if activation.notes:
         lines.append(f"Notes: {activation.notes}")
     lines.append("Follow the emergency action plan and keep the area clear unless assigned to respond.")
     return "\n".join(lines)[:8000]
+
+
+def emergency_communication_plan(plan: EmergencyActionPlan) -> str | None:
+    parts = [
+        plan.communication_protocols,
+        f"Incident command: {plan.incident_command_roles}" if plan.incident_command_roles else None,
+        f"Escalation matrix: {plan.escalation_matrix}" if plan.escalation_matrix else None,
+        f"External agencies: {plan.external_agency_contacts}" if plan.external_agency_contacts else None,
+    ]
+    return "\n".join(part for part in parts if part) or None
 
 
 async def create_equipment_item(

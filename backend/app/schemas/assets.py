@@ -57,6 +57,9 @@ class EmergencyActionPlanCreate(BaseModel):
     medical_protocols: str | None = Field(default=None, max_length=8000)
     weather_protocols: str | None = Field(default=None, max_length=8000)
     communication_protocols: str | None = Field(default=None, max_length=8000)
+    incident_command_roles: str | None = Field(default=None, max_length=8000)
+    escalation_matrix: str | None = Field(default=None, max_length=8000)
+    external_agency_contacts: str | None = Field(default=None, max_length=8000)
     equipment_locations: str | None = Field(default=None, max_length=8000)
     assembly_points: str | None = Field(default=None, max_length=8000)
     special_needs_plan: str | None = Field(default=None, max_length=8000)
@@ -71,6 +74,9 @@ class EmergencyActionPlanUpdate(BaseModel):
     medical_protocols: str | None = Field(default=None, max_length=8000)
     weather_protocols: str | None = Field(default=None, max_length=8000)
     communication_protocols: str | None = Field(default=None, max_length=8000)
+    incident_command_roles: str | None = Field(default=None, max_length=8000)
+    escalation_matrix: str | None = Field(default=None, max_length=8000)
+    external_agency_contacts: str | None = Field(default=None, max_length=8000)
     equipment_locations: str | None = Field(default=None, max_length=8000)
     assembly_points: str | None = Field(default=None, max_length=8000)
     special_needs_plan: str | None = Field(default=None, max_length=8000)
@@ -90,6 +96,7 @@ class EmergencyPlanActivationCreate(BaseModel):
     emergency_type: EmergencyType
     location_detail: str = Field(min_length=2, max_length=240)
     activated_at: datetime | None = None
+    escalation_level: int = Field(default=1, ge=1, le=5)
     assigned_responders: str | None = Field(default=None, max_length=8000)
     guidance_steps: str | None = Field(default=None, max_length=8000)
     communication_log: str | None = Field(default=None, max_length=12000)
@@ -99,6 +106,7 @@ class EmergencyPlanActivationCreate(BaseModel):
 class EmergencyPlanActivationUpdate(BaseModel):
     status: EmergencyActivationStatus | None = None
     closed_at: datetime | None = None
+    escalation_level: int | None = Field(default=None, ge=1, le=5)
     assigned_responders: str | None = Field(default=None, max_length=8000)
     guidance_steps: str | None = Field(default=None, max_length=8000)
     communication_log: str | None = Field(default=None, max_length=12000)
@@ -120,6 +128,7 @@ class EmergencyPlanActivationRead(BaseModel):
     location_detail: str
     activated_at: datetime
     closed_at: datetime | None
+    escalation_level: int
     assigned_responders: str | None
     guidance_steps: str | None
     communication_log: str | None
