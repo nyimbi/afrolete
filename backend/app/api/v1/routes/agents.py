@@ -448,10 +448,11 @@ async def run_agent_scorecard_publication_reminder_route(
 @router.get("/ethical-scorecard/publications/{publication_id}/artifact", response_model=AgentScorecardPublicationArtifactRead)
 async def get_agent_scorecard_publication_artifact_route(
     publication_id: UUID,
+    artifact_format: str = Query(default="markdown", pattern="^(markdown|pdf)$"),
     db: AsyncSession = Depends(get_db),
 ) -> AgentScorecardPublicationArtifactRead:
     return AgentScorecardPublicationArtifactRead(
-        **await get_agent_scorecard_publication_artifact(db, publication_id)
+        **await get_agent_scorecard_publication_artifact(db, publication_id, artifact_format)
     )
 
 

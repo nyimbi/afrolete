@@ -406,10 +406,16 @@ class AgentScorecardPublicationArtifactRead(BaseModel):
     publication_id: UUID
     organization_id: UUID
     period_label: str
+    artifact_format: str
     generated_at: datetime
     download_filename: str
     content_type: str
     content: str
+    content_base64: str | None = None
+    checksum: str
+    size_bytes: int
+    storage_url: str
+    storage_key: str
 
 
 class AgentScorecardPublicationReminderCreate(BaseModel):

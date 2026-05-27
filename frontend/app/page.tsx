@@ -518,6 +518,23 @@ function downloadTextArtifact(content: string, contentType: string, filename: st
   window.URL.revokeObjectURL(url);
 }
 
+function downloadBase64Artifact(contentBase64: string, contentType: string, filename: string) {
+  const raw = window.atob(contentBase64);
+  const bytes = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) {
+    bytes[index] = raw.charCodeAt(index);
+  }
+  const blob = new Blob([bytes], { type: contentType });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 function CompetitionBracketLane({ round }: { round: CompetitionBracketRoundRead }) {
   return (
     <article className="bracket-lane">
@@ -4998,16 +5015,26 @@ export default function HomePage() {
     );
   };
 
-  const downloadAgentScorecardPublication = (publication: AgentScorecardPublicationRead) => {
+  const downloadAgentScorecardPublication = (
+    publication: AgentScorecardPublicationRead,
+    artifactFormat: "markdown" | "pdf"
+  ) => {
     runAction(
-      `agent-scorecard-artifact-${publication.id}`,
+      `agent-scorecard-artifact-${artifactFormat}-${publication.id}`,
       () =>
         apiRequest<AgentScorecardPublicationArtifactRead>(
-          `/agents/ethical-scorecard/publications/${publication.id}/artifact`
+          `/agents/ethical-scorecard/publications/${publication.id}/artifact?artifact_format=${artifactFormat}`
         ),
       (artifact) => {
-        downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
-        addLog(`Downloaded ${artifact.period_label} scorecard artifact`, "good");
+        if (artifact.content_base64) {
+          downloadBase64Artifact(artifact.content_base64, artifact.content_type, artifact.download_filename);
+        } else {
+          downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
+        }
+        addLog(
+          `Downloaded ${artifact.period_label} ${artifact.artifact_format} scorecard artifact`,
+          "good"
+        );
       }
     );
   };
@@ -12000,7 +12027,8 @@ export default function HomePage() {
                     <span>{publication.public_summary}</span>
                   </div>
                   <div className="event-toolbar">
-                    <button type="button" onClick={() => downloadAgentScorecardPublication(publication)}>Artifact</button>
+                    <button type="button" onClick={() => downloadAgentScorecardPublication(publication, "markdown")}>Markdown</button>
+                    <button type="button" onClick={() => downloadAgentScorecardPublication(publication, "pdf")}>PDF</button>
                   </div>
                 </article>
               ))}

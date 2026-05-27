@@ -116,14 +116,18 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
     }
   };
 
-  const downloadPublicationArtifact = async (publicationId: string) => {
+  const downloadPublicationArtifact = async (publicationId: string, artifactFormat: "markdown" | "pdf") => {
     setBusy(true);
     setCommentError("");
     try {
       const artifact = await apiRequest<AgentScorecardPublicationArtifactRead>(
-        `/agents/ethical-scorecard/publications/${publicationId}/artifact`
+        `/agents/ethical-scorecard/publications/${publicationId}/artifact?artifact_format=${artifactFormat}`
       );
-      downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
+      if (artifact.content_base64) {
+        downloadBase64Artifact(artifact.content_base64, artifact.content_type, artifact.download_filename);
+      } else {
+        downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
+      }
     } catch (caught) {
       setCommentError(caught instanceof Error ? caught.message : "Publication artifact could not be downloaded");
     } finally {
@@ -227,8 +231,11 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
               <span>Published {formatDate(latestPublication.published_at)}</span>
               <span>{latestPublication.published_comment_count} public comments · {latestPublication.flagged_comment_count} held for review</span>
               <span>Snapshot {latestPublication.snapshot_hash.slice(0, 16)}</span>
-              <button type="button" onClick={() => downloadPublicationArtifact(latestPublication.id)} disabled={busy}>
-                Download artifact
+              <button type="button" onClick={() => downloadPublicationArtifact(latestPublication.id, "markdown")} disabled={busy}>
+                Download Markdown
+              </button>
+              <button type="button" onClick={() => downloadPublicationArtifact(latestPublication.id, "pdf")} disabled={busy}>
+                Download PDF
               </button>
             </div>
           </div>
@@ -328,6 +335,23 @@ function formatDate(value: string): string {
 
 function downloadTextArtifact(content: string, contentType: string, filename: string) {
   const blob = new Blob([content], { type: contentType });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+function downloadBase64Artifact(contentBase64: string, contentType: string, filename: string) {
+  const raw = window.atob(contentBase64);
+  const bytes = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) {
+    bytes[index] = raw.charCodeAt(index);
+  }
+  const blob = new Blob([bytes], { type: contentType });
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

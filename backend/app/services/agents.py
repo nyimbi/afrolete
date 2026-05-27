@@ -1,5 +1,7 @@
+import base64
 import hashlib
 import hmac
+import io
 import json
 import re
 import time
@@ -56,6 +58,7 @@ from app.schemas.communication import CommunicationMessageCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 from app.services.communications import create_message
+from app.services.storage.objects import put_object
 
 ASSIGNABLE_SCOPES = {"organization", "team", "event", "athlete_profile"}
 
@@ -1026,20 +1029,43 @@ async def list_agent_scorecard_publications(
 async def get_agent_scorecard_publication_artifact(
     db: AsyncSession,
     publication_id: UUID,
+    artifact_format: str = "markdown",
 ) -> dict[str, object]:
     publication = await db.get(AgentScorecardPublication, publication_id)
     if publication is None or publication.status != "published":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scorecard publication not found")
     generated_at = datetime.now(UTC)
-    content = render_scorecard_publication_artifact(publication, generated_at)
+    content, content_bytes, content_type, download_filename = build_scorecard_publication_artifact(
+        publication,
+        generated_at,
+        artifact_format,
+    )
+    checksum = hashlib.sha256(content_bytes).hexdigest()
+    storage_name = f"{checksum[:16]}-{download_filename}"
+    storage_key = f"ai-scorecards/{publication.organization_id}/{publication.id}/{storage_name}"
+    settings = get_settings()
+    stored = put_object(
+        settings,
+        local_root=settings.report_artifact_dir,
+        local_url_prefix=settings.report_artifact_url_prefix,
+        key=storage_key,
+        content=content_bytes,
+        content_type=content_type,
+    )
     return {
         "publication_id": publication.id,
         "organization_id": publication.organization_id,
         "period_label": publication.period_label,
+        "artifact_format": artifact_format,
         "generated_at": generated_at,
-        "download_filename": f"afrolete-ai-scorecard-{publication.period_label}-{str(publication.id)[:8]}.md",
-        "content_type": "text/markdown; charset=utf-8",
+        "download_filename": download_filename,
+        "content_type": content_type,
         "content": content,
+        "content_base64": base64.b64encode(content_bytes).decode() if artifact_format == "pdf" else None,
+        "checksum": checksum,
+        "size_bytes": len(content_bytes),
+        "storage_url": stored.url,
+        "storage_key": stored.key,
     }
 
 
@@ -1344,6 +1370,22 @@ def scorecard_publication_actions(publication: AgentScorecardPublication) -> lis
     return [str(parsed)]
 
 
+def build_scorecard_publication_artifact(
+    publication: AgentScorecardPublication,
+    generated_at: datetime,
+    artifact_format: str,
+) -> tuple[str, bytes, str, str]:
+    normalized = artifact_format.lower()
+    filename_stem = f"afrolete-ai-scorecard-{publication.period_label}-{str(publication.id)[:8]}"
+    if normalized == "markdown":
+        content = render_scorecard_publication_artifact(publication, generated_at)
+        return content, content.encode(), "text/markdown; charset=utf-8", f"{filename_stem}.md"
+    if normalized == "pdf":
+        content_bytes = render_scorecard_publication_pdf(publication, generated_at)
+        return "", content_bytes, "application/pdf", f"{filename_stem}.pdf"
+    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported artifact format")
+
+
 def render_scorecard_publication_artifact(
     publication: AgentScorecardPublication,
     generated_at: datetime,
@@ -1390,6 +1432,119 @@ def render_scorecard_publication_artifact(
             "Compare the snapshot hash above with the platform publication record to verify integrity.",
         ]
     )
+
+
+def render_scorecard_publication_pdf(
+    publication: AgentScorecardPublication,
+    generated_at: datetime,
+) -> bytes:
+    lines = [
+        "AfroLete Public AI Scorecard Publication",
+        f"Period: {publication.period_label}",
+        f"Published: {publication.published_at.isoformat()}",
+        f"Generated: {generated_at.isoformat()}",
+        f"Publication ID: {publication.id}",
+        f"Snapshot hash: {publication.snapshot_hash}",
+        "",
+        f"Score: {publication.score}/100",
+        f"Grade: {publication.grade}",
+        f"Ledger valid: {'yes' if publication.ledger_valid else 'no'}",
+        "",
+        "Governance metrics",
+        f"Total models: {publication.total_models}",
+        f"Approved models: {publication.approved_models}",
+        f"Fairness audits: {publication.bias_audits}",
+        f"Pending appeals: {publication.pending_appeals}",
+        f"Published comments: {publication.published_comment_count}",
+        f"Flagged comments held for review: {publication.flagged_comment_count}",
+        "",
+        "Public summary",
+        *wrapped_pdf_lines(publication.public_summary, 92),
+        "",
+        "Improvement actions",
+        *[
+            line
+            for action in scorecard_publication_actions(publication)
+            for line in wrapped_pdf_lines(f"- {action}", 92)
+        ],
+        "",
+        "Verification",
+        "Generated from a persisted AfroLete scorecard publication snapshot.",
+    ]
+    return simple_pdf_from_lines(lines, title=f"AI scorecard {publication.period_label}")
+
+
+def wrapped_pdf_lines(value: str, width: int) -> list[str]:
+    words = value.split()
+    if not words:
+        return [""]
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        if len(current) + len(word) + 1 > width:
+            lines.append(current)
+            current = word
+        else:
+            current = f"{current} {word}"
+    lines.append(current)
+    return lines
+
+
+def simple_pdf_from_lines(lines: list[str], title: str) -> bytes:
+    chunks = [lines[index : index + 46] for index in range(0, len(lines), 46)] or [[]]
+    page_objects: list[bytes] = []
+    page_ids: list[int] = []
+    for page_index, chunk in enumerate(chunks):
+        page_id = 4 + page_index * 2
+        stream_id = page_id + 1
+        page_ids.append(page_id)
+        page_lines = [title, f"Page {page_index + 1} of {len(chunks)}", "", *chunk]
+        text_commands = ["BT", "/F1 9 Tf", "54 748 Td"]
+        for line_index, line in enumerate(page_lines):
+            if line_index:
+                text_commands.append("0 -13 Td")
+            text_commands.append(f"({pdf_escape(line[:112])}) Tj")
+        text_commands.append("ET")
+        stream = "\n".join(text_commands).encode()
+        page_objects.extend(
+            [
+                (
+                    f"{page_id} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                    f"/Resources << /Font << /F1 3 0 R >> >> /Contents {stream_id} 0 R >> endobj\n"
+                ).encode(),
+                (
+                    f"{stream_id} 0 obj << /Length {len(stream)} >> stream\n".encode()
+                    + stream
+                    + b"\nendstream endobj\n"
+                ),
+            ]
+        )
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects = [
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+        f"2 0 obj << /Type /Pages /Kids [{kids}] /Count {len(chunks)} >> endobj\n".encode(),
+        b"3 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n",
+        *page_objects,
+    ]
+    output = io.BytesIO()
+    output.write(b"%PDF-1.4\n")
+    offsets = [0]
+    for item in objects:
+        offsets.append(output.tell())
+        output.write(item)
+    xref_at = output.tell()
+    output.write(f"xref\n0 {len(objects) + 1}\n".encode())
+    output.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.write(f"{offset:010d} 00000 n \n".encode())
+    output.write(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n".encode()
+    )
+    return output.getvalue()
+
+
+def pdf_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
 def render_scorecard_publication_reminder(readiness: dict[str, object]) -> str:

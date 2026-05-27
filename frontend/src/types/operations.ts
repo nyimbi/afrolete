@@ -2672,10 +2672,16 @@ export type AgentScorecardPublicationArtifactRead = {
   publication_id: UUID;
   organization_id: UUID;
   period_label: string;
+  artifact_format: string;
   generated_at: string;
   download_filename: string;
   content_type: string;
   content: string;
+  content_base64: string | null;
+  checksum: string;
+  size_bytes: number;
+  storage_url: string;
+  storage_key: string;
 };
 
 export type AgentScorecardPublicationReminderRead = {
