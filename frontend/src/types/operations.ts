@@ -487,6 +487,7 @@ export type EquipmentLeaseInstallmentRead = {
   sequence_number: number;
   due_on: string;
   amount: string;
+  amount_paid: string;
   currency: string;
   status: string;
   paid_at: string | null;
@@ -515,6 +516,7 @@ export type EquipmentLeasePaymentRead = {
   schedule: EquipmentLeaseScheduleRead;
   payment: FinancePaymentRead;
   installments_paid: number;
+  installments_partially_paid: number;
   amount_applied: string;
   remaining_balance: string;
 };

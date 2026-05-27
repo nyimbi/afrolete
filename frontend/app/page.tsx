@@ -3347,7 +3347,10 @@ export default function HomePage() {
           result.schedule.invoice,
           ...current.filter((invoice) => invoice.id !== result.schedule.invoice.id)
         ]);
-        addLog(`${result.installments_paid} lease installment(s) reconciled`, "good");
+        addLog(
+          `${result.installments_paid} paid, ${result.installments_partially_paid} partially paid`,
+          "good"
+        );
       }
     );
   };
@@ -5288,7 +5291,7 @@ export default function HomePage() {
               {leasePayment ? (
                 <article className="task-card">
                   <div>
-                    <strong>{leasePayment.installments_paid} installment(s) paid</strong>
+                    <strong>{leasePayment.installments_paid} paid · {leasePayment.installments_partially_paid} partial</strong>
                     <span>{leasePayment.payment.method} · {leasePayment.amount_applied} applied · {leasePayment.remaining_balance} remaining</span>
                   </div>
                 </article>
@@ -5297,7 +5300,9 @@ export default function HomePage() {
                 <article key={schedule.id} className="task-card">
                   <div>
                     <strong>{schedule.invoice.title}</strong>
-                    <span>{schedule.term_months} x {schedule.currency} {schedule.monthly_amount} · next {schedule.installments[0]?.due_on ?? schedule.starts_on}</span>
+                    <span>
+                      {schedule.term_months} x {schedule.currency} {schedule.monthly_amount} · paid {schedule.installments[0]?.amount_paid ?? "0.00"}/{schedule.installments[0]?.amount ?? schedule.monthly_amount} · next {schedule.installments[0]?.due_on ?? schedule.starts_on}
+                    </span>
                   </div>
                   <button
                     type="button"

@@ -323,6 +323,7 @@ class EquipmentLeaseInstallmentRead(BaseModel):
     sequence_number: int
     due_on: date
     amount: Decimal
+    amount_paid: Decimal
     currency: str
     status: str
     paid_at: datetime | None
@@ -358,6 +359,7 @@ class EquipmentLeasePaymentRead(BaseModel):
     schedule: EquipmentLeaseScheduleRead
     payment: FinancePaymentRead
     installments_paid: int
+    installments_partially_paid: int
     amount_applied: Decimal
     remaining_balance: Decimal
 

@@ -1079,12 +1079,15 @@ async def reconcile_equipment_lease_payment(
     if invoice is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease invoice not found")
     installments = await list_lease_installments(db, schedule.id)
-    outstanding_installments = [item for item in installments if item.status != "paid"]
+    outstanding_installments = [item for item in installments if item.amount_paid < item.amount]
     if not outstanding_installments:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Lease schedule is already paid")
-    amount = payload.amount or outstanding_installments[0].amount
+    amount = payload.amount or (outstanding_installments[0].amount - outstanding_installments[0].amount_paid)
     if amount <= 0:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment amount must be positive")
+    remaining_invoice_balance = max(invoice.amount_due - invoice.amount_paid, Decimal("0")).quantize(Decimal("0.01"))
+    if amount > remaining_invoice_balance:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment exceeds lease balance")
     payment = FinancePayment(
         organization_id=schedule.organization_id,
         invoice_id=invoice.id,
@@ -1097,19 +1100,28 @@ async def reconcile_equipment_lease_payment(
     )
     amount_remaining = amount
     paid_count = 0
+    partial_count = 0
     now = datetime.now(UTC)
     for installment in outstanding_installments:
-        if amount_remaining < installment.amount:
+        if amount_remaining <= 0:
             break
-        installment.status = "paid"
-        installment.paid_at = now
-        amount_remaining -= installment.amount
-        paid_count += 1
+        installment_balance = (installment.amount - installment.amount_paid).quantize(Decimal("0.01"))
+        applied = min(amount_remaining, installment_balance).quantize(Decimal("0.01"))
+        installment.amount_paid = (installment.amount_paid + applied).quantize(Decimal("0.01"))
+        amount_remaining = (amount_remaining - applied).quantize(Decimal("0.01"))
+        if installment.amount_paid >= installment.amount:
+            installment.amount_paid = installment.amount
+            installment.status = "paid"
+            installment.paid_at = now
+            paid_count += 1
+        else:
+            installment.status = "partial"
+            partial_count += 1
     invoice.amount_paid += amount
     invoice.status = CommercialStatus.PAID if invoice.amount_paid >= invoice.amount_due else CommercialStatus.PARTIAL
-    if paid_count > 0 and all(item.status == "paid" for item in installments):
+    if all(item.amount_paid >= item.amount for item in installments):
         schedule.status = "paid"
-    elif paid_count > 0:
+    elif paid_count > 0 or partial_count > 0:
         schedule.status = "active"
     db.add(payment)
     await db.commit()
@@ -1121,6 +1133,7 @@ async def reconcile_equipment_lease_payment(
         schedule=equipment_lease_schedule_read(schedule, invoice, refreshed_installments),
         payment=finance_payment_read(payment),
         installments_paid=paid_count,
+        installments_partially_paid=partial_count,
         amount_applied=amount,
         remaining_balance=max(invoice.amount_due - invoice.amount_paid, Decimal("0")).quantize(Decimal("0.01")),
     )
@@ -1518,6 +1531,7 @@ def equipment_lease_installment_read(installment: EquipmentLeaseInstallment) -> 
         sequence_number=installment.sequence_number,
         due_on=installment.due_on,
         amount=installment.amount,
+        amount_paid=installment.amount_paid,
         currency=installment.currency,
         status=installment.status,
         paid_at=installment.paid_at,
@@ -1557,6 +1571,7 @@ def build_lease_installments(
                 sequence_number=index + 1,
                 due_on=add_months(starts_on, index),
                 amount=amount,
+                amount_paid=Decimal("0"),
                 currency=schedule.currency,
                 status="scheduled",
             )

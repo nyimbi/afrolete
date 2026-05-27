@@ -323,6 +323,7 @@ class EquipmentLeaseInstallment(IdMixin, TimestampMixin, Base):
     sequence_number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     due_on: Mapped[date] = mapped_column(Date(), nullable=False, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    amount_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="scheduled", nullable=False, index=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
