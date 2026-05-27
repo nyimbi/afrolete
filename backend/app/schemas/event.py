@@ -406,6 +406,23 @@ class EventTravelCarpoolRideRead(BaseModel):
     notes: str | None
 
 
+class EventTravelReadinessRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    ready: bool
+    recommended_status: TravelPlanStatus
+    risk_level: TravelRiskLevel
+    blockers: list[str]
+    warnings: list[str]
+    approval_count: int
+    pending_approval_count: int
+    rejected_approval_count: int
+    checklist_count: int
+    pending_checklist_count: int
+    blocked_checklist_count: int
+    pending_consent_request_count: int
+
+
 class AttendanceRecordUpsert(BaseModel):
     person_id: UUID
     status: AttendanceStatus

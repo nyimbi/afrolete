@@ -36,6 +36,7 @@ from app.schemas.event import (
     EventTravelPlanCreate,
     EventTravelPlanRead,
     EventTravelPlanUpdate,
+    EventTravelReadinessRead,
     EventWeatherAlertCreate,
     EventWeatherAlertRead,
     EventWeatherAssessmentCreate,
@@ -57,6 +58,7 @@ from app.services.events import (
     generate_travel_fee_invoices,
     get_event,
     get_travel_manifest,
+    get_travel_readiness,
     list_attendance,
     list_travel_carpool_rides,
     list_travel_checklist_items,
@@ -322,6 +324,16 @@ async def update_travel_plan_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelPlanRead:
     return to_travel_plan_read(await update_travel_plan(db, identity, travel_plan_id, payload, authz))
+
+
+@router.get("/travel-plans/{travel_plan_id}/readiness", response_model=EventTravelReadinessRead)
+async def get_travel_readiness_route(
+    travel_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelReadinessRead:
+    return await get_travel_readiness(db, identity, travel_plan_id, authz)
 
 
 @router.post(

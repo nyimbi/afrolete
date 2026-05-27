@@ -68,6 +68,7 @@ from app.schemas.event import (
     EventTravelManifestRead,
     EventTravelPlanCreate,
     EventTravelPlanUpdate,
+    EventTravelReadinessRead,
     EventWeatherAlertCreate,
     EventWeatherAssessmentCreate,
     AttendanceRecordUpsert,
@@ -1059,6 +1060,80 @@ async def update_travel_carpool_ride(
     return travel_carpool_ride_read(ride)
 
 
+async def get_travel_readiness(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    authz: AuthorizationService,
+) -> EventTravelReadinessRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+
+    risk_level, risk_assessment = classify_travel_plan(plan)
+    warnings = [line for line in risk_assessment.splitlines() if line]
+    blockers: list[str] = []
+    if risk_level == TravelRiskLevel.CRITICAL:
+        blockers.append("Travel risk is critical; resolve route, driver, or vehicle blockers before departure.")
+
+    approval_count = await count_travel_approvals(db, plan.id)
+    pending_approval_count = await count_travel_approvals(db, plan.id, "pending")
+    rejected_approval_count = await count_travel_approvals(db, plan.id, "rejected")
+    if pending_approval_count:
+        blockers.append(f"{pending_approval_count} travel approval(s) are still pending.")
+    if rejected_approval_count:
+        blockers.append(f"{rejected_approval_count} travel approval(s) were rejected.")
+    if approval_count == 0:
+        warnings.append("No travel approval requirements are recorded.")
+
+    checklist_count = await count_travel_checklist_items(db, plan.id)
+    pending_checklist_count = await count_travel_checklist_items(db, plan.id, "pending")
+    blocked_checklist_count = await count_travel_checklist_items(db, plan.id, "blocked")
+    if pending_checklist_count:
+        blockers.append(f"{pending_checklist_count} travel checklist item(s) are still pending.")
+    if blocked_checklist_count:
+        blockers.append(f"{blocked_checklist_count} travel checklist item(s) are blocked.")
+    if checklist_count == 0:
+        warnings.append("No travel inspection checklist has been seeded.")
+
+    pending_consent_request_count = 0
+    if plan.consent_required:
+        pending_consent_request_count = int(
+            await db.scalar(
+                select(func.count(ConsentRequest.id)).where(
+                    ConsentRequest.organization_id == plan.organization_id,
+                    ConsentRequest.scope_type == ConsentScopeType.EVENT,
+                    ConsentRequest.scope_id == event.id,
+                    ConsentRequest.destination == plan.destination,
+                    ConsentRequest.status == ConsentRequestStatus.PENDING,
+                )
+            )
+            or 0
+        )
+        if pending_consent_request_count:
+            blockers.append(f"{pending_consent_request_count} guardian travel consent request(s) are pending.")
+
+    ready = not blockers
+    return EventTravelReadinessRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        ready=ready,
+        recommended_status=TravelPlanStatus.READY if ready else TravelPlanStatus.DRAFT,
+        risk_level=risk_level,
+        blockers=blockers,
+        warnings=warnings,
+        approval_count=approval_count,
+        pending_approval_count=pending_approval_count,
+        rejected_approval_count=rejected_approval_count,
+        checklist_count=checklist_count,
+        pending_checklist_count=pending_checklist_count,
+        blocked_checklist_count=blocked_checklist_count,
+        pending_consent_request_count=pending_consent_request_count,
+    )
+
+
 def classify_weather_risk(
     payload: EventWeatherAssessmentCreate,
 ) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
@@ -1276,6 +1351,20 @@ def travel_carpool_ride_read(ride: EventTravelCarpoolRide) -> EventTravelCarpool
         matched_at=ride.matched_at,
         notes=ride.notes,
     )
+
+
+async def count_travel_approvals(db: AsyncSession, travel_plan_id: UUID, status_value: str | None = None) -> int:
+    query = select(func.count(EventTravelApproval.id)).where(EventTravelApproval.travel_plan_id == travel_plan_id)
+    if status_value is not None:
+        query = query.where(EventTravelApproval.status == status_value)
+    return int(await db.scalar(query) or 0)
+
+
+async def count_travel_checklist_items(db: AsyncSession, travel_plan_id: UUID, status_value: str | None = None) -> int:
+    query = select(func.count(EventTravelChecklistItem.id)).where(EventTravelChecklistItem.travel_plan_id == travel_plan_id)
+    if status_value is not None:
+        query = query.where(EventTravelChecklistItem.status == status_value)
+    return int(await db.scalar(query) or 0)
 
 
 async def travel_location_update_read(

@@ -617,6 +617,23 @@ export type EventTravelCarpoolRideRead = {
   notes: string | null;
 };
 
+export type EventTravelReadinessRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  ready: boolean;
+  recommended_status: TravelPlanStatus;
+  risk_level: TravelRiskLevel;
+  blockers: string[];
+  warnings: string[];
+  approval_count: number;
+  pending_approval_count: number;
+  rejected_approval_count: number;
+  checklist_count: number;
+  pending_checklist_count: number;
+  blocked_checklist_count: number;
+  pending_consent_request_count: number;
+};
+
 export type AttendanceRecordRead = {
   id: UUID;
   event_id: UUID;

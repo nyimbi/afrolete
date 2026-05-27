@@ -82,6 +82,7 @@ import type {
   EventTravelManifestExportRead,
   EventTravelManifestRead,
   EventTravelPlanRead,
+  EventTravelReadinessRead,
   EventWeatherAlertRead,
   EventWeatherAssessmentRead,
   EventType,
@@ -361,6 +362,7 @@ export default function HomePage() {
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
   const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
+  const [travelReadiness, setTravelReadiness] = useState<EventTravelReadinessRead | null>(null);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -1618,6 +1620,7 @@ export default function HomePage() {
       setTravelLocationUpdates([]);
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
+      setTravelReadiness(null);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1829,6 +1832,7 @@ export default function HomePage() {
       setTravelLocationUpdates([]);
       setTravelExpenses([]);
       setTravelCarpoolRides([]);
+      setTravelReadiness(null);
       return;
     }
     runAction(
@@ -2379,6 +2383,25 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updated.id)
         ]);
         addLog(`Travel plan moved to ${updated.status} with ${updated.risk_level} risk`, "good");
+      }
+    );
+  };
+
+  const checkTravelReadiness = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-readiness-${plan.id}`,
+      () =>
+        apiRequest<EventTravelReadinessRead>(`/events/travel-plans/${plan.id}/readiness`, {
+          identity
+        }),
+      (readiness) => {
+        setTravelReadiness(readiness);
+        addLog(
+          readiness.ready
+            ? `${plan.destination} is ready for departure`
+            : `${readiness.blockers.length} departure blocker(s) found`,
+          readiness.ready ? "good" : "bad"
+        );
       }
     );
   };
@@ -7197,6 +7220,17 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelReadiness ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelReadiness.ready ? "Departure ready" : "Departure blocked"} · {travelReadiness.risk_level}</strong>
+                    <span>
+                      {travelReadiness.pending_approval_count} approvals · {travelReadiness.pending_checklist_count} checklist · {travelReadiness.pending_consent_request_count} consents pending
+                    </span>
+                    <span>{travelReadiness.blockers[0] ?? travelReadiness.warnings[0] ?? "No readiness warnings"}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelFeeBatch ? (
                 <article className="task-card">
                   <div>
@@ -7282,6 +7316,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => remindTravelConsents(plan)}>Remind</button>
                     <button type="button" onClick={() => loadTravelManifest(plan)}>Manifest</button>
                     <button type="button" onClick={() => exportTravelManifest(plan)}>Export</button>
+                    <button type="button" onClick={() => checkTravelReadiness(plan)}>Gate</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
                     <button type="button" onClick={() => createTravelApproval(plan)}>Require</button>
                     <button type="button" onClick={() => loadTravelApprovals(plan)}>Approvals</button>
