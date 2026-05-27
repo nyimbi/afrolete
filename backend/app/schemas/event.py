@@ -91,6 +91,35 @@ class EventWeatherAlertRead(BaseModel):
     urgent: bool
 
 
+class EventWeatherAutomationRunCreate(BaseModel):
+    channel: CommunicationChannel = CommunicationChannel.PUSH
+    minimum_alert_level: WeatherAlertLevel = WeatherAlertLevel.WARNING
+    copy_guardians_for_minors: bool = True
+    include_existing_alerts: bool = False
+    dry_run: bool = False
+
+
+class EventWeatherAutomationRunItemRead(BaseModel):
+    assessment_id: UUID
+    alert_level: WeatherAlertLevel
+    decision: WeatherDecision
+    action: str
+    message_id: UUID | None = None
+    recipient_count: int = 0
+    reason: str
+
+
+class EventWeatherAutomationRunRead(BaseModel):
+    event_id: UUID
+    channel: CommunicationChannel
+    minimum_alert_level: WeatherAlertLevel
+    dry_run: bool
+    candidate_count: int
+    dispatched_count: int
+    skipped_count: int
+    items: list[EventWeatherAutomationRunItemRead]
+
+
 class EventTravelPlanCreate(BaseModel):
     destination: str = Field(min_length=2, max_length=240)
     travel_mode: str = Field(min_length=2, max_length=80)

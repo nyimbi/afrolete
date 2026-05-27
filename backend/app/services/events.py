@@ -154,6 +154,9 @@ from app.schemas.event import (
     EventTravelRouteOptimizationRead,
     EventTravelRouteStopRead,
     EventWeatherAlertCreate,
+    EventWeatherAutomationRunCreate,
+    EventWeatherAutomationRunItemRead,
+    EventWeatherAutomationRunRead,
     EventWeatherAssessmentCreate,
     AttendanceRecordUpsert,
 )
@@ -379,6 +382,92 @@ async def dispatch_weather_assessment_alert(
         select(func.count(MessageRecipient.id)).where(MessageRecipient.message_id == message.id)
     )
     return message, int(recipient_count or 0)
+
+
+async def run_weather_alert_automation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    event_id: UUID,
+    payload: EventWeatherAutomationRunCreate,
+    authz: AuthorizationService,
+) -> EventWeatherAutomationRunRead:
+    event = await get_event(db, event_id)
+    await ensure_manage_event_scope(authz, event.organization_id, identity)
+    assessments = await list_weather_assessments(db, event_id)
+    items: list[EventWeatherAutomationRunItemRead] = []
+    dispatched = 0
+    threshold = weather_alert_level_rank(payload.minimum_alert_level)
+    for assessment in assessments:
+        if weather_alert_level_rank(assessment.alert_level) < threshold:
+            continue
+        existing = await weather_assessment_alert_exists(db, event, assessment, payload.channel)
+        if existing and not payload.include_existing_alerts:
+            items.append(
+                EventWeatherAutomationRunItemRead(
+                    assessment_id=assessment.id,
+                    alert_level=assessment.alert_level,
+                    decision=assessment.decision,
+                    action="skip_duplicate",
+                    reason="Matching weather alert already exists for this assessment and channel.",
+                )
+            )
+            continue
+        if payload.dry_run:
+            items.append(
+                EventWeatherAutomationRunItemRead(
+                    assessment_id=assessment.id,
+                    alert_level=assessment.alert_level,
+                    decision=assessment.decision,
+                    action="dry_run",
+                    reason="Assessment meets the automation threshold.",
+                )
+            )
+            continue
+        try:
+            message, recipient_count = await dispatch_weather_assessment_alert(
+                db,
+                identity,
+                event_id,
+                assessment.id,
+                EventWeatherAlertCreate(
+                    channel=payload.channel,
+                    copy_guardians_for_minors=payload.copy_guardians_for_minors,
+                ),
+                authz,
+            )
+        except HTTPException as exc:
+            items.append(
+                EventWeatherAutomationRunItemRead(
+                    assessment_id=assessment.id,
+                    alert_level=assessment.alert_level,
+                    decision=assessment.decision,
+                    action="skipped",
+                    reason=str(exc.detail),
+                )
+            )
+            continue
+        dispatched += 1
+        items.append(
+            EventWeatherAutomationRunItemRead(
+                assessment_id=assessment.id,
+                alert_level=assessment.alert_level,
+                decision=assessment.decision,
+                action="dispatched",
+                message_id=message.id,
+                recipient_count=recipient_count,
+                reason="Weather alert dispatched by automation.",
+            )
+        )
+    return EventWeatherAutomationRunRead(
+        event_id=event.id,
+        channel=payload.channel,
+        minimum_alert_level=payload.minimum_alert_level,
+        dry_run=payload.dry_run,
+        candidate_count=len(items),
+        dispatched_count=dispatched,
+        skipped_count=sum(1 for item in items if item.action != "dispatched"),
+        items=items,
+    )
 
 
 async def create_travel_plan(
@@ -5139,6 +5228,36 @@ def weather_alert_body(event: Event, assessment: EventWeatherAssessment) -> str:
     if assessment.notes:
         lines.append(f"Notes: {assessment.notes}")
     return "\n".join(lines)[:8000]
+
+
+def weather_alert_level_rank(alert_level: WeatherAlertLevel) -> int:
+    ranks = {
+        WeatherAlertLevel.INFORMATION: 0,
+        WeatherAlertLevel.ADVISORY: 1,
+        WeatherAlertLevel.WARNING: 2,
+        WeatherAlertLevel.CRITICAL: 3,
+    }
+    return ranks[alert_level]
+
+
+async def weather_assessment_alert_exists(
+    db: AsyncSession,
+    event: Event,
+    assessment: EventWeatherAssessment,
+    channel: CommunicationChannel,
+) -> bool:
+    marker = f"Observed at: {assessment.observed_at.isoformat()}"
+    existing = await db.scalar(
+        select(CommunicationMessage.id)
+        .where(CommunicationMessage.organization_id == event.organization_id)
+        .where(CommunicationMessage.message_type == CommunicationMessageType.ALERT)
+        .where(CommunicationMessage.scope_type == CommunicationScopeType.EVENT)
+        .where(CommunicationMessage.scope_id == event.id)
+        .where(CommunicationMessage.channel == channel)
+        .where(CommunicationMessage.subject == weather_alert_subject(event, assessment))
+        .where(CommunicationMessage.body.contains(marker))
+    )
+    return existing is not None
 
 
 async def record_attendance(

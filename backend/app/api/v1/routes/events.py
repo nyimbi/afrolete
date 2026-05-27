@@ -91,6 +91,8 @@ from app.schemas.event import (
     EventTravelRouteOptimizationRead,
     EventWeatherAlertCreate,
     EventWeatherAlertRead,
+    EventWeatherAutomationRunCreate,
+    EventWeatherAutomationRunRead,
     EventWeatherAssessmentCreate,
     EventWeatherAssessmentRead,
 )
@@ -150,6 +152,7 @@ from app.services.events import (
     read_signed_travel_manifest,
     reconcile_travel_expense_payout_callback,
     rotate_travel_device_secret,
+    run_weather_alert_automation,
     resolve_travel_fee_reconciliation_exception,
     route_travel_approvals,
     run_event_travel_consent_reminders,
@@ -362,6 +365,20 @@ async def dispatch_weather_alert_route(
         authz,
     )
     return to_weather_alert_read(message, recipient_count, event_id, assessment_id)
+
+
+@router.post(
+    "/{event_id}/weather-automation/run",
+    response_model=EventWeatherAutomationRunRead,
+)
+async def run_weather_alert_automation_route(
+    event_id: UUID,
+    payload: EventWeatherAutomationRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventWeatherAutomationRunRead:
+    return await run_weather_alert_automation(db, identity, event_id, payload, authz)
 
 
 @router.post("/{event_id}/attendance", response_model=AttendanceRecordRead, status_code=201)

@@ -436,6 +436,27 @@ export type EventWeatherAlertRead = {
   urgent: boolean;
 };
 
+export type EventWeatherAutomationRunItemRead = {
+  assessment_id: UUID;
+  alert_level: WeatherAlertLevel;
+  decision: WeatherDecision;
+  action: string;
+  message_id: UUID | null;
+  recipient_count: number;
+  reason: string;
+};
+
+export type EventWeatherAutomationRunRead = {
+  event_id: UUID;
+  channel: CommunicationChannel;
+  minimum_alert_level: WeatherAlertLevel;
+  dry_run: boolean;
+  candidate_count: number;
+  dispatched_count: number;
+  skipped_count: number;
+  items: EventWeatherAutomationRunItemRead[];
+};
+
 export type EventTravelPlanRead = {
   id: UUID;
   organization_id: UUID;

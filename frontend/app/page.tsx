@@ -108,6 +108,7 @@ import type {
   EventTravelReceiptUploadRead,
   EventTravelRouteOptimizationRead,
   EventWeatherAlertRead,
+  EventWeatherAutomationRunRead,
   EventWeatherAssessmentRead,
   EventType,
   EmergencyActivationAlertRead,
@@ -526,6 +527,7 @@ export default function HomePage() {
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
   const [weatherAssessments, setWeatherAssessments] = useState<EventWeatherAssessmentRead[]>([]);
   const [weatherAlert, setWeatherAlert] = useState<EventWeatherAlertRead | null>(null);
+  const [weatherAutomation, setWeatherAutomation] = useState<EventWeatherAutomationRunRead | null>(null);
   const [travelPlans, setTravelPlans] = useState<EventTravelPlanRead[]>([]);
   const [travelConsentBatch, setTravelConsentBatch] = useState<EventTravelConsentBatchRead | null>(null);
   const [travelConsentReminder, setTravelConsentReminder] = useState<EventTravelConsentReminderRead | null>(null);
@@ -1858,6 +1860,7 @@ export default function HomePage() {
       setEvents([]);
       setWeatherAssessments([]);
       setWeatherAlert(null);
+      setWeatherAutomation(null);
       setTravelPlans([]);
       setTravelConsentBatch(null);
       setTravelConsentReminder(null);
@@ -2091,6 +2094,7 @@ export default function HomePage() {
       setAttendance([]);
       setWeatherAssessments([]);
       setWeatherAlert(null);
+      setWeatherAutomation(null);
       setTravelPlans([]);
       setTravelConsentBatch(null);
       setTravelConsentReminder(null);
@@ -2604,6 +2608,38 @@ export default function HomePage() {
         setSelectedMessageId(alert.message_id);
         addLog(`Weather alert sent to ${alert.recipient_count} recipients`, "bad");
         if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
+        }
+      }
+    );
+  };
+
+  const runWeatherAutomation = () => {
+    if (!selectedEventId) {
+      addLog("Select an event before running weather automation", "bad");
+      return;
+    }
+    runAction(
+      `weather-automation-${selectedEventId}`,
+      () =>
+        apiRequest<EventWeatherAutomationRunRead>(`/events/${selectedEventId}/weather-automation/run`, {
+          method: "POST",
+          identity,
+          body: {
+            channel: weatherForm.alert_channel,
+            minimum_alert_level: "warning",
+            copy_guardians_for_minors: true,
+            include_existing_alerts: false,
+            dry_run: false
+          }
+        }),
+      (automation) => {
+        setWeatherAutomation(automation);
+        addLog(
+          `Weather automation dispatched ${automation.dispatched_count}, skipped ${automation.skipped_count}`,
+          automation.dispatched_count > 0 ? "bad" : "neutral"
+        );
+        if (selectedOrganizationId && automation.dispatched_count > 0) {
           void loadCommunications(selectedOrganizationId);
         }
       }
@@ -8144,6 +8180,7 @@ export default function HomePage() {
               <button type="button" onClick={seedAttendance} disabled={busyAction !== null}>Seed roster</button>
               <button type="button" onClick={checkClearance} disabled={busyAction !== null}>Clearance</button>
               <button type="button" onClick={assessEventWeather} disabled={busyAction !== null}>Weather check</button>
+              <button type="button" onClick={runWeatherAutomation} disabled={busyAction !== null}>Weather automation</button>
               <button type="button" onClick={createTravelPlan} disabled={busyAction !== null}>Travel plan</button>
               <button type="button" onClick={runTravelConsentReminderAutomation} disabled={busyAction !== null}>Auto reminders</button>
               <button type="button" onClick={loadTravelDeviceFleetInventory} disabled={busyAction !== null}>GPS fleet</button>
@@ -8186,6 +8223,15 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {weatherAutomation ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Weather automation · {weatherAutomation.channel}</strong>
+                    <span>{weatherAutomation.dispatched_count} dispatched · {weatherAutomation.skipped_count} skipped · threshold {weatherAutomation.minimum_alert_level}</span>
+                    <span>{weatherAutomation.items[0]?.reason ?? "No assessments met the automation threshold"}</span>
+                  </div>
+                </article>
+              ) : null}
               {weatherAlert ? (
                 <article className="task-card">
                   <div>
