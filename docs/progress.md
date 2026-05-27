@@ -662,6 +662,19 @@ athlete-development platform:
     `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
   - Not tested in this fast slice: full backend test suite, migration
     upgrade/downgrade execution, frontend production build, and browser QA.
+- Implemented slice 064 registration inquiry conversion:
+  - Added an operator conversion API for public registration inquiries that
+    creates athlete person/profile records, athlete organization membership,
+    optional team roster entry, and optional guardian relationship from the
+    inquiry contact details.
+  - Converted inquiries are marked `converted` and protected from repeat
+    conversion.
+  - Extended the operations console tenant panel with recent inquiry cards and
+    Convert actions that add the converted athlete into the local roster state.
+  - Verification: `uv run ruff check .`,
+    `pnpm --filter @afrolete/frontend typecheck`, `git diff --check`.
+  - Not tested in this fast slice: full backend test suite, frontend
+    production build, browser QA, and bulk inquiry deduplication.
 
 ## Implementation Slices
 
@@ -731,6 +744,7 @@ athlete-development platform:
 | 061 - Family portal consent responses | Partial | Backend ruff; frontend typecheck; diff check | Guardians can now list pending consent requests and grant or deny them from `/family`, fulfilling requests and updating consent records through existing safeguarding flows; live guardian smoke and full verification remain. |
 | 062 - Branded public organization sites | Partial | Backend ruff; frontend typecheck; diff check | Organization slugs/subdomains now expose public branded site profiles and `/site/[slug]` renders tenant colors, logo/name, mission, contact links, teams, and upcoming events; live subdomain routing and full verification remain. |
 | 063 - Public registration inquiry funnel | Partial | Backend ruff; frontend typecheck; diff check | Public organization sites now collect persisted player/parent registration inquiries and operators can list them through an authenticated organization API; full verification remains. |
+| 064 - Registration inquiry conversion | Partial | Backend ruff; frontend typecheck; diff check | Operators can convert public inquiries into athlete person/profile records, athlete membership, team roster entries, and guardian relationships from the console; full verification remains. |
 
 ## Capability Coverage
 
@@ -745,7 +759,7 @@ Status values:
 | --- | --- | --- |
 | Tenant organizations, clubs, schools, associations | partial | Polymorphic membership supports associations, clubs, schools, teams, and people in the tenant graph; organization branding/contact/subdomain fields now feed public branded site profiles and `/site/[slug]` pages with registration inquiry capture. |
 | Person identity and athlete profiles | partial | `Person`, `AppUser`, and `AthleteProfile` models added; Keycloak token claims provision `AppUser` identities and bind them to existing `Person` records by verified email before creating new people. |
-| Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees; public site inquiries can now feed player/parent onboarding review. |
+| Teams, rosters, staff, guardians | partial | Team APIs support team sports and individual sports with captains, vice captains, starters, bench, substitutes, reserves, individual athletes, staff/support roles, and team committees; public site inquiries can now convert into athlete profiles, roster entries, and guardian links. |
 | Events, schedules, attendance | partial | Event scheduling APIs, roster invitation seeding, attendance recording/listing, and consent-aware check-in are implemented. |
 | Performance metrics and assessments | partial | Metric definitions, observations with provenance/confidence, ALS-style assessments, summaries, provider-neutral evidence ingestion, pending-review observations, human review/correction, and console workflows are implemented. |
 | AI-assisted ingestion and analysis | partial | Agent identity, assignment, task queue, deterministic/webhook task execution, task review, provider-neutral performance evidence ingestion, derived run records, governance summary metrics, credential-boundary status, and console workflows are implemented; live provider workers, OpenBao secret fetch, persisted run history tables, model-backed extraction, audit immutability, and deeper model governance remain. |

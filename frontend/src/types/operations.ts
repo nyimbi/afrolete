@@ -263,6 +263,14 @@ export type RegistrationInquiryRead = {
   created_at: string;
 };
 
+export type RegistrationInquiryConversionRead = {
+  inquiry: RegistrationInquiryRead;
+  athlete_person_id: UUID;
+  athlete_profile_id: UUID;
+  roster_entry_id: UUID | null;
+  guardian_person_id: UUID | null;
+};
+
 export type MembershipRead = {
   id: UUID;
   organization_id: UUID;

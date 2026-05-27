@@ -120,6 +120,8 @@ import type {
   ReportExportJobRead,
   ReportFormat,
   ReportFrequency,
+  RegistrationInquiryConversionRead,
+  RegistrationInquiryRead,
   RenderedReportRead,
   ReportVerificationRead,
   ReportingBenchmarkRead,
@@ -389,6 +391,7 @@ export default function HomePage() {
     useState<BillingDunningDeliveryRead | null>(null);
   const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
+  const [registrationInquiries, setRegistrationInquiries] = useState<RegistrationInquiryRead[]>([]);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
@@ -875,6 +878,17 @@ export default function HomePage() {
     []
   );
 
+  const loadRegistrationInquiries = useCallback(
+    async (organizationId: string) => {
+      const data = await apiRequest<RegistrationInquiryRead[]>(
+        `/organizations/${organizationId}/registration-inquiries`,
+        { identity }
+      );
+      setRegistrationInquiries(data);
+    },
+    [identity]
+  );
+
   const loadEvents = useCallback(async (organizationId: string, teamId?: string) => {
     const query = teamId ? `&team_id=${teamId}` : "";
     const data = await apiRequest<EventRead[]>(`/events?organization_id=${organizationId}${query}`);
@@ -1318,6 +1332,7 @@ export default function HomePage() {
       setCompetitionConflicts([]);
       setMatchEvents([]);
       setOfficialAssignments([]);
+      setRegistrationInquiries([]);
       setCommunicationTemplates([]);
       setCommunicationMessages([]);
       setMessageRecipients([]);
@@ -1392,6 +1407,7 @@ export default function HomePage() {
     }
     runAction("load-tenant-data", async () => {
       await loadTeams(selectedOrganizationId);
+      await loadRegistrationInquiries(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
@@ -1407,6 +1423,7 @@ export default function HomePage() {
   }, [
     selectedOrganizationId,
     loadTeams,
+    loadRegistrationInquiries,
     loadEvents,
     loadAgents,
     loadAgentTasks,
@@ -1663,6 +1680,46 @@ export default function HomePage() {
         setAthletes((current) => [athlete, ...current.filter((item) => item.personId !== athlete.personId)]);
         setSelectedAthleteId(athlete.personId);
         addLog(`${athlete.name} joined ${selectedTeam?.name ?? "the team"}`, "good");
+      }
+    );
+  };
+
+  const convertRegistrationInquiry = (inquiry: RegistrationInquiryRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      `convert-registration-inquiry-${inquiry.id}`,
+      () =>
+        apiRequest<RegistrationInquiryConversionRead>(
+          `/organizations/${selectedOrganizationId}/registration-inquiries/${inquiry.id}/convert`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              team_id: inquiry.team_id || selectedTeamId || null,
+              role: "player",
+              create_guardian: true
+            }
+          }
+        ),
+      (conversion) => {
+        setRegistrationInquiries((current) =>
+          current.map((item) => (item.id === conversion.inquiry.id ? conversion.inquiry : item))
+        );
+        setAthletes((current) => [
+          {
+            personId: conversion.athlete_person_id,
+            athleteProfileId: conversion.athlete_profile_id,
+            name: conversion.inquiry.athlete_name,
+            email: conversion.inquiry.email,
+            rosterEntryId: conversion.roster_entry_id ?? undefined
+          },
+          ...current.filter((item) => item.personId !== conversion.athlete_person_id)
+        ]);
+        setSelectedAthleteId(conversion.athlete_person_id);
+        addLog(`${conversion.inquiry.athlete_name} converted from inquiry`, "good");
       }
     );
   };
@@ -4865,6 +4922,25 @@ export default function HomePage() {
                   <span>{organization.name}</span>
                   <small>{organization.organization_type} · {organization.my_roles.join(", ")}</small>
                 </button>
+              ))}
+            </div>
+            <div className="task-list">
+              {registrationInquiries.slice(0, 4).map((inquiry) => (
+                <article key={inquiry.id} className="task-card">
+                  <div>
+                    <strong>{inquiry.athlete_name}</strong>
+                    <span>{inquiry.email} · {inquiry.age_group ?? "age open"} · {inquiry.status}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button
+                      type="button"
+                      onClick={() => convertRegistrationInquiry(inquiry)}
+                      disabled={busyAction !== null || inquiry.status === "converted"}
+                    >
+                      Convert
+                    </button>
+                  </div>
+                </article>
               ))}
             </div>
           </form>

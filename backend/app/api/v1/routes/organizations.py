@@ -17,6 +17,8 @@ from app.schemas.organization import (
     PublicRegistrationInquiryCreate,
     PublicSiteEventRead,
     PublicSiteTeamRead,
+    RegistrationInquiryConversionCreate,
+    RegistrationInquiryConversionRead,
     RegistrationInquiryRead,
 )
 from app.services.auth.dependencies import get_current_identity
@@ -25,6 +27,7 @@ from app.services.authz.service import AuthorizationService, get_authorization_s
 from app.services.organizations import (
     add_committee_member,
     add_member,
+    convert_registration_inquiry,
     create_public_registration_inquiry,
     create_committee,
     create_organization,
@@ -124,6 +127,17 @@ def to_registration_inquiry_read(inquiry) -> RegistrationInquiryRead:
     )
 
 
+def to_registration_conversion_read(item) -> RegistrationInquiryConversionRead:
+    inquiry, athlete, athlete_profile, roster_entry, guardian = item
+    return RegistrationInquiryConversionRead(
+        inquiry=to_registration_inquiry_read(inquiry),
+        athlete_person_id=athlete.id,
+        athlete_profile_id=athlete_profile.id,
+        roster_entry_id=roster_entry.id if roster_entry is not None else None,
+        guardian_person_id=guardian.id if guardian is not None else None,
+    )
+
+
 @router.post("", response_model=OrganizationRead, status_code=status.HTTP_201_CREATED)
 async def create_organization_route(
     payload: OrganizationCreate,
@@ -181,6 +195,23 @@ async def list_registration_inquiries_route(
         to_registration_inquiry_read(inquiry)
         for inquiry in await list_registration_inquiries(db, identity, organization_id, authz)
     ]
+
+
+@router.post(
+    "/{organization_id}/registration-inquiries/{inquiry_id}/convert",
+    response_model=RegistrationInquiryConversionRead,
+)
+async def convert_registration_inquiry_route(
+    organization_id: UUID,
+    inquiry_id: UUID,
+    payload: RegistrationInquiryConversionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RegistrationInquiryConversionRead:
+    return to_registration_conversion_read(
+        await convert_registration_inquiry(db, identity, organization_id, inquiry_id, payload, authz)
+    )
 
 
 @router.post("/{organization_id}/members", response_model=MembershipRead, status_code=201)

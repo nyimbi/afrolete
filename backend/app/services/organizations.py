@@ -6,16 +6,17 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import MemberSubjectType, MembershipRole
+from app.models.enums import GuardianRelationshipKind, MemberSubjectType, MembershipRole, RosterStatus, TeamRole
 from app.models.event import Event
 from app.models.identity import Person
 from app.models.organization import Committee, CommitteeMembership, Membership, Organization, RegistrationInquiry
-from app.models.team import Team
+from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.organization import (
     CommitteeCreate,
     CommitteeMemberAdd,
     MemberAdd,
     OrganizationCreate,
+    RegistrationInquiryConversionCreate,
     PublicRegistrationInquiryCreate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -236,6 +237,149 @@ async def list_registration_inquiries(
             )
         ).all()
     )
+
+
+async def convert_registration_inquiry(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    inquiry_id: UUID,
+    payload: RegistrationInquiryConversionCreate,
+    authz: AuthorizationService,
+) -> tuple[RegistrationInquiry, Person, AthleteProfile, TeamRosterEntry | None, Person | None]:
+    can_manage = await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage_roster",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    ) or await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    if not can_manage:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    inquiry = await db.get(RegistrationInquiry, inquiry_id)
+    if inquiry is None or inquiry.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
+    if inquiry.status == "converted":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Inquiry already converted")
+
+    target_team_id = payload.team_id or inquiry.team_id
+    team = None
+    if target_team_id is not None:
+        team = await db.get(Team, target_team_id)
+        if team is None or team.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    athlete = Person(display_name=inquiry.athlete_name)
+    db.add(athlete)
+    await db.flush()
+
+    athlete_membership = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == organization_id,
+            Membership.subject_type == MemberSubjectType.PERSON,
+            Membership.subject_id == athlete.id,
+            Membership.role == MembershipRole.ATHLETE,
+        )
+    )
+    if athlete_membership is None:
+        db.add(
+            Membership(
+                organization_id=organization_id,
+                subject_type=MemberSubjectType.PERSON,
+                subject_id=athlete.id,
+                role=MembershipRole.ATHLETE,
+                title="Athlete",
+            )
+        )
+
+    athlete_profile = AthleteProfile(
+        organization_id=organization_id,
+        person_id=athlete.id,
+        development_notes=f"Converted from registration inquiry {inquiry.id}",
+    )
+    db.add(athlete_profile)
+    await db.flush()
+
+    roster_entry = None
+    if team is not None:
+        roster_entry = TeamRosterEntry(
+            team_id=team.id,
+            athlete_profile_id=athlete_profile.id,
+            role=payload.role,
+            status=RosterStatus.ACTIVE,
+            jersey_number=payload.jersey_number,
+            primary_position=payload.primary_position,
+        )
+        db.add(roster_entry)
+        await authz.touch(
+            Relationship(
+                resource_type="team",
+                resource_id=str(team.id),
+                relation="athlete" if payload.role == TeamRole.PLAYER else payload.role.value,
+                subject_type="person",
+                subject_id=str(athlete.id),
+            )
+        )
+
+    guardian = None
+    if payload.create_guardian:
+        guardian = await db.scalar(select(Person).where(Person.primary_email == inquiry.email))
+        if guardian is None:
+            guardian = Person(
+                display_name=inquiry.guardian_name or inquiry.email,
+                primary_email=inquiry.email,
+                primary_phone=inquiry.phone,
+            )
+            db.add(guardian)
+            await db.flush()
+        elif inquiry.phone and not guardian.primary_phone:
+            guardian.primary_phone = inquiry.phone
+
+        existing_guardian = await db.scalar(
+            select(GuardianRelationship).where(
+                GuardianRelationship.athlete_person_id == athlete.id,
+                GuardianRelationship.guardian_person_id == guardian.id,
+            )
+        )
+        if existing_guardian is None:
+            db.add(
+                GuardianRelationship(
+                    athlete_person_id=athlete.id,
+                    guardian_person_id=guardian.id,
+                    relationship_kind=GuardianRelationshipKind.PARENT,
+                    relationship="parent",
+                    can_sign_consent=True,
+                    emergency_contact=True,
+                    is_primary=True,
+                )
+            )
+
+    inquiry.status = "converted"
+    await authz.touch(
+        Relationship(
+            resource_type="organization",
+            resource_id=str(organization_id),
+            relation="athlete",
+            subject_type="person",
+            subject_id=str(athlete.id),
+        )
+    )
+    await db.commit()
+    await db.refresh(inquiry)
+    await db.refresh(athlete)
+    await db.refresh(athlete_profile)
+    if roster_entry is not None:
+        await db.refresh(roster_entry)
+    if guardian is not None:
+        await db.refresh(guardian)
+    return inquiry, athlete, athlete_profile, roster_entry, guardian
 
 
 async def add_member(
