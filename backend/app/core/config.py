@@ -51,6 +51,10 @@ class Settings(BaseSettings):
 
     billing_payment_webhook_signing_key: str = ""
     billing_payment_webhook_tolerance_seconds: int = 300
+    billing_dunning_delivery_mode: Literal["record_only", "webhook"] = "record_only"
+    billing_dunning_webhook_url: str = ""
+    billing_dunning_webhook_key: str = ""
+    billing_dunning_timeout_seconds: float = 5.0
 
     report_artifact_dir: str = "data/report-artifacts"
     report_artifact_url_prefix: str = "local://reports"

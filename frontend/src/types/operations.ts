@@ -966,6 +966,16 @@ export type BillingDunningNoticeRead = {
   next_action: string;
 };
 
+export type BillingDunningDeliveryRead = BillingDunningNoticeRead & {
+  delivery_mode: string;
+  delivery_attempted: boolean;
+  delivered: boolean;
+  destination: string | null;
+  provider_status_code: number | null;
+  failure_reason: string | null;
+  delivered_at: string;
+};
+
 export type BillingPaymentWebhookRead = {
   organization_id: UUID;
   invoice_id: UUID;

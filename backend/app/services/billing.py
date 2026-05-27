@@ -5,6 +5,7 @@ from decimal import Decimal
 from hashlib import sha256
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -289,6 +290,71 @@ async def dunning_notice(
         ),
         "next_action": next_action,
     }
+
+
+async def deliver_dunning_notice(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    invoice_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> dict:
+    selected_settings = settings or get_settings()
+    notice = await dunning_notice(db, identity, organization_id, invoice_id, authz)
+    result = {
+        **notice,
+        "delivery_mode": selected_settings.billing_dunning_delivery_mode,
+        "delivery_attempted": False,
+        "delivered": False,
+        "destination": selected_settings.billing_dunning_webhook_url or None,
+        "provider_status_code": None,
+        "failure_reason": None,
+        "delivered_at": datetime.now(UTC),
+    }
+    if selected_settings.billing_dunning_delivery_mode == "record_only":
+        result["failure_reason"] = "Record-only delivery mode; notice prepared for manual follow-up."
+        return result
+    if not selected_settings.billing_dunning_webhook_url:
+        result["failure_reason"] = "Billing dunning webhook mode is enabled but no webhook URL is configured."
+        return result
+
+    result["delivery_attempted"] = True
+    payload = {
+        "event_type": "billing.dunning_notice",
+        "organization_id": str(organization_id),
+        "invoice_id": str(invoice_id),
+        "invoice_number": notice["invoice_number"],
+        "severity": notice["severity"],
+        "channel": notice["channel"],
+        "amount_due": str(notice["amount_due"]),
+        "days_overdue": notice["days_overdue"],
+        "message": notice["message"],
+        "next_action": notice["next_action"],
+        "created_at": result["delivered_at"].isoformat(),
+    }
+    headers = billing_dunning_headers(selected_settings)
+    try:
+        async with httpx.AsyncClient(timeout=selected_settings.billing_dunning_timeout_seconds) as client:
+            response = await client.post(
+                selected_settings.billing_dunning_webhook_url,
+                json=payload,
+                headers=headers,
+            )
+        result["provider_status_code"] = response.status_code
+        result["delivered"] = 200 <= response.status_code < 300
+        if not result["delivered"]:
+            result["failure_reason"] = f"Dunning webhook returned {response.status_code}: {response.text[:500]}"
+    except httpx.HTTPError as error:
+        result["failure_reason"] = f"Dunning webhook failed: {error}"
+    return result
+
+
+def billing_dunning_headers(settings: Settings) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if settings.billing_dunning_webhook_key:
+        headers["X-Afrolete-Billing-Dunning-Key"] = settings.billing_dunning_webhook_key
+    return headers
 
 
 async def ingest_payment_webhook(

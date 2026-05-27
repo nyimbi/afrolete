@@ -170,6 +170,16 @@ class BillingDunningNoticeRead(BaseModel):
     next_action: str
 
 
+class BillingDunningDeliveryRead(BillingDunningNoticeRead):
+    delivery_mode: str
+    delivery_attempted: bool
+    delivered: bool
+    destination: str | None
+    provider_status_code: int | None
+    failure_reason: str | None
+    delivered_at: datetime
+
+
 class BillingPaymentWebhookCreate(BaseModel):
     organization_id: UUID
     invoice_id: UUID

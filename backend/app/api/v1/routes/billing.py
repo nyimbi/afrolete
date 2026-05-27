@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.schemas.billing import (
     BillingEntitlementCreate,
     BillingEntitlementRead,
+    BillingDunningDeliveryRead,
     BillingDunningNoticeRead,
     BillingPaymentWebhookCreate,
     BillingPaymentWebhookRead,
@@ -39,6 +40,7 @@ from app.services.billing import (
     create_plan,
     create_subscription,
     create_usage_meter,
+    deliver_dunning_notice,
     dunning_notice,
     ingest_payment_webhook,
     list_entitlements,
@@ -159,6 +161,19 @@ async def dunning_route(
 ) -> BillingDunningNoticeRead:
     return BillingDunningNoticeRead(
         **await dunning_notice(db, identity, organization_id, invoice_id, authz)
+    )
+
+
+@router.post("/invoices/{invoice_id}/dunning/deliver", response_model=BillingDunningDeliveryRead)
+async def deliver_dunning_route(
+    invoice_id: UUID,
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BillingDunningDeliveryRead:
+    return BillingDunningDeliveryRead(
+        **await deliver_dunning_notice(db, identity, organization_id, invoice_id, authz)
     )
 
 

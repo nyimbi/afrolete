@@ -28,6 +28,7 @@ import type {
   AttendanceSeedRead,
   AttendanceStatus,
   BillingCycle,
+  BillingDunningDeliveryRead,
   BillingDunningNoticeRead,
   BillingEntitlementRead,
   BillingPaymentWebhookRead,
@@ -307,6 +308,8 @@ export default function HomePage() {
   const [billingTaxQuote, setBillingTaxQuote] = useState<BillingTaxQuoteRead | null>(null);
   const [billingProration, setBillingProration] = useState<BillingProrationQuoteRead | null>(null);
   const [billingDunning, setBillingDunning] = useState<BillingDunningNoticeRead | null>(null);
+  const [billingDunningDelivery, setBillingDunningDelivery] =
+    useState<BillingDunningDeliveryRead | null>(null);
   const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
@@ -3699,7 +3702,31 @@ export default function HomePage() {
         ),
       (notice) => {
         setBillingDunning(notice);
+        setBillingDunningDelivery(null);
         addLog(`${notice.severity} dunning notice prepared`, "good");
+      }
+    );
+  };
+
+  const deliverBillingDunningNotice = () => {
+    if (!selectedOrganizationId || !selectedSaasInvoiceId) {
+      addLog("Create or select a SaaS invoice first", "bad");
+      return;
+    }
+    runAction(
+      "billing-dunning-delivery",
+      () =>
+        apiRequest<BillingDunningDeliveryRead>(
+          `/billing/invoices/${selectedSaasInvoiceId}/dunning/deliver?organization_id=${selectedOrganizationId}`,
+          { method: "POST", identity }
+        ),
+      (delivery) => {
+        setBillingDunning(delivery);
+        setBillingDunningDelivery(delivery);
+        addLog(
+          delivery.delivered ? "Dunning notice delivered" : delivery.failure_reason ?? "Dunning notice recorded",
+          delivery.delivered ? "good" : "neutral"
+        );
       }
     );
   };
@@ -5057,6 +5084,7 @@ export default function HomePage() {
                 <button type="button" onClick={createUsageMeterAndRecord} disabled={busyAction !== null}>Usage</button>
                 <button type="button" onClick={createSaaSInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
                 <button type="button" onClick={prepareDunningNotice} disabled={busyAction !== null}>Dunning</button>
+                <button type="button" onClick={deliverBillingDunningNotice} disabled={busyAction !== null}>Deliver</button>
                 <button type="button" onClick={ingestBillingWebhook} disabled={busyAction !== null}>Webhook</button>
               </div>
             </div>
@@ -5129,6 +5157,16 @@ export default function HomePage() {
                   <div>
                     <strong>{billingDunning.severity} · {billingDunning.amount_due}</strong>
                     <span>{billingDunning.days_overdue} days overdue · {billingDunning.next_action}</span>
+                  </div>
+                </article>
+              ) : null}
+              {billingDunningDelivery ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{billingDunningDelivery.delivery_mode} delivery · {billingDunningDelivery.delivered ? "delivered" : "pending"}</strong>
+                    <span>
+                      {billingDunningDelivery.destination ?? "No external destination"} · {billingDunningDelivery.failure_reason ?? `status ${billingDunningDelivery.provider_status_code ?? "recorded"}`}
+                    </span>
                   </div>
                 </article>
               ) : null}
