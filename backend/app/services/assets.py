@@ -28,7 +28,7 @@ from app.models.assets import (
     MaintenanceWorkOrder,
     SupplierOrder,
 )
-from app.models.commercial import FinanceInvoice
+from app.models.commercial import FinanceInvoice, FinancePayment
 from app.models.enums import (
     AssetCondition,
     CheckoutStatus,
@@ -37,6 +37,7 @@ from app.models.enums import (
     MemberSubjectType,
     WorkOrderStatus,
 )
+from app.models.enums import CommercialStatus
 from app.models.event import Event
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
@@ -51,6 +52,8 @@ from app.schemas.assets import (
     EquipmentLeaseInvoiceCreate,
     EquipmentLeaseInvoiceRead,
     EquipmentLeaseInstallmentRead,
+    EquipmentLeasePaymentCreate,
+    EquipmentLeasePaymentRead,
     EquipmentPhotoUpdate,
     EquipmentLeaseScheduleCreate,
     EquipmentLeaseScheduleRead,
@@ -74,7 +77,7 @@ from app.schemas.assets import (
     SupplierScoreRead,
     AssetUtilizationRecommendationRead,
 )
-from app.schemas.commercial import FinanceInvoiceRead
+from app.schemas.commercial import FinanceInvoiceRead, FinancePaymentRead
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
 
@@ -1009,6 +1012,66 @@ async def list_equipment_lease_schedules(
     return result
 
 
+async def reconcile_equipment_lease_payment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    lease_schedule_id: UUID,
+    payload: EquipmentLeasePaymentCreate,
+    authz: AuthorizationService,
+) -> EquipmentLeasePaymentRead:
+    schedule = await get_lease_schedule(db, lease_schedule_id)
+    await ensure_manage_assets(authz, identity, schedule.organization_id)
+    invoice = await db.get(FinanceInvoice, schedule.finance_invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease invoice not found")
+    installments = await list_lease_installments(db, schedule.id)
+    outstanding_installments = [item for item in installments if item.status != "paid"]
+    if not outstanding_installments:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Lease schedule is already paid")
+    amount = payload.amount or outstanding_installments[0].amount
+    if amount <= 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment amount must be positive")
+    payment = FinancePayment(
+        organization_id=schedule.organization_id,
+        invoice_id=invoice.id,
+        amount=amount,
+        currency=schedule.currency,
+        method=payload.method,
+        external_reference=payload.external_reference,
+        received_at=datetime.now(UTC),
+        notes=payload.notes,
+    )
+    amount_remaining = amount
+    paid_count = 0
+    now = datetime.now(UTC)
+    for installment in outstanding_installments:
+        if amount_remaining < installment.amount:
+            break
+        installment.status = "paid"
+        installment.paid_at = now
+        amount_remaining -= installment.amount
+        paid_count += 1
+    invoice.amount_paid += amount
+    invoice.status = CommercialStatus.PAID if invoice.amount_paid >= invoice.amount_due else CommercialStatus.PARTIAL
+    if paid_count > 0 and all(item.status == "paid" for item in installments):
+        schedule.status = "paid"
+    elif paid_count > 0:
+        schedule.status = "active"
+    db.add(payment)
+    await db.commit()
+    await db.refresh(payment)
+    await db.refresh(schedule)
+    await db.refresh(invoice)
+    refreshed_installments = await list_lease_installments(db, schedule.id)
+    return EquipmentLeasePaymentRead(
+        schedule=equipment_lease_schedule_read(schedule, invoice, refreshed_installments),
+        payment=finance_payment_read(payment),
+        installments_paid=paid_count,
+        amount_applied=amount,
+        remaining_balance=max(invoice.amount_due - invoice.amount_paid, Decimal("0")).quantize(Decimal("0.01")),
+    )
+
+
 async def utilization_recommendations(
     db: AsyncSession,
     organization_id: UUID,
@@ -1186,6 +1249,13 @@ async def get_equipment_reader_by_reader_id(
     return reader
 
 
+async def get_lease_schedule(db: AsyncSession, lease_schedule_id: UUID) -> EquipmentLeaseSchedule:
+    schedule = await db.get(EquipmentLeaseSchedule, lease_schedule_id)
+    if schedule is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease schedule not found")
+    return schedule
+
+
 async def list_lease_installments(
     db: AsyncSession,
     lease_schedule_id: UUID,
@@ -1344,6 +1414,20 @@ def finance_invoice_read(invoice: FinanceInvoice) -> FinanceInvoiceRead:
         due_on=invoice.due_on,
         status=invoice.status,
         memo=invoice.memo,
+    )
+
+
+def finance_payment_read(payment: FinancePayment) -> FinancePaymentRead:
+    return FinancePaymentRead(
+        id=payment.id,
+        organization_id=payment.organization_id,
+        invoice_id=payment.invoice_id,
+        amount=payment.amount,
+        currency=payment.currency,
+        method=payment.method,
+        external_reference=payment.external_reference,
+        received_at=payment.received_at,
+        notes=payment.notes,
     )
 
 

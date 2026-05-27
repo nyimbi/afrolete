@@ -14,7 +14,7 @@ from app.models.enums import (
     WorkOrderPriority,
     WorkOrderStatus,
 )
-from app.schemas.commercial import FinanceInvoiceRead
+from app.schemas.commercial import FinanceInvoiceRead, FinancePaymentRead
 
 
 class FacilityCreate(BaseModel):
@@ -334,6 +334,21 @@ class EquipmentLeaseScheduleRead(BaseModel):
     notes: str | None
     invoice: FinanceInvoiceRead
     installments: list[EquipmentLeaseInstallmentRead]
+
+
+class EquipmentLeasePaymentCreate(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    method: str = Field(default="bank_transfer", min_length=2, max_length=80)
+    external_reference: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EquipmentLeasePaymentRead(BaseModel):
+    schedule: EquipmentLeaseScheduleRead
+    payment: FinancePaymentRead
+    installments_paid: int
+    amount_applied: Decimal
+    remaining_balance: Decimal
 
 
 class AssetUtilizationRecommendationRead(BaseModel):

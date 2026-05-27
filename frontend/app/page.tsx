@@ -72,6 +72,7 @@ import type {
   EquipmentFileRead,
   EquipmentItemRead,
   EquipmentLeaseInvoiceRead,
+  EquipmentLeasePaymentRead,
   EquipmentLeaseQuoteRead,
   EquipmentLeaseScheduleRead,
   EquipmentReaderProvisionRead,
@@ -340,6 +341,7 @@ export default function HomePage() {
   const [leaseQuote, setLeaseQuote] = useState<EquipmentLeaseQuoteRead | null>(null);
   const [leaseInvoice, setLeaseInvoice] = useState<EquipmentLeaseInvoiceRead | null>(null);
   const [leaseSchedules, setLeaseSchedules] = useState<EquipmentLeaseScheduleRead[]>([]);
+  const [leasePayment, setLeasePayment] = useState<EquipmentLeasePaymentRead | null>(null);
   const [sponsors, setSponsors] = useState<SponsorRead[]>([]);
   const [sponsorships, setSponsorships] = useState<SponsorshipAgreementRead[]>([]);
   const [campaigns, setCampaigns] = useState<FundraisingCampaignRead[]>([]);
@@ -1337,6 +1339,7 @@ export default function HomePage() {
       setLeaseQuote(null);
       setLeaseInvoice(null);
       setLeaseSchedules([]);
+      setLeasePayment(null);
       setSponsors([]);
       setSponsorships([]);
       setCampaigns([]);
@@ -3307,6 +3310,45 @@ export default function HomePage() {
     );
   };
 
+  const reconcileNextLeaseInstallment = (scheduleId = leaseSchedules[0]?.id ?? "") => {
+    if (!selectedOrganizationId || !scheduleId) {
+      addLog("Create or select a lease schedule first", "bad");
+      return;
+    }
+    const schedule = leaseSchedules.find((item) => item.id === scheduleId);
+    const nextInstallment = schedule?.installments.find((item) => item.status !== "paid");
+    runAction(
+      "reconcile-lease-installment",
+      () =>
+        apiRequest<EquipmentLeasePaymentRead>(`/assets/lease-schedules/${scheduleId}/payments`, {
+          method: "POST",
+          identity,
+          body: {
+            amount: nextInstallment?.amount ?? schedule?.monthly_amount ?? String(invoiceForm.payment_amount),
+            method: invoiceForm.method,
+            external_reference: `LEASE-PAY-${Date.now()}`,
+            notes: "Lease installment reconciled from the operations console."
+          }
+        }),
+      (result) => {
+        setLeasePayment(result);
+        setLeaseSchedules((current) => [
+          result.schedule,
+          ...current.filter((item) => item.id !== result.schedule.id)
+        ]);
+        setPayments((current) => [
+          result.payment,
+          ...current.filter((payment) => payment.id !== result.payment.id)
+        ]);
+        setInvoices((current) => [
+          result.schedule.invoice,
+          ...current.filter((invoice) => invoice.id !== result.schedule.invoice.id)
+        ]);
+        addLog(`${result.installments_paid} lease installment(s) reconciled`, "good");
+      }
+    );
+  };
+
   const checkoutEquipmentItem = () => {
     if (!selectedOrganizationId || !selectedEquipmentId) {
       addLog("Create or select equipment first", "bad");
@@ -5067,6 +5109,7 @@ export default function HomePage() {
                 <button type="button" onClick={quoteSelectedEquipmentLease} disabled={busyAction !== null}>Lease</button>
                 <button type="button" onClick={billSelectedEquipmentLease} disabled={busyAction !== null}>Bill</button>
                 <button type="button" onClick={scheduleSelectedEquipmentLease} disabled={busyAction !== null}>Schedule</button>
+                <button type="button" onClick={() => reconcileNextLeaseInstallment()} disabled={busyAction !== null}>Reconcile</button>
                 <button type="button" onClick={checkoutEquipmentItem} disabled={busyAction !== null}>Checkout</button>
                 <button type="button" onClick={returnSelectedCheckout} disabled={busyAction !== null}>Return</button>
               </div>
@@ -5210,12 +5253,27 @@ export default function HomePage() {
               </div>
             ) : null}
             <div className="task-list">
+              {leasePayment ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{leasePayment.installments_paid} installment(s) paid</strong>
+                    <span>{leasePayment.payment.method} · {leasePayment.amount_applied} applied · {leasePayment.remaining_balance} remaining</span>
+                  </div>
+                </article>
+              ) : null}
               {leaseSchedules.slice(0, 2).map((schedule) => (
                 <article key={schedule.id} className="task-card">
                   <div>
                     <strong>{schedule.invoice.title}</strong>
                     <span>{schedule.term_months} x {schedule.currency} {schedule.monthly_amount} · next {schedule.installments[0]?.due_on ?? schedule.starts_on}</span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => reconcileNextLeaseInstallment(schedule.id)}
+                    disabled={schedule.status === "paid"}
+                  >
+                    Pay
+                  </button>
                 </article>
               ))}
               {equipmentReaders.slice(0, 3).map((reader) => (

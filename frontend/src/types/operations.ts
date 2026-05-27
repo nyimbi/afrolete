@@ -500,6 +500,14 @@ export type EquipmentLeaseScheduleRead = {
   installments: EquipmentLeaseInstallmentRead[];
 };
 
+export type EquipmentLeasePaymentRead = {
+  schedule: EquipmentLeaseScheduleRead;
+  payment: FinancePaymentRead;
+  installments_paid: number;
+  amount_applied: string;
+  remaining_balance: string;
+};
+
 export type AssetUtilizationRecommendationRead = {
   target_type: string;
   target_id: UUID;

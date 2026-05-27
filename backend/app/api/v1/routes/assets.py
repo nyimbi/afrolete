@@ -16,6 +16,8 @@ from app.schemas.assets import (
     EquipmentItemRead,
     EquipmentLeaseInvoiceCreate,
     EquipmentLeaseInvoiceRead,
+    EquipmentLeasePaymentCreate,
+    EquipmentLeasePaymentRead,
     EquipmentLeaseQuoteRead,
     EquipmentLeaseScheduleCreate,
     EquipmentLeaseScheduleRead,
@@ -64,6 +66,7 @@ from app.services.assets import (
     list_work_orders,
     procurement_recommendations,
     receive_supplier_order,
+    reconcile_equipment_lease_payment,
     record_gateway_equipment_scan,
     record_equipment_scan_event,
     return_equipment,
@@ -452,6 +455,17 @@ async def list_equipment_lease_schedules_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[EquipmentLeaseScheduleRead]:
     return await list_equipment_lease_schedules(db, organization_id, equipment_item_id=equipment_item_id)
+
+
+@router.post("/lease-schedules/{lease_schedule_id}/payments", response_model=EquipmentLeasePaymentRead)
+async def reconcile_equipment_lease_payment_route(
+    lease_schedule_id: UUID,
+    payload: EquipmentLeasePaymentCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EquipmentLeasePaymentRead:
+    return await reconcile_equipment_lease_payment(db, identity, lease_schedule_id, payload, authz)
 
 
 @router.post("/checkouts", response_model=EquipmentCheckoutRead, status_code=status.HTTP_201_CREATED)
