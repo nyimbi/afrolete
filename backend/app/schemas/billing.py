@@ -158,6 +158,23 @@ class BillingProrationQuoteRead(BaseModel):
     recommendation: str
 
 
+class BillingPlanChangeCreate(BaseModel):
+    organization_id: UUID
+    new_billing_plan_id: UUID | None = None
+    new_price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    effective_on: date
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class BillingPlanChangeRead(BillingProrationQuoteRead):
+    previous_billing_plan_id: UUID
+    new_billing_plan_id: UUID
+    previous_price: Decimal
+    applied_price: Decimal
+    subscription_status: SubscriptionStatus
+    applied_at: datetime
+
+
 class BillingDunningNoticeRead(BaseModel):
     organization_id: UUID
     invoice_id: UUID

@@ -954,6 +954,15 @@ export type BillingProrationQuoteRead = {
   recommendation: string;
 };
 
+export type BillingPlanChangeRead = BillingProrationQuoteRead & {
+  previous_billing_plan_id: UUID;
+  new_billing_plan_id: UUID;
+  previous_price: string;
+  applied_price: string;
+  subscription_status: SubscriptionStatus;
+  applied_at: string;
+};
+
 export type BillingDunningNoticeRead = {
   organization_id: UUID;
   invoice_id: UUID;

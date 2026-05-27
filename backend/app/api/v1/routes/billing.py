@@ -11,6 +11,8 @@ from app.schemas.billing import (
     BillingEntitlementRead,
     BillingDunningDeliveryRead,
     BillingDunningNoticeRead,
+    BillingPlanChangeCreate,
+    BillingPlanChangeRead,
     BillingPaymentWebhookCreate,
     BillingPaymentWebhookRead,
     BillingPlanCreate,
@@ -35,6 +37,7 @@ from app.services.authz.service import AuthorizationService, get_authorization_s
 from app.services.billing import (
     billing_summary,
     billing_tax_quote,
+    apply_plan_change,
     create_entitlement,
     create_invoice,
     create_plan,
@@ -102,6 +105,19 @@ async def proration_route(
 ) -> BillingProrationQuoteRead:
     return BillingProrationQuoteRead(
         **await proration_quote(db, identity, organization_id, subscription_id, new_price, effective_on, authz)
+    )
+
+
+@router.post("/subscriptions/{subscription_id}/plan-change", response_model=BillingPlanChangeRead)
+async def apply_plan_change_route(
+    subscription_id: UUID,
+    payload: BillingPlanChangeCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BillingPlanChangeRead:
+    return BillingPlanChangeRead(
+        **await apply_plan_change(db, identity, subscription_id, payload, authz)
     )
 
 

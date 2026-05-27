@@ -24,6 +24,7 @@ from app.models.enums import BillingInvoiceStatus, SubscriptionStatus
 from app.models.organization import Organization
 from app.schemas.billing import (
     BillingEntitlementCreate,
+    BillingPlanChangeCreate,
     BillingPaymentWebhookCreate,
     BillingPlanCreate,
     SaaSInvoiceCreate,
@@ -258,6 +259,55 @@ async def proration_quote(
         "new_charge": new_charge,
         "net_amount": net_amount,
         "recommendation": proration_recommendation(net_amount),
+    }
+
+
+async def apply_plan_change(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    subscription_id: UUID,
+    payload: BillingPlanChangeCreate,
+    authz: AuthorizationService,
+) -> dict:
+    await ensure_manage_billing(authz, identity, payload.organization_id)
+    subscription = await get_subscription_for_organization(db, subscription_id, payload.organization_id)
+    previous_plan = await get_plan(subscription.billing_plan_id)
+    previous_price = money(subscription.negotiated_price or previous_plan.base_price)
+    quote = await proration_quote(
+        db,
+        identity,
+        payload.organization_id,
+        subscription_id,
+        payload.new_price,
+        payload.effective_on,
+        authz,
+    )
+    new_plan = await get_plan(payload.new_billing_plan_id) if payload.new_billing_plan_id else previous_plan
+    subscription.billing_plan_id = new_plan.id
+    subscription.billing_cycle = new_plan.billing_cycle
+    subscription.negotiated_price = money(payload.new_price)
+    if subscription.status in {SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE, SubscriptionStatus.PAUSED}:
+        subscription.status = SubscriptionStatus.ACTIVE
+    subscription.notes = subscription_plan_change_notes(
+        subscription.notes,
+        previous_plan.id,
+        new_plan.id,
+        previous_price,
+        money(payload.new_price),
+        quote["net_amount"],
+        payload.effective_on,
+        payload.note,
+    )
+    await db.commit()
+    await db.refresh(subscription)
+    return {
+        **quote,
+        "previous_billing_plan_id": previous_plan.id,
+        "new_billing_plan_id": new_plan.id,
+        "previous_price": previous_price,
+        "applied_price": subscription.negotiated_price or money(payload.new_price),
+        "subscription_status": subscription.status,
+        "applied_at": datetime.now(UTC),
     }
 
 
@@ -567,3 +617,23 @@ def proration_recommendation(net_amount: Decimal) -> str:
     if net_amount < 0:
         return "Apply the prorated credit to the next invoice."
     return "No prorated balance is due for this period."
+
+
+def subscription_plan_change_notes(
+    existing: str | None,
+    previous_plan_id: UUID,
+    new_plan_id: UUID,
+    previous_price: Decimal,
+    new_price: Decimal,
+    net_amount: Decimal,
+    effective_on: date,
+    note: str | None,
+) -> str:
+    entry = (
+        f"{datetime.now(UTC).date()}: plan change effective {effective_on}; "
+        f"plan {previous_plan_id} -> {new_plan_id}; price {previous_price} -> {new_price}; "
+        f"proration net {net_amount}."
+    )
+    if note:
+        entry = f"{entry} Note: {note}"
+    return "\n".join(part for part in [existing, entry] if part)

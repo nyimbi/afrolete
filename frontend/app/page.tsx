@@ -32,6 +32,7 @@ import type {
   BillingDunningNoticeRead,
   BillingEntitlementRead,
   BillingPaymentWebhookRead,
+  BillingPlanChangeRead,
   BillingPlanRead,
   BillingProrationQuoteRead,
   BillingSummaryRead,
@@ -307,6 +308,7 @@ export default function HomePage() {
   const [billingEntitlements, setBillingEntitlements] = useState<BillingEntitlementRead[]>([]);
   const [billingTaxQuote, setBillingTaxQuote] = useState<BillingTaxQuoteRead | null>(null);
   const [billingProration, setBillingProration] = useState<BillingProrationQuoteRead | null>(null);
+  const [billingPlanChange, setBillingPlanChange] = useState<BillingPlanChangeRead | null>(null);
   const [billingDunning, setBillingDunning] = useState<BillingDunningNoticeRead | null>(null);
   const [billingDunningDelivery, setBillingDunningDelivery] =
     useState<BillingDunningDeliveryRead | null>(null);
@@ -1223,7 +1225,9 @@ export default function HomePage() {
       setBillingEntitlements([]);
       setBillingTaxQuote(null);
       setBillingProration(null);
+      setBillingPlanChange(null);
       setBillingDunning(null);
+      setBillingDunningDelivery(null);
       setBillingWebhook(null);
       setBillingSummary(null);
       return;
@@ -3688,6 +3692,36 @@ export default function HomePage() {
     );
   };
 
+  const applyBillingPlanChange = () => {
+    if (!selectedOrganizationId || !selectedSubscriptionId) {
+      addLog("Create or select a subscription first", "bad");
+      return;
+    }
+    runAction(
+      "billing-plan-change",
+      () =>
+        apiRequest<BillingPlanChangeRead>(
+          `/billing/subscriptions/${selectedSubscriptionId}/plan-change`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              new_price: String(billingForm.prorated_price),
+              effective_on: billingForm.period_start,
+              note: "Applied from AfroLete billing console."
+            }
+          }
+        ),
+      (change) => {
+        setBillingPlanChange(change);
+        setBillingProration(change);
+        addLog(`Plan change applied at ${change.applied_price}`, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
   const prepareDunningNotice = () => {
     if (!selectedOrganizationId || !selectedSaasInvoiceId) {
       addLog("Create or select a SaaS invoice first", "bad");
@@ -4979,6 +5013,7 @@ export default function HomePage() {
                 <button type="button" onClick={createBillingPlanAndSubscription} disabled={busyAction !== null}>Subscribe</button>
                 <button type="button" onClick={quoteBillingTax} disabled={busyAction !== null}>Tax</button>
                 <button type="button" onClick={quoteBillingProration} disabled={busyAction !== null}>Prorate</button>
+                <button type="button" onClick={applyBillingPlanChange} disabled={busyAction !== null}>Apply</button>
                 <button type="button" onClick={createBillingEntitlement} disabled={busyAction !== null}>Entitle</button>
               </div>
             </div>
@@ -5047,6 +5082,14 @@ export default function HomePage() {
                   <div>
                     <strong>Proration net {billingProration.net_amount}</strong>
                     <span>{billingProration.remaining_days}/{billingProration.total_days} days · {billingProration.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {billingPlanChange ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Plan change · {billingPlanChange.subscription_status}</strong>
+                    <span>{billingPlanChange.previous_price} to {billingPlanChange.applied_price} · net {billingPlanChange.net_amount}</span>
                   </div>
                 </article>
               ) : null}
