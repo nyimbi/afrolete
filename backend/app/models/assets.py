@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -285,3 +285,44 @@ class SupplierOrder(IdMixin, TimestampMixin, Base):
     expected_delivery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
+
+
+class EquipmentLeaseSchedule(IdMixin, TimestampMixin, Base):
+    __tablename__ = "equipment_lease_schedules"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    equipment_item_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("equipment_items.id"), index=True
+    )
+    finance_invoice_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("finance_invoices.id"), index=True
+    )
+    person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    term_months: Mapped[int] = mapped_column(Integer, nullable=False)
+    monthly_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    starts_on: Mapped[date] = mapped_column(Date(), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class EquipmentLeaseInstallment(IdMixin, TimestampMixin, Base):
+    __tablename__ = "equipment_lease_installments"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    lease_schedule_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("equipment_lease_schedules.id"), index=True
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    due_on: Mapped[date] = mapped_column(Date(), nullable=False, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="scheduled", nullable=False, index=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

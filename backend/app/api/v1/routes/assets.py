@@ -17,6 +17,8 @@ from app.schemas.assets import (
     EquipmentLeaseInvoiceCreate,
     EquipmentLeaseInvoiceRead,
     EquipmentLeaseQuoteRead,
+    EquipmentLeaseScheduleCreate,
+    EquipmentLeaseScheduleRead,
     EquipmentPhotoUpdate,
     EquipmentReaderCreate,
     EquipmentReaderGatewayScanCreate,
@@ -46,6 +48,7 @@ from app.services.assets import (
     create_facility,
     create_facility_booking,
     create_equipment_lease_invoice,
+    create_equipment_lease_schedule,
     list_equipment_readers,
     create_supplier_order,
     create_work_order,
@@ -54,6 +57,7 @@ from app.services.assets import (
     list_equipment_scan_events,
     list_checkouts,
     list_equipment_items,
+    list_equipment_lease_schedules,
     list_facilities,
     list_facility_bookings,
     list_supplier_orders,
@@ -424,6 +428,30 @@ async def create_equipment_lease_invoice_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EquipmentLeaseInvoiceRead:
     return await create_equipment_lease_invoice(db, identity, equipment_item_id, payload, authz)
+
+
+@router.post(
+    "/equipment/{equipment_item_id}/lease-schedules",
+    response_model=EquipmentLeaseScheduleRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_equipment_lease_schedule_route(
+    equipment_item_id: UUID,
+    payload: EquipmentLeaseScheduleCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EquipmentLeaseScheduleRead:
+    return await create_equipment_lease_schedule(db, identity, equipment_item_id, payload, authz)
+
+
+@router.get("/lease-schedules", response_model=list[EquipmentLeaseScheduleRead])
+async def list_equipment_lease_schedules_route(
+    organization_id: UUID = Query(),
+    equipment_item_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[EquipmentLeaseScheduleRead]:
+    return await list_equipment_lease_schedules(db, organization_id, equipment_item_id=equipment_item_id)
 
 
 @router.post("/checkouts", response_model=EquipmentCheckoutRead, status_code=status.HTTP_201_CREATED)

@@ -295,6 +295,47 @@ class EquipmentLeaseInvoiceRead(BaseModel):
     invoice: FinanceInvoiceRead
 
 
+class EquipmentLeaseScheduleCreate(BaseModel):
+    organization_id: UUID
+    quantity: int = Field(default=1, ge=1)
+    term_months: int = Field(default=12, ge=1, le=120)
+    person_id: UUID | None = None
+    team_id: UUID | None = None
+    starts_on: date | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EquipmentLeaseInstallmentRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    lease_schedule_id: UUID
+    sequence_number: int
+    due_on: date
+    amount: Decimal
+    currency: str
+    status: str
+    paid_at: datetime | None
+
+
+class EquipmentLeaseScheduleRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    equipment_item_id: UUID
+    finance_invoice_id: UUID
+    person_id: UUID | None
+    team_id: UUID | None
+    quantity: int
+    term_months: int
+    monthly_amount: Decimal
+    total_amount: Decimal
+    currency: str
+    starts_on: date
+    status: str
+    notes: str | None
+    invoice: FinanceInvoiceRead
+    installments: list[EquipmentLeaseInstallmentRead]
+
+
 class AssetUtilizationRecommendationRead(BaseModel):
     target_type: str
     target_id: UUID

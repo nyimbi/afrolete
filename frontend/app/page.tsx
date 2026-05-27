@@ -73,6 +73,7 @@ import type {
   EquipmentItemRead,
   EquipmentLeaseInvoiceRead,
   EquipmentLeaseQuoteRead,
+  EquipmentLeaseScheduleRead,
   EquipmentReaderProvisionRead,
   EquipmentReaderRead,
   EquipmentScanEventRead,
@@ -338,6 +339,7 @@ export default function HomePage() {
   const [assetUtilization, setAssetUtilization] = useState<AssetUtilizationRecommendationRead[]>([]);
   const [leaseQuote, setLeaseQuote] = useState<EquipmentLeaseQuoteRead | null>(null);
   const [leaseInvoice, setLeaseInvoice] = useState<EquipmentLeaseInvoiceRead | null>(null);
+  const [leaseSchedules, setLeaseSchedules] = useState<EquipmentLeaseScheduleRead[]>([]);
   const [sponsors, setSponsors] = useState<SponsorRead[]>([]);
   const [sponsorships, setSponsorships] = useState<SponsorshipAgreementRead[]>([]);
   const [campaigns, setCampaigns] = useState<FundraisingCampaignRead[]>([]);
@@ -1037,7 +1039,8 @@ export default function HomePage() {
       supplierData,
       utilizationData,
       scanEventData,
-      readerData
+      readerData,
+      leaseScheduleData
     ] = await Promise.all([
       apiRequest<FacilityRead[]>(`/assets/facilities?organization_id=${organizationId}`),
       apiRequest<EquipmentItemRead[]>(`/assets/equipment?organization_id=${organizationId}${facilityQuery}`),
@@ -1060,7 +1063,8 @@ export default function HomePage() {
       apiRequest<EquipmentReaderRead[]>(
         `/assets/equipment/rfid-readers?organization_id=${organizationId}`,
         { identity }
-      )
+      ),
+      apiRequest<EquipmentLeaseScheduleRead[]>(`/assets/lease-schedules?organization_id=${organizationId}`)
     ]);
     setFacilities(facilityData);
     setEquipmentItems(equipmentData);
@@ -1074,6 +1078,7 @@ export default function HomePage() {
     setAssetUtilization(utilizationData);
     setEquipmentScanEvents(scanEventData);
     setEquipmentReaders(readerData);
+    setLeaseSchedules(leaseScheduleData);
     setSelectedFacilityId((current) =>
       facilityData.some((facility) => facility.id === current) ? current : facilityData[0]?.id ?? ""
     );
@@ -1331,6 +1336,7 @@ export default function HomePage() {
       setAssetUtilization([]);
       setLeaseQuote(null);
       setLeaseInvoice(null);
+      setLeaseSchedules([]);
       setSponsors([]);
       setSponsorships([]);
       setCampaigns([]);
@@ -3255,6 +3261,52 @@ export default function HomePage() {
     );
   };
 
+  const scheduleSelectedEquipmentLease = () => {
+    if (!selectedOrganizationId || !selectedEquipmentId) {
+      addLog("Select equipment first", "bad");
+      return;
+    }
+    runAction(
+      "equipment-lease-schedule",
+      () =>
+        apiRequest<EquipmentLeaseScheduleRead>(`/assets/equipment/${selectedEquipmentId}/lease-schedules`, {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            quantity: checkoutForm.quantity,
+            term_months: 12,
+            person_id: selectedAthleteId || null,
+            team_id: selectedTeamId || null,
+            starts_on: new Date().toISOString().slice(0, 10),
+            notes: `Lease schedule created from asset operations for ${selectedEquipment?.name ?? equipmentForm.name}.`
+          }
+        }),
+      (schedule) => {
+        setLeaseSchedules((current) => [
+          schedule,
+          ...current.filter((item) => item.id !== schedule.id)
+        ]);
+        setLeaseQuote({
+          equipment_item_id: schedule.equipment_item_id,
+          item_name: schedule.invoice.title,
+          quantity: schedule.quantity,
+          term_months: schedule.term_months,
+          monthly_amount: schedule.monthly_amount,
+          total_amount: schedule.total_amount,
+          residual_value: "0.00",
+          rationale: "Scheduled lease billing from asset operations."
+        });
+        setInvoices((current) => [
+          schedule.invoice,
+          ...current.filter((invoice) => invoice.id !== schedule.invoice.id)
+        ]);
+        setSelectedInvoiceId(schedule.invoice.id);
+        addLog(`${schedule.term_months} lease installments scheduled`, "good");
+      }
+    );
+  };
+
   const checkoutEquipmentItem = () => {
     if (!selectedOrganizationId || !selectedEquipmentId) {
       addLog("Create or select equipment first", "bad");
@@ -5014,6 +5066,7 @@ export default function HomePage() {
                 <button type="button" onClick={uploadSelectedEquipmentFile} disabled={busyAction !== null}>Upload</button>
                 <button type="button" onClick={quoteSelectedEquipmentLease} disabled={busyAction !== null}>Lease</button>
                 <button type="button" onClick={billSelectedEquipmentLease} disabled={busyAction !== null}>Bill</button>
+                <button type="button" onClick={scheduleSelectedEquipmentLease} disabled={busyAction !== null}>Schedule</button>
                 <button type="button" onClick={checkoutEquipmentItem} disabled={busyAction !== null}>Checkout</button>
                 <button type="button" onClick={returnSelectedCheckout} disabled={busyAction !== null}>Return</button>
               </div>
@@ -5042,6 +5095,10 @@ export default function HomePage() {
               <div>
                 <span className="muted">Readers</span>
                 <strong>{equipmentReaders.length}</strong>
+              </div>
+              <div>
+                <span className="muted">Leases</span>
+                <strong>{leaseSchedules.length}</strong>
               </div>
             </div>
             <div className="form-grid">
@@ -5153,6 +5210,14 @@ export default function HomePage() {
               </div>
             ) : null}
             <div className="task-list">
+              {leaseSchedules.slice(0, 2).map((schedule) => (
+                <article key={schedule.id} className="task-card">
+                  <div>
+                    <strong>{schedule.invoice.title}</strong>
+                    <span>{schedule.term_months} x {schedule.currency} {schedule.monthly_amount} · next {schedule.installments[0]?.due_on ?? schedule.starts_on}</span>
+                  </div>
+                </article>
+              ))}
               {equipmentReaders.slice(0, 3).map((reader) => (
                 <article key={reader.id} className="task-card">
                   <div>

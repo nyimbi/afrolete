@@ -469,6 +469,37 @@ export type EquipmentLeaseInvoiceRead = {
   invoice: FinanceInvoiceRead;
 };
 
+export type EquipmentLeaseInstallmentRead = {
+  id: UUID;
+  organization_id: UUID;
+  lease_schedule_id: UUID;
+  sequence_number: number;
+  due_on: string;
+  amount: string;
+  currency: string;
+  status: string;
+  paid_at: string | null;
+};
+
+export type EquipmentLeaseScheduleRead = {
+  id: UUID;
+  organization_id: UUID;
+  equipment_item_id: UUID;
+  finance_invoice_id: UUID;
+  person_id: UUID | null;
+  team_id: UUID | null;
+  quantity: number;
+  term_months: number;
+  monthly_amount: string;
+  total_amount: string;
+  currency: string;
+  starts_on: string;
+  status: string;
+  notes: string | null;
+  invoice: FinanceInvoiceRead;
+  installments: EquipmentLeaseInstallmentRead[];
+};
+
 export type AssetUtilizationRecommendationRead = {
   target_type: string;
   target_id: UUID;

@@ -1,6 +1,7 @@
 from base64 import b64decode
 from binascii import Error as Base64Error
-from datetime import UTC, datetime
+from calendar import monthrange
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from hmac import compare_digest
 from hashlib import sha256
@@ -18,6 +19,8 @@ from app.models.assets import (
     EquipmentCheckout,
     EquipmentFile,
     EquipmentItem,
+    EquipmentLeaseInstallment,
+    EquipmentLeaseSchedule,
     EquipmentReader,
     EquipmentScanEvent,
     Facility,
@@ -47,7 +50,10 @@ from app.schemas.assets import (
     EquipmentFileUploadCreate,
     EquipmentLeaseInvoiceCreate,
     EquipmentLeaseInvoiceRead,
+    EquipmentLeaseInstallmentRead,
     EquipmentPhotoUpdate,
+    EquipmentLeaseScheduleCreate,
+    EquipmentLeaseScheduleRead,
     EquipmentReaderCreate,
     EquipmentReaderGatewayScanCreate,
     EquipmentReaderProvisionRead,
@@ -918,6 +924,91 @@ async def create_equipment_lease_invoice(
     )
 
 
+async def create_equipment_lease_schedule(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    equipment_item_id: UUID,
+    payload: EquipmentLeaseScheduleCreate,
+    authz: AuthorizationService,
+) -> EquipmentLeaseScheduleRead:
+    item = await get_equipment_for_organization(db, equipment_item_id, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    if payload.team_id is not None:
+        await get_team_for_organization(db, payload.team_id, payload.organization_id)
+    if payload.person_id is not None:
+        await get_person_member_for_organization(db, payload.person_id, payload.organization_id)
+    quote = await equipment_lease_quote(
+        db,
+        payload.organization_id,
+        equipment_item_id,
+        payload.quantity,
+        payload.term_months,
+    )
+    starts_on = payload.starts_on or datetime.now(UTC).date()
+    invoice = FinanceInvoice(
+        organization_id=payload.organization_id,
+        person_id=payload.person_id,
+        team_id=payload.team_id,
+        sponsor_id=None,
+        invoice_number=f"LEASE-SCH-{starts_on.strftime('%Y%m%d')}-{str(item.id)[:8]}",
+        title=f"{item.name} lease schedule ({payload.term_months} months)",
+        amount_due=quote.total_amount,
+        amount_paid=Decimal("0"),
+        currency="USD",
+        due_on=starts_on,
+        memo=payload.notes
+        or (
+            f"Scheduled lease for {payload.quantity} x {item.name}; "
+            f"{payload.term_months} installments at {quote.monthly_amount}."
+        ),
+    )
+    db.add(invoice)
+    await db.flush()
+    schedule = EquipmentLeaseSchedule(
+        organization_id=payload.organization_id,
+        equipment_item_id=item.id,
+        finance_invoice_id=invoice.id,
+        person_id=payload.person_id,
+        team_id=payload.team_id,
+        quantity=payload.quantity,
+        term_months=payload.term_months,
+        monthly_amount=quote.monthly_amount,
+        total_amount=quote.total_amount,
+        currency="USD",
+        starts_on=starts_on,
+        status="active",
+        notes=payload.notes,
+    )
+    db.add(schedule)
+    await db.flush()
+    installments = build_lease_installments(schedule, starts_on)
+    db.add_all(installments)
+    await db.commit()
+    await db.refresh(schedule)
+    await db.refresh(invoice)
+    return equipment_lease_schedule_read(schedule, invoice, installments)
+
+
+async def list_equipment_lease_schedules(
+    db: AsyncSession,
+    organization_id: UUID,
+    equipment_item_id: UUID | None = None,
+) -> list[EquipmentLeaseScheduleRead]:
+    statement = select(EquipmentLeaseSchedule).where(EquipmentLeaseSchedule.organization_id == organization_id)
+    if equipment_item_id is not None:
+        statement = statement.where(EquipmentLeaseSchedule.equipment_item_id == equipment_item_id)
+    schedules = (
+        await db.scalars(statement.order_by(EquipmentLeaseSchedule.starts_on.desc(), EquipmentLeaseSchedule.created_at.desc()))
+    ).all()
+    result = []
+    for schedule in schedules:
+        invoice = await db.get(FinanceInvoice, schedule.finance_invoice_id)
+        installments = await list_lease_installments(db, schedule.id)
+        if invoice is not None:
+            result.append(equipment_lease_schedule_read(schedule, invoice, installments))
+    return result
+
+
 async def utilization_recommendations(
     db: AsyncSession,
     organization_id: UUID,
@@ -1095,6 +1186,21 @@ async def get_equipment_reader_by_reader_id(
     return reader
 
 
+async def list_lease_installments(
+    db: AsyncSession,
+    lease_schedule_id: UUID,
+) -> list[EquipmentLeaseInstallment]:
+    return list(
+        (
+            await db.scalars(
+                select(EquipmentLeaseInstallment)
+                .where(EquipmentLeaseInstallment.lease_schedule_id == lease_schedule_id)
+                .order_by(EquipmentLeaseInstallment.sequence_number)
+            )
+        ).all()
+    )
+
+
 async def match_equipment_code(
     db: AsyncSession,
     organization_id: UUID,
@@ -1241,6 +1347,45 @@ def finance_invoice_read(invoice: FinanceInvoice) -> FinanceInvoiceRead:
     )
 
 
+def equipment_lease_schedule_read(
+    schedule: EquipmentLeaseSchedule,
+    invoice: FinanceInvoice,
+    installments: list[EquipmentLeaseInstallment],
+) -> EquipmentLeaseScheduleRead:
+    return EquipmentLeaseScheduleRead(
+        id=schedule.id,
+        organization_id=schedule.organization_id,
+        equipment_item_id=schedule.equipment_item_id,
+        finance_invoice_id=schedule.finance_invoice_id,
+        person_id=schedule.person_id,
+        team_id=schedule.team_id,
+        quantity=schedule.quantity,
+        term_months=schedule.term_months,
+        monthly_amount=schedule.monthly_amount,
+        total_amount=schedule.total_amount,
+        currency=schedule.currency,
+        starts_on=schedule.starts_on,
+        status=schedule.status,
+        notes=schedule.notes,
+        invoice=finance_invoice_read(invoice),
+        installments=[equipment_lease_installment_read(item) for item in installments],
+    )
+
+
+def equipment_lease_installment_read(installment: EquipmentLeaseInstallment) -> EquipmentLeaseInstallmentRead:
+    return EquipmentLeaseInstallmentRead(
+        id=installment.id,
+        organization_id=installment.organization_id,
+        lease_schedule_id=installment.lease_schedule_id,
+        sequence_number=installment.sequence_number,
+        due_on=installment.due_on,
+        amount=installment.amount,
+        currency=installment.currency,
+        status=installment.status,
+        paid_at=installment.paid_at,
+    )
+
+
 def decode_upload_content(content_base64: str) -> bytes:
     encoded = content_base64.split(",", 1)[1] if "," in content_base64 else content_base64
     try:
@@ -1256,6 +1401,37 @@ def safe_upload_filename(filename: str) -> str:
 
 def hash_reader_key(api_key: str) -> str:
     return sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def build_lease_installments(
+    schedule: EquipmentLeaseSchedule,
+    starts_on: date,
+) -> list[EquipmentLeaseInstallment]:
+    installments = []
+    for index in range(schedule.term_months):
+        is_final = index == schedule.term_months - 1
+        prior_total = schedule.monthly_amount * index
+        amount = (schedule.total_amount - prior_total).quantize(Decimal("0.01")) if is_final else schedule.monthly_amount
+        installments.append(
+            EquipmentLeaseInstallment(
+                organization_id=schedule.organization_id,
+                lease_schedule_id=schedule.id,
+                sequence_number=index + 1,
+                due_on=add_months(starts_on, index),
+                amount=amount,
+                currency=schedule.currency,
+                status="scheduled",
+            )
+        )
+    return installments
+
+
+def add_months(value: date, months: int) -> date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return date(year, month, day)
 
 
 def supplier_recommendation(score: int) -> str:
