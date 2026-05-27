@@ -2668,6 +2668,22 @@ export type AgentScorecardPublicationRead = {
   published_at: string;
 };
 
+export type AgentScorecardPublicationReadinessRead = {
+  organization_id: UUID;
+  current_period_label: string;
+  current_period_published: boolean;
+  next_publication_due_at: string;
+  days_until_due: number;
+  latest_period_label: string | null;
+  latest_published_at: string | null;
+  flagged_comment_count: number;
+  pending_appeal_count: number;
+  score: number;
+  grade: string;
+  readiness_status: string;
+  recommended_action: string;
+};
+
 export type AgentRunRecordRead = {
   id: UUID;
   task_id: UUID;

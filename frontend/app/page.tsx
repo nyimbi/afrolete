@@ -24,6 +24,7 @@ import type {
   AgentRunRecordRead,
   AgentScorecardCommentModerationRead,
   AgentScorecardPublicationRead,
+  AgentScorecardPublicationReadinessRead,
   AgentTaskRead,
   AgentTaskStatus,
   AgentWorkerCallbackRead,
@@ -590,6 +591,7 @@ export default function HomePage() {
   const [agentEthicalScorecard, setAgentEthicalScorecard] = useState<AgentEthicalScorecardRead | null>(null);
   const [agentScorecardComments, setAgentScorecardComments] = useState<AgentScorecardCommentModerationRead[]>([]);
   const [agentScorecardPublications, setAgentScorecardPublications] = useState<AgentScorecardPublicationRead[]>([]);
+  const [agentScorecardReadiness, setAgentScorecardReadiness] = useState<AgentScorecardPublicationReadinessRead | null>(null);
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
@@ -1473,7 +1475,7 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications] = await Promise.all([
+    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
@@ -1488,6 +1490,9 @@ export default function HomePage() {
       ),
       apiRequest<AgentScorecardPublicationRead[]>(
         `/agents/ethical-scorecard/publications?organization_id=${organizationId}`
+      ),
+      apiRequest<AgentScorecardPublicationReadinessRead>(
+        `/agents/ethical-scorecard/publications/readiness?organization_id=${organizationId}`
       )
     ]);
     setAgentTasks(tasks);
@@ -1501,6 +1506,7 @@ export default function HomePage() {
     setAgentEthicalScorecard(scorecard);
     setAgentScorecardComments(comments);
     setAgentScorecardPublications(publications);
+    setAgentScorecardReadiness(readiness);
   }, []);
 
   const loadMetricDefinitions = useCallback(async (organizationId: string) => {
@@ -1941,6 +1947,7 @@ export default function HomePage() {
       setAgentEthicalScorecard(null);
       setAgentScorecardComments([]);
       setAgentScorecardPublications([]);
+      setAgentScorecardReadiness(null);
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
@@ -4963,6 +4970,9 @@ export default function HomePage() {
           publication,
           ...current.filter((item) => item.id !== publication.id)
         ]);
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
         addLog(`Published ${publication.period_label} AI scorecard`, "good");
       }
     );
@@ -11843,6 +11853,20 @@ export default function HomePage() {
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={publishAgentScorecardSnapshot}>Publish snapshot</button>
+                  </div>
+                </article>
+              ) : null}
+              {agentScorecardReadiness ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{agentScorecardReadiness.current_period_label} publication · {agentScorecardReadiness.readiness_status}</strong>
+                    <span>
+                      Due {new Date(agentScorecardReadiness.next_publication_due_at).toLocaleDateString()} · {agentScorecardReadiness.days_until_due} days · score {agentScorecardReadiness.score}/100
+                    </span>
+                    <span>
+                      {agentScorecardReadiness.flagged_comment_count} flagged comments · {agentScorecardReadiness.pending_appeal_count} pending appeals · current {agentScorecardReadiness.current_period_published ? "published" : "unpublished"}
+                    </span>
+                    <span>{agentScorecardReadiness.recommended_action}</span>
                   </div>
                 </article>
               ) : null}

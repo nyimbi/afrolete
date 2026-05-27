@@ -400,3 +400,19 @@ class AgentScorecardPublicationRead(BaseModel):
     snapshot_hash: str
     published_by_person_id: UUID | None
     published_at: datetime
+
+
+class AgentScorecardPublicationReadinessRead(BaseModel):
+    organization_id: UUID
+    current_period_label: str
+    current_period_published: bool
+    next_publication_due_at: datetime
+    days_until_due: int
+    latest_period_label: str | None
+    latest_published_at: datetime | None
+    flagged_comment_count: int
+    pending_appeal_count: int
+    score: int
+    grade: str
+    readiness_status: str
+    recommended_action: str

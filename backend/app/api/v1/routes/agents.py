@@ -28,6 +28,7 @@ from app.schemas.agent import (
     AgentScorecardCommentRead,
     AgentScorecardCommentUpdate,
     AgentScorecardPublicationCreate,
+    AgentScorecardPublicationReadinessRead,
     AgentScorecardPublicationRead,
     AgentCreate,
     AgentRead,
@@ -42,6 +43,7 @@ from app.services.agents import (
     agent_ethical_scorecard,
     agent_governance_summary,
     agent_model_transparency_report,
+    agent_scorecard_publication_readiness,
     agent_run_records,
     assign_agent,
     create_agent,
@@ -399,6 +401,16 @@ async def list_agent_scorecard_publications_route(
         to_scorecard_publication_read(publication)
         for publication in await list_agent_scorecard_publications(db, organization_id)
     ]
+
+
+@router.get("/ethical-scorecard/publications/readiness", response_model=AgentScorecardPublicationReadinessRead)
+async def agent_scorecard_publication_readiness_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> AgentScorecardPublicationReadinessRead:
+    return AgentScorecardPublicationReadinessRead(
+        **await agent_scorecard_publication_readiness(db, organization_id)
+    )
 
 
 @router.post("/ethical-scorecard/publications", response_model=AgentScorecardPublicationRead, status_code=201)

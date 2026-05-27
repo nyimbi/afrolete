@@ -1013,6 +1013,59 @@ async def list_agent_scorecard_publications(
     )
 
 
+async def agent_scorecard_publication_readiness(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> dict[str, object]:
+    now = datetime.now(UTC)
+    current_period = scorecard_period_label(now)
+    due_at = scorecard_period_due_at(now)
+    latest_publication = await db.scalar(
+        select(AgentScorecardPublication)
+        .where(AgentScorecardPublication.organization_id == organization_id)
+        .where(AgentScorecardPublication.status == "published")
+        .order_by(AgentScorecardPublication.published_at.desc())
+    )
+    current_publication = await db.scalar(
+        select(AgentScorecardPublication)
+        .where(AgentScorecardPublication.organization_id == organization_id)
+        .where(AgentScorecardPublication.period_label == current_period)
+        .where(AgentScorecardPublication.status == "published")
+    )
+    scorecard = await agent_ethical_scorecard(db, organization_id)
+    flagged_comments = await db.scalar(
+        select(func.count(AgentScorecardComment.id))
+        .where(AgentScorecardComment.organization_id == organization_id)
+        .where(AgentScorecardComment.status == "flagged")
+    )
+    pending_appeals = int(scorecard["pending_appeals"])
+    days_until_due = max((due_at.date() - now.date()).days, 0)
+    readiness_status, recommended_action = scorecard_publication_readiness_state(
+        current_period_published=current_publication is not None,
+        days_until_due=days_until_due,
+        ledger_valid=bool(scorecard["ledger_valid"]),
+        flagged_comment_count=int(flagged_comments or 0),
+        pending_appeal_count=pending_appeals,
+        approved_models=int(scorecard["approved_models"]),
+        total_models=int(scorecard["total_models"]),
+    )
+    return {
+        "organization_id": organization_id,
+        "current_period_label": current_period,
+        "current_period_published": current_publication is not None,
+        "next_publication_due_at": due_at,
+        "days_until_due": days_until_due,
+        "latest_period_label": latest_publication.period_label if latest_publication else None,
+        "latest_published_at": latest_publication.published_at if latest_publication else None,
+        "flagged_comment_count": int(flagged_comments or 0),
+        "pending_appeal_count": pending_appeals,
+        "score": int(scorecard["score"]),
+        "grade": str(scorecard["grade"]),
+        "readiness_status": readiness_status,
+        "recommended_action": recommended_action,
+    }
+
+
 async def publish_agent_scorecard(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1085,6 +1138,39 @@ async def publish_agent_scorecard(
 def scorecard_period_label(value: datetime) -> str:
     quarter = ((value.month - 1) // 3) + 1
     return f"{value.year}-Q{quarter}"
+
+
+def scorecard_period_due_at(value: datetime) -> datetime:
+    quarter = ((value.month - 1) // 3) + 1
+    if quarter == 4:
+        next_quarter_start = datetime(value.year + 1, 1, 1, tzinfo=UTC)
+    else:
+        next_quarter_start = datetime(value.year, quarter * 3 + 1, 1, tzinfo=UTC)
+    return next_quarter_start - timedelta(seconds=1)
+
+
+def scorecard_publication_readiness_state(
+    current_period_published: bool,
+    days_until_due: int,
+    ledger_valid: bool,
+    flagged_comment_count: int,
+    pending_appeal_count: int,
+    approved_models: int,
+    total_models: int,
+) -> tuple[str, str]:
+    if current_period_published:
+        return "published", "Current quarter is published; monitor comments and prepare the next snapshot."
+    if not ledger_valid:
+        return "blocked", "Repair the AI run ledger before publishing a public scorecard."
+    if flagged_comment_count:
+        return "needs_review", "Moderate flagged public scorecard feedback before publication."
+    if pending_appeal_count:
+        return "needs_review", "Resolve pending AI decision appeals before publication."
+    if total_models and approved_models < total_models:
+        return "needs_review", "Approve, block, or retire all registered model policies before publication."
+    if days_until_due <= 14:
+        return "due_soon", "Publish the current quarter scorecard snapshot before the due date."
+    return "on_track", "Publication is on track; keep audits, appeals, and comments current."
 
 
 def scorecard_publication_actions(publication: AgentScorecardPublication) -> list[str]:
