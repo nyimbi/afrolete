@@ -559,6 +559,15 @@ export type EmergencyPlanActivationRead = {
   notes: string | null;
 };
 
+export type EmergencyActivationAlertRead = {
+  activation_id: UUID;
+  message_id: UUID;
+  recipient_count: number;
+  channel: CommunicationChannel;
+  subject: string;
+  urgent: boolean;
+};
+
 export type EquipmentItemRead = {
   id: UUID;
   organization_id: UUID;

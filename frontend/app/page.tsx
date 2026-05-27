@@ -70,6 +70,7 @@ import type {
   DonationRead,
   EventRead,
   EventType,
+  EmergencyActivationAlertRead,
   EmergencyActionPlanRead,
   EmergencyActionPlanStatus,
   EmergencyPlanActivationRead,
@@ -478,6 +479,7 @@ export default function HomePage() {
   const [selectedSubscriptionId, setSelectedSubscriptionId] = useState("");
   const [selectedUsageMeterId, setSelectedUsageMeterId] = useState("");
   const [selectedSaasInvoiceId, setSelectedSaasInvoiceId] = useState("");
+  const [emergencyAlert, setEmergencyAlert] = useState<EmergencyActivationAlertRead | null>(null);
   const [selectedEquipmentFile, setSelectedEquipmentFile] = useState<File | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -741,6 +743,8 @@ export default function HomePage() {
     special_needs_plan: "Assign accessibility marshal to ramp route and medical transport point.",
     activation_location: "Section B, main touchline",
     responders: "Safety Officer; Club medic; Security lead",
+    alert_channel: "push" as CommunicationChannel,
+    alert_body: "",
     notes: "Reviewed before all tournament fixtures."
   });
   const [equipmentForm, setEquipmentForm] = useState({
@@ -3992,6 +3996,30 @@ export default function HomePage() {
     );
   };
 
+  const dispatchEmergencyAlert = (activation: EmergencyPlanActivationRead) => {
+    runAction(
+      `emergency-alert-${activation.id}`,
+      () =>
+        apiRequest<EmergencyActivationAlertRead>(`/assets/emergency-activations/${activation.id}/alerts`, {
+          method: "POST",
+          identity,
+          body: {
+            channel: emergencyPlanForm.alert_channel,
+            scope_type: "organization" as CommunicationScopeType,
+            scope_id: selectedOrganizationId || activation.organization_id,
+            body: emergencyPlanForm.alert_body || null,
+            copy_guardians_for_minors: true
+          }
+        }),
+      (alert) => {
+        setEmergencyAlert(alert);
+        setSelectedMessageId(alert.message_id);
+        addLog(`Emergency alert sent to ${alert.recipient_count} recipients`, "bad");
+        void loadCommunications(activation.organization_id);
+      }
+    );
+  };
+
   const createEquipmentItem = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -6283,6 +6311,21 @@ export default function HomePage() {
                 Responders
                 <input value={emergencyPlanForm.responders} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, responders: event.target.value })} />
               </label>
+              <label>
+                Alert channel
+                <select value={emergencyPlanForm.alert_channel} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, alert_channel: event.target.value as CommunicationChannel })}>
+                  <option value="push">Push</option>
+                  <option value="in_app">In app</option>
+                  <option value="sms">SMS</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="email">Email</option>
+                </select>
+              </label>
+              <label className="wide-field">
+                Alert note
+                <input value={emergencyPlanForm.alert_body} onChange={(event) => setEmergencyPlanForm({ ...emergencyPlanForm, alert_body: event.target.value })} />
+              </label>
             </div>
             <div className="form-grid">
               <label>
@@ -6303,6 +6346,15 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {emergencyAlert ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{emergencyAlert.subject}</strong>
+                    <span>{emergencyAlert.channel} alert · {emergencyAlert.recipient_count} recipients</span>
+                    <span>Message {emergencyAlert.message_id}</span>
+                  </div>
+                </article>
+              ) : null}
               {emergencyActivations.slice(0, 3).map((activation) => (
                 <article key={activation.id} className="task-card">
                   <div>
@@ -6311,6 +6363,7 @@ export default function HomePage() {
                     <span>{activation.outcome_summary ?? activation.guidance_steps ?? "Response in progress"}</span>
                   </div>
                   <div className="event-toolbar">
+                    <button type="button" onClick={() => dispatchEmergencyAlert(activation)}>Alert</button>
                     <button type="button" onClick={() => updateEmergencyActivation(activation, "resolved")}>Resolve</button>
                     <button type="button" onClick={() => updateEmergencyActivation(activation, "reviewed")}>Review</button>
                     <button type="button" onClick={() => updateEmergencyActivation(activation, "cancelled")}>Cancel</button>

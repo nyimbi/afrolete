@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field, model_validator
 from app.models.enums import (
     AssetCondition,
     CheckoutStatus,
+    CommunicationChannel,
+    CommunicationScopeType,
     EmergencyActionPlanStatus,
     EmergencyActivationStatus,
     EmergencyType,
@@ -124,6 +126,25 @@ class EmergencyPlanActivationRead(BaseModel):
     outcome_summary: str | None
     response_time_seconds: int | None
     notes: str | None
+
+
+class EmergencyActivationAlertCreate(BaseModel):
+    channel: CommunicationChannel = CommunicationChannel.PUSH
+    scope_type: CommunicationScopeType = CommunicationScopeType.ORGANIZATION
+    scope_id: UUID | None = None
+    recipient_person_ids: list[UUID] = Field(default_factory=list)
+    subject: str | None = Field(default=None, min_length=2, max_length=240)
+    body: str | None = Field(default=None, min_length=2, max_length=8000)
+    copy_guardians_for_minors: bool = True
+
+
+class EmergencyActivationAlertRead(BaseModel):
+    activation_id: UUID
+    message_id: UUID
+    recipient_count: int
+    channel: CommunicationChannel
+    subject: str
+    urgent: bool
 
 
 class EquipmentItemCreate(BaseModel):

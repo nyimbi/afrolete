@@ -12,7 +12,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.assets import (
@@ -31,9 +31,12 @@ from app.models.assets import (
     SupplierOrder,
 )
 from app.models.commercial import FinanceInvoice, FinancePayment
+from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.enums import (
     AssetCondition,
     CheckoutStatus,
+    CommunicationMessageType,
+    CommunicationScopeType,
     EquipmentStatus,
     EmergencyActivationStatus,
     FacilityBookingStatus,
@@ -48,6 +51,7 @@ from app.models.team import Team
 from app.core.config import Settings, get_settings
 from app.schemas.assets import (
     AssetSummaryRead,
+    EmergencyActivationAlertCreate,
     EmergencyActionPlanCreate,
     EmergencyActionPlanUpdate,
     EmergencyPlanActivationCreate,
@@ -86,8 +90,10 @@ from app.schemas.assets import (
     AssetUtilizationRecommendationRead,
 )
 from app.schemas.commercial import FinanceInvoiceRead, FinancePaymentRead
+from app.schemas.communication import CommunicationMessageCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.communications import create_message
 from app.services.storage.objects import get_object, put_object
 
 
@@ -299,6 +305,75 @@ async def update_emergency_plan_activation(
     await db.commit()
     await db.refresh(activation)
     return activation
+
+
+async def dispatch_emergency_activation_alert(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    activation_id: UUID,
+    payload: EmergencyActivationAlertCreate,
+    authz: AuthorizationService,
+) -> tuple[CommunicationMessage, int]:
+    activation = await db.get(EmergencyPlanActivation, activation_id)
+    if activation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Emergency activation not found")
+    await ensure_manage_assets(authz, identity, activation.organization_id)
+
+    scope_id = payload.scope_id
+    if scope_id is None and payload.scope_type == CommunicationScopeType.ORGANIZATION:
+        scope_id = activation.organization_id
+    if scope_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="scope_id is required for non-organization emergency alerts",
+        )
+
+    subject = payload.subject or emergency_alert_subject(activation)
+    body = payload.body or emergency_alert_body(activation)
+    message = await create_message(
+        db,
+        identity,
+        CommunicationMessageCreate(
+            organization_id=activation.organization_id,
+            message_type=CommunicationMessageType.ALERT,
+            channel=payload.channel,
+            scope_type=payload.scope_type,
+            scope_id=scope_id,
+            recipient_person_ids=payload.recipient_person_ids,
+            subject=subject,
+            body=body,
+            urgent=True,
+            quiet_hours_override=True,
+            copy_guardians_for_minors=payload.copy_guardians_for_minors,
+        ),
+        authz,
+    )
+    recipient_count = await db.scalar(
+        select(func.count(MessageRecipient.id)).where(MessageRecipient.message_id == message.id)
+    )
+    return message, int(recipient_count or 0)
+
+
+def emergency_alert_subject(activation: EmergencyPlanActivation) -> str:
+    return f"Emergency alert: {activation.emergency_type.value} at {activation.location_detail}"[:240]
+
+
+def emergency_alert_body(activation: EmergencyPlanActivation) -> str:
+    lines = [
+        f"Emergency type: {activation.emergency_type.value}",
+        f"Status: {activation.status.value}",
+        f"Location: {activation.location_detail}",
+    ]
+    if activation.assigned_responders:
+        lines.append(f"Responders: {activation.assigned_responders}")
+    if activation.guidance_steps:
+        lines.append(f"Guidance: {activation.guidance_steps}")
+    if activation.communication_log:
+        lines.append(f"Communication plan: {activation.communication_log}")
+    if activation.notes:
+        lines.append(f"Notes: {activation.notes}")
+    lines.append("Follow the emergency action plan and keep the area clear unless assigned to respond.")
+    return "\n".join(lines)[:8000]
 
 
 async def create_equipment_item(

@@ -7,6 +7,8 @@ from app.db.session import get_db
 from app.schemas.assets import (
     AssetSummaryRead,
     AssetUtilizationRecommendationRead,
+    EmergencyActivationAlertCreate,
+    EmergencyActivationAlertRead,
     EmergencyActionPlanCreate,
     EmergencyActionPlanRead,
     EmergencyActionPlanUpdate,
@@ -60,6 +62,7 @@ from app.services.assets import (
     create_facility_booking,
     create_equipment_lease_invoice,
     create_equipment_lease_schedule,
+    dispatch_emergency_activation_alert,
     list_equipment_readers,
     create_supplier_order,
     create_work_order,
@@ -165,6 +168,17 @@ def to_emergency_activation_read(activation) -> EmergencyPlanActivationRead:
         outcome_summary=activation.outcome_summary,
         response_time_seconds=activation.response_time_seconds,
         notes=activation.notes,
+    )
+
+
+def to_emergency_activation_alert_read(message, recipient_count: int, activation_id: UUID) -> EmergencyActivationAlertRead:
+    return EmergencyActivationAlertRead(
+        activation_id=activation_id,
+        message_id=message.id,
+        recipient_count=recipient_count,
+        channel=message.channel,
+        subject=message.subject,
+        urgent=message.urgent,
     )
 
 
@@ -392,6 +406,28 @@ async def update_emergency_activation_route(
     return to_emergency_activation_read(
         await update_emergency_plan_activation(db, identity, activation_id, payload, authz)
     )
+
+
+@router.post(
+    "/emergency-activations/{activation_id}/alerts",
+    response_model=EmergencyActivationAlertRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def dispatch_emergency_activation_alert_route(
+    activation_id: UUID,
+    payload: EmergencyActivationAlertCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EmergencyActivationAlertRead:
+    message, recipient_count = await dispatch_emergency_activation_alert(
+        db,
+        identity,
+        activation_id,
+        payload,
+        authz,
+    )
+    return to_emergency_activation_alert_read(message, recipient_count, activation_id)
 
 
 @router.post("/equipment", response_model=EquipmentItemRead, status_code=status.HTTP_201_CREATED)
