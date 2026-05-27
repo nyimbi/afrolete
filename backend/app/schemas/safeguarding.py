@@ -88,6 +88,18 @@ class FamilyEventSummaryRead(BaseModel):
     reason: str
 
 
+class FamilyEventRsvpCreate(BaseModel):
+    organization_id: UUID
+    status: AttendanceStatus
+    note: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def response_status_allowed(self) -> "FamilyEventRsvpCreate":
+        if self.status not in {AttendanceStatus.CONFIRMED, AttendanceStatus.DECLINED}:
+            raise ValueError("family RSVP status must be confirmed or declined")
+        return self
+
+
 class ActivityConsentCreate(BaseModel):
     organization_id: UUID
     athlete_person_id: UUID

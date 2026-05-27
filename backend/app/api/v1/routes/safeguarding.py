@@ -11,6 +11,7 @@ from app.schemas.safeguarding import (
     ConsentRequestRead,
     FamilyAthleteSummaryRead,
     FamilyEventSummaryRead,
+    FamilyEventRsvpCreate,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
     KnownChannelConsentCapture,
@@ -30,6 +31,7 @@ from app.services.safeguarding import (
     list_guardians_for_athlete,
     list_my_family,
     list_my_family_events,
+    respond_to_family_event,
 )
 
 router = APIRouter(prefix="/safeguarding", tags=["safeguarding"])
@@ -131,6 +133,20 @@ async def list_my_family_events_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[FamilyEventSummaryRead]:
     return await list_my_family_events(db, identity, organization_id, limit)
+
+
+@router.post(
+    "/my-family/events/{event_id}/athletes/{athlete_person_id}/rsvp",
+    response_model=FamilyEventSummaryRead,
+)
+async def respond_to_family_event_route(
+    event_id: UUID,
+    athlete_person_id: UUID,
+    payload: FamilyEventRsvpCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> FamilyEventSummaryRead:
+    return await respond_to_family_event(db, identity, event_id, athlete_person_id, payload)
 
 
 @router.post("/consent-requests", response_model=ConsentRequestRead, status_code=201)

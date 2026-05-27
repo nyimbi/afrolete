@@ -8,6 +8,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import (
+    AttendanceStatus,
     ConsentCaptureChannel,
     ConsentRequestStatus,
     ConsentScopeType,
@@ -22,6 +23,7 @@ from app.schemas.safeguarding import (
     ConsentRequestCreate,
     FamilyAthleteSummaryRead,
     FamilyEventSummaryRead,
+    FamilyEventRsvpCreate,
     GuardianRelationshipCreate,
     KnownChannelConsentCapture,
     TokenConsentCapture,
@@ -301,6 +303,118 @@ async def list_my_family_events(
             )
 
     return sorted(summaries, key=lambda item: item.starts_at)[:limit]
+
+
+async def respond_to_family_event(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    event_id: UUID,
+    athlete_person_id: UUID,
+    payload: FamilyEventRsvpCreate,
+) -> FamilyEventSummaryRead:
+    relationship = await db.scalar(
+        select(GuardianRelationship)
+        .join(AthleteProfile, AthleteProfile.person_id == GuardianRelationship.athlete_person_id)
+        .where(AthleteProfile.organization_id == payload.organization_id)
+        .where(GuardianRelationship.guardian_person_id == identity.person_id)
+        .where(GuardianRelationship.athlete_person_id == athlete_person_id)
+    )
+    if relationship is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Family relationship not found")
+
+    event = await db.get(Event, event_id)
+    if event is None or event.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    if not await family_event_applies_to_athlete(db, event, athlete_person_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Family event not found")
+
+    clearance, _, _, _, reason = await clearance_for_event(db, event_id, athlete_person_id)
+    if payload.status == AttendanceStatus.CONFIRMED and clearance != ParticipationClearanceStatus.CLEARED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"clearance_status": clearance.value, "reason": reason},
+        )
+
+    attendance = await db.scalar(
+        select(AttendanceRecord).where(
+            AttendanceRecord.event_id == event_id,
+            AttendanceRecord.person_id == athlete_person_id,
+        )
+    )
+    if attendance is None:
+        attendance = AttendanceRecord(
+            event_id=event_id,
+            person_id=athlete_person_id,
+            status=payload.status,
+            recorded_by_person_id=identity.person_id,
+            note=payload.note,
+        )
+        db.add(attendance)
+    else:
+        attendance.status = payload.status
+        attendance.recorded_by_person_id = identity.person_id
+        attendance.note = payload.note
+    await db.commit()
+    await db.refresh(attendance)
+    return await family_event_summary(db, relationship, event, attendance)
+
+
+async def family_event_applies_to_athlete(
+    db: AsyncSession,
+    event: Event,
+    athlete_person_id: UUID,
+) -> bool:
+    attendance = await db.scalar(
+        select(AttendanceRecord.id).where(
+            AttendanceRecord.event_id == event.id,
+            AttendanceRecord.person_id == athlete_person_id,
+        )
+    )
+    if attendance is not None:
+        return True
+    if event.team_id is None:
+        return False
+    roster_entry = await db.scalar(
+        select(TeamRosterEntry.id)
+        .join(AthleteProfile, AthleteProfile.id == TeamRosterEntry.athlete_profile_id)
+        .where(TeamRosterEntry.team_id == event.team_id)
+        .where(AthleteProfile.person_id == athlete_person_id)
+        .where(AthleteProfile.organization_id == event.organization_id)
+    )
+    return roster_entry is not None
+
+
+async def family_event_summary(
+    db: AsyncSession,
+    relationship: GuardianRelationship,
+    event: Event,
+    attendance: AttendanceRecord | None = None,
+) -> FamilyEventSummaryRead:
+    athlete = await db.get(Person, relationship.athlete_person_id)
+    if athlete is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    clearance, _, guardian_required, consent_id, reason = await clearance_for_event(
+        db,
+        event.id,
+        relationship.athlete_person_id,
+    )
+    return FamilyEventSummaryRead(
+        athlete_person_id=relationship.athlete_person_id,
+        athlete_name=athlete.display_name,
+        event_id=event.id,
+        team_id=event.team_id,
+        event_type=event.event_type,
+        title=event.title,
+        starts_at=event.starts_at,
+        ends_at=event.ends_at,
+        timezone=event.timezone,
+        venue_name=event.venue_name,
+        attendance_status=attendance.status if attendance else None,
+        clearance_status=clearance,
+        guardian_required=guardian_required,
+        consent_id=consent_id,
+        reason=reason,
+    )
 
 
 async def consent_destination(db: AsyncSession, payload: ConsentRequestCreate) -> str:

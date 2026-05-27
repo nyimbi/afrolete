@@ -3,6 +3,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import type {
+  AttendanceStatus,
   CommunicationInboxItemRead,
   FamilyAthleteSummaryRead,
   FamilyEventSummaryRead,
@@ -114,6 +115,35 @@ export default function FamilyPortalPage() {
     }
   };
 
+  const respondToEvent = async (event: FamilyEventSummaryRead, status: AttendanceStatus) => {
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await apiRequest<FamilyEventSummaryRead>(
+        `/safeguarding/my-family/events/${event.event_id}/athletes/${event.athlete_person_id}/rsvp`,
+        {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: organizationId,
+            status
+          }
+        }
+      );
+      setEvents((current) =>
+        current.map((item) =>
+          item.event_id === updated.event_id && item.athlete_person_id === updated.athlete_person_id
+            ? updated
+            : item
+        )
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "RSVP update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="consent-page family-page">
       <section className="consent-shell family-shell">
@@ -188,9 +218,17 @@ export default function FamilyPortalPage() {
                 <strong>{event.title}</strong>
                 <span>{event.athlete_name} · {event.event_type} · {formatDate(event.starts_at)}</span>
               </div>
-              <small>
-                {event.attendance_status ?? "not invited"} · {event.clearance_status}
-              </small>
+              <div className="family-event-status">
+                <small>{event.attendance_status ?? "not invited"} · {event.clearance_status}</small>
+                <span>
+                  <button type="button" onClick={() => respondToEvent(event, "confirmed")} disabled={busy}>
+                    Confirm
+                  </button>
+                  <button type="button" onClick={() => respondToEvent(event, "declined")} disabled={busy}>
+                    Decline
+                  </button>
+                </span>
+              </div>
             </article>
           ))}
         </div>

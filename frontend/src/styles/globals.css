@@ -880,6 +880,23 @@ textarea:focus {
   text-align: right;
 }
 
+.family-event-status {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.family-event-status span {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.family-event-status button {
+  min-height: 32px;
+  padding: 7px 10px;
+}
+
 .family-layout {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
@@ -977,6 +994,14 @@ textarea:focus {
 
   .family-events small {
     text-align: left;
+  }
+
+  .family-event-status {
+    justify-items: start;
+  }
+
+  .family-event-status span {
+    justify-content: flex-start;
   }
 }
 
