@@ -72,6 +72,7 @@ import type {
   DonationRead,
   EventRead,
   EventTravelApprovalRead,
+  EventTravelApprovalRoutingRead,
   EventTravelCarpoolRideRead,
   EventTravelChecklistItemRead,
   EventTravelConsentBatchRead,
@@ -363,6 +364,7 @@ export default function HomePage() {
   const [travelFeeBatch, setTravelFeeBatch] = useState<EventTravelFeeInvoiceBatchRead | null>(null);
   const [travelFeeCheckoutBatch, setTravelFeeCheckoutBatch] = useState<EventTravelFeeCheckoutBatchRead | null>(null);
   const [travelApprovals, setTravelApprovals] = useState<EventTravelApprovalRead[]>([]);
+  const [travelApprovalRouting, setTravelApprovalRouting] = useState<EventTravelApprovalRoutingRead | null>(null);
   const [travelChecklistItems, setTravelChecklistItems] = useState<EventTravelChecklistItemRead[]>([]);
   const [travelLocationUpdates, setTravelLocationUpdates] = useState<EventTravelLocationUpdateRead[]>([]);
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
@@ -1631,6 +1633,7 @@ export default function HomePage() {
       setTravelFeeBatch(null);
       setTravelFeeCheckoutBatch(null);
       setTravelApprovals([]);
+      setTravelApprovalRouting(null);
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
       setTravelExpenses([]);
@@ -1846,6 +1849,7 @@ export default function HomePage() {
       setTravelFeeBatch(null);
       setTravelFeeCheckoutBatch(null);
       setTravelApprovals([]);
+      setTravelApprovalRouting(null);
       setTravelChecklistItems([]);
       setTravelLocationUpdates([]);
       setTravelExpenses([]);
@@ -2630,6 +2634,33 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== approval.id)
         ]);
         addLog(`${approval.approval_level} travel approval opened`, "good");
+      }
+    );
+  };
+
+  const routeTravelApprovals = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-approval-routing-${plan.id}`,
+      () =>
+        apiRequest<EventTravelApprovalRoutingRead>(`/events/travel-plans/${plan.id}/approval-routing`, {
+          method: "POST",
+          identity,
+          body: {
+            include_school: true,
+            include_association: true,
+            include_operations: true,
+            include_medical: true,
+            include_finance: true,
+            notes: `Routed from the operations console for ${plan.destination}.`
+          }
+        }),
+      (routing) => {
+        setTravelApprovalRouting(routing);
+        setTravelApprovals(routing.approvals);
+        addLog(
+          `Travel approvals routed: ${routing.created} created, ${routing.existing} existing`,
+          routing.created > 0 ? "good" : "neutral"
+        );
       }
     );
   };
@@ -7437,6 +7468,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelApprovalRouting ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Approval routing · {travelApprovalRouting.recommended_levels.join(", ") || "none"}</strong>
+                    <span>{travelApprovalRouting.created} created · {travelApprovalRouting.existing} existing</span>
+                    <span>{travelApprovalRouting.rationale[0] ?? "No approval route needed for this plan"}</span>
+                  </div>
+                </article>
+              ) : null}
               {travelExpenses.slice(0, 3).map((expense) => (
                 <article className="task-card" key={expense.id}>
                   <div>
@@ -7518,6 +7558,7 @@ export default function HomePage() {
                     <button type="button" onClick={() => optimizeTravelRoute(plan)}>Optimize</button>
                     <button type="button" onClick={() => generateTravelFeeInvoices(plan)}>Fees</button>
                     <button type="button" onClick={() => createTravelFeeCheckouts(plan)}>Pay links</button>
+                    <button type="button" onClick={() => routeTravelApprovals(plan)}>Route approvals</button>
                     <button type="button" onClick={() => createTravelApproval(plan)}>Require</button>
                     <button type="button" onClick={() => loadTravelApprovals(plan)}>Approvals</button>
                     <button type="button" onClick={() => seedTravelChecklist(plan)}>Inspect</button>

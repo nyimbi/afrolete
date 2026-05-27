@@ -574,6 +574,16 @@ export type EventTravelApprovalRead = {
   notes: string | null;
 };
 
+export type EventTravelApprovalRoutingRead = {
+  event_id: UUID;
+  travel_plan_id: UUID;
+  recommended_levels: string[];
+  created: number;
+  existing: number;
+  rationale: string[];
+  approvals: EventTravelApprovalRead[];
+};
+
 export type EventTravelChecklistItemRead = {
   id: UUID;
   organization_id: UUID;

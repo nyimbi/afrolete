@@ -297,6 +297,25 @@ class EventTravelApprovalRead(BaseModel):
     notes: str | None
 
 
+class EventTravelApprovalRoutingCreate(BaseModel):
+    include_school: bool = True
+    include_association: bool = True
+    include_operations: bool = True
+    include_medical: bool = True
+    include_finance: bool = True
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class EventTravelApprovalRoutingRead(BaseModel):
+    event_id: UUID
+    travel_plan_id: UUID
+    recommended_levels: list[str]
+    created: int
+    existing: int
+    rationale: list[str]
+    approvals: list[EventTravelApprovalRead]
+
+
 class EventTravelChecklistSeedCreate(BaseModel):
     checklist_type: str = Field(default="pre_trip_inspection", min_length=2, max_length=80)
     items: list[str] | None = None

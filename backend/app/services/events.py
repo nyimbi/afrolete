@@ -54,6 +54,8 @@ from app.schemas.event import (
     EventTravelConsentRequestItemRead,
     EventTravelApprovalCreate,
     EventTravelApprovalRead,
+    EventTravelApprovalRoutingCreate,
+    EventTravelApprovalRoutingRead,
     EventTravelApprovalUpdate,
     EventTravelCarpoolRideCreate,
     EventTravelCarpoolRideRead,
@@ -782,6 +784,55 @@ async def create_travel_approval(
     await db.commit()
     await db.refresh(approval)
     return travel_approval_read(approval)
+
+
+async def route_travel_approvals(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    travel_plan_id: UUID,
+    payload: EventTravelApprovalRoutingCreate,
+    authz: AuthorizationService,
+) -> EventTravelApprovalRoutingRead:
+    plan = await db.get(EventTravelPlan, travel_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
+    event = await get_event(db, plan.event_id)
+    await ensure_manage_event_scope(authz, plan.organization_id, identity)
+
+    levels, rationale = recommended_travel_approval_levels(plan, payload)
+    created = 0
+    existing = 0
+    for level in levels:
+        current = await db.scalar(
+            select(EventTravelApproval).where(
+                EventTravelApproval.travel_plan_id == plan.id,
+                EventTravelApproval.approval_level == level,
+            )
+        )
+        if current is None:
+            db.add(
+                EventTravelApproval(
+                    organization_id=plan.organization_id,
+                    travel_plan_id=plan.id,
+                    approval_level=level,
+                    status="pending",
+                    notes=payload.notes or travel_approval_routing_note(plan, level),
+                )
+            )
+            created += 1
+        else:
+            existing += 1
+    await db.commit()
+    approvals = await list_travel_approvals(db, identity, travel_plan_id, authz)
+    return EventTravelApprovalRoutingRead(
+        event_id=event.id,
+        travel_plan_id=plan.id,
+        recommended_levels=levels,
+        created=created,
+        existing=existing,
+        rationale=rationale,
+        approvals=approvals,
+    )
 
 
 async def update_travel_approval(
@@ -1606,6 +1657,65 @@ def travel_approval_read(approval: EventTravelApproval) -> EventTravelApprovalRe
         decided_at=approval.decided_at,
         notes=approval.notes,
     )
+
+
+def recommended_travel_approval_levels(
+    plan: EventTravelPlan,
+    payload: EventTravelApprovalRoutingCreate,
+) -> tuple[list[str], list[str]]:
+    risk_level, _ = classify_travel_plan(plan)
+    levels: list[str] = []
+    rationale: list[str] = []
+
+    if payload.include_operations:
+        levels.append("operations")
+        rationale.append("Operations approval is required for every managed trip.")
+    if payload.include_school and plan.consent_required:
+        levels.append("school")
+        rationale.append("School or program approval is recommended because guardian consent is required.")
+    if payload.include_association and (
+        risk_level in {TravelRiskLevel.HIGH, TravelRiskLevel.CRITICAL}
+        or contains_any(plan.destination, {"regional", "national", "championship", "tournament"})
+        or contains_any(plan.route_weather_risk or "", {"high", "severe", "critical"})
+    ):
+        levels.append("association")
+        rationale.append("Association approval is recommended for elevated-risk or higher-level travel.")
+    if payload.include_medical and (
+        bool(plan.medical_access_plan)
+        or risk_level in {TravelRiskLevel.HIGH, TravelRiskLevel.CRITICAL}
+        or contains_any(plan.passenger_manifest or "", {"injury", "medical", "minor"})
+    ):
+        levels.append("medical")
+        rationale.append("Medical approval is recommended because the trip carries health or minor-safety context.")
+    estimated_cost = Decimal("0")
+    if plan.estimated_cost is not None:
+        estimated_cost = Decimal(str(plan.estimated_cost))
+    participant_cost = Decimal("0")
+    if plan.cost_per_participant is not None:
+        participant_cost = Decimal(str(plan.cost_per_participant))
+    if payload.include_finance and (estimated_cost >= Decimal("500") or participant_cost > Decimal("0")):
+        levels.append("finance")
+        rationale.append("Finance approval is recommended because the trip has billable or reimbursable cost.")
+
+    seen: set[str] = set()
+    ordered_levels = []
+    for level in levels:
+        if level not in seen:
+            ordered_levels.append(level)
+            seen.add(level)
+    return ordered_levels, rationale
+
+
+def contains_any(value: str, needles: set[str]) -> bool:
+    lowered = value.lower()
+    return any(needle in lowered for needle in needles)
+
+
+def travel_approval_routing_note(plan: EventTravelPlan, level: str) -> str:
+    return (
+        f"Automatically routed {level} approval for {plan.destination} travel "
+        f"based on risk, consent, cost, and medical context."
+    )[:2000]
 
 
 def travel_checklist_item_read(item: EventTravelChecklistItem) -> EventTravelChecklistItemRead:

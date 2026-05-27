@@ -12,6 +12,8 @@ from app.schemas.event import (
     EventRead,
     EventTravelApprovalCreate,
     EventTravelApprovalRead,
+    EventTravelApprovalRoutingCreate,
+    EventTravelApprovalRoutingRead,
     EventTravelApprovalUpdate,
     EventTravelCarpoolRideCreate,
     EventTravelCarpoolRideRead,
@@ -81,6 +83,7 @@ from app.services.events import (
     optimize_travel_route,
     record_attendance,
     request_travel_consents,
+    route_travel_approvals,
     seed_attendance_from_team_roster,
     seed_travel_checklist_items,
     send_travel_consent_reminders,
@@ -463,6 +466,21 @@ async def create_travel_approval_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> EventTravelApprovalRead:
     return await create_travel_approval(db, identity, travel_plan_id, payload, authz)
+
+
+@router.post(
+    "/travel-plans/{travel_plan_id}/approval-routing",
+    response_model=EventTravelApprovalRoutingRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def route_travel_approvals_route(
+    travel_plan_id: UUID,
+    payload: EventTravelApprovalRoutingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventTravelApprovalRoutingRead:
+    return await route_travel_approvals(db, identity, travel_plan_id, payload, authz)
 
 
 @router.patch("/travel-approvals/{approval_id}", response_model=EventTravelApprovalRead)
