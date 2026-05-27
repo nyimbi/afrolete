@@ -11819,7 +11819,11 @@ export default function HomePage() {
                   <div>
                     <strong>Scorecard comment · {comment.status}</strong>
                     <span>{comment.display_name} · {comment.affiliation ?? "community"} · {comment.consent_to_publish ? "publish consent" : "private only"}</span>
-                    <span>{comment.contact_email ?? "no contact"} · {new Date(comment.submitted_at).toLocaleDateString()}</span>
+                    <span>
+                      {comment.contact_email ?? "no contact"} · abuse {comment.abuse_score}/100
+                      {comment.abuse_reason ? ` · ${comment.abuse_reason}` : ""}
+                    </span>
+                    <span>{new Date(comment.submitted_at).toLocaleDateString()}</span>
                     <span>{comment.comment}</span>
                   </div>
                   <div className="event-toolbar">

@@ -766,6 +766,11 @@ textarea:focus {
   margin: 0;
 }
 
+.form-success {
+  color: var(--teal);
+  margin: 0;
+}
+
 .consent-result dl {
   display: grid;
   gap: 10px;

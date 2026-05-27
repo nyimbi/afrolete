@@ -22,6 +22,7 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
   });
   const [error, setError] = useState("");
   const [commentError, setCommentError] = useState("");
+  const [commentNotice, setCommentNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -72,6 +73,7 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
     }
     setBusy(true);
     setCommentError("");
+    setCommentNotice("");
     try {
       const created = await apiRequest<AgentScorecardCommentRead>("/agents/ethical-scorecard/comments", {
         method: "POST",
@@ -87,6 +89,11 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
       if (created.status === "published" && created.consent_to_publish) {
         setComments((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       }
+      setCommentNotice(
+        created.status === "published"
+          ? "Feedback published."
+          : "Feedback received for operator review."
+      );
       setCommentForm({
         display_name: "",
         affiliation: "",
@@ -241,6 +248,7 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
               />
               Publish this comment
             </label>
+            {commentNotice ? <p className="form-success">{commentNotice}</p> : null}
             {commentError ? <p className="form-error">{commentError}</p> : null}
             <button type="submit" disabled={busy}>{busy ? "Sending" : "Submit feedback"}</button>
           </form>

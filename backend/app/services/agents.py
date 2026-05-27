@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import re
 import time
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -868,20 +869,84 @@ async def create_agent_scorecard_comment(
     organization = await db.get(Organization, payload.organization_id)
     if organization is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    abuse_score, abuse_reason = await scorecard_comment_abuse_review(db, payload)
+    initial_status = "private_feedback"
+    if payload.consent_to_publish:
+        initial_status = "flagged" if abuse_score >= 60 else "published"
     comment = AgentScorecardComment(
         organization_id=payload.organization_id,
         display_name=payload.display_name.strip(),
         affiliation=payload.affiliation.strip() if payload.affiliation else None,
         contact_email=payload.contact_email.strip().lower() if payload.contact_email else None,
         comment=payload.comment.strip(),
-        status="published" if payload.consent_to_publish else "private_feedback",
+        status=initial_status,
         consent_to_publish=payload.consent_to_publish,
+        abuse_score=abuse_score,
+        abuse_reason=abuse_reason,
         submitted_at=datetime.now(UTC),
     )
     db.add(comment)
     await db.commit()
     await db.refresh(comment)
     return comment
+
+
+async def scorecard_comment_abuse_review(
+    db: AsyncSession,
+    payload: AgentScorecardCommentCreate,
+) -> tuple[int, str | None]:
+    reasons: list[str] = []
+    score = 0
+    comment_text = payload.comment.strip()
+    normalized = normalize_comment_text(comment_text)
+    link_count = len(re.findall(r"https?://|www\.", comment_text, flags=re.IGNORECASE))
+    if link_count >= 2:
+        score += 45
+        reasons.append("multiple_links")
+    if re.search(r"\b(crypto|casino|loan|viagra|betting|airdrop|forex)\b", comment_text, flags=re.IGNORECASE):
+        score += 40
+        reasons.append("spam_keyword")
+    if len(comment_text) > 1200:
+        score += 20
+        reasons.append("very_long")
+    if repeated_character_run(comment_text):
+        score += 25
+        reasons.append("repeated_characters")
+    if normalized:
+        duplicate = await db.scalar(
+            select(AgentScorecardComment)
+            .where(AgentScorecardComment.organization_id == payload.organization_id)
+            .where(AgentScorecardComment.submitted_at >= datetime.now(UTC) - timedelta(days=1))
+            .where(func.lower(AgentScorecardComment.comment) == normalized)
+        )
+        if duplicate is not None:
+            score += 55
+            reasons.append("recent_duplicate")
+    email_key = payload.contact_email.strip().lower() if payload.contact_email else None
+    display_key = payload.display_name.strip().lower()
+    recent_count = await db.scalar(
+        select(func.count(AgentScorecardComment.id))
+        .where(AgentScorecardComment.organization_id == payload.organization_id)
+        .where(AgentScorecardComment.submitted_at >= datetime.now(UTC) - timedelta(hours=1))
+        .where(
+            (func.lower(AgentScorecardComment.contact_email) == email_key)
+            if email_key
+            else (func.lower(AgentScorecardComment.display_name) == display_key)
+        )
+    )
+    if recent_count and recent_count >= 3:
+        score += 50
+        reasons.append("rapid_repeat_submission")
+    score = min(score, 100)
+    return score, ", ".join(reasons) if reasons else None
+
+
+def normalize_comment_text(value: str) -> str:
+    return " ".join(value.strip().lower().split())
+
+
+def repeated_character_run(value: str) -> bool:
+    return bool(re.search(r"(.)\1{8,}", value))
 
 
 async def list_agent_scorecard_comments_for_moderation(

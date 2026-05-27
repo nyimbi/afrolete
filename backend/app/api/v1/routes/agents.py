@@ -201,6 +201,8 @@ def to_scorecard_comment_moderation_read(comment) -> AgentScorecardCommentModera
         comment=comment.comment,
         status=comment.status,
         consent_to_publish=comment.consent_to_publish,
+        abuse_score=comment.abuse_score,
+        abuse_reason=comment.abuse_reason,
         submitted_at=comment.submitted_at,
         created_at=comment.created_at,
         updated_at=comment.updated_at,

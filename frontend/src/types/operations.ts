@@ -2641,6 +2641,8 @@ export type AgentScorecardCommentRead = {
 
 export type AgentScorecardCommentModerationRead = AgentScorecardCommentRead & {
   contact_email: string | null;
+  abuse_score: number;
+  abuse_reason: string | null;
   created_at: string;
   updated_at: string;
 };

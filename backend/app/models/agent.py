@@ -164,4 +164,6 @@ class AgentScorecardComment(IdMixin, TimestampMixin, Base):
     comment: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="published", nullable=False, index=True)
     consent_to_publish: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    abuse_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
+    abuse_reason: Mapped[str | None] = mapped_column(Text)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

@@ -366,6 +366,8 @@ class AgentScorecardCommentRead(BaseModel):
 
 class AgentScorecardCommentModerationRead(AgentScorecardCommentRead):
     contact_email: str | None
+    abuse_score: int
+    abuse_reason: str | None
     created_at: datetime
     updated_at: datetime
 
