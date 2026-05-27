@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -135,6 +135,23 @@ class EquipmentScanEvent(IdMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class EquipmentReader(IdMixin, TimestampMixin, Base):
+    __tablename__ = "equipment_readers"
+    __table_args__ = (UniqueConstraint("organization_id", "reader_id"),)
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    reader_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    location: Mapped[str | None] = mapped_column(String(240), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    api_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

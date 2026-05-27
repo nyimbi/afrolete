@@ -161,6 +161,41 @@ class EquipmentScanEventRead(BaseModel):
     notes: str | None
 
 
+class EquipmentReaderCreate(BaseModel):
+    organization_id: UUID
+    reader_id: str = Field(min_length=2, max_length=160)
+    name: str = Field(min_length=2, max_length=180)
+    location: str | None = Field(default=None, max_length=240)
+    status: str = Field(default="active", min_length=2, max_length=40)
+    api_key: str | None = Field(default=None, min_length=16, max_length=200)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EquipmentReaderRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    reader_id: str
+    name: str
+    location: str | None
+    status: str
+    last_seen_at: datetime | None
+    last_scan_at: datetime | None
+    notes: str | None
+
+
+class EquipmentReaderProvisionRead(BaseModel):
+    reader: EquipmentReaderRead
+    api_key: str
+
+
+class EquipmentReaderGatewayScanCreate(BaseModel):
+    scanned_code: str = Field(min_length=1, max_length=160)
+    movement: str = Field(default="audit", min_length=2, max_length=40)
+    scanned_at: datetime | None = None
+    external_reference: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
 class ProcurementRecommendationRead(BaseModel):
     equipment_item_id: UUID
     item_name: str

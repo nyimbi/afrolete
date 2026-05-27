@@ -2,9 +2,11 @@ from base64 import b64decode
 from binascii import Error as Base64Error
 from datetime import UTC, datetime
 from decimal import Decimal
+from hmac import compare_digest
 from hashlib import sha256
 from pathlib import Path
 from re import sub
+from secrets import token_urlsafe
 from uuid import UUID
 
 import httpx
@@ -16,6 +18,7 @@ from app.models.assets import (
     EquipmentCheckout,
     EquipmentFile,
     EquipmentItem,
+    EquipmentReader,
     EquipmentScanEvent,
     Facility,
     FacilityBooking,
@@ -45,6 +48,10 @@ from app.schemas.assets import (
     EquipmentLeaseInvoiceCreate,
     EquipmentLeaseInvoiceRead,
     EquipmentPhotoUpdate,
+    EquipmentReaderCreate,
+    EquipmentReaderGatewayScanCreate,
+    EquipmentReaderProvisionRead,
+    EquipmentReaderRead,
     EquipmentScanEventCreate,
     EquipmentScanEventRead,
     EquipmentScanRead,
@@ -234,6 +241,102 @@ async def list_equipment_scan_events(
         statement = statement.where(EquipmentScanEvent.matched == matched)
     events = await db.scalars(statement.order_by(EquipmentScanEvent.scanned_at.desc()))
     return [equipment_scan_event_read(event) for event in events.all()]
+
+
+async def provision_equipment_reader(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: EquipmentReaderCreate,
+    authz: AuthorizationService,
+) -> EquipmentReaderProvisionRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    reader_id = payload.reader_id.strip()
+    existing = await db.scalar(
+        select(EquipmentReader).where(
+            EquipmentReader.organization_id == payload.organization_id,
+            EquipmentReader.reader_id == reader_id,
+        )
+    )
+    api_key = payload.api_key or token_urlsafe(32)
+    if existing is None:
+        reader = EquipmentReader(
+            organization_id=payload.organization_id,
+            reader_id=reader_id,
+            name=payload.name,
+            location=payload.location,
+            status=payload.status.strip().lower(),
+            api_key_hash=hash_reader_key(api_key),
+            notes=payload.notes,
+        )
+        db.add(reader)
+    else:
+        reader = existing
+        reader.name = payload.name
+        reader.location = payload.location
+        reader.status = payload.status.strip().lower()
+        reader.api_key_hash = hash_reader_key(api_key)
+        reader.notes = payload.notes
+    await db.commit()
+    await db.refresh(reader)
+    return EquipmentReaderProvisionRead(reader=equipment_reader_read(reader), api_key=api_key)
+
+
+async def list_equipment_readers(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> list[EquipmentReaderRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    readers = await db.scalars(
+        select(EquipmentReader)
+        .where(EquipmentReader.organization_id == organization_id)
+        .order_by(EquipmentReader.location, EquipmentReader.name)
+    )
+    return [equipment_reader_read(reader) for reader in readers.all()]
+
+
+async def record_gateway_equipment_scan(
+    db: AsyncSession,
+    organization_id: UUID,
+    reader_id: str,
+    api_key: str | None,
+    payload: EquipmentReaderGatewayScanCreate,
+) -> EquipmentScanEventRead:
+    reader = await get_equipment_reader_by_reader_id(db, organization_id, reader_id.strip())
+    if reader.status != "active":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reader is not active")
+    if not api_key or not compare_digest(reader.api_key_hash, hash_reader_key(api_key)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid reader key")
+    code = payload.scanned_code.strip()
+    item, match_type = await match_equipment_code(db, reader.organization_id, code)
+    scanned_at = payload.scanned_at or datetime.now(UTC)
+    reader.last_seen_at = scanned_at
+    reader.last_scan_at = scanned_at
+    event = EquipmentScanEvent(
+        organization_id=reader.organization_id,
+        equipment_item_id=item.id if item else None,
+        scanned_code=code,
+        match_type=match_type,
+        item_name=item.name if item else None,
+        reader_id=reader.reader_id,
+        reader_location=reader.location,
+        source="rfid_gateway",
+        movement=payload.movement.strip().lower() or "audit",
+        matched=item is not None,
+        scanned_at=scanned_at,
+        external_reference=payload.external_reference,
+        notes=payload.notes,
+    )
+    if item is not None:
+        item.last_audit_on = scanned_at.date()
+        if reader.location and event.movement in {"audit", "in", "location"}:
+            item.storage_location = reader.location
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    return equipment_scan_event_read(event)
 
 
 async def update_equipment_photo(
@@ -976,6 +1079,22 @@ async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> Suppl
     return order
 
 
+async def get_equipment_reader_by_reader_id(
+    db: AsyncSession,
+    organization_id: UUID,
+    reader_id: str,
+) -> EquipmentReader:
+    reader = await db.scalar(
+        select(EquipmentReader).where(
+            EquipmentReader.organization_id == organization_id,
+            EquipmentReader.reader_id == reader_id,
+        )
+    )
+    if reader is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reader not found")
+    return reader
+
+
 async def match_equipment_code(
     db: AsyncSession,
     organization_id: UUID,
@@ -1070,6 +1189,20 @@ def equipment_scan_event_read(event: EquipmentScanEvent) -> EquipmentScanEventRe
     )
 
 
+def equipment_reader_read(reader: EquipmentReader) -> EquipmentReaderRead:
+    return EquipmentReaderRead(
+        id=reader.id,
+        organization_id=reader.organization_id,
+        reader_id=reader.reader_id,
+        name=reader.name,
+        location=reader.location,
+        status=reader.status,
+        last_seen_at=reader.last_seen_at,
+        last_scan_at=reader.last_scan_at,
+        notes=reader.notes,
+    )
+
+
 def supplier_order_read(order: SupplierOrder) -> SupplierOrderRead:
     return SupplierOrderRead(
         id=order.id,
@@ -1119,6 +1252,10 @@ def decode_upload_content(content_base64: str) -> bytes:
 def safe_upload_filename(filename: str) -> str:
     cleaned = sub(r"[^A-Za-z0-9._-]+", "-", Path(filename).name).strip(".-")
     return cleaned[:180] or "equipment-file"
+
+
+def hash_reader_key(api_key: str) -> str:
+    return sha256(api_key.encode("utf-8")).hexdigest()
 
 
 def supplier_recommendation(score: int) -> str:

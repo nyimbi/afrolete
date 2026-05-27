@@ -6,6 +6,8 @@ from app.models.assets import (  # noqa: F401,E402
     EquipmentCheckout,
     EquipmentFile,
     EquipmentItem,
+    EquipmentReader,
+    EquipmentScanEvent,
     Facility,
     FacilityBooking,
     MaintenanceWorkOrder,

@@ -73,6 +73,8 @@ import type {
   EquipmentItemRead,
   EquipmentLeaseInvoiceRead,
   EquipmentLeaseQuoteRead,
+  EquipmentReaderProvisionRead,
+  EquipmentReaderRead,
   EquipmentScanEventRead,
   EquipmentScanRead,
   FacilityBookingRead,
@@ -323,6 +325,8 @@ export default function HomePage() {
   const [equipmentItems, setEquipmentItems] = useState<EquipmentItemRead[]>([]);
   const [equipmentFiles, setEquipmentFiles] = useState<EquipmentFileRead[]>([]);
   const [equipmentScanEvents, setEquipmentScanEvents] = useState<EquipmentScanEventRead[]>([]);
+  const [equipmentReaders, setEquipmentReaders] = useState<EquipmentReaderRead[]>([]);
+  const [rfidProvision, setRfidProvision] = useState<EquipmentReaderProvisionRead | null>(null);
   const [equipmentCheckouts, setEquipmentCheckouts] = useState<EquipmentCheckoutRead[]>([]);
   const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
@@ -620,9 +624,12 @@ export default function HomePage() {
   });
   const [rfidForm, setRfidForm] = useState({
     reader_id: "reader-main-gate",
+    reader_name: "Main gate RFID reader",
     reader_location: "Equipment Room A, Shelf 3",
     movement: "audit",
-    source: "rfid_reader"
+    source: "rfid_reader",
+    api_key: "local-reader-key-0001",
+    gateway_code: "BALL-SET-001"
   });
   const [checkoutForm, setCheckoutForm] = useState({
     quantity: 6,
@@ -1029,7 +1036,8 @@ export default function HomePage() {
       supplierOrderData,
       supplierData,
       utilizationData,
-      scanEventData
+      scanEventData,
+      readerData
     ] = await Promise.all([
       apiRequest<FacilityRead[]>(`/assets/facilities?organization_id=${organizationId}`),
       apiRequest<EquipmentItemRead[]>(`/assets/equipment?organization_id=${organizationId}${facilityQuery}`),
@@ -1048,6 +1056,10 @@ export default function HomePage() {
       apiRequest<EquipmentScanEventRead[]>(
         `/assets/equipment/rfid-scans?organization_id=${organizationId}`,
         { identity }
+      ),
+      apiRequest<EquipmentReaderRead[]>(
+        `/assets/equipment/rfid-readers?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setFacilities(facilityData);
@@ -1061,6 +1073,7 @@ export default function HomePage() {
     setSupplierScores(supplierData);
     setAssetUtilization(utilizationData);
     setEquipmentScanEvents(scanEventData);
+    setEquipmentReaders(readerData);
     setSelectedFacilityId((current) =>
       facilityData.some((facility) => facility.id === current) ? current : facilityData[0]?.id ?? ""
     );
@@ -1305,6 +1318,8 @@ export default function HomePage() {
       setEquipmentItems([]);
       setEquipmentFiles([]);
       setEquipmentScanEvents([]);
+      setEquipmentReaders([]);
+      setRfidProvision(null);
       setEquipmentCheckouts([]);
       setWorkOrders([]);
       setFacilityBookings([]);
@@ -3048,6 +3063,81 @@ export default function HomePage() {
           event.matched
             ? `${event.reader_id} matched ${event.item_name ?? event.scanned_code}`
             : `${event.reader_id} recorded unmatched code ${event.scanned_code}`,
+          event.matched ? "good" : "neutral"
+        );
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const provisionRfidReader = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "provision-rfid-reader",
+      () =>
+        apiRequest<EquipmentReaderProvisionRead>("/assets/equipment/rfid-readers", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            reader_id: rfidForm.reader_id,
+            name: rfidForm.reader_name,
+            location: rfidForm.reader_location,
+            status: "active",
+            api_key: rfidForm.api_key,
+            notes: "Provisioned from the operations console."
+          }
+        }),
+      (provision) => {
+        setRfidProvision(provision);
+        setEquipmentReaders((current) => [
+          provision.reader,
+          ...current.filter((reader) => reader.id !== provision.reader.id)
+        ]);
+        setRfidForm((current) => ({ ...current, api_key: provision.api_key }));
+        addLog(`${provision.reader.name} provisioned`, "good");
+      }
+    );
+  };
+
+  const recordGatewayRfidScan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const code = rfidForm.gateway_code || selectedEquipment?.tag_code || selectedEquipment?.serial_number;
+    if (!code) {
+      addLog("Enter a gateway scan code first", "bad");
+      return;
+    }
+    runAction(
+      "gateway-rfid-scan",
+      () =>
+        apiRequest<EquipmentScanEventRead>(
+          `/assets/equipment/rfid-gateway/${selectedOrganizationId}/${encodeURIComponent(rfidForm.reader_id)}/scans`,
+          {
+            method: "POST",
+            headers: { "X-Afrolete-RFID-Key": rfidProvision?.api_key ?? rfidForm.api_key },
+            body: {
+              scanned_code: code,
+              movement: rfidForm.movement,
+              external_reference: `GATEWAY-${Date.now()}`,
+              notes: "Hardware-style gateway scan submitted from the operations console."
+            }
+          }
+        ),
+      (event) => {
+        setEquipmentScanEvents((current) => [
+          event,
+          ...current.filter((item) => item.id !== event.id)
+        ]);
+        addLog(
+          event.matched
+            ? `${event.reader_id} gateway matched ${event.item_name ?? event.scanned_code}`
+            : `${event.reader_id} gateway recorded unmatched ${event.scanned_code}`,
           event.matched ? "good" : "neutral"
         );
         void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
@@ -4918,6 +5008,8 @@ export default function HomePage() {
                 <button type="button" onClick={createEquipmentItem} disabled={busyAction !== null}>Item</button>
                 <button type="button" onClick={scanEquipmentItem} disabled={busyAction !== null}>Scan</button>
                 <button type="button" onClick={recordRfidEquipmentScan} disabled={busyAction !== null}>RFID</button>
+                <button type="button" onClick={provisionRfidReader} disabled={busyAction !== null}>Reader</button>
+                <button type="button" onClick={recordGatewayRfidScan} disabled={busyAction !== null}>Gateway</button>
                 <button type="button" onClick={updateSelectedEquipmentPhoto} disabled={busyAction !== null}>Photo</button>
                 <button type="button" onClick={uploadSelectedEquipmentFile} disabled={busyAction !== null}>Upload</button>
                 <button type="button" onClick={quoteSelectedEquipmentLease} disabled={busyAction !== null}>Lease</button>
@@ -4946,6 +5038,10 @@ export default function HomePage() {
               <div>
                 <span className="muted">RFID scans</span>
                 <strong>{equipmentScanEvents.length}</strong>
+              </div>
+              <div>
+                <span className="muted">Readers</span>
+                <strong>{equipmentReaders.length}</strong>
               </div>
             </div>
             <div className="form-grid">
@@ -4986,8 +5082,20 @@ export default function HomePage() {
                 <input value={rfidForm.reader_id} onChange={(event) => setRfidForm({ ...rfidForm, reader_id: event.target.value })} />
               </label>
               <label>
+                Reader name
+                <input value={rfidForm.reader_name} onChange={(event) => setRfidForm({ ...rfidForm, reader_name: event.target.value })} />
+              </label>
+              <label>
                 Reader location
                 <input value={rfidForm.reader_location} onChange={(event) => setRfidForm({ ...rfidForm, reader_location: event.target.value })} />
+              </label>
+              <label>
+                Reader key
+                <input value={rfidForm.api_key} onChange={(event) => setRfidForm({ ...rfidForm, api_key: event.target.value })} />
+              </label>
+              <label>
+                Gateway code
+                <input value={rfidForm.gateway_code} onChange={(event) => setRfidForm({ ...rfidForm, gateway_code: event.target.value })} />
               </label>
               <label>
                 Movement
@@ -5045,6 +5153,14 @@ export default function HomePage() {
               </div>
             ) : null}
             <div className="task-list">
+              {equipmentReaders.slice(0, 3).map((reader) => (
+                <article key={reader.id} className="task-card">
+                  <div>
+                    <strong>{reader.name}</strong>
+                    <span>{reader.reader_id} · {reader.status} · {reader.location ?? "No location"} · last {reader.last_scan_at ? new Date(reader.last_scan_at).toLocaleString() : "never"}</span>
+                  </div>
+                </article>
+              ))}
               {equipmentScanEvents.slice(0, 3).map((scanEvent) => (
                 <article key={scanEvent.id} className="task-card">
                   <div>

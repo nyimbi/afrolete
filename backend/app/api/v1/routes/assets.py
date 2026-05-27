@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -18,6 +18,10 @@ from app.schemas.assets import (
     EquipmentLeaseInvoiceRead,
     EquipmentLeaseQuoteRead,
     EquipmentPhotoUpdate,
+    EquipmentReaderCreate,
+    EquipmentReaderGatewayScanCreate,
+    EquipmentReaderProvisionRead,
+    EquipmentReaderRead,
     EquipmentScanEventCreate,
     EquipmentScanEventRead,
     EquipmentScanRead,
@@ -42,6 +46,7 @@ from app.services.assets import (
     create_facility,
     create_facility_booking,
     create_equipment_lease_invoice,
+    list_equipment_readers,
     create_supplier_order,
     create_work_order,
     equipment_lease_quote,
@@ -55,6 +60,7 @@ from app.services.assets import (
     list_work_orders,
     procurement_recommendations,
     receive_supplier_order,
+    record_gateway_equipment_scan,
     record_equipment_scan_event,
     return_equipment,
     scan_equipment,
@@ -62,6 +68,7 @@ from app.services.assets import (
     supplier_scorecard,
     update_equipment_photo,
     upload_equipment_file,
+    provision_equipment_reader,
     update_work_order,
     utilization_recommendations,
 )
@@ -317,6 +324,41 @@ async def list_equipment_scan_events_route(
         equipment_item_id=equipment_item_id,
         matched=matched,
     )
+
+
+@router.post(
+    "/equipment/rfid-readers",
+    response_model=EquipmentReaderProvisionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def provision_equipment_reader_route(
+    payload: EquipmentReaderCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EquipmentReaderProvisionRead:
+    return await provision_equipment_reader(db, identity, payload, authz)
+
+
+@router.get("/equipment/rfid-readers", response_model=list[EquipmentReaderRead])
+async def list_equipment_readers_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[EquipmentReaderRead]:
+    return await list_equipment_readers(db, identity, organization_id, authz)
+
+
+@router.post("/equipment/rfid-gateway/{organization_id}/{reader_id}/scans", response_model=EquipmentScanEventRead)
+async def record_gateway_equipment_scan_route(
+    organization_id: UUID,
+    reader_id: str,
+    payload: EquipmentReaderGatewayScanCreate,
+    x_afrolete_rfid_key: str | None = Header(default=None, alias="X-Afrolete-RFID-Key"),
+    db: AsyncSession = Depends(get_db),
+) -> EquipmentScanEventRead:
+    return await record_gateway_equipment_scan(db, organization_id, reader_id, x_afrolete_rfid_key, payload)
 
 
 @router.patch("/equipment/{equipment_item_id}/photo", response_model=EquipmentItemRead)
