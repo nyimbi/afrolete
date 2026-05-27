@@ -3034,7 +3034,14 @@ export default function HomePage() {
       return;
     }
     const exception = travelFeeReconciliation.exceptions[0];
-    const item = travelFeeReconciliation.items.find((entry) => entry.invoice_id === exception.invoice_id);
+    const item =
+      travelFeeReconciliation.items.find((entry) => entry.invoice_id === exception.invoice_id) ??
+      (exception.code === "ledger_total_mismatch"
+        ? travelFeeReconciliation.items.find((entry) => {
+            const paymentTotal = entry.payments.reduce((total, payment) => total + Number(payment.amount), 0);
+            return paymentTotal.toFixed(2) !== Number(entry.amount_paid).toFixed(2);
+          })
+        : undefined);
     if (!item) {
       addLog("Select a travel fee invoice exception first", "bad");
       return;
@@ -3049,9 +3056,15 @@ export default function HomePage() {
             ? "refund_overpayment"
             : exception.code === "overdue_open_balance"
               ? "apply_waiver"
-              : "";
+              : exception.code === "invoice_payment_total_mismatch" || exception.code === "ledger_total_mismatch"
+                ? "sync_invoice_paid_total"
+                : "";
     if (!action) {
       addLog(`${exception.code} requires finance review before automatic resolution`, "neutral");
+      return;
+    }
+    if (action === "attach_payment_reference" && !unresolvedPayment) {
+      addLog("No payment row needs a provider reference", "neutral");
       return;
     }
     runAction(

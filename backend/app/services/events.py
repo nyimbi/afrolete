@@ -1099,6 +1099,21 @@ async def resolve_travel_fee_reconciliation_exception(
         invoice.amount_paid -= amount
         travel_fee_update_invoice_status(invoice)
         message = f"Recorded {amount} {invoice.currency} overpayment refund adjustment."
+    elif payload.action == "sync_invoice_paid_total":
+        invoice_payments = (
+            await db.scalars(
+                select(FinancePayment)
+                .where(FinancePayment.organization_id == invoice.organization_id)
+                .where(FinancePayment.invoice_id == invoice.id)
+            )
+        ).all()
+        payment_sum = sum((item.amount for item in invoice_payments), Decimal("0.00")).quantize(Decimal("0.01"))
+        if payment_sum == invoice.amount_paid.quantize(Decimal("0.01")):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invoice paid total already matches payment ledger")
+        previous_amount = invoice.amount_paid.quantize(Decimal("0.01"))
+        invoice.amount_paid = payment_sum
+        travel_fee_update_invoice_status(invoice)
+        message = f"Synced invoice paid total from {previous_amount} to {payment_sum} {invoice.currency}."
     else:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported resolution action")
 
@@ -3660,6 +3675,17 @@ def travel_fee_reconciliation_exceptions(
                     "Attach the processor, mobile-money, bank, or office receipt reference for auditability.",
                 )
             )
+    payment_sum = sum((payment.amount for payment in payments), Decimal("0.00")).quantize(Decimal("0.01"))
+    if payment_sum != invoice.amount_paid.quantize(Decimal("0.01")):
+        exceptions.append(
+            travel_fee_reconciliation_exception(
+                invoice,
+                "invoice_payment_total_mismatch",
+                "critical",
+                f"Invoice paid total {invoice.amount_paid.quantize(Decimal('0.01'))} does not match payment rows totaling {payment_sum}.",
+                "Sync the invoice paid total to the payment ledger or rebuild the missing payment row.",
+            )
+        )
     return exceptions
 
 
