@@ -8,6 +8,8 @@ from app.models.enums import (
     EventType,
     MedicalClearanceStatus,
     ParticipationClearanceStatus,
+    WeatherAlertLevel,
+    WeatherDecision,
 )
 
 
@@ -40,6 +42,30 @@ class EventRead(BaseModel):
     timezone: str
     venue_name: str | None
     notes: str | None
+
+
+class EventWeatherAssessmentCreate(BaseModel):
+    source: str = Field(default="manual", min_length=2, max_length=80)
+    observed_at: datetime
+    temperature_c: float | None = Field(default=None, ge=-80, le=80)
+    heat_index_c: float | None = Field(default=None, ge=-80, le=90)
+    wbgt_c: float | None = Field(default=None, ge=-50, le=60)
+    humidity_percent: float | None = Field(default=None, ge=0, le=100)
+    aqi: int | None = Field(default=None, ge=0, le=500)
+    lightning_distance_km: float | None = Field(default=None, ge=0, le=500)
+    wind_speed_kph: float | None = Field(default=None, ge=0, le=400)
+    wind_gust_kph: float | None = Field(default=None, ge=0, le=500)
+    precipitation_mm_per_hr: float | None = Field(default=None, ge=0, le=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EventWeatherAssessmentRead(EventWeatherAssessmentCreate):
+    id: UUID
+    organization_id: UUID
+    event_id: UUID
+    alert_level: WeatherAlertLevel
+    decision: WeatherDecision
+    recommended_actions: str
 
 
 class AttendanceRecordUpsert(BaseModel):

@@ -51,6 +51,9 @@ export type EventType =
   | "assessment"
   | "community";
 
+export type WeatherAlertLevel = "information" | "advisory" | "warning" | "critical";
+export type WeatherDecision = "proceed" | "monitor" | "modify" | "delay" | "cancel" | "evacuate";
+
 export type AttendanceStatus =
   | "invited"
   | "confirmed"
@@ -397,6 +400,27 @@ export type EventRead = {
   ends_at: string | null;
   timezone: string;
   venue_name: string | null;
+  notes: string | null;
+};
+
+export type EventWeatherAssessmentRead = {
+  id: UUID;
+  organization_id: UUID;
+  event_id: UUID;
+  source: string;
+  observed_at: string;
+  temperature_c: number | null;
+  heat_index_c: number | null;
+  wbgt_c: number | null;
+  humidity_percent: number | null;
+  aqi: number | null;
+  lightning_distance_km: number | null;
+  wind_speed_kph: number | null;
+  wind_gust_kph: number | null;
+  precipitation_mm_per_hr: number | null;
+  alert_level: WeatherAlertLevel;
+  decision: WeatherDecision;
+  recommended_actions: string;
   notes: string | null;
 };
 

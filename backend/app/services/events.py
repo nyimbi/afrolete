@@ -4,12 +4,18 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import AttendanceStatus, MedicalClearanceStatus, ParticipationClearanceStatus
-from app.models.event import AttendanceRecord, Event
+from app.models.enums import (
+    AttendanceStatus,
+    MedicalClearanceStatus,
+    ParticipationClearanceStatus,
+    WeatherAlertLevel,
+    WeatherDecision,
+)
+from app.models.event import AttendanceRecord, Event, EventWeatherAssessment
 from app.models.identity import Person
 from app.models.organization import Organization
 from app.models.team import AthleteProfile, Team, TeamRosterEntry
-from app.schemas.event import EventCreate, AttendanceRecordUpsert
+from app.schemas.event import EventCreate, EventWeatherAssessmentCreate, AttendanceRecordUpsert
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 from app.services.safeguarding import clearance_for_event, medical_clearance_for_event
@@ -131,6 +137,114 @@ async def get_event(db: AsyncSession, event_id: UUID) -> Event:
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
     return event
+
+
+async def create_weather_assessment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    event_id: UUID,
+    payload: EventWeatherAssessmentCreate,
+    authz: AuthorizationService,
+) -> EventWeatherAssessment:
+    event = await get_event(db, event_id)
+    await ensure_manage_event_scope(authz, event.organization_id, identity)
+    alert_level, decision, actions = classify_weather_risk(payload)
+    assessment = EventWeatherAssessment(
+        organization_id=event.organization_id,
+        event_id=event.id,
+        source=payload.source,
+        observed_at=payload.observed_at,
+        temperature_c=payload.temperature_c,
+        heat_index_c=payload.heat_index_c,
+        wbgt_c=payload.wbgt_c,
+        humidity_percent=payload.humidity_percent,
+        aqi=payload.aqi,
+        lightning_distance_km=payload.lightning_distance_km,
+        wind_speed_kph=payload.wind_speed_kph,
+        wind_gust_kph=payload.wind_gust_kph,
+        precipitation_mm_per_hr=payload.precipitation_mm_per_hr,
+        alert_level=alert_level,
+        decision=decision,
+        recommended_actions=actions,
+        notes=payload.notes,
+    )
+    db.add(assessment)
+    await db.commit()
+    await db.refresh(assessment)
+    return assessment
+
+
+async def list_weather_assessments(db: AsyncSession, event_id: UUID) -> list[EventWeatherAssessment]:
+    await get_event(db, event_id)
+    rows = await db.scalars(
+        select(EventWeatherAssessment)
+        .where(EventWeatherAssessment.event_id == event_id)
+        .order_by(EventWeatherAssessment.observed_at.desc())
+    )
+    return list(rows.all())
+
+
+def classify_weather_risk(
+    payload: EventWeatherAssessmentCreate,
+) -> tuple[WeatherAlertLevel, WeatherDecision, str]:
+    critical: list[str] = []
+    warnings: list[str] = []
+    advisories: list[str] = []
+
+    wbgt = payload.wbgt_c if payload.wbgt_c is not None else payload.heat_index_c
+    lightning = payload.lightning_distance_km
+    wind = max(value for value in [payload.wind_speed_kph, payload.wind_gust_kph] if value is not None) if (
+        payload.wind_speed_kph is not None or payload.wind_gust_kph is not None
+    ) else None
+
+    if lightning is not None:
+        if lightning < 8:
+            critical.append("Lightning is within 8 km: stop activity, clear fields, and shelter immediately.")
+        elif lightning < 16:
+            warnings.append("Lightning is within 16 km: suspend outdoor activity and prepare 30-minute all-clear clock.")
+        elif lightning < 25:
+            advisories.append("Lightning is within 25 km: monitor strike trend and keep shelter routes ready.")
+
+    if wbgt is not None:
+        if wbgt > 32:
+            critical.append("Extreme heat/WBGT above 32C: cancel or move activity indoors.")
+        elif wbgt >= 28:
+            warnings.append("Heat advisory/WBGT 28-32C: add cooling breaks, reduce intensity, and monitor athletes.")
+        elif wbgt >= 25:
+            advisories.append("Moderate heat/WBGT 25-28C: increase hydration checks and shade access.")
+
+    if payload.aqi is not None:
+        if payload.aqi > 200:
+            critical.append("Very unhealthy air quality: cancel outdoor activity for all participants.")
+        elif payload.aqi > 150:
+            warnings.append("Unhealthy air quality: modify or delay outdoor activity, especially for sensitive athletes.")
+        elif payload.aqi > 100:
+            advisories.append("Moderate air quality concern: monitor sensitive athletes and reduce high-intensity load.")
+
+    if wind is not None:
+        if wind >= 64:
+            critical.append("Damaging wind risk: clear exposed areas and secure equipment.")
+        elif wind > 40:
+            warnings.append("High wind warning: inspect field hazards and avoid elevated or projectile equipment.")
+        elif wind >= 25:
+            advisories.append("Breezy conditions: monitor loose equipment, tents, signage, and ball flight safety.")
+
+    if payload.precipitation_mm_per_hr is not None:
+        if payload.precipitation_mm_per_hr >= 30:
+            critical.append("Intense precipitation: suspend activity and assess flooding or surface safety.")
+        elif payload.precipitation_mm_per_hr >= 10:
+            warnings.append("Heavy rain: inspect footing, visibility, drainage, and travel safety.")
+        elif payload.precipitation_mm_per_hr > 0:
+            advisories.append("Light precipitation: monitor surface traction and equipment grip.")
+
+    if critical:
+        return WeatherAlertLevel.CRITICAL, WeatherDecision.EVACUATE, "\n".join(critical + warnings + advisories)
+    if warnings:
+        decision = WeatherDecision.DELAY if lightning is not None and lightning < 16 else WeatherDecision.MODIFY
+        return WeatherAlertLevel.WARNING, decision, "\n".join(warnings + advisories)
+    if advisories:
+        return WeatherAlertLevel.ADVISORY, WeatherDecision.MONITOR, "\n".join(advisories)
+    return WeatherAlertLevel.INFORMATION, WeatherDecision.PROCEED, "Conditions are within normal operating thresholds."
 
 
 async def record_attendance(

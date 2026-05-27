@@ -134,6 +134,22 @@ class EventType(StrEnum):
     COMMUNITY = "community"
 
 
+class WeatherAlertLevel(StrEnum):
+    INFORMATION = "information"
+    ADVISORY = "advisory"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class WeatherDecision(StrEnum):
+    PROCEED = "proceed"
+    MONITOR = "monitor"
+    MODIFY = "modify"
+    DELAY = "delay"
+    CANCEL = "cancel"
+    EVACUATE = "evacuate"
+
+
 class AttendanceStatus(StrEnum):
     INVITED = "invited"
     CONFIRMED = "confirmed"

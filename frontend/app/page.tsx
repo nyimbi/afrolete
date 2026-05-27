@@ -69,6 +69,7 @@ import type {
   ConsentRequestRead,
   DonationRead,
   EventRead,
+  EventWeatherAssessmentRead,
   EventType,
   EmergencyActivationAlertRead,
   EmergencyActionPlanRead,
@@ -332,6 +333,7 @@ export default function HomePage() {
   const [teams, setTeams] = useState<TeamRead[]>([]);
   const [events, setEvents] = useState<EventRead[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
+  const [weatherAssessments, setWeatherAssessments] = useState<EventWeatherAssessmentRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
@@ -519,6 +521,20 @@ export default function HomePage() {
     timezone: "Africa/Nairobi",
     venue_name: "City Stadium",
     notes: "Matchday operations and consent clearance."
+  });
+  const [weatherForm, setWeatherForm] = useState({
+    source: "manual venue check",
+    observed_at: "2026-05-28T08:30",
+    temperature_c: 29,
+    heat_index_c: 31,
+    wbgt_c: 28.5,
+    humidity_percent: 72,
+    aqi: 82,
+    lightning_distance_km: 30,
+    wind_speed_kph: 18,
+    wind_gust_kph: 30,
+    precipitation_mm_per_hr: 0,
+    notes: "Pre-match venue and weather safety check."
   });
   const [guardianForm, setGuardianForm] = useState({
     guardian_display_name: "Parent Example",
@@ -1035,6 +1051,11 @@ export default function HomePage() {
     setAttendance(data);
   }, []);
 
+  const loadWeatherAssessments = useCallback(async (eventId: string) => {
+    const data = await apiRequest<EventWeatherAssessmentRead[]>(`/events/${eventId}/weather-assessments`);
+    setWeatherAssessments(data);
+  }, []);
+
   const loadSafeguardingIncidents = useCallback(async (organizationId: string) => {
     const data = await apiRequest<SafeguardingIncidentRead[]>(
       `/safeguarding/incidents?organization_id=${organizationId}`,
@@ -1503,6 +1524,7 @@ export default function HomePage() {
     if (!selectedOrganizationId) {
       setTeams([]);
       setEvents([]);
+      setWeatherAssessments([]);
       setAgents([]);
       setAgentTasks([]);
       setAgentRuns([]);
@@ -1701,10 +1723,18 @@ export default function HomePage() {
   useEffect(() => {
     if (!selectedEventId) {
       setAttendance([]);
+      setWeatherAssessments([]);
       return;
     }
-    runAction("load-attendance", () => loadAttendance(selectedEventId), () => undefined);
-  }, [selectedEventId, loadAttendance, runAction]);
+    runAction(
+      "load-event-readiness",
+      async () => {
+        await loadAttendance(selectedEventId);
+        await loadWeatherAssessments(selectedEventId);
+      },
+      () => undefined
+    );
+  }, [selectedEventId, loadAttendance, loadWeatherAssessments, runAction]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -2110,6 +2140,45 @@ export default function HomePage() {
         setEvents((current) => [createdEvent, ...current.filter((item) => item.id !== createdEvent.id)]);
         setSelectedEventId(createdEvent.id);
         addLog(`${createdEvent.title} scheduled`, "good");
+      }
+    );
+  };
+
+  const assessEventWeather = () => {
+    if (!selectedEventId) {
+      addLog("Select an event first", "bad");
+      return;
+    }
+    runAction(
+      "assess-event-weather",
+      () =>
+        apiRequest<EventWeatherAssessmentRead>(`/events/${selectedEventId}/weather-assessments`, {
+          method: "POST",
+          identity,
+          body: {
+            source: weatherForm.source,
+            observed_at: new Date(weatherForm.observed_at).toISOString(),
+            temperature_c: weatherForm.temperature_c,
+            heat_index_c: weatherForm.heat_index_c,
+            wbgt_c: weatherForm.wbgt_c,
+            humidity_percent: weatherForm.humidity_percent,
+            aqi: weatherForm.aqi,
+            lightning_distance_km: weatherForm.lightning_distance_km,
+            wind_speed_kph: weatherForm.wind_speed_kph,
+            wind_gust_kph: weatherForm.wind_gust_kph,
+            precipitation_mm_per_hr: weatherForm.precipitation_mm_per_hr,
+            notes: weatherForm.notes || null
+          }
+        }),
+      (assessment) => {
+        setWeatherAssessments((current) => [
+          assessment,
+          ...current.filter((item) => item.id !== assessment.id)
+        ]);
+        addLog(
+          `Weather ${assessment.alert_level}: ${assessment.decision}`,
+          assessment.alert_level === "critical" || assessment.alert_level === "warning" ? "bad" : "good"
+        );
       }
     );
   };
@@ -6202,6 +6271,46 @@ export default function HomePage() {
             <div className="event-toolbar">
               <button type="button" onClick={seedAttendance} disabled={busyAction !== null}>Seed roster</button>
               <button type="button" onClick={checkClearance} disabled={busyAction !== null}>Clearance</button>
+              <button type="button" onClick={assessEventWeather} disabled={busyAction !== null}>Weather check</button>
+            </div>
+            <div className="form-grid three">
+              <label>
+                Observed
+                <input type="datetime-local" value={weatherForm.observed_at} onChange={(event) => setWeatherForm({ ...weatherForm, observed_at: event.target.value })} />
+              </label>
+              <label>
+                WBGT C
+                <input type="number" step="0.1" value={weatherForm.wbgt_c} onChange={(event) => setWeatherForm({ ...weatherForm, wbgt_c: Number(event.target.value) })} />
+              </label>
+              <label>
+                Lightning km
+                <input type="number" step="0.1" min="0" value={weatherForm.lightning_distance_km} onChange={(event) => setWeatherForm({ ...weatherForm, lightning_distance_km: Number(event.target.value) })} />
+              </label>
+              <label>
+                AQI
+                <input type="number" min="0" value={weatherForm.aqi} onChange={(event) => setWeatherForm({ ...weatherForm, aqi: Number(event.target.value) })} />
+              </label>
+              <label>
+                Gust kph
+                <input type="number" step="0.1" min="0" value={weatherForm.wind_gust_kph} onChange={(event) => setWeatherForm({ ...weatherForm, wind_gust_kph: Number(event.target.value) })} />
+              </label>
+              <label>
+                Rain mm/hr
+                <input type="number" step="0.1" min="0" value={weatherForm.precipitation_mm_per_hr} onChange={(event) => setWeatherForm({ ...weatherForm, precipitation_mm_per_hr: Number(event.target.value) })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {weatherAssessments.slice(0, 2).map((assessment) => (
+                <article key={assessment.id} className="task-card">
+                  <div>
+                    <strong>{assessment.alert_level} · {assessment.decision}</strong>
+                    <span>
+                      WBGT {assessment.wbgt_c ?? assessment.heat_index_c ?? "n/a"}C · AQI {assessment.aqi ?? "n/a"} · lightning {assessment.lightning_distance_km ?? "n/a"} km
+                    </span>
+                    <span>{assessment.recommended_actions}</span>
+                  </div>
+                </article>
+              ))}
             </div>
             <div className="selection-list compact">
               {events.map((item) => (

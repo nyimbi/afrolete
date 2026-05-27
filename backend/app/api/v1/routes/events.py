@@ -10,15 +10,19 @@ from app.schemas.event import (
     AttendanceSeedRead,
     EventCreate,
     EventRead,
+    EventWeatherAssessmentCreate,
+    EventWeatherAssessmentRead,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.events import (
+    create_weather_assessment,
     create_event,
     get_event,
     list_attendance,
     list_events,
+    list_weather_assessments,
     record_attendance,
     seed_attendance_from_team_roster,
 )
@@ -39,6 +43,33 @@ def to_event_read(event) -> EventRead:
         timezone=event.timezone,
         venue_name=event.venue_name,
         notes=event.notes,
+    )
+
+
+def to_weather_assessment_read(assessment) -> EventWeatherAssessmentRead:
+    return EventWeatherAssessmentRead(
+        id=assessment.id,
+        organization_id=assessment.organization_id,
+        event_id=assessment.event_id,
+        source=assessment.source,
+        observed_at=assessment.observed_at,
+        temperature_c=float(assessment.temperature_c) if assessment.temperature_c is not None else None,
+        heat_index_c=float(assessment.heat_index_c) if assessment.heat_index_c is not None else None,
+        wbgt_c=float(assessment.wbgt_c) if assessment.wbgt_c is not None else None,
+        humidity_percent=float(assessment.humidity_percent) if assessment.humidity_percent is not None else None,
+        aqi=assessment.aqi,
+        lightning_distance_km=(
+            float(assessment.lightning_distance_km) if assessment.lightning_distance_km is not None else None
+        ),
+        wind_speed_kph=float(assessment.wind_speed_kph) if assessment.wind_speed_kph is not None else None,
+        wind_gust_kph=float(assessment.wind_gust_kph) if assessment.wind_gust_kph is not None else None,
+        precipitation_mm_per_hr=(
+            float(assessment.precipitation_mm_per_hr) if assessment.precipitation_mm_per_hr is not None else None
+        ),
+        alert_level=assessment.alert_level,
+        decision=assessment.decision,
+        recommended_actions=assessment.recommended_actions,
+        notes=assessment.notes,
     )
 
 
@@ -89,6 +120,34 @@ async def get_event_route(
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
     return to_event_read(await get_event(db, event_id))
+
+
+@router.post(
+    "/{event_id}/weather-assessments",
+    response_model=EventWeatherAssessmentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_weather_assessment_route(
+    event_id: UUID,
+    payload: EventWeatherAssessmentCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventWeatherAssessmentRead:
+    return to_weather_assessment_read(
+        await create_weather_assessment(db, identity, event_id, payload, authz)
+    )
+
+
+@router.get("/{event_id}/weather-assessments", response_model=list[EventWeatherAssessmentRead])
+async def list_weather_assessments_route(
+    event_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[EventWeatherAssessmentRead]:
+    return [
+        to_weather_assessment_read(assessment)
+        for assessment in await list_weather_assessments(db, event_id)
+    ]
 
 
 @router.post("/{event_id}/attendance", response_model=AttendanceRecordRead, status_code=201)

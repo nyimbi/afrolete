@@ -1,7 +1,9 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text, UniqueConstraint
+from decimal import Decimal
+
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -22,6 +24,8 @@ from app.models.enums import (
     SafeguardingIncidentSeverity,
     SafeguardingIncidentStatus,
     SafeguardingIncidentType,
+    WeatherAlertLevel,
+    WeatherDecision,
 )
 
 
@@ -38,6 +42,32 @@ class Event(IdMixin, TimestampMixin, Base):
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timezone: Mapped[str] = mapped_column(String(80), default="UTC")
     venue_name: Mapped[str | None] = mapped_column(String(200))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class EventWeatherAssessment(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_weather_assessments"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    event_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    source: Mapped[str] = mapped_column(String(80), default="manual", nullable=False, index=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    temperature_c: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    heat_index_c: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    wbgt_c: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    humidity_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    aqi: Mapped[int | None] = mapped_column(index=True)
+    lightning_distance_km: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), index=True)
+    wind_speed_kph: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    wind_gust_kph: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    precipitation_mm_per_hr: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    alert_level: Mapped[WeatherAlertLevel] = mapped_column(
+        enum_type(WeatherAlertLevel), nullable=False, index=True
+    )
+    decision: Mapped[WeatherDecision] = mapped_column(
+        enum_type(WeatherDecision), nullable=False, index=True
+    )
+    recommended_actions: Mapped[str] = mapped_column(Text, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
 
 
