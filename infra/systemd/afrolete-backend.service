@@ -1,0 +1,16 @@
+[Unit]
+Description=AfroLete FastAPI backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=afrolete
+WorkingDirectory=/opt/afrolete/backend
+EnvironmentFile=/run/pjs/afrolete-backend.env
+ExecStart=/opt/afrolete/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

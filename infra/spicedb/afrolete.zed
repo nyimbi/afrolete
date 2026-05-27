@@ -1,0 +1,80 @@
+definition user {}
+
+definition agent {
+  relation owner: user
+  relation reviewer: user
+
+  permission administer = owner
+  permission review = reviewer + owner
+}
+
+definition organization {
+  relation owner: user
+  relation admin: user
+  relation coach: user
+  relation staff: user
+  relation guardian: user
+  relation athlete: user
+  relation viewer: user
+  relation assigned_agent: agent
+
+  permission manage = owner + admin
+  permission manage_roster = manage + coach + staff
+  permission view = manage_roster + guardian + athlete + viewer
+  permission use_agent = manage + assigned_agent->review
+}
+
+definition team {
+  relation parent_org: organization
+  relation coach: user
+  relation staff: user
+  relation athlete: user
+  relation guardian: user
+  relation assigned_agent: agent
+
+  permission manage = parent_org->manage
+  permission manage_roster = manage + coach + staff + parent_org->manage_roster
+  permission view = manage_roster + athlete + guardian + parent_org->view
+  permission use_agent = manage + assigned_agent->review + parent_org->use_agent
+}
+
+definition athlete_profile {
+  relation parent_org: organization
+  relation team: team
+  relation subject: user
+  relation guardian: user
+  relation coach: user
+  relation medical_viewer: user
+  relation assigned_agent: agent
+
+  permission manage = parent_org->manage + team->manage_roster
+  permission view = manage + subject + guardian + coach + team->view
+  permission view_medical = manage + medical_viewer + guardian
+  permission analyze = manage + assigned_agent->review + team->use_agent
+}
+
+definition event {
+  relation parent_org: organization
+  relation team: team
+  relation organizer: user
+  relation participant: user
+  relation guardian: user
+  relation assigned_agent: agent
+
+  permission manage = parent_org->manage + team->manage_roster + organizer
+  permission view = manage + participant + guardian + team->view
+  permission record_attendance = manage
+  permission analyze = manage + assigned_agent->review
+}
+
+definition report {
+  relation parent_org: organization
+  relation author: user
+  relation reader: user
+  relation assigned_agent: agent
+
+  permission manage = parent_org->manage + author
+  permission view = manage + reader + parent_org->view
+  permission generate = manage + assigned_agent->review
+}
+

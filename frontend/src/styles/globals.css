@@ -1,0 +1,304 @@
+:root {
+  color-scheme: light;
+  --ink: #101513;
+  --muted: #66736e;
+  --line: #d9e1dd;
+  --panel: rgba(255, 255, 255, 0.86);
+  --wash: #eef3ef;
+  --teal: #0f9f8d;
+  --amber: #d69722;
+  --violet: #7357d7;
+  --red: #b54048;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  color: var(--ink);
+  background:
+    linear-gradient(120deg, rgba(15, 159, 141, 0.16), transparent 34%),
+    linear-gradient(320deg, rgba(115, 87, 215, 0.16), transparent 42%),
+    #f7faf7;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+a {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 224px 1fr;
+}
+
+.rail {
+  border-right: 1px solid var(--line);
+  background: rgba(247, 250, 247, 0.74);
+  padding: 24px;
+}
+
+.mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  font-weight: 800;
+  margin-bottom: 40px;
+}
+
+.rail nav {
+  display: grid;
+  gap: 8px;
+}
+
+.rail a {
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 10px 12px;
+  text-decoration: none;
+}
+
+.rail a.active {
+  color: var(--ink);
+  background: white;
+  box-shadow: 0 1px 0 rgba(16, 21, 19, 0.08);
+}
+
+.workspace {
+  padding: 32px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+  margin-bottom: 28px;
+}
+
+.eyebrow,
+.section-label {
+  color: var(--teal);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  max-width: 900px;
+  font-size: 44px;
+  line-height: 1.03;
+  margin-bottom: 0;
+}
+
+h2 {
+  font-size: 25px;
+  line-height: 1.16;
+}
+
+.topbar button {
+  color: white;
+  background: var(--ink);
+  border: 0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+
+.hero-grid,
+.lower-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.8fr);
+  gap: 16px;
+}
+
+.mission-panel,
+.signal-panel,
+.metric-card,
+.agents-panel,
+.architecture-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 20px 80px rgba(41, 55, 48, 0.08);
+}
+
+.mission-panel,
+.signal-panel,
+.agents-panel,
+.architecture-panel {
+  padding: 24px;
+}
+
+.mission-panel p:not(.section-label),
+.agents-panel p {
+  color: var(--muted);
+  line-height: 1.58;
+}
+
+.workflow-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 28px;
+}
+
+.workflow-strip span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  padding: 8px 11px;
+  font-size: 13px;
+}
+
+.pulse {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.pulse span {
+  width: 12px;
+  height: 12px;
+  background: var(--red);
+  border-radius: 50%;
+}
+
+.signal-panel ul {
+  color: var(--muted);
+  padding-left: 18px;
+  line-height: 1.7;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.metric-card {
+  padding: 18px;
+}
+
+.metric-card p,
+.metric-card span {
+  color: var(--muted);
+}
+
+.metric-card strong {
+  display: block;
+  font-size: 34px;
+  margin: 6px 0;
+}
+
+.agent-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.agent-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  padding: 14px;
+}
+
+.agent-card > span {
+  width: 12px;
+  height: 44px;
+  border-radius: 99px;
+}
+
+.agent-card.teal > span {
+  background: var(--teal);
+}
+
+.agent-card.amber > span {
+  background: var(--amber);
+}
+
+.agent-card.violet > span {
+  background: var(--violet);
+}
+
+.agent-card p {
+  margin: 2px 0 0;
+}
+
+.architecture-panel dl {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+}
+
+.architecture-panel div {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+.architecture-panel div:last-child {
+  border-bottom: 0;
+}
+
+.architecture-panel dt {
+  font-weight: 800;
+}
+
+.architecture-panel dd {
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+
+@media (max-width: 920px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .rail {
+    display: none;
+  }
+
+  .workspace {
+    padding: 20px;
+  }
+
+  .topbar,
+  .hero-grid,
+  .lower-grid,
+  .metric-grid {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  h1 {
+    font-size: 34px;
+  }
+}
+
