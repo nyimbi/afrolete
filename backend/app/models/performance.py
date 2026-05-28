@@ -82,6 +82,8 @@ class AthleteAssessment(IdMixin, TimestampMixin, Base):
     tactical_score: Mapped[float] = mapped_column(Float, nullable=False)
     mental_score: Mapped[float] = mapped_column(Float, nullable=False)
     overall_score: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    perceived_exertion: Mapped[float | None] = mapped_column(Float)
+    effort_rating: Mapped[float | None] = mapped_column(Float)
     summary: Mapped[str | None] = mapped_column(Text)
     recommendations: Mapped[str | None] = mapped_column(Text)
     verification_status: Mapped[MetricVerificationStatus] = mapped_column(

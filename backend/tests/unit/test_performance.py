@@ -160,6 +160,67 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert profile["benchmarks"][0]["metric_name"] == "Pace"
 
 
+def test_player_can_submit_pending_self_assessment(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    player_headers = {
+        "X-Afrolete-Sub": "kc-athlete-1",
+        "X-Afrolete-Email": "performance-athlete@example.com",
+        "X-Afrolete-Name": "Performance Athlete",
+    }
+
+    response = client.post(
+        f"/api/v1/performance/my-profiles/{roster['athlete_profile_id']}/self-assessments",
+        headers=player_headers,
+        json={
+            "organization_id": organization["id"],
+            "physical_score": 72,
+            "technical_score": 75,
+            "tactical_score": 68,
+            "mental_score": 81,
+            "perceived_exertion": 6,
+            "effort_rating": 9,
+            "summary": "Felt sharp but tired late.",
+        },
+    )
+
+    assert response.status_code == 201
+    assessment = response.json()
+    assert assessment["athlete_profile_id"] == roster["athlete_profile_id"]
+    assert assessment["overall_score"] == 73.4
+    assert assessment["perceived_exertion"] == 6
+    assert assessment["effort_rating"] == 9
+    assert assessment["verification_status"] == "pending_review"
+    assert assessment["summary"] == "Felt sharp but tired late."
+
+
+def test_player_cannot_submit_self_assessment_for_another_athlete(
+    client,
+    identity_headers,
+) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    other_headers = {
+        "X-Afrolete-Sub": "kc-athlete-2",
+        "X-Afrolete-Email": "other-athlete@example.com",
+        "X-Afrolete-Name": "Other Athlete",
+    }
+
+    response = client.post(
+        f"/api/v1/performance/my-profiles/{roster['athlete_profile_id']}/self-assessments",
+        headers=other_headers,
+        json={
+            "organization_id": organization["id"],
+            "physical_score": 72,
+            "technical_score": 75,
+            "tactical_score": 68,
+            "mental_score": 81,
+            "perceived_exertion": 6,
+            "effort_rating": 9,
+        },
+    )
+
+    assert response.status_code == 403
+
+
 def create_rostered_athlete(client, identity_headers):
     organization = client.post(
         "/api/v1/organizations",

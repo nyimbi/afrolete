@@ -21,6 +21,7 @@ from app.schemas.performance import (
     PerformanceObservationCreate,
     PerformanceObservationRead,
     PerformanceObservationReviewCreate,
+    PlayerSelfAssessmentCreate,
     PlayerPerformanceProfileRead,
 )
 from app.services.auth.dependencies import get_current_identity
@@ -31,6 +32,7 @@ from app.services.performance import (
     create_metric_definition,
     create_observation,
     create_performance_goal,
+    create_player_self_assessment,
     evaluate_performance_achievements,
     ingest_performance_evidence,
     list_assessments,
@@ -97,6 +99,8 @@ def to_assessment_read(assessment) -> AthleteAssessmentRead:
         tactical_score=assessment.tactical_score,
         mental_score=assessment.mental_score,
         overall_score=assessment.overall_score,
+        perceived_exertion=assessment.perceived_exertion,
+        effort_rating=assessment.effort_rating,
         summary=assessment.summary,
         recommendations=assessment.recommendations,
         verification_status=assessment.verification_status,
@@ -202,6 +206,22 @@ async def list_my_player_performance_route(
         )
         for profile in profiles
     ]
+
+
+@router.post(
+    "/my-profiles/{athlete_profile_id}/self-assessments",
+    response_model=AthleteAssessmentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_player_self_assessment_route(
+    athlete_profile_id: UUID,
+    payload: PlayerSelfAssessmentCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> AthleteAssessmentRead:
+    return to_assessment_read(
+        await create_player_self_assessment(db, identity, athlete_profile_id, payload)
+    )
 
 
 @router.post(

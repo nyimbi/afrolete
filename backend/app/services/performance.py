@@ -34,6 +34,7 @@ from app.schemas.performance import (
     PerformanceIngestionCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
+    PlayerSelfAssessmentCreate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
@@ -268,6 +269,54 @@ async def create_assessment(
         assessed_at=payload.assessed_at or datetime.now(UTC),
         overall_score=overall_score,
         **payload.model_dump(exclude={"assessed_at", "overall_score"}),
+    )
+    db.add(assessment)
+    await db.commit()
+    await db.refresh(assessment)
+    return assessment
+
+
+async def create_player_self_assessment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    athlete_profile_id: UUID,
+    payload: PlayerSelfAssessmentCreate,
+) -> AthleteAssessment:
+    athlete_profile = await get_athlete_profile(db, athlete_profile_id, payload.organization_id)
+    if athlete_profile.person_id != identity.person_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if payload.event_id is not None:
+        event = await db.get(Event, payload.event_id)
+        if event is None or event.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+
+    overall_score = round(
+        payload.physical_score * 0.25
+        + payload.technical_score * 0.35
+        + payload.tactical_score * 0.25
+        + payload.mental_score * 0.15,
+        2,
+    )
+    summary = payload.summary or (
+        f"Player self-assessment with RPE {payload.perceived_exertion:g}/10 "
+        f"and effort {payload.effort_rating:g}/10."
+    )
+    assessment = AthleteAssessment(
+        organization_id=payload.organization_id,
+        athlete_profile_id=athlete_profile.id,
+        event_id=payload.event_id,
+        assessed_by_person_id=identity.person_id,
+        assessed_at=payload.assessed_at or datetime.now(UTC),
+        physical_score=payload.physical_score,
+        technical_score=payload.technical_score,
+        tactical_score=payload.tactical_score,
+        mental_score=payload.mental_score,
+        overall_score=overall_score,
+        perceived_exertion=payload.perceived_exertion,
+        effort_rating=payload.effort_rating,
+        summary=summary,
+        recommendations="Coach review requested for player self-assessment.",
+        verification_status=MetricVerificationStatus.PENDING_REVIEW,
     )
     db.add(assessment)
     await db.commit()

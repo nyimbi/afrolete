@@ -3176,6 +3176,8 @@ export type AthleteAssessmentRead = {
   tactical_score: number;
   mental_score: number;
   overall_score: number;
+  perceived_exertion: number | null;
+  effort_rating: number | null;
   summary: string | null;
   recommendations: string | null;
   verification_status: MetricVerificationStatus;

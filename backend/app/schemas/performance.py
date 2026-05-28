@@ -108,9 +108,24 @@ class AthleteAssessmentCreate(BaseModel):
     tactical_score: float = Field(ge=0, le=100)
     mental_score: float = Field(ge=0, le=100)
     overall_score: float | None = Field(default=None, ge=0, le=100)
+    perceived_exertion: float | None = Field(default=None, ge=0, le=10)
+    effort_rating: float | None = Field(default=None, ge=0, le=10)
     summary: str | None = Field(default=None, max_length=4000)
     recommendations: str | None = Field(default=None, max_length=4000)
     verification_status: MetricVerificationStatus = MetricVerificationStatus.VERIFIED
+
+
+class PlayerSelfAssessmentCreate(BaseModel):
+    organization_id: UUID
+    event_id: UUID | None = None
+    assessed_at: datetime | None = None
+    physical_score: float = Field(ge=0, le=100)
+    technical_score: float = Field(ge=0, le=100)
+    tactical_score: float = Field(ge=0, le=100)
+    mental_score: float = Field(ge=0, le=100)
+    perceived_exertion: float = Field(ge=0, le=10)
+    effort_rating: float = Field(ge=0, le=10)
+    summary: str | None = Field(default=None, max_length=4000)
 
 
 class AthleteAssessmentRead(BaseModel):
@@ -125,6 +140,8 @@ class AthleteAssessmentRead(BaseModel):
     tactical_score: float
     mental_score: float
     overall_score: float
+    perceived_exertion: float | None
+    effort_rating: float | None
     summary: str | None
     recommendations: str | None
     verification_status: MetricVerificationStatus

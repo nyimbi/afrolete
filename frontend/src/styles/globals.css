@@ -1351,6 +1351,48 @@ textarea:focus {
   margin-top: 14px;
 }
 
+.player-self-check {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(6, minmax(76px, 0.36fr)) auto;
+  gap: 10px;
+  margin-top: 14px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 14px;
+}
+
+.player-self-check div,
+.player-self-check label {
+  display: grid;
+  gap: 5px;
+}
+
+.player-self-check h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.player-self-check span,
+.player-self-check label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.player-self-check input,
+.player-self-check textarea {
+  color: var(--ink);
+}
+
+.player-self-note {
+  grid-column: 1 / -2;
+}
+
+.player-self-note textarea {
+  min-height: 58px;
+}
+
 .player-insights article,
 .player-empty,
 .player-message {
@@ -2280,8 +2322,13 @@ textarea:focus {
   .player-toolbar,
   .player-hero,
   .player-insights,
-  .player-columns {
+  .player-columns,
+  .player-self-check {
     grid-template-columns: 1fr;
+  }
+
+  .player-self-note {
+    grid-column: auto;
   }
 
   .player-hero dl {

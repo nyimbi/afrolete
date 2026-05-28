@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
-import type { LocalIdentity, PlayerPerformanceProfileRead } from "@/types/operations";
+import type { AthleteAssessmentRead, LocalIdentity, PlayerPerformanceProfileRead } from "@/types/operations";
 
 const defaultPlayerIdentity: LocalIdentity = {
   sub: "kc-athlete-1",
@@ -15,6 +15,15 @@ export default function PlayerPerformancePage() {
   const [identity, setIdentity] = useState<LocalIdentity>(defaultPlayerIdentity);
   const [profiles, setProfiles] = useState<PlayerPerformanceProfileRead[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [selfAssessment, setSelfAssessment] = useState({
+    physical_score: 70,
+    technical_score: 70,
+    tactical_score: 70,
+    mental_score: 70,
+    perceived_exertion: 5,
+    effort_rating: 8,
+    summary: ""
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -69,6 +78,36 @@ export default function PlayerPerformancePage() {
 
   const strongestTrend = selectedProfile?.trends.find((trend) => trend.trend_direction === "improving");
   const watchBenchmark = selectedProfile?.benchmarks.find((benchmark) => benchmark.benchmark_band === "watch");
+
+  const submitSelfAssessment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedProfile || !organizationId) {
+      setError("Load a player profile before submitting an assessment");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest<AthleteAssessmentRead>(
+        `/performance/my-profiles/${selectedProfile.athlete_profile_id}/self-assessments`,
+        {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: organizationId,
+            ...selfAssessment,
+            summary: selfAssessment.summary || null
+          }
+        }
+      );
+      setSelfAssessment((current) => ({ ...current, summary: "" }));
+      await loadProfiles();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Self-assessment submission failed");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <main className="player-page">
@@ -144,6 +183,81 @@ export default function PlayerPerformancePage() {
                 <p>{watchBenchmark?.recommendation ?? "Current benchmark cards do not show a watch-band priority."}</p>
               </article>
             </section>
+
+            <form className="player-self-check" onSubmit={submitSelfAssessment}>
+              <div>
+                <h2>Self-Assessment</h2>
+                <span>Scores are submitted for coach review before they become verified performance evidence.</span>
+              </div>
+              <label>
+                Physical
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={selfAssessment.physical_score}
+                  onChange={(event) => setSelfAssessment({ ...selfAssessment, physical_score: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                Technical
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={selfAssessment.technical_score}
+                  onChange={(event) => setSelfAssessment({ ...selfAssessment, technical_score: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                Tactical
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={selfAssessment.tactical_score}
+                  onChange={(event) => setSelfAssessment({ ...selfAssessment, tactical_score: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                Mental
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={selfAssessment.mental_score}
+                  onChange={(event) => setSelfAssessment({ ...selfAssessment, mental_score: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                RPE
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  value={selfAssessment.perceived_exertion}
+                  onChange={(event) => setSelfAssessment({ ...selfAssessment, perceived_exertion: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                Effort
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  value={selfAssessment.effort_rating}
+                  onChange={(event) => setSelfAssessment({ ...selfAssessment, effort_rating: Number(event.target.value) })}
+                />
+              </label>
+              <label className="player-self-note">
+                Note
+                <textarea
+                  value={selfAssessment.summary}
+                  onChange={(event) => setSelfAssessment({ ...selfAssessment, summary: event.target.value })}
+                />
+              </label>
+              <button type="submit" disabled={busy}>Submit</button>
+            </form>
 
             <section className="player-columns">
               <div>
