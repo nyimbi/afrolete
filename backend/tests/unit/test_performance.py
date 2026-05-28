@@ -1,3 +1,87 @@
+def test_performance_achievements_create_in_app_notification(client, identity_headers) -> None:
+    organization, _, member, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "finishing",
+            "name": "Finishing",
+            "category": "technical",
+            "unit": "score",
+            "min_value": 0,
+            "max_value": 10,
+        },
+    ).json()
+
+    first_observation = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "metric_definition_id": metric["id"],
+            "value": 7,
+        },
+    )
+    assert first_observation.status_code == 201
+
+    goal_response = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/goals",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "metric_definition_id": metric["id"],
+            "title": "Raise finishing score",
+            "target_value": 9,
+            "starts_at": "2026-01-01",
+        },
+    )
+    assert goal_response.status_code == 201
+    assert goal_response.json()["status"] == "active"
+
+    improved_observation = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "metric_definition_id": metric["id"],
+            "value": 9,
+        },
+    )
+    assert improved_observation.status_code == 201
+
+    evaluation = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/achievements/evaluate"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert evaluation.status_code == 200
+    result = evaluation.json()
+    assert result["awarded_count"] == 2
+    assert {award["achievement_type"] for award in result["awards"]} == {
+        "goal_achieved",
+        "personal_best",
+    }
+
+    messages = client.get(
+        f"/api/v1/communications/messages?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert len(messages) == 1
+    assert messages[0]["message_type"] == "report"
+    assert messages[0]["channel"] == "in_app"
+    assert messages[0]["recipient_count"] == 1
+    assert "2 performance achievements" in messages[0]["subject"]
+
+    recipients = client.get(
+        f"/api/v1/communications/messages/{messages[0]['id']}/recipients",
+        headers=identity_headers,
+    ).json()
+    assert [recipient["person_id"] for recipient in recipients] == [member["subject_id"]]
+
+
 def create_rostered_athlete(client, identity_headers):
     organization = client.post(
         "/api/v1/organizations",

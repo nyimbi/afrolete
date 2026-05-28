@@ -8,6 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.event import Event
+from app.models.communication import CommunicationMessage, MessageRecipient
+from app.models.identity import Person
 from app.models.organization import Organization
 from app.models.performance import (
     AthleteAssessment,
@@ -16,7 +18,13 @@ from app.models.performance import (
     PerformanceGoal,
     PerformanceMetricDefinition,
 )
-from app.models.enums import MetricSource, MetricVerificationStatus
+from app.models.enums import (
+    CommunicationChannel,
+    CommunicationMessageType,
+    CommunicationScopeType,
+    MetricSource,
+    MetricVerificationStatus,
+)
 from app.models.team import AthleteProfile
 from app.schemas.performance import (
     AthleteAssessmentCreate,
@@ -29,6 +37,11 @@ from app.schemas.performance import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.communications import (
+    destination_for_channel,
+    guardian_person_ids,
+    initial_delivery_status,
+)
 
 
 async def ensure_manage_performance(
@@ -577,6 +590,7 @@ async def evaluate_performance_achievements_for_athlete(
                 awards.append(award)
     personal_best_awards = await award_personal_bests(db, organization_id, athlete_profile_id)
     awards.extend(personal_best_awards)
+    messages = await create_achievement_notifications(db, organization_id, athlete_profile_id, awards)
     await db.commit()
     for award in awards:
         await db.refresh(award)
@@ -586,6 +600,7 @@ async def evaluate_performance_achievements_for_athlete(
         "evaluated_goals": len(goals),
         "awarded_count": len(awards),
         "updated_goals": updated_goals,
+        "notification_message_count": len(messages),
         "awards": awards,
     }
 
@@ -961,6 +976,89 @@ async def create_award_once(
     )
     db.add(award)
     return award
+
+
+async def create_achievement_notifications(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    awards: list[PerformanceAchievementAward],
+) -> list[CommunicationMessage]:
+    if not awards:
+        return []
+    athlete_profile = await get_athlete_profile(db, athlete_profile_id, organization_id)
+    athlete = await db.get(Person, athlete_profile.person_id)
+    if athlete is None:
+        return []
+    recipient_ids = {athlete.id}
+    recipient_ids.update(await guardian_person_ids(db, athlete.id))
+    if not recipient_ids:
+        return []
+
+    subject = achievement_notification_subject(athlete, awards)
+    body = achievement_notification_body(athlete, awards)
+    message = CommunicationMessage(
+        organization_id=organization_id,
+        template_id=None,
+        created_by_person_id=None,
+        message_type=CommunicationMessageType.REPORT,
+        channel=CommunicationChannel.IN_APP,
+        scope_type=CommunicationScopeType.PERSON,
+        scope_id=athlete.id,
+        subject=subject,
+        body=body,
+        urgent=False,
+        quiet_hours_override=False,
+        scheduled_for=None,
+        sent_at=datetime.now(UTC),
+        status="sent",
+    )
+    db.add(message)
+    await db.flush()
+    for person_id in sorted(recipient_ids, key=str):
+        person = await db.get(Person, person_id)
+        if person is None:
+            continue
+        db.add(
+            MessageRecipient(
+                message_id=message.id,
+                person_id=person.id,
+                destination=destination_for_channel(person, CommunicationChannel.IN_APP),
+                delivery_status=initial_delivery_status(person, CommunicationChannel.IN_APP),
+            )
+        )
+    return [message]
+
+
+def achievement_notification_subject(
+    athlete: Person,
+    awards: list[PerformanceAchievementAward],
+) -> str:
+    if len(awards) == 1:
+        return f"{athlete.display_name} earned {awards[0].title}"[:240]
+    return f"{athlete.display_name} earned {len(awards)} performance achievements"[:240]
+
+
+def achievement_notification_body(
+    athlete: Person,
+    awards: list[PerformanceAchievementAward],
+) -> str:
+    lines = [
+        f"{athlete.display_name} has new AfroLete performance recognition.",
+        "",
+    ]
+    for award in awards:
+        value = ""
+        if award.achieved_value is not None:
+            value = f" ({award.achieved_value:g})"
+        lines.append(f"- {award.title}{value}: {award.source_summary}")
+    lines.extend(
+        [
+            "",
+            "Open the family or player portal to review goals, badges, and recent performance context.",
+        ]
+    )
+    return "\n".join(lines)[:8000]
 
 
 async def award_personal_bests(
