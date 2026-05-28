@@ -2906,6 +2906,8 @@ export type IncidentReportPackageArtifactRead = {
   content_base64: string | null;
   checksum: string;
   size_bytes: number;
+  artifact_url: string;
+  storage_key: string;
 };
 
 export type IncidentReportPackageArtifactLinkRead = {
@@ -2920,6 +2922,8 @@ export type IncidentReportPackageArtifactLinkRead = {
   filename: string;
   checksum: string;
   size_bytes: number;
+  artifact_url: string;
+  storage_key: string;
 };
 
 export type IncidentInsuranceClaimRead = {

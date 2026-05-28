@@ -188,6 +188,8 @@ def test_incident_report_package_exports_markdown_and_pdf(client, identity_heade
     assert "County safeguarding office" in markdown["content"]
     assert len(markdown["checksum"]) == 64
     assert markdown["size_bytes"] > 500
+    assert markdown["artifact_url"].startswith("local://safeguarding-incident-artifacts/")
+    assert markdown["storage_key"].endswith(markdown["download_filename"])
 
     pdf_response = client.get(
         f"/api/v1/safeguarding/incident-report-packages/{report_package['id']}/artifact?artifact_format=pdf",
@@ -202,6 +204,8 @@ def test_incident_report_package_exports_markdown_and_pdf(client, identity_heade
     assert pdf_bytes.startswith(b"%PDF-1.4")
     assert pdf["size_bytes"] == len(pdf_bytes)
     assert len(pdf["checksum"]) == 64
+    assert pdf["artifact_url"].startswith("local://safeguarding-incident-artifacts/")
+    assert pdf["storage_key"].endswith(pdf["download_filename"])
 
     link_response = client.post(
         f"/api/v1/safeguarding/incident-report-packages/{report_package['id']}/artifact-link?artifact_format=pdf&ttl_seconds=600",
@@ -212,6 +216,8 @@ def test_incident_report_package_exports_markdown_and_pdf(client, identity_heade
     assert link["artifact_format"] == "pdf"
     assert link["filename"].endswith(".pdf")
     assert link["signed_url"].startswith("/api/v1/safeguarding/incident-report-artifacts/")
+    assert link["artifact_url"].startswith("local://safeguarding-incident-artifacts/")
+    assert link["storage_key"].endswith(link["filename"])
     signed_response = client.get(link["signed_url"])
     assert signed_response.status_code == 200
     assert signed_response.content.startswith(b"%PDF-1.4")

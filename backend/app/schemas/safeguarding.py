@@ -567,6 +567,8 @@ class IncidentReportPackageArtifactRead(BaseModel):
     content_base64: str | None
     checksum: str
     size_bytes: int
+    artifact_url: str
+    storage_key: str
 
 
 class IncidentReportPackageArtifactLinkRead(BaseModel):
@@ -581,6 +583,8 @@ class IncidentReportPackageArtifactLinkRead(BaseModel):
     filename: str
     checksum: str
     size_bytes: int
+    artifact_url: str
+    storage_key: str
 
 
 class IncidentInsuranceClaimCreate(BaseModel):

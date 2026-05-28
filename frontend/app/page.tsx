@@ -5814,7 +5814,7 @@ export default function HomePage() {
           downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
         }
         addLog(
-          `Downloaded ${artifact.artifact_format} regulatory package (${artifact.size_bytes} bytes)`,
+          `Downloaded ${artifact.artifact_format} regulatory package (${artifact.size_bytes} bytes, stored ${artifact.artifact_url})`,
           "good"
         );
       }
@@ -16194,6 +16194,7 @@ export default function HomePage() {
                   <strong>{incidentReportPackageArtifact.download_filename}</strong>
                   <span>{incidentReportPackageArtifact.artifact_format} · {incidentReportPackageArtifact.size_bytes} bytes · {incidentReportPackageArtifact.content_type}</span>
                   <span>{incidentReportPackageArtifact.checksum.slice(0, 16)} · generated {new Date(incidentReportPackageArtifact.generated_at).toLocaleString()}</span>
+                  <span>{incidentReportPackageArtifact.artifact_url} · {incidentReportPackageArtifact.storage_key}</span>
                 </div>
               </article>
             ) : null}
@@ -16205,6 +16206,7 @@ export default function HomePage() {
                     Expires {new Date(incidentReportPackageArtifactLink.expires_at).toLocaleString()} · {incidentReportPackageArtifactLink.size_bytes} bytes
                   </span>
                   <span>{incidentReportPackageArtifactLink.checksum.slice(0, 16)} · {incidentReportPackageArtifactLink.content_type}</span>
+                  <span>{incidentReportPackageArtifactLink.artifact_url} · {incidentReportPackageArtifactLink.storage_key}</span>
                 </div>
                 <a
                   href={`${apiBaseUrl}${incidentReportPackageArtifactLink.signed_url}`}

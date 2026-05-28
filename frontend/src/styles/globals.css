@@ -590,6 +590,7 @@ textarea:focus {
   color: var(--muted);
   font-size: 12px;
   margin-top: 3px;
+  overflow-wrap: anywhere;
 }
 
 .inquiry-review-card {
