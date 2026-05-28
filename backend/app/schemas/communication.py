@@ -125,6 +125,17 @@ class CommunicationDispatchSummary(BaseModel):
     transport_mode: str
 
 
+class CommunicationScheduledDispatchWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    executed_count: int
+    dispatched_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool = False
+    message_ids: list[UUID]
+
+
 class CommunicationDeliveryChannelReadiness(BaseModel):
     channel: CommunicationChannel
     status: str

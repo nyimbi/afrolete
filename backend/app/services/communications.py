@@ -43,6 +43,7 @@ from app.schemas.communication import (
     CommunicationEscalationSchedulerRunRead,
     CommunicationEscalationWorkerRunRead,
     CommunicationMessageCreate,
+    CommunicationScheduledDispatchWorkerRunRead,
     CommunicationTemplateCreate,
     DeliveryWebhookEvent,
     MessageRecipientUpdate,
@@ -594,6 +595,14 @@ async def dispatch_message(
     message = await get_message(db, message_id)
     await ensure_manage_communications(authz, identity, message.organization_id)
     settings = settings or get_settings()
+    return await dispatch_message_delivery(db, message, settings)
+
+
+async def dispatch_message_delivery(
+    db: AsyncSession,
+    message: CommunicationMessage,
+    settings: Settings,
+) -> CommunicationDispatchSummary:
     rows = await list_recipients(db, message.id)
     now = datetime.now(UTC)
 
@@ -625,8 +634,66 @@ async def dispatch_message(
 
             await deliver_recipient(client, webhook_url, settings, message, recipient, person, now)
 
+    message.sent_at = message.sent_at or now
+    message.status = "sent"
     await db.commit()
     return dispatch_summary(message.id, rows, settings.communication_delivery_mode)
+
+
+async def run_scheduled_message_dispatch_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    limit: int = 100,
+    dry_run: bool = False,
+    settings: Settings | None = None,
+) -> CommunicationScheduledDispatchWorkerRunRead:
+    settings = settings or get_settings()
+    messages = await scheduled_messages_due_for_dispatch(db, organization_id, limit)
+    dispatched_message_ids: list[UUID] = []
+    skipped_count = 0
+    failed_count = 0
+
+    for message in messages:
+        if dry_run:
+            skipped_count += 1
+            continue
+        try:
+            await dispatch_message_delivery(db, message, settings)
+            dispatched_message_ids.append(message.id)
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return CommunicationScheduledDispatchWorkerRunRead(
+        organization_id=organization_id,
+        eligible_count=len(messages),
+        executed_count=len(messages) - skipped_count,
+        dispatched_count=len(dispatched_message_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        message_ids=dispatched_message_ids,
+    )
+
+
+async def scheduled_messages_due_for_dispatch(
+    db: AsyncSession,
+    organization_id: UUID | None,
+    limit: int,
+) -> list[CommunicationMessage]:
+    now = datetime.now(UTC)
+    statement = (
+        select(CommunicationMessage)
+        .where(CommunicationMessage.status == "scheduled")
+        .where(CommunicationMessage.scheduled_for.is_not(None))
+        .where(CommunicationMessage.scheduled_for <= now)
+        .order_by(CommunicationMessage.scheduled_for.asc(), CommunicationMessage.created_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(CommunicationMessage.organization_id == organization_id)
+    return list((await db.scalars(statement)).all())
 
 
 async def communication_delivery_readiness(settings: Settings | None = None) -> CommunicationDeliveryReadinessRead:

@@ -77,6 +77,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
         "agent-tasks",
         "communication-digests",
         "communication-escalations",
+        "communication-scheduled-dispatch",
         "compliance-reconciliation",
         "developer-webhooks",
         "event-travel-consent-reminders",
@@ -91,6 +92,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["summary"]["processed_count"] == 2
     assert result["results"]["communication_digests"]["eligible_count"] == 0
     assert result["results"]["communication_escalations"]["eligible_count"] == 0
+    assert result["results"]["communication_scheduled_dispatch"]["eligible_count"] == 0
     assert result["results"]["compliance_reconciliation"]["eligible_count"] == 1
     assert result["results"]["compliance_reconciliation"]["executed_count"] == 1
     assert result["results"]["developer_webhooks"]["eligible_count"] == 0
@@ -114,6 +116,7 @@ def test_selected_lanes_expands_all() -> None:
         "agent-tasks",
         "communication-digests",
         "communication-escalations",
+        "communication-scheduled-dispatch",
         "compliance-reconciliation",
         "developer-webhooks",
         "event-travel-consent-reminders",
@@ -125,6 +128,76 @@ def test_selected_lanes_expands_all() -> None:
         "wearable-pull-retries",
     }
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}
+
+
+async def test_due_worker_dispatches_due_scheduled_messages(db_session) -> None:
+    organization = Organization(
+        name="Scheduled Dispatch Club",
+        slug="scheduled-dispatch-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    person = Person(display_name="Scheduled Parent", primary_email="scheduled-parent@example.com")
+    db_session.add_all([organization, person])
+    await db_session.flush()
+    message = CommunicationMessage(
+        organization_id=organization.id,
+        template_id=None,
+        created_by_person_id=None,
+        message_type=CommunicationMessageType.REMINDER,
+        channel=CommunicationChannel.IN_APP,
+        scope_type=CommunicationScopeType.ORGANIZATION,
+        scope_id=organization.id,
+        subject="Tonight training",
+        body="Training starts at 18:00.",
+        scheduled_for=datetime.now(UTC) - timedelta(minutes=5),
+        status="scheduled",
+    )
+    future_message = CommunicationMessage(
+        organization_id=organization.id,
+        template_id=None,
+        created_by_person_id=None,
+        message_type=CommunicationMessageType.REMINDER,
+        channel=CommunicationChannel.IN_APP,
+        scope_type=CommunicationScopeType.ORGANIZATION,
+        scope_id=organization.id,
+        subject="Tomorrow training",
+        body="Training starts tomorrow.",
+        scheduled_for=datetime.now(UTC) + timedelta(hours=1),
+        status="scheduled",
+    )
+    db_session.add_all([message, future_message])
+    await db_session.flush()
+    recipient = MessageRecipient(
+        message_id=message.id,
+        person_id=person.id,
+        destination=str(person.id),
+        delivery_status=MessageDeliveryStatus.QUEUED,
+    )
+    db_session.add(recipient)
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("communication-scheduled-dispatch",),
+        communication_scheduled_dispatch_limit=10,
+    )
+
+    dispatch = result["results"]["communication_scheduled_dispatch"]
+    assert dispatch["eligible_count"] == 1
+    assert dispatch["executed_count"] == 1
+    assert dispatch["dispatched_count"] == 1
+    assert dispatch["message_ids"] == [str(message.id)]
+    assert result["summary"]["processed_count"] == 1
+    await db_session.refresh(message)
+    await db_session.refresh(future_message)
+    await db_session.refresh(recipient)
+    assert message.status == "sent"
+    assert message.sent_at is not None
+    assert recipient.delivery_status == MessageDeliveryStatus.DELIVERED
+    assert recipient.delivered_at is not None
+    assert future_message.status == "scheduled"
 
 
 async def test_due_worker_reconciles_compliance_expiry(db_session) -> None:

@@ -10,7 +10,11 @@ from app.core.config import parse_positive_int_map
 from app.db.session import SessionLocal
 from app.models.enums import CommunicationChannel, NotificationFrequency
 from app.services.agents import run_agent_task_worker
-from app.services.communications import run_digest_scheduler_worker, run_message_escalation_worker
+from app.services.communications import (
+    run_digest_scheduler_worker,
+    run_message_escalation_worker,
+    run_scheduled_message_dispatch_worker,
+)
 from app.services.developer import run_developer_webhook_retry_due
 from app.services.events import run_event_travel_consent_reminder_worker
 from app.services.performance import (
@@ -29,6 +33,7 @@ WORKER_LANES = (
     "agent-tasks",
     "communication-digests",
     "communication-escalations",
+    "communication-scheduled-dispatch",
     "compliance-reconciliation",
     "developer-webhooks",
     "event-travel-consent-reminders",
@@ -54,6 +59,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--communication-escalation-level", type=int, default=2)
     parser.add_argument("--communication-escalation-failed-only", action="store_true")
     parser.add_argument("--dry-run-communication-escalations", action="store_true")
+    parser.add_argument("--communication-scheduled-dispatch-limit", type=int, default=None)
+    parser.add_argument("--dry-run-communication-scheduled-dispatch", action="store_true")
     parser.add_argument(
         "--communication-escalation-channel",
         choices=[channel.value for channel in CommunicationChannel],
@@ -150,6 +157,8 @@ async def run_due_workers(
     communication_escalation_failed_only: bool = False,
     communication_escalation_channel: CommunicationChannel | None = None,
     dry_run_communication_escalations: bool = False,
+    communication_scheduled_dispatch_limit: int | None = None,
+    dry_run_communication_scheduled_dispatch: bool = False,
     compliance_reconciliation_limit: int | None = None,
     webhook_limit: int | None = None,
     event_travel_consent_reminder_limit: int | None = None,
@@ -216,6 +225,15 @@ async def run_due_workers(
                 repeat_after_minutes=communication_escalation_repeat_after_minutes,
                 limit=communication_escalation_limit or limit,
                 dry_run=dry_run_communication_escalations,
+            )
+        ).model_dump(mode="json")
+    if "communication-scheduled-dispatch" in active_lanes:
+        results["communication_scheduled_dispatch"] = (
+            await run_scheduled_message_dispatch_worker(
+                db,
+                organization_id=organization_id,
+                limit=communication_scheduled_dispatch_limit or limit,
+                dry_run=dry_run_communication_scheduled_dispatch,
             )
         ).model_dump(mode="json")
     if "compliance-reconciliation" in active_lanes:
@@ -341,6 +359,7 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             result.get("executed_count")
             or result.get("replayed_count")
             or result.get("escalated_count")
+            or result.get("dispatched_count")
             or result.get("alerted_count")
             or result.get("reminded_count")
             or result.get("retried_count")
@@ -375,6 +394,8 @@ async def run() -> None:
             if args.communication_escalation_channel
             else None,
             dry_run_communication_escalations=args.dry_run_communication_escalations,
+            communication_scheduled_dispatch_limit=args.communication_scheduled_dispatch_limit,
+            dry_run_communication_scheduled_dispatch=args.dry_run_communication_scheduled_dispatch,
             compliance_reconciliation_limit=args.compliance_reconciliation_limit,
             webhook_limit=args.webhook_limit,
             event_travel_consent_reminder_limit=args.event_travel_consent_reminder_limit,
