@@ -70,6 +70,7 @@ from app.schemas.safeguarding import (
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
     IncidentReportPackageArtifactLinkRead,
+    IncidentReportPackageProviderSubmissionRead,
     IncidentInsuranceClaimCreate,
     IncidentInsuranceClaimProviderSyncRead,
     IncidentInsuranceClaimUpdate,
@@ -788,6 +789,243 @@ def incident_report_artifact_content_type_for_filename(filename: str) -> str:
     if extension == "md":
         return "text/markdown; charset=utf-8"
     return "application/octet-stream"
+
+
+async def submit_incident_report_package_to_regulator(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    package_id: UUID,
+    artifact_format: str,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> IncidentReportPackageProviderSubmissionRead:
+    package = await db.get(IncidentReportPackage, package_id)
+    if package is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report package not found")
+    await ensure_org_manage(authz, package.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, package.incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    selected_settings = settings or get_settings()
+    submitted_at = utc_now()
+    generated_at = datetime.fromtimestamp(int(submitted_at.timestamp()), tz=UTC)
+    artifact = build_incident_report_package_artifact(package, incident, artifact_format, generated_at)
+    stored = persist_incident_report_package_artifact(package, artifact, selected_settings)
+    package.status = IncidentReportPackageStatus.SUBMITTED
+    package.submitted_by_person_id = identity.person_id
+    package.submitted_at = package.submitted_at or submitted_at
+    payload = incident_report_package_regulator_payload(package, incident, artifact, stored)
+    package.submission_payload = json.dumps(payload, sort_keys=True, default=str)
+    append_incident_report_package_note(
+        package,
+        submitted_at,
+        f"Prepared regulatory portal submission in {selected_settings.safeguarding_regulatory_report_delivery_mode} mode.",
+    )
+    result = await deliver_incident_report_package_regulator_payload(
+        selected_settings,
+        package,
+        payload,
+        submitted_at,
+        artifact_url=stored["artifact_url"],
+        storage_key=stored["storage_key"],
+        checksum=str(artifact["checksum"]),
+    )
+    await db.commit()
+    await db.refresh(package)
+    return result.model_copy(
+        update={
+            "provider_reference": package.external_reference,
+            "package_status": package.status,
+        }
+    )
+
+
+async def deliver_incident_report_package_regulator_payload(
+    settings: Settings,
+    package: IncidentReportPackage,
+    payload: dict[str, object],
+    submitted_at: datetime,
+    *,
+    artifact_url: str,
+    storage_key: str,
+    checksum: str,
+) -> IncidentReportPackageProviderSubmissionRead:
+    result = IncidentReportPackageProviderSubmissionRead(
+        package_id=package.id,
+        organization_id=package.organization_id,
+        incident_id=package.incident_id,
+        agency_name=package.agency_name,
+        jurisdiction=package.jurisdiction,
+        delivery_mode=settings.safeguarding_regulatory_report_delivery_mode,
+        delivery_attempted=False,
+        delivered=False,
+        provider_status_code=None,
+        provider_reference=package.external_reference,
+        package_status=package.status,
+        artifact_url=artifact_url,
+        storage_key=storage_key,
+        checksum=checksum,
+        failure_reason=None,
+        submitted_at=submitted_at,
+    )
+    if settings.safeguarding_regulatory_report_delivery_mode == "record_only":
+        append_incident_report_package_note(
+            package,
+            submitted_at,
+            "Record-only regulatory submission; package is ready for manual portal filing.",
+        )
+        return result.model_copy(
+            update={
+                "failure_reason": "Record-only regulatory mode; package prepared for manual portal submission.",
+            }
+        )
+    if not settings.safeguarding_regulatory_report_webhook_url:
+        failure = "Regulatory webhook mode is enabled but no webhook URL is configured."
+        append_incident_report_package_note(package, submitted_at, failure)
+        return result.model_copy(update={"failure_reason": failure})
+
+    raw_body = json.dumps(payload, sort_keys=True, default=str).encode()
+    timestamp = str(int(submitted_at.timestamp()))
+    headers = incident_report_package_regulator_headers(settings, raw_body, timestamp)
+    try:
+        async with httpx.AsyncClient(timeout=settings.safeguarding_regulatory_report_timeout_seconds) as client:
+            response = await client.post(
+                settings.safeguarding_regulatory_report_webhook_url,
+                json=payload,
+                headers=headers,
+            )
+        delivered = 200 <= response.status_code < 300
+        response_payload = parse_insurer_response_json(response.text) if response.text else {}
+        if delivered:
+            apply_incident_report_package_regulator_response(package, response_payload, submitted_at)
+            append_incident_report_package_note(
+                package,
+                submitted_at,
+                f"Regulatory portal accepted submission with HTTP {response.status_code}.",
+            )
+        else:
+            append_incident_report_package_note(
+                package,
+                submitted_at,
+                f"Regulatory portal returned HTTP {response.status_code}.",
+            )
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "delivered": delivered,
+                "provider_status_code": response.status_code,
+                "provider_reference": package.external_reference,
+                "package_status": package.status,
+                "failure_reason": None if delivered else f"Regulatory webhook returned {response.status_code}: {response.text[:500]}",
+            }
+        )
+    except httpx.HTTPError as error:
+        append_incident_report_package_note(
+            package,
+            submitted_at,
+            f"Regulatory portal delivery failed: {error}",
+        )
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "failure_reason": f"Regulatory webhook delivery failed: {error}",
+            }
+        )
+
+
+def incident_report_package_regulator_payload(
+    package: IncidentReportPackage,
+    incident: SafeguardingIncident,
+    artifact: dict[str, object],
+    stored: dict[str, str],
+) -> dict[str, object]:
+    return {
+        "event_type": "incident_report_package.submit",
+        "package_id": str(package.id),
+        "organization_id": str(package.organization_id),
+        "incident_id": str(package.incident_id),
+        "agency_name": package.agency_name,
+        "jurisdiction": package.jurisdiction,
+        "status": package.status.value,
+        "due_at": package.due_at,
+        "external_reference": package.external_reference,
+        "narrative": package.narrative,
+        "checklist_json": package.checklist_json,
+        "artifact": {
+            "artifact_format": artifact["artifact_format"],
+            "filename": artifact["download_filename"],
+            "content_type": artifact["content_type"],
+            "checksum": artifact["checksum"],
+            "size_bytes": artifact["size_bytes"],
+            "artifact_url": stored["artifact_url"],
+            "storage_key": stored["storage_key"],
+        },
+        "incident": {
+            "title": incident.title,
+            "incident_type": incident.incident_type.value,
+            "severity": incident.severity.value,
+            "status": incident.status.value,
+            "occurred_at": incident.occurred_at,
+            "location": incident.location,
+            "description": incident.description,
+            "immediate_action": incident.immediate_action,
+            "parent_notified_at": incident.parent_notified_at,
+            "medical_follow_up_required": incident.medical_follow_up_required,
+            "regulatory_report_required": incident.regulatory_report_required,
+        },
+    }
+
+
+def incident_report_package_regulator_headers(
+    settings: Settings,
+    raw_body: bytes,
+    timestamp: str,
+) -> dict[str, str]:
+    signing_key = resolve_secret_sync(
+        settings,
+        env_value=settings.safeguarding_regulatory_report_webhook_key,
+        path=settings.safeguarding_regulatory_report_webhook_key_secret_path,
+        field_name=settings.safeguarding_regulatory_report_webhook_key_secret_field,
+        label="regulatory report webhook key",
+    )
+    key = (signing_key or settings.agent_webhook_key or "local-regulatory-report-key").encode()
+    signature = hmac.new(key, timestamp.encode() + b"." + raw_body, sha256).hexdigest()
+    return {
+        "content-type": "application/json",
+        "x-afrolete-regulatory-timestamp": timestamp,
+        "x-afrolete-regulatory-signature": signature,
+    }
+
+
+def apply_incident_report_package_regulator_response(
+    package: IncidentReportPackage,
+    response_payload: dict[str, object],
+    submitted_at: datetime,
+) -> None:
+    provider_reference = response_payload.get("external_reference") or response_payload.get("provider_reference")
+    if provider_reference:
+        package.external_reference = str(provider_reference)[:240]
+    status_value = response_payload.get("status") or response_payload.get("package_status")
+    if status_value:
+        try:
+            package.status = IncidentReportPackageStatus(str(status_value).lower())
+        except ValueError:
+            pass
+    if package.status == IncidentReportPackageStatus.ACCEPTED:
+        package.accepted_at = package.accepted_at or submitted_at
+    notes = response_payload.get("notes")
+    if notes:
+        append_incident_report_package_note(package, submitted_at, str(notes))
+
+
+def append_incident_report_package_note(
+    package: IncidentReportPackage,
+    at: datetime,
+    message: str,
+) -> None:
+    entry = f"{at.isoformat()} {message}"
+    package.notes = f"{package.notes}\n{entry}" if package.notes else entry
 
 
 async def create_incident_report_package(

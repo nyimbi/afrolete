@@ -2926,6 +2926,25 @@ export type IncidentReportPackageArtifactLinkRead = {
   storage_key: string;
 };
 
+export type IncidentReportPackageProviderSubmissionRead = {
+  package_id: UUID;
+  organization_id: UUID;
+  incident_id: UUID;
+  agency_name: string;
+  jurisdiction: string;
+  delivery_mode: string;
+  delivery_attempted: boolean;
+  delivered: boolean;
+  provider_status_code: number | null;
+  provider_reference: string | null;
+  package_status: IncidentReportPackageStatus;
+  artifact_url: string | null;
+  storage_key: string | null;
+  checksum: string | null;
+  failure_reason: string | null;
+  submitted_at: string;
+};
+
 export type IncidentInsuranceClaimRead = {
   id: UUID;
   organization_id: UUID;

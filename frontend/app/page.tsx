@@ -181,6 +181,7 @@ import type {
   GuardianRelationshipRead,
   IncidentReportPackageArtifactRead,
   IncidentReportPackageArtifactLinkRead,
+  IncidentReportPackageProviderSubmissionRead,
   IncidentInsuranceClaimRead,
   IncidentInsuranceClaimProviderSyncRead,
   IncidentMedicalClearanceRead,
@@ -1570,6 +1571,7 @@ export default function HomePage() {
   const [incidentReportPackages, setIncidentReportPackages] = useState<IncidentReportPackageRead[]>([]);
   const [incidentReportPackageArtifact, setIncidentReportPackageArtifact] = useState<IncidentReportPackageArtifactRead | null>(null);
   const [incidentReportPackageArtifactLink, setIncidentReportPackageArtifactLink] = useState<IncidentReportPackageArtifactLinkRead | null>(null);
+  const [incidentReportPackageSubmission, setIncidentReportPackageSubmission] = useState<IncidentReportPackageProviderSubmissionRead | null>(null);
   const [incidentInsuranceClaims, setIncidentInsuranceClaims] = useState<IncidentInsuranceClaimRead[]>([]);
   const [incidentInsuranceClaimProviderSync, setIncidentInsuranceClaimProviderSync] = useState<IncidentInsuranceClaimProviderSyncRead | null>(null);
   const [incidentMedicalClearances, setIncidentMedicalClearances] = useState<IncidentMedicalClearanceRead[]>([]);
@@ -3148,6 +3150,7 @@ export default function HomePage() {
       setIncidentReportPackages([]);
       setIncidentReportPackageArtifact(null);
       setIncidentReportPackageArtifactLink(null);
+      setIncidentReportPackageSubmission(null);
       setIncidentInsuranceClaims([]);
       setIncidentInsuranceClaimProviderSync(null);
       setIncidentMedicalClearances([]);
@@ -5840,6 +5843,30 @@ export default function HomePage() {
         addLog(
           `${link.artifact_format} regulatory package link expires ${new Date(link.expires_at).toLocaleString()}`,
           "good"
+        );
+      }
+    );
+  };
+
+  const submitIncidentReportPackageToRegulator = (
+    reportPackage: IncidentReportPackageRead,
+    artifactFormat: "markdown" | "pdf" = "pdf"
+  ) => {
+    runAction(
+      `incident-report-package-regulator-${reportPackage.id}`,
+      () =>
+        apiRequest<IncidentReportPackageProviderSubmissionRead>(
+          `/safeguarding/incident-report-packages/${reportPackage.id}/submit-regulator?artifact_format=${artifactFormat}`,
+          { method: "POST", identity }
+        ),
+      async (submission) => {
+        setIncidentReportPackageSubmission(submission);
+        if (selectedOrganizationId) {
+          await loadIncidentReportPackages(selectedOrganizationId);
+        }
+        addLog(
+          `${submission.agency_name} regulatory submission ${submission.delivered ? "delivered" : "prepared"} (${submission.delivery_mode}, ${submission.package_status})`,
+          submission.failure_reason ? "neutral" : "good"
         );
       }
     );
@@ -16212,9 +16239,22 @@ export default function HomePage() {
                   <button type="button" onClick={() => downloadIncidentReportPackageArtifact(reportPackage, "markdown")}>Markdown</button>
                   <button type="button" onClick={() => downloadIncidentReportPackageArtifact(reportPackage, "pdf")}>PDF</button>
                   <button type="button" onClick={() => shareIncidentReportPackageArtifact(reportPackage, "pdf")}>Link</button>
+                  <button type="button" onClick={() => submitIncidentReportPackageToRegulator(reportPackage, "pdf")}>File</button>
                 </div>
               </article>
             ))}
+            {incidentReportPackageSubmission ? (
+              <article className="task-card">
+                <div>
+                  <strong>{incidentReportPackageSubmission.agency_name} filing</strong>
+                  <span>
+                    {incidentReportPackageSubmission.jurisdiction} · {incidentReportPackageSubmission.delivery_mode} · {incidentReportPackageSubmission.package_status}
+                  </span>
+                  <span>{incidentReportPackageSubmission.provider_reference ?? "No portal reference"} · {incidentReportPackageSubmission.provider_status_code ?? "no HTTP status"}</span>
+                  <span>{incidentReportPackageSubmission.failure_reason ?? incidentReportPackageSubmission.artifact_url ?? "Regulatory submission recorded"}</span>
+                </div>
+              </article>
+            ) : null}
             {incidentReportPackageArtifact ? (
               <article className="task-card">
                 <div>

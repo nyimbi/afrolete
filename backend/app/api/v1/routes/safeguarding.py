@@ -47,6 +47,7 @@ from app.schemas.safeguarding import (
     IncidentReportPackageArtifactLinkRead,
     IncidentReportPackageArtifactRead,
     IncidentReportPackageCreate,
+    IncidentReportPackageProviderSubmissionRead,
     IncidentReportPackageRead,
     IncidentReportPackageUpdate,
     KnownChannelConsentCapture,
@@ -93,6 +94,7 @@ from app.services.safeguarding import (
     respond_to_family_event,
     reconcile_compliance_statuses,
     read_signed_incident_report_package_artifact,
+    submit_incident_report_package_to_regulator,
     update_background_check,
     update_compliance_credential,
     update_incident_insurance_claim,
@@ -457,6 +459,26 @@ async def create_incident_report_package_artifact_link_route(
         package_id,
         artifact_format,
         ttl_seconds,
+        authz,
+    )
+
+
+@router.post(
+    "/incident-report-packages/{package_id}/submit-regulator",
+    response_model=IncidentReportPackageProviderSubmissionRead,
+)
+async def submit_incident_report_package_to_regulator_route(
+    package_id: UUID,
+    artifact_format: str = Query(default="pdf", pattern="^(markdown|pdf)$"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentReportPackageProviderSubmissionRead:
+    return await submit_incident_report_package_to_regulator(
+        db,
+        identity,
+        package_id,
+        artifact_format,
         authz,
     )
 

@@ -587,6 +587,25 @@ class IncidentReportPackageArtifactLinkRead(BaseModel):
     storage_key: str
 
 
+class IncidentReportPackageProviderSubmissionRead(BaseModel):
+    package_id: UUID
+    organization_id: UUID
+    incident_id: UUID
+    agency_name: str
+    jurisdiction: str
+    delivery_mode: str
+    delivery_attempted: bool
+    delivered: bool
+    provider_status_code: int | None
+    provider_reference: str | None
+    package_status: IncidentReportPackageStatus
+    artifact_url: str | None
+    storage_key: str | None
+    checksum: str | None
+    failure_reason: str | None
+    submitted_at: datetime
+
+
 class IncidentInsuranceClaimCreate(BaseModel):
     organization_id: UUID
     incident_id: UUID

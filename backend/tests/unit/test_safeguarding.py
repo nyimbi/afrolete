@@ -227,6 +227,29 @@ def test_incident_report_package_exports_markdown_and_pdf(client, identity_heade
     bad_response = client.get(bad_link)
     assert bad_response.status_code == 403
 
+    regulator_response = client.post(
+        f"/api/v1/safeguarding/incident-report-packages/{report_package['id']}/submit-regulator?artifact_format=pdf",
+        headers=identity_headers,
+    )
+    assert regulator_response.status_code == 200
+    regulator = regulator_response.json()
+    assert regulator["delivery_mode"] == "record_only"
+    assert regulator["delivery_attempted"] is False
+    assert regulator["package_status"] == "submitted"
+    assert regulator["artifact_url"].startswith("local://safeguarding-incident-artifacts/")
+    assert regulator["storage_key"].endswith(".pdf")
+    assert regulator["checksum"]
+    assert regulator["failure_reason"].startswith("Record-only regulatory mode")
+
+    packages = client.get(
+        f"/api/v1/safeguarding/incident-report-packages?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    synced_package = next(item for item in packages if item["id"] == report_package["id"])
+    assert synced_package["status"] == "submitted"
+    assert "incident_report_package.submit" in synced_package["submission_payload"]
+    assert "Record-only regulatory submission" in synced_package["notes"]
+
 
 def test_insurance_claim_provider_submit_and_status_poll_record_only(client, identity_headers) -> None:
     organization = client.post(
