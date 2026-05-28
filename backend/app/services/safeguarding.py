@@ -78,6 +78,7 @@ from app.schemas.safeguarding import (
     FamilyAthleteSummaryRead,
     FamilyDashboardActionRead,
     FamilyDashboardRead,
+    FamilyScheduleConflictRead,
     FamilyConsentRequestRead,
     FamilyConsentResponseCreate,
     FamilyEventSummaryRead,
@@ -5217,12 +5218,14 @@ async def get_my_family_dashboard(
         for event in events
         if event.clearance_status != ParticipationClearanceStatus.CLEARED
     ]
+    schedule_conflicts = family_schedule_conflicts(events)
     active_goal_count = sum(item.active_goal_count for item in performance)
     award_count = sum(item.award_count for item in performance)
     action_items = family_dashboard_actions(
         consent_requests,
         rsvp_needed_events,
         clearance_blocked_events,
+        schedule_conflicts,
         unread_rows,
         open_ai_appeal_count,
     )
@@ -5238,6 +5241,7 @@ async def get_my_family_dashboard(
         upcoming_event_count=len(events),
         rsvp_needed_count=len(rsvp_needed_events),
         clearance_blocked_count=len(clearance_blocked_events),
+        schedule_conflict_count=len(schedule_conflicts),
         active_goal_count=active_goal_count,
         award_count=award_count,
         ai_recommendation_count=len(ai_tasks),
@@ -5245,6 +5249,7 @@ async def get_my_family_dashboard(
         next_event_at=events[0].starts_at if events else None,
         next_action_label=next_action_label,
         action_items=action_items,
+        schedule_conflicts=schedule_conflicts,
     )
 
 
@@ -5262,6 +5267,7 @@ def family_dashboard_actions(
     consent_requests: list[FamilyConsentRequestRead],
     rsvp_needed_events: list[FamilyEventSummaryRead],
     clearance_blocked_events: list[FamilyEventSummaryRead],
+    schedule_conflicts: list[FamilyScheduleConflictRead],
     unread_rows: list[tuple[MessageRecipient, CommunicationMessage]],
     open_ai_appeal_count: int,
 ) -> list[FamilyDashboardActionRead]:
@@ -5288,6 +5294,17 @@ def family_dashboard_actions(
                 athlete_person_id=event.athlete_person_id,
                 event_id=event.event_id,
                 due_at=event.starts_at,
+            )
+        )
+    for conflict in schedule_conflicts[:3]:
+        actions.append(
+            FamilyDashboardActionRead(
+                priority="high",
+                action_type="schedule_conflict",
+                title="Family schedule conflict",
+                detail=conflict.recommendation,
+                event_id=conflict.event_ids[0] if conflict.event_ids else None,
+                due_at=conflict.starts_at,
             )
         )
     for event in rsvp_needed_events[:3]:
@@ -5322,8 +5339,68 @@ def family_dashboard_actions(
             )
         )
     priority_order = {"high": 0, "medium": 1, "low": 2}
-    actions.sort(key=lambda item: (priority_order.get(item.priority, 9), item.due_at or datetime.max.replace(tzinfo=UTC)))
+    actions.sort(key=lambda item: (priority_order.get(item.priority, 9), family_action_sort_datetime(item.due_at)))
     return actions[:8]
+
+
+def family_action_sort_datetime(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.max.replace(tzinfo=UTC)
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def family_schedule_conflicts(events: list[FamilyEventSummaryRead]) -> list[FamilyScheduleConflictRead]:
+    conflicts: list[FamilyScheduleConflictRead] = []
+    seen_pairs: set[tuple[UUID, UUID, UUID, UUID]] = set()
+    sorted_events = sorted(events, key=lambda item: family_event_start(item))
+    for index, first in enumerate(sorted_events):
+        first_start = family_event_start(first)
+        first_end = family_event_end(first)
+        for second in sorted_events[index + 1 :]:
+            if first.event_id == second.event_id and first.athlete_person_id == second.athlete_person_id:
+                continue
+            second_start = family_event_start(second)
+            second_end = family_event_end(second)
+            if first_start >= second_end or second_start >= first_end:
+                continue
+            ordered_pair = sorted(
+                [
+                    (first.athlete_person_id, first.event_id),
+                    (second.athlete_person_id, second.event_id),
+                ],
+                key=lambda pair: (str(pair[0]), str(pair[1])),
+            )
+            pair_key = ordered_pair[0] + ordered_pair[1]
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+            athlete_names = sorted({first.athlete_name, second.athlete_name})
+            event_titles = [first.title, second.title]
+            starts_at = max(first_start, second_start)
+            ends_at = min(first_end, second_end)
+            conflicts.append(
+                FamilyScheduleConflictRead(
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                    athlete_names=athlete_names,
+                    event_titles=event_titles,
+                    event_ids=[first.event_id, second.event_id],
+                    recommendation=(
+                        f"{' and '.join(athlete_names)} have overlapping commitments: "
+                        f"{first.title} and {second.title}. Check carpool, pickup, or reschedule options."
+                    ),
+                )
+            )
+    return sorted(conflicts, key=lambda item: item.starts_at)[:10]
+
+
+def family_event_start(event: FamilyEventSummaryRead) -> datetime:
+    return event.starts_at.replace(tzinfo=UTC) if event.starts_at.tzinfo is None else event.starts_at.astimezone(UTC)
+
+
+def family_event_end(event: FamilyEventSummaryRead) -> datetime:
+    value = event.ends_at or event.starts_at + timedelta(hours=2)
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 async def list_my_family_events(

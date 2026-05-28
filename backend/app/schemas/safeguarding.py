@@ -126,6 +126,15 @@ class FamilyDashboardActionRead(BaseModel):
     due_at: datetime | None = None
 
 
+class FamilyScheduleConflictRead(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+    athlete_names: list[str]
+    event_titles: list[str]
+    event_ids: list[UUID]
+    recommendation: str
+
+
 class FamilyDashboardRead(BaseModel):
     organization_id: UUID
     guardian_person_id: UUID
@@ -137,6 +146,7 @@ class FamilyDashboardRead(BaseModel):
     upcoming_event_count: int
     rsvp_needed_count: int
     clearance_blocked_count: int
+    schedule_conflict_count: int
     active_goal_count: int
     award_count: int
     ai_recommendation_count: int
@@ -144,6 +154,7 @@ class FamilyDashboardRead(BaseModel):
     next_event_at: datetime | None
     next_action_label: str
     action_items: list[FamilyDashboardActionRead]
+    schedule_conflicts: list[FamilyScheduleConflictRead]
 
 
 class FamilyEventSummaryRead(BaseModel):

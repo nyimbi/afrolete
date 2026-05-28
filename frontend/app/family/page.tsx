@@ -358,6 +358,10 @@ export default function FamilyPortalPage() {
             <strong>{dashboard?.clearance_blocked_count ?? events.filter((event) => event.clearance_status !== "cleared").length}</strong>
           </div>
           <div>
+            <span>Conflicts</span>
+            <strong>{dashboard?.schedule_conflict_count ?? 0}</strong>
+          </div>
+          <div>
             <span>AI</span>
             <strong>{dashboard?.ai_recommendation_count ?? aiTasks.length}</strong>
           </div>
@@ -374,6 +378,14 @@ export default function FamilyPortalPage() {
               </p>
             </div>
             <div className="family-appeal-list">
+              {dashboard.schedule_conflicts.map((conflict) => (
+                <article key={`${conflict.event_ids.join("-")}-${conflict.starts_at}`}>
+                  <strong>Schedule conflict</strong>
+                  <span>{conflict.athlete_names.join(" and ")} · {formatDate(conflict.starts_at)}</span>
+                  <small>{conflict.recommendation}</small>
+                  <small>{conflict.event_titles.join(" · ")}</small>
+                </article>
+              ))}
               {dashboard.action_items.map((item) => (
                 <article key={`${item.action_type}-${item.title}-${item.due_at ?? "now"}`}>
                   <strong>{item.title}</strong>

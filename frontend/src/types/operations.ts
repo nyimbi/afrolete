@@ -1413,6 +1413,15 @@ export type FamilyDashboardActionRead = {
   due_at: string | null;
 };
 
+export type FamilyScheduleConflictRead = {
+  starts_at: string;
+  ends_at: string;
+  athlete_names: string[];
+  event_titles: string[];
+  event_ids: UUID[];
+  recommendation: string;
+};
+
 export type FamilyDashboardRead = {
   organization_id: UUID;
   guardian_person_id: UUID;
@@ -1424,6 +1433,7 @@ export type FamilyDashboardRead = {
   upcoming_event_count: number;
   rsvp_needed_count: number;
   clearance_blocked_count: number;
+  schedule_conflict_count: number;
   active_goal_count: number;
   award_count: number;
   ai_recommendation_count: number;
@@ -1431,6 +1441,7 @@ export type FamilyDashboardRead = {
   next_event_at: string | null;
   next_action_label: string;
   action_items: FamilyDashboardActionRead[];
+  schedule_conflicts: FamilyScheduleConflictRead[];
 };
 
 export type FamilyEventSummaryRead = {

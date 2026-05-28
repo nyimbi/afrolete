@@ -187,6 +187,46 @@ async def test_family_dashboard_summarizes_parent_actions(client, identity_heade
             "emergency_contact": True,
         },
     ).json()
+    second_team = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Family U12",
+            "sport": "football",
+            "sport_format": "team",
+        },
+    ).json()
+    second_member = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "dashboard-second-athlete@example.com",
+            "display_name": "Dashboard Second Athlete",
+            "role": "athlete",
+        },
+    ).json()
+    client.post(
+        f"/api/v1/teams/{second_team['id']}/members",
+        headers=identity_headers,
+        json={
+            "person_id": second_member["subject_id"],
+            "role": "player",
+            "status": "active",
+        },
+    )
+    client.post(
+        "/api/v1/safeguarding/guardians",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_person_id": second_member["subject_id"],
+            "guardian_person_id": guardian["guardian_person_id"],
+            "relationship_kind": "parent",
+            "can_sign_consent": True,
+            "emergency_contact": True,
+        },
+    )
     event = client.post(
         "/api/v1/events",
         headers=identity_headers,
@@ -199,6 +239,19 @@ async def test_family_dashboard_summarizes_parent_actions(client, identity_heade
             "venue_name": "North Field",
         },
     ).json()
+    client.post(
+        "/api/v1/events",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": second_team["id"],
+            "event_type": "training",
+            "title": "Overlapping sibling training",
+            "starts_at": "2099-06-10T15:30:00Z",
+            "ends_at": "2099-06-10T16:30:00Z",
+            "venue_name": "East Gym",
+        },
+    )
     client.post(
         "/api/v1/safeguarding/consent-requests",
         headers=identity_headers,
@@ -240,16 +293,22 @@ async def test_family_dashboard_summarizes_parent_actions(client, identity_heade
 
     assert dashboard_response.status_code == 200
     dashboard = dashboard_response.json()
-    assert dashboard["child_count"] == 1
+    assert dashboard["child_count"] == 2
     assert dashboard["pending_consent_count"] == 1
     assert dashboard["unread_message_count"] == 1
     assert dashboard["urgent_unread_count"] == 1
-    assert dashboard["upcoming_event_count"] == 1
-    assert dashboard["rsvp_needed_count"] == 1
-    assert dashboard["clearance_blocked_count"] == 0
+    assert dashboard["upcoming_event_count"] == 2
+    assert dashboard["rsvp_needed_count"] == 2
+    assert dashboard["clearance_blocked_count"] == 1
+    assert dashboard["schedule_conflict_count"] == 1
+    assert dashboard["schedule_conflicts"][0]["athlete_names"] == [
+        "Dashboard Athlete",
+        "Dashboard Second Athlete",
+    ]
+    assert "overlapping commitments" in dashboard["schedule_conflicts"][0]["recommendation"]
     assert dashboard["next_event_at"].startswith("2099-06-10T15:00:00")
     action_types = {item["action_type"] for item in dashboard["action_items"]}
-    assert {"consent", "rsvp", "message"}.issubset(action_types)
+    assert {"consent", "clearance", "rsvp", "message", "schedule_conflict"}.issubset(action_types)
 
 
 def test_incident_report_package_exports_markdown_and_pdf(client, identity_headers) -> None:
