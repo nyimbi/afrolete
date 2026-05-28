@@ -351,6 +351,7 @@ class PlayerPerformanceProfileRead(BaseModel):
     observation_count: int
     assessment_count: int
     latest_assessment_id: UUID | None
+    latest_assessment: AthleteAssessmentRead | None
     rating: str | None
     active_goal_count: int
     achieved_goal_count: int

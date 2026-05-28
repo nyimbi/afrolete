@@ -3342,6 +3342,7 @@ export type PlayerPerformanceProfileRead = {
   observation_count: number;
   assessment_count: number;
   latest_assessment_id: UUID | null;
+  latest_assessment: AthleteAssessmentRead | null;
   rating: string | null;
   active_goal_count: number;
   achieved_goal_count: number;

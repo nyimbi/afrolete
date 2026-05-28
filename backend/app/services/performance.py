@@ -908,6 +908,15 @@ async def list_my_player_performance(
         score, observation_count, assessment_count, latest_assessment_id, rating = (
             await performance_summary(db, organization_id, profile.id)
         )
+        latest_assessment = None
+        if latest_assessment_id is not None:
+            latest_assessment = await db.scalar(
+                select(AthleteAssessment)
+                .where(AthleteAssessment.organization_id == organization_id)
+                .where(AthleteAssessment.athlete_profile_id == profile.id)
+                .where(AthleteAssessment.id == latest_assessment_id)
+                .where(AthleteAssessment.verification_status == MetricVerificationStatus.VERIFIED)
+            )
         goals = await list_performance_goals(db, organization_id, profile.id)
         awards = await list_performance_awards(db, organization_id, profile.id)
         observations = (await list_observations(db, organization_id, profile.id))[:observation_limit]
@@ -927,6 +936,7 @@ async def list_my_player_performance(
                 "observation_count": observation_count,
                 "assessment_count": assessment_count,
                 "latest_assessment_id": latest_assessment_id,
+                "latest_assessment": latest_assessment,
                 "rating": rating,
                 "active_goal_count": sum(1 for goal in goals if goal.status == "active"),
                 "achieved_goal_count": sum(1 for goal in goals if goal.status == "achieved"),

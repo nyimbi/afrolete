@@ -10,6 +10,188 @@ const defaultPlayerIdentity: LocalIdentity = {
   name: "Performance Athlete"
 };
 
+const playerChartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--violet)", "var(--green)"];
+
+function playerValueLabel(value: number | null | undefined, unit?: string | null) {
+  if (typeof value !== "number") {
+    return "n/a";
+  }
+  const rounded = Number.isInteger(value) ? value.toString() : value.toFixed(1);
+  return unit ? `${rounded} ${unit}` : rounded;
+}
+
+function boundedPercent(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return 4;
+  }
+  return Math.max(4, Math.min(100, value));
+}
+
+function goalProgress(goal: PlayerPerformanceProfileRead["goals"][number]) {
+  if (typeof goal.current_value !== "number") {
+    return 4;
+  }
+  const baseline = goal.baseline_value ?? (goal.direction === "decrease" ? goal.target_value * 1.25 : 0);
+  if (goal.direction === "decrease") {
+    const span = baseline - goal.target_value;
+    return span > 0 ? boundedPercent(((baseline - goal.current_value) / span) * 100) : boundedPercent(goal.target_value / goal.current_value * 100);
+  }
+  const span = goal.target_value - baseline;
+  return span > 0 ? boundedPercent(((goal.current_value - baseline) / span) * 100) : boundedPercent(goal.current_value / goal.target_value * 100);
+}
+
+function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfileRead }) {
+  const latestAssessment = profile.latest_assessment;
+  const composition = latestAssessment
+    ? [
+        { label: "Physical", value: latestAssessment.physical_score, color: "var(--teal)" },
+        { label: "Technical", value: latestAssessment.technical_score, color: "var(--blue)" },
+        { label: "Tactical", value: latestAssessment.tactical_score, color: "var(--amber)" },
+        { label: "Mental", value: latestAssessment.mental_score, color: "var(--violet)" }
+      ]
+    : [];
+  const trendMax = Math.max(
+    1,
+    ...profile.trends.slice(0, 4).flatMap((trend) => [
+      Math.abs(trend.first_value ?? 0),
+      Math.abs(trend.latest_value ?? 0),
+      Math.abs(trend.forecast_next_value ?? 0),
+      Math.abs(trend.best_value ?? 0)
+    ])
+  );
+
+  return (
+    <section className="player-visual-grid">
+      <article className="player-chart-card">
+        <div>
+          <span>ALS composition</span>
+          <strong>{profile.latest_overall_score?.toFixed(1) ?? "No score"}</strong>
+          <small>{profile.rating ?? "Verified coach scores will appear here."}</small>
+        </div>
+        <div className="chart-bars">
+          {composition.map((score) => (
+            <div className="chart-bar-row" key={score.label}>
+              <span>{score.label}</span>
+              <div className="chart-track">
+                <div className="chart-fill" style={{ width: `${boundedPercent(score.value)}%`, backgroundColor: score.color }} />
+              </div>
+              <strong>{score.value.toFixed(0)}</strong>
+            </div>
+          ))}
+          {composition.length === 0 ? (
+            <div className="chart-bar-row">
+              <span>No scores</span>
+              <div className="chart-track">
+                <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--quiet)" }} />
+              </div>
+              <strong>n/a</strong>
+            </div>
+          ) : null}
+        </div>
+      </article>
+
+      <article className="player-chart-card">
+        <div>
+          <span>Trend runway</span>
+          <strong>{profile.trends.length} metrics</strong>
+          <small>Latest value compared with the next simple forecast.</small>
+        </div>
+        <div className="chart-bars">
+          {profile.trends.slice(0, 4).map((trend, index) => {
+            const width = boundedPercent((Math.abs(trend.forecast_next_value ?? trend.latest_value ?? 0) / trendMax) * 100);
+            return (
+              <div className="chart-bar-row" key={`${trend.metric_definition_id}-player-trend`}>
+                <span>{trend.metric_name}</span>
+                <div className="chart-track">
+                  <div className="chart-fill" style={{ width: `${width}%`, backgroundColor: playerChartColors[index % playerChartColors.length] }} />
+                </div>
+                <strong>{playerValueLabel(trend.forecast_next_value ?? trend.latest_value, trend.unit)}</strong>
+              </div>
+            );
+          })}
+          {profile.trends.length === 0 ? (
+            <div className="chart-bar-row">
+              <span>No trend</span>
+              <div className="chart-track">
+                <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--quiet)" }} />
+              </div>
+              <strong>n/a</strong>
+            </div>
+          ) : null}
+        </div>
+      </article>
+
+      <article className="player-chart-card">
+        <div>
+          <span>Cohort standing</span>
+          <strong>{profile.benchmarks.length} benchmarks</strong>
+          <small>Percentile rank inside the current sports cohort.</small>
+        </div>
+        <div className="chart-bars">
+          {profile.benchmarks.slice(0, 4).map((benchmark, index) => (
+            <div className="chart-bar-row" key={`${benchmark.metric_definition_id}-player-benchmark`}>
+              <span>{benchmark.metric_name}</span>
+              <div className="chart-track">
+                <div
+                  className="chart-fill"
+                  style={{
+                    width: `${boundedPercent(benchmark.percentile_rank)}%`,
+                    backgroundColor: playerChartColors[(index + 1) % playerChartColors.length]
+                  }}
+                />
+              </div>
+              <strong>{benchmark.percentile_rank === null ? "n/a" : `${benchmark.percentile_rank}%`}</strong>
+            </div>
+          ))}
+          {profile.benchmarks.length === 0 ? (
+            <div className="chart-bar-row">
+              <span>No cohort</span>
+              <div className="chart-track">
+                <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--quiet)" }} />
+              </div>
+              <strong>n/a</strong>
+            </div>
+          ) : null}
+        </div>
+      </article>
+
+      <article className="player-chart-card">
+        <div>
+          <span>Goal pace</span>
+          <strong>{profile.active_goal_count}/{profile.achieved_goal_count}</strong>
+          <small>Active progress and achieved targets.</small>
+        </div>
+        <div className="chart-bars">
+          {profile.goals.slice(0, 4).map((goal, index) => (
+            <div className="chart-bar-row" key={`${goal.id}-player-goal`}>
+              <span>{goal.title}</span>
+              <div className="chart-track">
+                <div
+                  className="chart-fill"
+                  style={{
+                    width: `${goal.status === "achieved" ? 100 : goalProgress(goal)}%`,
+                    backgroundColor: goal.status === "achieved" ? "var(--green)" : playerChartColors[(index + 2) % playerChartColors.length]
+                  }}
+                />
+              </div>
+              <strong>{goal.current_value === null ? "n/a" : playerValueLabel(goal.current_value)}</strong>
+            </div>
+          ))}
+          {profile.goals.length === 0 ? (
+            <div className="chart-bar-row">
+              <span>No goals</span>
+              <div className="chart-track">
+                <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--quiet)" }} />
+              </div>
+              <strong>n/a</strong>
+            </div>
+          ) : null}
+        </div>
+      </article>
+    </section>
+  );
+}
+
 export default function PlayerPerformancePage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultPlayerIdentity);
@@ -183,6 +365,8 @@ export default function PlayerPerformancePage() {
                 <p>{watchBenchmark?.recommendation ?? "Current benchmark cards do not show a watch-band priority."}</p>
               </article>
             </section>
+
+            <PlayerPerformanceVisuals profile={selectedProfile} />
 
             <form className="player-self-check" onSubmit={submitSelfAssessment}>
               <div>

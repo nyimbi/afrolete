@@ -1351,6 +1351,43 @@ textarea:focus {
   margin-top: 14px;
 }
 
+.player-visual-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.player-chart-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  min-height: 222px;
+  padding: 14px;
+}
+
+.player-chart-card > div:first-child {
+  min-height: 78px;
+}
+
+.player-chart-card span,
+.player-chart-card small {
+  color: var(--muted);
+}
+
+.player-chart-card span,
+.player-chart-card strong,
+.player-chart-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.player-chart-card > div:first-child > strong {
+  font-size: 25px;
+  line-height: 1.05;
+  margin: 4px 0;
+}
+
 .player-self-check {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) repeat(6, minmax(76px, 0.36fr)) auto;
@@ -2323,6 +2360,7 @@ textarea:focus {
   .player-hero,
   .player-insights,
   .player-columns,
+  .player-visual-grid,
   .player-self-check {
     grid-template-columns: 1fr;
   }

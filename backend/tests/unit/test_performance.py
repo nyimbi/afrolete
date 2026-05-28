@@ -155,6 +155,10 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert profile["rating"] == "good"
     assert profile["observation_count"] == 1
     assert profile["assessment_count"] == 1
+    assert profile["latest_assessment"]["physical_score"] == 82
+    assert profile["latest_assessment"]["technical_score"] == 76
+    assert profile["latest_assessment"]["tactical_score"] == 72
+    assert profile["latest_assessment"]["mental_score"] == 79
     assert profile["active_goal_count"] == 1
     assert profile["award_count"] == 0
     assert profile["goals"][0]["title"] == "Lower sprint time"

@@ -229,6 +229,11 @@ async def list_my_player_performance_route(
             observation_count=profile["observation_count"],
             assessment_count=profile["assessment_count"],
             latest_assessment_id=profile["latest_assessment_id"],
+            latest_assessment=(
+                to_assessment_read(profile["latest_assessment"])
+                if profile["latest_assessment"] is not None
+                else None
+            ),
             rating=profile["rating"],
             active_goal_count=profile["active_goal_count"],
             achieved_goal_count=profile["achieved_goal_count"],
