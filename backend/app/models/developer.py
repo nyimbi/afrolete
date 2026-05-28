@@ -107,6 +107,8 @@ class DeveloperWebhookDelivery(IdMixin, TimestampMixin, Base):
     response_status_code: Mapped[int | None] = mapped_column(Integer)
     failure_reason: Mapped[str | None] = mapped_column(Text)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
+    last_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 

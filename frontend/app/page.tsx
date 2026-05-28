@@ -11880,6 +11880,7 @@ export default function HomePage() {
                     <strong>{delivery.event_type}</strong>
                     <span>
                       {delivery.status} · {delivery.delivery_mode} · {delivery.attempt_count} attempt{delivery.attempt_count === 1 ? "" : "s"}
+                      {delivery.next_attempt_at ? ` · next ${new Date(delivery.next_attempt_at).toLocaleTimeString()}` : ""}
                     </span>
                   </div>
                   <button type="button" onClick={() => replayDeveloperWebhookDelivery(delivery.id)} disabled={busyAction !== null}>Replay</button>

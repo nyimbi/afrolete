@@ -402,6 +402,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert deliveries[0]["event_type"] == "training.drill.created"
     assert deliveries[0]["status"] == "recorded"
     assert deliveries[0]["attempt_count"] == 1
+    assert deliveries[0]["last_attempted_at"]
+    assert deliveries[0]["next_attempt_at"] is None
     replay_delivery_response = client.post(
         f"/api/v1/developers/webhook-deliveries/{deliveries[0]['id']}/replay",
         headers=identity_headers,

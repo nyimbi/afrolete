@@ -138,6 +138,8 @@ def webhook_delivery_read(delivery) -> DeveloperWebhookDeliveryRead:
         attempt_count=delivery.attempt_count,
         response_status_code=delivery.response_status_code,
         failure_reason=delivery.failure_reason,
+        last_attempted_at=delivery.last_attempted_at,
+        next_attempt_at=delivery.next_attempt_at,
         delivered_at=delivery.delivered_at,
     )
 

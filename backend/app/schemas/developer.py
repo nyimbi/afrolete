@@ -195,6 +195,8 @@ class DeveloperWebhookDeliveryRead(BaseModel):
     attempt_count: int
     response_status_code: int | None
     failure_reason: str | None
+    last_attempted_at: datetime | None
+    next_attempt_at: datetime | None
     delivered_at: datetime | None
 
 

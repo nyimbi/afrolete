@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.developer import (
@@ -603,6 +603,7 @@ async def retry_developer_webhook_deliveries(
     retry_statuses = ["failed", "queued"]
     if include_recorded:
         retry_statuses.append("recorded")
+    now = datetime.now(UTC)
     deliveries = list(
         (
             await db.scalars(
@@ -611,6 +612,10 @@ async def retry_developer_webhook_deliveries(
                     DeveloperWebhookDelivery.organization_id == organization_id,
                     DeveloperWebhookDelivery.status.in_(retry_statuses),
                     DeveloperWebhookDelivery.attempt_count < max_attempts,
+                    or_(
+                        DeveloperWebhookDelivery.next_attempt_at.is_(None),
+                        DeveloperWebhookDelivery.next_attempt_at <= now,
+                    ),
                 )
                 .order_by(DeveloperWebhookDelivery.created_at.asc())
                 .limit(limit)
@@ -655,9 +660,11 @@ async def deliver_single_webhook(
 ) -> None:
     now = datetime.now(UTC)
     delivery.attempt_count += 1
+    delivery.last_attempted_at = now
     if subscription.delivery_mode == "record_only":
         delivery.status = "recorded"
         delivery.delivered_at = now
+        delivery.next_attempt_at = None
         subscription.last_delivery_status = delivery.status
         subscription.last_delivered_at = now
         return
@@ -673,17 +680,25 @@ async def deliver_single_webhook(
         if 200 <= response.status_code < 300:
             delivery.status = "delivered"
             delivery.delivered_at = now
+            delivery.next_attempt_at = None
         else:
             delivery.status = "failed"
             delivery.failure_reason = f"Webhook returned {response.status_code}: {response.text[:500]}"
+            delivery.next_attempt_at = next_webhook_attempt_at(now, delivery.attempt_count)
             subscription.failure_count += 1
     except httpx.HTTPError as error:
         delivery.status = "failed"
         delivery.failure_reason = f"Webhook delivery failed: {error}"
+        delivery.next_attempt_at = next_webhook_attempt_at(now, delivery.attempt_count)
         subscription.failure_count += 1
     subscription.last_delivery_status = delivery.status
     subscription.last_delivered_at = delivery.delivered_at
     await db.flush()
+
+
+def next_webhook_attempt_at(now: datetime, attempt_count: int) -> datetime:
+    delay_seconds = min(60 * (2 ** max(attempt_count - 1, 0)), 60 * 60)
+    return now + timedelta(seconds=delay_seconds)
 
 
 async def update_developer_webhook_subscription(

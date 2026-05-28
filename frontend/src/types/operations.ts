@@ -2332,6 +2332,8 @@ export type DeveloperWebhookDeliveryRead = {
   attempt_count: number;
   response_status_code: number | null;
   failure_reason: string | null;
+  last_attempted_at: string | null;
+  next_attempt_at: string | null;
   delivered_at: string | null;
 };
 
