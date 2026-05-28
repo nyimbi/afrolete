@@ -3738,6 +3738,9 @@ export type AgentRunRecordRead = {
   finished_at: string | null;
   duration_ms: number | null;
   ledger_sequence: number;
+  external_event_id: string | null;
+  callback_payload_hash: string | null;
+  callback_received_at: string | null;
   record_hash: string;
   previous_record_hash: string | null;
 };

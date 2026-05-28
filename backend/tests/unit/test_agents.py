@@ -2,10 +2,16 @@ from sqlalchemy import select
 
 from app.models.agent import Agent, AgentRunRecord, AgentTask
 from app.models.enums import AgentKind, AgentTaskStatus, GuardianRelationshipKind, OrganizationType
-from app.models.organization import Organization
 from app.models.identity import Person
+from app.models.organization import Organization
 from app.models.team import AthleteProfile, GuardianRelationship
-from app.services.agents import get_my_agent_decision_appeal_form, run_agent_task_worker
+from app.schemas.agent import AgentWorkerCallbackCreate
+from app.services.agents import (
+    apply_agent_worker_callback,
+    get_my_agent_decision_appeal_form,
+    run_agent_task_worker,
+    verify_agent_run_ledger,
+)
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import authorization_service
 
@@ -351,6 +357,91 @@ async def test_family_ai_appeal_form_renders_markdown_and_pdf(db_session) -> Non
     assert pdf["content"] == ""
     assert isinstance(pdf["content_base64"], str)
     assert pdf["size_bytes"] > 500
+
+
+async def test_agent_worker_callback_external_event_replay_is_ignored(db_session) -> None:
+    organization = Organization(
+        name="Agent Callback Club",
+        slug="agent-callback-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    agent = Agent(
+        organization_id=organization.id,
+        name="Provider Worker",
+        kind=AgentKind.OPERATIONS,
+        purpose="Execute live provider worker callbacks for governed tasks.",
+        model_policy="provider-model",
+    )
+    db_session.add(agent)
+    await db_session.flush()
+    task = AgentTask(
+        agent_id=agent.id,
+        organization_id=organization.id,
+        task_type="provider_review",
+        title="Review callback replay handling",
+        input_ref="provider:event",
+    )
+    db_session.add(task)
+    await db_session.commit()
+
+    first_payload = AgentWorkerCallbackCreate(
+        task_id=task.id,
+        status=AgentTaskStatus.WAITING_FOR_REVIEW,
+        output_ref="agent://provider/output/1",
+        review_notes="Provider completed the review.",
+        idempotency_key="provider-callback-1",
+        external_event_id="provider-event-123",
+        raw_payload={"provider": "demo-ai", "sequence": 1},
+    )
+    accepted_task, duplicate, message, run_record_id = await apply_agent_worker_callback(db_session, first_payload)
+
+    assert accepted_task.id == task.id
+    assert duplicate is False
+    assert message == "Agent worker callback accepted."
+    assert run_record_id is not None
+    await db_session.refresh(task)
+    assert task.output_ref == "agent://provider/output/1"
+
+    replay_payload = AgentWorkerCallbackCreate(
+        task_id=task.id,
+        status=AgentTaskStatus.COMPLETED,
+        output_ref="agent://provider/output/replayed",
+        review_notes="This replay should not mutate the task.",
+        idempotency_key="provider-callback-replay-different-key",
+        external_event_id="provider-event-123",
+        raw_payload={"provider": "demo-ai", "sequence": 2},
+    )
+    replay_task, replay_duplicate, replay_message, replay_run_record_id = await apply_agent_worker_callback(
+        db_session,
+        replay_payload,
+    )
+
+    assert replay_task.id == task.id
+    assert replay_duplicate is True
+    assert replay_message == "Duplicate external agent worker event ignored."
+    assert replay_run_record_id == run_record_id
+    await db_session.refresh(task)
+    assert task.status == AgentTaskStatus.WAITING_FOR_REVIEW
+    assert task.output_ref == "agent://provider/output/1"
+
+    records = list(
+        (
+            await db_session.scalars(
+                select(AgentRunRecord).where(AgentRunRecord.task_id == task.id).order_by(AgentRunRecord.ledger_sequence)
+            )
+        ).all()
+    )
+    assert len(records) == 1
+    assert records[0].external_event_id == "provider-event-123"
+    assert records[0].callback_payload_hash
+    assert records[0].callback_received_at is not None
+    assert "provider-event-123" in records[0].governance_notes
+
+    ledger = await verify_agent_run_ledger(db_session, organization.id)
+    assert ledger["valid"] is True
 
 
 def test_agent_assignment_rejects_cross_organization_scope(client, identity_headers) -> None:

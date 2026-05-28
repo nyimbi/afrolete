@@ -81,6 +81,7 @@ class AgentRunRecord(IdMixin, TimestampMixin, Base):
     __tablename__ = "agent_run_records"
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_agent_run_records_idempotency_key"),
+        UniqueConstraint("organization_id", "external_event_id", name="uq_agent_run_records_org_external_event"),
     )
 
     organization_id: Mapped[UUID] = mapped_column(
@@ -106,6 +107,9 @@ class AgentRunRecord(IdMixin, TimestampMixin, Base):
     ledger_sequence: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     governance_notes: Mapped[str] = mapped_column(Text, nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    external_event_id: Mapped[str | None] = mapped_column(String(180), index=True)
+    callback_payload_hash: Mapped[str | None] = mapped_column(String(128), index=True)
+    callback_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     previous_record_hash: Mapped[str | None] = mapped_column(String(128))
     record_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
 

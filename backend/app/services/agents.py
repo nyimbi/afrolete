@@ -867,6 +867,9 @@ async def agent_run_records(
             "finished_at": record.finished_at,
             "duration_ms": record.duration_ms,
             "ledger_sequence": record.ledger_sequence,
+            "external_event_id": record.external_event_id,
+            "callback_payload_hash": record.callback_payload_hash,
+            "callback_received_at": record.callback_received_at,
             "record_hash": record.record_hash,
             "previous_record_hash": record.previous_record_hash,
         }
@@ -2400,7 +2403,20 @@ async def apply_agent_worker_callback(
     agent = await db.get(Agent, task.agent_id)
     if agent is None or agent.organization_id != task.organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    if payload.external_event_id:
+        existing_event = await db.scalar(
+            select(AgentRunRecord).where(
+                AgentRunRecord.organization_id == task.organization_id,
+                AgentRunRecord.external_event_id == payload.external_event_id,
+            )
+        )
+        if existing_event is not None:
+            existing_task = await db.get(AgentTask, existing_event.task_id)
+            if existing_task is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+            return existing_task, True, "Duplicate external agent worker event ignored.", existing_event.id
 
+    received_at = datetime.now(UTC)
     task.status = payload.status
     if payload.output_ref is not None:
         task.output_ref = payload.output_ref
@@ -2413,8 +2429,11 @@ async def apply_agent_worker_callback(
         None,
         event_type="worker_callback",
         settings=settings or get_settings(),
-        finished_at=datetime.now(UTC),
+        finished_at=received_at,
         idempotency_key=payload.idempotency_key,
+        external_event_id=payload.external_event_id,
+        callback_payload_hash=agent_worker_callback_payload_hash(payload),
+        callback_received_at=received_at,
         governance_note=agent_worker_callback_governance_note(payload),
     )
     await db.commit()
@@ -2536,6 +2555,9 @@ async def append_agent_run_record(
     finished_at: datetime | None = None,
     duration_ms: int | None = None,
     idempotency_key: str | None = None,
+    external_event_id: str | None = None,
+    callback_payload_hash: str | None = None,
+    callback_received_at: datetime | None = None,
     governance_note: str | None = None,
 ) -> AgentRunRecord:
     sequence = await agent_task_record_sequence(db, task.id)
@@ -2563,6 +2585,9 @@ async def append_agent_run_record(
             "ledger_sequence": ledger_sequence,
             "governance_notes": note,
             "idempotency_key": selected_idempotency_key,
+            "external_event_id": external_event_id,
+            "callback_payload_hash": callback_payload_hash,
+            "callback_received_at": datetime_digest(callback_received_at),
             "previous_record_hash": previous_hash,
         }
     )
@@ -2584,6 +2609,9 @@ async def append_agent_run_record(
         ledger_sequence=ledger_sequence,
         governance_notes=note,
         idempotency_key=selected_idempotency_key,
+        external_event_id=external_event_id,
+        callback_payload_hash=callback_payload_hash,
+        callback_received_at=callback_received_at,
         previous_record_hash=previous_hash,
         record_hash=record_hash,
     )
@@ -2641,6 +2669,9 @@ def record_hash_payload(record: AgentRunRecord, previous_hash: str | None) -> di
         "ledger_sequence": record.ledger_sequence,
         "governance_notes": record.governance_notes,
         "idempotency_key": record.idempotency_key,
+        "external_event_id": record.external_event_id,
+        "callback_payload_hash": record.callback_payload_hash,
+        "callback_received_at": datetime_digest(record.callback_received_at),
         "previous_record_hash": previous_hash,
     }
 
@@ -3343,10 +3374,21 @@ def governance_notes(agent: Agent, task: AgentTask) -> str:
 
 
 def agent_worker_callback_governance_note(payload: AgentWorkerCallbackCreate) -> str:
+    source = f" external event {payload.external_event_id}" if payload.external_event_id else ""
     if payload.status == AgentTaskStatus.FAILED:
-        return "External worker reported failure; operator review is required before retry."
+        return f"External worker{source} reported failure; operator review is required before retry."
     if payload.status == AgentTaskStatus.WAITING_FOR_REVIEW:
-        return "External worker returned output that requires human review before side effects are applied."
+        return f"External worker{source} returned output that requires human review before side effects are applied."
     if payload.status == AgentTaskStatus.COMPLETED:
-        return "External worker marked the task complete through a signed callback."
-    return "External worker callback updated the governed agent task state."
+        return f"External worker{source} marked the task complete through a signed callback."
+    return f"External worker{source} callback updated the governed agent task state."
+
+
+def agent_worker_callback_payload_hash(payload: AgentWorkerCallbackCreate) -> str:
+    encoded = json.dumps(
+        payload.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()

@@ -306,6 +306,9 @@ class AgentRunRecordRead(BaseModel):
     finished_at: datetime | None
     duration_ms: int | None
     ledger_sequence: int
+    external_event_id: str | None
+    callback_payload_hash: str | None
+    callback_received_at: datetime | None
     record_hash: str
     previous_record_hash: str | None
 

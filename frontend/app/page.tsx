@@ -16508,6 +16508,9 @@ export default function HomePage() {
                   <div>
                     <strong>#{run.ledger_sequence} · {run.agent_name} · {run.event_type} · {run.status}</strong>
                     <span>{run.execution_mode} · {run.model_policy} · {run.governance_notes}</span>
+                    {run.external_event_id ? (
+                      <span>Callback {run.external_event_id} · {run.callback_payload_hash?.slice(0, 12) ?? "hash pending"}</span>
+                    ) : null}
                     <span>{run.record_hash.slice(0, 12)}{run.previous_record_hash ? ` <- ${run.previous_record_hash.slice(0, 12)}` : ""}</span>
                   </div>
                 </article>
