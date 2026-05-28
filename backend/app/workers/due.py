@@ -14,6 +14,7 @@ from app.services.performance import (
     run_assessment_review_escalation_worker,
     run_performance_achievement_worker,
     run_performance_injury_risk_alert_scan_worker,
+    run_wearable_pull_retry_worker,
 )
 
 WORKER_LANES = (
@@ -22,6 +23,7 @@ WORKER_LANES = (
     "performance-achievements",
     "performance-review-escalations",
     "performance-injury-risk-alerts",
+    "wearable-pull-retries",
 )
 
 
@@ -47,6 +49,9 @@ def parse_args() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument("--dry-run-performance-injury-risk-alerts", action="store_true")
+    parser.add_argument("--wearable-pull-limit", type=int, default=None)
+    parser.add_argument("--wearable-pull-max-pages", type=int, default=3)
+    parser.add_argument("--wearable-pull-default-retry-after-seconds", type=int, default=300)
     parser.add_argument("--webhook-max-attempts", type=int, default=3)
     parser.add_argument("--include-recorded-webhooks", action="store_true")
     parser.add_argument("--pretty", action="store_true")
@@ -77,6 +82,9 @@ async def run_due_workers(
     performance_injury_risk_repeat_after_hours: int = 24,
     performance_injury_risk_channels: Sequence[CommunicationChannel] | None = None,
     dry_run_performance_injury_risk_alerts: bool = False,
+    wearable_pull_limit: int | None = None,
+    wearable_pull_max_pages: int = 3,
+    wearable_pull_default_retry_after_seconds: int = 300,
     webhook_max_attempts: int = 3,
     include_recorded_webhooks: bool = False,
 ) -> dict[str, object]:
@@ -131,6 +139,16 @@ async def run_due_workers(
                 dry_run=dry_run_performance_injury_risk_alerts,
             )
         ).model_dump(mode="json")
+    if "wearable-pull-retries" in active_lanes:
+        results["wearable_pull_retries"] = (
+            await run_wearable_pull_retry_worker(
+                db,
+                organization_id=organization_id,
+                limit=wearable_pull_limit or limit,
+                max_pages=wearable_pull_max_pages,
+                default_retry_after_seconds=wearable_pull_default_retry_after_seconds,
+            )
+        ).model_dump(mode="json")
     return {
         "organization_id": str(organization_id) if organization_id else None,
         "lanes": sorted(active_lanes),
@@ -156,6 +174,7 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             or result.get("replayed_count")
             or result.get("escalated_count")
             or result.get("alerted_count")
+            or result.get("retried_count")
             or 0
         )
         summary["skipped_count"] += int(result.get("skipped_count") or 0)
@@ -187,6 +206,9 @@ async def run() -> None:
             if args.performance_injury_risk_channel
             else None,
             dry_run_performance_injury_risk_alerts=args.dry_run_performance_injury_risk_alerts,
+            wearable_pull_limit=args.wearable_pull_limit,
+            wearable_pull_max_pages=args.wearable_pull_max_pages,
+            wearable_pull_default_retry_after_seconds=args.wearable_pull_default_retry_after_seconds,
             webhook_max_attempts=args.webhook_max_attempts,
             include_recorded_webhooks=args.include_recorded_webhooks,
         )

@@ -220,6 +220,17 @@ class PerformanceWearableSyncRunRead(BaseModel):
     message: str | None
 
 
+class PerformanceWearablePullRetryWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    retried_count: int
+    skipped_count: int
+    failed_count: int
+    rate_limited_count: int
+    connection_ids: list[UUID]
+    sync_run_ids: list[UUID]
+
+
 class PerformanceWearableOAuthStartCreate(BaseModel):
     client_id: str = Field(min_length=2, max_length=180)
     client_secret_path: str | None = Field(default=None, max_length=500)

@@ -62,6 +62,7 @@ from app.schemas.performance import (
     PerformanceWearableOAuthCallbackCreate,
     PerformanceWearableProviderTokenResponse,
     PerformanceWearableOAuthStartCreate,
+    PerformanceWearablePullRetryWorkerRunRead,
     PerformanceWearableSyncRunCreate,
     PerformanceWearableTokenRefreshCreate,
     PerformanceWearableWebhookCreate,
@@ -438,6 +439,14 @@ async def run_wearable_provider_sync(
     if connection is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wearable connection not found")
     await ensure_manage_performance(authz, identity, connection.organization_id)
+    return await execute_wearable_provider_sync(db, connection, payload)
+
+
+async def execute_wearable_provider_sync(
+    db: AsyncSession,
+    connection: PerformanceWearableProviderConnection,
+    payload: PerformanceWearableSyncRunCreate,
+) -> PerformanceWearableProviderSyncRun:
     started_at = datetime.now(UTC)
     status_value = "needs_credentials"
     message = "Connection is missing an access-token secret path or sample provider payload."
@@ -569,6 +578,100 @@ async def list_wearable_provider_sync_runs(
             )
         ).all()
     )
+
+
+async def run_wearable_pull_retry_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    limit: int = 25,
+    max_pages: int = 3,
+    default_retry_after_seconds: int = 300,
+) -> PerformanceWearablePullRetryWorkerRunRead:
+    rows = await wearable_pull_retry_rows(
+        db,
+        organization_id=organization_id,
+        limit=limit,
+        default_retry_after_seconds=default_retry_after_seconds,
+    )
+    retried_count = 0
+    failed_count = 0
+    connection_ids: list[UUID] = []
+    sync_run_ids: list[UUID] = []
+    for previous_run, connection in rows:
+        try:
+            retry_run = await execute_wearable_provider_sync(
+                db,
+                connection,
+                PerformanceWearableSyncRunCreate(
+                    sync_mode="pull_retry",
+                    metric_definition_ids=decode_uuid_list(connection.default_metric_definition_ids) or None,
+                    max_pages=max_pages,
+                ),
+            )
+            retried_count += 1
+            connection_ids.append(connection.id)
+            sync_run_ids.append(retry_run.id)
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+            previous_run.message = (
+                f"{previous_run.message or 'Rate-limited provider pull.'} Retry worker failed; check provider credentials."
+            )[:4000]
+            db.add(previous_run)
+            await db.commit()
+    return PerformanceWearablePullRetryWorkerRunRead(
+        organization_id=organization_id,
+        eligible_count=len(rows),
+        retried_count=retried_count,
+        skipped_count=max(len(rows) - retried_count - failed_count, 0),
+        failed_count=failed_count,
+        rate_limited_count=sum(1 for run, _ in rows if run.provider_rate_limited),
+        connection_ids=connection_ids,
+        sync_run_ids=sync_run_ids,
+    )
+
+
+async def wearable_pull_retry_rows(
+    db: AsyncSession,
+    organization_id: UUID | None,
+    limit: int,
+    default_retry_after_seconds: int,
+) -> list[tuple[PerformanceWearableProviderSyncRun, PerformanceWearableProviderConnection]]:
+    now = datetime.now(UTC)
+    statement = (
+        select(PerformanceWearableProviderSyncRun, PerformanceWearableProviderConnection)
+        .join(
+            PerformanceWearableProviderConnection,
+            PerformanceWearableProviderConnection.id == PerformanceWearableProviderSyncRun.connection_id,
+        )
+        .where(PerformanceWearableProviderConnection.provider_pull_url.is_not(None))
+        .where(PerformanceWearableProviderConnection.access_token_secret_path.is_not(None))
+        .order_by(
+            PerformanceWearableProviderSyncRun.connection_id,
+            PerformanceWearableProviderSyncRun.completed_at.desc().nullslast(),
+            PerformanceWearableProviderSyncRun.started_at.desc(),
+        )
+        .limit(max(limit * 10, 50))
+    )
+    if organization_id is not None:
+        statement = statement.where(PerformanceWearableProviderSyncRun.organization_id == organization_id)
+    rows = list((await db.execute(statement)).all())
+    selected: list[tuple[PerformanceWearableProviderSyncRun, PerformanceWearableProviderConnection]] = []
+    seen_connections: set[UUID] = set()
+    for run, connection in rows:
+        if connection.id in seen_connections:
+            continue
+        seen_connections.add(connection.id)
+        if run.status != "rate_limited" or not run.provider_rate_limited:
+            continue
+        completed_at = as_utc_datetime(run.completed_at) or as_utc_datetime(run.started_at)
+        retry_after = run.provider_retry_after_seconds or default_retry_after_seconds
+        if completed_at is not None and completed_at + timedelta(seconds=retry_after) > now:
+            continue
+        selected.append((run, connection))
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 async def ingest_wearable_sync_payload(
