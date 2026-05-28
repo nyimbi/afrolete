@@ -20,7 +20,10 @@ from app.services.performance import (
     run_performance_injury_risk_alert_scan_worker,
     run_wearable_pull_retry_worker,
 )
-from app.services.safeguarding import run_compliance_reconciliation_worker
+from app.services.safeguarding import (
+    run_compliance_reconciliation_worker,
+    run_guardian_portal_invite_reminder_worker,
+)
 
 WORKER_LANES = (
     "agent-tasks",
@@ -29,6 +32,7 @@ WORKER_LANES = (
     "compliance-reconciliation",
     "developer-webhooks",
     "event-travel-consent-reminders",
+    "family-portal-invite-reminders",
     "performance-achievements",
     "performance-forecast-validations",
     "performance-review-escalations",
@@ -71,6 +75,15 @@ def parse_args() -> argparse.Namespace:
         default=CommunicationChannel.EMAIL.value,
     )
     parser.add_argument("--dry-run-event-travel-consent-reminders", action="store_true")
+    parser.add_argument("--family-portal-invite-reminder-limit", type=int, default=None)
+    parser.add_argument("--family-portal-invite-reminder-invited-before-hours", type=int, default=24)
+    parser.add_argument("--family-portal-invite-reminder-repeat-after-hours", type=int, default=24)
+    parser.add_argument(
+        "--family-portal-invite-reminder-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        default=CommunicationChannel.EMAIL.value,
+    )
+    parser.add_argument("--dry-run-family-portal-invite-reminders", action="store_true")
     parser.add_argument("--performance-limit", type=int, default=None)
     parser.add_argument("--performance-forecast-validation-limit", type=int, default=None)
     parser.add_argument("--auto-alert-performance-forecast-drift", action="store_true")
@@ -144,6 +157,11 @@ async def run_due_workers(
     event_travel_consent_reminder_repeat_after_hours: int = 24,
     event_travel_consent_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
     dry_run_event_travel_consent_reminders: bool = False,
+    family_portal_invite_reminder_limit: int | None = None,
+    family_portal_invite_reminder_invited_before_hours: int = 24,
+    family_portal_invite_reminder_repeat_after_hours: int = 24,
+    family_portal_invite_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    dry_run_family_portal_invite_reminders: bool = False,
     performance_limit: int | None = None,
     performance_forecast_validation_limit: int | None = None,
     auto_alert_performance_forecast_drift: bool = False,
@@ -218,6 +236,18 @@ async def run_due_workers(
                 repeat_after_hours=event_travel_consent_reminder_repeat_after_hours,
                 limit=event_travel_consent_reminder_limit or limit,
                 dry_run=dry_run_event_travel_consent_reminders,
+            )
+        ).model_dump(mode="json")
+    if "family-portal-invite-reminders" in active_lanes:
+        results["family_portal_invite_reminders"] = (
+            await run_guardian_portal_invite_reminder_worker(
+                db,
+                organization_id=organization_id,
+                channel=family_portal_invite_reminder_channel,
+                invited_before_hours=family_portal_invite_reminder_invited_before_hours,
+                repeat_after_hours=family_portal_invite_reminder_repeat_after_hours,
+                limit=family_portal_invite_reminder_limit or limit,
+                dry_run=dry_run_family_portal_invite_reminders,
             )
         ).model_dump(mode="json")
     if "developer-webhooks" in active_lanes:
@@ -354,6 +384,13 @@ async def run() -> None:
                 args.event_travel_consent_reminder_channel
             ),
             dry_run_event_travel_consent_reminders=args.dry_run_event_travel_consent_reminders,
+            family_portal_invite_reminder_limit=args.family_portal_invite_reminder_limit,
+            family_portal_invite_reminder_invited_before_hours=args.family_portal_invite_reminder_invited_before_hours,
+            family_portal_invite_reminder_repeat_after_hours=args.family_portal_invite_reminder_repeat_after_hours,
+            family_portal_invite_reminder_channel=CommunicationChannel(
+                args.family_portal_invite_reminder_channel
+            ),
+            dry_run_family_portal_invite_reminders=args.dry_run_family_portal_invite_reminders,
             performance_limit=args.performance_limit,
             performance_forecast_validation_limit=args.performance_forecast_validation_limit,
             auto_alert_performance_forecast_drift=args.auto_alert_performance_forecast_drift,

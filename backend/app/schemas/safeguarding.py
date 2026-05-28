@@ -149,6 +149,18 @@ class GuardianPortalInviteBatchRead(BaseModel):
     skipped: list[str]
 
 
+class GuardianPortalInviteReminderWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    executed_count: int
+    reminded_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool = False
+    guardian_person_ids: list[UUID]
+    message_ids: list[UUID]
+
+
 class FamilyAthleteSummaryRead(BaseModel):
     athlete_person_id: UUID
     athlete_name: str

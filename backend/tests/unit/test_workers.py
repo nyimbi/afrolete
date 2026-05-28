@@ -18,6 +18,7 @@ from app.models.enums import (
     ConsentRequestStatus,
     ConsentScopeType,
     EventType,
+    GuardianRelationshipKind,
     MemberSubjectType,
     MessageDeliveryStatus,
     MembershipRole,
@@ -37,7 +38,7 @@ from app.models.performance import (
     PerformanceWearableProviderConnection,
     PerformanceWearableProviderSyncRun,
 )
-from app.models.team import AthleteProfile
+from app.models.team import AthleteProfile, GuardianRelationship
 from app.services import performance as performance_service
 from app.workers.due import run_due_workers, selected_lanes
 
@@ -79,6 +80,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
         "compliance-reconciliation",
         "developer-webhooks",
         "event-travel-consent-reminders",
+        "family-portal-invite-reminders",
         "performance-achievements",
         "performance-forecast-validations",
         "performance-injury-risk-alerts",
@@ -93,6 +95,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["results"]["compliance_reconciliation"]["executed_count"] == 1
     assert result["results"]["developer_webhooks"]["eligible_count"] == 0
     assert result["results"]["event_travel_consent_reminders"]["eligible_count"] == 0
+    assert result["results"]["family_portal_invite_reminders"]["eligible_count"] == 0
     assert result["results"]["performance_achievements"]["eligible_count"] == 0
     assert result["results"]["performance_forecast_validations"]["eligible_count"] == 0
     assert result["results"]["performance_injury_risk_alerts"]["eligible_count"] == 0
@@ -114,6 +117,7 @@ def test_selected_lanes_expands_all() -> None:
         "compliance-reconciliation",
         "developer-webhooks",
         "event-travel-consent-reminders",
+        "family-portal-invite-reminders",
         "performance-achievements",
         "performance-forecast-validations",
         "performance-injury-risk-alerts",
@@ -431,6 +435,94 @@ async def test_due_worker_sends_travel_consent_reminders_once(db_session) -> Non
         )
     )
     assert message_count == 1
+
+
+async def test_due_worker_sends_family_portal_invite_reminders_once(db_session) -> None:
+    organization = Organization(
+        name="Family Reminder Worker Club",
+        slug="family-reminder-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    athlete = Person(display_name="Portal Athlete", primary_email="portal-athlete@example.com")
+    guardian = Person(display_name="Portal Guardian", primary_email="portal-guardian@example.com")
+    db_session.add_all([athlete, guardian])
+    await db_session.flush()
+    profile = AthleteProfile(
+        organization_id=organization.id,
+        person_id=athlete.id,
+        athlete_code="PORTAL-1",
+    )
+    relationship = GuardianRelationship(
+        athlete_person_id=athlete.id,
+        guardian_person_id=guardian.id,
+        relationship_kind=GuardianRelationshipKind.PARENT,
+        relationship="parent",
+        can_sign_consent=True,
+    )
+    invite = CommunicationMessage(
+        organization_id=organization.id,
+        template_id=None,
+        created_by_person_id=None,
+        message_type=CommunicationMessageType.REQUEST,
+        channel=CommunicationChannel.EMAIL,
+        scope_type=CommunicationScopeType.PERSON,
+        scope_id=guardian.id,
+        subject="Family portal invitation",
+        body="Open the AfroLete family portal to complete onboarding.",
+        sent_at=datetime.now(UTC) - timedelta(hours=30),
+        status="sent",
+    )
+    db_session.add_all([profile, relationship, invite])
+    await db_session.flush()
+    db_session.add(
+        MessageRecipient(
+            message_id=invite.id,
+            person_id=guardian.id,
+            destination=guardian.primary_email,
+            delivery_status=MessageDeliveryStatus.QUEUED,
+        )
+    )
+    await db_session.commit()
+
+    first = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("family-portal-invite-reminders",),
+        family_portal_invite_reminder_channel=CommunicationChannel.IN_APP,
+        family_portal_invite_reminder_invited_before_hours=24,
+        family_portal_invite_reminder_repeat_after_hours=24,
+        family_portal_invite_reminder_limit=10,
+    )
+
+    reminder = first["results"]["family_portal_invite_reminders"]
+    assert reminder["eligible_count"] == 1
+    assert reminder["executed_count"] == 1
+    assert reminder["reminded_count"] == 1
+    assert reminder["skipped_count"] == 0
+    assert len(reminder["message_ids"]) == 1
+    message = await db_session.get(CommunicationMessage, reminder["message_ids"][0])
+    assert message is not None
+    assert message.subject == "Family portal sign-in reminder"
+    assert "Portal Guardian" in message.body
+    assert "family portal" in message.body
+
+    second = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("family-portal-invite-reminders",),
+        family_portal_invite_reminder_channel=CommunicationChannel.IN_APP,
+        family_portal_invite_reminder_invited_before_hours=24,
+        family_portal_invite_reminder_repeat_after_hours=24,
+        family_portal_invite_reminder_limit=10,
+    )
+
+    duplicate = second["results"]["family_portal_invite_reminders"]
+    assert duplicate["eligible_count"] == 1
+    assert duplicate["reminded_count"] == 0
+    assert duplicate["skipped_count"] == 1
 
 
 async def test_due_worker_runs_forecast_validation_lane(db_session) -> None:

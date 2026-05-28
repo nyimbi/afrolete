@@ -92,6 +92,7 @@ from app.schemas.safeguarding import (
     GuardianPortalInviteBatchRead,
     GuardianPortalInviteCreate,
     GuardianPortalInviteRead,
+    GuardianPortalInviteReminderWorkerRunRead,
     FamilyPerformanceAwardRead,
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
@@ -5228,6 +5229,139 @@ async def latest_guardian_portal_invite(
         )
     ).first()
     return (row[0], row[1]) if row is not None else None
+
+
+async def run_guardian_portal_invite_reminder_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    invited_before_hours: int = 24,
+    repeat_after_hours: int = 24,
+    limit: int = 100,
+    dry_run: bool = False,
+) -> GuardianPortalInviteReminderWorkerRunRead:
+    cutoff = utc_now() - timedelta(hours=invited_before_hours)
+    statement = (
+        select(CommunicationMessage, MessageRecipient, Person)
+        .join(MessageRecipient, MessageRecipient.message_id == CommunicationMessage.id)
+        .join(Person, Person.id == MessageRecipient.person_id)
+        .join(GuardianRelationship, GuardianRelationship.guardian_person_id == Person.id)
+        .join(
+            AthleteProfile,
+            and_(
+                AthleteProfile.person_id == GuardianRelationship.athlete_person_id,
+                AthleteProfile.organization_id == CommunicationMessage.organization_id,
+            ),
+        )
+        .where(CommunicationMessage.message_type == CommunicationMessageType.REQUEST)
+        .where(CommunicationMessage.scope_type == CommunicationScopeType.PERSON)
+        .where(CommunicationMessage.scope_id == Person.id)
+        .where(func.coalesce(CommunicationMessage.sent_at, CommunicationMessage.created_at) <= cutoff)
+        .where(
+            or_(
+                CommunicationMessage.subject.ilike("%family portal%"),
+                CommunicationMessage.body.ilike("%family portal%"),
+            )
+        )
+        .order_by(CommunicationMessage.created_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(CommunicationMessage.organization_id == organization_id)
+    rows = (await db.execute(statement)).all()
+    seen_guardians: set[UUID] = set()
+    reminded_guardian_ids: list[UUID] = []
+    message_ids: list[UUID] = []
+    skipped_count = 0
+    failed_count = 0
+
+    for invite, _recipient, guardian in rows:
+        if guardian.id in seen_guardians:
+            skipped_count += 1
+            continue
+        seen_guardians.add(guardian.id)
+        linked_user = await db.scalar(select(AppUser.id).where(AppUser.person_id == guardian.id).limit(1))
+        if linked_user is not None:
+            skipped_count += 1
+            continue
+        if await has_recent_guardian_portal_reminder(db, invite.organization_id, guardian.id, repeat_after_hours):
+            skipped_count += 1
+            continue
+        destination = destination_for_channel(guardian, channel)
+        if destination is None and channel != CommunicationChannel.IN_APP:
+            skipped_count += 1
+            continue
+        if dry_run:
+            skipped_count += 1
+            continue
+        try:
+            reminder = await create_message_for_recipients(
+                db,
+                organization_id=invite.organization_id,
+                message_type=CommunicationMessageType.REMINDER,
+                channel=channel,
+                scope_type=CommunicationScopeType.PERSON,
+                scope_id=guardian.id,
+                recipient_person_ids=[guardian.id],
+                subject="Family portal sign-in reminder",
+                body=guardian_portal_reminder_body(guardian, invite),
+                urgent=False,
+                created_by_person_id=None,
+            )
+            reminded_guardian_ids.append(guardian.id)
+            message_ids.append(reminder.id)
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+    return GuardianPortalInviteReminderWorkerRunRead(
+        organization_id=organization_id,
+        eligible_count=len(seen_guardians),
+        executed_count=len(seen_guardians),
+        reminded_count=len(message_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        guardian_person_ids=reminded_guardian_ids,
+        message_ids=message_ids,
+    )
+
+
+async def has_recent_guardian_portal_reminder(
+    db: AsyncSession,
+    organization_id: UUID,
+    guardian_person_id: UUID,
+    repeat_after_hours: int,
+) -> bool:
+    cutoff = utc_now() - timedelta(hours=repeat_after_hours)
+    existing = await db.scalar(
+        select(CommunicationMessage.id)
+        .where(CommunicationMessage.organization_id == organization_id)
+        .where(CommunicationMessage.message_type == CommunicationMessageType.REMINDER)
+        .where(CommunicationMessage.scope_type == CommunicationScopeType.PERSON)
+        .where(CommunicationMessage.scope_id == guardian_person_id)
+        .where(CommunicationMessage.created_at >= cutoff)
+        .where(
+            or_(
+                CommunicationMessage.subject.ilike("%family portal%"),
+                CommunicationMessage.body.ilike("%family portal%"),
+            )
+        )
+        .limit(1)
+    )
+    return existing is not None
+
+
+def guardian_portal_reminder_body(guardian: Person, invite: CommunicationMessage) -> str:
+    return "\n\n".join(
+        [
+            f"Hello {guardian.display_name},",
+            "This is a reminder to complete your AfroLete family portal sign-in.",
+            "Your club uses the family portal for consent requests, event RSVPs, schedule updates, and athlete development visibility.",
+            f"Original invite: {invite.subject}",
+            "Open the family portal from the invitation link and sign in with the email address where you received it.",
+        ]
+    )
 
 
 async def create_guardian_portal_invite(
