@@ -3,15 +3,20 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 
 from app.models.agent import Agent, AgentRunRecord, AgentTask
-from app.models.communication import CommunicationMessage, MessageRecipient
+from app.models.communication import CommunicationMessage, MessageRecipient, NotificationPreference
 from app.models.enums import (
     AgentKind,
     AgentTaskStatus,
+    ChannelPreference,
     CommunicationChannel,
+    CommunicationMessageType,
+    CommunicationScopeType,
     MemberSubjectType,
+    MessageDeliveryStatus,
     MembershipRole,
     MetricCategory,
     MetricSource,
+    NotificationFrequency,
     OrganizationType,
 )
 from app.models.identity import Person
@@ -60,6 +65,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
 
     assert result["lanes"] == [
         "agent-tasks",
+        "communication-digests",
         "developer-webhooks",
         "performance-achievements",
         "performance-forecast-validations",
@@ -69,6 +75,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     ]
     assert result["summary"]["eligible_count"] == 1
     assert result["summary"]["processed_count"] == 1
+    assert result["results"]["communication_digests"]["eligible_count"] == 0
     assert result["results"]["developer_webhooks"]["eligible_count"] == 0
     assert result["results"]["performance_achievements"]["eligible_count"] == 0
     assert result["results"]["performance_forecast_validations"]["eligible_count"] == 0
@@ -86,6 +93,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
 def test_selected_lanes_expands_all() -> None:
     assert selected_lanes(("all",)) == {
         "agent-tasks",
+        "communication-digests",
         "developer-webhooks",
         "performance-achievements",
         "performance-forecast-validations",
@@ -94,6 +102,73 @@ def test_selected_lanes_expands_all() -> None:
         "wearable-pull-retries",
     }
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}
+
+
+async def test_due_worker_runs_communication_digest_lane(db_session) -> None:
+    organization = Organization(
+        name="Digest Worker Club",
+        slug="digest-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    person = Person(display_name="Digest Parent", primary_email="digest-parent@example.com")
+    db_session.add(person)
+    await db_session.flush()
+    db_session.add(
+        NotificationPreference(
+            organization_id=organization.id,
+            person_id=person.id,
+            frequency=NotificationFrequency.DAILY_DIGEST,
+            channel_preference=ChannelPreference.APP,
+        )
+    )
+    source_message = CommunicationMessage(
+        organization_id=organization.id,
+        template_id=None,
+        created_by_person_id=None,
+        message_type=CommunicationMessageType.ANNOUNCEMENT,
+        channel=CommunicationChannel.IN_APP,
+        scope_type=CommunicationScopeType.ORGANIZATION,
+        scope_id=organization.id,
+        subject="Training update",
+        body="Training moved to 5pm.",
+        sent_at=datetime(2026, 1, 5, 12, tzinfo=UTC),
+        status="sent",
+    )
+    db_session.add(source_message)
+    await db_session.flush()
+    db_session.add(
+        MessageRecipient(
+            message_id=source_message.id,
+            person_id=person.id,
+            destination=str(person.id),
+            delivery_status=MessageDeliveryStatus.DELIVERED,
+            delivered_at=datetime(2026, 1, 5, 12, tzinfo=UTC),
+        )
+    )
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("communication-digests",),
+        communication_digest_frequency=NotificationFrequency.DAILY_DIGEST,
+        communication_digest_limit=10,
+    )
+
+    digest = result["results"]["communication_digests"]
+    assert digest["eligible_count"] == 1
+    assert digest["executed_count"] == 1
+    assert digest["created_count"] == 1
+    assert digest["skipped_count"] == 0
+    assert len(digest["digest_message_ids"]) == 1
+    assert result["summary"]["processed_count"] == 1
+    digest_message = await db_session.get(CommunicationMessage, digest["digest_message_ids"][0])
+    assert digest_message is not None
+    assert digest_message.subject == "Digest: daily digest"
+    assert "Training update" in digest_message.body
 
 
 async def test_due_worker_runs_forecast_validation_lane(db_session) -> None:

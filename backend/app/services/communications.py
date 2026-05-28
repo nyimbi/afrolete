@@ -31,6 +31,7 @@ from app.schemas.communication import (
     CommunicationDigestRead,
     CommunicationDigestRunCreate,
     CommunicationDigestRunRead,
+    CommunicationDigestWorkerRunRead,
     CommunicationDispatchSummary,
     CommunicationDraftRead,
     CommunicationDraftRequest,
@@ -210,6 +211,27 @@ async def list_inbox_items(
     return list(rows)
 
 
+async def inbox_rows_for_person(
+    db: AsyncSession,
+    organization_id: UUID,
+    person_id: UUID,
+) -> list[tuple[MessageRecipient, CommunicationMessage]]:
+    rows = (
+        await db.execute(
+            select(MessageRecipient, CommunicationMessage)
+            .join(CommunicationMessage, CommunicationMessage.id == MessageRecipient.message_id)
+            .where(CommunicationMessage.organization_id == organization_id)
+            .where(MessageRecipient.person_id == person_id)
+            .order_by(
+                CommunicationMessage.urgent.desc(),
+                CommunicationMessage.sent_at.desc().nullslast(),
+                CommunicationMessage.created_at.desc(),
+            )
+        )
+    ).all()
+    return list(rows)
+
+
 async def update_recipient_status(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -270,24 +292,43 @@ async def create_digest(
     authz: AuthorizationService,
 ) -> CommunicationDigestRead:
     await ensure_view_person_messages(db, identity, payload.organization_id, payload.person_id, authz)
-    rows = await list_inbox_items(db, identity, payload.organization_id, payload.person_id, authz)
+    return await create_digest_for_person(
+        db,
+        payload.organization_id,
+        payload.person_id,
+        payload.frequency,
+        channel=payload.channel,
+        created_by_person_id=identity.person_id,
+    )
+
+
+async def create_digest_for_person(
+    db: AsyncSession,
+    organization_id: UUID,
+    person_id: UUID,
+    frequency: NotificationFrequency = NotificationFrequency.DAILY_DIGEST,
+    *,
+    channel: CommunicationChannel | None = None,
+    created_by_person_id: UUID | None = None,
+) -> CommunicationDigestRead:
+    rows = await inbox_rows_for_person(db, organization_id, person_id)
     source_rows = digest_source_rows(rows)
-    person = await db.get(Person, payload.person_id)
+    person = await db.get(Person, person_id)
     if person is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
-    channel = payload.channel or await digest_channel_for_person(db, payload.organization_id, payload.person_id)
-    subject = f"Digest: {payload.frequency.value.replace('_', ' ')}"
+    channel = channel or await digest_channel_for_person(db, organization_id, person_id)
+    subject = f"Digest: {frequency.value.replace('_', ' ')}"
     body = digest_body(person, source_rows)
     now = datetime.now(UTC)
 
     message = CommunicationMessage(
-        organization_id=payload.organization_id,
+        organization_id=organization_id,
         template_id=None,
-        created_by_person_id=identity.person_id,
+        created_by_person_id=created_by_person_id,
         message_type=CommunicationMessageType.REPORT,
         channel=channel,
         scope_type=CommunicationScopeType.PERSON,
-        scope_id=payload.person_id,
+        scope_id=person_id,
         subject=subject,
         body=body,
         urgent=False,
@@ -301,7 +342,7 @@ async def create_digest(
 
     recipient = MessageRecipient(
         message_id=message.id,
-        person_id=payload.person_id,
+        person_id=person_id,
         destination=destination_for_channel(person, channel),
         delivery_status=MessageDeliveryStatus.DELIVERED
         if channel == CommunicationChannel.IN_APP
@@ -316,8 +357,8 @@ async def create_digest(
     return CommunicationDigestRead(
         message_id=message.id,
         recipient_id=recipient.id,
-        person_id=payload.person_id,
-        frequency=payload.frequency,
+        person_id=person_id,
+        frequency=frequency,
         channel=channel,
         item_count=len(source_rows),
         subject=message.subject,
@@ -333,49 +374,107 @@ async def run_digest_scheduler(
 ) -> CommunicationDigestRunRead:
     await get_organization(db, payload.organization_id)
     await ensure_manage_communications(authz, identity, payload.organization_id)
-    if payload.frequency == NotificationFrequency.IMMEDIATE:
+    return await run_digest_scheduler_for_organization(
+        db,
+        payload.organization_id,
+        frequency=payload.frequency,
+        limit=payload.limit,
+        created_by_person_id=identity.person_id,
+    )
+
+
+async def run_digest_scheduler_for_organization(
+    db: AsyncSession,
+    organization_id: UUID,
+    *,
+    frequency: NotificationFrequency | None = None,
+    limit: int = 100,
+    created_by_person_id: UUID | None = None,
+) -> CommunicationDigestRunRead:
+    await get_organization(db, organization_id)
+    if frequency == NotificationFrequency.IMMEDIATE:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Digest scheduler frequency must be daily_digest or weekly_digest",
         )
     statement = select(NotificationPreference).where(
-        NotificationPreference.organization_id == payload.organization_id,
+        NotificationPreference.organization_id == organization_id,
         NotificationPreference.frequency.in_(
             [NotificationFrequency.DAILY_DIGEST, NotificationFrequency.WEEKLY_DIGEST]
         ),
     )
-    if payload.frequency is not None:
-        statement = statement.where(NotificationPreference.frequency == payload.frequency)
+    if frequency is not None:
+        statement = statement.where(NotificationPreference.frequency == frequency)
     preferences = list(
-        (await db.scalars(statement.order_by(NotificationPreference.updated_at.desc()).limit(payload.limit))).all()
+        (await db.scalars(statement.order_by(NotificationPreference.updated_at.desc()).limit(limit))).all()
     )
     digests: list[CommunicationDigestRead] = []
     skipped = 0
     for preference in preferences:
-        rows = await list_inbox_items(db, identity, payload.organization_id, preference.person_id, authz)
+        rows = await inbox_rows_for_person(db, organization_id, preference.person_id)
         source_rows = digest_source_rows(rows)
         if not source_rows:
             skipped += 1
             continue
         digests.append(
-            await create_digest(
+            await create_digest_for_person(
                 db,
-                identity,
-                CommunicationDigestCreate(
-                    organization_id=payload.organization_id,
-                    person_id=preference.person_id,
-                    frequency=preference.frequency,
-                ),
-                authz,
+                organization_id,
+                preference.person_id,
+                preference.frequency,
+                created_by_person_id=created_by_person_id,
             )
         )
     return CommunicationDigestRunRead(
-        organization_id=payload.organization_id,
-        frequency=payload.frequency,
+        organization_id=organization_id,
+        frequency=frequency,
         considered=len(preferences),
         created=len(digests),
         skipped=skipped,
         digests=digests,
+    )
+
+
+async def run_digest_scheduler_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    frequency: NotificationFrequency | None = None,
+    limit: int = 100,
+) -> CommunicationDigestWorkerRunRead:
+    organization_ids = await digest_scheduler_organization_ids(db, organization_id, frequency, limit)
+    executed_count = 0
+    created_count = 0
+    skipped_count = 0
+    failed_count = 0
+    digest_message_ids: list[UUID] = []
+
+    for org_id in organization_ids:
+        try:
+            result = await run_digest_scheduler_for_organization(
+                db,
+                org_id,
+                frequency=frequency,
+                limit=limit,
+            )
+            executed_count += 1
+            created_count += result.created
+            skipped_count += result.skipped
+            digest_message_ids.extend(digest.message_id for digest in result.digests)
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return CommunicationDigestWorkerRunRead(
+        organization_id=organization_id,
+        frequency=frequency,
+        eligible_count=len(organization_ids),
+        executed_count=executed_count,
+        created_count=created_count,
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        organization_ids=organization_ids,
+        digest_message_ids=digest_message_ids,
     )
 
 
@@ -814,6 +913,42 @@ async def digest_channel_for_person(
         ChannelPreference.APP: CommunicationChannel.IN_APP,
         ChannelPreference.ALL: CommunicationChannel.IN_APP,
     }[preference.channel_preference]
+
+
+async def digest_scheduler_organization_ids(
+    db: AsyncSession,
+    organization_id: UUID | None,
+    frequency: NotificationFrequency | None,
+    limit: int,
+) -> list[UUID]:
+    if organization_id is not None:
+        statement = (
+            select(NotificationPreference.organization_id)
+            .where(NotificationPreference.organization_id == organization_id)
+            .where(
+                NotificationPreference.frequency.in_(
+                    [NotificationFrequency.DAILY_DIGEST, NotificationFrequency.WEEKLY_DIGEST]
+                )
+            )
+            .limit(1)
+        )
+        if frequency is not None:
+            statement = statement.where(NotificationPreference.frequency == frequency)
+        return [organization_id] if await db.scalar(statement) is not None else []
+    statement = (
+        select(NotificationPreference.organization_id)
+        .where(
+            NotificationPreference.frequency.in_(
+                [NotificationFrequency.DAILY_DIGEST, NotificationFrequency.WEEKLY_DIGEST]
+            )
+        )
+        .group_by(NotificationPreference.organization_id)
+        .order_by(func.max(NotificationPreference.updated_at).desc())
+        .limit(limit)
+    )
+    if frequency is not None:
+        statement = statement.where(NotificationPreference.frequency == frequency)
+    return list((await db.scalars(statement)).all())
 
 
 def digest_body(

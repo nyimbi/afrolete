@@ -181,6 +181,18 @@ class CommunicationDigestRunRead(BaseModel):
     digests: list[CommunicationDigestRead]
 
 
+class CommunicationDigestWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    frequency: NotificationFrequency | None
+    eligible_count: int
+    executed_count: int
+    created_count: int
+    skipped_count: int
+    failed_count: int
+    organization_ids: list[UUID]
+    digest_message_ids: list[UUID]
+
+
 class CommunicationDraftRequest(BaseModel):
     organization_id: UUID
     message_type: CommunicationMessageType = CommunicationMessageType.ANNOUNCEMENT

@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import parse_positive_int_map
 from app.db.session import SessionLocal
-from app.models.enums import CommunicationChannel
+from app.models.enums import CommunicationChannel, NotificationFrequency
 from app.services.agents import run_agent_task_worker
+from app.services.communications import run_digest_scheduler_worker
 from app.services.developer import run_developer_webhook_retry_due
 from app.services.performance import (
     run_assessment_review_escalation_worker,
@@ -21,6 +22,7 @@ from app.services.performance import (
 
 WORKER_LANES = (
     "agent-tasks",
+    "communication-digests",
     "developer-webhooks",
     "performance-achievements",
     "performance-forecast-validations",
@@ -36,6 +38,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lane", choices=(*WORKER_LANES, "all"), action="append", default=None)
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--agent-limit", type=int, default=None)
+    parser.add_argument("--communication-digest-limit", type=int, default=None)
+    parser.add_argument(
+        "--communication-digest-frequency",
+        choices=[NotificationFrequency.DAILY_DIGEST.value, NotificationFrequency.WEEKLY_DIGEST.value],
+        default=None,
+    )
     parser.add_argument("--webhook-limit", type=int, default=None)
     parser.add_argument("--performance-limit", type=int, default=None)
     parser.add_argument("--performance-forecast-validation-limit", type=int, default=None)
@@ -94,6 +102,8 @@ async def run_due_workers(
     lanes: Sequence[str] = ("all",),
     limit: int = 25,
     agent_limit: int | None = None,
+    communication_digest_limit: int | None = None,
+    communication_digest_frequency: NotificationFrequency | None = None,
     webhook_limit: int | None = None,
     performance_limit: int | None = None,
     performance_forecast_validation_limit: int | None = None,
@@ -126,6 +136,15 @@ async def run_due_workers(
                 db,
                 organization_id=organization_id,
                 limit=agent_limit or limit,
+            )
+        ).model_dump(mode="json")
+    if "communication-digests" in active_lanes:
+        results["communication_digests"] = (
+            await run_digest_scheduler_worker(
+                db,
+                organization_id=organization_id,
+                frequency=communication_digest_frequency,
+                limit=communication_digest_limit or limit,
             )
         ).model_dump(mode="json")
     if "developer-webhooks" in active_lanes:
@@ -239,6 +258,10 @@ async def run() -> None:
             lanes=args.lane or ("all",),
             limit=args.limit,
             agent_limit=args.agent_limit,
+            communication_digest_limit=args.communication_digest_limit,
+            communication_digest_frequency=NotificationFrequency(args.communication_digest_frequency)
+            if args.communication_digest_frequency
+            else None,
             webhook_limit=args.webhook_limit,
             performance_limit=args.performance_limit,
             performance_forecast_validation_limit=args.performance_forecast_validation_limit,

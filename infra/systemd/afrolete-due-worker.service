@@ -10,6 +10,7 @@ User=afrolete
 WorkingDirectory=/opt/afrolete/backend
 EnvironmentFile=/run/pjs/afrolete-backend.env
 Environment=AFROLETE_DUE_WORKER_LIMIT=25
+Environment=AFROLETE_DUE_WORKER_COMMUNICATION_DIGEST_LIMIT=100
 Environment=AFROLETE_DUE_WORKER_PERFORMANCE_LIMIT=25
 Environment=AFROLETE_DUE_WORKER_PERFORMANCE_FORECAST_VALIDATION_LIMIT=25
 Environment=AFROLETE_DUE_WORKER_PERFORMANCE_FORECAST_DRIFT_REPEAT_AFTER_HOURS=24
@@ -27,6 +28,7 @@ Environment=AFROLETE_DUE_WORKER_WEARABLE_PULL_DEFAULT_RETRY_AFTER_SECONDS=300
 Environment=AFROLETE_DUE_WORKER_WEBHOOK_MAX_ATTEMPTS=5
 ExecStart=/opt/afrolete/backend/.venv/bin/python -m app.workers.due \
   --limit ${AFROLETE_DUE_WORKER_LIMIT} \
+  --communication-digest-limit ${AFROLETE_DUE_WORKER_COMMUNICATION_DIGEST_LIMIT} \
   --performance-limit ${AFROLETE_DUE_WORKER_PERFORMANCE_LIMIT} \
   --performance-forecast-validation-limit ${AFROLETE_DUE_WORKER_PERFORMANCE_FORECAST_VALIDATION_LIMIT} \
   --auto-alert-performance-forecast-drift \
