@@ -874,6 +874,74 @@ def test_performance_forecast_scenarios_use_signed_model_webhook(
     performance_service.get_settings.cache_clear()
 
 
+def test_performance_forecast_validation_persists_drift_run(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "sprint_time",
+            "name": "Sprint Time",
+            "category": "physical",
+            "unit": "seconds",
+            "higher_is_better": False,
+        },
+    ).json()
+    for value, observed_at in [
+        (13.0, "2026-01-01T10:00:00Z"),
+        (12.5, "2026-01-08T10:00:00Z"),
+        (12.0, "2026-01-15T10:00:00Z"),
+        (11.6, "2026-01-22T10:00:00Z"),
+    ]:
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": metric["id"],
+                "value": value,
+                "observed_at": observed_at,
+            },
+        )
+        assert response.status_code == 201
+
+    response = client.post(
+        "/api/v1/performance/forecast-validation-runs",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+        },
+    )
+
+    assert response.status_code == 201
+    run = response.json()
+    assert run["model_policy"] == "deterministic_forecast_v1_backtest"
+    assert run["forecast_mode"] == "off"
+    assert run["metric_count"] == 1
+    assert run["evaluated_count"] == 1
+    assert run["passed_count"] == 1
+    assert run["drift_count"] == 0
+    assert run["drift_level"] == "stable"
+    assert run["mean_absolute_error"] == 0.1
+    assert run["details"][0]["metric_code"] == "sprint_time"
+    assert run["details"][0]["sample_size"] == 3
+    assert run["details"][0]["predicted_value"] == 11.5
+    assert run["details"][0]["actual_value"] == 11.6
+    assert run["details"][0]["passed"] is True
+    assert run["details"][0]["drifted"] is False
+
+    list_response = client.get(
+        f"/api/v1/performance/forecast-validation-runs?organization_id={organization['id']}"
+        f"&athlete_profile_id={roster['athlete_profile_id']}",
+        headers=identity_headers,
+    )
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["id"] == run["id"]
+
+
 def test_performance_what_if_forecast_adjusts_training_runway(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(

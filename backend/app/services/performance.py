@@ -40,6 +40,7 @@ from app.models.performance import (
     PerformanceAchievementAward,
     PerformanceGoal,
     PerformanceMetricDefinition,
+    PerformanceForecastValidationRun,
     PerformanceModelExtractionBenchmarkCase,
     PerformanceModelExtractionBenchmarkDataset,
     PerformanceWearableIngestEvent,
@@ -59,6 +60,7 @@ from app.schemas.performance import (
     MetricDefinitionCreate,
     PerformanceAchievementWorkerRunRead,
     PerformanceGoalCreate,
+    PerformanceForecastValidationRunCreate,
     PerformanceIngestionCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
@@ -396,6 +398,83 @@ async def list_performance_model_extraction_benchmark_datasets(
         ).all()
     )
     return [await performance_model_benchmark_dataset_read(db, dataset.id) for dataset in datasets]
+
+
+async def run_performance_forecast_validation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: PerformanceForecastValidationRunCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    if payload.athlete_profile_id is not None:
+        await get_athlete_profile(db, payload.athlete_profile_id, payload.organization_id)
+    settings = get_settings()
+    profile_ids = await forecast_validation_profile_ids(db, payload.organization_id, payload.athlete_profile_id)
+    metric_rows = await forecast_validation_metric_rows(db, payload.organization_id, profile_ids)
+    details = [forecast_validation_metric_detail(*row) for row in metric_rows]
+    evaluated = [detail for detail in details if detail["absolute_error"] is not None]
+    passed_count = sum(1 for detail in evaluated if detail["passed"])
+    drift_count = sum(1 for detail in evaluated if detail["drifted"])
+    mean_absolute_error = (
+        round(sum(float(detail["absolute_error"]) for detail in evaluated) / len(evaluated), 4)
+        if evaluated
+        else 0.0
+    )
+    mean_relative_error = (
+        round(sum(float(detail["relative_error"] or 0.0) for detail in evaluated) / len(evaluated), 4)
+        if evaluated
+        else 0.0
+    )
+    max_absolute_error = (
+        round(max(float(detail["absolute_error"]) for detail in evaluated), 4)
+        if evaluated
+        else 0.0
+    )
+    drift_level = forecast_validation_drift_level(mean_relative_error, drift_count, len(evaluated))
+    recommendation = forecast_validation_recommendation(drift_level, mean_relative_error, drift_count, len(evaluated))
+    run = PerformanceForecastValidationRun(
+        organization_id=payload.organization_id,
+        athlete_profile_id=payload.athlete_profile_id,
+        model_policy=forecast_validation_model_policy(settings),
+        forecast_mode=settings.performance_forecast_mode,
+        metric_count=len(details),
+        evaluated_count=len(evaluated),
+        passed_count=passed_count,
+        drift_count=drift_count,
+        mean_absolute_error=mean_absolute_error,
+        mean_relative_error=mean_relative_error,
+        max_absolute_error=max_absolute_error,
+        drift_level=drift_level,
+        recommendation=recommendation,
+        details_json=stable_payload_text({"details": details}),
+        created_by_person_id=identity.person_id,
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    return forecast_validation_run_read(run)
+
+
+async def list_performance_forecast_validation_runs(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    athlete_profile_id: UUID | None = None,
+    limit: int = 10,
+) -> list[dict[str, object]]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    query = (
+        select(PerformanceForecastValidationRun)
+        .where(PerformanceForecastValidationRun.organization_id == organization_id)
+        .order_by(PerformanceForecastValidationRun.created_at.desc())
+        .limit(max(1, min(limit, 50)))
+    )
+    if athlete_profile_id is not None:
+        query = query.where(PerformanceForecastValidationRun.athlete_profile_id == athlete_profile_id)
+    rows = list((await db.scalars(query)).all())
+    return [forecast_validation_run_read(row) for row in rows]
 
 
 async def ingest_performance_wearable_webhook(
@@ -5605,6 +5684,176 @@ async def performance_model_benchmark_dataset_read(
             }
             for case in cases
         ],
+    }
+
+
+async def forecast_validation_profile_ids(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID | None,
+) -> list[UUID]:
+    if athlete_profile_id is not None:
+        return [athlete_profile_id]
+    return list(
+        (
+            await db.scalars(
+                select(AthleteProfile.id)
+                .where(AthleteProfile.organization_id == organization_id)
+                .order_by(AthleteProfile.created_at.desc())
+            )
+        ).all()
+    )
+
+
+async def forecast_validation_metric_rows(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_ids: list[UUID],
+) -> list[tuple[UUID, PerformanceMetricDefinition, list[AthletePerformanceObservation]]]:
+    if not athlete_profile_ids:
+        return []
+    rows = list(
+        (
+            await db.execute(
+                select(AthletePerformanceObservation, PerformanceMetricDefinition)
+                .join(
+                    PerformanceMetricDefinition,
+                    PerformanceMetricDefinition.id == AthletePerformanceObservation.metric_definition_id,
+                )
+                .where(AthletePerformanceObservation.organization_id == organization_id)
+                .where(AthletePerformanceObservation.athlete_profile_id.in_(athlete_profile_ids))
+                .where(AthletePerformanceObservation.verification_status != MetricVerificationStatus.REJECTED)
+                .order_by(
+                    AthletePerformanceObservation.athlete_profile_id,
+                    AthletePerformanceObservation.metric_definition_id,
+                    AthletePerformanceObservation.observed_at.asc(),
+                )
+            )
+        ).all()
+    )
+    grouped: dict[tuple[UUID, UUID], tuple[PerformanceMetricDefinition, list[AthletePerformanceObservation]]] = {}
+    for observation, metric in rows:
+        key = (observation.athlete_profile_id, observation.metric_definition_id)
+        if key not in grouped:
+            grouped[key] = (metric, [])
+        grouped[key][1].append(observation)
+    return [
+        (athlete_profile_id, metric, observations)
+        for (athlete_profile_id, _), (metric, observations) in grouped.items()
+        if len(observations) >= 3
+    ]
+
+
+def forecast_validation_metric_detail(
+    athlete_profile_id: UUID,
+    metric: PerformanceMetricDefinition,
+    observations: list[AthletePerformanceObservation],
+) -> dict[str, object]:
+    history = observations[:-1]
+    actual = observations[-1].value
+    values = [observation.value for observation in history]
+    trend = metric_trend_summary(values, metric.higher_is_better, metric.name, metric.unit)
+    summary = forecast_scenario_summary(values, metric.higher_is_better, metric.name, metric.unit, trend)
+    predicted = structured_float(summary["forecast_next_value"])
+    tolerance = forecast_validation_tolerance(values, actual)
+    absolute_error = round(abs(predicted - actual), 4) if predicted is not None else None
+    relative_error = (
+        round(absolute_error / max(abs(actual), 1.0), 4)
+        if absolute_error is not None
+        else None
+    )
+    passed = absolute_error is not None and absolute_error <= tolerance
+    drifted = relative_error is not None and relative_error >= 0.12
+    return {
+        "athlete_profile_id": athlete_profile_id,
+        "metric_definition_id": metric.id,
+        "metric_code": metric.code,
+        "metric_name": metric.name,
+        "sample_size": len(history),
+        "predicted_value": predicted,
+        "actual_value": actual,
+        "absolute_error": absolute_error,
+        "relative_error": relative_error,
+        "tolerance": tolerance,
+        "passed": passed,
+        "drifted": drifted,
+    }
+
+
+def forecast_validation_tolerance(values: list[float], actual: float) -> float:
+    band = forecast_band(values)
+    relative_floor = abs(actual) * 0.08
+    return round(max(0.01, band, relative_floor), 4)
+
+
+def forecast_validation_drift_level(mean_relative_error: float, drift_count: int, evaluated_count: int) -> str:
+    if evaluated_count == 0:
+        return "no_data"
+    drift_ratio = drift_count / evaluated_count
+    if mean_relative_error >= 0.25 or drift_ratio >= 0.5:
+        return "high"
+    if mean_relative_error >= 0.12 or drift_ratio >= 0.25:
+        return "watch"
+    return "stable"
+
+
+def forecast_validation_recommendation(
+    drift_level: str,
+    mean_relative_error: float,
+    drift_count: int,
+    evaluated_count: int,
+) -> str:
+    if drift_level == "no_data":
+        return "Record at least three accepted observations per athlete metric before validating forecast drift."
+    percent = round(mean_relative_error * 100, 1)
+    if drift_level == "high":
+        return (
+            f"Forecast drift is high across {drift_count}/{evaluated_count} metric backtests "
+            f"with {percent}% mean relative error; recalibrate model-provider settings before using forecasts for selection."
+        )
+    if drift_level == "watch":
+        return (
+            f"Forecast drift is on watch across {drift_count}/{evaluated_count} metric backtests "
+            f"with {percent}% mean relative error; review outlier metrics and collect another observation cycle."
+        )
+    return (
+        f"Forecast backtests are stable across {evaluated_count} metric(s) with {percent}% mean relative error; "
+        "continue routine monitoring."
+    )
+
+
+def forecast_validation_model_policy(settings: Settings) -> str:
+    if settings.performance_forecast_mode == "webhook":
+        return settings.performance_forecast_model
+    return "deterministic_forecast_v1_backtest"
+
+
+def forecast_validation_run_read(run: PerformanceForecastValidationRun) -> dict[str, object]:
+    details: list[dict[str, object]] = []
+    if run.details_json:
+        try:
+            payload = json.loads(run.details_json)
+        except ValueError:
+            payload = {}
+        if isinstance(payload, dict) and isinstance(payload.get("details"), list):
+            details = [detail for detail in payload["details"] if isinstance(detail, dict)]
+    return {
+        "id": run.id,
+        "organization_id": run.organization_id,
+        "athlete_profile_id": run.athlete_profile_id,
+        "model_policy": run.model_policy,
+        "forecast_mode": run.forecast_mode,
+        "metric_count": run.metric_count,
+        "evaluated_count": run.evaluated_count,
+        "passed_count": run.passed_count,
+        "drift_count": run.drift_count,
+        "mean_absolute_error": run.mean_absolute_error,
+        "mean_relative_error": run.mean_relative_error,
+        "max_absolute_error": run.max_absolute_error,
+        "drift_level": run.drift_level,
+        "recommendation": run.recommendation,
+        "details": details,
+        "created_at": run.created_at,
     }
 
 

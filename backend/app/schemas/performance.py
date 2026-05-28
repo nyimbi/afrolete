@@ -194,6 +194,45 @@ class PerformanceModelExtractionBenchmarkRunRead(BaseModel):
     cases: list[PerformanceModelExtractionBenchmarkCaseRead]
 
 
+class PerformanceForecastValidationRunCreate(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID | None = None
+
+
+class PerformanceForecastValidationMetricRead(BaseModel):
+    athlete_profile_id: UUID
+    metric_definition_id: UUID
+    metric_code: str
+    metric_name: str
+    sample_size: int
+    predicted_value: float | None
+    actual_value: float
+    absolute_error: float | None
+    relative_error: float | None
+    tolerance: float
+    passed: bool
+    drifted: bool
+
+
+class PerformanceForecastValidationRunRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    athlete_profile_id: UUID | None
+    model_policy: str
+    forecast_mode: str
+    metric_count: int
+    evaluated_count: int
+    passed_count: int
+    drift_count: int
+    mean_absolute_error: float
+    mean_relative_error: float
+    max_absolute_error: float
+    drift_level: str
+    recommendation: str
+    details: list[PerformanceForecastValidationMetricRead]
+    created_at: datetime
+
+
 class PerformanceWearableWebhookCreate(BaseModel):
     organization_id: UUID
     athlete_profile_id: UUID

@@ -245,6 +245,30 @@ class PerformanceModelExtractionBenchmarkCase(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
 
 
+class PerformanceForecastValidationRun(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_forecast_validation_runs"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    athlete_profile_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), index=True
+    )
+    model_policy: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    forecast_mode: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    metric_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    evaluated_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    passed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    drift_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    mean_absolute_error: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    mean_relative_error: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    max_absolute_error: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    drift_level: Mapped[str] = mapped_column(String(40), default="no_data", nullable=False, index=True)
+    recommendation: Mapped[str] = mapped_column(Text, nullable=False)
+    details_json: Mapped[str | None] = mapped_column(Text)
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+
+
 class AthleteAssessment(IdMixin, TimestampMixin, Base):
     __tablename__ = "athlete_assessments"
 

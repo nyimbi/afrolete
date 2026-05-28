@@ -20,6 +20,8 @@ from app.schemas.performance import (
     PerformanceAchievementAwardRead,
     PerformanceAchievementRunRead,
     PerformanceAssessmentReviewEscalationRunRead,
+    PerformanceForecastValidationRunCreate,
+    PerformanceForecastValidationRunRead,
     PerformanceGoalCreate,
     PerformanceGoalRead,
     PerformanceInjuryRiskAlertRead,
@@ -80,6 +82,7 @@ from app.services.performance import (
     list_metric_definitions,
     list_my_player_performance,
     list_observations,
+    list_performance_forecast_validation_runs,
     list_performance_model_extraction_benchmark_datasets,
     list_wearable_provider_connections,
     list_wearable_provider_sync_runs,
@@ -92,6 +95,7 @@ from app.services.performance import (
     performance_metric_trend_series,
     performance_metric_trends,
     performance_summary,
+    run_performance_forecast_validation,
     run_assessment_review_escalations,
     run_performance_injury_risk_alert_scan,
     run_wearable_provider_sync,
@@ -520,6 +524,47 @@ async def run_performance_model_extraction_benchmark_route(
     return PerformanceModelExtractionBenchmarkRunRead(
         **await run_performance_model_extraction_benchmark(db, identity, payload, authz)
     )
+
+
+@router.post(
+    "/forecast-validation-runs",
+    response_model=PerformanceForecastValidationRunRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def run_performance_forecast_validation_route(
+    payload: PerformanceForecastValidationRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceForecastValidationRunRead:
+    return PerformanceForecastValidationRunRead(
+        **await run_performance_forecast_validation(db, identity, payload, authz)
+    )
+
+
+@router.get(
+    "/forecast-validation-runs",
+    response_model=list[PerformanceForecastValidationRunRead],
+)
+async def list_performance_forecast_validation_runs_route(
+    organization_id: UUID = Query(),
+    athlete_profile_id: UUID | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=50),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceForecastValidationRunRead]:
+    return [
+        PerformanceForecastValidationRunRead(**run)
+        for run in await list_performance_forecast_validation_runs(
+            db,
+            identity,
+            organization_id,
+            authz,
+            athlete_profile_id=athlete_profile_id,
+            limit=limit,
+        )
+    ]
 
 
 @router.post(

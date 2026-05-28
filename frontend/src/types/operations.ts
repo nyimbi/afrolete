@@ -3542,6 +3542,40 @@ export type PerformanceForecastWhatIfRead = PerformanceForecastScenarioRead & {
   horizon: number;
 };
 
+export type PerformanceForecastValidationMetricRead = {
+  athlete_profile_id: UUID;
+  metric_definition_id: UUID;
+  metric_code: string;
+  metric_name: string;
+  sample_size: number;
+  predicted_value: number | null;
+  actual_value: number;
+  absolute_error: number | null;
+  relative_error: number | null;
+  tolerance: number;
+  passed: boolean;
+  drifted: boolean;
+};
+
+export type PerformanceForecastValidationRunRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID | null;
+  model_policy: string;
+  forecast_mode: string;
+  metric_count: number;
+  evaluated_count: number;
+  passed_count: number;
+  drift_count: number;
+  mean_absolute_error: number;
+  mean_relative_error: number;
+  max_absolute_error: number;
+  drift_level: string;
+  recommendation: string;
+  details: PerformanceForecastValidationMetricRead[];
+  created_at: string;
+};
+
 export type PerformanceInjuryRiskRead = {
   athlete_profile_id: UUID;
   generated_at: string;

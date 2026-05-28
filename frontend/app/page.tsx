@@ -204,6 +204,7 @@ import type {
   PerformanceAssessmentReviewEscalationRunRead,
   PerformanceCohortComparisonRead,
   PerformanceForecastScenarioRead,
+  PerformanceForecastValidationRunRead,
   PerformanceForecastWhatIfRead,
   PerformanceGoalRead,
   PerformanceInjuryRiskAlertRead,
@@ -1399,6 +1400,10 @@ export default function HomePage() {
   const [performanceTrendMetricCode, setPerformanceTrendMetricCode] = useState("");
   const [performanceForecastScenarios, setPerformanceForecastScenarios] = useState<PerformanceForecastScenarioRead[]>([]);
   const [performanceWhatIfScenarios, setPerformanceWhatIfScenarios] = useState<PerformanceForecastWhatIfRead[]>([]);
+  const [performanceForecastValidationRun, setPerformanceForecastValidationRun] =
+    useState<PerformanceForecastValidationRunRead | null>(null);
+  const [performanceForecastValidationRuns, setPerformanceForecastValidationRuns] =
+    useState<PerformanceForecastValidationRunRead[]>([]);
   const [performanceWhatIfAdjustment, setPerformanceWhatIfAdjustment] = useState(15);
   const [performanceWhatIfReadiness, setPerformanceWhatIfReadiness] = useState(70);
   const [performanceRiskAlertChannels, setPerformanceRiskAlertChannels] =
@@ -2451,6 +2456,21 @@ export default function HomePage() {
     setPerformanceModelBenchmarkDatasets(data);
   }, [identity]);
 
+  const loadPerformanceForecastValidationRuns = useCallback(async (organizationId: string, athleteProfileId?: string) => {
+    const params = new URLSearchParams({ organization_id: organizationId, limit: "5" });
+    if (athleteProfileId) {
+      params.set("athlete_profile_id", athleteProfileId);
+    }
+    const data = await apiRequest<PerformanceForecastValidationRunRead[]>(
+      `/performance/forecast-validation-runs?${params.toString()}`,
+      { identity }
+    );
+    setPerformanceForecastValidationRuns(data);
+    setPerformanceForecastValidationRun((current) =>
+      current && data.some((run) => run.id === current.id) ? current : data[0] ?? null
+    );
+  }, [identity]);
+
   const loadAthletePerformance = useCallback(
     async (organizationId: string, athleteProfileId: string) => {
       const trendParams = new URLSearchParams({ organization_id: organizationId });
@@ -2476,6 +2496,7 @@ export default function HomePage() {
         trendSeriesData,
         forecastScenarioData,
         whatIfScenarioData,
+        forecastValidationData,
         injuryRiskData,
         goalData,
         awardData,
@@ -2508,6 +2529,10 @@ export default function HomePage() {
         apiRequest<PerformanceForecastWhatIfRead[]>(
           `/performance/athletes/${athleteProfileId}/forecast-scenarios/what-if?organization_id=${organizationId}&training_adjustment_percent=${performanceWhatIfAdjustment}&readiness_score=${performanceWhatIfReadiness}`
         ),
+        apiRequest<PerformanceForecastValidationRunRead[]>(
+          `/performance/forecast-validation-runs?organization_id=${organizationId}&athlete_profile_id=${athleteProfileId}&limit=5`,
+          { identity }
+        ),
         apiRequest<PerformanceInjuryRiskRead>(
           `/performance/athletes/${athleteProfileId}/injury-risk?organization_id=${organizationId}`
         ),
@@ -2531,6 +2556,8 @@ export default function HomePage() {
       setPerformanceTrendSeries(trendSeriesData);
       setPerformanceForecastScenarios(forecastScenarioData);
       setPerformanceWhatIfScenarios(whatIfScenarioData);
+      setPerformanceForecastValidationRuns(forecastValidationData);
+      setPerformanceForecastValidationRun(forecastValidationData[0] ?? null);
       setPerformanceInjuryRisk(injuryRiskData);
       setPerformanceGoals(goalData);
       setPerformanceAwards(awardData);
@@ -3023,6 +3050,8 @@ export default function HomePage() {
       setPerformanceIngestion(null);
       setPerformanceModelBenchmark(null);
       setPerformanceModelBenchmarkDatasets([]);
+      setPerformanceForecastValidationRun(null);
+      setPerformanceForecastValidationRuns([]);
       setPerformanceWebhookIngest(null);
       setWearableConnections([]);
       setWearableSyncRun(null);
@@ -3331,6 +3360,8 @@ export default function HomePage() {
       setPerformanceTrendSeries([]);
       setPerformanceForecastScenarios([]);
       setPerformanceWhatIfScenarios([]);
+      setPerformanceForecastValidationRun(null);
+      setPerformanceForecastValidationRuns([]);
       setPerformanceInjuryRisk(null);
       setPerformanceInjuryRiskAlert(null);
       setPerformanceInjuryRiskAlertRun(null);
@@ -6575,6 +6606,40 @@ export default function HomePage() {
         addLog(
           `${dataset ? dataset.name : benchmark.model_policy} benchmark ${benchmark.passed_count}/${benchmark.case_count} passed`,
           benchmark.failed_count ? "neutral" : "good"
+        );
+      }
+    );
+  };
+
+  const runPerformanceForecastValidation = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running forecast validation", "bad");
+      return;
+    }
+    runAction(
+      "performance-forecast-validation",
+      () =>
+        apiRequest<PerformanceForecastValidationRunRead>("/performance/forecast-validation-runs", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            ...(selectedAthlete?.athleteProfileId ? { athlete_profile_id: selectedAthlete.athleteProfileId } : {})
+          }
+        }),
+      (run) => {
+        setPerformanceForecastValidationRun(run);
+        setPerformanceForecastValidationRuns((current) => [
+          run,
+          ...current.filter((item) => item.id !== run.id)
+        ]);
+        addLog(
+          `Forecast QA ${run.drift_level.replaceAll("_", " ")} · ${run.passed_count}/${run.evaluated_count} backtests passed`,
+          run.drift_level === "stable" ? "good" : "neutral"
+        );
+        void loadPerformanceForecastValidationRuns(
+          selectedOrganizationId,
+          selectedAthlete?.athleteProfileId
         );
       }
     );
@@ -13998,6 +14063,7 @@ export default function HomePage() {
                 <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
+                <button type="button" onClick={runPerformanceForecastValidation} disabled={busyAction !== null}>Forecast QA</button>
                 <button type="button" onClick={ingestPerformanceWearableWebhook} disabled={busyAction !== null}>Webhook</button>
                 <button type="button" onClick={createWearableConnection} disabled={busyAction !== null}>Connect</button>
                 <button type="button" onClick={runWearableConnectionSync} disabled={busyAction !== null}>Sync</button>
@@ -14404,6 +14470,48 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {performanceForecastValidationRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>
+                      Forecast QA · {performanceForecastValidationRun.drift_level.replaceAll("_", " ")}
+                    </strong>
+                    <span>
+                      {performanceForecastValidationRun.passed_count}/{performanceForecastValidationRun.evaluated_count} passed ·{" "}
+                      {performanceForecastValidationRun.drift_count} drift · MAE{" "}
+                      {performanceForecastValidationRun.mean_absolute_error} · MRE{" "}
+                      {Math.round(performanceForecastValidationRun.mean_relative_error * 100)}%
+                    </span>
+                    <small>
+                      {performanceForecastValidationRun.model_policy} ·{" "}
+                      {new Date(performanceForecastValidationRun.created_at).toLocaleString()}
+                    </small>
+                    <small>{performanceForecastValidationRun.recommendation}</small>
+                    {performanceForecastValidationRun.details.length ? (
+                      <small>
+                        {performanceForecastValidationRun.details.slice(0, 3).map((item) =>
+                          `${item.metric_name}: ${item.passed ? "pass" : "review"} ` +
+                          `${item.predicted_value ?? "n/a"} vs ${item.actual_value}`
+                        ).join(" · ")}
+                      </small>
+                    ) : null}
+                  </div>
+                </article>
+              ) : null}
+              {performanceForecastValidationRuns
+                .filter((run) => run.id !== performanceForecastValidationRun?.id)
+                .slice(0, 2)
+                .map((run) => (
+                  <article key={run.id} className="task-card">
+                    <div>
+                      <strong>Previous forecast QA · {run.drift_level.replaceAll("_", " ")}</strong>
+                      <span>
+                        {run.passed_count}/{run.evaluated_count} passed · {Math.round(run.mean_relative_error * 100)}% MRE
+                      </span>
+                      <small>{new Date(run.created_at).toLocaleString()} · {run.model_policy}</small>
+                    </div>
+                  </article>
+                ))}
               {performanceModelBenchmarkDatasets.slice(0, 3).map((dataset) => (
                 <article key={dataset.id} className="task-card">
                   <div>
