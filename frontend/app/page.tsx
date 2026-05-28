@@ -97,6 +97,7 @@ import type {
   DeveloperMarketplaceListingRead,
   DeveloperPortalSummaryRead,
   DeveloperWebhookDeliveryRead,
+  DeveloperWebhookRetryRunRead,
   DeveloperWebhookSubscriptionProvisionedRead,
   DeveloperWebhookSubscriptionRead,
   EventRead,
@@ -830,6 +831,7 @@ export default function HomePage() {
   const [developerApiKeys, setDeveloperApiKeys] = useState<DeveloperApiKeyRead[]>([]);
   const [developerWebhooks, setDeveloperWebhooks] = useState<DeveloperWebhookSubscriptionRead[]>([]);
   const [developerWebhookDeliveries, setDeveloperWebhookDeliveries] = useState<DeveloperWebhookDeliveryRead[]>([]);
+  const [developerWebhookRetryRun, setDeveloperWebhookRetryRun] = useState<DeveloperWebhookRetryRunRead | null>(null);
   const [developerListings, setDeveloperListings] = useState<DeveloperMarketplaceListingRead[]>([]);
   const [developerSummary, setDeveloperSummary] = useState<DeveloperPortalSummaryRead | null>(null);
   const [developerApplicationSecret, setDeveloperApplicationSecret] =
@@ -2296,6 +2298,7 @@ export default function HomePage() {
       setDeveloperApiKeys([]);
       setDeveloperWebhooks([]);
       setDeveloperWebhookDeliveries([]);
+      setDeveloperWebhookRetryRun(null);
       setDeveloperListings([]);
       setDeveloperSummary(null);
       setDeveloperApplicationSecret(null);
@@ -8708,6 +8711,26 @@ export default function HomePage() {
     );
   };
 
+  const retryDeveloperWebhookDeliveries = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "retry-developer-webhooks",
+      () =>
+        apiRequest<DeveloperWebhookRetryRunRead>(
+          `/developers/webhook-deliveries/retry-due?organization_id=${selectedOrganizationId}&max_attempts=5&limit=25&include_recorded=true`,
+          { method: "POST", identity }
+        ),
+      (run) => {
+        setDeveloperWebhookRetryRun(run);
+        addLog(`${run.replayed_count}/${run.eligible_count} webhook deliveries retried`, "good");
+        void loadDevelopers(selectedOrganizationId);
+      }
+    );
+  };
+
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
@@ -11726,6 +11749,17 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              <article className="task-card">
+                <div>
+                  <strong>Webhook retry run</strong>
+                  <span>
+                    {developerWebhookRetryRun
+                      ? `${developerWebhookRetryRun.replayed_count}/${developerWebhookRetryRun.eligible_count} retried · ${developerWebhookRetryRun.failed_count} failed · ${developerWebhookRetryRun.skipped_count} skipped`
+                      : "No retry run yet"}
+                  </span>
+                </div>
+                <button type="button" onClick={retryDeveloperWebhookDeliveries} disabled={busyAction !== null}>Retry</button>
+              </article>
               {developerWebhookDeliveries.slice(0, 3).map((delivery) => (
                 <article key={delivery.id} className="task-card">
                   <div>

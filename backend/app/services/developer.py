@@ -26,6 +26,7 @@ from app.schemas.developer import (
     DeveloperMarketplaceListingCreate,
     DeveloperMarketplaceListingReview,
     DeveloperPortalSummaryRead,
+    DeveloperWebhookRetryRunRead,
     DeveloperWebhookSubscriptionCreate,
     DeveloperWebhookSubscriptionUpdate,
 )
@@ -377,6 +378,65 @@ async def replay_developer_webhook_delivery(
     await db.commit()
     await db.refresh(delivery)
     return delivery
+
+
+async def retry_developer_webhook_deliveries(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    *,
+    max_attempts: int = 3,
+    limit: int = 25,
+    include_recorded: bool = False,
+) -> DeveloperWebhookRetryRunRead:
+    await ensure_manage_developer_platform(authz, identity, organization_id)
+    retry_statuses = ["failed", "queued"]
+    if include_recorded:
+        retry_statuses.append("recorded")
+    deliveries = list(
+        (
+            await db.scalars(
+                select(DeveloperWebhookDelivery)
+                .where(
+                    DeveloperWebhookDelivery.organization_id == organization_id,
+                    DeveloperWebhookDelivery.status.in_(retry_statuses),
+                    DeveloperWebhookDelivery.attempt_count < max_attempts,
+                )
+                .order_by(DeveloperWebhookDelivery.created_at.asc())
+                .limit(limit)
+            )
+        ).all()
+    )
+    replayed_count = 0
+    skipped_count = 0
+    for delivery in deliveries:
+        subscription = await db.get(DeveloperWebhookSubscription, delivery.subscription_id)
+        if subscription is None or subscription.status != "active":
+            skipped_count += 1
+            continue
+        delivery.status = "queued"
+        delivery.failure_reason = None
+        delivery.response_status_code = None
+        delivery.delivered_at = None
+        await deliver_single_webhook(db, subscription, delivery)
+        replayed_count += 1
+    await db.commit()
+    statuses: dict[str, int] = {}
+    for delivery in deliveries:
+        await db.refresh(delivery)
+        statuses[delivery.status] = statuses.get(delivery.status, 0) + 1
+    return DeveloperWebhookRetryRunRead(
+        organization_id=organization_id,
+        eligible_count=len(deliveries),
+        replayed_count=replayed_count,
+        skipped_count=skipped_count,
+        failed_count=statuses.get("failed", 0),
+        delivery_ids=[delivery.id for delivery in deliveries],
+        statuses=statuses,
+        max_attempts=max_attempts,
+        include_recorded=include_recorded,
+    )
 
 
 async def deliver_single_webhook(

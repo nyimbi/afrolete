@@ -139,6 +139,18 @@ class DeveloperWebhookDeliveryRead(BaseModel):
     delivered_at: datetime | None
 
 
+class DeveloperWebhookRetryRunRead(BaseModel):
+    organization_id: UUID
+    eligible_count: int
+    replayed_count: int
+    skipped_count: int
+    failed_count: int
+    delivery_ids: list[UUID]
+    statuses: dict[str, int]
+    max_attempts: int
+    include_recorded: bool
+
+
 class DeveloperMarketplaceListingCreate(BaseModel):
     organization_id: UUID
     application_id: UUID | None = None

@@ -17,6 +17,7 @@ from app.schemas.developer import (
     DeveloperMarketplaceListingReview,
     DeveloperPortalSummaryRead,
     DeveloperWebhookDeliveryRead,
+    DeveloperWebhookRetryRunRead,
     DeveloperWebhookSubscriptionCreate,
     DeveloperWebhookSubscriptionProvisionedRead,
     DeveloperWebhookSubscriptionRead,
@@ -42,6 +43,7 @@ from app.services.developer import (
     revoke_developer_api_key,
     review_developer_marketplace_listing,
     rotate_developer_application_secret,
+    retry_developer_webhook_deliveries,
     unpack_list,
     update_developer_webhook_subscription,
 )
@@ -281,6 +283,27 @@ async def list_developer_webhook_deliveries_route(
             subscription_id,
         )
     ]
+
+
+@router.post("/webhook-deliveries/retry-due", response_model=DeveloperWebhookRetryRunRead)
+async def retry_developer_webhook_deliveries_route(
+    organization_id: UUID = Query(),
+    max_attempts: int = Query(default=3, ge=1, le=25),
+    limit: int = Query(default=25, ge=1, le=100),
+    include_recorded: bool = Query(default=False),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperWebhookRetryRunRead:
+    return await retry_developer_webhook_deliveries(
+        db,
+        identity,
+        organization_id,
+        authz,
+        max_attempts=max_attempts,
+        limit=limit,
+        include_recorded=include_recorded,
+    )
 
 
 @router.post("/webhook-deliveries/{delivery_id}/replay", response_model=DeveloperWebhookDeliveryRead)

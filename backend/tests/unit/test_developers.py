@@ -169,6 +169,29 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert replayed_delivery["status"] == "recorded"
     assert replayed_delivery["attempt_count"] == 2
 
+    retry_run_response = client.post(
+        (
+            f"/api/v1/developers/webhook-deliveries/retry-due?organization_id={organization['id']}"
+            "&include_recorded=true&max_attempts=5"
+        ),
+        headers=identity_headers,
+    )
+    assert retry_run_response.status_code == 200
+    retry_run = retry_run_response.json()
+    assert retry_run["eligible_count"] == 1
+    assert retry_run["replayed_count"] == 1
+    assert retry_run["failed_count"] == 0
+    assert retry_run["statuses"]["recorded"] == 1
+    assert retry_run["max_attempts"] == 5
+    assert retry_run["include_recorded"] is True
+
+    retried_deliveries_response = client.get(
+        f"/api/v1/developers/webhook-deliveries?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert retried_deliveries_response.status_code == 200
+    assert retried_deliveries_response.json()[0]["attempt_count"] == 3
+
     read_only_key_response = client.post(
         "/api/v1/developers/api-keys",
         json={

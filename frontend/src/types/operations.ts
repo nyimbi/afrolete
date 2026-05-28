@@ -2299,6 +2299,18 @@ export type DeveloperWebhookDeliveryRead = {
   delivered_at: string | null;
 };
 
+export type DeveloperWebhookRetryRunRead = {
+  organization_id: UUID;
+  eligible_count: number;
+  replayed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  delivery_ids: UUID[];
+  statuses: Record<string, number>;
+  max_attempts: number;
+  include_recorded: boolean;
+};
+
 export type DeveloperMarketplaceListingRead = {
   id: UUID;
   organization_id: UUID;
