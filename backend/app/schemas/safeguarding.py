@@ -569,6 +569,20 @@ class IncidentReportPackageArtifactRead(BaseModel):
     size_bytes: int
 
 
+class IncidentReportPackageArtifactLinkRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    incident_id: UUID
+    generated_at: datetime
+    artifact_format: str
+    signed_url: str
+    expires_at: datetime
+    content_type: str
+    filename: str
+    checksum: str
+    size_bytes: int
+
+
 class IncidentInsuranceClaimCreate(BaseModel):
     organization_id: UUID
     incident_id: UUID

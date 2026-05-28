@@ -5,6 +5,7 @@ import time
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -65,6 +66,7 @@ from app.schemas.safeguarding import (
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
+    IncidentReportPackageArtifactLinkRead,
     IncidentInsuranceClaimCreate,
     IncidentInsuranceClaimUpdate,
     IncidentMedicalClearanceCreate,
@@ -78,7 +80,7 @@ from app.schemas.safeguarding import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
-from app.services.secrets import resolve_secret
+from app.services.secrets import resolve_secret, resolve_secret_sync
 
 
 def hash_token(token: str) -> str:
@@ -522,26 +524,16 @@ def render_incident_report_package_pdf(markdown_content: str, package: IncidentR
     return simple_pdf_from_lines(lines, title=f"Incident report {str(package.id)[:8]}")
 
 
-async def get_incident_report_package_artifact(
-    db: AsyncSession,
-    identity: CurrentIdentity,
-    package_id: UUID,
+def build_incident_report_package_artifact(
+    package: IncidentReportPackage,
+    incident: SafeguardingIncident,
     artifact_format: str,
-    authz: AuthorizationService,
+    generated_at: datetime,
 ) -> dict[str, object]:
-    package = await db.get(IncidentReportPackage, package_id)
-    if package is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report package not found")
-    await ensure_org_manage(authz, package.organization_id, identity)
-    incident = await db.get(SafeguardingIncident, package.incident_id)
-    if incident is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-
     normalized_format = artifact_format.lower().strip()
     if normalized_format not in {"markdown", "pdf"}:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported report package format")
 
-    generated_at = utc_now()
     content = render_incident_report_package_markdown(package, incident, generated_at)
     filename_slug = slug_for_filename(package.agency_name)
     if normalized_format == "pdf":
@@ -572,6 +564,176 @@ async def get_incident_report_package_artifact(
         "content_base64": None,
         "checksum": sha256(content_bytes).hexdigest(),
         "size_bytes": len(content_bytes),
+    }
+
+
+async def get_incident_report_package_artifact(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    package_id: UUID,
+    artifact_format: str,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    package = await db.get(IncidentReportPackage, package_id)
+    if package is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report package not found")
+    await ensure_org_manage(authz, package.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, package.incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    return build_incident_report_package_artifact(package, incident, artifact_format, utc_now())
+
+def incident_report_artifact_signing_key(settings: Settings) -> bytes:
+    key = resolve_secret_sync(
+        settings,
+        env_value=settings.safeguarding_incident_artifact_signing_key,
+        path=settings.safeguarding_incident_artifact_signing_key_secret_path,
+        field_name=settings.safeguarding_incident_artifact_signing_key_secret_field,
+        label="safeguarding incident artifact signing key",
+    )
+    return (key or "local-safeguarding-artifact-key").encode()
+
+
+def incident_report_artifact_signature(
+    settings: Settings,
+    organization_id: UUID,
+    package_id: UUID,
+    filename: str,
+    artifact_format: str,
+    generated: int,
+    expires: int,
+) -> str:
+    payload = f"{organization_id}/{package_id}/{filename}:{artifact_format}:{generated}:{expires}"
+    digest = hmac.new(
+        incident_report_artifact_signing_key(settings),
+        payload.encode(),
+        sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def signed_incident_report_artifact_url(
+    settings: Settings,
+    organization_id: UUID,
+    package_id: UUID,
+    filename: str,
+    artifact_format: str,
+    generated_at: datetime,
+    expires_at: datetime,
+) -> str:
+    generated = int(generated_at.timestamp())
+    expires = int(expires_at.timestamp())
+    signature = incident_report_artifact_signature(
+        settings,
+        organization_id,
+        package_id,
+        filename,
+        artifact_format,
+        generated,
+        expires,
+    )
+    safe_name = quote(filename, safe="")
+    return (
+        f"{settings.api_prefix}/safeguarding/incident-report-artifacts/{organization_id}/{package_id}/{safe_name}"
+        f"?artifact_format={artifact_format}&generated={generated}&expires={expires}&signature={signature}"
+    )
+
+
+async def create_signed_incident_report_package_artifact_link(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    package_id: UUID,
+    artifact_format: str,
+    ttl_seconds: int | None,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> IncidentReportPackageArtifactLinkRead:
+    package = await db.get(IncidentReportPackage, package_id)
+    if package is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report package not found")
+    await ensure_org_manage(authz, package.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, package.incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    selected_settings = settings or get_settings()
+    generated_at = datetime.fromtimestamp(int(utc_now().timestamp()), tz=UTC)
+    artifact = build_incident_report_package_artifact(package, incident, artifact_format, generated_at)
+    expires_at = generated_at + timedelta(
+        seconds=ttl_seconds or selected_settings.safeguarding_incident_artifact_url_ttl_seconds
+    )
+    signed_url = signed_incident_report_artifact_url(
+        selected_settings,
+        package.organization_id,
+        package.id,
+        str(artifact["download_filename"]),
+        str(artifact["artifact_format"]),
+        generated_at,
+        expires_at,
+    )
+    return IncidentReportPackageArtifactLinkRead(
+        id=package.id,
+        organization_id=package.organization_id,
+        incident_id=package.incident_id,
+        generated_at=generated_at,
+        artifact_format=str(artifact["artifact_format"]),
+        signed_url=signed_url,
+        expires_at=expires_at,
+        content_type=str(artifact["content_type"]),
+        filename=str(artifact["download_filename"]),
+        checksum=str(artifact["checksum"]),
+        size_bytes=int(artifact["size_bytes"]),
+    )
+
+
+async def read_signed_incident_report_package_artifact(
+    db: AsyncSession,
+    organization_id: UUID,
+    package_id: UUID,
+    filename: str,
+    artifact_format: str,
+    generated: int,
+    expires: int,
+    signature: str,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    selected_settings = settings or get_settings()
+    if "/" in filename or "\\" in filename or filename in {"", ".", ".."}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid artifact name")
+    if expires < int(time.time()):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Artifact link expired")
+    normalized_format = artifact_format.lower().strip()
+    expected = incident_report_artifact_signature(
+        selected_settings,
+        organization_id,
+        package_id,
+        filename,
+        normalized_format,
+        generated,
+        expires,
+    )
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid artifact signature")
+    package = await db.get(IncidentReportPackage, package_id)
+    if package is None or package.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report package not found")
+    incident = await db.get(SafeguardingIncident, package.incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    generated_at = datetime.fromtimestamp(generated, tz=UTC)
+    artifact = build_incident_report_package_artifact(package, incident, normalized_format, generated_at)
+    if artifact["download_filename"] != filename:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Artifact filename mismatch")
+    content_bytes = (
+        base64.b64decode(str(artifact["content_base64"]))
+        if artifact["content_base64"]
+        else str(artifact["content"]).encode("utf-8")
+    )
+    return {
+        "content": content_bytes,
+        "content_type": artifact["content_type"],
+        "filename": artifact["download_filename"],
+        "checksum": sha256(content_bytes).hexdigest(),
     }
 
 

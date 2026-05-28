@@ -168,6 +168,10 @@ class Settings(BaseSettings):
     safeguarding_screening_webhook_signing_key_secret_path: str = ""
     safeguarding_screening_webhook_signing_key_secret_field: str = "value"
     safeguarding_screening_webhook_tolerance_seconds: int = 300
+    safeguarding_incident_artifact_signing_key: str = "local-safeguarding-artifact-key"
+    safeguarding_incident_artifact_signing_key_secret_path: str = ""
+    safeguarding_incident_artifact_signing_key_secret_field: str = "value"
+    safeguarding_incident_artifact_url_ttl_seconds: int = 900
     performance_wearable_webhook_signing_key: str = ""
     performance_wearable_webhook_signing_key_secret_path: str = ""
     performance_wearable_webhook_signing_key_secret_field: str = "value"

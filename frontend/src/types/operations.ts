@@ -2908,6 +2908,20 @@ export type IncidentReportPackageArtifactRead = {
   size_bytes: number;
 };
 
+export type IncidentReportPackageArtifactLinkRead = {
+  id: UUID;
+  organization_id: UUID;
+  incident_id: UUID;
+  generated_at: string;
+  artifact_format: "markdown" | "pdf";
+  signed_url: string;
+  expires_at: string;
+  content_type: string;
+  filename: string;
+  checksum: string;
+  size_bytes: number;
+};
+
 export type IncidentInsuranceClaimRead = {
   id: UUID;
   organization_id: UUID;

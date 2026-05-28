@@ -203,6 +203,24 @@ def test_incident_report_package_exports_markdown_and_pdf(client, identity_heade
     assert pdf["size_bytes"] == len(pdf_bytes)
     assert len(pdf["checksum"]) == 64
 
+    link_response = client.post(
+        f"/api/v1/safeguarding/incident-report-packages/{report_package['id']}/artifact-link?artifact_format=pdf&ttl_seconds=600",
+        headers=identity_headers,
+    )
+    assert link_response.status_code == 200
+    link = link_response.json()
+    assert link["artifact_format"] == "pdf"
+    assert link["filename"].endswith(".pdf")
+    assert link["signed_url"].startswith("/api/v1/safeguarding/incident-report-artifacts/")
+    signed_response = client.get(link["signed_url"])
+    assert signed_response.status_code == 200
+    assert signed_response.content.startswith(b"%PDF-1.4")
+    assert signed_response.headers["x-afrolete-safeguarding-artifact-checksum"] == link["checksum"]
+
+    bad_link = link["signed_url"].replace("signature=", "signature=bad", 1)
+    bad_response = client.get(bad_link)
+    assert bad_response.status_code == 403
+
 
 def test_signed_screening_provider_result_updates_background_check(
     client,

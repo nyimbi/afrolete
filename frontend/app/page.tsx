@@ -180,6 +180,7 @@ import type {
   BackgroundCheckStatus,
   GuardianRelationshipRead,
   IncidentReportPackageArtifactRead,
+  IncidentReportPackageArtifactLinkRead,
   IncidentInsuranceClaimRead,
   IncidentMedicalClearanceRead,
   IncidentReportPackageRead,
@@ -1567,6 +1568,7 @@ export default function HomePage() {
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummaryRead | null>(null);
   const [incidentReportPackages, setIncidentReportPackages] = useState<IncidentReportPackageRead[]>([]);
   const [incidentReportPackageArtifact, setIncidentReportPackageArtifact] = useState<IncidentReportPackageArtifactRead | null>(null);
+  const [incidentReportPackageArtifactLink, setIncidentReportPackageArtifactLink] = useState<IncidentReportPackageArtifactLinkRead | null>(null);
   const [incidentInsuranceClaims, setIncidentInsuranceClaims] = useState<IncidentInsuranceClaimRead[]>([]);
   const [incidentMedicalClearances, setIncidentMedicalClearances] = useState<IncidentMedicalClearanceRead[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
@@ -3143,6 +3145,7 @@ export default function HomePage() {
       setComplianceSummary(null);
       setIncidentReportPackages([]);
       setIncidentReportPackageArtifact(null);
+      setIncidentReportPackageArtifactLink(null);
       setIncidentInsuranceClaims([]);
       setIncidentMedicalClearances([]);
       setCommunicationTemplates([]);
@@ -5812,6 +5815,27 @@ export default function HomePage() {
         }
         addLog(
           `Downloaded ${artifact.artifact_format} regulatory package (${artifact.size_bytes} bytes)`,
+          "good"
+        );
+      }
+    );
+  };
+
+  const shareIncidentReportPackageArtifact = (
+    reportPackage: IncidentReportPackageRead,
+    artifactFormat: "markdown" | "pdf"
+  ) => {
+    runAction(
+      `incident-report-package-artifact-link-${artifactFormat}-${reportPackage.id}`,
+      () =>
+        apiRequest<IncidentReportPackageArtifactLinkRead>(
+          `/safeguarding/incident-report-packages/${reportPackage.id}/artifact-link?artifact_format=${artifactFormat}`,
+          { method: "POST", identity }
+        ),
+      (link) => {
+        setIncidentReportPackageArtifactLink(link);
+        addLog(
+          `${link.artifact_format} regulatory package link expires ${new Date(link.expires_at).toLocaleString()}`,
           "good"
         );
       }
@@ -16160,6 +16184,7 @@ export default function HomePage() {
                   <button type="button" onClick={() => updateIncidentReportPackage(reportPackage, "rejected")}>Reject</button>
                   <button type="button" onClick={() => downloadIncidentReportPackageArtifact(reportPackage, "markdown")}>Markdown</button>
                   <button type="button" onClick={() => downloadIncidentReportPackageArtifact(reportPackage, "pdf")}>PDF</button>
+                  <button type="button" onClick={() => shareIncidentReportPackageArtifact(reportPackage, "pdf")}>Link</button>
                 </div>
               </article>
             ))}
@@ -16170,6 +16195,24 @@ export default function HomePage() {
                   <span>{incidentReportPackageArtifact.artifact_format} · {incidentReportPackageArtifact.size_bytes} bytes · {incidentReportPackageArtifact.content_type}</span>
                   <span>{incidentReportPackageArtifact.checksum.slice(0, 16)} · generated {new Date(incidentReportPackageArtifact.generated_at).toLocaleString()}</span>
                 </div>
+              </article>
+            ) : null}
+            {incidentReportPackageArtifactLink ? (
+              <article className="task-card">
+                <div>
+                  <strong>{incidentReportPackageArtifactLink.filename} signed link</strong>
+                  <span>
+                    Expires {new Date(incidentReportPackageArtifactLink.expires_at).toLocaleString()} · {incidentReportPackageArtifactLink.size_bytes} bytes
+                  </span>
+                  <span>{incidentReportPackageArtifactLink.checksum.slice(0, 16)} · {incidentReportPackageArtifactLink.content_type}</span>
+                </div>
+                <a
+                  href={`${apiBaseUrl}${incidentReportPackageArtifactLink.signed_url}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open
+                </a>
               </article>
             ) : null}
             {incidentInsuranceClaims.slice(0, 4).map((claim) => (

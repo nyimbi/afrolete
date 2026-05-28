@@ -1,7 +1,7 @@
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +43,7 @@ from app.schemas.safeguarding import (
     IncidentMedicalClearanceCreate,
     IncidentMedicalClearanceRead,
     IncidentMedicalClearanceUpdate,
+    IncidentReportPackageArtifactLinkRead,
     IncidentReportPackageArtifactRead,
     IncidentReportPackageCreate,
     IncidentReportPackageRead,
@@ -66,6 +67,7 @@ from app.services.safeguarding import (
     create_compliance_credential,
     create_consent_request,
     create_guardian_relationship,
+    create_signed_incident_report_package_artifact_link,
     create_incident_insurance_claim,
     create_incident_medical_clearance,
     create_incident_report_package,
@@ -88,6 +90,7 @@ from app.services.safeguarding import (
     respond_to_family_consent_request,
     respond_to_family_event,
     reconcile_compliance_statuses,
+    read_signed_incident_report_package_artifact,
     update_background_check,
     update_compliance_credential,
     update_incident_insurance_claim,
@@ -430,6 +433,59 @@ async def get_incident_report_package_artifact_route(
             artifact_format,
             authz,
         )
+    )
+
+
+@router.post(
+    "/incident-report-packages/{package_id}/artifact-link",
+    response_model=IncidentReportPackageArtifactLinkRead,
+)
+async def create_incident_report_package_artifact_link_route(
+    package_id: UUID,
+    artifact_format: str = Query(default="pdf", pattern="^(markdown|pdf)$"),
+    ttl_seconds: int | None = Query(default=None, ge=60, le=86400),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentReportPackageArtifactLinkRead:
+    return await create_signed_incident_report_package_artifact_link(
+        db,
+        identity,
+        package_id,
+        artifact_format,
+        ttl_seconds,
+        authz,
+    )
+
+
+@router.get("/incident-report-artifacts/{organization_id}/{package_id}/{filename}")
+async def read_incident_report_package_artifact_route(
+    organization_id: UUID,
+    package_id: UUID,
+    filename: str,
+    artifact_format: str = Query(pattern="^(markdown|pdf)$"),
+    generated: int = Query(),
+    expires: int = Query(),
+    signature: str = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    artifact = await read_signed_incident_report_package_artifact(
+        db,
+        organization_id,
+        package_id,
+        filename,
+        artifact_format,
+        generated,
+        expires,
+        signature,
+    )
+    return Response(
+        content=artifact["content"],
+        media_type=str(artifact["content_type"]),
+        headers={
+            "Content-Disposition": f"inline; filename={artifact['filename']}",
+            "X-Afrolete-Safeguarding-Artifact-Checksum": str(artifact["checksum"]),
+        },
     )
 
 
