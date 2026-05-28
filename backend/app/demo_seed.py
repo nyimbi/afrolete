@@ -3,15 +3,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models.agent import Agent, AgentTask
 from app.models.communication import CommunicationMessage, MessageRecipient, NotificationPreference
+from app.models.commercial import FinanceInvoice, Sponsor, SponsorshipAgreement
 from app.models.enums import (
     AgentKind,
     ChannelPreference,
+    CommercialStatus,
     CommunicationChannel,
     CommunicationMessageType,
     CommunicationScopeType,
@@ -220,6 +223,47 @@ async def main() -> None:
             notes="Demo travel consent request.",
         )
         db.add_all([plan, consent])
+
+        sponsor = Sponsor(
+            organization_id=organization.id,
+            name="Demo Bank Public",
+            industry="Financial services",
+            contact_name="Sponsor Example",
+            contact_email="sponsor@example.com",
+            website_url="https://demo-bank.example",
+            brand_assets_url="https://placehold.co/512x256?text=Demo+Bank",
+            notes="Seed sponsor for the public support showcase and sponsor portal.",
+        )
+        db.add(sponsor)
+        await db.flush()
+        db.add_all(
+            [
+                SponsorshipAgreement(
+                    organization_id=organization.id,
+                    sponsor_id=sponsor.id,
+                    event_id=event.id,
+                    name="Regional Showcase Partner",
+                    tier="Gold",
+                    value_amount=Decimal("3000.00"),
+                    currency="USD",
+                    deliverables="Shirt logo, match board, community clinic",
+                    activation_notes="Public support campaign and family ticket bundle are live.",
+                    roi_notes="Track public-site visits, ticket conversions, and clinic attendance.",
+                ),
+                FinanceInvoice(
+                    organization_id=organization.id,
+                    sponsor_id=sponsor.id,
+                    invoice_number="SPONSOR-DEMO-1",
+                    title="Regional Showcase Partner",
+                    amount_due=Decimal("1500.00"),
+                    amount_paid=Decimal("500.00"),
+                    currency="USD",
+                    due_on=date.today() + timedelta(days=14),
+                    status=CommercialStatus.PARTIAL,
+                    memo="Demo invoice visible in the sponsor portal.",
+                ),
+            ]
+        )
 
         sprint = PerformanceMetricDefinition(
             organization_id=organization.id,

@@ -20,6 +20,7 @@ from app.schemas.commercial import (
     FundraisingCampaignRead,
     PaymentSettlementRead,
     SponsorCreate,
+    SponsorPortalRead,
     SponsorRead,
     SponsorshipDashboardRead,
     SponsorshipAgreementCreate,
@@ -56,6 +57,7 @@ from app.services.commercial import (
     record_payment,
     refund_invoice,
     refund_ticket,
+    sponsor_portal,
     sponsorship_dashboard,
     tax_quote,
 )
@@ -322,6 +324,15 @@ async def sponsorship_dashboard_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[SponsorshipDashboardRead]:
     return await sponsorship_dashboard(db, organization_id)
+
+
+@router.get("/sponsor-portal", response_model=SponsorPortalRead)
+async def sponsor_portal_route(
+    organization_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> SponsorPortalRead:
+    return await sponsor_portal(db, identity, organization_id)
 
 
 @router.get("/summary", response_model=CommercialSummaryRead)

@@ -12,6 +12,8 @@ docker compose up --build
 Open:
 
 - Frontend: http://localhost:3000
+- Public branded site: http://localhost:3000/site/demo-city-fc
+- Sponsor portal: http://localhost:3000/sponsors
 - Backend health: http://localhost:8000/api/v1/healthz
 - OpenAPI: http://localhost:8000/api/v1/openapi.json
 
@@ -34,10 +36,16 @@ The frontend defaults to local identity headers:
 - Email: `owner@example.com`
 - Name: `Owner Example`
 
+The sponsor portal defaults to the seeded sponsor contact:
+
+- Subject: `kc-sponsor-1`
+- Email: `sponsor@example.com`
+- Name: `Sponsor Example`
+
 The demo seed creates the matching user, person, owner membership, Demo City FC
 tenant, team, minor athlete, guardian, travel consent request, travel plan,
-performance observations, inbox item, notification preference, and AI agent
-task.
+performance observations, public sponsor, sponsorship agreement, sponsor
+invoice, inbox item, notification preference, and AI agent task.
 
 ## Worker
 

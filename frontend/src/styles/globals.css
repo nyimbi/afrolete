@@ -1554,6 +1554,212 @@ textarea:focus {
   margin-top: 16px;
 }
 
+.sponsor-page {
+  min-height: 100vh;
+  background: #f4f2ed;
+  color: var(--ink);
+  padding: 24px;
+}
+
+.sponsor-shell {
+  width: min(1160px, 100%);
+  margin: 0 auto;
+}
+
+.sponsor-hero {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 24px;
+  align-items: end;
+  padding: 24px 0 18px;
+}
+
+.sponsor-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sponsor-brand .mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: #fff;
+  font-weight: 800;
+}
+
+.sponsor-brand strong,
+.sponsor-brand span,
+.sponsor-hero p,
+.sponsor-list strong,
+.sponsor-list span,
+.sponsor-list a,
+.sponsor-facts dt,
+.sponsor-facts dd,
+.sponsor-panel p,
+.sponsor-empty strong,
+.sponsor-empty span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.sponsor-brand span,
+.sponsor-hero p,
+.sponsor-list span,
+.sponsor-panel p,
+.sponsor-empty span,
+.sponsor-facts dt {
+  color: var(--muted);
+}
+
+.sponsor-hero h1 {
+  font-size: 52px;
+  line-height: 0.98;
+  margin: 4px 0 8px;
+}
+
+.sponsor-controls,
+.sponsor-panel,
+.sponsor-empty,
+.sponsor-metrics div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.sponsor-controls {
+  padding: 16px;
+}
+
+.sponsor-controls form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.sponsor-controls button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  padding: 0 16px;
+}
+
+.sponsor-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.sponsor-metrics div {
+  padding: 16px;
+}
+
+.sponsor-metrics strong {
+  display: block;
+  font-size: 24px;
+}
+
+.sponsor-metrics span {
+  color: var(--muted);
+}
+
+.sponsor-layout,
+.sponsor-detail-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.sponsor-layout {
+  grid-template-columns: minmax(0, 1.1fr) repeat(2, minmax(0, 1fr));
+}
+
+.sponsor-detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.sponsor-panel,
+.sponsor-empty {
+  padding: 16px;
+}
+
+.sponsor-panel h2 {
+  margin: 4px 0 12px;
+}
+
+.sponsor-list {
+  display: grid;
+  gap: 8px;
+}
+
+.sponsor-list div,
+.sponsor-list button,
+.sponsor-list > span {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 10px;
+  text-align: left;
+}
+
+.sponsor-list button.selected {
+  border-color: var(--teal);
+  box-shadow: inset 4px 0 0 var(--teal);
+}
+
+.sponsor-list a {
+  color: var(--teal);
+  font-size: 13px;
+  margin-top: 4px;
+  text-decoration: none;
+}
+
+.sponsor-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.sponsor-facts div,
+.sponsor-chip-row span {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.sponsor-facts dd {
+  margin: 3px 0 0;
+  font-weight: 700;
+}
+
+.sponsor-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sponsor-chip-row span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sponsor-empty {
+  margin-top: 14px;
+}
+
 .public-site-page {
   --site-primary: var(--teal);
   --site-secondary: var(--amber);
@@ -2475,7 +2681,13 @@ textarea:focus {
   .work-grid,
   .consent-grid,
   .trend-series-grid,
-  .payment-grid {
+  .payment-grid,
+  .sponsor-hero,
+  .sponsor-controls form,
+  .sponsor-metrics,
+  .sponsor-layout,
+  .sponsor-detail-grid,
+  .sponsor-facts {
     grid-template-columns: 1fr;
   }
 

@@ -3,7 +3,7 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.commercial import (
@@ -33,6 +33,11 @@ from app.schemas.commercial import (
     FundraisingCampaignCreate,
     PaymentSettlementRead,
     SponsorCreate,
+    SponsorPortalAgreementRead,
+    SponsorPortalInvoiceRead,
+    SponsorPortalRead,
+    SponsorPortalSponsorRead,
+    SponsorPortalSummaryRead,
     SponsorshipDashboardRead,
     SponsorshipAgreementCreate,
     TaxQuoteRead,
@@ -438,6 +443,155 @@ async def sponsorship_dashboard(db: AsyncSession, organization_id: UUID) -> list
     return dashboards
 
 
+async def sponsor_portal(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID | None = None,
+) -> SponsorPortalRead:
+    email = identity.email.strip().casefold()
+    if not email:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sponsor email required")
+
+    sponsor_query = select(Sponsor).where(func.lower(Sponsor.contact_email) == email)
+    if organization_id is not None:
+        sponsor_query = sponsor_query.where(Sponsor.organization_id == organization_id)
+    sponsors = list((await db.scalars(sponsor_query.order_by(Sponsor.name))).all())
+    if not sponsors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor portal not found")
+
+    organization_ids = {sponsor.organization_id for sponsor in sponsors}
+    organizations = {
+        organization.id: organization
+        for organization in (
+            await db.scalars(select(Organization).where(Organization.id.in_(organization_ids)))
+        ).all()
+    }
+    sponsor_ids = [sponsor.id for sponsor in sponsors]
+    agreements = list(
+        (
+            await db.scalars(
+                select(SponsorshipAgreement)
+                .where(SponsorshipAgreement.sponsor_id.in_(sponsor_ids))
+                .order_by(SponsorshipAgreement.created_at.desc())
+            )
+        ).all()
+    )
+    invoices = list(
+        (
+            await db.scalars(
+                select(FinanceInvoice)
+                .where(FinanceInvoice.sponsor_id.in_(sponsor_ids))
+                .order_by(FinanceInvoice.due_on.is_(None), FinanceInvoice.due_on, FinanceInvoice.created_at.desc())
+            )
+        ).all()
+    )
+    event_ids = {agreement.event_id for agreement in agreements if agreement.event_id is not None}
+    events = {
+        event.id: event
+        for event in (
+            await db.scalars(select(Event).where(Event.id.in_(event_ids)))
+        ).all()
+    } if event_ids else {}
+    sponsors_by_id = {sponsor.id: sponsor for sponsor in sponsors}
+
+    active_value = sum(
+        (agreement.value_amount for agreement in agreements if agreement.status == CommercialStatus.ACTIVE),
+        Decimal("0"),
+    )
+    outstanding_invoice_amount = sum(
+        (invoice.amount_due - invoice.amount_paid for invoice in invoices),
+        Decimal("0"),
+    )
+    deliverable_count = sum(count_deliverables(agreement.deliverables) for agreement in agreements)
+    activation_count = sum(1 for agreement in agreements if agreement.activation_notes)
+    upcoming_event_count = sum(
+        1
+        for agreement in agreements
+        if agreement.event_id in events and utc_datetime(events[agreement.event_id].starts_at) >= datetime.now(UTC)
+    )
+    roi_score = min(
+        100,
+        (60 if active_value > 0 else 0)
+        + min(deliverable_count * 5, 25)
+        + min(activation_count * 10, 15),
+    )
+
+    return SponsorPortalRead(
+        identity_email=email,
+        sponsors=[
+            SponsorPortalSponsorRead(
+                id=sponsor.id,
+                organization_id=sponsor.organization_id,
+                organization_name=organizations[sponsor.organization_id].name,
+                organization_slug=organizations[sponsor.organization_id].slug,
+                sponsor_name=sponsor.name,
+                industry=sponsor.industry,
+                contact_name=sponsor.contact_name,
+                contact_email=sponsor.contact_email,
+                website_url=sponsor.website_url,
+                brand_assets_url=sponsor.brand_assets_url,
+                public_site_path=f"/site/{organizations[sponsor.organization_id].slug}",
+            )
+            for sponsor in sponsors
+            if sponsor.organization_id in organizations
+        ],
+        agreements=[
+            SponsorPortalAgreementRead(
+                id=agreement.id,
+                organization_id=agreement.organization_id,
+                organization_name=organizations[agreement.organization_id].name,
+                sponsor_id=agreement.sponsor_id,
+                sponsor_name=sponsors_by_id[agreement.sponsor_id].name,
+                event_id=agreement.event_id,
+                event_title=events[agreement.event_id].title if agreement.event_id in events else None,
+                event_starts_at=events[agreement.event_id].starts_at if agreement.event_id in events else None,
+                event_venue_name=events[agreement.event_id].venue_name if agreement.event_id in events else None,
+                name=agreement.name,
+                tier=agreement.tier,
+                value_amount=agreement.value_amount,
+                currency=agreement.currency,
+                starts_on=agreement.starts_on,
+                ends_on=agreement.ends_on,
+                deliverables=split_deliverables(agreement.deliverables),
+                activation_notes=agreement.activation_notes,
+                roi_notes=agreement.roi_notes,
+                status=agreement.status,
+            )
+            for agreement in agreements
+            if agreement.organization_id in organizations and agreement.sponsor_id in sponsors_by_id
+        ],
+        invoices=[
+            SponsorPortalInvoiceRead(
+                id=invoice.id,
+                organization_id=invoice.organization_id,
+                organization_name=organizations[invoice.organization_id].name,
+                sponsor_id=invoice.sponsor_id,
+                invoice_number=invoice.invoice_number,
+                title=invoice.title,
+                amount_due=invoice.amount_due,
+                amount_paid=invoice.amount_paid,
+                outstanding_amount=max(invoice.amount_due - invoice.amount_paid, Decimal("0")),
+                currency=invoice.currency,
+                due_on=invoice.due_on,
+                status=invoice.status,
+                memo=invoice.memo,
+            )
+            for invoice in invoices
+            if invoice.organization_id in organizations and invoice.sponsor_id is not None
+        ],
+        summary=SponsorPortalSummaryRead(
+            sponsor_count=len(sponsors),
+            agreement_count=len(agreements),
+            active_value=active_value.quantize(Decimal("0.01")),
+            outstanding_invoice_amount=max(outstanding_invoice_amount, Decimal("0")).quantize(Decimal("0.01")),
+            deliverable_count=deliverable_count,
+            activation_count=activation_count,
+            upcoming_event_count=upcoming_event_count,
+            recommendation=sponsorship_recommendation(roi_score),
+        ),
+    )
+
+
 async def commercial_summary(db: AsyncSession, organization_id: UUID) -> CommercialSummaryRead:
     sponsors = await list_sponsors(db, organization_id)
     sponsorships = await list_sponsorships(db, organization_id)
@@ -559,9 +713,19 @@ async def tickets_remaining_in_order(
 
 
 def count_deliverables(deliverables: str | None) -> int:
+    return len(split_deliverables(deliverables))
+
+
+def split_deliverables(deliverables: str | None) -> list[str]:
     if not deliverables:
-        return 0
-    return len([part for part in deliverables.replace("\n", ",").split(",") if part.strip()])
+        return []
+    return [part.strip() for part in deliverables.replace("\n", ",").split(",") if part.strip()]
+
+
+def utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def sponsorship_recommendation(roi_score: int) -> str:

@@ -240,6 +240,77 @@ class SponsorshipDashboardRead(BaseModel):
     recommendation: str
 
 
+class SponsorPortalSponsorRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    organization_name: str
+    organization_slug: str
+    sponsor_name: str
+    industry: str | None
+    contact_name: str | None
+    contact_email: str | None
+    website_url: str | None
+    brand_assets_url: str | None
+    public_site_path: str
+
+
+class SponsorPortalAgreementRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    organization_name: str
+    sponsor_id: UUID
+    sponsor_name: str
+    event_id: UUID | None
+    event_title: str | None
+    event_starts_at: datetime | None
+    event_venue_name: str | None
+    name: str
+    tier: str
+    value_amount: Decimal
+    currency: str
+    starts_on: date | None
+    ends_on: date | None
+    deliverables: list[str] = Field(default_factory=list)
+    activation_notes: str | None
+    roi_notes: str | None
+    status: CommercialStatus
+
+
+class SponsorPortalInvoiceRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    organization_name: str
+    sponsor_id: UUID
+    invoice_number: str
+    title: str
+    amount_due: Decimal
+    amount_paid: Decimal
+    outstanding_amount: Decimal
+    currency: str
+    due_on: date | None
+    status: CommercialStatus
+    memo: str | None
+
+
+class SponsorPortalSummaryRead(BaseModel):
+    sponsor_count: int
+    agreement_count: int
+    active_value: Decimal
+    outstanding_invoice_amount: Decimal
+    deliverable_count: int
+    activation_count: int
+    upcoming_event_count: int
+    recommendation: str
+
+
+class SponsorPortalRead(BaseModel):
+    identity_email: str
+    sponsors: list[SponsorPortalSponsorRead]
+    agreements: list[SponsorPortalAgreementRead]
+    invoices: list[SponsorPortalInvoiceRead]
+    summary: SponsorPortalSummaryRead
+
+
 class CommercialSummaryRead(BaseModel):
     organization_id: UUID
     sponsorship_value: Decimal

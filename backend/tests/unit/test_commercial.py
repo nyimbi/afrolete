@@ -194,3 +194,88 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     assert dashboard[0]["sponsor_name"] == "Acme Sports"
     assert dashboard[0]["deliverable_count"] == 3
     assert dashboard[0]["roi_score"] >= 85
+
+
+def test_sponsor_contact_can_open_self_service_portal(client, identity_headers) -> None:
+    organization, team, event = create_commercial_context(client, identity_headers)
+    sponsor = client.post(
+        "/api/v1/commercial/sponsors",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Portal Partner",
+            "industry": "Healthcare",
+            "contact_name": "Sam Sponsor",
+            "contact_email": "portal-sponsor@example.com",
+            "website_url": "https://portal-sponsor.example",
+        },
+    ).json()
+    client.post(
+        "/api/v1/commercial/sponsorships",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sponsor_id": sponsor["id"],
+            "event_id": event["id"],
+            "name": "Match Health Partner",
+            "tier": "Silver",
+            "value_amount": "750.00",
+            "deliverables": "Medical tent, player recovery report",
+            "activation_notes": "Sideline clinic scheduled.",
+        },
+    )
+    invoice = client.post(
+        "/api/v1/commercial/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "sponsor_id": sponsor["id"],
+            "invoice_number": "SPONSOR-1",
+            "title": "Match Health Partner",
+            "amount_due": "500.00",
+            "memo": "Portal visible sponsor invoice.",
+        },
+    ).json()
+    client.post(
+        "/api/v1/commercial/payments",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "invoice_id": invoice["id"],
+            "amount": "200.00",
+            "method": "bank",
+        },
+    )
+    sponsor_headers = {
+        "X-Afrolete-Sub": "kc-sponsor-portal",
+        "X-Afrolete-Email": "PORTAL-SPONSOR@example.com",
+        "X-Afrolete-Name": "Sam Sponsor",
+    }
+
+    portal_response = client.get(
+        f"/api/v1/commercial/sponsor-portal?organization_id={organization['id']}",
+        headers=sponsor_headers,
+    )
+
+    assert portal_response.status_code == 200
+    portal = portal_response.json()
+    assert portal["identity_email"] == "portal-sponsor@example.com"
+    assert portal["sponsors"][0]["sponsor_name"] == "Portal Partner"
+    assert portal["sponsors"][0]["public_site_path"] == f"/site/{organization['slug']}"
+    assert portal["agreements"][0]["event_title"] == "Commercial derby"
+    assert portal["agreements"][0]["deliverables"] == ["Medical tent", "player recovery report"]
+    assert portal["invoices"][0]["invoice_number"] == "SPONSOR-1"
+    assert portal["invoices"][0]["outstanding_amount"] == "300.00"
+    assert portal["summary"]["active_value"] == "750.00"
+    assert portal["summary"]["outstanding_invoice_amount"] == "300.00"
+
+    outsider_response = client.get(
+        f"/api/v1/commercial/sponsor-portal?organization_id={organization['id']}",
+        headers={
+            "X-Afrolete-Sub": "kc-sponsor-outsider",
+            "X-Afrolete-Email": "outsider-sponsor@example.com",
+            "X-Afrolete-Name": "Outsider Sponsor",
+        },
+    )
+    assert outsider_response.status_code == 404

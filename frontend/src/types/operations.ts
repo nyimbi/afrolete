@@ -1916,6 +1916,77 @@ export type SponsorshipDashboardRead = {
   recommendation: string;
 };
 
+export type SponsorPortalSponsorRead = {
+  id: UUID;
+  organization_id: UUID;
+  organization_name: string;
+  organization_slug: string;
+  sponsor_name: string;
+  industry: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  website_url: string | null;
+  brand_assets_url: string | null;
+  public_site_path: string;
+};
+
+export type SponsorPortalAgreementRead = {
+  id: UUID;
+  organization_id: UUID;
+  organization_name: string;
+  sponsor_id: UUID;
+  sponsor_name: string;
+  event_id: UUID | null;
+  event_title: string | null;
+  event_starts_at: string | null;
+  event_venue_name: string | null;
+  name: string;
+  tier: string;
+  value_amount: string;
+  currency: string;
+  starts_on: string | null;
+  ends_on: string | null;
+  deliverables: string[];
+  activation_notes: string | null;
+  roi_notes: string | null;
+  status: CommercialStatus;
+};
+
+export type SponsorPortalInvoiceRead = {
+  id: UUID;
+  organization_id: UUID;
+  organization_name: string;
+  sponsor_id: UUID;
+  invoice_number: string;
+  title: string;
+  amount_due: string;
+  amount_paid: string;
+  outstanding_amount: string;
+  currency: string;
+  due_on: string | null;
+  status: CommercialStatus;
+  memo: string | null;
+};
+
+export type SponsorPortalSummaryRead = {
+  sponsor_count: number;
+  agreement_count: number;
+  active_value: string;
+  outstanding_invoice_amount: string;
+  deliverable_count: number;
+  activation_count: number;
+  upcoming_event_count: number;
+  recommendation: string;
+};
+
+export type SponsorPortalRead = {
+  identity_email: string;
+  sponsors: SponsorPortalSponsorRead[];
+  agreements: SponsorPortalAgreementRead[];
+  invoices: SponsorPortalInvoiceRead[];
+  summary: SponsorPortalSummaryRead;
+};
+
 export type CommercialSummaryRead = {
   organization_id: UUID;
   sponsorship_value: string;
