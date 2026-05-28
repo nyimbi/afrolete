@@ -157,8 +157,16 @@ class PerformanceWearableConnectionRead(BaseModel):
     access_token_configured: bool
     refresh_token_configured: bool
     webhook_secret_configured: bool
+    access_token_recorded: bool
+    refresh_token_recorded: bool
+    refresh_token_family_id: str | None
+    refresh_token_rotated_at: datetime | None
+    token_last_refreshed_at: datetime | None
+    token_type: str | None
+    token_scope: list[str]
     token_expires_at: datetime | None
     oauth_client_id: str | None
+    oauth_client_secret_configured: bool
     oauth_authorization_url: str | None
     oauth_token_url: str | None
     oauth_redirect_uri: str | None
@@ -197,6 +205,7 @@ class PerformanceWearableSyncRunRead(BaseModel):
 
 class PerformanceWearableOAuthStartCreate(BaseModel):
     client_id: str = Field(min_length=2, max_length=180)
+    client_secret_path: str | None = Field(default=None, max_length=500)
     authorization_url: str = Field(min_length=8, max_length=800)
     redirect_uri: str = Field(min_length=8, max_length=800)
     token_url: str | None = Field(default=None, max_length=800)
@@ -213,12 +222,21 @@ class PerformanceWearableOAuthStartRead(BaseModel):
     scopes: list[str]
 
 
+class PerformanceWearableProviderTokenResponse(BaseModel):
+    access_token: str | None = Field(default=None, max_length=8000)
+    refresh_token: str | None = Field(default=None, max_length=8000)
+    expires_in: int | None = Field(default=None, ge=1, le=31_536_000)
+    token_type: str | None = Field(default=None, max_length=40)
+    scope: str | list[str] | None = None
+
+
 class PerformanceWearableOAuthCallbackCreate(BaseModel):
     state: str = Field(min_length=16, max_length=500)
     code: str = Field(min_length=2, max_length=1000)
     access_token_secret_path: str | None = Field(default=None, max_length=500)
     refresh_token_secret_path: str | None = Field(default=None, max_length=500)
     token_expires_at: datetime | None = None
+    provider_token_response: PerformanceWearableProviderTokenResponse | None = None
 
 
 class PerformanceWearableOAuthCallbackRead(BaseModel):
@@ -226,6 +244,21 @@ class PerformanceWearableOAuthCallbackRead(BaseModel):
     status: str
     message: str
     authorization_code_ref: str
+
+
+class PerformanceWearableTokenRefreshCreate(BaseModel):
+    access_token_secret_path: str | None = Field(default=None, max_length=500)
+    refresh_token_secret_path: str | None = Field(default=None, max_length=500)
+    token_expires_at: datetime | None = None
+    provider_token_response: PerformanceWearableProviderTokenResponse | None = None
+
+
+class PerformanceWearableTokenRefreshRead(BaseModel):
+    connection: PerformanceWearableConnectionRead
+    status: str
+    message: str
+    access_token_ref: str | None
+    refresh_token_rotated: bool
 
 
 class PerformanceObservationReviewCreate(BaseModel):

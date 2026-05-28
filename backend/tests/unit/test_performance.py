@@ -1449,7 +1449,13 @@ def test_performance_wearable_connection_oauth_start_and_callback(
             "code": "provider-code-123",
             "access_token_secret_path": "secret/data/afrolete/wearables/garmin/access",
             "refresh_token_secret_path": "secret/data/afrolete/wearables/garmin/refresh",
-            "token_expires_at": "2026-06-30T00:00:00Z",
+            "provider_token_response": {
+                "access_token": "provider-access-token-1",
+                "refresh_token": "provider-refresh-token-1",
+                "expires_in": 3600,
+                "token_type": "Bearer",
+                "scope": "wellness.read sleep.read",
+            },
         },
     )
 
@@ -1459,8 +1465,38 @@ def test_performance_wearable_connection_oauth_start_and_callback(
     assert callback_payload["connection"]["status"] == "authorized"
     assert callback_payload["connection"]["access_token_configured"] is True
     assert callback_payload["connection"]["refresh_token_configured"] is True
+    assert callback_payload["connection"]["access_token_recorded"] is True
+    assert callback_payload["connection"]["refresh_token_recorded"] is True
+    assert callback_payload["connection"]["refresh_token_family_id"]
+    assert callback_payload["connection"]["token_type"] == "Bearer"
+    assert callback_payload["connection"]["token_scope"] == ["wellness.read", "sleep.read"]
+    assert "provider-access-token-1" not in callback.text
+    assert "provider-refresh-token-1" not in callback.text
     assert callback_payload["connection"]["oauth_state_pending"] is False
     assert callback_payload["connection"]["oauth_authorized_at"] is not None
+
+    refresh = client.post(
+        f"/api/v1/performance/wearable-connections/{connection['id']}/oauth/refresh",
+        headers=identity_headers,
+        json={
+            "provider_token_response": {
+                "access_token": "provider-access-token-2",
+                "refresh_token": "provider-refresh-token-2",
+                "expires_in": 7200,
+                "token_type": "Bearer",
+                "scope": ["wellness.read", "sleep.read", "activity.read"],
+            },
+        },
+    )
+    assert refresh.status_code == 200
+    refresh_payload = refresh.json()
+    assert refresh_payload["status"] == "refreshed"
+    assert refresh_payload["refresh_token_rotated"] is True
+    assert refresh_payload["connection"]["refresh_token_rotated_at"] is not None
+    assert refresh_payload["connection"]["token_last_refreshed_at"] is not None
+    assert refresh_payload["connection"]["token_scope"] == ["wellness.read", "sleep.read", "activity.read"]
+    assert "provider-access-token-2" not in refresh.text
+    assert "provider-refresh-token-2" not in refresh.text
 
     bad_replay = client.post(
         f"/api/v1/performance/wearable-connections/{connection['id']}/oauth/callback",

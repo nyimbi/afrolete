@@ -1,6 +1,7 @@
 from datetime import UTC, date, datetime, timedelta
 import hmac
 import hashlib
+import httpx
 import json
 import re
 import time
@@ -59,8 +60,10 @@ from app.schemas.performance import (
     PerformanceObservationReviewCreate,
     PerformanceWearableConnectionCreate,
     PerformanceWearableOAuthCallbackCreate,
+    PerformanceWearableProviderTokenResponse,
     PerformanceWearableOAuthStartCreate,
     PerformanceWearableSyncRunCreate,
+    PerformanceWearableTokenRefreshCreate,
     PerformanceWearableWebhookCreate,
     PlayerSelfAssessmentCreate,
 )
@@ -531,6 +534,7 @@ async def start_wearable_provider_oauth(
     expires_at = datetime.now(UTC) + timedelta(seconds=payload.state_ttl_seconds)
     scopes = payload.scopes if payload.scopes is not None else decode_string_list(connection.scopes)
     connection.oauth_client_id = payload.client_id
+    connection.oauth_client_secret_path = payload.client_secret_path
     connection.oauth_authorization_url = payload.authorization_url
     connection.oauth_token_url = payload.token_url
     connection.oauth_redirect_uri = payload.redirect_uri
@@ -573,13 +577,23 @@ async def complete_wearable_provider_oauth(
         connection.status = "oauth_expired"
         await db.commit()
         raise HTTPException(status_code=422, detail="Wearable OAuth state has expired")
+    token_response = payload.provider_token_response
+    if token_response is None and not payload.access_token_secret_path and connection.oauth_token_url and connection.oauth_client_secret_path:
+        token_response = await exchange_wearable_oauth_code(connection, payload.code)
     connection.access_token_secret_path = (
         payload.access_token_secret_path or default_wearable_secret_path(connection, "access-token")
     )
     connection.refresh_token_secret_path = (
         payload.refresh_token_secret_path or default_wearable_secret_path(connection, "refresh-token")
     )
-    connection.token_expires_at = payload.token_expires_at
+    token_ref = apply_wearable_token_response(
+        connection,
+        token_response,
+        access_token_secret_path=connection.access_token_secret_path,
+        refresh_token_secret_path=connection.refresh_token_secret_path,
+        explicit_expires_at=payload.token_expires_at,
+        now=now,
+    )
     connection.oauth_authorized_at = now
     connection.oauth_state_hash = None
     connection.oauth_state_expires_at = None
@@ -593,8 +607,103 @@ async def complete_wearable_provider_oauth(
             f"{connection.provider} OAuth callback accepted; token material must be stored at "
             f"{connection.access_token_secret_path}."
         ),
-        "authorization_code_ref": stable_secret_hash(payload.code)[:16],
+        "authorization_code_ref": token_ref or stable_secret_hash(payload.code)[:16],
     }
+
+
+async def refresh_wearable_provider_token(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    connection_id: UUID,
+    payload: PerformanceWearableTokenRefreshCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    connection = await db.get(PerformanceWearableProviderConnection, connection_id)
+    if connection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wearable connection not found")
+    await ensure_manage_performance(authz, identity, connection.organization_id)
+    if not connection.refresh_token_secret_path and not connection.refresh_token_hash:
+        raise HTTPException(status_code=422, detail="Wearable connection has no refresh token configured")
+    now = datetime.now(UTC)
+    old_refresh_hash = connection.refresh_token_hash
+    token_response = payload.provider_token_response
+    if token_response is None:
+        token_response = await refresh_wearable_oauth_token_from_provider(connection)
+    access_token_ref = apply_wearable_token_response(
+        connection,
+        token_response,
+        access_token_secret_path=payload.access_token_secret_path or connection.access_token_secret_path,
+        refresh_token_secret_path=payload.refresh_token_secret_path or connection.refresh_token_secret_path,
+        explicit_expires_at=payload.token_expires_at,
+        now=now,
+    )
+    connection.token_last_refreshed_at = now
+    connection.status = "authorized"
+    refresh_rotated = bool(old_refresh_hash and connection.refresh_token_hash and connection.refresh_token_hash != old_refresh_hash)
+    if refresh_rotated and connection.refresh_token_rotated_at is None:
+        connection.refresh_token_rotated_at = now
+    await db.commit()
+    await db.refresh(connection)
+    return {
+        "connection": connection,
+        "status": "refreshed",
+        "message": (
+            f"{connection.provider} OAuth token refresh recorded; raw provider tokens were not stored in PostgreSQL."
+        ),
+        "access_token_ref": access_token_ref,
+        "refresh_token_rotated": refresh_rotated,
+    }
+
+
+async def exchange_wearable_oauth_code(
+    connection: PerformanceWearableProviderConnection,
+    code: str,
+) -> PerformanceWearableProviderTokenResponse:
+    if not connection.oauth_token_url or not connection.oauth_client_id or not connection.oauth_redirect_uri:
+        raise HTTPException(status_code=422, detail="Wearable OAuth token endpoint is not fully configured")
+    client_secret = await resolve_wearable_client_secret(connection)
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            response = await client.post(
+                connection.oauth_token_url,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": connection.oauth_redirect_uri,
+                    "client_id": connection.oauth_client_id,
+                    "client_secret": client_secret,
+                },
+                headers={"Accept": "application/json"},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Wearable OAuth token exchange failed: {exc}") from exc
+    return wearable_provider_token_response_from_payload(response.json())
+
+
+async def refresh_wearable_oauth_token_from_provider(
+    connection: PerformanceWearableProviderConnection,
+) -> PerformanceWearableProviderTokenResponse:
+    if not connection.oauth_token_url or not connection.oauth_client_id or not connection.refresh_token_secret_path:
+        raise HTTPException(status_code=422, detail="Wearable OAuth refresh endpoint is not fully configured")
+    client_secret = await resolve_wearable_client_secret(connection)
+    refresh_token = await resolve_wearable_token_secret(connection.refresh_token_secret_path, "refresh_token")
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            response = await client.post(
+                connection.oauth_token_url,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "client_id": connection.oauth_client_id,
+                    "client_secret": client_secret,
+                },
+                headers={"Accept": "application/json"},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Wearable OAuth token refresh failed: {exc}") from exc
+    return wearable_provider_token_response_from_payload(response.json())
 
 
 def wearable_oauth_authorization_url(
@@ -626,6 +735,95 @@ def default_wearable_secret_path(
     return (
         "secret/data/afrolete/wearables/"
         f"{connection.organization_id}/{connection.athlete_profile_id}/{connection.provider}/{token_name}"
+    )
+
+
+def wearable_provider_token_response_from_payload(payload: object) -> PerformanceWearableProviderTokenResponse:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="Wearable OAuth provider returned a non-object token response")
+    return PerformanceWearableProviderTokenResponse(
+        access_token=payload.get("access_token") if payload.get("access_token") is not None else None,
+        refresh_token=payload.get("refresh_token") if payload.get("refresh_token") is not None else None,
+        expires_in=payload.get("expires_in") if payload.get("expires_in") is not None else None,
+        token_type=payload.get("token_type") if payload.get("token_type") is not None else None,
+        scope=payload.get("scope") if payload.get("scope") is not None else None,
+    )
+
+
+def apply_wearable_token_response(
+    connection: PerformanceWearableProviderConnection,
+    token_response: PerformanceWearableProviderTokenResponse | None,
+    *,
+    access_token_secret_path: str | None,
+    refresh_token_secret_path: str | None,
+    explicit_expires_at: datetime | None,
+    now: datetime,
+) -> str | None:
+    if access_token_secret_path:
+        connection.access_token_secret_path = access_token_secret_path
+    if refresh_token_secret_path:
+        connection.refresh_token_secret_path = refresh_token_secret_path
+    if token_response is None:
+        connection.token_expires_at = explicit_expires_at
+        return None
+
+    if token_response.access_token:
+        access_hash = stable_secret_hash(token_response.access_token)
+        connection.access_token_hash = access_hash
+        connection.access_token_secret_path = (
+            access_token_secret_path or connection.access_token_secret_path or default_wearable_secret_path(connection, "access-token")
+        )
+    elif not connection.access_token_secret_path:
+        raise HTTPException(status_code=422, detail="Wearable token response did not include an access token")
+
+    if token_response.refresh_token:
+        refresh_hash = stable_secret_hash(token_response.refresh_token)
+        if connection.refresh_token_hash and connection.refresh_token_hash != refresh_hash:
+            connection.refresh_token_rotated_at = now
+        connection.refresh_token_hash = refresh_hash
+        connection.refresh_token_secret_path = (
+            refresh_token_secret_path
+            or connection.refresh_token_secret_path
+            or default_wearable_secret_path(connection, "refresh-token")
+        )
+        connection.refresh_token_family_id = connection.refresh_token_family_id or stable_secret_hash(
+            f"{connection.id}:{connection.provider}:refresh-token-family"
+        )[:32]
+    elif refresh_token_secret_path:
+        connection.refresh_token_secret_path = refresh_token_secret_path
+
+    connection.token_type = token_response.token_type or connection.token_type
+    scope_values = wearable_token_scope_values(token_response.scope)
+    if scope_values:
+        connection.token_scope = encode_string_list(scope_values)
+    if token_response.expires_in is not None:
+        connection.token_expires_at = now + timedelta(seconds=token_response.expires_in)
+    else:
+        connection.token_expires_at = explicit_expires_at or connection.token_expires_at
+    return connection.access_token_hash[:16] if connection.access_token_hash else None
+
+
+def wearable_token_scope_values(scope: str | list[str] | None) -> list[str]:
+    if scope is None:
+        return []
+    if isinstance(scope, str):
+        return [item for item in re.split(r"[\s,]+", scope.strip()) if item]
+    return [str(item) for item in scope if str(item).strip()]
+
+
+async def resolve_wearable_client_secret(connection: PerformanceWearableProviderConnection) -> str:
+    if not connection.oauth_client_secret_path:
+        return ""
+    return await resolve_wearable_token_secret(connection.oauth_client_secret_path, "client_secret")
+
+
+async def resolve_wearable_token_secret(path: str, field_name: str) -> str:
+    return await resolve_secret(
+        get_settings(),
+        env_value="",
+        path=path,
+        field_name=field_name,
+        label=f"wearable OAuth {field_name}",
     )
 
 

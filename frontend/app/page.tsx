@@ -218,6 +218,7 @@ import type {
   PerformanceWearableOAuthCallbackRead,
   PerformanceWearableOAuthStartRead,
   PerformanceWearableSyncRunRead,
+  PerformanceWearableTokenRefreshRead,
   PerformanceWearableWebhookRead,
   NotificationFrequency,
   NotificationPreferenceRead,
@@ -1317,6 +1318,7 @@ export default function HomePage() {
   const [wearableSyncRun, setWearableSyncRun] = useState<PerformanceWearableSyncRunRead | null>(null);
   const [wearableOAuthStart, setWearableOAuthStart] = useState<PerformanceWearableOAuthStartRead | null>(null);
   const [wearableOAuthCallback, setWearableOAuthCallback] = useState<PerformanceWearableOAuthCallbackRead | null>(null);
+  const [wearableTokenRefresh, setWearableTokenRefresh] = useState<PerformanceWearableTokenRefreshRead | null>(null);
   const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
   const [performanceBenchmarkScope, setPerformanceBenchmarkScope] = useState<BenchmarkCohortScope>("tenant");
   const [performanceCohortComparisons, setPerformanceCohortComparisons] = useState<PerformanceCohortComparisonRead[]>([]);
@@ -2921,6 +2923,7 @@ export default function HomePage() {
       setWearableSyncRun(null);
       setWearableOAuthStart(null);
       setWearableOAuthCallback(null);
+      setWearableTokenRefresh(null);
       setAssessments([]);
       setAssessmentReviewQueue([]);
       setAssessmentReviewSummary(null);
@@ -6591,7 +6594,13 @@ export default function HomePage() {
             code: `${connection.provider}-authorization-code`,
             access_token_secret_path: `secret/data/afrolete/wearables/${connection.organization_id}/${connection.athlete_profile_id}/${connection.provider}/access-token`,
             refresh_token_secret_path: `secret/data/afrolete/wearables/${connection.organization_id}/${connection.athlete_profile_id}/${connection.provider}/refresh-token`,
-            token_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+            provider_token_response: {
+              access_token: `${connection.provider}-access-token-sample`,
+              refresh_token: `${connection.provider}-refresh-token-sample`,
+              expires_in: 30 * 24 * 60 * 60,
+              token_type: "Bearer",
+              scope: connection.scopes.length ? connection.scopes : ["read:profile", "read:metrics"]
+            }
           }
         }),
       (callback) => {
@@ -6601,6 +6610,39 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== callback.connection.id)
         ]);
         addLog(`${callback.connection.provider} OAuth callback accepted`, "good");
+      }
+    );
+  };
+
+  const refreshWearableToken = () => {
+    const connection = wearableConnections[0];
+    if (!connection) {
+      addLog("Create and authorize a wearable connection before refreshing tokens", "bad");
+      return;
+    }
+    runAction(
+      "refresh-wearable-token",
+      () =>
+        apiRequest<PerformanceWearableTokenRefreshRead>(`/performance/wearable-connections/${connection.id}/oauth/refresh`, {
+          method: "POST",
+          identity,
+          body: {
+            provider_token_response: {
+              access_token: `${connection.provider}-access-token-rotated`,
+              refresh_token: `${connection.provider}-refresh-token-rotated-${Date.now()}`,
+              expires_in: 45 * 24 * 60 * 60,
+              token_type: "Bearer",
+              scope: [...new Set([...(connection.scopes.length ? connection.scopes : ["read:profile", "read:metrics"]), "read:recovery"])]
+            }
+          }
+        }),
+      (refresh) => {
+        setWearableTokenRefresh(refresh);
+        setWearableConnections((current) => [
+          refresh.connection,
+          ...current.filter((item) => item.id !== refresh.connection.id)
+        ]);
+        addLog(`${refresh.connection.provider} token refresh recorded`, "good");
       }
     );
   };
@@ -13680,6 +13722,7 @@ export default function HomePage() {
                 <button type="button" onClick={runWearableConnectionSync} disabled={busyAction !== null}>Sync</button>
                 <button type="button" onClick={startWearableOAuth} disabled={busyAction !== null}>OAuth</button>
                 <button type="button" onClick={completeWearableOAuth} disabled={busyAction !== null}>Callback</button>
+                <button type="button" onClick={refreshWearableToken} disabled={busyAction !== null}>Refresh</button>
                 <button type="button" onClick={reviewSelectedObservation} disabled={busyAction !== null}>Review</button>
                 <button type="button" onClick={createPerformanceGoal} disabled={busyAction !== null}>Goal</button>
                 <button type="button" onClick={evaluatePerformanceAchievements} disabled={busyAction !== null}>Award</button>
@@ -14057,18 +14100,30 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {wearableTokenRefresh ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{wearableTokenRefresh.connection.provider} token refresh · {wearableTokenRefresh.status}</strong>
+                    <span>
+                      {wearableTokenRefresh.refresh_token_rotated ? "refresh token rotated" : "refresh token retained"} ·{" "}
+                      {wearableTokenRefresh.access_token_ref ?? "token ref unavailable"}
+                    </span>
+                    <small>{wearableTokenRefresh.message}</small>
+                  </div>
+                </article>
+              ) : null}
               {wearableConnections.slice(0, 3).map((connection) => (
                 <article key={connection.id} className="task-card">
                   <div>
                     <strong>{connection.display_name} · {connection.status}</strong>
                     <span>
                       {connection.provider} · {connection.external_athlete_ref} ·{" "}
-                      {connection.access_token_configured ? "token path configured" : "token missing"}
+                      {connection.access_token_recorded ? "token fingerprint recorded" : connection.access_token_configured ? "token path configured" : "token missing"}
                     </span>
                     <small>
                       {connection.webhook_registered ? "webhook registered" : "webhook not registered"} ·{" "}
                       {connection.oauth_authorized_at ? `authorized ${new Date(connection.oauth_authorized_at).toLocaleString()}` : connection.oauth_state_pending ? "OAuth pending" : "OAuth not started"} ·{" "}
-                      {connection.last_sync_at ? `last sync ${new Date(connection.last_sync_at).toLocaleString()}` : "not synced"}
+                      {connection.token_last_refreshed_at ? `token refreshed ${new Date(connection.token_last_refreshed_at).toLocaleString()}` : connection.last_sync_at ? `last sync ${new Date(connection.last_sync_at).toLocaleString()}` : "not synced"}
                     </small>
                   </div>
                 </article>

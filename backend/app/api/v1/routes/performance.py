@@ -43,6 +43,8 @@ from app.schemas.performance import (
     PerformanceWearableOAuthStartRead,
     PerformanceWearableSyncRunCreate,
     PerformanceWearableSyncRunRead,
+    PerformanceWearableTokenRefreshCreate,
+    PerformanceWearableTokenRefreshRead,
     PerformanceWearableWebhookCreate,
     PerformanceWearableWebhookRead,
     PlayerSelfAssessmentCreate,
@@ -84,6 +86,7 @@ from app.services.performance import (
     run_assessment_review_escalations,
     run_performance_injury_risk_alert_scan,
     run_wearable_provider_sync,
+    refresh_wearable_provider_token,
     start_wearable_provider_oauth,
     review_assessment,
     review_observation,
@@ -146,8 +149,16 @@ def to_wearable_connection_read(connection) -> PerformanceWearableConnectionRead
         access_token_configured=bool(connection.access_token_secret_path),
         refresh_token_configured=bool(connection.refresh_token_secret_path),
         webhook_secret_configured=bool(connection.webhook_secret_path),
+        access_token_recorded=bool(connection.access_token_hash),
+        refresh_token_recorded=bool(connection.refresh_token_hash),
+        refresh_token_family_id=connection.refresh_token_family_id,
+        refresh_token_rotated_at=connection.refresh_token_rotated_at,
+        token_last_refreshed_at=connection.token_last_refreshed_at,
+        token_type=connection.token_type,
+        token_scope=decode_string_list(connection.token_scope),
         token_expires_at=connection.token_expires_at,
         oauth_client_id=connection.oauth_client_id,
+        oauth_client_secret_configured=bool(connection.oauth_client_secret_path),
         oauth_authorization_url=connection.oauth_authorization_url,
         oauth_token_url=connection.oauth_token_url,
         oauth_redirect_uri=connection.oauth_redirect_uri,
@@ -546,6 +557,27 @@ async def complete_wearable_connection_oauth_route(
         status=result["status"],
         message=result["message"],
         authorization_code_ref=result["authorization_code_ref"],
+    )
+
+
+@router.post(
+    "/wearable-connections/{connection_id}/oauth/refresh",
+    response_model=PerformanceWearableTokenRefreshRead,
+)
+async def refresh_wearable_connection_token_route(
+    connection_id: UUID,
+    payload: PerformanceWearableTokenRefreshCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceWearableTokenRefreshRead:
+    result = await refresh_wearable_provider_token(db, identity, connection_id, payload, authz)
+    return PerformanceWearableTokenRefreshRead(
+        connection=to_wearable_connection_read(result["connection"]),
+        status=result["status"],
+        message=result["message"],
+        access_token_ref=result["access_token_ref"],
+        refresh_token_rotated=result["refresh_token_rotated"],
     )
 
 
