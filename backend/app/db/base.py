@@ -89,6 +89,7 @@ from app.models.event import (  # noqa: F401,E402
     IncidentInsuranceClaim,
     IncidentMedicalClearance,
     IncidentReportPackage,
+    SafeguardingEvidencePolicyRule,
     SafeguardingIncident,
 )
 from app.models.identity import AppUser, Person  # noqa: F401,E402

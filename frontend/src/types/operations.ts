@@ -2843,6 +2843,28 @@ export type SafeguardingIncidentEvidenceApprovalPolicyRead = {
   acceptance_blocked_by_policy: boolean;
   policy_summary: string;
   rationale: string[];
+  matched_rule_codes: string[];
+};
+
+export type SafeguardingEvidencePolicyRuleRead = {
+  id: UUID;
+  organization_id: UUID;
+  rule_code: string;
+  title: string;
+  active: boolean;
+  incident_type: SafeguardingIncidentType | null;
+  minimum_severity: SafeguardingIncidentSeverity | null;
+  evidence_type_contains: string | null;
+  medical_follow_up_values: string | null;
+  regulatory_required: boolean | null;
+  athlete_linked_required: boolean | null;
+  required_approval_level: string;
+  risk_level: string;
+  recommended_review_status: string;
+  block_acceptance: boolean;
+  rationale: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type SafeguardingIncidentEvidenceReviewItemRead = {

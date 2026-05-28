@@ -449,6 +449,33 @@ class SafeguardingIncident(IdMixin, TimestampMixin, Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class SafeguardingEvidencePolicyRule(IdMixin, TimestampMixin, Base):
+    __tablename__ = "safeguarding_evidence_policy_rules"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "rule_code",
+            name="uq_safeguarding_evidence_policy_rules_org_code",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    rule_code: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    active: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    incident_type: Mapped[str | None] = mapped_column(String(80), index=True)
+    minimum_severity: Mapped[str | None] = mapped_column(String(40), index=True)
+    evidence_type_contains: Mapped[str | None] = mapped_column(String(120), index=True)
+    medical_follow_up_values: Mapped[str | None] = mapped_column(String(240))
+    regulatory_required: Mapped[bool | None] = mapped_column(index=True)
+    athlete_linked_required: Mapped[bool | None] = mapped_column(index=True)
+    required_approval_level: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    risk_level: Mapped[str] = mapped_column(String(40), default="high", nullable=False, index=True)
+    recommended_review_status: Mapped[str] = mapped_column(String(40), default="escalated", nullable=False, index=True)
+    block_acceptance: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class IncidentReportPackage(IdMixin, TimestampMixin, Base):
     __tablename__ = "incident_report_packages"
 

@@ -44,6 +44,7 @@ from app.models.event import (
     IncidentInsuranceClaim,
     IncidentMedicalClearance,
     IncidentReportPackage,
+    SafeguardingEvidencePolicyRule,
     SafeguardingIncident,
 )
 from app.models.identity import AppUser, Person
@@ -73,6 +74,9 @@ from app.schemas.safeguarding import (
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
+    SafeguardingEvidencePolicyRuleCreate,
+    SafeguardingEvidencePolicyRuleRead,
+    SafeguardingEvidencePolicyRuleUpdate,
     SafeguardingIncidentAccessControlRead,
     SafeguardingIncidentEvidenceApprovalPolicyRead,
     SafeguardingIncidentEvidenceReviewActionCreate,
@@ -487,6 +491,124 @@ async def app_user_ids_for_person(db: AsyncSession, person_id: UUID) -> list[UUI
     return list((await db.scalars(select(AppUser.id).where(AppUser.person_id == person_id))).all())
 
 
+async def create_safeguarding_evidence_policy_rule(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SafeguardingEvidencePolicyRuleCreate,
+    authz: AuthorizationService,
+) -> SafeguardingEvidencePolicyRuleRead:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    existing = await db.scalar(
+        select(SafeguardingEvidencePolicyRule).where(
+            SafeguardingEvidencePolicyRule.organization_id == payload.organization_id,
+            SafeguardingEvidencePolicyRule.rule_code == payload.rule_code,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Evidence policy rule already exists")
+    rule = SafeguardingEvidencePolicyRule(
+        organization_id=payload.organization_id,
+        rule_code=payload.rule_code,
+        title=payload.title,
+        active=payload.active,
+        incident_type=payload.incident_type.value if payload.incident_type else None,
+        minimum_severity=payload.minimum_severity.value if payload.minimum_severity else None,
+        evidence_type_contains=payload.evidence_type_contains,
+        medical_follow_up_values=payload.medical_follow_up_values,
+        regulatory_required=payload.regulatory_required,
+        athlete_linked_required=payload.athlete_linked_required,
+        required_approval_level=normalize_provider_profile(payload.required_approval_level, "safeguarding_lead"),
+        risk_level=payload.risk_level,
+        recommended_review_status=payload.recommended_review_status,
+        block_acceptance=payload.block_acceptance,
+        rationale=payload.rationale,
+    )
+    db.add(rule)
+    await db.commit()
+    await db.refresh(rule)
+    return safeguarding_evidence_policy_rule_read(rule)
+
+
+async def list_safeguarding_evidence_policy_rules(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    active: bool | None = None,
+) -> list[SafeguardingEvidencePolicyRuleRead]:
+    await ensure_org_manage(authz, organization_id, identity)
+    return [
+        safeguarding_evidence_policy_rule_read(rule)
+        for rule in await active_safeguarding_evidence_policy_rules(db, organization_id, active=active)
+    ]
+
+
+async def update_safeguarding_evidence_policy_rule(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    rule_id: UUID,
+    payload: SafeguardingEvidencePolicyRuleUpdate,
+    authz: AuthorizationService,
+) -> SafeguardingEvidencePolicyRuleRead:
+    rule = await db.get(SafeguardingEvidencePolicyRule, rule_id)
+    if rule is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence policy rule not found")
+    await ensure_org_manage(authz, rule.organization_id, identity)
+    if payload.title is not None:
+        rule.title = payload.title
+    if payload.active is not None:
+        rule.active = payload.active
+    if payload.incident_type is not None:
+        rule.incident_type = payload.incident_type.value
+    if payload.minimum_severity is not None:
+        rule.minimum_severity = payload.minimum_severity.value
+    if payload.evidence_type_contains is not None:
+        rule.evidence_type_contains = payload.evidence_type_contains
+    if payload.medical_follow_up_values is not None:
+        rule.medical_follow_up_values = payload.medical_follow_up_values
+    if payload.regulatory_required is not None:
+        rule.regulatory_required = payload.regulatory_required
+    if payload.athlete_linked_required is not None:
+        rule.athlete_linked_required = payload.athlete_linked_required
+    if payload.required_approval_level is not None:
+        rule.required_approval_level = normalize_provider_profile(payload.required_approval_level, "safeguarding_lead")
+    if payload.risk_level is not None:
+        rule.risk_level = payload.risk_level
+    if payload.recommended_review_status is not None:
+        rule.recommended_review_status = payload.recommended_review_status
+    if payload.block_acceptance is not None:
+        rule.block_acceptance = payload.block_acceptance
+    if payload.rationale is not None:
+        rule.rationale = payload.rationale
+    await db.commit()
+    await db.refresh(rule)
+    return safeguarding_evidence_policy_rule_read(rule)
+
+
+async def active_safeguarding_evidence_policy_rules(
+    db: AsyncSession,
+    organization_id: UUID,
+    *,
+    active: bool | None = True,
+) -> list[SafeguardingEvidencePolicyRule]:
+    statement = select(SafeguardingEvidencePolicyRule).where(
+        SafeguardingEvidencePolicyRule.organization_id == organization_id
+    )
+    if active is not None:
+        statement = statement.where(SafeguardingEvidencePolicyRule.active.is_(active))
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    SafeguardingEvidencePolicyRule.active.desc(),
+                    SafeguardingEvidencePolicyRule.risk_level.desc(),
+                    SafeguardingEvidencePolicyRule.rule_code,
+                )
+            )
+        ).all()
+    )
+
+
 async def create_guardian_relationship(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -853,12 +975,14 @@ async def list_safeguarding_incident_evidence_review_queue(
 ) -> list[SafeguardingIncidentEvidenceReviewItemRead]:
     await ensure_org_manage(authz, organization_id, identity)
     selected_settings = settings or get_settings()
+    rule_rows = await active_safeguarding_evidence_policy_rules(db, organization_id)
     incidents = await list_safeguarding_incidents(db, organization_id)
     items: list[SafeguardingIncidentEvidenceReviewItemRead] = []
     for incident in incidents:
         incident_items = safeguarding_incident_evidence_review_items(
             incident,
             selected_settings,
+            rule_rows,
         )
         items.extend(incident_items)
     if review_status:
@@ -889,7 +1013,8 @@ async def get_safeguarding_incident_evidence_approval_policy(
         incident.organization_id,
         incident.id,
     )
-    items = safeguarding_incident_evidence_review_items(incident, selected_settings)
+    rule_rows = await active_safeguarding_evidence_policy_rules(db, incident.organization_id)
+    items = safeguarding_incident_evidence_review_items(incident, selected_settings, rule_rows)
     item = next((candidate for candidate in items if candidate.storage_key == storage_key), None)
     if item is None or item.approval_policy is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence upload not found in case notes")
@@ -914,7 +1039,8 @@ async def review_safeguarding_incident_evidence(
         incident.organization_id,
         incident.id,
     )
-    existing_items = safeguarding_incident_evidence_review_items(incident, selected_settings)
+    rule_rows = await active_safeguarding_evidence_policy_rules(db, incident.organization_id)
+    existing_items = safeguarding_incident_evidence_review_items(incident, selected_settings, rule_rows)
     current_item = next((item for item in existing_items if item.storage_key == payload.storage_key), None)
     if current_item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence upload not found in case notes")
@@ -967,7 +1093,8 @@ async def review_safeguarding_incident_evidence(
 
     await db.commit()
     await db.refresh(incident)
-    updated_items = safeguarding_incident_evidence_review_items(incident, selected_settings)
+    updated_rule_rows = await active_safeguarding_evidence_policy_rules(db, incident.organization_id)
+    updated_items = safeguarding_incident_evidence_review_items(incident, selected_settings, updated_rule_rows)
     updated_item = next((item for item in updated_items if item.storage_key == payload.storage_key), None)
     return SafeguardingIncidentEvidenceReviewActionRead(
         incident_id=incident.id,
@@ -1130,6 +1257,7 @@ def decode_safeguarding_upload_content(content_base64: str) -> bytes:
 def safeguarding_incident_evidence_review_items(
     incident: SafeguardingIncident,
     settings: Settings,
+    rule_rows: list[SafeguardingEvidencePolicyRule] | None = None,
 ) -> list[SafeguardingIncidentEvidenceReviewItemRead]:
     reviews = safeguarding_incident_evidence_review_updates(incident)
     items: list[SafeguardingIncidentEvidenceReviewItemRead] = []
@@ -1142,7 +1270,7 @@ def safeguarding_incident_evidence_review_items(
             item.review_status = review["review_status"]
             item.latest_reviewed_at = review["reviewed_at"]
             item.latest_review_notes = review["notes"]
-        item.approval_policy = safeguarding_incident_evidence_approval_policy(incident, item)
+        item.approval_policy = safeguarding_incident_evidence_approval_policy(incident, item, rule_rows or [])
         items.append(item)
     return items
 
@@ -1150,9 +1278,14 @@ def safeguarding_incident_evidence_review_items(
 def safeguarding_incident_evidence_approval_policy(
     incident: SafeguardingIncident,
     item: SafeguardingIncidentEvidenceReviewItemRead,
+    rule_rows: list[SafeguardingEvidencePolicyRule],
 ) -> SafeguardingIncidentEvidenceApprovalPolicyRead:
     required_levels: list[str] = []
     rationale: list[str] = []
+    matched_rule_codes: list[str] = []
+    rule_risk_levels: list[str] = []
+    rule_recommended_statuses: list[str] = []
+    block_acceptance = False
 
     add_approval_level(
         required_levels,
@@ -1202,8 +1335,17 @@ def safeguarding_incident_evidence_approval_policy(
             "guardian_communications",
             "Athlete-linked high-risk evidence requires guardian communication review.",
         )
+    for rule in rule_rows:
+        if not safeguarding_evidence_policy_rule_matches(rule, incident, item):
+            continue
+        matched_rule_codes.append(rule.rule_code)
+        add_approval_level(required_levels, rationale, rule.required_approval_level, rule.rationale)
+        rule_risk_levels.append(rule.risk_level)
+        rule_recommended_statuses.append(rule.recommended_review_status)
+        block_acceptance = block_acceptance or rule.block_acceptance
 
     policy_risk_level = safeguarding_evidence_policy_risk_level(incident, required_levels)
+    policy_risk_level = highest_safeguarding_policy_risk([policy_risk_level, *rule_risk_levels])
     approval_required = policy_risk_level in {"high", "critical"}
     if item.review_status == "accepted":
         approval_status = "approved"
@@ -1220,8 +1362,15 @@ def safeguarding_incident_evidence_approval_policy(
     else:
         approval_status = "lead_review_pending"
         missing_levels = required_levels[:1]
-    recommended_status = "escalated" if approval_required and item.review_status == "needs_review" else item.review_status
-    acceptance_blocked = approval_required and item.review_status == "needs_review"
+    recommended_status = item.review_status
+    if item.review_status == "needs_review":
+        recommended_status = highest_recommended_review_status(
+            [
+                "escalated" if approval_required else item.review_status,
+                *rule_recommended_statuses,
+            ]
+        )
+    acceptance_blocked = (approval_required or block_acceptance) and item.review_status == "needs_review"
     policy_summary = safeguarding_evidence_policy_summary(
         policy_risk_level,
         approval_status,
@@ -1247,6 +1396,7 @@ def safeguarding_incident_evidence_approval_policy(
         acceptance_blocked_by_policy=acceptance_blocked,
         policy_summary=policy_summary,
         rationale=rationale,
+        matched_rule_codes=matched_rule_codes,
     )
 
 
@@ -1278,6 +1428,47 @@ def safeguarding_evidence_policy_risk_level(
     return "low"
 
 
+def safeguarding_evidence_policy_rule_matches(
+    rule: SafeguardingEvidencePolicyRule,
+    incident: SafeguardingIncident,
+    item: SafeguardingIncidentEvidenceReviewItemRead,
+) -> bool:
+    if not rule.active:
+        return False
+    if rule.incident_type and rule.incident_type != incident.incident_type.value:
+        return False
+    if rule.minimum_severity and severity_rank(incident.severity.value) < severity_rank(rule.minimum_severity):
+        return False
+    if rule.evidence_type_contains and rule.evidence_type_contains.lower() not in item.evidence_type.lower():
+        return False
+    if rule.medical_follow_up_values:
+        values = {value.strip().lower() for value in rule.medical_follow_up_values.split(",") if value.strip()}
+        if incident.medical_follow_up_required.lower() not in values:
+            return False
+    if rule.regulatory_required is not None and incident.regulatory_report_required is not rule.regulatory_required:
+        return False
+    if rule.athlete_linked_required is not None and (incident.athlete_person_id is not None) is not rule.athlete_linked_required:
+        return False
+    return True
+
+
+def severity_rank(value: str) -> int:
+    return {"low": 1, "medium": 2, "high": 3, "critical": 4}.get(value, 0)
+
+
+def highest_safeguarding_policy_risk(values: list[str]) -> str:
+    return max((value for value in values if value), key=severity_rank, default="low")
+
+
+def highest_recommended_review_status(statuses: list[str]) -> str:
+    status_rank = {"accepted": 1, "needs_review": 2, "rejected": 3, "escalated": 4}
+    return max(
+        (status_value for status_value in statuses if status_value),
+        key=lambda value: status_rank.get(value, 0),
+        default="needs_review",
+    )
+
+
 def contains_any(value: str, needles: set[str]) -> bool:
     lowered = value.lower()
     return any(needle in lowered for needle in needles)
@@ -1298,6 +1489,31 @@ def safeguarding_evidence_policy_summary(
     if missing_levels:
         return f"{risk_level.title()}-risk evidence still needs {', '.join(missing_levels)} approval."
     return f"{risk_level.title()}-risk evidence is waiting for safeguarding lead review."
+
+
+def safeguarding_evidence_policy_rule_read(
+    rule: SafeguardingEvidencePolicyRule,
+) -> SafeguardingEvidencePolicyRuleRead:
+    return SafeguardingEvidencePolicyRuleRead(
+        id=rule.id,
+        organization_id=rule.organization_id,
+        rule_code=rule.rule_code,
+        title=rule.title,
+        active=rule.active,
+        incident_type=SafeguardingIncidentType(rule.incident_type) if rule.incident_type else None,
+        minimum_severity=SafeguardingIncidentSeverity(rule.minimum_severity) if rule.minimum_severity else None,
+        evidence_type_contains=rule.evidence_type_contains,
+        medical_follow_up_values=rule.medical_follow_up_values,
+        regulatory_required=rule.regulatory_required,
+        athlete_linked_required=rule.athlete_linked_required,
+        required_approval_level=rule.required_approval_level,
+        risk_level=rule.risk_level,
+        recommended_review_status=rule.recommended_review_status,
+        block_acceptance=rule.block_acceptance,
+        rationale=rule.rationale,
+        created_at=rule.created_at,
+        updated_at=rule.updated_at,
+    )
 
 
 def parse_safeguarding_incident_evidence_upload_note(

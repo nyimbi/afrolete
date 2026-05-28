@@ -402,6 +402,62 @@ class SafeguardingIncidentEvidenceApprovalPolicyRead(BaseModel):
     acceptance_blocked_by_policy: bool
     policy_summary: str
     rationale: list[str]
+    matched_rule_codes: list[str] = Field(default_factory=list)
+
+
+class SafeguardingEvidencePolicyRuleCreate(BaseModel):
+    organization_id: UUID
+    rule_code: str = Field(min_length=2, max_length=120, pattern="^[A-Za-z0-9_.-]+$")
+    title: str = Field(min_length=2, max_length=240)
+    active: bool = True
+    incident_type: SafeguardingIncidentType | None = None
+    minimum_severity: SafeguardingIncidentSeverity | None = None
+    evidence_type_contains: str | None = Field(default=None, max_length=120)
+    medical_follow_up_values: str | None = Field(default=None, max_length=240)
+    regulatory_required: bool | None = None
+    athlete_linked_required: bool | None = None
+    required_approval_level: str = Field(default="safeguarding_lead", min_length=2, max_length=80)
+    risk_level: str = Field(default="high", pattern="^(low|medium|high|critical)$")
+    recommended_review_status: str = Field(default="escalated", pattern="^(needs_review|accepted|rejected|escalated)$")
+    block_acceptance: bool = True
+    rationale: str = Field(min_length=2, max_length=2000)
+
+
+class SafeguardingEvidencePolicyRuleUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=240)
+    active: bool | None = None
+    incident_type: SafeguardingIncidentType | None = None
+    minimum_severity: SafeguardingIncidentSeverity | None = None
+    evidence_type_contains: str | None = Field(default=None, max_length=120)
+    medical_follow_up_values: str | None = Field(default=None, max_length=240)
+    regulatory_required: bool | None = None
+    athlete_linked_required: bool | None = None
+    required_approval_level: str | None = Field(default=None, min_length=2, max_length=80)
+    risk_level: str | None = Field(default=None, pattern="^(low|medium|high|critical)$")
+    recommended_review_status: str | None = Field(default=None, pattern="^(needs_review|accepted|rejected|escalated)$")
+    block_acceptance: bool | None = None
+    rationale: str | None = Field(default=None, min_length=2, max_length=2000)
+
+
+class SafeguardingEvidencePolicyRuleRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    rule_code: str
+    title: str
+    active: bool
+    incident_type: SafeguardingIncidentType | None
+    minimum_severity: SafeguardingIncidentSeverity | None
+    evidence_type_contains: str | None
+    medical_follow_up_values: str | None
+    regulatory_required: bool | None
+    athlete_linked_required: bool | None
+    required_approval_level: str
+    risk_level: str
+    recommended_review_status: str
+    block_acceptance: bool
+    rationale: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class SafeguardingIncidentEvidenceReviewItemRead(BaseModel):

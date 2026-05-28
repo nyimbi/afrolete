@@ -180,6 +180,7 @@ import type {
   BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
+  SafeguardingEvidencePolicyRuleRead,
   SafeguardingIncidentAccessControlRead,
   SafeguardingIncidentEvidenceApprovalPolicyRead,
   SafeguardingIncidentEvidenceReviewActionRead,
@@ -1586,6 +1587,8 @@ export default function HomePage() {
     useState<SafeguardingIncidentEvidenceReviewActionRead | null>(null);
   const [incidentEvidenceApprovalPolicy, setIncidentEvidenceApprovalPolicy] =
     useState<SafeguardingIncidentEvidenceApprovalPolicyRead | null>(null);
+  const [safeguardingEvidencePolicyRules, setSafeguardingEvidencePolicyRules] =
+    useState<SafeguardingEvidencePolicyRuleRead[]>([]);
   const [incidentAccessControlSync, setIncidentAccessControlSync] =
     useState<SafeguardingIncidentAccessControlRead | null>(null);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
@@ -2375,6 +2378,14 @@ export default function HomePage() {
       { identity }
     );
     setIncidentEvidenceReviewQueue(data);
+  }, [identity]);
+
+  const loadSafeguardingEvidencePolicyRules = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<SafeguardingEvidencePolicyRuleRead[]>(
+      `/safeguarding/evidence-policy-rules?organization_id=${organizationId}`,
+      { identity }
+    );
+    setSafeguardingEvidencePolicyRules(data);
   }, [identity]);
 
   const loadBackgroundChecks = useCallback(async (organizationId: string) => {
@@ -3185,6 +3196,7 @@ export default function HomePage() {
       setIncidentEvidenceReviewQueue([]);
       setIncidentEvidenceReviewAction(null);
       setIncidentEvidenceApprovalPolicy(null);
+      setSafeguardingEvidencePolicyRules([]);
       setIncidentAccessControlSync(null);
       setBackgroundChecks([]);
       setBackgroundCheckProviderSubmission(null);
@@ -3296,6 +3308,7 @@ export default function HomePage() {
       await loadEvents(selectedOrganizationId);
       await loadSafeguardingIncidents(selectedOrganizationId);
       await loadIncidentEvidenceReviewQueue(selectedOrganizationId);
+      await loadSafeguardingEvidencePolicyRules(selectedOrganizationId);
       await loadBackgroundChecks(selectedOrganizationId);
       await loadComplianceCredentials(selectedOrganizationId);
       await loadComplianceSummary(selectedOrganizationId);
@@ -3322,6 +3335,7 @@ export default function HomePage() {
     loadEvents,
     loadSafeguardingIncidents,
     loadIncidentEvidenceReviewQueue,
+    loadSafeguardingEvidencePolicyRules,
     loadBackgroundChecks,
     loadComplianceCredentials,
     loadComplianceSummary,
@@ -6017,6 +6031,43 @@ export default function HomePage() {
     );
   };
 
+  const createSafeguardingEvidencePolicyRule = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const ruleCode = `high-risk-evidence-${Date.now().toString(36)}`;
+    runAction(
+      "create-safeguarding-evidence-policy-rule",
+      () =>
+        apiRequest<SafeguardingEvidencePolicyRuleRead>("/safeguarding/evidence-policy-rules", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            rule_code: ruleCode,
+            title: "High-risk evidence escalation",
+            incident_type: "safeguarding",
+            minimum_severity: "medium",
+            evidence_type_contains: "case_note",
+            required_approval_level: "safeguarding_board",
+            risk_level: "critical",
+            recommended_review_status: "escalated",
+            block_acceptance: true,
+            rationale: "Tenant policy requires board-level safeguarding approval for sensitive case-note evidence."
+          }
+        }),
+      async (rule) => {
+        setSafeguardingEvidencePolicyRules((current) => [
+          rule,
+          ...current.filter((item) => item.id !== rule.id)
+        ]);
+        await loadIncidentEvidenceReviewQueue(selectedOrganizationId);
+        addLog(`${rule.title} policy rule activated`, "good");
+      }
+    );
+  };
+
   const createIncidentReportPackage = (incident: SafeguardingIncidentRead) => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -6372,6 +6423,7 @@ export default function HomePage() {
       loadComplianceCredentials(selectedOrganizationId),
       loadSafeguardingIncidents(selectedOrganizationId),
       loadIncidentEvidenceReviewQueue(selectedOrganizationId),
+      loadSafeguardingEvidencePolicyRules(selectedOrganizationId),
       loadComplianceSummary(selectedOrganizationId),
       loadIncidentReportPackages(selectedOrganizationId),
       loadIncidentInsuranceClaims(selectedOrganizationId),
@@ -16230,6 +16282,7 @@ export default function HomePage() {
               <button type="button" onClick={createBackgroundCheck} disabled={busyAction !== null}>Request check</button>
               <button type="button" onClick={createComplianceCredential} disabled={busyAction !== null}>Track credential</button>
               <button type="button" onClick={createSafeguardingIncident} disabled={busyAction !== null}>Log incident</button>
+              <button type="button" onClick={createSafeguardingEvidencePolicyRule} disabled={busyAction !== null}>Policy rule</button>
               <button type="button" onClick={reconcileCompliance} disabled={busyAction !== null}>Reconcile</button>
             </div>
           </div>
@@ -16556,6 +16609,9 @@ export default function HomePage() {
                       {item.approval_policy.missing_approval_levels.length > 0 ? ` · needs ${item.approval_policy.missing_approval_levels.join(", ")}` : ""}
                     </span>
                   ) : null}
+                  {item.approval_policy?.matched_rule_codes.length ? (
+                    <span>Matched rules: {item.approval_policy.matched_rule_codes.join(", ")}</span>
+                  ) : null}
                   {item.latest_review_notes ? <span>{item.latest_review_notes}</span> : null}
                 </div>
                 <div className="event-toolbar">
@@ -16587,10 +16643,26 @@ export default function HomePage() {
                   </span>
                   <span>{incidentEvidenceApprovalPolicy.policy_summary}</span>
                   <span>{incidentEvidenceApprovalPolicy.required_approval_levels.join(", ")}</span>
+                  {incidentEvidenceApprovalPolicy.matched_rule_codes.length ? (
+                    <span>Matched rules: {incidentEvidenceApprovalPolicy.matched_rule_codes.join(", ")}</span>
+                  ) : null}
                   <span>{incidentEvidenceApprovalPolicy.rationale[0] ?? "No additional policy rationale"}</span>
                 </div>
               </article>
             ) : null}
+            {safeguardingEvidencePolicyRules.slice(0, 4).map((rule) => (
+              <article key={rule.id} className="task-card">
+                <div>
+                  <strong>{rule.title}</strong>
+                  <span>{rule.rule_code} · {rule.active ? "active" : "inactive"} · {rule.risk_level}</span>
+                  <span>
+                    {rule.incident_type ?? "any incident"} · severity {rule.minimum_severity ?? "any"} · evidence {rule.evidence_type_contains ?? "any"}
+                  </span>
+                  <span>Requires {rule.required_approval_level} · recommends {rule.recommended_review_status}</span>
+                  <span>{rule.rationale}</span>
+                </div>
+              </article>
+            ))}
             {incidentReportPackages.slice(0, 4).map((reportPackage) => (
               <article key={reportPackage.id} className="task-card">
                 <div>

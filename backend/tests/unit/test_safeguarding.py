@@ -524,6 +524,47 @@ def test_incident_evidence_review_queue_and_actions(client, identity_headers) ->
         headers=identity_headers,
         json={"name": "Evidence Queue Club", "organization_type": "club"},
     ).json()
+    policy_rule_response = client.post(
+        "/api/v1/safeguarding/evidence-policy-rules",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "rule_code": "case-note-board-escalation",
+            "title": "Case note board escalation",
+            "incident_type": "safeguarding",
+            "minimum_severity": "medium",
+            "evidence_type_contains": "case_note",
+            "required_approval_level": "board_safeguarding_panel",
+            "risk_level": "critical",
+            "recommended_review_status": "escalated",
+            "block_acceptance": True,
+            "rationale": "Tenant-authored policy requires board safeguarding panel review for case notes.",
+        },
+    )
+    assert policy_rule_response.status_code == 201
+    policy_rule = policy_rule_response.json()
+    assert policy_rule["rule_code"] == "case-note-board-escalation"
+
+    duplicate_rule_response = client.post(
+        "/api/v1/safeguarding/evidence-policy-rules",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "rule_code": "case-note-board-escalation",
+            "title": "Duplicate rule",
+            "required_approval_level": "duplicate_panel",
+            "rationale": "Duplicate tenant policy should be rejected.",
+        },
+    )
+    assert duplicate_rule_response.status_code == 409
+
+    listed_rules_response = client.get(
+        f"/api/v1/safeguarding/evidence-policy-rules?organization_id={organization['id']}&active=true",
+        headers=identity_headers,
+    )
+    assert listed_rules_response.status_code == 200
+    assert [rule["rule_code"] for rule in listed_rules_response.json()] == ["case-note-board-escalation"]
+
     incident = client.post(
         "/api/v1/safeguarding/incidents",
         headers=identity_headers,
@@ -567,10 +608,12 @@ def test_incident_evidence_review_queue_and_actions(client, identity_headers) ->
     assert queue[0]["review_status"] == "needs_review"
     assert queue[0]["storage_key"] == upload["storage_key"]
     assert queue[0]["checksum"] == upload["checksum"]
-    assert queue[0]["approval_policy"]["policy_risk_level"] == "high"
+    assert queue[0]["approval_policy"]["policy_risk_level"] == "critical"
     assert queue[0]["approval_policy"]["recommended_review_status"] == "escalated"
     assert queue[0]["approval_policy"]["acceptance_blocked_by_policy"] is True
     assert "safeguarding_committee" in queue[0]["approval_policy"]["required_approval_levels"]
+    assert "board_safeguarding_panel" in queue[0]["approval_policy"]["required_approval_levels"]
+    assert queue[0]["approval_policy"]["matched_rule_codes"] == ["case-note-board-escalation"]
 
     policy_response = client.get(
         f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-approval-policy?storage_key={upload['storage_key']}",
@@ -580,6 +623,7 @@ def test_incident_evidence_review_queue_and_actions(client, identity_headers) ->
     policy = policy_response.json()
     assert policy["approval_status"] == "escalation_required"
     assert policy["approval_required"] is True
+    assert policy["matched_rule_codes"] == ["case-note-board-escalation"]
 
     direct_accept_response = client.post(
         f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-review",
@@ -626,6 +670,21 @@ def test_incident_evidence_review_queue_and_actions(client, identity_headers) ->
     assert len(escalated_queue) == 1
     assert escalated_queue[0]["review_status"] == "escalated"
     assert escalated_queue[0]["latest_review_notes"] == "Escalate to the safeguarding committee."
+
+    disable_rule_response = client.patch(
+        f"/api/v1/safeguarding/evidence-policy-rules/{policy_rule['id']}",
+        headers=identity_headers,
+        json={"active": False},
+    )
+    assert disable_rule_response.status_code == 200
+    assert disable_rule_response.json()["active"] is False
+
+    active_rules_after_disable = client.get(
+        f"/api/v1/safeguarding/evidence-policy-rules?organization_id={organization['id']}&active=true",
+        headers=identity_headers,
+    )
+    assert active_rules_after_disable.status_code == 200
+    assert active_rules_after_disable.json() == []
 
     bad_review = client.post(
         f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-review",

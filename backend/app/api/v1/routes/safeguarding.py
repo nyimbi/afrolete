@@ -38,6 +38,9 @@ from app.schemas.safeguarding import (
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
+    SafeguardingEvidencePolicyRuleCreate,
+    SafeguardingEvidencePolicyRuleRead,
+    SafeguardingEvidencePolicyRuleUpdate,
     SafeguardingIncidentAccessControlRead,
     SafeguardingIncidentEvidenceApprovalPolicyRead,
     SafeguardingIncidentEvidenceReviewActionCreate,
@@ -88,6 +91,7 @@ from app.services.safeguarding import (
     create_incident_insurance_claim,
     create_incident_medical_clearance,
     create_incident_report_package,
+    create_safeguarding_evidence_policy_rule,
     create_safeguarding_incident,
     ensure_org_manage,
     compliance_summary,
@@ -102,6 +106,7 @@ from app.services.safeguarding import (
     poll_incident_medical_clearance_provider_status,
     list_incident_medical_clearances,
     list_incident_report_packages,
+    list_safeguarding_evidence_policy_rules,
     list_safeguarding_incident_evidence_review_queue,
     list_safeguarding_incidents,
     list_my_family_consent_requests,
@@ -125,6 +130,7 @@ from app.services.safeguarding import (
     upload_safeguarding_incident_evidence,
     update_incident_medical_clearance,
     update_incident_report_package,
+    update_safeguarding_evidence_policy_rule,
     update_safeguarding_incident,
 )
 
@@ -452,6 +458,44 @@ async def sync_safeguarding_incident_access_controls_route(
         incident_id,
         authz,
     )
+
+
+@router.post("/evidence-policy-rules", response_model=SafeguardingEvidencePolicyRuleRead, status_code=201)
+async def create_safeguarding_evidence_policy_rule_route(
+    payload: SafeguardingEvidencePolicyRuleCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingEvidencePolicyRuleRead:
+    return await create_safeguarding_evidence_policy_rule(db, identity, payload, authz)
+
+
+@router.get("/evidence-policy-rules", response_model=list[SafeguardingEvidencePolicyRuleRead])
+async def list_safeguarding_evidence_policy_rules_route(
+    organization_id: UUID = Query(),
+    active: bool | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[SafeguardingEvidencePolicyRuleRead]:
+    return await list_safeguarding_evidence_policy_rules(
+        db,
+        identity,
+        organization_id,
+        authz,
+        active=active,
+    )
+
+
+@router.patch("/evidence-policy-rules/{rule_id}", response_model=SafeguardingEvidencePolicyRuleRead)
+async def update_safeguarding_evidence_policy_rule_route(
+    rule_id: UUID,
+    payload: SafeguardingEvidencePolicyRuleUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingEvidencePolicyRuleRead:
+    return await update_safeguarding_evidence_policy_rule(db, identity, rule_id, payload, authz)
 
 
 @router.post("/incidents/{incident_id}/evidence", response_model=SafeguardingIncidentEvidenceUploadRead)
