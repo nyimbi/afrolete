@@ -8,7 +8,7 @@ import time
 from secrets import token_urlsafe
 from statistics import pstdev
 from urllib.parse import urlencode
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -22,6 +22,7 @@ from app.models.enums import (
     CommunicationScopeType,
     MemberSubjectType,
     MembershipRole,
+    MetricCategory,
     MetricSource,
     MetricVerificationStatus,
     SafeguardingIncidentStatus,
@@ -56,6 +57,8 @@ from app.schemas.performance import (
     PerformanceAchievementWorkerRunRead,
     PerformanceGoalCreate,
     PerformanceIngestionCreate,
+    PerformanceModelExtractionBenchmarkCaseCreate,
+    PerformanceModelExtractionBenchmarkRunCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
     PerformanceWearableConnectionCreate,
@@ -283,6 +286,37 @@ async def ingest_performance_evidence(
         "model_confidence": model_assist["confidence"] if model_assist else None,
         "model_summary": model_assist["summary"] if model_assist else None,
         "model_evaluation": model_evaluation(parsed, model_assist, model_applied),
+    }
+
+
+async def run_performance_model_extraction_benchmark(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: PerformanceModelExtractionBenchmarkRunCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    settings = get_settings()
+    cases = payload.cases or default_model_extraction_benchmark_cases()
+    results = [
+        await evaluate_model_extraction_benchmark_case(settings, payload.organization_id, case)
+        for case in cases
+    ]
+    passed_count = sum(1 for result in results if result["passed"])
+    mean_absolute_error = (
+        round(sum(float(result["absolute_error"]) for result in results) / len(results), 4)
+        if results
+        else 0.0
+    )
+    return {
+        "organization_id": payload.organization_id,
+        "model_policy": settings.performance_model_extraction_model,
+        "case_count": len(results),
+        "passed_count": passed_count,
+        "failed_count": len(results) - passed_count,
+        "accuracy": round(passed_count / len(results), 4) if results else 0.0,
+        "mean_absolute_error": mean_absolute_error,
+        "cases": results,
     }
 
 
@@ -4736,6 +4770,107 @@ def model_evaluation(
         "model_method": str(model_assist["method"]),
         "model_confidence": f"{float(model_assist['confidence']):.2f}",
         "final_method": str(parsed["method"]),
+    }
+
+
+def default_model_extraction_benchmark_cases() -> list[PerformanceModelExtractionBenchmarkCaseCreate]:
+    return [
+        PerformanceModelExtractionBenchmarkCaseCreate(
+            case_id="sleep-duration-number-word",
+            metric_code="sleep_minutes",
+            metric_name="Sleep Minutes",
+            unit="minutes",
+            min_value=0,
+            max_value=900,
+            source=MetricSource.AUDIO_NARRATION,
+            evidence_ref="benchmark://performance/sleep-duration-number-word",
+            evidence_text="Recovery note: sleep duration was seven hours after travel.",
+            expected_value=420,
+            tolerance=0.01,
+        ),
+        PerformanceModelExtractionBenchmarkCaseCreate(
+            case_id="video-first-touch-specific-number",
+            metric_code="first_touch",
+            metric_name="First Touch",
+            category=MetricCategory.TECHNICAL,
+            unit="score",
+            min_value=0,
+            max_value=10,
+            source=MetricSource.VIDEO_ANALYSIS,
+            evidence_ref="benchmark://performance/video-first-touch-specific-number",
+            evidence_text="70th minute clip: first touch quality 8.4 under pressure after two scans.",
+            expected_value=8.4,
+            tolerance=0.01,
+        ),
+        PerformanceModelExtractionBenchmarkCaseCreate(
+            case_id="agent-recovery-score",
+            metric_code="recovery_score",
+            metric_name="Recovery Score",
+            unit="score",
+            min_value=0,
+            max_value=100,
+            source=MetricSource.AGENT_EXTRACTED,
+            evidence_ref="benchmark://performance/agent-recovery-score",
+            evidence_text="Agent summary: fatigue was high but readiness improved; recovery score came out at 74.",
+            expected_value=74,
+            tolerance=0.01,
+        ),
+    ]
+
+
+async def evaluate_model_extraction_benchmark_case(
+    settings: Settings,
+    organization_id: UUID,
+    case: PerformanceModelExtractionBenchmarkCaseCreate,
+) -> dict[str, object]:
+    metric = PerformanceMetricDefinition(
+        id=uuid4(),
+        organization_id=organization_id,
+        sport="benchmark",
+        code=case.metric_code,
+        name=case.metric_name,
+        category=case.category,
+        unit=case.unit,
+        min_value=case.min_value,
+        max_value=case.max_value,
+        weight=1.0,
+        higher_is_better=True,
+        status="active",
+    )
+    ingestion_payload = PerformanceIngestionCreate(
+        organization_id=organization_id,
+        athlete_profile_id=uuid4(),
+        metric_definition_id=metric.id,
+        source=case.source,
+        source_provider=case.source_provider,
+        evidence_ref=case.evidence_ref,
+        evidence_text=case.evidence_text,
+    )
+    parsed = parse_performance_evidence(ingestion_payload, metric)
+    model_assist = await model_assisted_performance_extraction(settings, ingestion_payload, metric, parsed)
+    model_applied = False
+    if should_apply_model_extraction(parsed, model_assist):
+        parsed = apply_model_extraction(parsed, model_assist)
+        model_applied = True
+    extracted_value = float(parsed["value"])
+    absolute_error = round(abs(extracted_value - case.expected_value), 4)
+    return {
+        "case_id": case.case_id,
+        "metric_code": case.metric_code,
+        "source": case.source,
+        "expected_value": case.expected_value,
+        "extracted_value": extracted_value,
+        "absolute_error": absolute_error,
+        "tolerance": case.tolerance,
+        "passed": absolute_error <= case.tolerance,
+        "parser_method": parsed["method"],
+        "model_assisted": model_applied,
+        "model_policy": model_assist["model_policy"] if model_assist else None,
+        "confidence": parsed["confidence"],
+        "summary": (
+            f"{case.case_id}: expected {case.expected_value:g}, extracted {extracted_value:g} "
+            f"via {parsed['method']}."
+        ),
     }
 
 

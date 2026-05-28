@@ -3174,6 +3174,33 @@ export type PerformanceIngestionRead = {
   model_evaluation: Record<string, string>;
 };
 
+export type PerformanceModelExtractionBenchmarkCaseRead = {
+  case_id: string;
+  metric_code: string;
+  source: MetricSource;
+  expected_value: number;
+  extracted_value: number;
+  absolute_error: number;
+  tolerance: number;
+  passed: boolean;
+  parser_method: string;
+  model_assisted: boolean;
+  model_policy: string | null;
+  confidence: number;
+  summary: string;
+};
+
+export type PerformanceModelExtractionBenchmarkRunRead = {
+  organization_id: UUID;
+  model_policy: string;
+  case_count: number;
+  passed_count: number;
+  failed_count: number;
+  accuracy: number;
+  mean_absolute_error: number;
+  cases: PerformanceModelExtractionBenchmarkCaseRead[];
+};
+
 export type PerformanceWearableWebhookRead = {
   ingest_event_id: UUID;
   organization_id: UUID;

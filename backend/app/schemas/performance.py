@@ -105,6 +105,54 @@ class PerformanceIngestionRead(BaseModel):
     model_evaluation: dict[str, str]
 
 
+class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
+    case_id: str = Field(min_length=2, max_length=120)
+    metric_code: str = Field(min_length=2, max_length=80)
+    metric_name: str = Field(min_length=2, max_length=180)
+    category: MetricCategory = MetricCategory.WELLNESS
+    unit: str | None = Field(default=None, max_length=40)
+    min_value: float | None = None
+    max_value: float | None = None
+    source: MetricSource = MetricSource.AUDIO_NARRATION
+    source_provider: str | None = Field(default=None, max_length=80)
+    evidence_ref: str = Field(default="benchmark://performance/model-extraction", max_length=500)
+    evidence_text: str = Field(min_length=2, max_length=8000)
+    expected_value: float
+    tolerance: float = Field(default=0.01, ge=0)
+
+
+class PerformanceModelExtractionBenchmarkRunCreate(BaseModel):
+    organization_id: UUID
+    cases: list[PerformanceModelExtractionBenchmarkCaseCreate] = Field(default_factory=list, max_length=50)
+
+
+class PerformanceModelExtractionBenchmarkCaseRead(BaseModel):
+    case_id: str
+    metric_code: str
+    source: MetricSource
+    expected_value: float
+    extracted_value: float
+    absolute_error: float
+    tolerance: float
+    passed: bool
+    parser_method: str
+    model_assisted: bool
+    model_policy: str | None
+    confidence: float
+    summary: str
+
+
+class PerformanceModelExtractionBenchmarkRunRead(BaseModel):
+    organization_id: UUID
+    model_policy: str
+    case_count: int
+    passed_count: int
+    failed_count: int
+    accuracy: float
+    mean_absolute_error: float
+    cases: list[PerformanceModelExtractionBenchmarkCaseRead]
+
+
 class PerformanceWearableWebhookCreate(BaseModel):
     organization_id: UUID
     athlete_profile_id: UUID

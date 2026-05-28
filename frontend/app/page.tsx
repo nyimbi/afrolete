@@ -211,6 +211,7 @@ import type {
   PerformanceInjuryRiskRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
+  PerformanceModelExtractionBenchmarkRunRead,
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceObservationRead,
@@ -1346,6 +1347,8 @@ export default function HomePage() {
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
+  const [performanceModelBenchmark, setPerformanceModelBenchmark] =
+    useState<PerformanceModelExtractionBenchmarkRunRead | null>(null);
   const [performanceWebhookIngest, setPerformanceWebhookIngest] = useState<PerformanceWearableWebhookRead | null>(null);
   const [wearableConnections, setWearableConnections] = useState<PerformanceWearableConnectionRead[]>([]);
   const [wearableSyncRun, setWearableSyncRun] = useState<PerformanceWearableSyncRunRead | null>(null);
@@ -2953,6 +2956,7 @@ export default function HomePage() {
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
+      setPerformanceModelBenchmark(null);
       setPerformanceWebhookIngest(null);
       setWearableConnections([]);
       setWearableSyncRun(null);
@@ -6474,6 +6478,29 @@ export default function HomePage() {
         setSelectedObservationId(ingestion.observation.id);
         addLog(`${ingestion.extractor} queued observation review`, "good");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const runPerformanceModelBenchmark = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running model extraction benchmarks", "bad");
+      return;
+    }
+    runAction(
+      "performance-model-benchmark",
+      () =>
+        apiRequest<PerformanceModelExtractionBenchmarkRunRead>("/performance/model-extraction/benchmarks", {
+          method: "POST",
+          identity,
+          body: { organization_id: selectedOrganizationId }
+        }),
+      (benchmark) => {
+        setPerformanceModelBenchmark(benchmark);
+        addLog(
+          `${benchmark.model_policy} benchmark ${benchmark.passed_count}/${benchmark.case_count} passed`,
+          benchmark.failed_count ? "neutral" : "good"
+        );
       }
     );
   };
@@ -13822,6 +13849,7 @@ export default function HomePage() {
                 <button type="button" onClick={createMetricDefinition} disabled={busyAction !== null}>Metric</button>
                 <button type="button" onClick={recordObservation} disabled={busyAction !== null}>Observe</button>
                 <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
+                <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
                 <button type="button" onClick={ingestPerformanceWearableWebhook} disabled={busyAction !== null}>Webhook</button>
                 <button type="button" onClick={createWearableConnection} disabled={busyAction !== null}>Connect</button>
                 <button type="button" onClick={runWearableConnectionSync} disabled={busyAction !== null}>Sync</button>
@@ -14170,6 +14198,23 @@ export default function HomePage() {
                           : "no score"}
                       </small>
                     ) : null}
+                  </div>
+                </article>
+              ) : null}
+              {performanceModelBenchmark ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{performanceModelBenchmark.model_policy} benchmark</strong>
+                    <span>
+                      {performanceModelBenchmark.passed_count}/{performanceModelBenchmark.case_count} passed ·{" "}
+                      {Math.round(performanceModelBenchmark.accuracy * 100)}% accuracy · MAE{" "}
+                      {performanceModelBenchmark.mean_absolute_error}
+                    </span>
+                    <small>
+                      {performanceModelBenchmark.cases.slice(0, 3).map((item) =>
+                        `${item.case_id}: ${item.passed ? "pass" : "fail"} via ${item.parser_method.replaceAll("_", " ")}`
+                      ).join(" · ")}
+                    </small>
                   </div>
                 </article>
               ) : null}

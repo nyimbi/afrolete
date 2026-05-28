@@ -30,6 +30,8 @@ from app.schemas.performance import (
     PerformanceForecastScenarioRead,
     PerformanceForecastWhatIfRead,
     PerformanceMetricBenchmarkRead,
+    PerformanceModelExtractionBenchmarkRunCreate,
+    PerformanceModelExtractionBenchmarkRunRead,
     PerformanceMetricTrendRead,
     PerformanceMetricTrendSeriesRead,
     PerformanceObservationCreate,
@@ -81,6 +83,7 @@ from app.services.performance import (
     performance_forecast_what_if_scenarios,
     performance_injury_risk,
     performance_metric_benchmarks,
+    run_performance_model_extraction_benchmark,
     performance_cohort_comparisons,
     performance_metric_trend_series,
     performance_metric_trends,
@@ -444,6 +447,21 @@ async def ingest_performance_evidence_route(
         model_confidence=result["model_confidence"],
         model_summary=result["model_summary"],
         model_evaluation=result["model_evaluation"],
+    )
+
+
+@router.post(
+    "/model-extraction/benchmarks",
+    response_model=PerformanceModelExtractionBenchmarkRunRead,
+)
+async def run_performance_model_extraction_benchmark_route(
+    payload: PerformanceModelExtractionBenchmarkRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceModelExtractionBenchmarkRunRead:
+    return PerformanceModelExtractionBenchmarkRunRead(
+        **await run_performance_model_extraction_benchmark(db, identity, payload, authz)
     )
 
 

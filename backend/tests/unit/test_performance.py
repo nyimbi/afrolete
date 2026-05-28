@@ -1412,6 +1412,28 @@ def test_performance_ingestion_uses_model_assist_for_narrative_number_words(clie
     assert "Model-assisted extraction requires human review before verification." in ingestion["parser_warnings"]
 
 
+def test_performance_model_extraction_benchmark_reports_accuracy(client, identity_headers) -> None:
+    organization, _, _, _ = create_rostered_athlete(client, identity_headers)
+
+    response = client.post(
+        "/api/v1/performance/model-extraction/benchmarks",
+        headers=identity_headers,
+        json={"organization_id": organization["id"]},
+    )
+
+    assert response.status_code == 200
+    benchmark = response.json()
+    assert benchmark["model_policy"] == "afrolete-performance-extractor-v1"
+    assert benchmark["case_count"] == 3
+    assert benchmark["passed_count"] == 3
+    assert benchmark["failed_count"] == 0
+    assert benchmark["accuracy"] == 1.0
+    assert benchmark["mean_absolute_error"] == 0.0
+    methods = {case["case_id"]: case["parser_method"] for case in benchmark["cases"]}
+    assert methods["sleep-duration-number-word"] == "model_assisted_extraction"
+    assert methods["video-first-touch-specific-number"] == "metric_specific_text"
+
+
 def test_performance_wearable_webhook_creates_pending_observations_once(
     client, identity_headers
 ) -> None:
