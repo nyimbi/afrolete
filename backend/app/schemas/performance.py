@@ -140,6 +140,15 @@ class AthleteAssessmentReviewCreate(BaseModel):
     recommendations: str | None = Field(default=None, max_length=4000)
 
 
+class AthleteAssessmentReviewAssignmentUpdate(BaseModel):
+    assign_to_self: bool = False
+    clear_assignment: bool = False
+    assigned_to_person_id: UUID | None = None
+    review_due_at: datetime | None = None
+    review_priority: str | None = Field(default=None, pattern="^(low|normal|high|urgent)$")
+    review_notes: str | None = Field(default=None, max_length=4000)
+
+
 class AthleteAssessmentRead(BaseModel):
     id: UUID
     organization_id: UUID
@@ -156,6 +165,12 @@ class AthleteAssessmentRead(BaseModel):
     effort_rating: float | None
     summary: str | None
     recommendations: str | None
+    review_assigned_to_person_id: UUID | None
+    review_due_at: datetime | None
+    review_priority: str
+    review_notes: str | None
+    reviewed_by_person_id: UUID | None
+    reviewed_at: datetime | None
     verification_status: MetricVerificationStatus
 
 
@@ -163,6 +178,9 @@ class AthleteAssessmentReviewQueueItemRead(BaseModel):
     assessment: AthleteAssessmentRead
     athlete_person_id: UUID
     athlete_name: str
+    review_assigned_to_name: str | None
+    review_sla_state: str
+    review_age_hours: int
 
 
 class AthletePerformanceSummaryRead(BaseModel):

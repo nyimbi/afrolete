@@ -86,6 +86,14 @@ class AthleteAssessment(IdMixin, TimestampMixin, Base):
     effort_rating: Mapped[float | None] = mapped_column(Float)
     summary: Mapped[str | None] = mapped_column(Text)
     recommendations: Mapped[str | None] = mapped_column(Text)
+    review_assigned_to_person_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("persons.id"), index=True
+    )
+    review_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    review_priority: Mapped[str] = mapped_column(String(20), default="normal", nullable=False, index=True)
+    review_notes: Mapped[str | None] = mapped_column(Text)
+    reviewed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     verification_status: Mapped[MetricVerificationStatus] = mapped_column(
         enum_type(MetricVerificationStatus),
         default=MetricVerificationStatus.VERIFIED,

@@ -1,3 +1,6 @@
+from datetime import UTC, datetime, timedelta
+
+
 def test_performance_achievements_create_in_app_notification(client, identity_headers) -> None:
     organization, _, member, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(
@@ -230,6 +233,43 @@ def test_coach_can_review_player_self_assessment(client, identity_headers) -> No
     assert len(queue) == 1
     assert queue[0]["athlete_name"] == "Performance Athlete"
     assert queue[0]["assessment"]["id"] == pending["id"]
+    assert queue[0]["assessment"]["review_priority"] == "normal"
+    assert queue[0]["assessment"]["review_due_at"] is not None
+    assert queue[0]["review_sla_state"] in {"due_soon", "on_track"}
+
+    due_at = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    assignment_response = client.patch(
+        f"/api/v1/performance/assessments/{pending['id']}/review-assignment",
+        headers=identity_headers,
+        json={
+            "assign_to_self": True,
+            "review_due_at": due_at,
+            "review_priority": "urgent",
+            "review_notes": "Review before the next matchday squad is picked.",
+        },
+    )
+    assert assignment_response.status_code == 200
+    assigned = assignment_response.json()
+    assert assigned["review_assigned_to_person_id"] is not None
+    assert assigned["review_priority"] == "urgent"
+    assert assigned["review_notes"] == "Review before the next matchday squad is picked."
+
+    filtered_queue = client.get(
+        f"/api/v1/performance/assessments/review-queue?organization_id={organization['id']}"
+        "&assignment=mine&sla=overdue&priority=urgent",
+        headers=identity_headers,
+    ).json()
+    assert len(filtered_queue) == 1
+    assert filtered_queue[0]["review_assigned_to_name"] == "Owner Example"
+    assert filtered_queue[0]["review_sla_state"] == "overdue"
+    assert filtered_queue[0]["review_age_hours"] >= 0
+
+    unassigned_queue = client.get(
+        f"/api/v1/performance/assessments/review-queue?organization_id={organization['id']}"
+        "&assignment=unassigned",
+        headers=identity_headers,
+    ).json()
+    assert unassigned_queue == []
 
     response = client.patch(
         f"/api/v1/performance/assessments/{pending['id']}/review",
@@ -247,6 +287,8 @@ def test_coach_can_review_player_self_assessment(client, identity_headers) -> No
     assert reviewed["physical_score"] == 74
     assert reviewed["overall_score"] == 73.9
     assert reviewed["recommendations"] == "Keep the recovery block and review fatigue next session."
+    assert reviewed["reviewed_by_person_id"] is not None
+    assert reviewed["reviewed_at"] is not None
 
     summary = client.get(
         f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/summary"

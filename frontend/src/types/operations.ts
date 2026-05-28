@@ -3180,6 +3180,12 @@ export type AthleteAssessmentRead = {
   effort_rating: number | null;
   summary: string | null;
   recommendations: string | null;
+  review_assigned_to_person_id: UUID | null;
+  review_due_at: string | null;
+  review_priority: "low" | "normal" | "high" | "urgent";
+  review_notes: string | null;
+  reviewed_by_person_id: UUID | null;
+  reviewed_at: string | null;
   verification_status: MetricVerificationStatus;
 };
 
@@ -3187,6 +3193,9 @@ export type AthleteAssessmentReviewQueueItemRead = {
   assessment: AthleteAssessmentRead;
   athlete_person_id: UUID;
   athlete_name: string;
+  review_assigned_to_name: string | null;
+  review_sla_state: "unscheduled" | "overdue" | "due_soon" | "on_track";
+  review_age_hours: number;
 };
 
 export type AthletePerformanceSummaryRead = {

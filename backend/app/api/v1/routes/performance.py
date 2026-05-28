@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -7,6 +8,7 @@ from app.db.session import get_db
 from app.schemas.performance import (
     AthleteAssessmentCreate,
     AthleteAssessmentRead,
+    AthleteAssessmentReviewAssignmentUpdate,
     AthleteAssessmentReviewQueueItemRead,
     AthleteAssessmentReviewCreate,
     AthletePerformanceSummaryRead,
@@ -49,6 +51,7 @@ from app.services.performance import (
     performance_summary,
     review_assessment,
     review_observation,
+    update_assessment_review_assignment,
 )
 
 router = APIRouter(prefix="/performance", tags=["performance"])
@@ -107,8 +110,35 @@ def to_assessment_read(assessment) -> AthleteAssessmentRead:
         effort_rating=assessment.effort_rating,
         summary=assessment.summary,
         recommendations=assessment.recommendations,
+        review_assigned_to_person_id=assessment.review_assigned_to_person_id,
+        review_due_at=assessment.review_due_at,
+        review_priority=assessment.review_priority,
+        review_notes=assessment.review_notes,
+        reviewed_by_person_id=assessment.reviewed_by_person_id,
+        reviewed_at=assessment.reviewed_at,
         verification_status=assessment.verification_status,
     )
+
+
+def assessment_review_sla_state(assessment) -> str:
+    if assessment.review_due_at is None:
+        return "unscheduled"
+    due_at = assessment.review_due_at
+    if due_at.tzinfo is None:
+        due_at = due_at.replace(tzinfo=UTC)
+    now = datetime.now(UTC)
+    if due_at < now:
+        return "overdue"
+    if (due_at - now).total_seconds() <= 24 * 60 * 60:
+        return "due_soon"
+    return "on_track"
+
+
+def assessment_review_age_hours(assessment) -> int:
+    created_at = assessment.created_at or assessment.assessed_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    return max(0, int((datetime.now(UTC) - created_at).total_seconds() // 3600))
 
 
 def to_goal_read(goal) -> PerformanceGoalRead:
@@ -297,6 +327,22 @@ async def review_assessment_route(
     return to_assessment_read(await review_assessment(db, identity, assessment_id, payload, authz))
 
 
+@router.patch(
+    "/assessments/{assessment_id}/review-assignment",
+    response_model=AthleteAssessmentRead,
+)
+async def update_assessment_review_assignment_route(
+    assessment_id: UUID,
+    payload: AthleteAssessmentReviewAssignmentUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AthleteAssessmentRead:
+    return to_assessment_read(
+        await update_assessment_review_assignment(db, identity, assessment_id, payload, authz)
+    )
+
+
 @router.get(
     "/assessments/review-queue",
     response_model=list[AthleteAssessmentReviewQueueItemRead],
@@ -304,18 +350,33 @@ async def review_assessment_route(
 async def list_assessment_review_queue_route(
     organization_id: UUID = Query(),
     limit: int = Query(default=25, ge=1, le=100),
+    assignment: str = Query(default="all", pattern="^(all|mine|unassigned|assigned)$"),
+    sla: str = Query(default="all", pattern="^(all|overdue|due_soon|on_track)$"),
+    priority: str = Query(default="all", pattern="^(all|low|normal|high|urgent)$"),
     identity: CurrentIdentity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> list[AthleteAssessmentReviewQueueItemRead]:
-    rows = await list_assessment_review_queue(db, identity, organization_id, authz, limit=limit)
+    rows = await list_assessment_review_queue(
+        db,
+        identity,
+        organization_id,
+        authz,
+        limit=limit,
+        assignment=assignment,
+        sla=sla,
+        priority=priority,
+    )
     return [
         AthleteAssessmentReviewQueueItemRead(
             assessment=to_assessment_read(assessment),
             athlete_person_id=athlete_profile.person_id,
             athlete_name=person.display_name,
+            review_assigned_to_name=assignee.display_name if assignee is not None else None,
+            review_sla_state=assessment_review_sla_state(assessment),
+            review_age_hours=assessment_review_age_hours(assessment),
         )
-        for assessment, athlete_profile, person in rows
+        for assessment, athlete_profile, person, assignee in rows
     ]
 
 

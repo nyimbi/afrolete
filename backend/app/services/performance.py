@@ -1,10 +1,11 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import re
 from statistics import pstdev
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.communication import CommunicationMessage, MessageRecipient
@@ -12,12 +13,13 @@ from app.models.enums import (
     CommunicationChannel,
     CommunicationMessageType,
     CommunicationScopeType,
+    MemberSubjectType,
     MetricSource,
     MetricVerificationStatus,
 )
 from app.models.event import Event
 from app.models.identity import Person
-from app.models.organization import Organization
+from app.models.organization import Membership, Organization
 from app.models.performance import (
     AthleteAssessment,
     AthletePerformanceObservation,
@@ -28,6 +30,7 @@ from app.models.performance import (
 from app.models.team import AthleteProfile
 from app.schemas.performance import (
     AthleteAssessmentCreate,
+    AthleteAssessmentReviewAssignmentUpdate,
     AthleteAssessmentReviewCreate,
     MetricDefinitionCreate,
     PerformanceAchievementWorkerRunRead,
@@ -66,6 +69,33 @@ async def ensure_manage_performance(
     )
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+async def ensure_assignment_person(
+    db: AsyncSession,
+    organization_id: UUID,
+    person_id: UUID,
+) -> Person:
+    person = await db.get(Person, person_id)
+    membership = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == organization_id,
+            Membership.subject_type == MemberSubjectType.PERSON,
+            Membership.subject_id == person_id,
+            Membership.status == "active",
+        )
+    )
+    if person is None or membership is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+    return person
+
+
+def self_assessment_priority(overall_score: float, perceived_exertion: float) -> str:
+    if perceived_exertion >= 9 or overall_score < 55:
+        return "urgent"
+    if perceived_exertion >= 8 or overall_score < 65:
+        return "high"
+    return "normal"
 
 
 async def create_metric_definition(
@@ -302,12 +332,13 @@ async def create_player_self_assessment(
         f"Player self-assessment with RPE {payload.perceived_exertion:g}/10 "
         f"and effort {payload.effort_rating:g}/10."
     )
+    created_at = datetime.now(UTC)
     assessment = AthleteAssessment(
         organization_id=payload.organization_id,
         athlete_profile_id=athlete_profile.id,
         event_id=payload.event_id,
         assessed_by_person_id=identity.person_id,
-        assessed_at=payload.assessed_at or datetime.now(UTC),
+        assessed_at=payload.assessed_at or created_at,
         physical_score=payload.physical_score,
         technical_score=payload.technical_score,
         tactical_score=payload.tactical_score,
@@ -317,6 +348,8 @@ async def create_player_self_assessment(
         effort_rating=payload.effort_rating,
         summary=summary,
         recommendations="Coach review requested for player self-assessment.",
+        review_due_at=created_at + timedelta(hours=48),
+        review_priority=self_assessment_priority(overall_score, payload.perceived_exertion),
         verification_status=MetricVerificationStatus.PENDING_REVIEW,
     )
     db.add(assessment)
@@ -355,10 +388,47 @@ async def review_assessment(
         2,
     )
     assessment.verification_status = payload.verification_status
+    assessment.reviewed_by_person_id = identity.person_id
+    assessment.reviewed_at = datetime.now(UTC)
+    if assessment.review_assigned_to_person_id is None:
+        assessment.review_assigned_to_person_id = identity.person_id
     if payload.summary is not None:
         assessment.summary = payload.summary
     if payload.recommendations is not None:
         assessment.recommendations = payload.recommendations
+    await db.commit()
+    await db.refresh(assessment)
+    return assessment
+
+
+async def update_assessment_review_assignment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    assessment_id: UUID,
+    payload: AthleteAssessmentReviewAssignmentUpdate,
+    authz: AuthorizationService,
+) -> AthleteAssessment:
+    assessment = await db.get(AthleteAssessment, assessment_id)
+    if assessment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found")
+    await ensure_manage_performance(authz, identity, assessment.organization_id)
+    if payload.clear_assignment:
+        assessment.review_assigned_to_person_id = None
+    elif payload.assign_to_self:
+        await ensure_assignment_person(db, assessment.organization_id, identity.person_id)
+        assessment.review_assigned_to_person_id = identity.person_id
+    elif "assigned_to_person_id" in payload.model_fields_set:
+        if payload.assigned_to_person_id is None:
+            assessment.review_assigned_to_person_id = None
+        else:
+            await ensure_assignment_person(db, assessment.organization_id, payload.assigned_to_person_id)
+            assessment.review_assigned_to_person_id = payload.assigned_to_person_id
+    if "review_due_at" in payload.model_fields_set:
+        assessment.review_due_at = payload.review_due_at
+    if payload.review_priority is not None:
+        assessment.review_priority = payload.review_priority
+    if "review_notes" in payload.model_fields_set:
+        assessment.review_notes = payload.review_notes
     await db.commit()
     await db.refresh(assessment)
     return assessment
@@ -370,19 +440,53 @@ async def list_assessment_review_queue(
     organization_id: UUID,
     authz: AuthorizationService,
     limit: int = 25,
-) -> list[tuple[AthleteAssessment, AthleteProfile, Person]]:
+    assignment: str = "all",
+    sla: str = "all",
+    priority: str = "all",
+) -> list[tuple[AthleteAssessment, AthleteProfile, Person, Person | None]]:
     organization = await db.get(Organization, organization_id)
     if organization is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
     await ensure_manage_performance(authz, identity, organization_id)
-    rows = await db.execute(
+    assignee = aliased(Person)
+    now = datetime.now(UTC)
+    statement = (
         select(AthleteAssessment, AthleteProfile, Person)
+        .add_columns(assignee)
         .join(AthleteProfile, AthleteProfile.id == AthleteAssessment.athlete_profile_id)
         .join(Person, Person.id == AthleteProfile.person_id)
+        .outerjoin(assignee, assignee.id == AthleteAssessment.review_assigned_to_person_id)
         .where(AthleteAssessment.organization_id == organization_id)
         .where(AthleteAssessment.verification_status == MetricVerificationStatus.PENDING_REVIEW)
-        .order_by(AthleteAssessment.assessed_at.desc(), AthleteAssessment.created_at.desc())
-        .limit(limit)
+    )
+    if assignment == "mine":
+        statement = statement.where(AthleteAssessment.review_assigned_to_person_id == identity.person_id)
+    elif assignment == "unassigned":
+        statement = statement.where(AthleteAssessment.review_assigned_to_person_id.is_(None))
+    elif assignment == "assigned":
+        statement = statement.where(AthleteAssessment.review_assigned_to_person_id.is_not(None))
+    if sla == "overdue":
+        statement = statement.where(AthleteAssessment.review_due_at.is_not(None), AthleteAssessment.review_due_at < now)
+    elif sla == "due_soon":
+        statement = statement.where(
+            AthleteAssessment.review_due_at.is_not(None),
+            AthleteAssessment.review_due_at >= now,
+            AthleteAssessment.review_due_at <= now + timedelta(hours=24),
+        )
+    elif sla == "on_track":
+        statement = statement.where(
+            (AthleteAssessment.review_due_at.is_(None))
+            | (AthleteAssessment.review_due_at > now + timedelta(hours=24))
+        )
+    if priority != "all":
+        statement = statement.where(AthleteAssessment.review_priority == priority)
+    rows = await db.execute(
+        statement.order_by(
+            AthleteAssessment.review_due_at.is_(None),
+            AthleteAssessment.review_due_at.asc(),
+            AthleteAssessment.assessed_at.desc(),
+            AthleteAssessment.created_at.desc(),
+        ).limit(limit)
     )
     return list(rows.all())
 

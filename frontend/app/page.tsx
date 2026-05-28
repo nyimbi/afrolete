@@ -449,6 +449,12 @@ type InquiryReviewForm = {
   follow_up_at: string;
 };
 
+type AssessmentReviewQueueFilters = {
+  assignment: "all" | "mine" | "unassigned" | "assigned";
+  sla: "all" | "overdue" | "due_soon" | "on_track";
+  priority: "all" | "low" | "normal" | "high" | "urgent";
+};
+
 const chartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--red)", "var(--violet)"];
 
 function infrastructureTone(component: InfrastructureComponent) {
@@ -746,6 +752,8 @@ export default function HomePage() {
     useState<PerformanceAchievementRunRead | null>(null);
   const [assessments, setAssessments] = useState<AthleteAssessmentRead[]>([]);
   const [assessmentReviewQueue, setAssessmentReviewQueue] = useState<AthleteAssessmentReviewQueueItemRead[]>([]);
+  const [assessmentReviewQueueFilters, setAssessmentReviewQueueFilters] =
+    useState<AssessmentReviewQueueFilters>({ assignment: "all", sla: "all", priority: "all" });
   const [performanceSummary, setPerformanceSummary] =
     useState<AthletePerformanceSummaryRead | null>(null);
   const [trainingDrills, setTrainingDrills] = useState<TrainingDrillRead[]>([]);
@@ -1486,6 +1494,12 @@ export default function HomePage() {
     [athletes, selectedAthleteId]
   );
   const selectedInboxPersonId = selectedAthlete?.personId ?? athletes[0]?.personId ?? "";
+  const assessmentReviewQueueSummary = useMemo(() => ({
+    total: assessmentReviewQueue.length,
+    overdue: assessmentReviewQueue.filter((item) => item.review_sla_state === "overdue").length,
+    dueSoon: assessmentReviewQueue.filter((item) => item.review_sla_state === "due_soon").length,
+    urgent: assessmentReviewQueue.filter((item) => item.assessment.review_priority === "urgent").length
+  }), [assessmentReviewQueue]);
   const selectedTrainingPlan = useMemo(
     () => trainingPlans.find((plan) => plan.id === selectedTrainingPlanId) ?? null,
     [trainingPlans, selectedTrainingPlanId]
@@ -1733,9 +1747,22 @@ export default function HomePage() {
     setMetricDefinitions(data);
   }, []);
 
-  const loadAssessmentReviewQueue = useCallback(async (organizationId: string) => {
+  const loadAssessmentReviewQueue = useCallback(async (
+    organizationId: string,
+    filters: AssessmentReviewQueueFilters
+  ) => {
+    const params = new URLSearchParams({ organization_id: organizationId });
+    if (filters.assignment !== "all") {
+      params.set("assignment", filters.assignment);
+    }
+    if (filters.sla !== "all") {
+      params.set("sla", filters.sla);
+    }
+    if (filters.priority !== "all") {
+      params.set("priority", filters.priority);
+    }
     const data = await apiRequest<AthleteAssessmentReviewQueueItemRead[]>(
-      `/performance/assessments/review-queue?organization_id=${organizationId}`,
+      `/performance/assessments/review-queue?${params.toString()}`,
       { identity }
     );
     setAssessmentReviewQueue(data);
@@ -2389,7 +2416,6 @@ export default function HomePage() {
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
-      await loadAssessmentReviewQueue(selectedOrganizationId);
       await loadTraining(selectedOrganizationId);
       await loadCompetitions(selectedOrganizationId);
       await loadCommunications(selectedOrganizationId);
@@ -2414,7 +2440,6 @@ export default function HomePage() {
     loadAgents,
     loadAgentTasks,
     loadMetricDefinitions,
-    loadAssessmentReviewQueue,
     loadTraining,
     loadCompetitions,
     loadCommunications,
@@ -2425,6 +2450,22 @@ export default function HomePage() {
     loadDevelopers,
     runAction,
     addLog
+  ]);
+
+  useEffect(() => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "load-assessment-review-queue",
+      () => loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters),
+      () => undefined
+    );
+  }, [
+    selectedOrganizationId,
+    assessmentReviewQueueFilters,
+    loadAssessmentReviewQueue,
+    runAction
   ]);
 
   useEffect(() => {
@@ -5898,10 +5939,51 @@ export default function HomePage() {
             : current.filter((item) => item.assessment.id !== reviewed.id)
         );
         addLog(`Assessment ${verificationStatus}: ALS ${reviewed.overall_score}`, verificationStatus === "verified" ? "good" : "neutral");
-        void loadAssessmentReviewQueue(selectedOrganizationId);
+        void loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters);
         if (selectedAthlete?.athleteProfileId === reviewed.athlete_profile_id) {
           void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
         }
+      }
+    );
+  };
+
+  const updateAssessmentQueueItem = (
+    assessment: AthleteAssessmentRead,
+    body: {
+      assign_to_self?: boolean;
+      clear_assignment?: boolean;
+      review_due_at?: string | null;
+      review_priority?: "low" | "normal" | "high" | "urgent";
+      review_notes?: string | null;
+    },
+    label: string
+  ) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      `assessment-queue-${assessment.id}-${label}`,
+      () =>
+        apiRequest<AthleteAssessmentRead>(
+          `/performance/assessments/${assessment.id}/review-assignment`,
+          {
+            method: "PATCH",
+            identity,
+            body
+          }
+        ),
+      (updated) => {
+        setAssessments((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item))
+        );
+        setAssessmentReviewQueue((current) =>
+          current.map((item) =>
+            item.assessment.id === updated.id ? { ...item, assessment: updated } : item
+          )
+        );
+        addLog(`Assessment queue updated: ${label.replaceAll("-", " ")}`, "good");
+        void loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters);
       }
     );
   };
@@ -12732,17 +12814,86 @@ export default function HomePage() {
                 <input type="date" value={performanceGoalForm.due_at} onChange={(event) => setPerformanceGoalForm({ ...performanceGoalForm, due_at: event.target.value })} />
               </label>
             </div>
+            <div className="form-grid">
+              <label>
+                Queue
+                <select
+                  value={assessmentReviewQueueFilters.assignment}
+                  onChange={(event) =>
+                    setAssessmentReviewQueueFilters({
+                      ...assessmentReviewQueueFilters,
+                      assignment: event.target.value as AssessmentReviewQueueFilters["assignment"]
+                    })
+                  }
+                >
+                  <option value="all">All</option>
+                  <option value="mine">Mine</option>
+                  <option value="unassigned">Unassigned</option>
+                  <option value="assigned">Assigned</option>
+                </select>
+              </label>
+              <label>
+                SLA
+                <select
+                  value={assessmentReviewQueueFilters.sla}
+                  onChange={(event) =>
+                    setAssessmentReviewQueueFilters({
+                      ...assessmentReviewQueueFilters,
+                      sla: event.target.value as AssessmentReviewQueueFilters["sla"]
+                    })
+                  }
+                >
+                  <option value="all">All</option>
+                  <option value="overdue">Overdue</option>
+                  <option value="due_soon">Due soon</option>
+                  <option value="on_track">On track</option>
+                </select>
+              </label>
+              <label>
+                Priority
+                <select
+                  value={assessmentReviewQueueFilters.priority}
+                  onChange={(event) =>
+                    setAssessmentReviewQueueFilters({
+                      ...assessmentReviewQueueFilters,
+                      priority: event.target.value as AssessmentReviewQueueFilters["priority"]
+                    })
+                  }
+                >
+                  <option value="all">All</option>
+                  <option value="urgent">Urgent</option>
+                  <option value="high">High</option>
+                  <option value="normal">Normal</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+              <label>
+                Review load
+                <input
+                  readOnly
+                  value={`${assessmentReviewQueueSummary.total} open · ${assessmentReviewQueueSummary.urgent} urgent · ${assessmentReviewQueueSummary.overdue} overdue · ${assessmentReviewQueueSummary.dueSoon} soon`}
+                />
+              </label>
+            </div>
             <div className="task-list">
-              {assessmentReviewQueue.slice(0, 4).map((item) => (
+              {assessmentReviewQueue.slice(0, 6).map((item) => (
                 <article key={`review-${item.assessment.id}`} className="task-card">
                   <div>
-                    <strong>{item.athlete_name} · ALS {item.assessment.overall_score}</strong>
+                    <strong>{item.athlete_name} · ALS {item.assessment.overall_score} · {item.assessment.review_priority}</strong>
                     <span>
-                      pending assessment · RPE {item.assessment.perceived_exertion ?? "n/a"} · effort {item.assessment.effort_rating ?? "n/a"}
+                      {item.review_sla_state.replaceAll("_", " ")} · {item.review_age_hours}h open ·{" "}
+                      {item.review_assigned_to_name ? `assigned to ${item.review_assigned_to_name}` : "unassigned"}
                     </span>
-                    <small>{item.assessment.summary ?? "Player self-assessment awaiting review."}</small>
+                    <small>
+                      RPE {item.assessment.perceived_exertion ?? "n/a"} · effort {item.assessment.effort_rating ?? "n/a"} ·{" "}
+                      {item.assessment.review_due_at ? `due ${new Date(item.assessment.review_due_at).toLocaleString()}` : "no due date"} ·{" "}
+                      {item.assessment.summary ?? "Player self-assessment awaiting review."}
+                    </small>
                   </div>
                   <span>
+                    <button type="button" onClick={() => updateAssessmentQueueItem(item.assessment, { assign_to_self: true }, "assign-me")} disabled={busyAction !== null}>Assign me</button>
+                    <button type="button" onClick={() => updateAssessmentQueueItem(item.assessment, { review_due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }, "due-24h")} disabled={busyAction !== null}>Due 24h</button>
+                    <button type="button" onClick={() => updateAssessmentQueueItem(item.assessment, { review_priority: "urgent" }, "urgent")} disabled={busyAction !== null}>Urgent</button>
                     <button type="button" onClick={() => reviewAssessment(item.assessment, "verified")} disabled={busyAction !== null}>Verify</button>
                     <button type="button" onClick={() => reviewAssessment(item.assessment, "rejected")} disabled={busyAction !== null}>Reject</button>
                   </span>
