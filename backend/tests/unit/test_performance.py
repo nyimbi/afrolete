@@ -175,7 +175,10 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert profile["what_if_scenarios"][0]["metric_name"] == "Pace"
     assert profile["what_if_scenarios"][0]["scenario_label"] == "baseline load, readiness 70"
     assert profile["what_if_scenarios"][0]["model_policy"] == "deterministic_what_if_forecast_v1"
-    assert profile["injury_risk"]["model_policy"] == "deterministic_injury_risk_v3_biomarker_environmental"
+    assert (
+        profile["injury_risk"]["model_policy"]
+        == "deterministic_injury_risk_v4_biomarker_environmental_biomechanical"
+    )
     assert profile["injury_risk"]["athlete_profile_id"] == roster["athlete_profile_id"]
     assert profile["injury_risk"]["risk_band"] in {"low", "watch", "high", "critical"}
     assert "No athlete-specific training feedback" in profile["injury_risk"]["drivers"][0]
@@ -880,6 +883,36 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
         )
         assert response.status_code == 201
 
+    for code, name, unit, value, higher_is_better in [
+        ("movement_asymmetry", "Movement Asymmetry", "percent", 18, False),
+        ("landing_quality", "Landing Mechanics Quality", "score", 42, True),
+    ]:
+        video_metric = client.post(
+            "/api/v1/performance/metrics",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "sport": "football",
+                "code": code,
+                "name": name,
+                "category": "physical",
+                "unit": unit,
+                "higher_is_better": higher_is_better,
+            },
+        ).json()
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": video_metric["id"],
+                "value": value,
+                "source": "video_analysis",
+                "observed_at": "2026-06-03T10:00:00Z",
+            },
+        )
+        assert response.status_code == 201
+
     facility = client.post(
         "/api/v1/assets/facilities",
         headers=identity_headers,
@@ -975,7 +1008,7 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
 
     assert response.status_code == 200
     risk = response.json()
-    assert risk["model_policy"] == "deterministic_injury_risk_v3_biomarker_environmental"
+    assert risk["model_policy"] == "deterministic_injury_risk_v4_biomarker_environmental_biomechanical"
     assert risk["score"] == 100
     assert risk["risk_band"] == "critical"
     assert risk["latest_readiness_score"] == 42
@@ -995,11 +1028,18 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
     assert risk["latest_resting_heart_rate"] == 102.0
     assert risk["latest_recovery_score"] == 42.0
     assert risk["latest_hydration_score"] == 64.0
+    assert risk["biomechanical_observation_count"] == 2
+    assert risk["biomechanical_risk_count"] == 2
+    assert risk["latest_movement_quality_score"] == 42.0
+    assert risk["latest_asymmetry_score"] == 18.0
     assert any("low HRV" in label for label in risk["wearable_risk_labels"])
+    assert any("movement asymmetry" in label for label in risk["video_risk_labels"])
+    assert any("landing mechanics" in label for label in risk["video_risk_labels"])
     assert any("open injury" in driver for driver in risk["drivers"])
     assert any("weather risk" in driver for driver in risk["drivers"])
     assert any("surface risk" in driver for driver in risk["drivers"])
     assert any("wearable biomarker" in driver for driver in risk["drivers"])
+    assert any("biomechanical video" in driver for driver in risk["drivers"])
     assert "medical or safeguarding review" in risk["recommendation"]
 
     scan_response = client.post(

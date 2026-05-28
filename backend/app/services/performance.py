@@ -2468,6 +2468,7 @@ async def performance_injury_risk(
     declining_metric_count = sum(1 for trend in trends if trend["trend_direction"] == "declining")
     environmental_context = await injury_risk_environment_context(db, organization_id, feedback_rows)
     biomarker_context = await injury_risk_biomarker_context(db, organization_id, athlete_profile_id)
+    biomechanical_context = await injury_risk_biomechanical_context(db, organization_id, athlete_profile_id)
     return injury_risk_summary(
         athlete_profile_id,
         feedback_rows,
@@ -2475,6 +2476,7 @@ async def performance_injury_risk(
         declining_metric_count,
         environmental_context,
         biomarker_context,
+        biomechanical_context,
     )
 
 
@@ -3848,9 +3850,11 @@ def injury_risk_summary(
     declining_metric_count: int,
     environmental_context: dict[str, object] | None = None,
     biomarker_context: dict[str, object] | None = None,
+    biomechanical_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     environmental_context = environmental_context or default_injury_risk_environment_context()
     biomarker_context = biomarker_context or default_injury_risk_biomarker_context()
+    biomechanical_context = biomechanical_context or default_injury_risk_biomechanical_context()
     feedbacks = [feedback for feedback, _ in feedback_rows]
     loads = [training_feedback_load(feedback, session_plan) for feedback, session_plan in feedback_rows]
     now = datetime.now(UTC)
@@ -3935,6 +3939,11 @@ def injury_risk_summary(
         score += int(biomarker_context["biomarker_score_penalty"])
         labels = ", ".join(str(label) for label in biomarker_context["wearable_risk_labels"])
         drivers.append(f"{biomarker_risk_count} wearable biomarker risk marker(s): {labels}.")
+    biomechanical_risk_count = int(biomechanical_context["biomechanical_risk_count"])
+    if biomechanical_risk_count:
+        score += int(biomechanical_context["biomechanical_score_penalty"])
+        labels = ", ".join(str(label) for label in biomechanical_context["video_risk_labels"])
+        drivers.append(f"{biomechanical_risk_count} biomechanical video risk marker(s): {labels}.")
 
     rounded_score = int(round(max(0, min(100, score))))
     band = injury_risk_band(rounded_score)
@@ -3943,7 +3952,7 @@ def injury_risk_summary(
     return {
         "athlete_profile_id": athlete_profile_id,
         "generated_at": now,
-        "model_policy": "deterministic_injury_risk_v3_biomarker_environmental",
+        "model_policy": "deterministic_injury_risk_v4_biomarker_environmental_biomechanical",
         "score": rounded_score,
         "risk_band": band,
         "confidence": injury_risk_confidence(
@@ -3952,6 +3961,7 @@ def injury_risk_summary(
             declining_metric_count,
             environmental_risk_count,
             biomarker_risk_count,
+            biomechanical_risk_count,
         ),
         "latest_readiness_score": latest_feedback.readiness_score if latest_feedback is not None else None,
         "average_readiness_score": round(average_readiness, 1) if average_readiness is not None else None,
@@ -3978,6 +3988,11 @@ def injury_risk_summary(
         "latest_recovery_score": biomarker_context["latest_recovery_score"],
         "latest_hydration_score": biomarker_context["latest_hydration_score"],
         "wearable_risk_labels": biomarker_context["wearable_risk_labels"],
+        "biomechanical_observation_count": biomechanical_context["biomechanical_observation_count"],
+        "biomechanical_risk_count": biomechanical_risk_count,
+        "latest_movement_quality_score": biomechanical_context["latest_movement_quality_score"],
+        "latest_asymmetry_score": biomechanical_context["latest_asymmetry_score"],
+        "video_risk_labels": biomechanical_context["video_risk_labels"],
         "drivers": drivers,
         "recommendation": injury_risk_recommendation(band),
     }
@@ -4190,6 +4205,115 @@ def default_injury_risk_biomarker_context() -> dict[str, object]:
     }
 
 
+async def injury_risk_biomechanical_context(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+) -> dict[str, object]:
+    rows = list(
+        (
+            await db.execute(
+                select(AthletePerformanceObservation, PerformanceMetricDefinition)
+                .join(
+                    PerformanceMetricDefinition,
+                    PerformanceMetricDefinition.id == AthletePerformanceObservation.metric_definition_id,
+                )
+                .where(AthletePerformanceObservation.organization_id == organization_id)
+                .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+                .where(
+                    AthletePerformanceObservation.source.in_(
+                        [MetricSource.VIDEO_ANALYSIS, MetricSource.AGENT_EXTRACTED, MetricSource.COACH_EVALUATION]
+                    )
+                )
+                .where(AthletePerformanceObservation.verification_status != MetricVerificationStatus.REJECTED)
+                .order_by(AthletePerformanceObservation.observed_at.desc())
+                .limit(80)
+            )
+        ).all()
+    )
+    latest_by_family: dict[str, float] = {}
+    risk_labels: list[str] = []
+    score_penalty = 0
+    biomechanical_observation_count = 0
+    for observation, metric in rows:
+        family = biomechanical_metric_family(metric)
+        if family is None:
+            continue
+        biomechanical_observation_count += 1
+        value = float(observation.value)
+        latest_by_family.setdefault(family, value)
+        marker = biomechanical_risk_marker(family, value, metric.higher_is_better)
+        if marker is None:
+            continue
+        label, penalty = marker
+        if label not in risk_labels:
+            risk_labels.append(label)
+            score_penalty += penalty
+    return {
+        "biomechanical_observation_count": biomechanical_observation_count,
+        "biomechanical_risk_count": len(risk_labels),
+        "biomechanical_score_penalty": min(24, score_penalty),
+        "latest_movement_quality_score": rounded_latest_biomarker(
+            latest_by_family.get("movement_quality")
+            or latest_by_family.get("landing_mechanics")
+            or latest_by_family.get("gait_quality")
+            or latest_by_family.get("cutting_control")
+        ),
+        "latest_asymmetry_score": rounded_latest_biomarker(latest_by_family.get("asymmetry")),
+        "video_risk_labels": risk_labels,
+    }
+
+
+def default_injury_risk_biomechanical_context() -> dict[str, object]:
+    return {
+        "biomechanical_observation_count": 0,
+        "biomechanical_risk_count": 0,
+        "biomechanical_score_penalty": 0,
+        "latest_movement_quality_score": None,
+        "latest_asymmetry_score": None,
+        "video_risk_labels": [],
+    }
+
+
+def biomechanical_metric_family(metric: PerformanceMetricDefinition) -> str | None:
+    label = f"{metric.code} {metric.name} {metric.description or ''}".lower()
+    normalized = re.sub(r"[^a-z0-9]+", "_", label)
+    if any(marker in normalized for marker in ("asymmetry", "imbalance", "left_right", "lsi", "symmetry")):
+        return "asymmetry"
+    if any(marker in normalized for marker in ("landing", "knee_valgus", "valgus", "collapse")):
+        return "landing_mechanics"
+    if any(marker in normalized for marker in ("movement_quality", "movement_score", "mechanics", "technique_quality")):
+        return "movement_quality"
+    if any(marker in normalized for marker in ("gait", "stride", "limp")):
+        return "gait_quality"
+    if any(marker in normalized for marker in ("cutting", "change_direction", "deceleration", "braking")):
+        return "cutting_control"
+    return None
+
+
+def biomechanical_risk_marker(family: str, value: float, higher_is_better: bool) -> tuple[str, int] | None:
+    if family == "asymmetry":
+        if value >= 18:
+            return f"high movement asymmetry {value:g}", 10
+        if value >= 10:
+            return f"elevated movement asymmetry {value:g}", 6
+        return None
+    if family == "landing_mechanics":
+        if not higher_is_better and value >= 15:
+            return f"landing mechanics risk score {value:g}", 8
+        if higher_is_better and value < 60:
+            return f"low landing mechanics score {value:g}", 8 if value < 45 else 5
+        return None
+    if family in {"movement_quality", "gait_quality", "cutting_control"}:
+        if higher_is_better and value < 60:
+            label = family.replace("_", " ")
+            return f"low {label} {value:g}", 8 if value < 45 else 5
+        if not higher_is_better and value >= 15:
+            label = family.replace("_", " ")
+            return f"high {label} risk {value:g}", 8 if value >= 25 else 5
+    return None
+
+
 def wearable_metric_family(metric: PerformanceMetricDefinition) -> str | None:
     label = f"{metric.code} {metric.name} {metric.description or ''}".lower()
     normalized = re.sub(r"[^a-z0-9]+", "_", label)
@@ -4246,14 +4370,25 @@ def injury_risk_confidence(
     declining_metric_count: int,
     environmental_risk_count: int = 0,
     biomarker_risk_count: int = 0,
+    biomechanical_risk_count: int = 0,
 ) -> float:
     evidence_bonus = min(0.45, feedback_count * 0.06)
     incident_bonus = 0.12 if open_incident_count else 0.0
     trend_bonus = min(0.15, declining_metric_count * 0.04)
     environment_bonus = min(0.1, environmental_risk_count * 0.03)
     biomarker_bonus = min(0.12, biomarker_risk_count * 0.04)
+    biomechanical_bonus = min(0.1, biomechanical_risk_count * 0.04)
     return round(
-        min(0.95, 0.35 + evidence_bonus + incident_bonus + trend_bonus + environment_bonus + biomarker_bonus),
+        min(
+            0.95,
+            0.35
+            + evidence_bonus
+            + incident_bonus
+            + trend_bonus
+            + environment_bonus
+            + biomarker_bonus
+            + biomechanical_bonus,
+        ),
         2,
     )
 

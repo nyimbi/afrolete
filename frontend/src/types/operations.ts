@@ -3574,6 +3574,11 @@ export type PerformanceInjuryRiskRead = {
   latest_recovery_score: number | null;
   latest_hydration_score: number | null;
   wearable_risk_labels: string[];
+  biomechanical_observation_count: number;
+  biomechanical_risk_count: number;
+  latest_movement_quality_score: number | null;
+  latest_asymmetry_score: number | null;
+  video_risk_labels: string[];
   drivers: string[];
   recommendation: string;
 };

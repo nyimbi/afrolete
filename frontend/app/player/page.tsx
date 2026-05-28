@@ -304,8 +304,22 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
             </div>
             <strong>{injuryRisk.acute_chronic_ratio ?? "n/a"}</strong>
           </div>
+          <div className="chart-bar-row">
+            <span>Movement</span>
+            <div className="chart-track">
+              <div
+                className="chart-fill"
+                style={{
+                  width: `${boundedPercent((injuryRisk.biomechanical_risk_count ?? 0) * 34)}%`,
+                  backgroundColor: "var(--amber)"
+                }}
+              />
+            </div>
+            <strong>{injuryRisk.biomechanical_risk_count || "n/a"}</strong>
+          </div>
         </div>
         <small>{injuryRisk.drivers[0] ?? injuryRisk.recommendation}</small>
+        {injuryRisk.video_risk_labels.length ? <small>Video: {injuryRisk.video_risk_labels.join(", ")}</small> : null}
         </article>
 
         <article className="player-chart-card">
@@ -809,7 +823,7 @@ export default function PlayerPerformancePage() {
               <article>
                 <span>Safety</span>
                 <strong>{injuryRisk ? `${injuryRisk.risk_band.replaceAll("_", " ")} · ${injuryRisk.score}/100` : "Awaiting risk signal"}</strong>
-                <p>{injuryRisk?.drivers[0] ?? "Readiness, workload, incidents, weather, surfaces, and wearable signals will shape this card."}</p>
+                <p>{injuryRisk?.drivers[0] ?? "Readiness, workload, incidents, weather, surfaces, wearable data, and video movement signals will shape this card."}</p>
               </article>
             </section>
 

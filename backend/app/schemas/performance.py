@@ -693,6 +693,11 @@ class PerformanceInjuryRiskRead(BaseModel):
     latest_recovery_score: float | None
     latest_hydration_score: float | None
     wearable_risk_labels: list[str]
+    biomechanical_observation_count: int
+    biomechanical_risk_count: int
+    latest_movement_quality_score: float | None
+    latest_asymmetry_score: float | None
+    video_risk_labels: list[str]
     drivers: list[str]
     recommendation: str
 

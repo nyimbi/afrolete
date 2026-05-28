@@ -1197,6 +1197,19 @@ function PerformanceInjuryRiskCard({
           <strong>{risk?.biomarker_risk_count ?? "n/a"}</strong>
         </div>
         <div className="chart-bar-row">
+          <span>Movement</span>
+          <div className="chart-track">
+            <div
+              className="chart-fill"
+              style={{
+                width: `${Math.max(4, Math.min(100, (risk?.biomechanical_risk_count ?? 0) * 34))}%`,
+                backgroundColor: "var(--amber)"
+              }}
+            />
+          </div>
+          <strong>{risk?.biomechanical_risk_count ?? "n/a"}</strong>
+        </div>
+        <div className="chart-bar-row">
           <span>Recovery</span>
           <div className="chart-track">
             <div
@@ -1211,6 +1224,7 @@ function PerformanceInjuryRiskCard({
         </div>
       </div>
       <small>{risk?.drivers[0] ?? "Record athlete-specific readiness and session feedback to generate risk drivers."}</small>
+      {risk?.video_risk_labels.length ? <small>Video: {risk.video_risk_labels.join(", ")}</small> : null}
       <small>{risk?.recommendation ?? "No risk recommendation is available yet."}</small>
       <span>
         <button type="button" onClick={onSendAlert} disabled={disabled || !risk}>Send risk alert</button>
