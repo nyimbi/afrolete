@@ -44,6 +44,7 @@ function goalProgress(goal: PlayerPerformanceProfileRead["goals"][number]) {
 function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfileRead }) {
   const latestAssessment = profile.latest_assessment;
   const visibleSeries = profile.trend_series.filter((series) => series.points.length > 0).slice(0, 4);
+  const visibleForecasts = profile.forecast_scenarios.filter((scenario) => scenario.sample_size > 0).slice(0, 4);
   const composition = latestAssessment
     ? [
         { label: "Physical", value: latestAssessment.physical_score, color: "var(--teal)" },
@@ -59,6 +60,14 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
       Math.abs(trend.latest_value ?? 0),
       Math.abs(trend.forecast_next_value ?? 0),
       Math.abs(trend.best_value ?? 0)
+    ])
+  );
+  const forecastMax = Math.max(
+    1,
+    ...visibleForecasts.flatMap((scenario) => [
+      Math.abs(scenario.latest_value ?? 0),
+      Math.abs(scenario.forecast_next_value ?? 0),
+      ...scenario.projected_points.map((point) => Math.abs(point))
     ])
   );
 
@@ -163,6 +172,40 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
 
         <article className="player-chart-card">
         <div>
+          <span>Forecast scenario</span>
+          <strong>{visibleForecasts.length} metrics</strong>
+          <small>Deterministic runway with confidence and risk flags.</small>
+        </div>
+        <div className="chart-bars">
+          {visibleForecasts.map((scenario, index) => {
+            const width = boundedPercent((Math.abs(scenario.forecast_next_value ?? scenario.latest_value ?? 0) / forecastMax) * 100);
+            return (
+              <div className="chart-bar-row" key={`${scenario.metric_definition_id}-player-forecast`}>
+                <span>{scenario.metric_name}</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{ width: `${width}%`, backgroundColor: playerChartColors[(index + 3) % playerChartColors.length] }}
+                  />
+                </div>
+                <strong>{Math.round(scenario.confidence * 100)}%</strong>
+              </div>
+            );
+          })}
+          {visibleForecasts.length === 0 ? (
+            <div className="chart-bar-row">
+              <span>No forecast</span>
+              <div className="chart-track">
+                <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--quiet)" }} />
+              </div>
+              <strong>n/a</strong>
+            </div>
+          ) : null}
+        </div>
+        </article>
+
+        <article className="player-chart-card">
+        <div>
           <span>Goal pace</span>
           <strong>{profile.active_goal_count}/{profile.achieved_goal_count}</strong>
           <small>Active progress and achieved targets.</small>
@@ -235,6 +278,31 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
               </div>
             </div>
             <small>{comparison.recommendation}</small>
+          </article>
+        ))}
+        {visibleForecasts.map((scenario, index) => (
+          <article className="player-chart-card" key={`${scenario.metric_definition_id}-player-forecast-scenario`}>
+            <div>
+              <span>Scenario runway</span>
+              <strong>{scenario.metric_name}</strong>
+              <small>
+                {scenario.risk_level.replaceAll("_", " ")} · {scenario.data_quality.replaceAll("_", " ")} · next{" "}
+                {playerValueLabel(scenario.forecast_next_value, scenario.unit)}
+              </small>
+            </div>
+            <div className="spark-bars" aria-label={`${scenario.metric_name} player forecast scenario`}>
+              {scenario.projected_points.map((point, pointIndex) => (
+                <i
+                  key={`${scenario.metric_definition_id}-player-projection-${pointIndex}`}
+                  title={`Scenario ${pointIndex + 1} · ${playerValueLabel(point, scenario.unit)}`}
+                  style={{
+                    height: `${boundedPercent((Math.abs(point) / forecastMax) * 100)}%`,
+                    backgroundColor: playerChartColors[(index + pointIndex) % playerChartColors.length]
+                  }}
+                />
+              ))}
+            </div>
+            <small>{scenario.recommendation}</small>
           </article>
         ))}
         {visibleSeries.map((series, index) => (

@@ -166,6 +166,9 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert profile["trends"][0]["metric_name"] == "Pace"
     assert profile["trend_series"][0]["metric_name"] == "Pace"
     assert profile["trend_series"][0]["points"][0]["value"] == 12.4
+    assert profile["forecast_scenarios"][0]["metric_name"] == "Pace"
+    assert profile["forecast_scenarios"][0]["model_policy"] == "deterministic_forecast_v1"
+    assert profile["forecast_scenarios"][0]["data_quality"] == "thin_history"
     assert profile["benchmarks"][0]["cohort_scope"] == "tenant"
     assert profile["benchmarks"][0]["cohort_label"] == "All athletes"
     assert profile["benchmarks"][0]["metric_name"] == "Pace"
@@ -399,6 +402,62 @@ def test_performance_trend_series_returns_ordered_points(client, identity_header
     assert series["trend_direction"] == "improving"
     assert [point["value"] for point in series["points"]] == [13.0, 12.5, 12.0]
     assert [point["normalized_value"] for point in series["points"]] == [0.0, 50.0, 100.0]
+
+
+def test_performance_forecast_scenarios_project_training_runway(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "sprint_time",
+            "name": "Sprint Time",
+            "category": "physical",
+            "unit": "seconds",
+            "higher_is_better": False,
+        },
+    ).json()
+    for value, observed_at, status in [
+        (13.0, "2026-01-01T10:00:00Z", "verified"),
+        (12.5, "2026-01-08T10:00:00Z", "verified"),
+        (99.0, "2026-01-09T10:00:00Z", "rejected"),
+        (12.0, "2026-01-15T10:00:00Z", "verified"),
+    ]:
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": metric["id"],
+                "value": value,
+                "observed_at": observed_at,
+                "verification_status": status,
+            },
+        )
+        assert response.status_code == 201
+
+    response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/forecast-scenarios"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert response.status_code == 200
+    scenario = response.json()[0]
+    assert scenario["metric_name"] == "Sprint Time"
+    assert scenario["sample_size"] == 3
+    assert scenario["latest_value"] == 12.0
+    assert scenario["forecast_next_value"] == 11.5
+    assert scenario["forecast_low"] == 11.0
+    assert scenario["forecast_high"] == 12.0
+    assert scenario["confidence"] == 0.72
+    assert scenario["data_quality"] == "usable_history"
+    assert scenario["risk_level"] == "opportunity"
+    assert scenario["model_policy"] == "deterministic_forecast_v1"
+    assert scenario["projected_points"] == [11.5, 11.0, 10.5, 10.0]
+    assert "improving scenario" in scenario["recommendation"]
 
 
 def test_player_can_submit_pending_self_assessment(client, identity_headers) -> None:

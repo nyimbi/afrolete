@@ -970,6 +970,60 @@ async def performance_metric_trend_series(
     return series
 
 
+async def performance_forecast_scenarios(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    sport: str | None = None,
+) -> list[dict[str, object]]:
+    await get_athlete_profile(db, athlete_profile_id, organization_id)
+    metrics = await list_metric_definitions(db, organization_id, sport=sport)
+    metric_by_id = {metric.id: metric for metric in metrics}
+    if not metric_by_id:
+        return []
+
+    observations = list(
+        (
+            await db.scalars(
+                select(AthletePerformanceObservation)
+                .where(AthletePerformanceObservation.organization_id == organization_id)
+                .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+                .where(AthletePerformanceObservation.metric_definition_id.in_(list(metric_by_id)))
+                .where(
+                    AthletePerformanceObservation.verification_status
+                    != MetricVerificationStatus.REJECTED
+                )
+                .order_by(
+                    AthletePerformanceObservation.metric_definition_id,
+                    AthletePerformanceObservation.observed_at,
+                )
+            )
+        ).all()
+    )
+    observations_by_metric: dict[UUID, list[AthletePerformanceObservation]] = {}
+    for observation in observations:
+        observations_by_metric.setdefault(observation.metric_definition_id, []).append(observation)
+
+    scenarios: list[dict[str, object]] = []
+    for metric in metrics:
+        metric_observations = observations_by_metric.get(metric.id, [])
+        values = [observation.value for observation in metric_observations]
+        trend = metric_trend_summary(values, metric.higher_is_better, metric.name, metric.unit)
+        scenarios.append(
+            {
+                "metric_definition_id": metric.id,
+                "metric_code": metric.code,
+                "metric_name": metric.name,
+                "sport": metric.sport,
+                "category": metric.category,
+                "unit": metric.unit,
+                "higher_is_better": metric.higher_is_better,
+                **forecast_scenario_summary(values, metric.higher_is_better, metric.name, metric.unit, trend),
+            }
+        )
+    return scenarios
+
+
 async def create_performance_goal(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1083,6 +1137,7 @@ async def list_my_player_performance(
         observations = (await list_observations(db, organization_id, profile.id))[:observation_limit]
         trends = await performance_metric_trends(db, organization_id, profile.id)
         trend_series = await performance_metric_trend_series(db, organization_id, profile.id)
+        forecast_scenarios = await performance_forecast_scenarios(db, organization_id, profile.id)
         benchmarks = await performance_metric_benchmarks(
             db,
             organization_id,
@@ -1110,6 +1165,7 @@ async def list_my_player_performance(
                 "awards": awards,
                 "trends": trends,
                 "trend_series": trend_series,
+                "forecast_scenarios": forecast_scenarios,
                 "benchmarks": benchmarks,
                 "cohort_comparisons": cohort_comparisons,
             }
@@ -1764,6 +1820,159 @@ def metric_trend_summary(
             change_first,
         ),
     }
+
+
+def forecast_scenario_summary(
+    values: list[float],
+    higher_is_better: bool,
+    metric_name: str,
+    unit: str | None,
+    trend: dict[str, object],
+) -> dict[str, object]:
+    sample_size = len(values)
+    forecast = trend["forecast_next_value"]
+    consistency = trend["consistency_index"]
+    direction = str(trend["trend_direction"])
+    projected_points = projected_forecast_points(values, horizon=4)
+    band = forecast_band(values)
+    forecast_low = round(float(forecast) - band, 2) if isinstance(forecast, int | float) else None
+    forecast_high = round(float(forecast) + band, 2) if isinstance(forecast, int | float) else None
+    confidence = forecast_confidence(sample_size, consistency if isinstance(consistency, int | float) else None)
+    data_quality = forecast_data_quality(sample_size, confidence)
+    risk_level = forecast_risk_level(direction, confidence, data_quality)
+    return {
+        "sample_size": sample_size,
+        "latest_value": trend["latest_value"],
+        "forecast_next_value": forecast,
+        "forecast_low": forecast_low,
+        "forecast_high": forecast_high,
+        "confidence": confidence,
+        "data_quality": data_quality,
+        "risk_level": risk_level,
+        "trend_direction": direction,
+        "model_policy": "deterministic_forecast_v1",
+        "projected_points": projected_points,
+        "recommendation": forecast_recommendation(
+            metric_name,
+            unit,
+            higher_is_better,
+            direction,
+            data_quality,
+            risk_level,
+            trend["latest_value"],
+            forecast,
+            forecast_low,
+            forecast_high,
+        ),
+    }
+
+
+def projected_forecast_points(values: list[float], horizon: int) -> list[float]:
+    if not values:
+        return []
+    delta = average_observation_delta(values)
+    current = values[-1]
+    points: list[float] = []
+    for _ in range(horizon):
+        current += delta
+        points.append(round(current, 2))
+    return points
+
+
+def average_observation_delta(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    deltas = [current - previous for previous, current in zip(values[:-1], values[1:], strict=True)]
+    return sum(deltas) / len(deltas)
+
+
+def forecast_band(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    volatility = pstdev(values) if len(values) >= 2 else 0.0
+    momentum = abs(average_observation_delta(values))
+    latest_magnitude = abs(values[-1]) or 1.0
+    floor = latest_magnitude * 0.03
+    return round(max(volatility, momentum, floor), 2)
+
+
+def forecast_confidence(sample_size: int, consistency: float | None) -> float:
+    if sample_size == 0:
+        return 0.0
+    consistency_factor = (consistency if consistency is not None else 50.0) / 100.0
+    sample_factor = min(1.0, sample_size / 6)
+    return round(max(0.2, min(0.95, 0.25 + (sample_factor * 0.45) + (consistency_factor * 0.25))), 2)
+
+
+def forecast_data_quality(sample_size: int, confidence: float) -> str:
+    if sample_size == 0:
+        return "no_data"
+    if sample_size < 3:
+        return "thin_history"
+    if sample_size >= 6 and confidence >= 0.75:
+        return "strong_history"
+    return "usable_history"
+
+
+def forecast_risk_level(direction: str, confidence: float, data_quality: str) -> str:
+    if data_quality == "no_data":
+        return "no_data"
+    if data_quality == "thin_history":
+        return "needs_more_data"
+    if direction == "declining" or confidence < 0.5:
+        return "watch"
+    if direction == "improving":
+        return "opportunity"
+    return "stable"
+
+
+def forecast_recommendation(
+    metric_name: str,
+    unit: str | None,
+    higher_is_better: bool,
+    direction: str,
+    data_quality: str,
+    risk_level: str,
+    latest: object,
+    forecast: object,
+    forecast_low: float | None,
+    forecast_high: float | None,
+) -> str:
+    if data_quality == "no_data":
+        return f"Record accepted {metric_name} observations before producing a forecast scenario."
+    suffix = f" {unit}" if unit else ""
+    latest_text = f"{float(latest):g}{suffix}" if isinstance(latest, int | float) else "n/a"
+    forecast_text = f"{float(forecast):g}{suffix}" if isinstance(forecast, int | float) else "n/a"
+    band_text = (
+        f"expected range {forecast_low:g}-{forecast_high:g}{suffix}"
+        if forecast_low is not None and forecast_high is not None
+        else "expected range unavailable"
+    )
+    if risk_level == "needs_more_data":
+        return (
+            f"{metric_name} forecast is based on a thin history; collect another accepted data point "
+            f"before changing the plan. Latest {latest_text}, next scenario {forecast_text}."
+        )
+    if risk_level == "watch":
+        return (
+            f"{metric_name} is a watch item with {band_text}. Review load, recovery, and technique "
+            f"before chasing the next scenario from latest {latest_text}."
+        )
+    if risk_level == "opportunity":
+        action = "raise the target" if higher_is_better else "tighten the target"
+        return (
+            f"{metric_name} has an improving scenario from latest {latest_text} to {forecast_text}; "
+            f"{action} while preserving the current training stimulus."
+        )
+    if direction == "stable":
+        return (
+            f"{metric_name} is stable around latest {latest_text}; use {band_text} as the next "
+            f"checkpoint and add a focused stimulus if progress stalls."
+        )
+    return (
+        f"Keep collecting {metric_name} data; current deterministic scenario projects {forecast_text} "
+        f"from latest {latest_text}."
+    )
 
 
 def directional_change(

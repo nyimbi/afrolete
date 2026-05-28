@@ -203,6 +203,7 @@ import type {
   PerformanceAchievementRunRead,
   PerformanceAssessmentReviewEscalationRunRead,
   PerformanceCohortComparisonRead,
+  PerformanceForecastScenarioRead,
   PerformanceGoalRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
@@ -871,6 +872,69 @@ function PerformanceCohortComparisonDashboard({ comparisons }: { comparisons: Pe
   );
 }
 
+function PerformanceForecastScenarioDashboard({ scenarios }: { scenarios: PerformanceForecastScenarioRead[] }) {
+  const visibleScenarios = scenarios
+    .filter((scenario) => scenario.sample_size > 0)
+    .slice(0, 4);
+  const maxProjection = Math.max(
+    1,
+    ...visibleScenarios.flatMap((scenario) => [
+      Math.abs(scenario.latest_value ?? 0),
+      Math.abs(scenario.forecast_next_value ?? 0),
+      ...scenario.projected_points.map((point) => Math.abs(point))
+    ])
+  );
+
+  return (
+    <div className="trend-series-grid">
+      {visibleScenarios.map((scenario, index) => (
+        <article className="task-card trend-series-card" key={`${scenario.metric_definition_id}-forecast-scenario`}>
+          <div>
+            <strong>{scenario.metric_name} · {scenario.risk_level.replaceAll("_", " ")}</strong>
+            <span>
+              {scenario.data_quality.replaceAll("_", " ")} · {Math.round(scenario.confidence * 100)}% confidence ·{" "}
+              {scenario.model_policy.replaceAll("_", " ")}
+            </span>
+          </div>
+          <div className="spark-bars" aria-label={`${scenario.metric_name} forecast scenario`}>
+            {scenario.projected_points.length ? scenario.projected_points.map((point, pointIndex) => (
+              <i
+                key={`${scenario.metric_definition_id}-projection-${pointIndex}`}
+                title={`Scenario ${pointIndex + 1} · ${performanceValueLabel(point, scenario.unit)}`}
+                style={{
+                  height: `${Math.max(8, Math.min(100, (Math.abs(point) / maxProjection) * 100))}%`,
+                  backgroundColor: chartColors[(index + pointIndex) % chartColors.length]
+                }}
+              />
+            )) : (
+              <i style={{ height: "12%", backgroundColor: "var(--muted)" }} />
+            )}
+          </div>
+          <small>
+            Next {performanceValueLabel(scenario.forecast_next_value, scenario.unit)} · range{" "}
+            {performanceValueLabel(scenario.forecast_low, scenario.unit)} to {performanceValueLabel(scenario.forecast_high, scenario.unit)}
+          </small>
+          <small>{scenario.recommendation}</small>
+        </article>
+      ))}
+      {visibleScenarios.length === 0 ? (
+        <article className="task-card trend-series-card">
+          <div>
+            <strong>Forecast scenarios</strong>
+            <span>Accepted observations will generate deterministic training runway scenarios.</span>
+          </div>
+          <div className="spark-bars empty">
+            <i />
+            <i />
+            <i />
+          </div>
+          <small>No forecast-ready performance history is available yet.</small>
+        </article>
+      ) : null}
+    </div>
+  );
+}
+
 function downloadTextArtifact(content: string, contentType: string, filename: string) {
   const blob = new Blob([content], { type: contentType });
   const url = window.URL.createObjectURL(blob);
@@ -1012,6 +1076,7 @@ export default function HomePage() {
   const [performanceCohortComparisons, setPerformanceCohortComparisons] = useState<PerformanceCohortComparisonRead[]>([]);
   const [performanceTrends, setPerformanceTrends] = useState<PerformanceMetricTrendRead[]>([]);
   const [performanceTrendSeries, setPerformanceTrendSeries] = useState<PerformanceMetricTrendSeriesRead[]>([]);
+  const [performanceForecastScenarios, setPerformanceForecastScenarios] = useState<PerformanceForecastScenarioRead[]>([]);
   const [performanceGoals, setPerformanceGoals] = useState<PerformanceGoalRead[]>([]);
   const [performanceAwards, setPerformanceAwards] = useState<PerformanceAchievementAwardRead[]>([]);
   const [performanceAchievementRun, setPerformanceAchievementRun] =
@@ -2057,6 +2122,7 @@ export default function HomePage() {
         cohortComparisonData,
         trendData,
         trendSeriesData,
+        forecastScenarioData,
         goalData,
         awardData
       ] = await Promise.all([
@@ -2081,6 +2147,9 @@ export default function HomePage() {
         apiRequest<PerformanceMetricTrendSeriesRead[]>(
           `/performance/athletes/${athleteProfileId}/trend-series?organization_id=${organizationId}`
         ),
+        apiRequest<PerformanceForecastScenarioRead[]>(
+          `/performance/athletes/${athleteProfileId}/forecast-scenarios?organization_id=${organizationId}`
+        ),
         apiRequest<PerformanceGoalRead[]>(
           `/performance/athletes/${athleteProfileId}/goals?organization_id=${organizationId}`
         ),
@@ -2095,6 +2164,7 @@ export default function HomePage() {
       setPerformanceCohortComparisons(cohortComparisonData);
       setPerformanceTrends(trendData);
       setPerformanceTrendSeries(trendSeriesData);
+      setPerformanceForecastScenarios(forecastScenarioData);
       setPerformanceGoals(goalData);
       setPerformanceAwards(awardData);
       setSelectedObservationId((current) =>
@@ -2870,6 +2940,8 @@ export default function HomePage() {
       setPerformanceBenchmarks([]);
       setPerformanceCohortComparisons([]);
       setPerformanceTrends([]);
+      setPerformanceTrendSeries([]);
+      setPerformanceForecastScenarios([]);
       setPerformanceGoals([]);
       setPerformanceAwards([]);
       setPerformanceAchievementRun(null);
@@ -13163,6 +13235,7 @@ export default function HomePage() {
               trends={performanceTrends}
               benchmarks={performanceBenchmarks}
             />
+            <PerformanceForecastScenarioDashboard scenarios={performanceForecastScenarios} />
             <PerformanceCohortComparisonDashboard comparisons={performanceCohortComparisons} />
             <PerformanceTrendSeriesDashboard series={performanceTrendSeries} />
             <div className="form-grid">

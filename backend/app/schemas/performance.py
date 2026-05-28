@@ -304,6 +304,28 @@ class PerformanceMetricTrendSeriesRead(BaseModel):
     points: list[PerformanceMetricTrendPointRead]
 
 
+class PerformanceForecastScenarioRead(BaseModel):
+    metric_definition_id: UUID
+    metric_code: str
+    metric_name: str
+    sport: str | None
+    category: MetricCategory
+    unit: str | None
+    higher_is_better: bool
+    sample_size: int
+    latest_value: float | None
+    forecast_next_value: float | None
+    forecast_low: float | None
+    forecast_high: float | None
+    confidence: float
+    data_quality: str
+    risk_level: str
+    trend_direction: str
+    model_policy: str
+    projected_points: list[float]
+    recommendation: str
+
+
 class PerformanceGoalCreate(BaseModel):
     organization_id: UUID
     metric_definition_id: UUID
@@ -401,5 +423,6 @@ class PlayerPerformanceProfileRead(BaseModel):
     awards: list[PerformanceAchievementAwardRead]
     trends: list[PerformanceMetricTrendRead]
     trend_series: list[PerformanceMetricTrendSeriesRead]
+    forecast_scenarios: list[PerformanceForecastScenarioRead]
     benchmarks: list[PerformanceMetricBenchmarkRead]
     cohort_comparisons: list[PerformanceCohortComparisonRead]

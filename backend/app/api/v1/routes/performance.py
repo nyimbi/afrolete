@@ -23,6 +23,7 @@ from app.schemas.performance import (
     PerformanceGoalRead,
     PerformanceIngestionCreate,
     PerformanceIngestionRead,
+    PerformanceForecastScenarioRead,
     PerformanceMetricBenchmarkRead,
     PerformanceMetricTrendRead,
     PerformanceMetricTrendSeriesRead,
@@ -51,6 +52,7 @@ from app.services.performance import (
     list_metric_definitions,
     list_my_player_performance,
     list_observations,
+    performance_forecast_scenarios,
     performance_metric_benchmarks,
     performance_cohort_comparisons,
     performance_metric_trend_series,
@@ -255,6 +257,10 @@ async def list_my_player_performance_route(
             trend_series=[
                 PerformanceMetricTrendSeriesRead(**series)
                 for series in profile["trend_series"]
+            ],
+            forecast_scenarios=[
+                PerformanceForecastScenarioRead(**scenario)
+                for scenario in profile["forecast_scenarios"]
             ],
             benchmarks=[
                 PerformanceMetricBenchmarkRead(**benchmark) for benchmark in profile["benchmarks"]
@@ -618,6 +624,27 @@ async def athlete_performance_trend_series_route(
             athlete_profile_id,
             sport=sport,
             limit_per_metric=limit_per_metric,
+        )
+    ]
+
+
+@router.get(
+    "/athletes/{athlete_profile_id}/forecast-scenarios",
+    response_model=list[PerformanceForecastScenarioRead],
+)
+async def athlete_performance_forecast_scenarios_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    sport: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceForecastScenarioRead]:
+    return [
+        PerformanceForecastScenarioRead(**scenario)
+        for scenario in await performance_forecast_scenarios(
+            db,
+            organization_id,
+            athlete_profile_id,
+            sport=sport,
         )
     ]
 

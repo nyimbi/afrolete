@@ -3319,6 +3319,28 @@ export type PerformanceMetricTrendSeriesRead = {
   points: PerformanceMetricTrendPointRead[];
 };
 
+export type PerformanceForecastScenarioRead = {
+  metric_definition_id: UUID;
+  metric_code: string;
+  metric_name: string;
+  sport: string | null;
+  category: MetricCategory;
+  unit: string | null;
+  higher_is_better: boolean;
+  sample_size: number;
+  latest_value: number | null;
+  forecast_next_value: number | null;
+  forecast_low: number | null;
+  forecast_high: number | null;
+  confidence: number;
+  data_quality: string;
+  risk_level: string;
+  trend_direction: string;
+  model_policy: string;
+  projected_points: number[];
+  recommendation: string;
+};
+
 export type PerformanceGoalRead = {
   id: UUID;
   organization_id: UUID;
@@ -3392,6 +3414,7 @@ export type PlayerPerformanceProfileRead = {
   awards: PerformanceAchievementAwardRead[];
   trends: PerformanceMetricTrendRead[];
   trend_series: PerformanceMetricTrendSeriesRead[];
+  forecast_scenarios: PerformanceForecastScenarioRead[];
   benchmarks: PerformanceMetricBenchmarkRead[];
   cohort_comparisons: PerformanceCohortComparisonRead[];
 };
