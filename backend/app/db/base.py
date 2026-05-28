@@ -74,6 +74,7 @@ from app.models.event import (  # noqa: F401,E402
     EventAttendancePolicy,
     AttendanceRecord,
     BackgroundCheck,
+    BackgroundCheckEvidenceDocument,
     ComplianceCredential,
     ConsentRequest,
     Event,

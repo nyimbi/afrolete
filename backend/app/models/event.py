@@ -640,6 +640,30 @@ class BackgroundCheck(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class BackgroundCheckEvidenceDocument(IdMixin, TimestampMixin, Base):
+    __tablename__ = "background_check_evidence_documents"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    background_check_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("background_checks.id"), index=True)
+    person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    uploaded_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reviewed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    document_type: Mapped[str] = mapped_column(String(80), default="screening_report", nullable=False, index=True)
+    review_status: Mapped[str] = mapped_column(String(40), default="needs_review", nullable=False, index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    storage_key: Mapped[str] = mapped_column(String(800), nullable=False, unique=True, index=True)
+    evidence_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    provider_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    review_notes: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class ComplianceCredential(IdMixin, TimestampMixin, Base):
     __tablename__ = "compliance_credentials"
 

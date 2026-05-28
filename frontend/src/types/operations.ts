@@ -2976,6 +2976,45 @@ export type BackgroundCheckRead = {
   created_at: string;
 };
 
+export type BackgroundCheckEvidenceDocumentRead = {
+  id: UUID;
+  organization_id: UUID;
+  background_check_id: UUID;
+  person_id: UUID;
+  uploaded_by_person_id: UUID | null;
+  reviewed_by_person_id: UUID | null;
+  filename: string;
+  content_type: string;
+  document_type: string;
+  review_status: string;
+  size_bytes: number;
+  checksum: string;
+  storage_key: string;
+  evidence_url: string;
+  provider_reference: string | null;
+  reviewed_at: string | null;
+  review_notes: string | null;
+  notes: string | null;
+  background_check_status: BackgroundCheckStatus;
+  background_check_risk_level: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BackgroundCheckEvidenceDocumentLinkRead = {
+  document_id: UUID;
+  background_check_id: UUID;
+  organization_id: UUID;
+  signed_url: string;
+  expires_at: string;
+  filename: string;
+  content_type: string;
+  checksum: string;
+  size_bytes: number;
+  evidence_url: string;
+  storage_key: string;
+};
+
 export type ComplianceCredentialRead = {
   id: UUID;
   organization_id: UUID;

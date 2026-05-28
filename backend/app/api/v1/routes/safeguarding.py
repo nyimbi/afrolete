@@ -18,6 +18,11 @@ from app.schemas.safeguarding import (
     ActivityConsentCreate,
     ActivityConsentRead,
     BackgroundCheckCreate,
+    BackgroundCheckEvidenceDocumentLinkCreate,
+    BackgroundCheckEvidenceDocumentLinkRead,
+    BackgroundCheckEvidenceDocumentRead,
+    BackgroundCheckEvidenceDocumentReviewCreate,
+    BackgroundCheckEvidenceDocumentUploadCreate,
     BackgroundCheckProviderResultCreate,
     BackgroundCheckProviderResultRead,
     BackgroundCheckProviderSubmissionRead,
@@ -84,6 +89,7 @@ from app.services.safeguarding import (
     capture_consent_by_known_channel,
     capture_consent_by_token,
     create_signed_safeguarding_incident_evidence_link,
+    create_signed_background_check_evidence_document_link,
     clearance_for_event,
     create_activity_consent,
     create_background_check,
@@ -102,6 +108,7 @@ from app.services.safeguarding import (
     get_incident_report_package_artifact,
     get_safeguarding_incident_evidence_approval_policy,
     ingest_background_check_provider_result,
+    list_background_check_evidence_documents,
     list_background_checks,
     list_compliance_credentials,
     list_guardians_for_athlete,
@@ -122,7 +129,9 @@ from app.services.safeguarding import (
     respond_to_family_event,
     reconcile_compliance_statuses,
     read_signed_incident_report_package_artifact,
+    read_signed_background_check_evidence_document,
     read_signed_safeguarding_incident_evidence,
+    review_background_check_evidence_document,
     review_safeguarding_incident_evidence,
     revoke_safeguarding_incident_access_grant,
     submit_background_check_to_screening_provider,
@@ -134,6 +143,7 @@ from app.services.safeguarding import (
     submit_incident_medical_clearance_to_provider,
     sync_safeguarding_incident_access_controls_by_id,
     upload_safeguarding_incident_evidence,
+    upload_background_check_evidence_document,
     update_incident_medical_clearance,
     update_incident_report_package,
     update_safeguarding_evidence_policy_rule,
@@ -776,6 +786,33 @@ async def read_safeguarding_incident_evidence_route(
     )
 
 
+@router.get("/background-check-evidence/{organization_id}/{check_id}/{filename}")
+async def read_background_check_evidence_document_route(
+    organization_id: UUID,
+    check_id: UUID,
+    filename: str,
+    checksum: str = Query(),
+    expires: int = Query(),
+    signature: str = Query(),
+) -> Response:
+    evidence = await read_signed_background_check_evidence_document(
+        organization_id,
+        check_id,
+        filename,
+        checksum,
+        expires,
+        signature,
+    )
+    return Response(
+        content=evidence["content"],
+        media_type=str(evidence["content_type"]),
+        headers={
+            "Content-Disposition": f"inline; filename={evidence['filename']}",
+            "X-Afrolete-Background-Check-Evidence-Checksum": str(evidence["checksum"]),
+        },
+    )
+
+
 @router.post("/insurance-claims", response_model=IncidentInsuranceClaimRead, status_code=201)
 async def create_incident_insurance_claim_route(
     payload: IncidentInsuranceClaimCreate,
@@ -915,6 +952,62 @@ async def list_background_checks_route(
         to_background_check_read(check)
         for check in await list_background_checks(db, organization_id, status_filter)
     ]
+
+
+@router.post(
+    "/background-checks/{check_id}/evidence",
+    response_model=BackgroundCheckEvidenceDocumentRead,
+    status_code=201,
+)
+async def upload_background_check_evidence_document_route(
+    check_id: UUID,
+    payload: BackgroundCheckEvidenceDocumentUploadCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BackgroundCheckEvidenceDocumentRead:
+    return await upload_background_check_evidence_document(db, identity, check_id, payload, authz)
+
+
+@router.get(
+    "/background-checks/{check_id}/evidence",
+    response_model=list[BackgroundCheckEvidenceDocumentRead],
+)
+async def list_background_check_evidence_documents_route(
+    check_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[BackgroundCheckEvidenceDocumentRead]:
+    return await list_background_check_evidence_documents(db, identity, check_id, authz)
+
+
+@router.post(
+    "/background-check-evidence/{document_id}/review",
+    response_model=BackgroundCheckEvidenceDocumentRead,
+)
+async def review_background_check_evidence_document_route(
+    document_id: UUID,
+    payload: BackgroundCheckEvidenceDocumentReviewCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BackgroundCheckEvidenceDocumentRead:
+    return await review_background_check_evidence_document(db, identity, document_id, payload, authz)
+
+
+@router.post(
+    "/background-check-evidence/{document_id}/link",
+    response_model=BackgroundCheckEvidenceDocumentLinkRead,
+)
+async def create_background_check_evidence_document_link_route(
+    document_id: UUID,
+    payload: BackgroundCheckEvidenceDocumentLinkCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BackgroundCheckEvidenceDocumentLinkRead:
+    return await create_signed_background_check_evidence_document_link(db, identity, document_id, payload, authz)
 
 
 @router.get("/compliance-summary", response_model=ComplianceSummaryRead)

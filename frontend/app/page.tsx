@@ -176,6 +176,8 @@ import type {
   FundraisingCampaignRead,
   GeneratedTrainingPlanRead,
   GeneratedReportRead,
+  BackgroundCheckEvidenceDocumentLinkRead,
+  BackgroundCheckEvidenceDocumentRead,
   BackgroundCheckRead,
   BackgroundCheckProviderResultRead,
   BackgroundCheckProviderSubmissionRead,
@@ -1597,6 +1599,10 @@ export default function HomePage() {
   const [incidentAccessControlSync, setIncidentAccessControlSync] =
     useState<SafeguardingIncidentAccessControlRead | null>(null);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
+  const [backgroundCheckEvidenceDocuments, setBackgroundCheckEvidenceDocuments] =
+    useState<BackgroundCheckEvidenceDocumentRead[]>([]);
+  const [backgroundCheckEvidenceLink, setBackgroundCheckEvidenceLink] =
+    useState<BackgroundCheckEvidenceDocumentLinkRead | null>(null);
   const [backgroundCheckProviderSubmission, setBackgroundCheckProviderSubmission] =
     useState<BackgroundCheckProviderSubmissionRead | null>(null);
   const [backgroundCheckProviderResult, setBackgroundCheckProviderResult] = useState<BackgroundCheckProviderResultRead | null>(null);
@@ -2406,6 +2412,14 @@ export default function HomePage() {
     setBackgroundChecks(data);
   }, [identity]);
 
+  const loadBackgroundCheckEvidenceDocuments = useCallback(async (checkId: string) => {
+    const data = await apiRequest<BackgroundCheckEvidenceDocumentRead[]>(
+      `/safeguarding/background-checks/${checkId}/evidence`,
+      { identity }
+    );
+    setBackgroundCheckEvidenceDocuments(data);
+  }, [identity]);
+
   const loadComplianceCredentials = useCallback(async (organizationId: string) => {
     const data = await apiRequest<ComplianceCredentialRead[]>(
       `/safeguarding/credentials?organization_id=${organizationId}`,
@@ -3210,6 +3224,8 @@ export default function HomePage() {
       setIncidentAccessGrants([]);
       setIncidentAccessControlSync(null);
       setBackgroundChecks([]);
+      setBackgroundCheckEvidenceDocuments([]);
+      setBackgroundCheckEvidenceLink(null);
       setBackgroundCheckProviderSubmission(null);
       setBackgroundCheckProviderResult(null);
       setComplianceCredentials([]);
@@ -5794,6 +5810,94 @@ export default function HomePage() {
           `Provider result accepted: ${result.status} risk ${result.risk_level}`,
           result.status === "failed" || result.status === "review_required" ? "neutral" : "good"
         );
+      }
+    );
+  };
+
+  const uploadBackgroundCheckEvidence = (check: BackgroundCheckRead) => {
+    const evidenceText = [
+      `Background check evidence for ${check.check_type}`,
+      `Provider: ${check.provider}`,
+      `Reference: ${check.external_reference ?? `local-${check.id.slice(0, 8)}`}`,
+      "Screening packet reviewed by the safeguarding operator."
+    ].join("\n");
+    runAction(
+      `background-check-evidence-upload-${check.id}`,
+      () =>
+        apiRequest<BackgroundCheckEvidenceDocumentRead>(
+          `/safeguarding/background-checks/${check.id}/evidence`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              filename: `${check.check_type.replace(/[^A-Za-z0-9]+/g, "-")}-evidence.txt`,
+              content_type: "text/plain",
+              content_base64: btoa(evidenceText),
+              document_type: "screening_report",
+              review_status: "needs_review",
+              provider_reference: check.external_reference,
+              notes: "Console-generated screening evidence packet for review."
+            }
+          }
+        ),
+      async (document) => {
+        setBackgroundCheckEvidenceDocuments((current) => [
+          document,
+          ...current.filter((item) => item.id !== document.id)
+        ]);
+        await loadBackgroundChecks(document.organization_id);
+        addLog(`${document.filename} screening evidence stored`, "good");
+      }
+    );
+  };
+
+  const reviewBackgroundCheckEvidence = (
+    document: BackgroundCheckEvidenceDocumentRead,
+    reviewStatus: "accepted" | "rejected" | "escalated"
+  ) => {
+    runAction(
+      `background-check-evidence-review-${document.id}-${reviewStatus}`,
+      () =>
+        apiRequest<BackgroundCheckEvidenceDocumentRead>(
+          `/safeguarding/background-check-evidence/${document.id}/review`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              review_status: reviewStatus,
+              review_notes: `Screening evidence ${reviewStatus} from the operations console.`,
+              check_status: reviewStatus === "accepted" ? "clear" : "review_required",
+              risk_level: reviewStatus === "accepted" ? "low" : "high",
+              result_summary: `Evidence document ${document.filename} was ${reviewStatus}.`
+            }
+          }
+        ),
+      async (updated) => {
+        setBackgroundCheckEvidenceDocuments((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        await loadBackgroundChecks(updated.organization_id);
+        addLog(`${updated.filename} evidence ${updated.review_status}`, reviewStatus === "accepted" ? "good" : "neutral");
+      }
+    );
+  };
+
+  const shareBackgroundCheckEvidence = (document: BackgroundCheckEvidenceDocumentRead) => {
+    runAction(
+      `background-check-evidence-link-${document.id}`,
+      () =>
+        apiRequest<BackgroundCheckEvidenceDocumentLinkRead>(
+          `/safeguarding/background-check-evidence/${document.id}/link`,
+          {
+            method: "POST",
+            identity,
+            body: { ttl_seconds: 600 }
+          }
+        ),
+      (link) => {
+        setBackgroundCheckEvidenceLink(link);
+        addLog(`${link.filename} screening evidence link expires ${new Date(link.expires_at).toLocaleString()}`, "good");
       }
     );
   };
@@ -16923,11 +17027,48 @@ export default function HomePage() {
                   <button type="button" onClick={() => updateBackgroundCheck(check, "clear")}>Clear</button>
                   <button type="button" onClick={() => updateBackgroundCheck(check, "review_required")}>Review</button>
                   <button type="button" onClick={() => submitBackgroundCheckToProvider(check)}>Send</button>
+                  <button type="button" onClick={() => uploadBackgroundCheckEvidence(check)}>Evidence</button>
+                  <button type="button" onClick={() => loadBackgroundCheckEvidenceDocuments(check.id)}>Docs</button>
                   <button type="button" onClick={() => simulateBackgroundCheckProviderResult(check, "clear", "low")}>Provider clear</button>
                   <button type="button" onClick={() => simulateBackgroundCheckProviderResult(check, "review_required", "high")}>Provider risk</button>
                 </div>
               </article>
             ))}
+            {backgroundCheckEvidenceDocuments.slice(0, 4).map((document) => (
+              <article key={document.id} className="task-card">
+                <div>
+                  <strong>{document.filename}</strong>
+                  <span>
+                    {document.document_type} · {document.review_status} · {document.background_check_status} · risk {document.background_check_risk_level}
+                  </span>
+                  <span>{document.checksum.slice(0, 16)} · {document.size_bytes} bytes · {document.content_type}</span>
+                  <span>{document.evidence_url} · {document.storage_key}</span>
+                  {document.review_notes ? <span>{document.review_notes}</span> : null}
+                </div>
+                <div className="event-toolbar">
+                  <button type="button" onClick={() => reviewBackgroundCheckEvidence(document, "accepted")}>Accept</button>
+                  <button type="button" onClick={() => reviewBackgroundCheckEvidence(document, "escalated")}>Escalate</button>
+                  <button type="button" onClick={() => shareBackgroundCheckEvidence(document)}>Link</button>
+                </div>
+              </article>
+            ))}
+            {backgroundCheckEvidenceLink ? (
+              <article className="task-card">
+                <div>
+                  <strong>{backgroundCheckEvidenceLink.filename} signed screening evidence</strong>
+                  <span>Expires {new Date(backgroundCheckEvidenceLink.expires_at).toLocaleString()} · {backgroundCheckEvidenceLink.size_bytes} bytes</span>
+                  <span>{backgroundCheckEvidenceLink.checksum.slice(0, 16)} · {backgroundCheckEvidenceLink.content_type}</span>
+                  <span>{backgroundCheckEvidenceLink.evidence_url} · {backgroundCheckEvidenceLink.storage_key}</span>
+                </div>
+                <a
+                  href={`${apiBaseUrl}${backgroundCheckEvidenceLink.signed_url}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open
+                </a>
+              </article>
+            ) : null}
             {backgroundCheckProviderSubmission ? (
               <article className="task-card">
                 <div>

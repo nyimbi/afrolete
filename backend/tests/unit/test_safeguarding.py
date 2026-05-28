@@ -1056,6 +1056,104 @@ def test_signed_screening_provider_result_updates_background_check(
     safeguarding_service.get_settings.cache_clear()
 
 
+def test_background_check_evidence_document_review_and_signed_access(
+    client,
+    identity_headers,
+    athlete_person,
+) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Screening Evidence Club", "organization_type": "club"},
+    ).json()
+    check = client.post(
+        "/api/v1/safeguarding/background-checks",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "person_id": str(athlete_person.id),
+            "provider": "SafeScreen",
+            "check_type": "Safeguarding background",
+            "requested_at": "2026-05-28T09:00:00Z",
+            "external_reference": "safe-evidence-001",
+        },
+    ).json()
+    content = b"SafeScreen report: candidate cleared after manual safeguarding review."
+
+    upload_response = client.post(
+        f"/api/v1/safeguarding/background-checks/{check['id']}/evidence",
+        headers=identity_headers,
+        json={
+            "filename": "Screening Report.txt",
+            "content_type": "text/plain",
+            "content_base64": base64.b64encode(content).decode(),
+            "document_type": "screening_report",
+            "review_status": "needs_review",
+            "provider_reference": "safe-evidence-001",
+            "notes": "Provider report uploaded by the safeguarding desk.",
+        },
+    )
+    assert upload_response.status_code == 201
+    document = upload_response.json()
+    assert document["filename"] == "Screening-Report.txt"
+    assert document["checksum"] == sha256(content).hexdigest()
+    assert document["review_status"] == "needs_review"
+    assert document["background_check_status"] == "review_required"
+    assert document["evidence_url"].startswith("local://safeguarding-incident-evidence/background-checks/")
+    assert document["storage_key"].endswith("Screening-Report.txt")
+
+    list_response = client.get(
+        f"/api/v1/safeguarding/background-checks/{check['id']}/evidence",
+        headers=identity_headers,
+    )
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["id"] == document["id"]
+
+    review_response = client.post(
+        f"/api/v1/safeguarding/background-check-evidence/{document['id']}/review",
+        headers=identity_headers,
+        json={
+            "review_status": "accepted",
+            "review_notes": "Safeguarding lead accepted the provider evidence.",
+            "check_status": "clear",
+            "risk_level": "low",
+            "result_summary": "Evidence accepted; candidate cleared.",
+        },
+    )
+    assert review_response.status_code == 200
+    reviewed = review_response.json()
+    assert reviewed["review_status"] == "accepted"
+    assert reviewed["reviewed_by_person_id"] is not None
+    assert reviewed["reviewed_at"] is not None
+    assert reviewed["background_check_status"] == "clear"
+    assert reviewed["background_check_risk_level"] == "low"
+
+    link_response = client.post(
+        f"/api/v1/safeguarding/background-check-evidence/{document['id']}/link",
+        headers=identity_headers,
+        json={"ttl_seconds": 600},
+    )
+    assert link_response.status_code == 200
+    link = link_response.json()
+    assert link["signed_url"].startswith("/api/v1/safeguarding/background-check-evidence/")
+    assert link["checksum"] == reviewed["checksum"]
+    assert link["storage_key"] == reviewed["storage_key"]
+
+    signed_response = client.get(link["signed_url"])
+    assert signed_response.status_code == 200
+    assert signed_response.content == content
+    assert signed_response.headers["x-afrolete-background-check-evidence-checksum"] == reviewed["checksum"]
+
+    checks = client.get(
+        f"/api/v1/safeguarding/background-checks?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    updated = next(item for item in checks if item["id"] == check["id"])
+    assert updated["status"] == "clear"
+    assert updated["risk_level"] == "low"
+    assert "Evidence document Screening-Report.txt" in updated["notes"]
+
+
 def test_screening_provider_result_rejects_bad_signature(
     client,
     identity_headers,

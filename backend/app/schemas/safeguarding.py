@@ -611,6 +611,67 @@ class BackgroundCheckRead(BaseModel):
     created_at: datetime
 
 
+class BackgroundCheckEvidenceDocumentUploadCreate(BaseModel):
+    filename: str = Field(min_length=1, max_length=240)
+    content_type: str = Field(default="application/octet-stream", max_length=120)
+    content_base64: str = Field(min_length=1)
+    document_type: str = Field(default="screening_report", min_length=2, max_length=80)
+    review_status: str = Field(default="needs_review", pattern="^(needs_review|accepted|rejected|escalated)$")
+    provider_reference: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class BackgroundCheckEvidenceDocumentReviewCreate(BaseModel):
+    review_status: str = Field(pattern="^(needs_review|accepted|rejected|escalated)$")
+    review_notes: str | None = Field(default=None, max_length=2000)
+    check_status: BackgroundCheckStatus | None = None
+    risk_level: str | None = Field(default=None, max_length=40)
+    result_summary: str | None = Field(default=None, max_length=4000)
+
+
+class BackgroundCheckEvidenceDocumentRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    background_check_id: UUID
+    person_id: UUID
+    uploaded_by_person_id: UUID | None
+    reviewed_by_person_id: UUID | None
+    filename: str
+    content_type: str
+    document_type: str
+    review_status: str
+    size_bytes: int
+    checksum: str
+    storage_key: str
+    evidence_url: str
+    provider_reference: str | None
+    reviewed_at: datetime | None
+    review_notes: str | None
+    notes: str | None
+    background_check_status: BackgroundCheckStatus
+    background_check_risk_level: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class BackgroundCheckEvidenceDocumentLinkCreate(BaseModel):
+    ttl_seconds: int | None = Field(default=None, ge=60, le=86400)
+
+
+class BackgroundCheckEvidenceDocumentLinkRead(BaseModel):
+    document_id: UUID
+    background_check_id: UUID
+    organization_id: UUID
+    signed_url: str
+    expires_at: datetime
+    filename: str
+    content_type: str
+    checksum: str
+    size_bytes: int
+    evidence_url: str
+    storage_key: str
+
+
 class BackgroundCheckProviderResultCreate(BaseModel):
     organization_id: UUID | None = None
     background_check_id: UUID | None = None

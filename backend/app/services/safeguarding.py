@@ -38,6 +38,7 @@ from app.models.event import (
     ActivityConsent,
     AttendanceRecord,
     BackgroundCheck,
+    BackgroundCheckEvidenceDocument,
     ComplianceCredential,
     ConsentRequest,
     Event,
@@ -55,6 +56,11 @@ from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRost
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
     BackgroundCheckCreate,
+    BackgroundCheckEvidenceDocumentLinkCreate,
+    BackgroundCheckEvidenceDocumentLinkRead,
+    BackgroundCheckEvidenceDocumentRead,
+    BackgroundCheckEvidenceDocumentReviewCreate,
+    BackgroundCheckEvidenceDocumentUploadCreate,
     BackgroundCheckProviderSubmissionRead,
     BackgroundCheckProviderResultCreate,
     BackgroundCheckProviderResultRead,
@@ -3748,6 +3754,243 @@ async def update_background_check(
     return check
 
 
+async def upload_background_check_evidence_document(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    check_id: UUID,
+    payload: BackgroundCheckEvidenceDocumentUploadCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> BackgroundCheckEvidenceDocumentRead:
+    check = await db.get(BackgroundCheck, check_id)
+    if check is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Background check not found")
+    await ensure_org_manage(authz, check.organization_id, identity)
+    content = decode_safeguarding_upload_content(payload.content_base64)
+    if not content:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Evidence document is empty")
+
+    selected_settings = settings or get_settings()
+    uploaded_at = utc_now()
+    checksum = sha256(content).hexdigest()
+    safe_name = safe_safeguarding_upload_filename(payload.filename, fallback="background-check-evidence")
+    storage_name = f"{checksum[:16]}-{safe_name}"
+    relative_path = (
+        Path("background-checks")
+        / str(check.organization_id)
+        / str(check.id)
+        / storage_name
+    ).as_posix()
+    stored = put_object(
+        selected_settings,
+        local_root=selected_settings.safeguarding_incident_evidence_dir,
+        local_url_prefix=selected_settings.safeguarding_incident_evidence_url_prefix,
+        key=relative_path,
+        content=content,
+        content_type=payload.content_type or "application/octet-stream",
+    )
+    document = BackgroundCheckEvidenceDocument(
+        organization_id=check.organization_id,
+        background_check_id=check.id,
+        person_id=check.person_id,
+        uploaded_by_person_id=identity.person_id,
+        reviewed_by_person_id=identity.person_id if payload.review_status != "needs_review" else None,
+        filename=safe_name,
+        content_type=payload.content_type or "application/octet-stream",
+        document_type=payload.document_type,
+        review_status=payload.review_status,
+        size_bytes=len(content),
+        checksum=checksum,
+        storage_key=relative_path,
+        evidence_url=stored.url,
+        provider_reference=payload.provider_reference,
+        reviewed_at=uploaded_at if payload.review_status != "needs_review" else None,
+        review_notes=payload.notes if payload.review_status != "needs_review" else None,
+        notes=payload.notes,
+    )
+    db.add(document)
+    apply_background_check_evidence_review_to_check(
+        check,
+        review_status=payload.review_status,
+        reviewed_at=uploaded_at,
+        reviewer_person_id=identity.person_id,
+        risk_level=None,
+        check_status=None,
+        result_summary=None,
+        review_notes=payload.notes,
+        document=document,
+    )
+
+    await db.commit()
+    await db.refresh(document)
+    await db.refresh(check)
+    return background_check_evidence_document_read(document, check)
+
+
+async def list_background_check_evidence_documents(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    check_id: UUID,
+    authz: AuthorizationService,
+) -> list[BackgroundCheckEvidenceDocumentRead]:
+    check = await db.get(BackgroundCheck, check_id)
+    if check is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Background check not found")
+    await ensure_org_manage(authz, check.organization_id, identity)
+    statement = (
+        select(BackgroundCheckEvidenceDocument)
+        .where(BackgroundCheckEvidenceDocument.background_check_id == check.id)
+        .order_by(BackgroundCheckEvidenceDocument.created_at.desc())
+    )
+    documents = list((await db.scalars(statement)).all())
+    return [background_check_evidence_document_read(document, check) for document in documents]
+
+
+async def review_background_check_evidence_document(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    document_id: UUID,
+    payload: BackgroundCheckEvidenceDocumentReviewCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> BackgroundCheckEvidenceDocumentRead:
+    document = await db.get(BackgroundCheckEvidenceDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence document not found")
+    check = await db.get(BackgroundCheck, document.background_check_id)
+    if check is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Background check not found")
+    await ensure_org_manage(authz, check.organization_id, identity)
+    selected_settings = settings or get_settings()
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.safeguarding_incident_evidence_dir,
+        key=document.storage_key,
+    )
+    checksum = sha256(content).hexdigest()
+    if checksum != document.checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Evidence checksum mismatch")
+
+    reviewed_at = utc_now()
+    document.review_status = payload.review_status
+    document.reviewed_by_person_id = identity.person_id
+    document.reviewed_at = reviewed_at
+    document.review_notes = payload.review_notes
+    apply_background_check_evidence_review_to_check(
+        check,
+        review_status=payload.review_status,
+        reviewed_at=reviewed_at,
+        reviewer_person_id=identity.person_id,
+        risk_level=payload.risk_level,
+        check_status=payload.check_status,
+        result_summary=payload.result_summary,
+        review_notes=payload.review_notes,
+        document=document,
+    )
+
+    await db.commit()
+    await db.refresh(document)
+    await db.refresh(check)
+    return background_check_evidence_document_read(document, check)
+
+
+async def create_signed_background_check_evidence_document_link(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    document_id: UUID,
+    payload: BackgroundCheckEvidenceDocumentLinkCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> BackgroundCheckEvidenceDocumentLinkRead:
+    document = await db.get(BackgroundCheckEvidenceDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence document not found")
+    check = await db.get(BackgroundCheck, document.background_check_id)
+    if check is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Background check not found")
+    await ensure_org_manage(authz, check.organization_id, identity)
+    selected_settings = settings or get_settings()
+    storage_name = validate_background_check_evidence_storage_key(
+        document.storage_key,
+        check.organization_id,
+        check.id,
+    )
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.safeguarding_incident_evidence_dir,
+        key=document.storage_key,
+    )
+    checksum = sha256(content).hexdigest()
+    if checksum != document.checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Evidence checksum mismatch")
+    now = utc_now()
+    expires_at = now + timedelta(
+        seconds=payload.ttl_seconds or selected_settings.safeguarding_incident_evidence_url_ttl_seconds
+    )
+    signed_url = signed_background_check_evidence_url(
+        selected_settings,
+        check.organization_id,
+        check.id,
+        storage_name,
+        checksum,
+        expires_at,
+    )
+    return BackgroundCheckEvidenceDocumentLinkRead(
+        document_id=document.id,
+        background_check_id=check.id,
+        organization_id=check.organization_id,
+        signed_url=signed_url,
+        expires_at=expires_at,
+        filename=document.filename,
+        content_type=document.content_type,
+        checksum=checksum,
+        size_bytes=len(content),
+        evidence_url=document.evidence_url,
+        storage_key=document.storage_key,
+    )
+
+
+async def read_signed_background_check_evidence_document(
+    organization_id: UUID,
+    check_id: UUID,
+    filename: str,
+    checksum: str,
+    expires: int,
+    signature: str,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    selected_settings = settings or get_settings()
+    if "/" in filename or "\\" in filename or filename in {"", ".", ".."}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid evidence name")
+    if expires < int(time.time()):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Evidence link expired")
+    expected = background_check_evidence_signature(
+        selected_settings,
+        organization_id,
+        check_id,
+        filename,
+        checksum,
+        expires,
+    )
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid evidence signature")
+    storage_key = (Path("background-checks") / str(organization_id) / str(check_id) / filename).as_posix()
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.safeguarding_incident_evidence_dir,
+        key=storage_key,
+    )
+    actual_checksum = sha256(content).hexdigest()
+    if actual_checksum != checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Evidence checksum mismatch")
+    return {
+        "content": content,
+        "content_type": safeguarding_evidence_content_type_for_filename(filename),
+        "filename": public_safeguarding_evidence_filename(filename),
+        "checksum": actual_checksum,
+    }
+
+
 async def submit_background_check_to_screening_provider(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -4096,6 +4339,143 @@ def append_background_check_note(
 ) -> None:
     entry = f"{at.isoformat()} {message}"
     check.notes = "\n".join(part for part in [check.notes, entry] if part)
+
+
+def apply_background_check_evidence_review_to_check(
+    check: BackgroundCheck,
+    *,
+    review_status: str,
+    reviewed_at: datetime,
+    reviewer_person_id: UUID | None,
+    risk_level: str | None,
+    check_status: BackgroundCheckStatus | None,
+    result_summary: str | None,
+    review_notes: str | None,
+    document: BackgroundCheckEvidenceDocument,
+) -> None:
+    normalized_status = review_status.strip().lower()
+    if normalized_status != "needs_review":
+        check.reviewed_by_person_id = reviewer_person_id
+    if check_status is not None:
+        check.status = check_status
+    elif normalized_status == "accepted":
+        check.status = BackgroundCheckStatus.CLEAR
+    elif normalized_status in {"rejected", "escalated", "needs_review"}:
+        check.status = BackgroundCheckStatus.REVIEW_REQUIRED
+    if check.status in {BackgroundCheckStatus.CLEAR, BackgroundCheckStatus.FAILED} or (
+        check_status is not None and check.status == BackgroundCheckStatus.REVIEW_REQUIRED
+    ):
+        check.completed_at = check.completed_at or reviewed_at
+    if risk_level is not None:
+        check.risk_level = risk_level.lower()
+    elif normalized_status == "accepted" and check.risk_level in {"unknown", "medium", "high", "critical"}:
+        check.risk_level = "low"
+    elif normalized_status == "escalated" and check.risk_level in {"unknown", "low"}:
+        check.risk_level = "high"
+    if result_summary is not None:
+        check.result_summary = result_summary
+    elif normalized_status == "accepted" and not check.result_summary:
+        check.result_summary = f"Screening evidence {document.filename} accepted for {check.check_type}."
+    append_background_check_note(
+        check,
+        reviewed_at,
+        (
+            f"Evidence document {document.filename} ({document.document_type}) marked {normalized_status}; "
+            f"checksum {document.checksum}; storage {document.storage_key}."
+            + (f" Notes: {review_notes}" if review_notes else "")
+        ),
+    )
+
+
+def background_check_evidence_document_read(
+    document: BackgroundCheckEvidenceDocument,
+    check: BackgroundCheck,
+) -> BackgroundCheckEvidenceDocumentRead:
+    return BackgroundCheckEvidenceDocumentRead(
+        id=document.id,
+        organization_id=document.organization_id,
+        background_check_id=document.background_check_id,
+        person_id=document.person_id,
+        uploaded_by_person_id=document.uploaded_by_person_id,
+        reviewed_by_person_id=document.reviewed_by_person_id,
+        filename=document.filename,
+        content_type=document.content_type,
+        document_type=document.document_type,
+        review_status=document.review_status,
+        size_bytes=document.size_bytes,
+        checksum=document.checksum,
+        storage_key=document.storage_key,
+        evidence_url=document.evidence_url,
+        provider_reference=document.provider_reference,
+        reviewed_at=document.reviewed_at,
+        review_notes=document.review_notes,
+        notes=document.notes,
+        background_check_status=check.status,
+        background_check_risk_level=check.risk_level,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+    )
+
+
+def validate_background_check_evidence_storage_key(
+    storage_key: str,
+    organization_id: UUID,
+    check_id: UUID,
+) -> str:
+    expected_prefix = (Path("background-checks") / str(organization_id) / str(check_id)).as_posix() + "/"
+    normalized = storage_key.strip()
+    if (
+        not normalized.startswith(expected_prefix)
+        or "\\" in normalized
+        or "/../" in normalized
+        or normalized.endswith("/")
+    ):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid evidence storage key")
+    storage_name = normalized.rsplit("/", 1)[-1]
+    if storage_name in {"", ".", ".."}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid evidence storage key")
+    return storage_name
+
+
+def signed_background_check_evidence_url(
+    settings: Settings,
+    organization_id: UUID,
+    check_id: UUID,
+    storage_name: str,
+    checksum: str,
+    expires_at: datetime,
+) -> str:
+    expires = int(expires_at.timestamp())
+    signature = background_check_evidence_signature(
+        settings,
+        organization_id,
+        check_id,
+        storage_name,
+        checksum,
+        expires,
+    )
+    safe_name = quote(storage_name, safe="")
+    return (
+        f"{settings.api_prefix}/safeguarding/background-check-evidence/{organization_id}/{check_id}/{safe_name}"
+        f"?checksum={checksum}&expires={expires}&signature={signature}"
+    )
+
+
+def background_check_evidence_signature(
+    settings: Settings,
+    organization_id: UUID,
+    check_id: UUID,
+    storage_name: str,
+    checksum: str,
+    expires: int,
+) -> str:
+    payload = f"background-checks/{organization_id}/{check_id}/{storage_name}:{checksum}:{expires}"
+    digest = hmac.new(
+        safeguarding_incident_evidence_signing_key(settings),
+        payload.encode(),
+        sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
 
 
 async def resolve_safeguarding_screening_webhook_key(settings: Settings) -> str:
