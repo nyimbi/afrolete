@@ -1,4 +1,11 @@
-from app.api.v1.routes.platform import _parse_host_port, _safe_url_without_credentials
+from app.api.v1.routes.platform import (
+    _openbao_component,
+    _parse_host_port,
+    _redis_component,
+    _safe_url_without_credentials,
+    _temporal_component,
+)
+from app.core.config import Settings
 
 
 def test_healthz(client) -> None:
@@ -33,3 +40,11 @@ def test_infrastructure_status_is_secret_safe(client) -> None:
 def test_infrastructure_helpers_redact_credentials() -> None:
     assert _safe_url_without_credentials("redis://:secret@localhost:6379/0") == "redis://localhost:6379/0"
     assert _parse_host_port("temporal.lindela.io:7233", 7233) == ("temporal.lindela.io", 7233)
+
+
+def test_demo_infrastructure_marks_optional_services_as_standby() -> None:
+    settings = Settings(env="demo", openbao_token="")
+
+    assert _openbao_component(settings).status == "standby"
+    assert _redis_component(settings).status == "standby"
+    assert _temporal_component(settings).status == "standby"

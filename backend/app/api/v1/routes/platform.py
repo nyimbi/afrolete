@@ -137,6 +137,16 @@ def _spicedb_component(settings: Settings) -> InfrastructureComponent:
 
 
 def _openbao_component(settings: Settings) -> InfrastructureComponent:
+    if settings.env == "demo" and not settings.openbao_token:
+        return InfrastructureComponent(
+            key="openbao",
+            name="OpenBao",
+            status="standby",
+            mode="demo",
+            configured=False,
+            endpoint=settings.openbao_addr,
+            details=["demo mode uses environment/local defaults without a vault token"],
+        )
     configured = bool(settings.openbao_addr and settings.openbao_token)
     details = ["namespace configured"] if settings.openbao_namespace else ["root namespace"]
     if settings.openbao_addr and not settings.openbao_token:
@@ -182,6 +192,16 @@ def _object_storage_component(settings: Settings) -> InfrastructureComponent:
 
 
 def _redis_component(settings: Settings) -> InfrastructureComponent:
+    if settings.env == "demo":
+        return InfrastructureComponent(
+            key="redis",
+            name="Redis",
+            status="standby",
+            mode="demo",
+            configured=False,
+            endpoint=_safe_url_without_credentials(settings.redis_url),
+            details=["not required for the local Docker demo"],
+        )
     return InfrastructureComponent(
         key="redis",
         name="Redis",
@@ -194,6 +214,16 @@ def _redis_component(settings: Settings) -> InfrastructureComponent:
 
 
 def _temporal_component(settings: Settings) -> InfrastructureComponent:
+    if settings.env == "demo":
+        return InfrastructureComponent(
+            key="temporal",
+            name="Temporal",
+            status="standby",
+            mode="demo",
+            configured=False,
+            endpoint=settings.temporal_address,
+            details=["not required for the local Docker demo"],
+        )
     return InfrastructureComponent(
         key="temporal",
         name="Temporal",
@@ -268,6 +298,8 @@ async def _spicedb_probe(settings: Settings) -> InfrastructureProbeResult:
 
 
 async def _openbao_probe(settings: Settings) -> InfrastructureProbeResult:
+    if settings.env == "demo" and not settings.openbao_token:
+        return _skipped_probe("openbao", "OpenBao", "demo mode does not require a vault token")
     if not settings.openbao_addr:
         return _skipped_probe("openbao", "OpenBao", "address missing")
     return await _http_probe(
@@ -315,6 +347,8 @@ async def _object_storage_probe(settings: Settings) -> InfrastructureProbeResult
 
 
 async def _redis_probe(settings: Settings) -> InfrastructureProbeResult:
+    if settings.env == "demo":
+        return _skipped_probe("redis", "Redis", "not required for the local Docker demo")
     if not settings.redis_url:
         return _skipped_probe("redis", "Redis", "URL missing")
     parsed = urlparse(settings.redis_url)
@@ -329,6 +363,8 @@ async def _redis_probe(settings: Settings) -> InfrastructureProbeResult:
 
 
 async def _temporal_probe(settings: Settings) -> InfrastructureProbeResult:
+    if settings.env == "demo":
+        return _skipped_probe("temporal", "Temporal", "not required for the local Docker demo")
     if not settings.temporal_address:
         return _skipped_probe("temporal", "Temporal", "address missing")
     return await _tcp_probe(

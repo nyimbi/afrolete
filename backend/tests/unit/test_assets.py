@@ -208,6 +208,18 @@ def test_facility_equipment_checkout_work_order_booking_and_summary(
     assert summary["projected_booking_revenue"] == "240.00"
 
 
+def test_asset_summary_handles_empty_tenant(client, identity_headers) -> None:
+    organization, _, _, _ = create_assets_context(client, identity_headers, "Empty Assets Club")
+
+    summary_response = client.get(f"/api/v1/assets/summary?organization_id={organization['id']}")
+
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["facilities"] == 0
+    assert summary["upcoming_bookings"] == 0
+    assert summary["projected_booking_revenue"] == "0.00"
+
+
 def test_facility_booking_rejects_overlap(client, identity_headers) -> None:
     organization, team, _, _ = create_assets_context(client, identity_headers, "Booking Club")
     facility = client.post(

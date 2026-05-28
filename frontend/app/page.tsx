@@ -2208,6 +2208,8 @@ export default function HomePage() {
     infrastructureStatus?.components.filter((component) => infrastructureTone(component) === "ready").length ?? 0;
   const infrastructureAttentionCount =
     infrastructureStatus?.components.filter((component) => infrastructureTone(component) === "attention").length ?? 0;
+  const infrastructureStandbyCount =
+    infrastructureStatus?.components.filter((component) => infrastructureTone(component) === "standby").length ?? 0;
   const infrastructureProbeFailures =
     infrastructureProbes?.results.filter((result) => result.reachable === false).length ?? 0;
   const infrastructureProbeByKey = useMemo(
@@ -2382,7 +2384,8 @@ export default function HomePage() {
       apiRequest<AgentDecisionAppealRead[]>(`/agents/appeals?organization_id=${organizationId}`),
       apiRequest<AgentEthicalScorecardRead>(`/agents/ethical-scorecard?organization_id=${organizationId}`),
       apiRequest<AgentScorecardCommentModerationRead[]>(
-        `/agents/ethical-scorecard/comments/moderation?organization_id=${organizationId}`
+        `/agents/ethical-scorecard/comments/moderation?organization_id=${organizationId}`,
+        { identity }
       ),
       apiRequest<AgentScorecardPublicationRead[]>(
         `/agents/ethical-scorecard/publications?organization_id=${organizationId}`
@@ -2879,20 +2882,31 @@ export default function HomePage() {
 
   const loadDevelopers = useCallback(async (organizationId: string) => {
     const [applications, apiKeys, oauthAuthorizations, webhooks, deliveries, listings, catalog, summary] = await Promise.all([
-      apiRequest<DeveloperApplicationRead[]>(`/developers/applications?organization_id=${organizationId}`),
-      apiRequest<DeveloperApiKeyRead[]>(`/developers/api-keys?organization_id=${organizationId}`),
-      apiRequest<DeveloperOAuthAuthorizationRead[]>(`/developers/oauth/authorizations?organization_id=${organizationId}`),
+      apiRequest<DeveloperApplicationRead[]>(`/developers/applications?organization_id=${organizationId}`, {
+        identity
+      }),
+      apiRequest<DeveloperApiKeyRead[]>(`/developers/api-keys?organization_id=${organizationId}`, { identity }),
+      apiRequest<DeveloperOAuthAuthorizationRead[]>(`/developers/oauth/authorizations?organization_id=${organizationId}`, {
+        identity
+      }),
       apiRequest<DeveloperWebhookSubscriptionRead[]>(
-        `/developers/webhook-subscriptions?organization_id=${organizationId}`
+        `/developers/webhook-subscriptions?organization_id=${organizationId}`,
+        { identity }
       ),
       apiRequest<DeveloperWebhookDeliveryRead[]>(
-        `/developers/webhook-deliveries?organization_id=${organizationId}`
+        `/developers/webhook-deliveries?organization_id=${organizationId}`,
+        { identity }
       ),
       apiRequest<DeveloperMarketplaceListingRead[]>(
-        `/developers/marketplace-listings?organization_id=${organizationId}`
+        `/developers/marketplace-listings?organization_id=${organizationId}`,
+        { identity }
       ),
-      apiRequest<DeveloperIntegrationCatalogRead>(`/developers/catalog?organization_id=${organizationId}`),
-      apiRequest<DeveloperPortalSummaryRead>(`/developers/summary?organization_id=${organizationId}`)
+      apiRequest<DeveloperIntegrationCatalogRead>(`/developers/catalog?organization_id=${organizationId}`, {
+        identity
+      }),
+      apiRequest<DeveloperPortalSummaryRead>(`/developers/summary?organization_id=${organizationId}`, {
+        identity
+      })
     ]);
     setDeveloperApplications(applications);
     setDeveloperApiKeys(apiKeys);
@@ -2902,7 +2916,7 @@ export default function HomePage() {
     setDeveloperListings(listings);
     setDeveloperCatalog(catalog);
     setDeveloperSummary(summary);
-  }, []);
+  }, [identity]);
 
   const loadInfrastructure = useCallback(async () => {
     const [status, probes] = await Promise.all([
@@ -10444,7 +10458,7 @@ export default function HomePage() {
             <p className="section-label">Infrastructure</p>
             <strong>
               {infrastructureStatus
-                ? `${infrastructureReadyCount}/${infrastructureStatus.components.length} ready`
+                ? `${infrastructureReadyCount} active · ${infrastructureStandbyCount} standby`
                 : "Checking runtime"}
             </strong>
             <span>

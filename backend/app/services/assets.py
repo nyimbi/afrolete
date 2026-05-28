@@ -1011,9 +1011,12 @@ async def asset_summary(db: AsyncSession, organization_id: UUID) -> AssetSummary
         for booking in upcoming_bookings
     )
     projected_revenue = sum(
-        Decimal(str(max((booking.ends_at - booking.starts_at).total_seconds() / 3600, 0)))
-        * (booking.rate or Decimal("0"))
-        for booking in upcoming_bookings
+        (
+            Decimal(str(max((booking.ends_at - booking.starts_at).total_seconds() / 3600, 0)))
+            * (booking.rate or Decimal("0"))
+            for booking in upcoming_bookings
+        ),
+        Decimal("0"),
     )
     open_work_orders = [
         work_order
