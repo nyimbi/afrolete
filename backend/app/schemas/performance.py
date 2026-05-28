@@ -333,6 +333,29 @@ class PerformanceForecastWhatIfRead(PerformanceForecastScenarioRead):
     horizon: int
 
 
+class PerformanceInjuryRiskRead(BaseModel):
+    athlete_profile_id: UUID
+    generated_at: datetime
+    model_policy: str
+    score: int
+    risk_band: str
+    confidence: float
+    latest_readiness_score: int | None
+    average_readiness_score: float | None
+    average_soreness_score: float | None
+    average_sleep_quality: float | None
+    latest_load: float | None
+    average_load: float | None
+    acute_load: float | None
+    chronic_load: float | None
+    acute_chronic_ratio: float | None
+    load_delta: float | None
+    open_incident_count: int
+    declining_metric_count: int
+    drivers: list[str]
+    recommendation: str
+
+
 class PerformanceGoalCreate(BaseModel):
     organization_id: UUID
     metric_definition_id: UUID

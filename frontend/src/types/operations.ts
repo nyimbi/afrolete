@@ -3348,6 +3348,29 @@ export type PerformanceForecastWhatIfRead = PerformanceForecastScenarioRead & {
   horizon: number;
 };
 
+export type PerformanceInjuryRiskRead = {
+  athlete_profile_id: UUID;
+  generated_at: string;
+  model_policy: string;
+  score: number;
+  risk_band: string;
+  confidence: number;
+  latest_readiness_score: number | null;
+  average_readiness_score: number | null;
+  average_soreness_score: number | null;
+  average_sleep_quality: number | null;
+  latest_load: number | null;
+  average_load: number | null;
+  acute_load: number | null;
+  chronic_load: number | null;
+  acute_chronic_ratio: number | null;
+  load_delta: number | null;
+  open_incident_count: number;
+  declining_metric_count: number;
+  drivers: string[];
+  recommendation: string;
+};
+
 export type PerformanceGoalRead = {
   id: UUID;
   organization_id: UUID;

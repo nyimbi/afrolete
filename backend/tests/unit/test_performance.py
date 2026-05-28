@@ -513,6 +513,102 @@ def test_performance_what_if_forecast_adjusts_training_runway(client, identity_h
     assert "20% training adjustment" in scenario["recommendation"]
 
 
+def test_performance_injury_risk_combines_workload_readiness_and_incidents(
+    client,
+    identity_headers,
+) -> None:
+    organization, team, member, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "jump_power",
+            "name": "Jump Power",
+            "category": "physical",
+            "unit": "cm",
+            "higher_is_better": True,
+        },
+    ).json()
+    for value in [50, 44]:
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": metric["id"],
+                "value": value,
+            },
+        )
+        assert response.status_code == 201
+
+    session = client.post(
+        "/api/v1/training/sessions",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "title": "High load conditioning",
+            "scheduled_for": "2026-06-03T15:00:00Z",
+            "duration_minutes": 75,
+            "rpe_target": 7,
+        },
+    )
+    assert session.status_code == 201
+    feedback = client.post(
+        f"/api/v1/training/sessions/{session.json()['id']}/feedback",
+        headers=identity_headers,
+        json={
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "readiness_score": 42,
+            "soreness_score": 8,
+            "sleep_quality": 4,
+            "mood_score": 5,
+            "actual_rpe": 10,
+            "actual_duration_minutes": 95,
+            "completed": True,
+        },
+    )
+    assert feedback.status_code == 201
+    incident = client.post(
+        "/api/v1/safeguarding/incidents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "athlete_person_id": member["subject_id"],
+            "incident_type": "injury",
+            "severity": "high",
+            "occurred_at": "2026-06-04T12:00:00Z",
+            "title": "Hamstring tightness",
+            "description": "Athlete reported hamstring tightness after conditioning.",
+            "medical_follow_up_required": "required",
+        },
+    )
+    assert incident.status_code == 201
+
+    response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/injury-risk"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert response.status_code == 200
+    risk = response.json()
+    assert risk["model_policy"] == "deterministic_injury_risk_v1"
+    assert risk["score"] == 100
+    assert risk["risk_band"] == "critical"
+    assert risk["latest_readiness_score"] == 42
+    assert risk["average_soreness_score"] == 8.0
+    assert risk["average_sleep_quality"] == 4.0
+    assert risk["latest_load"] == 950.0
+    assert risk["open_incident_count"] == 1
+    assert risk["declining_metric_count"] == 1
+    assert any("open injury" in driver for driver in risk["drivers"])
+    assert "medical or safeguarding review" in risk["recommendation"]
+
+
 def test_player_can_submit_pending_self_assessment(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     player_headers = {

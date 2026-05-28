@@ -206,6 +206,7 @@ import type {
   PerformanceForecastScenarioRead,
   PerformanceForecastWhatIfRead,
   PerformanceGoalRead,
+  PerformanceInjuryRiskRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
   PerformanceMetricTrendRead,
@@ -995,6 +996,63 @@ function PerformanceWhatIfScenarioDashboard({ scenarios }: { scenarios: Performa
   );
 }
 
+function PerformanceInjuryRiskCard({ risk }: { risk: PerformanceInjuryRiskRead | null }) {
+  const score = risk?.score ?? 0;
+  const riskColor =
+    risk?.risk_band === "critical" ? "var(--red)" :
+    risk?.risk_band === "high" ? "var(--orange)" :
+    risk?.risk_band === "watch" ? "var(--amber)" :
+    "var(--green)";
+
+  return (
+    <article className="task-card chart-card">
+      <div>
+        <strong>Injury risk · {risk?.risk_band ?? "no data"}</strong>
+        <span>
+          {risk ? `${Math.round(risk.confidence * 100)}% confidence · ${risk.model_policy.replaceAll("_", " ")}` : "Training feedback drives risk prediction"}
+        </span>
+      </div>
+      <div className="chart-bars">
+        <div className="chart-bar-row">
+          <span>Risk score</span>
+          <div className="chart-track">
+            <div className="chart-fill" style={{ width: `${Math.max(4, Math.min(100, score))}%`, backgroundColor: riskColor }} />
+          </div>
+          <strong>{risk?.score ?? "n/a"}</strong>
+        </div>
+        <div className="chart-bar-row">
+          <span>Readiness</span>
+          <div className="chart-track">
+            <div
+              className="chart-fill"
+              style={{
+                width: `${Math.max(4, Math.min(100, risk?.latest_readiness_score ?? 0))}%`,
+                backgroundColor: "var(--teal)"
+              }}
+            />
+          </div>
+          <strong>{risk?.latest_readiness_score ?? "n/a"}</strong>
+        </div>
+        <div className="chart-bar-row">
+          <span>ACWR</span>
+          <div className="chart-track">
+            <div
+              className="chart-fill"
+              style={{
+                width: `${Math.max(4, Math.min(100, (risk?.acute_chronic_ratio ?? 0) * 50))}%`,
+                backgroundColor: "var(--violet)"
+              }}
+            />
+          </div>
+          <strong>{risk?.acute_chronic_ratio ?? "n/a"}</strong>
+        </div>
+      </div>
+      <small>{risk?.drivers[0] ?? "Record athlete-specific readiness and session feedback to generate risk drivers."}</small>
+      <small>{risk?.recommendation ?? "No risk recommendation is available yet."}</small>
+    </article>
+  );
+}
+
 function downloadTextArtifact(content: string, contentType: string, filename: string) {
   const blob = new Blob([content], { type: contentType });
   const url = window.URL.createObjectURL(blob);
@@ -1140,6 +1198,7 @@ export default function HomePage() {
   const [performanceWhatIfScenarios, setPerformanceWhatIfScenarios] = useState<PerformanceForecastWhatIfRead[]>([]);
   const [performanceWhatIfAdjustment, setPerformanceWhatIfAdjustment] = useState(15);
   const [performanceWhatIfReadiness, setPerformanceWhatIfReadiness] = useState(70);
+  const [performanceInjuryRisk, setPerformanceInjuryRisk] = useState<PerformanceInjuryRiskRead | null>(null);
   const [performanceGoals, setPerformanceGoals] = useState<PerformanceGoalRead[]>([]);
   const [performanceAwards, setPerformanceAwards] = useState<PerformanceAchievementAwardRead[]>([]);
   const [performanceAchievementRun, setPerformanceAchievementRun] =
@@ -2187,6 +2246,7 @@ export default function HomePage() {
         trendSeriesData,
         forecastScenarioData,
         whatIfScenarioData,
+        injuryRiskData,
         goalData,
         awardData
       ] = await Promise.all([
@@ -2217,6 +2277,9 @@ export default function HomePage() {
         apiRequest<PerformanceForecastWhatIfRead[]>(
           `/performance/athletes/${athleteProfileId}/forecast-scenarios/what-if?organization_id=${organizationId}&training_adjustment_percent=${performanceWhatIfAdjustment}&readiness_score=${performanceWhatIfReadiness}`
         ),
+        apiRequest<PerformanceInjuryRiskRead>(
+          `/performance/athletes/${athleteProfileId}/injury-risk?organization_id=${organizationId}`
+        ),
         apiRequest<PerformanceGoalRead[]>(
           `/performance/athletes/${athleteProfileId}/goals?organization_id=${organizationId}`
         ),
@@ -2233,6 +2296,7 @@ export default function HomePage() {
       setPerformanceTrendSeries(trendSeriesData);
       setPerformanceForecastScenarios(forecastScenarioData);
       setPerformanceWhatIfScenarios(whatIfScenarioData);
+      setPerformanceInjuryRisk(injuryRiskData);
       setPerformanceGoals(goalData);
       setPerformanceAwards(awardData);
       setSelectedObservationId((current) =>
@@ -3011,6 +3075,7 @@ export default function HomePage() {
       setPerformanceTrendSeries([]);
       setPerformanceForecastScenarios([]);
       setPerformanceWhatIfScenarios([]);
+      setPerformanceInjuryRisk(null);
       setPerformanceGoals([]);
       setPerformanceAwards([]);
       setPerformanceAchievementRun(null);
@@ -13324,6 +13389,7 @@ export default function HomePage() {
               trends={performanceTrends}
               benchmarks={performanceBenchmarks}
             />
+            <PerformanceInjuryRiskCard risk={performanceInjuryRisk} />
             <PerformanceForecastScenarioDashboard scenarios={performanceForecastScenarios} />
             <PerformanceWhatIfScenarioDashboard scenarios={performanceWhatIfScenarios} />
             <PerformanceCohortComparisonDashboard comparisons={performanceCohortComparisons} />

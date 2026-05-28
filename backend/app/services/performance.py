@@ -17,8 +17,10 @@ from app.models.enums import (
     MembershipRole,
     MetricSource,
     MetricVerificationStatus,
+    SafeguardingIncidentStatus,
+    SafeguardingIncidentType,
 )
-from app.models.event import Event
+from app.models.event import Event, SafeguardingIncident
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.performance import (
@@ -29,6 +31,7 @@ from app.models.performance import (
     PerformanceMetricDefinition,
 )
 from app.models.team import AthleteProfile, Team, TeamRosterEntry
+from app.models.training import TrainingSessionFeedback, TrainingSessionPlan
 from app.schemas.performance import (
     AssessmentReviewLoadRead,
     AssessmentReviewQueueSummaryRead,
@@ -1095,6 +1098,54 @@ async def performance_forecast_what_if_scenarios(
     return scenarios
 
 
+async def performance_injury_risk(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+) -> dict[str, object]:
+    athlete_profile = await get_athlete_profile(db, athlete_profile_id, organization_id)
+    feedback_rows = list(
+        (
+            await db.execute(
+                select(TrainingSessionFeedback, TrainingSessionPlan)
+                .join(TrainingSessionPlan, TrainingSessionPlan.id == TrainingSessionFeedback.session_plan_id)
+                .where(TrainingSessionFeedback.organization_id == organization_id)
+                .where(TrainingSessionFeedback.athlete_profile_id == athlete_profile_id)
+                .order_by(TrainingSessionFeedback.recorded_at.desc())
+                .limit(28)
+            )
+        ).all()
+    )
+    open_incidents = list(
+        (
+            await db.scalars(
+                select(SafeguardingIncident)
+                .where(SafeguardingIncident.organization_id == organization_id)
+                .where(SafeguardingIncident.athlete_person_id == athlete_profile.person_id)
+                .where(
+                    SafeguardingIncident.incident_type.in_(
+                        [SafeguardingIncidentType.INJURY, SafeguardingIncidentType.MEDICAL]
+                    )
+                )
+                .where(
+                    SafeguardingIncident.status.not_in(
+                        [SafeguardingIncidentStatus.RESOLVED, SafeguardingIncidentStatus.CLOSED]
+                    )
+                )
+                .order_by(SafeguardingIncident.occurred_at.desc())
+            )
+        ).all()
+    )
+    trends = await performance_metric_trends(db, organization_id, athlete_profile_id)
+    declining_metric_count = sum(1 for trend in trends if trend["trend_direction"] == "declining")
+    return injury_risk_summary(
+        athlete_profile_id,
+        feedback_rows,
+        len(open_incidents),
+        declining_metric_count,
+    )
+
+
 async def create_performance_goal(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -2121,6 +2172,145 @@ def what_if_scenario_label(training_adjustment_percent: float, readiness_score: 
     else:
         adjustment = "baseline load"
     return f"{adjustment}, readiness {readiness_score}"
+
+
+def injury_risk_summary(
+    athlete_profile_id: UUID,
+    feedback_rows: list[tuple[TrainingSessionFeedback, TrainingSessionPlan]],
+    open_incident_count: int,
+    declining_metric_count: int,
+) -> dict[str, object]:
+    feedbacks = [feedback for feedback, _ in feedback_rows]
+    loads = [training_feedback_load(feedback, session_plan) for feedback, session_plan in feedback_rows]
+    now = datetime.now(UTC)
+    latest_feedback = feedbacks[0] if feedbacks else None
+    latest_load = loads[0] if loads else None
+    average_load = average_or_none(loads)
+    recent_loads = [
+        training_feedback_load(feedback, session_plan)
+        for feedback, session_plan in feedback_rows
+        if (recorded_at := as_utc_datetime(feedback.recorded_at)) is not None
+        and recorded_at >= now - timedelta(days=7)
+    ]
+    chronic_loads = [
+        training_feedback_load(feedback, session_plan)
+        for feedback, session_plan in feedback_rows
+        if (recorded_at := as_utc_datetime(feedback.recorded_at)) is not None
+        and recorded_at >= now - timedelta(days=28)
+    ]
+    acute_load = sum(recent_loads) if recent_loads else None
+    chronic_load = sum(chronic_loads) if chronic_loads else None
+    acute_chronic_ratio = (
+        round((acute_load / 7) / (chronic_load / 28), 2)
+        if acute_load is not None and chronic_load not in {None, 0}
+        else None
+    )
+    load_delta = latest_load - average_load if latest_load is not None and average_load is not None else None
+    average_readiness = average_or_none([feedback.readiness_score for feedback in feedbacks])
+    average_soreness = average_or_none([feedback.soreness_score for feedback in feedbacks])
+    average_sleep = average_or_none([feedback.sleep_quality for feedback in feedbacks])
+
+    score = 10.0
+    drivers: list[str] = []
+    if latest_feedback is None:
+        drivers.append("No athlete-specific training feedback has been recorded yet.")
+    else:
+        readiness_penalty = max(0, 100 - latest_feedback.readiness_score) * 0.25
+        score += readiness_penalty
+        if latest_feedback.readiness_score < 60:
+            drivers.append(f"Latest readiness is low at {latest_feedback.readiness_score}/100.")
+        if average_soreness is not None:
+            soreness_penalty = average_soreness * 4
+            score += soreness_penalty
+            if average_soreness >= 6:
+                drivers.append(f"Average soreness is elevated at {average_soreness:.1f}/10.")
+        if average_sleep is not None:
+            sleep_penalty = max(0, 7 - average_sleep) * 4
+            score += sleep_penalty
+            if average_sleep <= 5:
+                drivers.append(f"Average sleep quality is low at {average_sleep:.1f}/10.")
+    if load_delta is not None and load_delta > 150:
+        score += min(25, load_delta / 20)
+        drivers.append(f"Latest training load is {load_delta:.0f} above the athlete average.")
+    if acute_chronic_ratio is not None:
+        if acute_chronic_ratio > 1.5:
+            score += 20
+            drivers.append(f"Acute:chronic workload ratio is high at {acute_chronic_ratio}.")
+        elif acute_chronic_ratio > 1.25:
+            score += 12
+            drivers.append(f"Acute:chronic workload ratio is rising at {acute_chronic_ratio}.")
+    if open_incident_count:
+        score += min(30, open_incident_count * 18)
+        drivers.append(f"{open_incident_count} open injury or medical incident(s) require attention.")
+    if declining_metric_count:
+        score += min(20, declining_metric_count * 6)
+        drivers.append(f"{declining_metric_count} performance metric trend(s) are declining.")
+
+    rounded_score = int(round(max(0, min(100, score))))
+    band = injury_risk_band(rounded_score)
+    if not drivers:
+        drivers.append("Training feedback, workload, incidents, and performance trends are within routine range.")
+    return {
+        "athlete_profile_id": athlete_profile_id,
+        "generated_at": now,
+        "model_policy": "deterministic_injury_risk_v1",
+        "score": rounded_score,
+        "risk_band": band,
+        "confidence": injury_risk_confidence(len(feedbacks), open_incident_count, declining_metric_count),
+        "latest_readiness_score": latest_feedback.readiness_score if latest_feedback is not None else None,
+        "average_readiness_score": round(average_readiness, 1) if average_readiness is not None else None,
+        "average_soreness_score": round(average_soreness, 1) if average_soreness is not None else None,
+        "average_sleep_quality": round(average_sleep, 1) if average_sleep is not None else None,
+        "latest_load": round(latest_load, 1) if latest_load is not None else None,
+        "average_load": round(average_load, 1) if average_load is not None else None,
+        "acute_load": round(acute_load, 1) if acute_load is not None else None,
+        "chronic_load": round(chronic_load, 1) if chronic_load is not None else None,
+        "acute_chronic_ratio": acute_chronic_ratio,
+        "load_delta": round(load_delta, 1) if load_delta is not None else None,
+        "open_incident_count": open_incident_count,
+        "declining_metric_count": declining_metric_count,
+        "drivers": drivers,
+        "recommendation": injury_risk_recommendation(band),
+    }
+
+
+def training_feedback_load(feedback: TrainingSessionFeedback, session_plan: TrainingSessionPlan) -> float:
+    if feedback.actual_rpe is not None:
+        return float((feedback.actual_duration_minutes or session_plan.duration_minutes) * feedback.actual_rpe)
+    return float(session_plan.load_score)
+
+
+def average_or_none(values: list[float | int]) -> float | None:
+    if not values:
+        return None
+    return sum(float(value) for value in values) / len(values)
+
+
+def injury_risk_band(score: int) -> str:
+    if score >= 85:
+        return "critical"
+    if score >= 65:
+        return "high"
+    if score >= 35:
+        return "watch"
+    return "low"
+
+
+def injury_risk_confidence(feedback_count: int, open_incident_count: int, declining_metric_count: int) -> float:
+    evidence_bonus = min(0.45, feedback_count * 0.06)
+    incident_bonus = 0.12 if open_incident_count else 0.0
+    trend_bonus = min(0.15, declining_metric_count * 0.04)
+    return round(min(0.95, 0.35 + evidence_bonus + incident_bonus + trend_bonus), 2)
+
+
+def injury_risk_recommendation(band: str) -> str:
+    if band == "critical":
+        return "Pause high-intensity participation and require medical or safeguarding review before the next session."
+    if band == "high":
+        return "Reduce load, assign coach follow-up, and repeat readiness/soreness checks within 24 hours."
+    if band == "watch":
+        return "Keep the athlete on modified monitoring and avoid sharp load increases until drivers improve."
+    return "Continue normal progression with routine readiness and workload monitoring."
 
 
 def directional_change(

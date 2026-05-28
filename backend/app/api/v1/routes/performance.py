@@ -21,6 +21,7 @@ from app.schemas.performance import (
     PerformanceAssessmentReviewEscalationRunRead,
     PerformanceGoalCreate,
     PerformanceGoalRead,
+    PerformanceInjuryRiskRead,
     PerformanceIngestionCreate,
     PerformanceIngestionRead,
     PerformanceForecastScenarioRead,
@@ -55,6 +56,7 @@ from app.services.performance import (
     list_observations,
     performance_forecast_scenarios,
     performance_forecast_what_if_scenarios,
+    performance_injury_risk,
     performance_metric_benchmarks,
     performance_cohort_comparisons,
     performance_metric_trend_series,
@@ -676,6 +678,20 @@ async def athlete_performance_forecast_what_if_route(
             horizon=horizon,
         )
     ]
+
+
+@router.get(
+    "/athletes/{athlete_profile_id}/injury-risk",
+    response_model=PerformanceInjuryRiskRead,
+)
+async def athlete_performance_injury_risk_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> PerformanceInjuryRiskRead:
+    return PerformanceInjuryRiskRead(
+        **await performance_injury_risk(db, organization_id, athlete_profile_id)
+    )
 
 
 @router.post(
