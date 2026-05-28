@@ -27,6 +27,19 @@ Local development uses `AFROLETE_AUTHZ_MODE=memory` for fast isolated tests.
 Set `AFROLETE_AUTHZ_MODE=spicedb` and `AFROLETE_SPICEDB_KEY` in deployed
 environments so permission checks and relationship writes go through SpiceDB.
 
+## Workers
+
+Developer webhook retries can run without an operator click:
+
+```bash
+cd backend
+uv run python -m app.workers.developer_webhooks --limit 100 --max-attempts 5
+```
+
+The worker processes queued/failed deliveries whose `next_attempt_at` is due,
+honors per-delivery attempt limits, and emits a JSON summary suitable for cron,
+Temporal activities, or container job logs.
+
 ## Responsibilities
 
 - Domain API and OpenAPI contract.

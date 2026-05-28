@@ -212,6 +212,19 @@ class DeveloperWebhookRetryRunRead(BaseModel):
     include_recorded: bool
 
 
+class DeveloperWebhookRetryWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    replayed_count: int
+    skipped_count: int
+    failed_count: int
+    delivery_ids: list[UUID]
+    statuses: dict[str, int]
+    organization_count: int
+    max_attempts: int
+    include_recorded: bool
+
+
 class DeveloperApiScopeCatalogRead(BaseModel):
     scope: str
     category: str

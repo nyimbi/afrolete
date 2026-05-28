@@ -48,6 +48,7 @@ from app.schemas.developer import (
     DeveloperSdkCatalogRead,
     DeveloperWebhookEventCatalogRead,
     DeveloperWebhookRetryRunRead,
+    DeveloperWebhookRetryWorkerRunRead,
     DeveloperWebhookSubscriptionCreate,
     DeveloperWebhookSubscriptionUpdate,
 )
@@ -600,24 +601,55 @@ async def retry_developer_webhook_deliveries(
     include_recorded: bool = False,
 ) -> DeveloperWebhookRetryRunRead:
     await ensure_manage_developer_platform(authz, identity, organization_id)
+    worker_run = await run_developer_webhook_retry_due(
+        db,
+        organization_id=organization_id,
+        max_attempts=max_attempts,
+        limit=limit,
+        include_recorded=include_recorded,
+    )
+    return DeveloperWebhookRetryRunRead(
+        organization_id=organization_id,
+        eligible_count=worker_run.eligible_count,
+        replayed_count=worker_run.replayed_count,
+        skipped_count=worker_run.skipped_count,
+        failed_count=worker_run.failed_count,
+        delivery_ids=worker_run.delivery_ids,
+        statuses=worker_run.statuses,
+        max_attempts=worker_run.max_attempts,
+        include_recorded=worker_run.include_recorded,
+    )
+
+
+async def run_developer_webhook_retry_due(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None = None,
+    max_attempts: int = 3,
+    limit: int = 25,
+    include_recorded: bool = False,
+) -> DeveloperWebhookRetryWorkerRunRead:
     retry_statuses = ["failed", "queued"]
     if include_recorded:
         retry_statuses.append("recorded")
     now = datetime.now(UTC)
+    statement = select(DeveloperWebhookDelivery).where(
+        DeveloperWebhookDelivery.status.in_(retry_statuses),
+        DeveloperWebhookDelivery.attempt_count < max_attempts,
+        or_(
+            DeveloperWebhookDelivery.next_attempt_at.is_(None),
+            DeveloperWebhookDelivery.next_attempt_at <= now,
+        ),
+    )
+    if organization_id is not None:
+        statement = statement.where(DeveloperWebhookDelivery.organization_id == organization_id)
     deliveries = list(
         (
             await db.scalars(
-                select(DeveloperWebhookDelivery)
-                .where(
-                    DeveloperWebhookDelivery.organization_id == organization_id,
-                    DeveloperWebhookDelivery.status.in_(retry_statuses),
-                    DeveloperWebhookDelivery.attempt_count < max_attempts,
-                    or_(
-                        DeveloperWebhookDelivery.next_attempt_at.is_(None),
-                        DeveloperWebhookDelivery.next_attempt_at <= now,
-                    ),
+                statement.order_by(
+                    DeveloperWebhookDelivery.next_attempt_at.asc().nulls_first(),
+                    DeveloperWebhookDelivery.created_at.asc(),
                 )
-                .order_by(DeveloperWebhookDelivery.created_at.asc())
                 .limit(limit)
             )
         ).all()
@@ -640,7 +672,7 @@ async def retry_developer_webhook_deliveries(
     for delivery in deliveries:
         await db.refresh(delivery)
         statuses[delivery.status] = statuses.get(delivery.status, 0) + 1
-    return DeveloperWebhookRetryRunRead(
+    return DeveloperWebhookRetryWorkerRunRead(
         organization_id=organization_id,
         eligible_count=len(deliveries),
         replayed_count=replayed_count,
@@ -648,6 +680,7 @@ async def retry_developer_webhook_deliveries(
         failed_count=statuses.get("failed", 0),
         delivery_ids=[delivery.id for delivery in deliveries],
         statuses=statuses,
+        organization_count=len({delivery.organization_id for delivery in deliveries}),
         max_attempts=max_attempts,
         include_recorded=include_recorded,
     )
