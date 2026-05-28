@@ -180,6 +180,12 @@ class Settings(BaseSettings):
     safeguarding_insurance_claim_webhook_key_secret_path: str = ""
     safeguarding_insurance_claim_webhook_key_secret_field: str = "value"
     safeguarding_insurance_claim_timeout_seconds: float = 5.0
+    safeguarding_medical_clearance_delivery_mode: Literal["record_only", "webhook"] = "record_only"
+    safeguarding_medical_clearance_webhook_url: str = ""
+    safeguarding_medical_clearance_webhook_key: str = ""
+    safeguarding_medical_clearance_webhook_key_secret_path: str = ""
+    safeguarding_medical_clearance_webhook_key_secret_field: str = "value"
+    safeguarding_medical_clearance_timeout_seconds: float = 5.0
     safeguarding_incident_artifact_signing_key: str = "local-safeguarding-artifact-key"
     safeguarding_incident_artifact_signing_key_secret_path: str = ""
     safeguarding_incident_artifact_signing_key_secret_field: str = "value"

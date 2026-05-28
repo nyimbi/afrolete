@@ -3007,6 +3007,23 @@ export type IncidentMedicalClearanceRead = {
   created_at: string;
 };
 
+export type IncidentMedicalClearanceProviderSyncRead = {
+  clearance_id: UUID;
+  organization_id: UUID;
+  incident_id: UUID;
+  athlete_person_id: UUID;
+  action: string;
+  delivery_mode: string;
+  delivery_attempted: boolean;
+  delivered: boolean;
+  provider_status_code: number | null;
+  provider_reference: string | null;
+  clearance_status: MedicalClearanceStatus;
+  documentation_object_key: string | null;
+  failure_reason: string | null;
+  synced_at: string;
+};
+
 export type AgentRead = {
   id: UUID;
   organization_id: UUID | null;

@@ -75,6 +75,7 @@ from app.schemas.safeguarding import (
     IncidentInsuranceClaimProviderSyncRead,
     IncidentInsuranceClaimUpdate,
     IncidentMedicalClearanceCreate,
+    IncidentMedicalClearanceProviderSyncRead,
     IncidentMedicalClearanceUpdate,
     IncidentReportPackageCreate,
     IncidentReportPackageUpdate,
@@ -1552,6 +1553,262 @@ async def update_incident_medical_clearance(
     await db.commit()
     await db.refresh(clearance)
     return clearance
+
+
+async def submit_incident_medical_clearance_to_provider(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    clearance_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> IncidentMedicalClearanceProviderSyncRead:
+    clearance = await db.get(IncidentMedicalClearance, clearance_id)
+    if clearance is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical clearance not found")
+    await ensure_org_manage(authz, clearance.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, clearance.incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    selected_settings = settings or get_settings()
+    now = utc_now()
+    clearance.reviewed_by_person_id = identity.person_id
+    clearance.assessed_at = clearance.assessed_at or now
+    payload = incident_medical_clearance_provider_payload(clearance, incident, "submit")
+    append_incident_medical_clearance_note(
+        clearance,
+        now,
+        f"Prepared medical portal submission in {selected_settings.safeguarding_medical_clearance_delivery_mode} mode.",
+    )
+    result = await deliver_incident_medical_clearance_provider_payload(
+        selected_settings,
+        clearance,
+        payload,
+        now,
+        action="submit",
+    )
+    await db.commit()
+    await db.refresh(clearance)
+    return result.model_copy(update={"clearance_status": clearance.status})
+
+
+async def poll_incident_medical_clearance_provider_status(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    clearance_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> IncidentMedicalClearanceProviderSyncRead:
+    clearance = await db.get(IncidentMedicalClearance, clearance_id)
+    if clearance is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical clearance not found")
+    await ensure_org_manage(authz, clearance.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, clearance.incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    selected_settings = settings or get_settings()
+    now = utc_now()
+    payload = incident_medical_clearance_provider_payload(clearance, incident, "status_poll")
+    result = await deliver_incident_medical_clearance_provider_payload(
+        selected_settings,
+        clearance,
+        payload,
+        now,
+        action="status_poll",
+    )
+    await db.commit()
+    await db.refresh(clearance)
+    return result.model_copy(update={"clearance_status": clearance.status})
+
+
+async def deliver_incident_medical_clearance_provider_payload(
+    settings: Settings,
+    clearance: IncidentMedicalClearance,
+    payload: dict[str, object],
+    now: datetime,
+    *,
+    action: str,
+) -> IncidentMedicalClearanceProviderSyncRead:
+    result = IncidentMedicalClearanceProviderSyncRead(
+        clearance_id=clearance.id,
+        organization_id=clearance.organization_id,
+        incident_id=clearance.incident_id,
+        athlete_person_id=clearance.athlete_person_id,
+        action=action,
+        delivery_mode=settings.safeguarding_medical_clearance_delivery_mode,
+        delivery_attempted=False,
+        delivered=False,
+        provider_status_code=None,
+        provider_reference=clearance.documentation_object_key,
+        clearance_status=clearance.status,
+        documentation_object_key=clearance.documentation_object_key,
+        failure_reason=None,
+        synced_at=now,
+    )
+    if settings.safeguarding_medical_clearance_delivery_mode == "record_only":
+        append_incident_medical_clearance_note(
+            clearance,
+            now,
+            f"Record-only medical portal {action}; payload prepared for manual provider handling.",
+        )
+        return result.model_copy(
+            update={"failure_reason": "Record-only medical portal mode; payload prepared for manual provider handling."}
+        )
+    if not settings.safeguarding_medical_clearance_webhook_url:
+        failure = "Medical portal webhook mode is enabled but no webhook URL is configured."
+        append_incident_medical_clearance_note(clearance, now, failure)
+        return result.model_copy(update={"failure_reason": failure})
+
+    raw_body = json.dumps(payload, sort_keys=True, default=str).encode()
+    timestamp = str(int(now.timestamp()))
+    headers = incident_medical_clearance_provider_headers(settings, raw_body, timestamp)
+    try:
+        async with httpx.AsyncClient(timeout=settings.safeguarding_medical_clearance_timeout_seconds) as client:
+            response = await client.post(
+                settings.safeguarding_medical_clearance_webhook_url,
+                json=payload,
+                headers=headers,
+            )
+        delivered = 200 <= response.status_code < 300
+        response_payload = parse_insurer_response_json(response.text) if response.text else {}
+        if delivered:
+            apply_incident_medical_clearance_provider_response(clearance, response_payload, now)
+            append_incident_medical_clearance_note(
+                clearance,
+                now,
+                f"Medical portal {action} accepted with HTTP {response.status_code}.",
+            )
+        else:
+            append_incident_medical_clearance_note(
+                clearance,
+                now,
+                f"Medical portal {action} returned HTTP {response.status_code}.",
+            )
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "delivered": delivered,
+                "provider_status_code": response.status_code,
+                "provider_reference": clearance.documentation_object_key,
+                "clearance_status": clearance.status,
+                "documentation_object_key": clearance.documentation_object_key,
+                "failure_reason": None if delivered else f"Medical portal webhook returned {response.status_code}: {response.text[:500]}",
+            }
+        )
+    except httpx.HTTPError as error:
+        append_incident_medical_clearance_note(
+            clearance,
+            now,
+            f"Medical portal {action} delivery failed: {error}",
+        )
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "failure_reason": f"Medical portal webhook delivery failed: {error}",
+            }
+        )
+
+
+def incident_medical_clearance_provider_payload(
+    clearance: IncidentMedicalClearance,
+    incident: SafeguardingIncident,
+    action: str,
+) -> dict[str, object]:
+    return {
+        "event_type": f"incident_medical_clearance.{action}",
+        "clearance_id": str(clearance.id),
+        "organization_id": str(clearance.organization_id),
+        "incident_id": str(clearance.incident_id),
+        "athlete_person_id": str(clearance.athlete_person_id),
+        "clearance_type": clearance.clearance_type,
+        "status": clearance.status.value,
+        "assessed_at": clearance.assessed_at,
+        "valid_from": clearance.valid_from,
+        "valid_until": clearance.valid_until,
+        "restrictions": clearance.restrictions,
+        "return_to_play_stage": clearance.return_to_play_stage,
+        "provider_name": clearance.provider_name,
+        "documentation_object_key": clearance.documentation_object_key,
+        "incident": {
+            "title": incident.title,
+            "incident_type": incident.incident_type.value,
+            "severity": incident.severity.value,
+            "occurred_at": incident.occurred_at,
+            "location": incident.location,
+            "description": incident.description,
+            "immediate_action": incident.immediate_action,
+            "medical_follow_up_required": incident.medical_follow_up_required,
+        },
+    }
+
+
+def incident_medical_clearance_provider_headers(
+    settings: Settings,
+    raw_body: bytes,
+    timestamp: str,
+) -> dict[str, str]:
+    signing_key = resolve_secret_sync(
+        settings,
+        env_value=settings.safeguarding_medical_clearance_webhook_key,
+        path=settings.safeguarding_medical_clearance_webhook_key_secret_path,
+        field_name=settings.safeguarding_medical_clearance_webhook_key_secret_field,
+        label="medical clearance webhook key",
+    )
+    key = (signing_key or settings.agent_webhook_key or "local-medical-clearance-key").encode()
+    signature = hmac.new(key, timestamp.encode() + b"." + raw_body, sha256).hexdigest()
+    return {
+        "content-type": "application/json",
+        "x-afrolete-medical-timestamp": timestamp,
+        "x-afrolete-medical-signature": signature,
+    }
+
+
+def apply_incident_medical_clearance_provider_response(
+    clearance: IncidentMedicalClearance,
+    response_payload: dict[str, object],
+    now: datetime,
+) -> None:
+    status_value = response_payload.get("status") or response_payload.get("clearance_status")
+    if status_value:
+        try:
+            clearance.status = MedicalClearanceStatus(str(status_value).lower())
+        except ValueError:
+            pass
+    provider_reference = response_payload.get("documentation_object_key") or response_payload.get("provider_reference")
+    if provider_reference:
+        clearance.documentation_object_key = str(provider_reference)[:500]
+    for field in ["restrictions", "return_to_play_stage", "provider_name"]:
+        value = response_payload.get(field)
+        if value:
+            setattr(clearance, field, str(value)[:4000] if field == "restrictions" else str(value)[:240])
+    assessed_at = response_payload.get("assessed_at")
+    if isinstance(assessed_at, str):
+        try:
+            clearance.assessed_at = datetime.fromisoformat(assessed_at.replace("Z", "+00:00"))
+        except ValueError:
+            clearance.assessed_at = clearance.assessed_at or now
+    elif clearance.status in {MedicalClearanceStatus.CLEARED, MedicalClearanceStatus.RESTRICTED}:
+        clearance.assessed_at = clearance.assessed_at or now
+    for field in ["valid_from", "valid_until"]:
+        value = response_payload.get(field)
+        if isinstance(value, str):
+            try:
+                setattr(clearance, field, date.fromisoformat(value[:10]))
+            except ValueError:
+                pass
+    notes = response_payload.get("notes")
+    if notes:
+        append_incident_medical_clearance_note(clearance, now, str(notes))
+
+
+def append_incident_medical_clearance_note(
+    clearance: IncidentMedicalClearance,
+    at: datetime,
+    message: str,
+) -> None:
+    entry = f"{at.isoformat()} {message}"
+    clearance.notes = f"{clearance.notes}\n{entry}" if clearance.notes else entry
 
 
 async def create_background_check(

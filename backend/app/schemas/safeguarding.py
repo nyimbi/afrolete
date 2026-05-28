@@ -730,3 +730,20 @@ class IncidentMedicalClearanceRead(BaseModel):
     documentation_object_key: str | None
     notes: str | None
     created_at: datetime
+
+
+class IncidentMedicalClearanceProviderSyncRead(BaseModel):
+    clearance_id: UUID
+    organization_id: UUID
+    incident_id: UUID
+    athlete_person_id: UUID
+    action: str
+    delivery_mode: str
+    delivery_attempted: bool
+    delivered: bool
+    provider_status_code: int | None
+    provider_reference: str | None
+    clearance_status: MedicalClearanceStatus
+    documentation_object_key: str | None
+    failure_reason: str | None
+    synced_at: datetime

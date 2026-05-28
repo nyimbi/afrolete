@@ -320,6 +320,106 @@ def test_insurance_claim_provider_submit_and_status_poll_record_only(client, ide
     assert "incident_insurance_claim.submit" in synced_claim["submission_payload"]
 
 
+def test_medical_clearance_provider_submit_and_status_poll_record_only(
+    client,
+    identity_headers,
+) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Medical Portal Club", "organization_type": "club"},
+    ).json()
+    athlete = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "medical-clearance-athlete@example.com",
+            "display_name": "Medical Clearance Athlete",
+            "country_code": "KE",
+            "role": "athlete",
+        },
+    ).json()
+    team = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Medical Portal U15",
+            "sport": "football",
+            "sport_format": "team",
+        },
+    ).json()
+    roster_response = client.post(
+        f"/api/v1/teams/{team['id']}/members",
+        headers=identity_headers,
+        json={
+            "person_id": athlete["subject_id"],
+            "role": "player",
+            "status": "active",
+        },
+    )
+    assert roster_response.status_code == 201
+    incident = client.post(
+        "/api/v1/safeguarding/incidents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_type": "injury",
+            "severity": "medium",
+            "occurred_at": "2026-05-28T12:15:00Z",
+            "location": "Clinic room",
+            "athlete_person_id": athlete["subject_id"],
+            "title": "Return-to-play review",
+            "description": "Athlete needs physician clearance after injury.",
+            "immediate_action": "Held from training pending medical review.",
+            "medical_follow_up_required": "yes",
+        },
+    ).json()
+    clearance_response = client.post(
+        "/api/v1/safeguarding/medical-clearances",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_id": incident["id"],
+            "athlete_person_id": athlete["subject_id"],
+            "clearance_type": "return_to_play",
+            "provider_name": "Demo Sports Clinic",
+            "return_to_play_stage": "assessment",
+            "restrictions": "No contact drills.",
+        },
+    )
+    assert clearance_response.status_code == 201
+    clearance = clearance_response.json()
+
+    submit_response = client.post(
+        f"/api/v1/safeguarding/medical-clearances/{clearance['id']}/submit-provider",
+        headers=identity_headers,
+    )
+    assert submit_response.status_code == 200
+    submitted = submit_response.json()
+    assert submitted["delivery_mode"] == "record_only"
+    assert submitted["delivery_attempted"] is False
+    assert submitted["clearance_status"] == "pending_review"
+    assert submitted["failure_reason"].startswith("Record-only medical portal mode")
+
+    poll_response = client.post(
+        f"/api/v1/safeguarding/medical-clearances/{clearance['id']}/poll-provider-status",
+        headers=identity_headers,
+    )
+    assert poll_response.status_code == 200
+    polled = poll_response.json()
+    assert polled["action"] == "status_poll"
+    assert polled["clearance_status"] == "pending_review"
+
+    clearances = client.get(
+        f"/api/v1/safeguarding/medical-clearances?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    synced_clearance = next(item for item in clearances if item["id"] == clearance["id"])
+    assert synced_clearance["reviewed_by_person_id"] is not None
+    assert "Record-only medical portal status_poll" in synced_clearance["notes"]
+
+
 def test_signed_screening_provider_result_updates_background_check(
     client,
     identity_headers,

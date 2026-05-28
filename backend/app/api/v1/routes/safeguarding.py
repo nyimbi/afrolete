@@ -42,6 +42,7 @@ from app.schemas.safeguarding import (
     IncidentInsuranceClaimRead,
     IncidentInsuranceClaimUpdate,
     IncidentMedicalClearanceCreate,
+    IncidentMedicalClearanceProviderSyncRead,
     IncidentMedicalClearanceRead,
     IncidentMedicalClearanceUpdate,
     IncidentReportPackageArtifactLinkRead,
@@ -83,6 +84,7 @@ from app.services.safeguarding import (
     list_guardians_for_athlete,
     list_incident_insurance_claims,
     poll_incident_insurance_claim_provider_status,
+    poll_incident_medical_clearance_provider_status,
     list_incident_medical_clearances,
     list_incident_report_packages,
     list_safeguarding_incidents,
@@ -99,6 +101,7 @@ from app.services.safeguarding import (
     update_compliance_credential,
     update_incident_insurance_claim,
     submit_incident_insurance_claim_to_provider,
+    submit_incident_medical_clearance_to_provider,
     update_incident_medical_clearance,
     update_incident_report_package,
     update_safeguarding_incident,
@@ -608,6 +611,26 @@ async def update_incident_medical_clearance_route(
     return to_medical_clearance_read(
         await update_incident_medical_clearance(db, identity, clearance_id, payload, authz)
     )
+
+
+@router.post("/medical-clearances/{clearance_id}/submit-provider", response_model=IncidentMedicalClearanceProviderSyncRead)
+async def submit_incident_medical_clearance_to_provider_route(
+    clearance_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentMedicalClearanceProviderSyncRead:
+    return await submit_incident_medical_clearance_to_provider(db, identity, clearance_id, authz)
+
+
+@router.post("/medical-clearances/{clearance_id}/poll-provider-status", response_model=IncidentMedicalClearanceProviderSyncRead)
+async def poll_incident_medical_clearance_provider_status_route(
+    clearance_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentMedicalClearanceProviderSyncRead:
+    return await poll_incident_medical_clearance_provider_status(db, identity, clearance_id, authz)
 
 
 @router.post("/background-checks", response_model=BackgroundCheckRead, status_code=201)

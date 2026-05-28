@@ -185,6 +185,7 @@ import type {
   IncidentInsuranceClaimRead,
   IncidentInsuranceClaimProviderSyncRead,
   IncidentMedicalClearanceRead,
+  IncidentMedicalClearanceProviderSyncRead,
   IncidentReportPackageRead,
   IncidentReportPackageStatus,
   InsightSeverity,
@@ -1575,6 +1576,7 @@ export default function HomePage() {
   const [incidentInsuranceClaims, setIncidentInsuranceClaims] = useState<IncidentInsuranceClaimRead[]>([]);
   const [incidentInsuranceClaimProviderSync, setIncidentInsuranceClaimProviderSync] = useState<IncidentInsuranceClaimProviderSyncRead | null>(null);
   const [incidentMedicalClearances, setIncidentMedicalClearances] = useState<IncidentMedicalClearanceRead[]>([]);
+  const [incidentMedicalClearanceProviderSync, setIncidentMedicalClearanceProviderSync] = useState<IncidentMedicalClearanceProviderSyncRead | null>(null);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
@@ -3154,6 +3156,7 @@ export default function HomePage() {
       setIncidentInsuranceClaims([]);
       setIncidentInsuranceClaimProviderSync(null);
       setIncidentMedicalClearances([]);
+      setIncidentMedicalClearanceProviderSync(null);
       setCommunicationTemplates([]);
       setCommunicationMessages([]);
       setMessageRecipients([]);
@@ -6044,6 +6047,30 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updated.id)
         ]);
         addLog(`${updated.clearance_type} moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
+  const syncIncidentMedicalClearanceProvider = (
+    clearance: IncidentMedicalClearanceRead,
+    action: "submit-provider" | "poll-provider-status"
+  ) => {
+    runAction(
+      `incident-medical-clearance-provider-${action}-${clearance.id}`,
+      () =>
+        apiRequest<IncidentMedicalClearanceProviderSyncRead>(
+          `/safeguarding/medical-clearances/${clearance.id}/${action}`,
+          { method: "POST", identity }
+        ),
+      async (sync) => {
+        setIncidentMedicalClearanceProviderSync(sync);
+        if (selectedOrganizationId) {
+          await loadIncidentMedicalClearances(selectedOrganizationId);
+        }
+        addLog(
+          `${sync.action === "submit" ? "Sent clearance to medical portal" : "Polled medical clearance status"} (${sync.delivery_mode}, ${sync.clearance_status})`,
+          sync.failure_reason ? "neutral" : "good"
+        );
       }
     );
   };
@@ -16328,9 +16355,23 @@ export default function HomePage() {
                   <button type="button" onClick={() => updateIncidentMedicalClearance(clearance, "cleared")}>Clear</button>
                   <button type="button" onClick={() => updateIncidentMedicalClearance(clearance, "not_cleared")}>Hold</button>
                   <button type="button" onClick={() => updateIncidentMedicalClearance(clearance, "expired")}>Expire</button>
+                  <button type="button" onClick={() => syncIncidentMedicalClearanceProvider(clearance, "submit-provider")}>Send</button>
+                  <button type="button" onClick={() => syncIncidentMedicalClearanceProvider(clearance, "poll-provider-status")}>Poll</button>
                 </div>
               </article>
             ))}
+            {incidentMedicalClearanceProviderSync ? (
+              <article className="task-card">
+                <div>
+                  <strong>Medical portal {incidentMedicalClearanceProviderSync.action}</strong>
+                  <span>
+                    {incidentMedicalClearanceProviderSync.delivery_mode} · {incidentMedicalClearanceProviderSync.clearance_status} · {incidentMedicalClearanceProviderSync.delivered ? "delivered" : "not delivered"}
+                  </span>
+                  <span>{incidentMedicalClearanceProviderSync.provider_reference ?? incidentMedicalClearanceProviderSync.documentation_object_key ?? "No provider reference"} · {incidentMedicalClearanceProviderSync.provider_status_code ?? "no HTTP status"}</span>
+                  <span>{incidentMedicalClearanceProviderSync.failure_reason ?? "Medical portal sync recorded"}</span>
+                </div>
+              </article>
+            ) : null}
             {backgroundChecks.slice(0, 4).map((check) => (
               <article key={check.id} className="task-card">
                 <div>
