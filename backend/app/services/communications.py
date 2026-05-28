@@ -43,6 +43,7 @@ from app.schemas.communication import (
     CommunicationEscalationSchedulerRunRead,
     CommunicationEscalationWorkerRunRead,
     CommunicationMessageCreate,
+    CommunicationScheduledDispatchRunCreate,
     CommunicationScheduledDispatchWorkerRunRead,
     CommunicationTemplateCreate,
     DeliveryWebhookEvent,
@@ -674,6 +675,22 @@ async def run_scheduled_message_dispatch_worker(
         failed_count=failed_count,
         dry_run=dry_run,
         message_ids=dispatched_message_ids,
+    )
+
+
+async def run_scheduled_message_dispatch_scheduler(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: CommunicationScheduledDispatchRunCreate,
+    authz: AuthorizationService,
+) -> CommunicationScheduledDispatchWorkerRunRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_communications(authz, identity, payload.organization_id)
+    return await run_scheduled_message_dispatch_worker(
+        db,
+        organization_id=payload.organization_id,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
     )
 
 

@@ -21,6 +21,8 @@ from app.schemas.communication import (
     CommunicationInboxItemRead,
     CommunicationMessageCreate,
     CommunicationMessageRead,
+    CommunicationScheduledDispatchRunCreate,
+    CommunicationScheduledDispatchWorkerRunRead,
     CommunicationTemplateCreate,
     CommunicationTemplateRead,
     DeliveryWebhookEvent,
@@ -52,6 +54,7 @@ from app.services.communications import (
     run_message_escalation,
     run_message_escalation_scheduler,
     run_digest_scheduler,
+    run_scheduled_message_dispatch_scheduler,
     update_recipient_status,
     upsert_preference,
 )
@@ -313,6 +316,16 @@ async def run_message_escalation_scheduler_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> CommunicationEscalationSchedulerRunRead:
     return await run_message_escalation_scheduler(db, identity, payload, authz)
+
+
+@router.post("/scheduled-dispatch/run", response_model=CommunicationScheduledDispatchWorkerRunRead)
+async def run_scheduled_message_dispatch_route(
+    payload: CommunicationScheduledDispatchRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunicationScheduledDispatchWorkerRunRead:
+    return await run_scheduled_message_dispatch_scheduler(db, identity, payload, authz)
 
 
 @router.patch("/recipients/{recipient_id}", response_model=MessageRecipientRead)

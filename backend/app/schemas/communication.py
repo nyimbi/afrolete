@@ -136,6 +136,12 @@ class CommunicationScheduledDispatchWorkerRunRead(BaseModel):
     message_ids: list[UUID]
 
 
+class CommunicationScheduledDispatchRunCreate(BaseModel):
+    organization_id: UUID
+    limit: int = Field(default=50, ge=1, le=500)
+    dry_run: bool = False
+
+
 class CommunicationDeliveryChannelReadiness(BaseModel):
     channel: CommunicationChannel
     status: str

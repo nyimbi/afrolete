@@ -82,7 +82,7 @@ services:
       [
         "sh",
         "-c",
-        "while true; do python -m app.workers.due --limit 20 --communication-digest-limit 50 --communication-escalation-limit 50 --communication-escalation-channel in_app --communication-escalation-unresolved-after-minutes 15 --communication-escalation-repeat-after-minutes 60 --compliance-reconciliation-limit 50 --event-travel-consent-reminder-limit 20 --event-travel-consent-reminder-channel in_app --auto-alert-performance-forecast-drift --performance-forecast-drift-channel in_app; sleep 60; done",
+        "while true; do python -m app.workers.due --limit 20 --communication-digest-limit 50 --communication-escalation-limit 50 --communication-escalation-channel in_app --communication-escalation-unresolved-after-minutes 15 --communication-escalation-repeat-after-minutes 60 --communication-scheduled-dispatch-limit 50 --compliance-reconciliation-limit 50 --event-travel-consent-reminder-limit 20 --event-travel-consent-reminder-channel in_app --auto-alert-performance-forecast-drift --performance-forecast-drift-channel in_app; sleep 60; done",
       ]
 
 volumes:

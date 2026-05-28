@@ -146,6 +146,55 @@ def test_record_only_dispatch_and_delivery_callback(client, identity_headers) ->
     assert callback["delivered_at"] is not None
 
 
+def test_due_scheduled_message_dispatch_route_sends_ready_messages(client, identity_headers) -> None:
+    organization, team, _ = create_communications_context(client, identity_headers)
+    message_response = client.post(
+        "/api/v1/communications/messages",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "message_type": "reminder",
+            "channel": "email",
+            "scope_type": "team",
+            "scope_id": team["id"],
+            "subject": "Scheduled fixture reminder",
+            "body": "This scheduled reminder is now due.",
+            "scheduled_for": "2026-01-01T08:00:00Z",
+        },
+    )
+
+    assert message_response.status_code == 201
+    message = message_response.json()
+    assert message["status"] == "scheduled"
+    assert message["sent_at"] is None
+
+    run_response = client.post(
+        "/api/v1/communications/scheduled-dispatch/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "limit": 10,
+            "dry_run": False,
+        },
+    )
+
+    assert run_response.status_code == 200
+    run = run_response.json()
+    assert run["eligible_count"] == 1
+    assert run["executed_count"] == 1
+    assert run["dispatched_count"] == 1
+    assert run["failed_count"] == 0
+    assert run["message_ids"] == [message["id"]]
+
+    messages = client.get(
+        f"/api/v1/communications/messages?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    dispatched = next(item for item in messages if item["id"] == message["id"])
+    assert dispatched["status"] == "sent"
+    assert dispatched["sent_at"] is not None
+
+
 def test_provider_delivery_callback_normalizes_statuses_and_requires_key(client, identity_headers) -> None:
     organization, team, _ = create_communications_context(client, identity_headers)
     message = client.post(

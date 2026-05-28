@@ -85,6 +85,7 @@ import type {
   CommunicationMessageRead,
   CommunicationMessageType,
   CommunicationScopeType,
+  CommunicationScheduledDispatchWorkerRunRead,
   CommunicationTemplateRead,
   CommercialRefundRead,
   CompetitionAdvancementRead,
@@ -1531,6 +1532,8 @@ export default function HomePage() {
   const [escalationRun, setEscalationRun] = useState<CommunicationEscalationRunRead | null>(null);
   const [escalationSchedulerRun, setEscalationSchedulerRun] =
     useState<CommunicationEscalationSchedulerRunRead | null>(null);
+  const [scheduledDispatchRun, setScheduledDispatchRun] =
+    useState<CommunicationScheduledDispatchWorkerRunRead | null>(null);
   const [notificationPreference, setNotificationPreference] = useState<NotificationPreferenceRead | null>(null);
   const [facilities, setFacilities] = useState<FacilityRead[]>([]);
   const [emergencyPlans, setEmergencyPlans] = useState<EmergencyActionPlanRead[]>([]);
@@ -2040,6 +2043,7 @@ export default function HomePage() {
     scope_type: "team" as CommunicationScopeType,
     subject: "Match day information",
     body: "Kick-off is at 09:00. Bring boots, ID, water, and travel consent if required.",
+    scheduled_for: "",
     urgent: false,
     quiet_hours_override: false
   });
@@ -9187,6 +9191,7 @@ export default function HomePage() {
             template_id: communicationTemplates[0]?.id ?? null,
             ...messageForm,
             scope_id: scopeId,
+            scheduled_for: messageForm.scheduled_for ? new Date(messageForm.scheduled_for).toISOString() : null,
             quiet_hours_override: messageForm.urgent && messageForm.quiet_hours_override
           }
         }),
@@ -9196,7 +9201,12 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== message.id)
         ]);
         setSelectedMessageId(message.id);
-        addLog(`${message.subject} sent to ${message.recipient_count} recipients`, "good");
+        addLog(
+          message.status === "scheduled"
+            ? `${message.subject} scheduled for ${message.scheduled_for ? new Date(message.scheduled_for).toLocaleString() : "later"}`
+            : `${message.subject} sent to ${message.recipient_count} recipients`,
+          "good"
+        );
       }
     );
   };
@@ -9320,6 +9330,36 @@ export default function HomePage() {
         addLog(
           `Escalation timers created ${run.escalated_count} and skipped ${run.skipped_count}`,
           run.failed_count > 0 ? "bad" : run.escalated_count > 0 ? "bad" : "neutral"
+        );
+        if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
+        }
+      }
+    );
+  };
+
+  const runScheduledCommunicationDispatch = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "run-scheduled-communication-dispatch",
+      () =>
+        apiRequest<CommunicationScheduledDispatchWorkerRunRead>("/communications/scheduled-dispatch/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            limit: 50,
+            dry_run: false
+          }
+        }),
+      (run) => {
+        setScheduledDispatchRun(run);
+        addLog(
+          `Scheduled dispatch sent ${run.dispatched_count}/${run.eligible_count} due message(s)`,
+          run.failed_count > 0 ? "bad" : "good"
         );
         if (selectedOrganizationId) {
           void loadCommunications(selectedOrganizationId);
@@ -15326,7 +15366,9 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createCommunicationTemplate} disabled={busyAction !== null}>Template</button>
                 <button type="button" onClick={draftCommunicationMessage} disabled={busyAction !== null}>Draft</button>
-                <button type="button" onClick={sendCommunicationMessage} disabled={busyAction !== null}>Send</button>
+                <button type="button" onClick={sendCommunicationMessage} disabled={busyAction !== null}>
+                  {messageForm.scheduled_for ? "Schedule" : "Send"}
+                </button>
               </div>
             </div>
             <div className="form-grid">
@@ -15376,6 +15418,10 @@ export default function HomePage() {
                 Body
                 <textarea value={messageForm.body} onChange={(event) => setMessageForm({ ...messageForm, body: event.target.value })} />
               </label>
+              <label>
+                Schedule
+                <input type="datetime-local" value={messageForm.scheduled_for} onChange={(event) => setMessageForm({ ...messageForm, scheduled_for: event.target.value })} />
+              </label>
               <label className="checkbox-label">
                 <input type="checkbox" checked={messageForm.urgent} onChange={(event) => setMessageForm({ ...messageForm, urgent: event.target.checked })} />
                 Urgent
@@ -15402,7 +15448,9 @@ export default function HomePage() {
                 >
                   <span>{message.subject}</span>
                   <small>
-                    {message.message_type} · {message.channel} · {message.recipient_count} recipients
+                    {message.status} · {message.message_type} · {message.channel} · {message.recipient_count} recipients
+                    {message.scheduled_for ? ` · scheduled ${new Date(message.scheduled_for).toLocaleString()}` : ""}
+                    {message.sent_at ? ` · sent ${new Date(message.sent_at).toLocaleString()}` : ""}
                     {message.escalates_message_id ? ` · escalation L${message.escalation_level}` : ""}
                   </small>
                 </button>
@@ -15420,6 +15468,7 @@ export default function HomePage() {
                 <button type="button" onClick={createCommunicationDigest} disabled={busyAction !== null || !selectedInboxPersonId}>Digest</button>
                 <button type="button" onClick={runCommunicationDigestScheduler} disabled={busyAction !== null || !selectedOrganizationId}>Run digests</button>
                 <button type="button" onClick={dispatchSelectedMessage} disabled={busyAction !== null || !selectedMessageId}>Dispatch</button>
+                <button type="button" onClick={runScheduledCommunicationDispatch} disabled={busyAction !== null || !selectedOrganizationId}>Due send</button>
                 <button type="button" onClick={escalateSelectedMessage} disabled={busyAction !== null || !selectedMessageId}>Escalate</button>
                 <button type="button" onClick={runCommunicationEscalationScheduler} disabled={busyAction !== null || !selectedOrganizationId}>Timers</button>
                 <button type="button" onClick={saveNotificationPreference} disabled={busyAction !== null}>Preference</button>
@@ -15428,7 +15477,11 @@ export default function HomePage() {
             <div className="score-summary">
               <strong>{inboxItems.length}</strong>
               <span>{selectedMessage?.subject ?? "No message selected"}</span>
-              <small>{messageRecipients.length} recipients · {notificationPreference?.frequency ?? "no preference"}</small>
+              <small>
+                {messageRecipients.length} recipients · {selectedMessage?.status ?? "no status"}
+                {selectedMessage?.scheduled_for ? ` · due ${new Date(selectedMessage.scheduled_for).toLocaleString()}` : ""}
+                · {notificationPreference?.frequency ?? "no preference"}
+              </small>
             </div>
             {communicationDeliveryReadiness ? (
               <div className="score-summary">
@@ -15497,6 +15550,17 @@ export default function HomePage() {
                       {escalationSchedulerRun.escalated_count} escalated · {escalationSchedulerRun.skipped_count} skipped · {escalationSchedulerRun.failed_count} failed
                     </span>
                     <span>{escalationSchedulerRun.eligible_count} urgent messages evaluated</span>
+                  </div>
+                </article>
+              ) : null}
+              {scheduledDispatchRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Scheduled dispatch</strong>
+                    <span>
+                      {scheduledDispatchRun.dispatched_count} dispatched · {scheduledDispatchRun.skipped_count} skipped · {scheduledDispatchRun.failed_count} failed
+                    </span>
+                    <span>{scheduledDispatchRun.eligible_count} due messages evaluated</span>
                   </div>
                 </article>
               ) : null}

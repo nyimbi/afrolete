@@ -4965,6 +4965,17 @@ export type CommunicationMessageRead = {
   escalation_reason: string | null;
 };
 
+export type CommunicationScheduledDispatchWorkerRunRead = {
+  organization_id: UUID | null;
+  eligible_count: number;
+  executed_count: number;
+  dispatched_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  message_ids: UUID[];
+};
+
 export type MessageRecipientRead = {
   id: UUID;
   message_id: UUID;
