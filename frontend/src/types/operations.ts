@@ -3199,6 +3199,13 @@ export type PerformanceWearableConnectionRead = {
   refresh_token_configured: boolean;
   webhook_secret_configured: boolean;
   token_expires_at: string | null;
+  oauth_client_id: string | null;
+  oauth_authorization_url: string | null;
+  oauth_token_url: string | null;
+  oauth_redirect_uri: string | null;
+  oauth_state_pending: boolean;
+  oauth_state_expires_at: string | null;
+  oauth_authorized_at: string | null;
   sync_cursor: string | null;
   last_sync_at: string | null;
   webhook_registered: boolean;
@@ -3220,6 +3227,22 @@ export type PerformanceWearableSyncRunRead = {
   skipped_metric_count: number;
   replayed: boolean;
   message: string | null;
+};
+
+export type PerformanceWearableOAuthStartRead = {
+  connection_id: UUID;
+  provider: string;
+  authorization_url: string;
+  state: string;
+  expires_at: string;
+  scopes: string[];
+};
+
+export type PerformanceWearableOAuthCallbackRead = {
+  connection: PerformanceWearableConnectionRead;
+  status: string;
+  message: string;
+  authorization_code_ref: string;
 };
 
 export type AthleteAssessmentRead = {

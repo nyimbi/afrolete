@@ -158,6 +158,13 @@ class PerformanceWearableConnectionRead(BaseModel):
     refresh_token_configured: bool
     webhook_secret_configured: bool
     token_expires_at: datetime | None
+    oauth_client_id: str | None
+    oauth_authorization_url: str | None
+    oauth_token_url: str | None
+    oauth_redirect_uri: str | None
+    oauth_state_pending: bool
+    oauth_state_expires_at: datetime | None
+    oauth_authorized_at: datetime | None
     sync_cursor: str | None
     last_sync_at: datetime | None
     webhook_registered: bool
@@ -186,6 +193,39 @@ class PerformanceWearableSyncRunRead(BaseModel):
     skipped_metric_count: int
     replayed: bool
     message: str | None
+
+
+class PerformanceWearableOAuthStartCreate(BaseModel):
+    client_id: str = Field(min_length=2, max_length=180)
+    authorization_url: str = Field(min_length=8, max_length=800)
+    redirect_uri: str = Field(min_length=8, max_length=800)
+    token_url: str | None = Field(default=None, max_length=800)
+    scopes: list[str] | None = None
+    state_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+
+
+class PerformanceWearableOAuthStartRead(BaseModel):
+    connection_id: UUID
+    provider: str
+    authorization_url: str
+    state: str
+    expires_at: datetime
+    scopes: list[str]
+
+
+class PerformanceWearableOAuthCallbackCreate(BaseModel):
+    state: str = Field(min_length=16, max_length=500)
+    code: str = Field(min_length=2, max_length=1000)
+    access_token_secret_path: str | None = Field(default=None, max_length=500)
+    refresh_token_secret_path: str | None = Field(default=None, max_length=500)
+    token_expires_at: datetime | None = None
+
+
+class PerformanceWearableOAuthCallbackRead(BaseModel):
+    connection: PerformanceWearableConnectionRead
+    status: str
+    message: str
+    authorization_code_ref: str
 
 
 class PerformanceObservationReviewCreate(BaseModel):

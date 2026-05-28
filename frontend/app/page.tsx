@@ -215,6 +215,8 @@ import type {
   PerformanceMetricTrendSeriesRead,
   PerformanceObservationRead,
   PerformanceWearableConnectionRead,
+  PerformanceWearableOAuthCallbackRead,
+  PerformanceWearableOAuthStartRead,
   PerformanceWearableSyncRunRead,
   PerformanceWearableWebhookRead,
   NotificationFrequency,
@@ -1313,6 +1315,8 @@ export default function HomePage() {
   const [performanceWebhookIngest, setPerformanceWebhookIngest] = useState<PerformanceWearableWebhookRead | null>(null);
   const [wearableConnections, setWearableConnections] = useState<PerformanceWearableConnectionRead[]>([]);
   const [wearableSyncRun, setWearableSyncRun] = useState<PerformanceWearableSyncRunRead | null>(null);
+  const [wearableOAuthStart, setWearableOAuthStart] = useState<PerformanceWearableOAuthStartRead | null>(null);
+  const [wearableOAuthCallback, setWearableOAuthCallback] = useState<PerformanceWearableOAuthCallbackRead | null>(null);
   const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
   const [performanceBenchmarkScope, setPerformanceBenchmarkScope] = useState<BenchmarkCohortScope>("tenant");
   const [performanceCohortComparisons, setPerformanceCohortComparisons] = useState<PerformanceCohortComparisonRead[]>([]);
@@ -2915,6 +2919,8 @@ export default function HomePage() {
       setPerformanceWebhookIngest(null);
       setWearableConnections([]);
       setWearableSyncRun(null);
+      setWearableOAuthStart(null);
+      setWearableOAuthCallback(null);
       setAssessments([]);
       setAssessmentReviewQueue([]);
       setAssessmentReviewSummary(null);
@@ -6537,6 +6543,64 @@ export default function HomePage() {
         setWearableSyncRun(syncRun);
         addLog(`${syncRun.provider} sync ${syncRun.status}: ${syncRun.observation_count} observation(s)`, "good");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const startWearableOAuth = () => {
+    const connection = wearableConnections[0];
+    if (!connection) {
+      addLog("Create a wearable connection before OAuth authorization", "bad");
+      return;
+    }
+    runAction(
+      "start-wearable-oauth",
+      () =>
+        apiRequest<PerformanceWearableOAuthStartRead>(`/performance/wearable-connections/${connection.id}/oauth/start`, {
+          method: "POST",
+          identity,
+          body: {
+            client_id: `${connection.provider}-client`,
+            authorization_url: `https://${connection.provider}.connect.example/oauth/authorize`,
+            token_url: `https://${connection.provider}.connect.example/oauth/token`,
+            redirect_uri: `${window.location.origin}/performance/wearables/callback`,
+            scopes: connection.scopes.length ? connection.scopes : ["read:profile", "read:metrics"]
+          }
+        }),
+      (oauthStart) => {
+        setWearableOAuthStart(oauthStart);
+        addLog(`${oauthStart.provider} OAuth URL prepared`, "good");
+      }
+    );
+  };
+
+  const completeWearableOAuth = () => {
+    const connection = wearableConnections[0];
+    if (!connection || !wearableOAuthStart) {
+      addLog("Start wearable OAuth before completing it", "bad");
+      return;
+    }
+    runAction(
+      "complete-wearable-oauth",
+      () =>
+        apiRequest<PerformanceWearableOAuthCallbackRead>(`/performance/wearable-connections/${connection.id}/oauth/callback`, {
+          method: "POST",
+          identity,
+          body: {
+            state: wearableOAuthStart.state,
+            code: `${connection.provider}-authorization-code`,
+            access_token_secret_path: `secret/data/afrolete/wearables/${connection.organization_id}/${connection.athlete_profile_id}/${connection.provider}/access-token`,
+            refresh_token_secret_path: `secret/data/afrolete/wearables/${connection.organization_id}/${connection.athlete_profile_id}/${connection.provider}/refresh-token`,
+            token_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+          }
+        }),
+      (callback) => {
+        setWearableOAuthCallback(callback);
+        setWearableConnections((current) => [
+          callback.connection,
+          ...current.filter((item) => item.id !== callback.connection.id)
+        ]);
+        addLog(`${callback.connection.provider} OAuth callback accepted`, "good");
       }
     );
   };
@@ -13614,6 +13678,8 @@ export default function HomePage() {
                 <button type="button" onClick={ingestPerformanceWearableWebhook} disabled={busyAction !== null}>Webhook</button>
                 <button type="button" onClick={createWearableConnection} disabled={busyAction !== null}>Connect</button>
                 <button type="button" onClick={runWearableConnectionSync} disabled={busyAction !== null}>Sync</button>
+                <button type="button" onClick={startWearableOAuth} disabled={busyAction !== null}>OAuth</button>
+                <button type="button" onClick={completeWearableOAuth} disabled={busyAction !== null}>Callback</button>
                 <button type="button" onClick={reviewSelectedObservation} disabled={busyAction !== null}>Review</button>
                 <button type="button" onClick={createPerformanceGoal} disabled={busyAction !== null}>Goal</button>
                 <button type="button" onClick={evaluatePerformanceAchievements} disabled={busyAction !== null}>Award</button>
@@ -13973,6 +14039,24 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {wearableOAuthStart ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{wearableOAuthStart.provider} OAuth authorization</strong>
+                    <span>{wearableOAuthStart.scopes.join(", ")} · expires {new Date(wearableOAuthStart.expires_at).toLocaleTimeString()}</span>
+                    <small>{wearableOAuthStart.authorization_url}</small>
+                  </div>
+                </article>
+              ) : null}
+              {wearableOAuthCallback ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{wearableOAuthCallback.connection.provider} OAuth · {wearableOAuthCallback.status}</strong>
+                    <span>{wearableOAuthCallback.connection.access_token_configured ? "access token path set" : "token path missing"} · {wearableOAuthCallback.authorization_code_ref}</span>
+                    <small>{wearableOAuthCallback.message}</small>
+                  </div>
+                </article>
+              ) : null}
               {wearableConnections.slice(0, 3).map((connection) => (
                 <article key={connection.id} className="task-card">
                   <div>
@@ -13983,6 +14067,7 @@ export default function HomePage() {
                     </span>
                     <small>
                       {connection.webhook_registered ? "webhook registered" : "webhook not registered"} ·{" "}
+                      {connection.oauth_authorized_at ? `authorized ${new Date(connection.oauth_authorized_at).toLocaleString()}` : connection.oauth_state_pending ? "OAuth pending" : "OAuth not started"} ·{" "}
                       {connection.last_sync_at ? `last sync ${new Date(connection.last_sync_at).toLocaleString()}` : "not synced"}
                     </small>
                   </div>

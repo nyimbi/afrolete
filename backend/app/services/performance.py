@@ -4,7 +4,9 @@ import hashlib
 import json
 import re
 import time
+from secrets import token_urlsafe
 from statistics import pstdev
+from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -56,6 +58,8 @@ from app.schemas.performance import (
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
     PerformanceWearableConnectionCreate,
+    PerformanceWearableOAuthCallbackCreate,
+    PerformanceWearableOAuthStartCreate,
     PerformanceWearableSyncRunCreate,
     PerformanceWearableWebhookCreate,
     PlayerSelfAssessmentCreate,
@@ -509,6 +513,119 @@ async def list_wearable_provider_sync_runs(
                 .order_by(PerformanceWearableProviderSyncRun.started_at.desc())
             )
         ).all()
+    )
+
+
+async def start_wearable_provider_oauth(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    connection_id: UUID,
+    payload: PerformanceWearableOAuthStartCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    connection = await db.get(PerformanceWearableProviderConnection, connection_id)
+    if connection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wearable connection not found")
+    await ensure_manage_performance(authz, identity, connection.organization_id)
+    state = token_urlsafe(32)
+    expires_at = datetime.now(UTC) + timedelta(seconds=payload.state_ttl_seconds)
+    scopes = payload.scopes if payload.scopes is not None else decode_string_list(connection.scopes)
+    connection.oauth_client_id = payload.client_id
+    connection.oauth_authorization_url = payload.authorization_url
+    connection.oauth_token_url = payload.token_url
+    connection.oauth_redirect_uri = payload.redirect_uri
+    connection.oauth_state_hash = stable_secret_hash(state)
+    connection.oauth_state_expires_at = expires_at
+    if payload.scopes is not None:
+        connection.scopes = encode_string_list(payload.scopes)
+    connection.status = "oauth_pending"
+    await db.commit()
+    await db.refresh(connection)
+    return {
+        "connection_id": connection.id,
+        "provider": connection.provider,
+        "authorization_url": wearable_oauth_authorization_url(connection, scopes, state),
+        "state": state,
+        "expires_at": expires_at,
+        "scopes": scopes,
+    }
+
+
+async def complete_wearable_provider_oauth(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    connection_id: UUID,
+    payload: PerformanceWearableOAuthCallbackCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    connection = await db.get(PerformanceWearableProviderConnection, connection_id)
+    if connection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wearable connection not found")
+    await ensure_manage_performance(authz, identity, connection.organization_id)
+    now = datetime.now(UTC)
+    if not connection.oauth_state_hash or not hmac.compare_digest(
+        connection.oauth_state_hash,
+        stable_secret_hash(payload.state),
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid wearable OAuth state")
+    state_expires_at = as_utc_datetime(connection.oauth_state_expires_at)
+    if state_expires_at is None or state_expires_at <= now:
+        connection.status = "oauth_expired"
+        await db.commit()
+        raise HTTPException(status_code=422, detail="Wearable OAuth state has expired")
+    connection.access_token_secret_path = (
+        payload.access_token_secret_path or default_wearable_secret_path(connection, "access-token")
+    )
+    connection.refresh_token_secret_path = (
+        payload.refresh_token_secret_path or default_wearable_secret_path(connection, "refresh-token")
+    )
+    connection.token_expires_at = payload.token_expires_at
+    connection.oauth_authorized_at = now
+    connection.oauth_state_hash = None
+    connection.oauth_state_expires_at = None
+    connection.status = "authorized"
+    await db.commit()
+    await db.refresh(connection)
+    return {
+        "connection": connection,
+        "status": "authorized",
+        "message": (
+            f"{connection.provider} OAuth callback accepted; token material must be stored at "
+            f"{connection.access_token_secret_path}."
+        ),
+        "authorization_code_ref": stable_secret_hash(payload.code)[:16],
+    }
+
+
+def wearable_oauth_authorization_url(
+    connection: PerformanceWearableProviderConnection,
+    scopes: list[str],
+    state: str,
+) -> str:
+    query = urlencode(
+        {
+            "response_type": "code",
+            "client_id": connection.oauth_client_id or "",
+            "redirect_uri": connection.oauth_redirect_uri or "",
+            "scope": " ".join(scopes),
+            "state": state,
+        }
+    )
+    separator = "&" if "?" in (connection.oauth_authorization_url or "") else "?"
+    return f"{connection.oauth_authorization_url}{separator}{query}"
+
+
+def stable_secret_hash(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def default_wearable_secret_path(
+    connection: PerformanceWearableProviderConnection,
+    token_name: str,
+) -> str:
+    return (
+        "secret/data/afrolete/wearables/"
+        f"{connection.organization_id}/{connection.athlete_profile_id}/{connection.provider}/{token_name}"
     )
 
 

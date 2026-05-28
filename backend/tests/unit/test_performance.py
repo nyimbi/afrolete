@@ -1398,6 +1398,81 @@ def test_performance_wearable_connection_sync_run_ingests_provider_payload(
     assert sync_runs[0]["id"] == sync_run["id"]
 
 
+def test_performance_wearable_connection_oauth_start_and_callback(
+    client, identity_headers
+) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    connection = client.post(
+        "/api/v1/performance/wearable-connections",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "provider": "garmin",
+            "display_name": "Garmin Connect",
+            "external_athlete_ref": "garmin-athlete-1",
+            "scopes": ["wellness.read"],
+        },
+    ).json()
+
+    oauth_start = client.post(
+        f"/api/v1/performance/wearable-connections/{connection['id']}/oauth/start",
+        headers=identity_headers,
+        json={
+            "client_id": "garmin-client-1",
+            "authorization_url": "https://connect.garmin.example/oauth/authorize",
+            "token_url": "https://connect.garmin.example/oauth/token",
+            "redirect_uri": "https://app.afrolete.local/performance/wearables/callback",
+            "scopes": ["wellness.read", "sleep.read"],
+        },
+    )
+
+    assert oauth_start.status_code == 200
+    start_payload = oauth_start.json()
+    assert "response_type=code" in start_payload["authorization_url"]
+    assert "client_id=garmin-client-1" in start_payload["authorization_url"]
+    assert start_payload["state"]
+    assert start_payload["scopes"] == ["wellness.read", "sleep.read"]
+
+    listed_pending = client.get(
+        f"/api/v1/performance/wearable-connections?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert listed_pending[0]["status"] == "oauth_pending"
+    assert listed_pending[0]["oauth_state_pending"] is True
+
+    callback = client.post(
+        f"/api/v1/performance/wearable-connections/{connection['id']}/oauth/callback",
+        headers=identity_headers,
+        json={
+            "state": start_payload["state"],
+            "code": "provider-code-123",
+            "access_token_secret_path": "secret/data/afrolete/wearables/garmin/access",
+            "refresh_token_secret_path": "secret/data/afrolete/wearables/garmin/refresh",
+            "token_expires_at": "2026-06-30T00:00:00Z",
+        },
+    )
+
+    assert callback.status_code == 200
+    callback_payload = callback.json()
+    assert callback_payload["status"] == "authorized"
+    assert callback_payload["connection"]["status"] == "authorized"
+    assert callback_payload["connection"]["access_token_configured"] is True
+    assert callback_payload["connection"]["refresh_token_configured"] is True
+    assert callback_payload["connection"]["oauth_state_pending"] is False
+    assert callback_payload["connection"]["oauth_authorized_at"] is not None
+
+    bad_replay = client.post(
+        f"/api/v1/performance/wearable-connections/{connection['id']}/oauth/callback",
+        headers=identity_headers,
+        json={
+            "state": start_payload["state"],
+            "code": "provider-code-456",
+        },
+    )
+    assert bad_replay.status_code == 401
+
+
 def test_performance_ingestion_uses_metric_specific_video_text(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(

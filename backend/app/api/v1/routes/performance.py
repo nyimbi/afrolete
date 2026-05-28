@@ -37,6 +37,10 @@ from app.schemas.performance import (
     PerformanceObservationReviewCreate,
     PerformanceWearableConnectionCreate,
     PerformanceWearableConnectionRead,
+    PerformanceWearableOAuthCallbackCreate,
+    PerformanceWearableOAuthCallbackRead,
+    PerformanceWearableOAuthStartCreate,
+    PerformanceWearableOAuthStartRead,
     PerformanceWearableSyncRunCreate,
     PerformanceWearableSyncRunRead,
     PerformanceWearableWebhookCreate,
@@ -80,9 +84,11 @@ from app.services.performance import (
     run_assessment_review_escalations,
     run_performance_injury_risk_alert_scan,
     run_wearable_provider_sync,
+    start_wearable_provider_oauth,
     review_assessment,
     review_observation,
     send_performance_injury_risk_alert,
+    complete_wearable_provider_oauth,
     update_assessment_review_assignment,
     validate_performance_wearable_webhook_signature,
 )
@@ -141,6 +147,13 @@ def to_wearable_connection_read(connection) -> PerformanceWearableConnectionRead
         refresh_token_configured=bool(connection.refresh_token_secret_path),
         webhook_secret_configured=bool(connection.webhook_secret_path),
         token_expires_at=connection.token_expires_at,
+        oauth_client_id=connection.oauth_client_id,
+        oauth_authorization_url=connection.oauth_authorization_url,
+        oauth_token_url=connection.oauth_token_url,
+        oauth_redirect_uri=connection.oauth_redirect_uri,
+        oauth_state_pending=bool(connection.oauth_state_hash),
+        oauth_state_expires_at=connection.oauth_state_expires_at,
+        oauth_authorized_at=connection.oauth_authorized_at,
         sync_cursor=connection.sync_cursor,
         last_sync_at=connection.last_sync_at,
         webhook_registered=connection.webhook_registered,
@@ -498,6 +511,42 @@ async def list_wearable_connection_sync_runs_route(
         to_wearable_sync_run_read(run)
         for run in await list_wearable_provider_sync_runs(db, identity, connection_id, authz)
     ]
+
+
+@router.post(
+    "/wearable-connections/{connection_id}/oauth/start",
+    response_model=PerformanceWearableOAuthStartRead,
+)
+async def start_wearable_connection_oauth_route(
+    connection_id: UUID,
+    payload: PerformanceWearableOAuthStartCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceWearableOAuthStartRead:
+    return PerformanceWearableOAuthStartRead(
+        **await start_wearable_provider_oauth(db, identity, connection_id, payload, authz)
+    )
+
+
+@router.post(
+    "/wearable-connections/{connection_id}/oauth/callback",
+    response_model=PerformanceWearableOAuthCallbackRead,
+)
+async def complete_wearable_connection_oauth_route(
+    connection_id: UUID,
+    payload: PerformanceWearableOAuthCallbackCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceWearableOAuthCallbackRead:
+    result = await complete_wearable_provider_oauth(db, identity, connection_id, payload, authz)
+    return PerformanceWearableOAuthCallbackRead(
+        connection=to_wearable_connection_read(result["connection"]),
+        status=result["status"],
+        message=result["message"],
+        authorization_code_ref=result["authorization_code_ref"],
+    )
 
 
 @router.patch(
