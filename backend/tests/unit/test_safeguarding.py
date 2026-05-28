@@ -239,6 +239,8 @@ def test_incident_report_package_exports_markdown_and_pdf(client, identity_heade
     assert regulator["artifact_url"].startswith("local://safeguarding-incident-artifacts/")
     assert regulator["storage_key"].endswith(".pdf")
     assert regulator["checksum"]
+    assert regulator["provider_profile"] == "local_safeguarding_office"
+    assert regulator["provider_schema_id"] == "safeguarding.regulatory.local_safeguarding_office.v1"
     assert regulator["failure_reason"].startswith("Record-only regulatory mode")
 
     packages = client.get(
@@ -248,6 +250,9 @@ def test_incident_report_package_exports_markdown_and_pdf(client, identity_heade
     synced_package = next(item for item in packages if item["id"] == report_package["id"])
     assert synced_package["status"] == "submitted"
     assert "incident_report_package.submit" in synced_package["submission_payload"]
+    regulatory_payload = json.loads(synced_package["submission_payload"])
+    assert regulatory_payload["provider_schema"]["provider_payload"]["statutory_incident_report"]
+    assert regulatory_payload["provider_schema"]["required_fields"]
     assert "Record-only regulatory submission" in synced_package["notes"]
 
 
@@ -299,6 +304,8 @@ def test_insurance_claim_provider_submit_and_status_poll_record_only(client, ide
     assert submitted["delivery_mode"] == "record_only"
     assert submitted["delivery_attempted"] is False
     assert submitted["claim_status"] == "submitted"
+    assert submitted["provider_profile"] == "medical_claim"
+    assert submitted["provider_schema_id"] == "safeguarding.insurance.medical_claim.v1"
     assert submitted["failure_reason"].startswith("Record-only insurer mode")
 
     poll_response = client.post(
@@ -318,6 +325,9 @@ def test_insurance_claim_provider_submit_and_status_poll_record_only(client, ide
     assert synced_claim["status"] == "submitted"
     assert "Record-only insurer status_poll" in synced_claim["communication_log"]
     assert "incident_insurance_claim.submit" in synced_claim["submission_payload"]
+    claim_payload = json.loads(synced_claim["submission_payload"])
+    assert claim_payload["provider_schema"]["provider_payload"]["medical_expense_claim"]
+    assert claim_payload["provider_schema"]["field_map"]["policy_id"] == "policy_number"
 
 
 def test_medical_clearance_provider_submit_and_status_poll_record_only(
@@ -400,6 +410,8 @@ def test_medical_clearance_provider_submit_and_status_poll_record_only(
     assert submitted["delivery_mode"] == "record_only"
     assert submitted["delivery_attempted"] is False
     assert submitted["clearance_status"] == "pending_review"
+    assert submitted["provider_profile"] == "return_to_play_clearance"
+    assert submitted["provider_schema_id"] == "safeguarding.medical.return_to_play_clearance.v1"
     assert submitted["failure_reason"].startswith("Record-only medical portal mode")
 
     poll_response = client.post(

@@ -2932,6 +2932,8 @@ export type IncidentReportPackageProviderSubmissionRead = {
   incident_id: UUID;
   agency_name: string;
   jurisdiction: string;
+  provider_profile: string;
+  provider_schema_id: string;
   delivery_mode: string;
   delivery_attempted: boolean;
   delivered: boolean;
@@ -2977,6 +2979,8 @@ export type IncidentInsuranceClaimProviderSyncRead = {
   claim_id: UUID;
   organization_id: UUID;
   action: string;
+  provider_profile: string;
+  provider_schema_id: string;
   delivery_mode: string;
   delivery_attempted: boolean;
   delivered: boolean;
@@ -3013,6 +3017,8 @@ export type IncidentMedicalClearanceProviderSyncRead = {
   incident_id: UUID;
   athlete_person_id: UUID;
   action: string;
+  provider_profile: string;
+  provider_schema_id: string;
   delivery_mode: string;
   delivery_attempted: boolean;
   delivered: boolean;

@@ -16277,6 +16277,7 @@ export default function HomePage() {
                   <span>
                     {incidentReportPackageSubmission.jurisdiction} · {incidentReportPackageSubmission.delivery_mode} · {incidentReportPackageSubmission.package_status}
                   </span>
+                  <span>{incidentReportPackageSubmission.provider_profile} · {incidentReportPackageSubmission.provider_schema_id}</span>
                   <span>{incidentReportPackageSubmission.provider_reference ?? "No portal reference"} · {incidentReportPackageSubmission.provider_status_code ?? "no HTTP status"}</span>
                   <span>{incidentReportPackageSubmission.failure_reason ?? incidentReportPackageSubmission.artifact_url ?? "Regulatory submission recorded"}</span>
                 </div>
@@ -16337,6 +16338,7 @@ export default function HomePage() {
                   <span>
                     {incidentInsuranceClaimProviderSync.delivery_mode} · {incidentInsuranceClaimProviderSync.claim_status} · {incidentInsuranceClaimProviderSync.delivered ? "delivered" : "not delivered"}
                   </span>
+                  <span>{incidentInsuranceClaimProviderSync.provider_profile} · {incidentInsuranceClaimProviderSync.provider_schema_id}</span>
                   <span>{incidentInsuranceClaimProviderSync.provider_reference ?? "No provider reference"} · {incidentInsuranceClaimProviderSync.provider_status_code ?? "no HTTP status"}</span>
                   <span>{incidentInsuranceClaimProviderSync.failure_reason ?? incidentInsuranceClaimProviderSync.tracking_url ?? "Provider sync recorded"}</span>
                 </div>
@@ -16367,6 +16369,7 @@ export default function HomePage() {
                   <span>
                     {incidentMedicalClearanceProviderSync.delivery_mode} · {incidentMedicalClearanceProviderSync.clearance_status} · {incidentMedicalClearanceProviderSync.delivered ? "delivered" : "not delivered"}
                   </span>
+                  <span>{incidentMedicalClearanceProviderSync.provider_profile} · {incidentMedicalClearanceProviderSync.provider_schema_id}</span>
                   <span>{incidentMedicalClearanceProviderSync.provider_reference ?? incidentMedicalClearanceProviderSync.documentation_object_key ?? "No provider reference"} · {incidentMedicalClearanceProviderSync.provider_status_code ?? "no HTTP status"}</span>
                   <span>{incidentMedicalClearanceProviderSync.failure_reason ?? "Medical portal sync recorded"}</span>
                 </div>

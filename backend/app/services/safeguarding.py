@@ -109,6 +109,94 @@ MEDICAL_INCIDENT_TYPES = {
 BLOCKING_MEDICAL_FOLLOW_UP_VALUES = {"yes", "urgent", "required", "true"}
 
 
+def normalize_provider_profile(value: str | None, default: str) -> str:
+    normalized = (value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized or default
+
+
+def selected_provider_profile(configured: str | None, inferred: str) -> str:
+    normalized = normalize_provider_profile(configured, "auto")
+    return inferred if normalized in {"auto", "infer", "default"} else normalized
+
+
+def provider_schema_id(scope: str, profile: str) -> str:
+    return f"safeguarding.{scope}.{profile}.v1"
+
+
+def provider_schema_id_from_payload(payload: dict[str, object]) -> str:
+    schema = payload.get("provider_schema")
+    if isinstance(schema, dict):
+        schema_id = schema.get("schema_id")
+        if schema_id:
+            return str(schema_id)
+    return "safeguarding.provider.unknown.v1"
+
+
+def infer_regulatory_provider_profile(
+    package: IncidentReportPackage,
+    incident: SafeguardingIncident,
+) -> str:
+    text = " ".join(
+        [
+            package.agency_name,
+            package.jurisdiction,
+            incident.title,
+            incident.description or "",
+            incident.incident_type.value,
+        ]
+    ).lower()
+    if "safe" in text and "sport" in text or incident.incident_type in {
+        SafeguardingIncidentType.SAFEGUARDING,
+        SafeguardingIncidentType.MISCONDUCT,
+    }:
+        return "safe_sport"
+    if any(marker in text for marker in ["school", "education", "ministry"]):
+        return "school_sport_authority"
+    if any(marker in text for marker in ["federation", "association", "league"]):
+        return "federation_discipline"
+    if any(marker in text for marker in ["county", "local", "municipal"]):
+        return "local_safeguarding_office"
+    return "standard_regulatory"
+
+
+def infer_insurance_provider_profile(claim: IncidentInsuranceClaim) -> str:
+    claim_type = claim.claim_type.value
+    if claim_type == "injury_medical":
+        return "medical_claim"
+    if claim_type in {"equipment_damage", "property_damage"}:
+        return "property_equipment_claim"
+    if claim_type == "liability":
+        return "liability_claim"
+    if claim_type == "travel":
+        return "travel_claim"
+    return "standard_claim"
+
+
+def infer_medical_provider_profile(
+    clearance: IncidentMedicalClearance,
+    incident: SafeguardingIncident,
+) -> str:
+    text = " ".join(
+        [
+            clearance.clearance_type,
+            clearance.return_to_play_stage or "",
+            clearance.provider_name or "",
+            incident.title,
+            incident.description or "",
+            incident.immediate_action or "",
+        ]
+    ).lower()
+    if any(marker in text for marker in ["concussion", "head impact", "head injury"]):
+        return "concussion_return_to_play"
+    if "physio" in text or "rehab" in text:
+        return "physiotherapy_clearance"
+    if "school" in text:
+        return "school_medical_clearance"
+    if "return" in text and "play" in text:
+        return "return_to_play_clearance"
+    return "standard_medical_clearance"
+
+
 def is_minor_on(person: Person, on_date: date) -> bool | None:
     if person.date_of_birth is None:
         return None
@@ -816,7 +904,13 @@ async def submit_incident_report_package_to_regulator(
     package.status = IncidentReportPackageStatus.SUBMITTED
     package.submitted_by_person_id = identity.person_id
     package.submitted_at = package.submitted_at or submitted_at
-    payload = incident_report_package_regulator_payload(package, incident, artifact, stored)
+    payload = incident_report_package_regulator_payload(
+        package,
+        incident,
+        artifact,
+        stored,
+        selected_settings.safeguarding_regulatory_report_provider_profile,
+    )
     package.submission_payload = json.dumps(payload, sort_keys=True, default=str)
     append_incident_report_package_note(
         package,
@@ -858,6 +952,8 @@ async def deliver_incident_report_package_regulator_payload(
         incident_id=package.incident_id,
         agency_name=package.agency_name,
         jurisdiction=package.jurisdiction,
+        provider_profile=str(payload.get("provider_profile") or "standard_regulatory"),
+        provider_schema_id=provider_schema_id_from_payload(payload),
         delivery_mode=settings.safeguarding_regulatory_report_delivery_mode,
         delivery_attempted=False,
         delivered=False,
@@ -940,9 +1036,22 @@ def incident_report_package_regulator_payload(
     incident: SafeguardingIncident,
     artifact: dict[str, object],
     stored: dict[str, str],
+    configured_profile: str | None = None,
 ) -> dict[str, object]:
+    profile = selected_provider_profile(
+        configured_profile,
+        infer_regulatory_provider_profile(package, incident),
+    )
     return {
         "event_type": "incident_report_package.submit",
+        "provider_profile": profile,
+        "provider_schema": incident_report_package_regulator_provider_schema(
+            profile,
+            package,
+            incident,
+            artifact,
+            stored,
+        ),
         "package_id": str(package.id),
         "organization_id": str(package.organization_id),
         "incident_id": str(package.incident_id),
@@ -975,6 +1084,91 @@ def incident_report_package_regulator_payload(
             "medical_follow_up_required": incident.medical_follow_up_required,
             "regulatory_report_required": incident.regulatory_report_required,
         },
+    }
+
+
+def incident_report_package_regulator_provider_schema(
+    profile: str,
+    package: IncidentReportPackage,
+    incident: SafeguardingIncident,
+    artifact: dict[str, object],
+    stored: dict[str, str],
+) -> dict[str, object]:
+    field_map = {
+        "case_reference": "external_reference",
+        "agency": "agency_name",
+        "jurisdiction": "jurisdiction",
+        "incident_category": "incident.incident_type",
+        "severity": "incident.severity",
+        "occurred_at": "incident.occurred_at",
+        "narrative": "narrative",
+        "evidence_uri": "artifact.artifact_url",
+    }
+    provider_payload: dict[str, object]
+    if profile == "school_sport_authority":
+        provider_payload = {
+            "learner_safety_case": {
+                "school_sport_reference": package.external_reference,
+                "education_jurisdiction": package.jurisdiction,
+                "reporting_body": package.agency_name,
+                "learner_activity_context": incident.location,
+                "guardian_notification_recorded": incident.parent_notified_at is not None,
+                "medical_follow_up": incident.medical_follow_up_required,
+                "document_uri": stored["artifact_url"],
+            }
+        }
+    elif profile == "safe_sport":
+        provider_payload = {
+            "safesport_case": {
+                "case_reference": package.external_reference,
+                "reporting_organization_id": str(package.organization_id),
+                "allegation_type": incident.incident_type.value,
+                "risk_level": incident.severity.value,
+                "immediate_protective_action": incident.immediate_action,
+                "evidence_checksum": artifact["checksum"],
+            }
+        }
+    elif profile == "federation_discipline":
+        provider_payload = {
+            "disciplinary_notice": {
+                "federation_reference": package.external_reference,
+                "competition_or_event_location": incident.location,
+                "incident_status": incident.status.value,
+                "rules_checklist": package.checklist_json,
+                "artifact_storage_key": stored["storage_key"],
+            }
+        }
+    else:
+        provider_payload = {
+            "statutory_incident_report": {
+                "portal_reference": package.external_reference,
+                "agency": package.agency_name,
+                "jurisdiction": package.jurisdiction,
+                "incident_title": incident.title,
+                "incident_summary": incident.description,
+                "artifact_url": stored["artifact_url"],
+            }
+        }
+    return {
+        "schema_id": provider_schema_id("regulatory", profile),
+        "version": "1.0",
+        "profile": profile,
+        "required_fields": [
+            "agency_name",
+            "jurisdiction",
+            "incident.title",
+            "incident.occurred_at",
+            "artifact.artifact_url",
+            "artifact.checksum",
+        ],
+        "field_map": field_map,
+        "status_mapping": {
+            "submitted": "submitted",
+            "accepted": "accepted",
+            "rejected": "rejected",
+            "withdrawn": "withdrawn",
+        },
+        "provider_payload": provider_payload,
     }
 
 
@@ -1225,7 +1419,12 @@ async def submit_incident_insurance_claim_to_provider(
 
     selected_settings = settings or get_settings()
     now = utc_now()
-    payload = incident_insurance_claim_provider_payload(claim, incident, "submit")
+    payload = incident_insurance_claim_provider_payload(
+        claim,
+        incident,
+        "submit",
+        selected_settings.safeguarding_insurance_claim_provider_profile,
+    )
     claim.submitted_by_person_id = identity.person_id
     claim.submitted_at = claim.submitted_at or now
     claim.status = InsuranceClaimStatus.SUBMITTED
@@ -1265,7 +1464,12 @@ async def poll_incident_insurance_claim_provider_status(
 
     selected_settings = settings or get_settings()
     now = utc_now()
-    payload = incident_insurance_claim_provider_payload(claim, incident, "status_poll")
+    payload = incident_insurance_claim_provider_payload(
+        claim,
+        incident,
+        "status_poll",
+        selected_settings.safeguarding_insurance_claim_provider_profile,
+    )
     result = await deliver_incident_insurance_claim_provider_payload(
         selected_settings,
         claim,
@@ -1290,6 +1494,8 @@ async def deliver_incident_insurance_claim_provider_payload(
         claim_id=claim.id,
         organization_id=claim.organization_id,
         action=action,
+        provider_profile=str(payload.get("provider_profile") or "standard_claim"),
+        provider_schema_id=provider_schema_id_from_payload(payload),
         delivery_mode=settings.safeguarding_insurance_claim_delivery_mode,
         delivery_attempted=False,
         delivered=False,
@@ -1370,9 +1576,16 @@ def incident_insurance_claim_provider_payload(
     claim: IncidentInsuranceClaim,
     incident: SafeguardingIncident,
     action: str,
+    configured_profile: str | None = None,
 ) -> dict[str, object]:
+    profile = selected_provider_profile(
+        configured_profile,
+        infer_insurance_provider_profile(claim),
+    )
     return {
         "event_type": f"incident_insurance_claim.{action}",
+        "provider_profile": profile,
+        "provider_schema": incident_insurance_claim_provider_schema(profile, claim, incident, action),
         "claim_id": str(claim.id),
         "organization_id": str(claim.organization_id),
         "incident_id": str(claim.incident_id),
@@ -1399,6 +1612,108 @@ def incident_insurance_claim_provider_payload(
             "immediate_action": incident.immediate_action,
             "medical_follow_up_required": incident.medical_follow_up_required,
         },
+    }
+
+
+def incident_insurance_claim_provider_schema(
+    profile: str,
+    claim: IncidentInsuranceClaim,
+    incident: SafeguardingIncident,
+    action: str,
+) -> dict[str, object]:
+    field_map = {
+        "policy_id": "policy_number",
+        "claim_reference": "claim_number",
+        "loss_type": "claim_type",
+        "loss_date": "incident.occurred_at",
+        "loss_location": "incident.location",
+        "claimed_amount_minor": "claimed_amount_cents",
+        "reserve_amount_minor": "reserve_amount_cents",
+        "currency": "currency",
+        "supporting_documents": "documentation_checklist_json",
+    }
+    if profile == "medical_claim":
+        provider_payload = {
+            "medical_expense_claim": {
+                "operation": action,
+                "policy_number": claim.policy_number,
+                "claimant_person_id": str(claim.claimant_person_id) if claim.claimant_person_id else None,
+                "injury_description": incident.description,
+                "first_aid_or_referral": incident.immediate_action,
+                "follow_up_required": incident.medical_follow_up_required,
+                "amount_requested_cents": claim.claimed_amount_cents,
+                "reserve_cents": claim.reserve_amount_cents,
+            }
+        }
+    elif profile == "property_equipment_claim":
+        provider_payload = {
+            "property_loss_notice": {
+                "operation": action,
+                "policy_number": claim.policy_number,
+                "damage_context": incident.description,
+                "location": incident.location,
+                "estimated_loss_cents": claim.claimed_amount_cents,
+                "evidence_checklist": claim.documentation_checklist_json,
+            }
+        }
+    elif profile == "liability_claim":
+        provider_payload = {
+            "liability_notice": {
+                "operation": action,
+                "policy_number": claim.policy_number,
+                "incident_summary": incident.description,
+                "immediate_mitigation": incident.immediate_action,
+                "severity": incident.severity.value,
+                "reserve_cents": claim.reserve_amount_cents,
+            }
+        }
+    elif profile == "travel_claim":
+        provider_payload = {
+            "travel_incident_claim": {
+                "operation": action,
+                "policy_number": claim.policy_number,
+                "travel_incident_reference": str(incident.id),
+                "location": incident.location,
+                "amount_requested_cents": claim.claimed_amount_cents,
+                "status": claim.status.value,
+            }
+        }
+    else:
+        provider_payload = {
+            "standard_claim_notice": {
+                "operation": action,
+                "policy_number": claim.policy_number,
+                "claim_type": claim.claim_type.value,
+                "claim_number": claim.claim_number,
+                "amount_requested_cents": claim.claimed_amount_cents,
+                "currency": claim.currency,
+            }
+        }
+    return {
+        "schema_id": provider_schema_id("insurance", profile),
+        "version": "1.0",
+        "profile": profile,
+        "required_fields": [
+            "provider_name",
+            "claim_type",
+            "policy_number",
+            "incident.occurred_at",
+            "incident.description",
+            "claimed_amount_cents",
+            "currency",
+        ],
+        "field_map": field_map,
+        "status_mapping": {
+            "submitted": "submitted",
+            "acknowledged": "acknowledged",
+            "in_review": "in_review",
+            "approved": "approved",
+            "partially_paid": "partially_paid",
+            "paid": "paid",
+            "denied": "denied",
+            "closed": "closed",
+        },
+        "provider_payload": provider_payload,
     }
 
 
@@ -1574,7 +1889,12 @@ async def submit_incident_medical_clearance_to_provider(
     now = utc_now()
     clearance.reviewed_by_person_id = identity.person_id
     clearance.assessed_at = clearance.assessed_at or now
-    payload = incident_medical_clearance_provider_payload(clearance, incident, "submit")
+    payload = incident_medical_clearance_provider_payload(
+        clearance,
+        incident,
+        "submit",
+        selected_settings.safeguarding_medical_clearance_provider_profile,
+    )
     append_incident_medical_clearance_note(
         clearance,
         now,
@@ -1609,7 +1929,12 @@ async def poll_incident_medical_clearance_provider_status(
 
     selected_settings = settings or get_settings()
     now = utc_now()
-    payload = incident_medical_clearance_provider_payload(clearance, incident, "status_poll")
+    payload = incident_medical_clearance_provider_payload(
+        clearance,
+        incident,
+        "status_poll",
+        selected_settings.safeguarding_medical_clearance_provider_profile,
+    )
     result = await deliver_incident_medical_clearance_provider_payload(
         selected_settings,
         clearance,
@@ -1636,6 +1961,8 @@ async def deliver_incident_medical_clearance_provider_payload(
         incident_id=clearance.incident_id,
         athlete_person_id=clearance.athlete_person_id,
         action=action,
+        provider_profile=str(payload.get("provider_profile") or "standard_medical_clearance"),
+        provider_schema_id=provider_schema_id_from_payload(payload),
         delivery_mode=settings.safeguarding_medical_clearance_delivery_mode,
         delivery_attempted=False,
         delivered=False,
@@ -1714,9 +2041,16 @@ def incident_medical_clearance_provider_payload(
     clearance: IncidentMedicalClearance,
     incident: SafeguardingIncident,
     action: str,
+    configured_profile: str | None = None,
 ) -> dict[str, object]:
+    profile = selected_provider_profile(
+        configured_profile,
+        infer_medical_provider_profile(clearance, incident),
+    )
     return {
         "event_type": f"incident_medical_clearance.{action}",
+        "provider_profile": profile,
+        "provider_schema": incident_medical_clearance_provider_schema(profile, clearance, incident, action),
         "clearance_id": str(clearance.id),
         "organization_id": str(clearance.organization_id),
         "incident_id": str(clearance.incident_id),
@@ -1740,6 +2074,104 @@ def incident_medical_clearance_provider_payload(
             "immediate_action": incident.immediate_action,
             "medical_follow_up_required": incident.medical_follow_up_required,
         },
+    }
+
+
+def incident_medical_clearance_provider_schema(
+    profile: str,
+    clearance: IncidentMedicalClearance,
+    incident: SafeguardingIncident,
+    action: str,
+) -> dict[str, object]:
+    field_map = {
+        "patient_reference": "athlete_person_id",
+        "case_reference": "incident_id",
+        "review_type": "clearance_type",
+        "clinical_status": "status",
+        "assessment_time": "assessed_at",
+        "valid_from": "valid_from",
+        "valid_until": "valid_until",
+        "restrictions": "restrictions",
+        "return_to_play_stage": "return_to_play_stage",
+        "document_reference": "documentation_object_key",
+    }
+    if profile == "concussion_return_to_play":
+        provider_payload = {
+            "concussion_rtp_clearance": {
+                "operation": action,
+                "athlete_person_id": str(clearance.athlete_person_id),
+                "incident_summary": incident.description,
+                "removal_from_play_action": incident.immediate_action,
+                "current_stage": clearance.return_to_play_stage,
+                "restrictions": clearance.restrictions,
+                "clearance_status": clearance.status.value,
+                "minimum_required_documentation": [
+                    "initial_head_injury_assessment",
+                    "symptom_free_confirmation",
+                    "graduated_return_to_play_steps",
+                    "licensed_clinician_signoff",
+                ],
+            }
+        }
+    elif profile == "physiotherapy_clearance":
+        provider_payload = {
+            "rehabilitation_clearance": {
+                "operation": action,
+                "athlete_person_id": str(clearance.athlete_person_id),
+                "injury_context": incident.description,
+                "functional_restrictions": clearance.restrictions,
+                "return_stage": clearance.return_to_play_stage,
+                "validity_window": {
+                    "from": clearance.valid_from,
+                    "until": clearance.valid_until,
+                },
+            }
+        }
+    elif profile == "school_medical_clearance":
+        provider_payload = {
+            "school_activity_medical_clearance": {
+                "operation": action,
+                "learner_person_id": str(clearance.athlete_person_id),
+                "activity_incident_id": str(incident.id),
+                "school_activity_location": incident.location,
+                "participation_decision": clearance.status.value,
+                "guardian_notification_recorded": incident.parent_notified_at is not None,
+                "school_restrictions": clearance.restrictions,
+            }
+        }
+    else:
+        provider_payload = {
+            "return_to_play_clearance": {
+                "operation": action,
+                "athlete_person_id": str(clearance.athlete_person_id),
+                "clearance_type": clearance.clearance_type,
+                "status": clearance.status.value,
+                "return_to_play_stage": clearance.return_to_play_stage,
+                "restrictions": clearance.restrictions,
+                "documentation_object_key": clearance.documentation_object_key,
+            }
+        }
+    return {
+        "schema_id": provider_schema_id("medical", profile),
+        "version": "1.0",
+        "profile": profile,
+        "required_fields": [
+            "athlete_person_id",
+            "incident_id",
+            "clearance_type",
+            "status",
+            "assessed_at",
+            "return_to_play_stage",
+        ],
+        "field_map": field_map,
+        "status_mapping": {
+            "pending_review": "pending_review",
+            "restricted": "restricted",
+            "cleared": "cleared",
+            "not_cleared": "not_cleared",
+            "expired": "expired",
+        },
+        "provider_payload": provider_payload,
     }
 
 

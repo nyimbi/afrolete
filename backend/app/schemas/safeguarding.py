@@ -593,6 +593,8 @@ class IncidentReportPackageProviderSubmissionRead(BaseModel):
     incident_id: UUID
     agency_name: str
     jurisdiction: str
+    provider_profile: str
+    provider_schema_id: str
     delivery_mode: str
     delivery_attempted: bool
     delivered: bool
@@ -674,6 +676,8 @@ class IncidentInsuranceClaimProviderSyncRead(BaseModel):
     claim_id: UUID
     organization_id: UUID
     action: str
+    provider_profile: str
+    provider_schema_id: str
     delivery_mode: str
     delivery_attempted: bool
     delivered: bool
@@ -738,6 +742,8 @@ class IncidentMedicalClearanceProviderSyncRead(BaseModel):
     incident_id: UUID
     athlete_person_id: UUID
     action: str
+    provider_profile: str
+    provider_schema_id: str
     delivery_mode: str
     delivery_attempted: bool
     delivered: bool
