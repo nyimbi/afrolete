@@ -202,6 +202,7 @@ import type {
   ParticipationClearanceRead,
   PaymentSettlementRead,
   CommercialSettlementPayoutRead,
+  CommercialSettlementPayoutCallbackRead,
   PerformanceAchievementAwardRead,
   PerformanceAchievementRunRead,
   PerformanceAssessmentReviewEscalationRunRead,
@@ -1498,6 +1499,7 @@ export default function HomePage() {
   const [commercialTaxFiling, setCommercialTaxFiling] = useState<CommercialTaxFilingRead | null>(null);
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlementRead | null>(null);
   const [commercialPayout, setCommercialPayout] = useState<CommercialSettlementPayoutRead | null>(null);
+  const [commercialPayouts, setCommercialPayouts] = useState<CommercialSettlementPayoutRead[]>([]);
   const [accountingExport, setAccountingExport] = useState<AccountingExportRead | null>(null);
   const [accountingSync, setAccountingSync] = useState<AccountingSyncRead | null>(null);
   const [commercialRefund, setCommercialRefund] = useState<CommercialRefundRead | null>(null);
@@ -2783,7 +2785,8 @@ export default function HomePage() {
       ticketData,
       invoiceData,
       summaryData,
-      dashboardData
+      dashboardData,
+      payoutData
     ] = await Promise.all([
       apiRequest<SponsorRead[]>(`/commercial/sponsors?organization_id=${organizationId}`),
       apiRequest<SponsorshipAgreementRead[]>(`/commercial/sponsorships?organization_id=${organizationId}`),
@@ -2794,7 +2797,8 @@ export default function HomePage() {
       apiRequest<CommercialSummaryRead>(`/commercial/summary?organization_id=${organizationId}`),
       apiRequest<SponsorshipDashboardRead[]>(
         `/commercial/sponsorship-dashboard?organization_id=${organizationId}`
-      )
+      ),
+      apiRequest<CommercialSettlementPayoutRead[]>(`/commercial/settlements/payouts?organization_id=${organizationId}`)
     ]);
     setSponsors(sponsorData);
     setSponsorships(sponsorshipData);
@@ -2804,6 +2808,7 @@ export default function HomePage() {
     setInvoices(invoiceData);
     setCommercialSummary(summaryData);
     setSponsorshipDashboard(dashboardData);
+    setCommercialPayouts(payoutData);
     setSelectedSponsorId((current) =>
       sponsorData.some((sponsor) => sponsor.id === current) ? current : sponsorData[0]?.id ?? ""
     );
@@ -3163,6 +3168,7 @@ export default function HomePage() {
       setCommercialTaxFiling(null);
       setPaymentSettlement(null);
       setCommercialPayout(null);
+      setCommercialPayouts([]);
       setAccountingExport(null);
       setAccountingSync(null);
       setCommercialRefund(null);
@@ -9451,12 +9457,45 @@ export default function HomePage() {
         ),
       (payout) => {
         setCommercialPayout(payout);
+        setCommercialPayouts((current) => [payout, ...current.filter((item) => item.id !== payout.id)]);
         addLog(
           payout.delivered
             ? `Payout delivered: ${payout.payout_batch_reference}`
             : `Payout prepared: ${payout.payout_batch_reference}`,
           payout.failure_reason ? "neutral" : "good"
         );
+      }
+    );
+  };
+
+  const reconcileCommercialPayout = (statusValue: "paid" | "failed" | "returned") => {
+    const payout = commercialPayout ?? commercialPayouts[0];
+    if (!payout) {
+      addLog("Execute a payout before reconciling provider status", "neutral");
+      return;
+    }
+    runAction(
+      `commercial-payout-callback-${statusValue}`,
+      () =>
+        apiRequest<CommercialSettlementPayoutCallbackRead>("/commercial/settlements/payout-callbacks", {
+          method: "POST",
+          body: {
+            provider: payout.provider,
+            payout_batch_reference: payout.payout_batch_reference,
+            idempotency_key: payout.idempotency_key,
+            status: statusValue,
+            provider_status_code: statusValue === "paid" ? 200 : 422,
+            external_event_id: `commercial-payout-${statusValue}-${Date.now()}`,
+            raw_payload: {
+              source: "operations_console",
+              payout_reference: payout.payout_reference
+            }
+          }
+        }),
+      (callback) => {
+        setCommercialPayout(callback.payout);
+        setCommercialPayouts((current) => [callback.payout, ...current.filter((item) => item.id !== callback.payout.id)]);
+        addLog(callback.message, callback.payout_status === "paid" ? "good" : "neutral");
       }
     );
   };
@@ -12766,6 +12805,7 @@ export default function HomePage() {
                 <button type="button" onClick={fileCommercialTax} disabled={busyAction !== null}>File tax</button>
                 <button type="button" onClick={settleCommercialPayments} disabled={busyAction !== null}>Settle</button>
                 <button type="button" onClick={executeCommercialPayout} disabled={busyAction !== null}>Payout</button>
+                <button type="button" onClick={() => reconcileCommercialPayout("paid")} disabled={busyAction !== null}>Paid</button>
                 <button type="button" onClick={exportCommercialAccounting} disabled={busyAction !== null}>Export</button>
                 <button type="button" onClick={syncCommercialAccounting} disabled={busyAction !== null}>Sync</button>
               </div>
@@ -12875,13 +12915,26 @@ export default function HomePage() {
                   <div>
                     <strong>{commercialPayout.delivered ? "Payout delivered" : "Payout prepared"}</strong>
                     <span>
-                      {commercialPayout.net_amount} {commercialPayout.currency} · {commercialPayout.delivery_mode}
+                      {commercialPayout.net_amount} {commercialPayout.currency} · {commercialPayout.status} · {commercialPayout.delivery_mode}
                       {commercialPayout.provider_status_code ? ` · ${commercialPayout.provider_status_code}` : ""}
                     </span>
                     {commercialPayout.failure_reason ? <small>{commercialPayout.failure_reason}</small> : null}
                   </div>
                 </article>
               ) : null}
+              {commercialPayouts.slice(0, 3).map((payout) => (
+                <button
+                  type="button"
+                  key={payout.id ?? payout.payout_batch_reference}
+                  className={`task-card ${payout.id && payout.id === commercialPayout?.id ? "selected" : ""}`}
+                  onClick={() => setCommercialPayout(payout)}
+                >
+                  <div>
+                    <strong>{payout.status} · {payout.payout_batch_reference}</strong>
+                    <span>{payout.net_amount} {payout.currency} · {payout.provider}</span>
+                  </div>
+                </button>
+              ))}
               {accountingExport ? (
                 <article className="task-card">
                   <div>

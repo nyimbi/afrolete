@@ -233,22 +233,53 @@ class PaymentSettlementRead(BaseModel):
 
 
 class CommercialSettlementPayoutRead(BaseModel):
+    id: UUID | None = None
     organization_id: UUID
     provider: str
     currency: str
+    status: str
     delivery_mode: str
     delivery_attempted: bool
     delivered: bool
     payout_reference: str
     payout_batch_reference: str
+    idempotency_key: str
     gross_amount: Decimal
     fee_amount: Decimal
     net_amount: Decimal
     line_count: int
     destination: str | None
     provider_status_code: int | None
+    provider_response: str | None = None
     failure_reason: str | None
+    processed_by_person_id: UUID | None = None
     executed_at: datetime
+    reconciled_at: datetime | None = None
+    external_event_id: str | None = None
+
+
+class CommercialSettlementPayoutCallbackCreate(BaseModel):
+    provider: str = Field(default="manual_gateway", min_length=2, max_length=80)
+    payout_reference: str | None = Field(default=None, max_length=180)
+    payout_batch_reference: str | None = Field(default=None, max_length=180)
+    idempotency_key: str | None = Field(default=None, max_length=180)
+    status: str = Field(default="paid", min_length=2, max_length=80)
+    provider_status_code: int | None = Field(default=None, ge=100, le=599)
+    external_event_id: str | None = Field(default=None, max_length=180)
+    raw_payload: dict[str, Any] | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class CommercialSettlementPayoutCallbackRead(BaseModel):
+    accepted: bool
+    signature_required: bool = False
+    signature_validated: bool = False
+    matched_by: str
+    payout_reference: str
+    payout_batch_reference: str
+    payout_status: str
+    message: str
+    payout: CommercialSettlementPayoutRead
 
 
 class CommercialInvoiceHostedCheckoutRead(BaseModel):

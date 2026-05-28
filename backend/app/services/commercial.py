@@ -12,11 +12,12 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.models.commercial import (
+    CommercialSettlementPayout,
     Donation,
     FinanceInvoice,
     FinancePayment,
@@ -42,6 +43,8 @@ from app.schemas.commercial import (
     CommercialSummaryRead,
     CommercialRefundCreate,
     CommercialRefundRead,
+    CommercialSettlementPayoutCallbackCreate,
+    CommercialSettlementPayoutCallbackRead,
     CommercialSettlementPayoutRead,
     CommercialTaxFilingRead,
     DonationCreate,
@@ -600,33 +603,70 @@ async def execute_payment_settlement_payout(
     settlement = await payment_settlement(db, organization_id, provider, fee_rate, fixed_fee)
     selected_settings = settings or get_settings()
     batch_reference = commercial_payout_batch_reference(settlement)
-    result = CommercialSettlementPayoutRead(
+    existing = await db.scalar(
+        select(CommercialSettlementPayout).where(
+            CommercialSettlementPayout.organization_id == organization_id,
+            CommercialSettlementPayout.provider == provider,
+            CommercialSettlementPayout.payout_batch_reference == batch_reference,
+        )
+    )
+    if existing is not None and existing.status in {"paid", "queued", "delivered", "prepared"}:
+        return commercial_settlement_payout_read(existing)
+
+    executed_at = datetime.now(UTC)
+    payout = existing or CommercialSettlementPayout(
         organization_id=organization_id,
         provider=provider,
         currency=settlement.currency,
+        payout_reference=settlement.payout_reference,
+        payout_batch_reference=batch_reference,
+        idempotency_key=commercial_payout_idempotency_key(settlement, batch_reference),
+        status="prepared",
         delivery_mode=selected_settings.commercial_payout_delivery_mode,
         delivery_attempted=False,
         delivered=False,
-        payout_reference=settlement.payout_reference,
-        payout_batch_reference=batch_reference,
         gross_amount=settlement.gross_amount,
         fee_amount=settlement.fee_amount,
         net_amount=settlement.net_amount,
         line_count=settlement.line_count,
         destination=selected_settings.commercial_payout_webhook_url or None,
         provider_status_code=None,
+        provider_response=None,
         failure_reason=None,
-        executed_at=datetime.now(UTC),
+        processed_by_person_id=identity.person_id,
+        executed_at=executed_at,
     )
-    if selected_settings.commercial_payout_delivery_mode == "record_only":
-        return result.model_copy(update={"failure_reason": "Record-only payout mode; settlement prepared for manual payout."})
-    if not selected_settings.commercial_payout_webhook_url:
-        return result.model_copy(update={"failure_reason": "Commercial payout webhook mode is enabled but no webhook URL is configured."})
+    payout.currency = settlement.currency
+    payout.payout_reference = settlement.payout_reference
+    payout.idempotency_key = commercial_payout_idempotency_key(settlement, batch_reference)
+    payout.delivery_mode = selected_settings.commercial_payout_delivery_mode
+    payout.gross_amount = settlement.gross_amount
+    payout.fee_amount = settlement.fee_amount
+    payout.net_amount = settlement.net_amount
+    payout.line_count = settlement.line_count
+    payout.destination = selected_settings.commercial_payout_webhook_url or None
+    payout.processed_by_person_id = identity.person_id
+    payout.executed_at = executed_at
+    db.add(payout)
 
-    payload = commercial_payout_payload(result)
+    if selected_settings.commercial_payout_delivery_mode == "record_only":
+        payout.status = "prepared"
+        payout.failure_reason = "Record-only payout mode; settlement prepared for manual payout."
+        await db.commit()
+        await db.refresh(payout)
+        return commercial_settlement_payout_read(payout)
+    if not selected_settings.commercial_payout_webhook_url:
+        payout.status = "failed"
+        payout.failure_reason = "Commercial payout webhook mode is enabled but no webhook URL is configured."
+        await db.commit()
+        await db.refresh(payout)
+        return commercial_settlement_payout_read(payout)
+
+    payload = commercial_payout_payload(commercial_settlement_payout_read(payout))
     raw_body = json.dumps(payload, sort_keys=True, default=str).encode()
     timestamp = str(int(time.time()))
     headers = await commercial_payout_headers(selected_settings, raw_body, timestamp)
+    payout.delivery_attempted = True
     try:
         async with httpx.AsyncClient(timeout=selected_settings.commercial_payout_timeout_seconds) as client:
             response = await client.post(
@@ -635,21 +675,98 @@ async def execute_payment_settlement_payout(
                 headers=headers,
             )
         delivered = 200 <= response.status_code < 300
-        return result.model_copy(
-            update={
-                "delivery_attempted": True,
-                "delivered": delivered,
-                "provider_status_code": response.status_code,
-                "failure_reason": None if delivered else f"Commercial payout webhook returned {response.status_code}: {response.text[:500]}",
-            }
-        )
+        payout.delivered = delivered
+        payout.status = "queued" if delivered else "failed"
+        payout.provider_status_code = response.status_code
+        payout.provider_response = commercial_payout_provider_response(response.status_code, response.text)
+        payout.failure_reason = None if delivered else f"Commercial payout webhook returned {response.status_code}: {response.text[:500]}"
     except httpx.HTTPError as error:
-        return result.model_copy(
-            update={
-                "delivery_attempted": True,
-                "failure_reason": f"Commercial payout webhook failed: {error}",
-            }
+        payout.status = "failed"
+        payout.failure_reason = f"Commercial payout webhook failed: {error}"
+
+    await db.commit()
+    await db.refresh(payout)
+    return commercial_settlement_payout_read(payout)
+
+
+async def list_commercial_settlement_payouts(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[CommercialSettlementPayoutRead]:
+    await get_organization(db, organization_id)
+    payouts = list(
+        (
+            await db.scalars(
+                select(CommercialSettlementPayout)
+                .where(CommercialSettlementPayout.organization_id == organization_id)
+                .order_by(CommercialSettlementPayout.executed_at.desc())
+            )
+        ).all()
+    )
+    return [commercial_settlement_payout_read(payout) for payout in payouts]
+
+
+async def reconcile_commercial_settlement_payout_callback(
+    db: AsyncSession,
+    payload: CommercialSettlementPayoutCallbackCreate,
+    *,
+    signature_required: bool = False,
+    signature_validated: bool = False,
+) -> CommercialSettlementPayoutCallbackRead:
+    filters = []
+    if payload.payout_reference is not None:
+        filters.append(CommercialSettlementPayout.payout_reference == payload.payout_reference)
+    if payload.payout_batch_reference is not None:
+        filters.append(CommercialSettlementPayout.payout_batch_reference == payload.payout_batch_reference)
+    if payload.idempotency_key is not None:
+        filters.append(CommercialSettlementPayout.idempotency_key == payload.idempotency_key)
+    if not filters:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Payout reference, batch reference, or idempotency key required",
         )
+    payout = (
+        await db.scalars(
+            select(CommercialSettlementPayout)
+            .where(CommercialSettlementPayout.provider == payload.provider)
+            .where(or_(*filters))
+        )
+    ).first()
+    if payout is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Commercial settlement payout not found")
+
+    matched_by = commercial_payout_callback_match(payload, payout)
+    payout_status = normalize_commercial_payout_status(payload.status)
+    reconciled_at = datetime.now(UTC)
+    payout.status = payout_status
+    payout.delivered = payout_status in {"paid", "queued"}
+    payout.provider_status_code = payload.provider_status_code
+    payout.external_event_id = payload.external_event_id
+    payout.reconciled_at = reconciled_at
+    payout.callback_payload = commercial_payout_callback_response(
+        payload,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        matched_by=matched_by,
+        reconciled_at=reconciled_at,
+    )
+    payout.provider_response = payout.callback_payload
+    payout.failure_reason = None if payout_status in {"paid", "queued"} else payload.notes or f"Commercial payout callback reconciled as {payout_status}."
+
+    await db.commit()
+    await db.refresh(payout)
+    read = commercial_settlement_payout_read(payout)
+    return CommercialSettlementPayoutCallbackRead(
+        accepted=True,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        matched_by=matched_by,
+        payout_reference=payout.payout_reference,
+        payout_batch_reference=payout.payout_batch_reference,
+        payout_status=payout.status,
+        message=f"Commercial settlement payout callback reconciled as {payout.status}.",
+        payout=read,
+    )
 
 
 async def accounting_export(
@@ -1490,6 +1607,7 @@ def commercial_payout_payload(payout: CommercialSettlementPayoutRead) -> dict[st
         "event_type": "commercial.settlement_payout",
         "organization_id": str(payout.organization_id),
         "provider": payout.provider,
+        "idempotency_key": payout.idempotency_key,
         "payout_reference": payout.payout_reference,
         "payout_batch_reference": payout.payout_batch_reference,
         "gross_amount": str(payout.gross_amount),
@@ -1525,6 +1643,141 @@ async def commercial_payout_headers(
             sha256,
         ).hexdigest()
     return headers
+
+
+def commercial_payout_idempotency_key(settlement: PaymentSettlementRead, batch_reference: str) -> str:
+    token = sha256(
+        f"commercial-payout:{settlement.organization_id}:{settlement.provider}:{batch_reference}:{settlement.net_amount}".encode()
+    ).hexdigest()
+    provider_token = sub(r"[^a-z0-9]+", "-", settlement.provider.lower()).strip("-")[:24] or "provider"
+    return f"csp_{provider_token}_{token[:24]}"
+
+
+def commercial_payout_provider_response(status_code: int, body: str) -> str:
+    return json.dumps(
+        {
+            "provider_status_code": status_code,
+            "body": body[:1000],
+        },
+        sort_keys=True,
+    )
+
+
+def normalize_commercial_payout_status(status_value: str) -> str:
+    normalized = status_value.strip().lower().replace("-", "_")
+    if normalized in {"paid", "succeeded", "success", "completed", "complete", "settled"}:
+        return "paid"
+    if normalized in {"queued", "pending", "processing", "submitted", "accepted"}:
+        return "queued"
+    if normalized in {"failed", "failure", "rejected", "declined", "error"}:
+        return "failed"
+    if normalized in {"cancelled", "canceled", "voided"}:
+        return "cancelled"
+    if normalized in {"returned", "reversed", "refunded", "chargeback"}:
+        return "returned"
+    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported commercial payout callback status")
+
+
+def commercial_payout_callback_match(
+    payload: CommercialSettlementPayoutCallbackCreate,
+    payout: CommercialSettlementPayout,
+) -> str:
+    if payload.payout_reference and payload.payout_reference == payout.payout_reference:
+        return "payout_reference"
+    if payload.payout_batch_reference and payload.payout_batch_reference == payout.payout_batch_reference:
+        return "payout_batch_reference"
+    return "idempotency_key"
+
+
+def commercial_payout_callback_response(
+    payload: CommercialSettlementPayoutCallbackCreate,
+    *,
+    signature_required: bool,
+    signature_validated: bool,
+    matched_by: str,
+    reconciled_at: datetime,
+) -> str:
+    return json.dumps(
+        {
+            "provider": payload.provider,
+            "payout_reference": payload.payout_reference,
+            "payout_batch_reference": payload.payout_batch_reference,
+            "idempotency_key": payload.idempotency_key,
+            "status": payload.status,
+            "external_event_id": payload.external_event_id,
+            "provider_status_code": payload.provider_status_code,
+            "matched_by": matched_by,
+            "signature_required": signature_required,
+            "signature_validated": signature_validated,
+            "reconciled_at": reconciled_at.isoformat(),
+            "raw_payload": payload.raw_payload,
+        },
+        sort_keys=True,
+    )
+
+
+def commercial_settlement_payout_read(payout: CommercialSettlementPayout) -> CommercialSettlementPayoutRead:
+    return CommercialSettlementPayoutRead(
+        id=payout.id,
+        organization_id=payout.organization_id,
+        provider=payout.provider,
+        currency=payout.currency,
+        status=payout.status,
+        delivery_mode=payout.delivery_mode,
+        delivery_attempted=payout.delivery_attempted,
+        delivered=payout.delivered,
+        payout_reference=payout.payout_reference,
+        payout_batch_reference=payout.payout_batch_reference,
+        idempotency_key=payout.idempotency_key,
+        gross_amount=payout.gross_amount,
+        fee_amount=payout.fee_amount,
+        net_amount=payout.net_amount,
+        line_count=payout.line_count,
+        destination=payout.destination,
+        provider_status_code=payout.provider_status_code,
+        provider_response=payout.provider_response,
+        failure_reason=payout.failure_reason,
+        processed_by_person_id=payout.processed_by_person_id,
+        executed_at=payout.executed_at,
+        reconciled_at=payout.reconciled_at,
+        external_event_id=payout.external_event_id,
+    )
+
+
+async def validate_commercial_payout_callback_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> tuple[bool, bool]:
+    selected_settings = settings or get_settings()
+    signing_key = await resolve_commercial_secret(
+        selected_settings,
+        env_value=selected_settings.commercial_payout_callback_signing_key,
+        path=selected_settings.commercial_payout_callback_signing_key_secret_path,
+        field_name=selected_settings.commercial_payout_callback_signing_key_secret_field,
+        label="commercial payout callback signing key",
+    )
+    if not signing_key:
+        return False, False
+    if not timestamp_header or not signature_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing commercial payout callback signature")
+    try:
+        timestamp = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid commercial payout callback timestamp") from exc
+    age = abs(int(time.time()) - timestamp)
+    if age > selected_settings.commercial_payout_callback_tolerance_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Stale commercial payout callback signature")
+    expected = hmac.new(
+        signing_key.encode(),
+        timestamp_header.encode() + b"." + raw_body,
+        sha256,
+    ).hexdigest()
+    submitted = signature_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, submitted):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid commercial payout callback signature")
+    return True, True
 
 
 async def validate_commercial_invoice_payment_webhook_signature(

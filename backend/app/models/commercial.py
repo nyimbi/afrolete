@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -175,3 +175,32 @@ class FinancePayment(IdMixin, TimestampMixin, Base):
     external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
+
+
+class CommercialSettlementPayout(IdMixin, TimestampMixin, Base):
+    __tablename__ = "commercial_settlement_payouts"
+    __table_args__ = (UniqueConstraint("organization_id", "provider", "payout_batch_reference"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    payout_reference: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    payout_batch_reference: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="prepared", nullable=False, index=True)
+    delivery_mode: Mapped[str] = mapped_column(String(40), default="record_only", nullable=False, index=True)
+    delivery_attempted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    gross_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    fee_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    net_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    line_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    destination: Mapped[str | None] = mapped_column(String(500))
+    provider_status_code: Mapped[int | None] = mapped_column(Integer)
+    provider_response: Mapped[str | None] = mapped_column(Text)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    processed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    external_event_id: Mapped[str | None] = mapped_column(String(180), index=True)
+    callback_payload: Mapped[str | None] = mapped_column(Text)

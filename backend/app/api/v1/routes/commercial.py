@@ -16,6 +16,8 @@ from app.schemas.commercial import (
     CommercialSummaryRead,
     CommercialRefundCreate,
     CommercialRefundRead,
+    CommercialSettlementPayoutCallbackCreate,
+    CommercialSettlementPayoutCallbackRead,
     CommercialSettlementPayoutRead,
     CommercialTaxFilingRead,
     DonationCreate,
@@ -58,6 +60,7 @@ from app.services.commercial import (
     execute_payment_settlement_payout,
     get_commercial_invoice_hosted_checkout,
     ingest_commercial_invoice_payment_webhook,
+    list_commercial_settlement_payouts,
     list_campaigns,
     list_invoices,
     list_sponsors,
@@ -67,6 +70,7 @@ from app.services.commercial import (
     payment_settlement,
     record_donation,
     record_payment,
+    reconcile_commercial_settlement_payout_callback,
     refund_invoice,
     refund_ticket,
     settle_commercial_invoice_checkout,
@@ -74,6 +78,7 @@ from app.services.commercial import (
     sponsorship_dashboard,
     sync_accounting_export,
     tax_quote,
+    validate_commercial_payout_callback_signature,
     validate_commercial_invoice_payment_webhook_signature,
 )
 
@@ -416,6 +421,41 @@ async def execute_payment_settlement_payout_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> CommercialSettlementPayoutRead:
     return await execute_payment_settlement_payout(db, identity, organization_id, provider, fee_rate, fixed_fee, authz)
+
+
+@router.get("/settlements/payouts", response_model=list[CommercialSettlementPayoutRead])
+async def list_commercial_settlement_payouts_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[CommercialSettlementPayoutRead]:
+    return await list_commercial_settlement_payouts(db, organization_id)
+
+
+@router.post("/settlements/payout-callbacks", response_model=CommercialSettlementPayoutCallbackRead)
+async def commercial_settlement_payout_callback_route(
+    request: Request,
+    payload: CommercialSettlementPayoutCallbackCreate,
+    x_afrolete_commercial_payout_timestamp: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Commercial-Payout-Timestamp",
+    ),
+    x_afrolete_commercial_payout_signature: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Commercial-Payout-Signature",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> CommercialSettlementPayoutCallbackRead:
+    signature_required, signature_validated = await validate_commercial_payout_callback_signature(
+        await request.body(),
+        x_afrolete_commercial_payout_timestamp,
+        x_afrolete_commercial_payout_signature,
+    )
+    return await reconcile_commercial_settlement_payout_callback(
+        db,
+        payload,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+    )
 
 
 @router.get("/accounting-export", response_model=AccountingExportRead)

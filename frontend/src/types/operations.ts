@@ -1945,22 +1945,41 @@ export type PaymentSettlementRead = {
 };
 
 export type CommercialSettlementPayoutRead = {
+  id: UUID | null;
   organization_id: UUID;
   provider: string;
   currency: string;
+  status: string;
   delivery_mode: string;
   delivery_attempted: boolean;
   delivered: boolean;
   payout_reference: string;
   payout_batch_reference: string;
+  idempotency_key: string;
   gross_amount: string;
   fee_amount: string;
   net_amount: string;
   line_count: number;
   destination: string | null;
   provider_status_code: number | null;
+  provider_response: string | null;
   failure_reason: string | null;
+  processed_by_person_id: UUID | null;
   executed_at: string;
+  reconciled_at: string | null;
+  external_event_id: string | null;
+};
+
+export type CommercialSettlementPayoutCallbackRead = {
+  accepted: boolean;
+  signature_required: boolean;
+  signature_validated: boolean;
+  matched_by: string;
+  payout_reference: string;
+  payout_batch_reference: string;
+  payout_status: string;
+  message: string;
+  payout: CommercialSettlementPayoutRead;
 };
 
 export type AccountingExportRow = {

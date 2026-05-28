@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     commercial_payout_webhook_key_secret_path: str = ""
     commercial_payout_webhook_key_secret_field: str = "value"
     commercial_payout_timeout_seconds: float = 5.0
+    commercial_payout_callback_signing_key: str = ""
+    commercial_payout_callback_signing_key_secret_path: str = ""
+    commercial_payout_callback_signing_key_secret_field: str = "value"
+    commercial_payout_callback_tolerance_seconds: int = 300
 
     report_artifact_dir: str = "data/report-artifacts"
     report_artifact_url_prefix: str = "local://reports"

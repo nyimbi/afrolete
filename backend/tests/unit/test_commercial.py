@@ -703,10 +703,12 @@ def test_commercial_settlement_payout_delivers_signed_webhook(
     assert payout["delivery_mode"] == "webhook"
     assert payout["delivery_attempted"] is True
     assert payout["delivered"] is True
+    assert payout["status"] == "queued"
     assert payout["provider_status_code"] == 202
     assert payout["gross_amount"] == "60.00"
     assert payout["fee_amount"] == "2.04"
     assert payout["net_amount"] == "57.96"
+    assert payout["idempotency_key"].startswith("csp_bank-gateway_")
     assert captured["url"] == "https://payout.example/commercial"
     payload = captured["json"]
     assert isinstance(payload, dict)
@@ -723,5 +725,52 @@ def test_commercial_settlement_payout_delivers_signed_webhook(
     ).hexdigest()
     assert headers["X-Afrolete-Commercial-Payout-Key"] == "commercial-payout-secret"
     assert headers["X-Afrolete-Commercial-Payout-Signature"] == f"sha256={expected_signature}"
+
+    payouts_response = client.get(
+        "/api/v1/commercial/settlements/payouts",
+        params={"organization_id": organization["id"]},
+    )
+    assert payouts_response.status_code == 200
+    payouts = payouts_response.json()
+    assert len(payouts) == 1
+    assert payouts[0]["payout_batch_reference"] == payout["payout_batch_reference"]
+
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_PAYOUT_CALLBACK_SIGNING_KEY", "commercial-callback-secret")
+    commercial_service.get_settings.cache_clear()
+    callback_payload = {
+        "provider": "bank_gateway",
+        "payout_batch_reference": payout["payout_batch_reference"],
+        "idempotency_key": payout["idempotency_key"],
+        "status": "paid",
+        "provider_status_code": 200,
+        "external_event_id": "bank-payout-paid-1",
+        "raw_payload": {"provider_state": "settled"},
+    }
+    raw_callback = json.dumps(callback_payload).encode()
+    callback_timestamp = str(int(time.time()))
+    callback_signature = hmac.new(
+        b"commercial-callback-secret",
+        callback_timestamp.encode() + b"." + raw_callback,
+        sha256,
+    ).hexdigest()
+    callback_response = client.post(
+        "/api/v1/commercial/settlements/payout-callbacks",
+        content=raw_callback,
+        headers={
+            "Content-Type": "application/json",
+            "X-Afrolete-Commercial-Payout-Timestamp": callback_timestamp,
+            "X-Afrolete-Commercial-Payout-Signature": f"sha256={callback_signature}",
+        },
+    )
+    assert callback_response.status_code == 200
+    callback = callback_response.json()
+    assert callback["accepted"] is True
+    assert callback["signature_required"] is True
+    assert callback["signature_validated"] is True
+    assert callback["matched_by"] == "payout_batch_reference"
+    assert callback["payout_status"] == "paid"
+    assert callback["payout"]["status"] == "paid"
+    assert callback["payout"]["external_event_id"] == "bank-payout-paid-1"
+    assert callback["payout"]["reconciled_at"] is not None
 
     commercial_service.get_settings.cache_clear()
