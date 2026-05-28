@@ -1371,6 +1371,47 @@ def test_performance_ingestion_normalizes_catapult_workload_schema(client, ident
     assert ingestion["parsed_fields"]["source_path"] == "metrics.player_load"
 
 
+def test_performance_ingestion_uses_model_assist_for_narrative_number_words(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "sleep_minutes",
+            "name": "Sleep Minutes",
+            "category": "wellness",
+            "unit": "minutes",
+            "min_value": 0,
+            "max_value": 900,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/performance/ingest",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "metric_definition_id": metric["id"],
+            "source": "audio_narration",
+            "evidence_ref": "audio://coach-notes/recovery-2026-06-05",
+            "evidence_text": "Coach note: recovery looked better today. Sleep duration was seven hours after travel.",
+        },
+    )
+
+    assert response.status_code == 201
+    ingestion = response.json()
+    assert ingestion["observation"]["value"] == 420
+    assert ingestion["parser_method"] == "model_assisted_extraction"
+    assert ingestion["model_assisted"] is True
+    assert ingestion["model_policy"] == "afrolete-performance-extractor-v1"
+    assert ingestion["model_confidence"] >= 0.75
+    assert ingestion["model_evaluation"]["status"] == "applied"
+    assert "Model-assisted extraction requires human review before verification." in ingestion["parser_warnings"]
+
+
 def test_performance_wearable_webhook_creates_pending_observations_once(
     client, identity_headers
 ) -> None:

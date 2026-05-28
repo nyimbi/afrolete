@@ -3167,6 +3167,11 @@ export type PerformanceIngestionRead = {
   parser_confidence_reason: string;
   parser_warnings: string[];
   parsed_fields: Record<string, string>;
+  model_assisted: boolean;
+  model_policy: string | null;
+  model_confidence: number | null;
+  model_summary: string | null;
+  model_evaluation: Record<string, string>;
 };
 
 export type PerformanceWearableWebhookRead = {

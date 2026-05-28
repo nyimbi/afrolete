@@ -14161,6 +14161,15 @@ export default function HomePage() {
                     {performanceIngestion.parser_warnings.length ? (
                       <small>{performanceIngestion.parser_warnings.join(" · ")}</small>
                     ) : null}
+                    {performanceIngestion.model_policy ? (
+                      <small>
+                        {performanceIngestion.model_assisted ? "model applied" : "model evaluated"} ·{" "}
+                        {performanceIngestion.model_policy} ·{" "}
+                        {performanceIngestion.model_confidence !== null
+                          ? `${Math.round(performanceIngestion.model_confidence * 100)}%`
+                          : "no score"}
+                      </small>
+                    ) : null}
                   </div>
                 </article>
               ) : null}

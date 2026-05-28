@@ -233,6 +233,11 @@ async def ingest_performance_evidence(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
 
     parsed = parse_performance_evidence(payload, metric)
+    model_assist = await model_assisted_performance_extraction(get_settings(), payload, metric, parsed)
+    model_applied = False
+    if should_apply_model_extraction(parsed, model_assist):
+        parsed = apply_model_extraction(parsed, model_assist)
+        model_applied = True
     value = float(parsed["value"])
     confidence = float(parsed["confidence"])
     parser_warnings = list(parsed["warnings"])
@@ -273,6 +278,11 @@ async def ingest_performance_evidence(
         "parser_confidence_reason": parsed["confidence_reason"],
         "parser_warnings": parser_warnings,
         "parsed_fields": parsed["fields"],
+        "model_assisted": model_applied,
+        "model_policy": model_assist["model_policy"] if model_assist else None,
+        "model_confidence": model_assist["confidence"] if model_assist else None,
+        "model_summary": model_assist["summary"] if model_assist else None,
+        "model_evaluation": model_evaluation(parsed, model_assist, model_applied),
     }
 
 
@@ -4518,6 +4528,272 @@ def parse_performance_evidence(
         "observed_at": observed_at,
         "source_provider": source_provider,
     }
+
+
+MODEL_ASSIST_SOURCES = {
+    MetricSource.VIDEO_ANALYSIS,
+    MetricSource.AUDIO_NARRATION,
+    MetricSource.AGENT_EXTRACTED,
+}
+
+NUMBER_WORDS = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+}
+
+
+async def model_assisted_performance_extraction(
+    settings: Settings,
+    payload: PerformanceIngestionCreate,
+    metric: PerformanceMetricDefinition,
+    parsed: dict[str, object],
+) -> dict[str, object] | None:
+    if settings.performance_model_extraction_mode == "off":
+        return None
+    if payload.extracted_value is not None or payload.source not in MODEL_ASSIST_SOURCES or not payload.evidence_text:
+        return None
+    if settings.performance_model_extraction_mode == "webhook":
+        return await webhook_model_extraction(settings, payload, metric, parsed)
+    return deterministic_model_extraction(settings, payload, metric, parsed)
+
+
+def deterministic_model_extraction(
+    settings: Settings,
+    payload: PerformanceIngestionCreate,
+    metric: PerformanceMetricDefinition,
+    parsed: dict[str, object],
+) -> dict[str, object] | None:
+    text = payload.evidence_text or ""
+    value = model_metric_text_value(text, metric)
+    if value is None:
+        return None
+    confidence = min(max(source_confidence(payload.source) + 0.07, float(parsed["confidence"]) + 0.08), 0.93)
+    return {
+        "value": value,
+        "confidence": round(confidence, 2),
+        "method": "model_assisted_extraction",
+        "model_policy": settings.performance_model_extraction_model,
+        "summary": f"Model-assisted parser matched {metric.name} from narrative evidence.",
+        "confidence_reason": (
+            "Deterministic model-assist evaluated metric aliases, number words, units, and context before human review."
+        ),
+        "fields": {
+            "model_policy": settings.performance_model_extraction_model,
+            "model_mode": settings.performance_model_extraction_mode,
+            "metric": metric.code,
+            "value": f"{value:g}",
+        },
+    }
+
+
+async def webhook_model_extraction(
+    settings: Settings,
+    payload: PerformanceIngestionCreate,
+    metric: PerformanceMetricDefinition,
+    parsed: dict[str, object],
+) -> dict[str, object] | None:
+    if not settings.performance_model_extraction_webhook_url:
+        return None
+    key_resolution = await resolve_performance_model_webhook_key(settings)
+    request_payload = {
+        "event": "afrolete.performance.extract",
+        "model": settings.performance_model_extraction_model,
+        "metric": {
+            "id": str(metric.id),
+            "code": metric.code,
+            "name": metric.name,
+            "unit": metric.unit,
+            "min_value": metric.min_value,
+            "max_value": metric.max_value,
+        },
+        "evidence": {
+            "source": payload.source.value,
+            "source_provider": payload.source_provider,
+            "evidence_ref": payload.evidence_ref,
+            "text": payload.evidence_text,
+        },
+        "parser_baseline": {
+            "method": parsed["method"],
+            "confidence": parsed["confidence"],
+            "value": parsed["value"],
+        },
+    }
+    body = stable_payload_text(request_payload).encode()
+    try:
+        async with httpx.AsyncClient(timeout=settings.performance_model_extraction_timeout_seconds) as client:
+            response = await client.post(
+                settings.performance_model_extraction_webhook_url,
+                content=body,
+                headers=performance_model_webhook_headers(settings, body, str(key_resolution["key"] or "")),
+            )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    return webhook_model_extraction_result(settings, response)
+
+
+async def resolve_performance_model_webhook_key(settings: Settings) -> dict[str, str | None]:
+    try:
+        key = await resolve_secret(
+            settings,
+            env_value=settings.performance_model_extraction_webhook_key,
+            path=settings.performance_model_extraction_webhook_key_secret_path,
+            field_name=settings.performance_model_extraction_webhook_key_secret_field,
+            label="performance model extraction webhook key",
+        )
+    except HTTPException:
+        return {"key": None}
+    return {"key": key}
+
+
+def performance_model_webhook_headers(settings: Settings, body: bytes, signing_key: str = "") -> dict[str, str]:
+    headers = {
+        "User-Agent": "AfroLete-Performance-Extractor/1.0",
+        "Content-Type": "application/json",
+    }
+    if signing_key:
+        timestamp = str(int(time.time()))
+        digest = hmac.new(signing_key.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+        headers["X-Afrolete-Performance-Model-Timestamp"] = timestamp
+        headers["X-Afrolete-Performance-Model-Signature"] = f"sha256={digest}"
+        headers["X-Afrolete-Performance-Model-Key-Source"] = (
+            "openbao" if settings.performance_model_extraction_webhook_key_secret_path else "env"
+        )
+    return headers
+
+
+def webhook_model_extraction_result(settings: Settings, response: httpx.Response) -> dict[str, object] | None:
+    try:
+        result = response.json()
+    except ValueError:
+        return None
+    if not isinstance(result, dict):
+        return None
+    value = structured_float(result.get("value") or result.get("extracted_value"))
+    if value is None:
+        return None
+    confidence = structured_float(result.get("confidence")) or 0.82
+    fields = result.get("fields") if isinstance(result.get("fields"), dict) else {}
+    return {
+        "value": value,
+        "confidence": round(max(0, min(confidence, 1)), 2),
+        "method": "model_webhook_extraction",
+        "model_policy": str(result.get("model") or settings.performance_model_extraction_model),
+        "summary": str(result.get("summary") or "External model extracted a performance metric candidate."),
+        "confidence_reason": str(
+            result.get("confidence_reason")
+            or "External model webhook returned a bounded metric candidate for human review."
+        ),
+        "fields": {str(key): str(value) for key, value in fields.items()},
+    }
+
+
+def should_apply_model_extraction(parsed: dict[str, object], model_assist: dict[str, object] | None) -> bool:
+    if model_assist is None:
+        return False
+    return str(parsed["method"]) in {"numeric_text_fallback", "metric_default"}
+
+
+def apply_model_extraction(
+    parsed: dict[str, object],
+    model_assist: dict[str, object],
+) -> dict[str, object]:
+    fields = {**dict(parsed["fields"]), **dict(model_assist["fields"])}
+    warnings = list(parsed["warnings"])
+    warnings.append("Model-assisted extraction requires human review before verification.")
+    return {
+        **parsed,
+        "value": model_assist["value"],
+        "confidence": model_assist["confidence"],
+        "method": model_assist["method"],
+        "confidence_reason": model_assist["confidence_reason"],
+        "warnings": warnings,
+        "fields": fields,
+    }
+
+
+def model_evaluation(
+    parsed: dict[str, object],
+    model_assist: dict[str, object] | None,
+    model_applied: bool,
+) -> dict[str, str]:
+    if model_assist is None:
+        return {"status": "not_attempted", "reason": "No eligible model-assisted extraction candidate was produced."}
+    return {
+        "status": "applied" if model_applied else "not_applied",
+        "model_policy": str(model_assist["model_policy"]),
+        "model_method": str(model_assist["method"]),
+        "model_confidence": f"{float(model_assist['confidence']):.2f}",
+        "final_method": str(parsed["method"]),
+    }
+
+
+def model_metric_text_value(text: str, metric: PerformanceMetricDefinition) -> float | None:
+    metric_labels = {metric.code, metric.name}
+    metric_labels.update(PROVIDER_METRIC_ALIASES.get(metric.code, set()))
+    for label in sorted(metric_labels, key=len, reverse=True):
+        if not label:
+            continue
+        value = number_near_metric_label(text, label)
+        if value is not None:
+            return convert_model_value_for_metric(value, metric, text)
+    if metric.code == "sleep_minutes":
+        sleep_value = sleep_duration_from_text(text)
+        if sleep_value is not None:
+            return sleep_value
+    return None
+
+
+def number_near_metric_label(text: str, label: str) -> float | None:
+    normalized = text.replace("_", " ")
+    label_words = re.sub(r"([a-z])([A-Z])", r"\1 \2", label).replace("_", " ")
+    label_pattern = re.escape(label_words)
+    value_pattern = r"(-?\d+(?:\.\d+)?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)"
+    patterns = [
+        rf"{label_pattern}\D{{0,80}}{value_pattern}",
+        rf"{value_pattern}\D{{0,80}}{label_pattern}",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if match:
+            return numeric_word_or_float(match.group(1))
+    return None
+
+
+def numeric_word_or_float(value: str) -> float | None:
+    normalized = value.strip().lower()
+    if normalized in NUMBER_WORDS:
+        return float(NUMBER_WORDS[normalized])
+    return structured_float(normalized)
+
+
+def convert_model_value_for_metric(value: float, metric: PerformanceMetricDefinition, text: str) -> float:
+    if metric.code in {"sleep_minutes", "sleep_duration_minutes"} and re.search(r"\bhours?\b", text, re.IGNORECASE):
+        return round(value * 60, 2)
+    return value
+
+
+def sleep_duration_from_text(text: str) -> float | None:
+    value_pattern = r"(-?\d+(?:\.\d+)?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)"
+    match = re.search(rf"(?:sleep|slept|asleep)\D{{0,80}}{value_pattern}\s*(hours?|hrs?|minutes?|mins?)", text, re.IGNORECASE)
+    if not match:
+        return None
+    value = numeric_word_or_float(match.group(1))
+    if value is None:
+        return None
+    unit = match.group(2).lower()
+    return round(value * 60, 2) if unit.startswith(("hour", "hr")) else value
 
 
 def decode_structured_evidence(text: str | None) -> object | None:

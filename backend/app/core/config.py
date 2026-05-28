@@ -136,6 +136,13 @@ class Settings(BaseSettings):
     performance_wearable_webhook_tolerance_seconds: int = 300
     performance_wearable_provider_retry_after_seconds: dict[str, int] = Field(default_factory=dict)
     performance_wearable_provider_max_pages: dict[str, int] = Field(default_factory=dict)
+    performance_model_extraction_mode: Literal["off", "deterministic", "webhook"] = "deterministic"
+    performance_model_extraction_model: str = "afrolete-performance-extractor-v1"
+    performance_model_extraction_webhook_url: str = ""
+    performance_model_extraction_webhook_key: str = ""
+    performance_model_extraction_webhook_key_secret_path: str = ""
+    performance_model_extraction_webhook_key_secret_field: str = "value"
+    performance_model_extraction_timeout_seconds: float = 8.0
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"

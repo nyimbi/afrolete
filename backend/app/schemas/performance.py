@@ -98,6 +98,11 @@ class PerformanceIngestionRead(BaseModel):
     parser_confidence_reason: str
     parser_warnings: list[str]
     parsed_fields: dict[str, str]
+    model_assisted: bool
+    model_policy: str | None
+    model_confidence: float | None
+    model_summary: str | None
+    model_evaluation: dict[str, str]
 
 
 class PerformanceWearableWebhookCreate(BaseModel):
