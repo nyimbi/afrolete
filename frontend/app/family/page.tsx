@@ -28,6 +28,7 @@ const defaultFamilyIdentity: LocalIdentity = {
 export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
+  const [loadedInviteKey, setLoadedInviteKey] = useState("");
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
   const [dashboard, setDashboard] = useState<FamilyDashboardRead | null>(null);
   const [performance, setPerformance] = useState<FamilyPerformanceSummaryRead[]>([]);
@@ -45,17 +46,38 @@ export default function FamilyPortalPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let nextOrganizationId = "";
+    let nextIdentity = defaultFamilyIdentity;
     const stored = window.localStorage.getItem("afrolete.familyPortal");
-    if (!stored) {
-      return;
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as { organizationId?: string; identity?: LocalIdentity };
+        nextOrganizationId = parsed.organizationId ?? "";
+        nextIdentity = parsed.identity ?? defaultFamilyIdentity;
+      } catch {
+        window.localStorage.removeItem("afrolete.familyPortal");
+      }
     }
-    try {
-      const parsed = JSON.parse(stored) as { organizationId?: string; identity?: LocalIdentity };
-      setOrganizationId(parsed.organizationId ?? "");
-      setIdentity(parsed.identity ?? defaultFamilyIdentity);
-    } catch {
-      window.localStorage.removeItem("afrolete.familyPortal");
+
+    const params = new URLSearchParams(window.location.search);
+    const organizationParam = params.get("organization_id") ?? params.get("organizationId");
+    const emailParam = params.get("guardian_email") ?? params.get("email");
+    const nameParam = params.get("guardian_name") ?? params.get("name") ?? emailParam;
+    const subParam = params.get("guardian_sub") ?? params.get("sub");
+
+    if (organizationParam) {
+      nextOrganizationId = organizationParam;
     }
+    if (emailParam || nameParam || subParam) {
+      nextIdentity = {
+        sub: subParam ?? (emailParam ? `guardian-${emailParam}` : nextIdentity.sub),
+        email: emailParam ?? nextIdentity.email,
+        name: nameParam ?? nextIdentity.name
+      };
+    }
+
+    setOrganizationId(nextOrganizationId);
+    setIdentity(nextIdentity);
   }, []);
 
   useEffect(() => {
@@ -125,6 +147,16 @@ export default function FamilyPortalPage() {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const inviteKey = params.get("relationship_id") ?? "";
+    if (!inviteKey || !organizationId || loadedInviteKey === inviteKey) {
+      return;
+    }
+    setLoadedInviteKey(inviteKey);
+    void loadWorkspace();
+  }, [identity, loadedInviteKey, organizationId]);
 
   const markRead = async (recipientId: string) => {
     setBusy(true);

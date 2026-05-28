@@ -9,7 +9,7 @@ from hashlib import sha256
 from pathlib import Path
 from re import search, sub
 from secrets import token_urlsafe
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
@@ -5410,16 +5410,17 @@ async def create_guardian_portal_invite(
             .limit(1)
         )
     status_value, action = guardian_account_status(guardian, linked_user, email_user)
+    portal_url = guardian_portal_invite_url(payload.portal_url, payload.organization_id, relationship.id, guardian)
     subject = payload.subject or f"{organization.public_name or organization.name} family portal invitation"
     body = payload.body or guardian_portal_invite_body(
         organization=organization,
         athlete=athlete,
         guardian=guardian,
-        portal_url=payload.portal_url,
+        portal_url=portal_url,
         account_status=status_value,
     )
     if "family portal" not in body.lower():
-        body = f"{body}\n\nFamily portal: {payload.portal_url}"
+        body = f"{body}\n\nFamily portal: {portal_url}"
     message = await create_message_for_recipients(
         db,
         organization_id=payload.organization_id,
@@ -5452,7 +5453,7 @@ async def create_guardian_portal_invite(
         account_status=status_value,
         channel=payload.channel,
         destination=recipient.destination if recipient else destination,
-        portal_url=payload.portal_url,
+        portal_url=portal_url,
         message_id=message.id,
         recipient_id=recipient.id if recipient else None,
         delivery_status=recipient.delivery_status.value if recipient else None,
@@ -5464,6 +5465,23 @@ async def create_guardian_portal_invite(
         dispatch_queued=dispatch_summary.queued if dispatch_summary else 0,
         recommended_action=action,
     )
+
+
+def guardian_portal_invite_url(
+    base_url: str,
+    organization_id: UUID,
+    relationship_id: UUID,
+    guardian: Person,
+) -> str:
+    parts = urlsplit(base_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("organization_id", str(organization_id))
+    query.setdefault("relationship_id", str(relationship_id))
+    query.setdefault("guardian_sub", f"guardian-{relationship_id}")
+    query.setdefault("guardian_name", guardian.display_name)
+    if guardian.primary_email:
+        query.setdefault("guardian_email", guardian.primary_email)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def guardian_portal_invite_body(

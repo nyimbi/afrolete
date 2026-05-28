@@ -4,6 +4,7 @@ import json
 import time
 from datetime import UTC, date, datetime
 from hashlib import sha256
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -254,7 +255,16 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
     assert invite["guardian_person_id"] == invite_ready["guardian_person_id"]
     assert invite["account_status"] == "invite_ready"
     assert invite["destination"] == "invite-ready-parent@example.com"
-    assert invite["portal_url"] == "http://localhost:3000/family"
+    parsed_invite_url = urlparse(invite["portal_url"])
+    invite_query = parse_qs(parsed_invite_url.query)
+    assert parsed_invite_url.scheme == "http"
+    assert parsed_invite_url.netloc == "localhost:3000"
+    assert parsed_invite_url.path == "/family"
+    assert invite_query["organization_id"] == [organization["id"]]
+    assert invite_query["relationship_id"] == [invite_ready["id"]]
+    assert invite_query["guardian_email"] == ["invite-ready-parent@example.com"]
+    assert invite_query["guardian_name"] == ["Invite Ready Parent"]
+    assert invite_query["guardian_sub"] == [f"guardian-{invite_ready['id']}"]
     assert invite["delivery_status"] == "queued"
     assert invite["dispatch_attempted"] == 1
     assert invite["dispatch_queued"] == 1
@@ -263,7 +273,7 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
     assert message is not None
     assert message.subject == "Guardian Account Club family portal invitation"
     assert "Readiness Athlete" in message.body
-    assert "http://localhost:3000/family" in message.body
+    assert invite["portal_url"] in message.body
     recipient = await db_session.get(MessageRecipient, invite["recipient_id"])
     assert recipient is not None
     assert str(recipient.person_id) == invite_ready["guardian_person_id"]
@@ -302,6 +312,26 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
     assert batch["invites"][0]["guardian_person_id"] == batch_ready["guardian_person_id"]
     assert any("invited recently" in item for item in batch["skipped"])
     assert any("already linked" in item for item in batch["skipped"])
+    family_response = client.get(
+        f"/api/v1/safeguarding/my-family?organization_id={organization['id']}",
+        headers={
+            "X-Afrolete-Sub": invite_query["guardian_sub"][0],
+            "X-Afrolete-Email": invite_query["guardian_email"][0],
+            "X-Afrolete-Name": invite_query["guardian_name"][0],
+        },
+    )
+    assert family_response.status_code == 200
+    assert family_response.json()[0]["athlete_name"] == "Readiness Athlete"
+    linked_readiness_response = client.get(
+        f"/api/v1/safeguarding/guardian-account-readiness?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    linked_readiness = {
+        item["guardian_person_id"]: item for item in linked_readiness_response.json()
+    }
+    linked_invite_ready = linked_readiness[invite_ready["guardian_person_id"]]
+    assert linked_invite_ready["account_status"] == "linked"
+    assert linked_invite_ready["keycloak_sub"] == invite_query["guardian_sub"][0]
 
 
 async def test_family_dashboard_summarizes_parent_actions(client, identity_headers, db_session) -> None:
