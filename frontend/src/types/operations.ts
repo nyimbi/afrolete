@@ -3367,6 +3367,12 @@ export type PerformanceInjuryRiskRead = {
   load_delta: number | null;
   open_incident_count: number;
   declining_metric_count: number;
+  latest_weather_alert_level: string | null;
+  latest_weather_decision: string | null;
+  weather_alert_count: number;
+  hazardous_surface_count: number;
+  environmental_risk_count: number;
+  surface_risk_labels: string[];
   drivers: string[];
   recommendation: string;
 };

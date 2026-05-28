@@ -352,6 +352,12 @@ class PerformanceInjuryRiskRead(BaseModel):
     load_delta: float | None
     open_incident_count: int
     declining_metric_count: int
+    latest_weather_alert_level: str | None
+    latest_weather_decision: str | None
+    weather_alert_count: int
+    hazardous_surface_count: int
+    environmental_risk_count: int
+    surface_risk_labels: list[str]
     drivers: list[str]
     recommendation: str
 

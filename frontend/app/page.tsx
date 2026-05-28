@@ -1060,6 +1060,32 @@ function PerformanceInjuryRiskCard({
           </div>
           <strong>{risk?.acute_chronic_ratio ?? "n/a"}</strong>
         </div>
+        <div className="chart-bar-row">
+          <span>Weather</span>
+          <div className="chart-track">
+            <div
+              className="chart-fill"
+              style={{
+                width: `${Math.max(4, Math.min(100, (risk?.weather_alert_count ?? 0) * 34))}%`,
+                backgroundColor: "var(--blue)"
+              }}
+            />
+          </div>
+          <strong>{risk?.latest_weather_alert_level ?? "n/a"}</strong>
+        </div>
+        <div className="chart-bar-row">
+          <span>Surface</span>
+          <div className="chart-track">
+            <div
+              className="chart-fill"
+              style={{
+                width: `${Math.max(4, Math.min(100, (risk?.hazardous_surface_count ?? 0) * 50))}%`,
+                backgroundColor: "var(--orange)"
+              }}
+            />
+          </div>
+          <strong>{risk?.hazardous_surface_count ?? "n/a"}</strong>
+        </div>
       </div>
       <small>{risk?.drivers[0] ?? "Record athlete-specific readiness and session feedback to generate risk drivers."}</small>
       <small>{risk?.recommendation ?? "No risk recommendation is available yet."}</small>

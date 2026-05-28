@@ -19,8 +19,10 @@ from app.models.enums import (
     MetricVerificationStatus,
     SafeguardingIncidentStatus,
     SafeguardingIncidentType,
+    WeatherAlertLevel,
 )
-from app.models.event import Event, SafeguardingIncident
+from app.models.assets import Facility
+from app.models.event import Event, EventWeatherAssessment, SafeguardingIncident
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.performance import (
@@ -1139,11 +1141,13 @@ async def performance_injury_risk(
     )
     trends = await performance_metric_trends(db, organization_id, athlete_profile_id)
     declining_metric_count = sum(1 for trend in trends if trend["trend_direction"] == "declining")
+    environmental_context = await injury_risk_environment_context(db, organization_id, feedback_rows)
     return injury_risk_summary(
         athlete_profile_id,
         feedback_rows,
         len(open_incidents),
         declining_metric_count,
+        environmental_context,
     )
 
 
@@ -2357,7 +2361,9 @@ def injury_risk_summary(
     feedback_rows: list[tuple[TrainingSessionFeedback, TrainingSessionPlan]],
     open_incident_count: int,
     declining_metric_count: int,
+    environmental_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    environmental_context = environmental_context or default_injury_risk_environment_context()
     feedbacks = [feedback for feedback, _ in feedback_rows]
     loads = [training_feedback_load(feedback, session_plan) for feedback, session_plan in feedback_rows]
     now = datetime.now(UTC)
@@ -2423,6 +2429,20 @@ def injury_risk_summary(
     if declining_metric_count:
         score += min(20, declining_metric_count * 6)
         drivers.append(f"{declining_metric_count} performance metric trend(s) are declining.")
+    weather_alert_count = int(environmental_context["weather_alert_count"])
+    hazardous_surface_count = int(environmental_context["hazardous_surface_count"])
+    environmental_risk_count = weather_alert_count + hazardous_surface_count
+    if weather_alert_count:
+        score += int(environmental_context["weather_score_penalty"])
+        latest_weather = environmental_context["latest_weather_alert_level"]
+        latest_decision = environmental_context["latest_weather_decision"]
+        drivers.append(
+            f"{weather_alert_count} recent weather risk assessment(s) include {latest_weather}/{latest_decision} conditions."
+        )
+    if hazardous_surface_count:
+        score += min(12, hazardous_surface_count * 6)
+        labels = ", ".join(str(label) for label in environmental_context["surface_risk_labels"])
+        drivers.append(f"{hazardous_surface_count} recent session venue surface risk marker(s): {labels}.")
 
     rounded_score = int(round(max(0, min(100, score))))
     band = injury_risk_band(rounded_score)
@@ -2431,10 +2451,15 @@ def injury_risk_summary(
     return {
         "athlete_profile_id": athlete_profile_id,
         "generated_at": now,
-        "model_policy": "deterministic_injury_risk_v1",
+        "model_policy": "deterministic_injury_risk_v2_environmental",
         "score": rounded_score,
         "risk_band": band,
-        "confidence": injury_risk_confidence(len(feedbacks), open_incident_count, declining_metric_count),
+        "confidence": injury_risk_confidence(
+            len(feedbacks),
+            open_incident_count,
+            declining_metric_count,
+            environmental_risk_count,
+        ),
         "latest_readiness_score": latest_feedback.readiness_score if latest_feedback is not None else None,
         "average_readiness_score": round(average_readiness, 1) if average_readiness is not None else None,
         "average_soreness_score": round(average_soreness, 1) if average_soreness is not None else None,
@@ -2447,6 +2472,12 @@ def injury_risk_summary(
         "load_delta": round(load_delta, 1) if load_delta is not None else None,
         "open_incident_count": open_incident_count,
         "declining_metric_count": declining_metric_count,
+        "latest_weather_alert_level": environmental_context["latest_weather_alert_level"],
+        "latest_weather_decision": environmental_context["latest_weather_decision"],
+        "weather_alert_count": weather_alert_count,
+        "hazardous_surface_count": hazardous_surface_count,
+        "environmental_risk_count": environmental_risk_count,
+        "surface_risk_labels": environmental_context["surface_risk_labels"],
         "drivers": drivers,
         "recommendation": injury_risk_recommendation(band),
     }
@@ -2474,11 +2505,140 @@ def injury_risk_band(score: int) -> str:
     return "low"
 
 
-def injury_risk_confidence(feedback_count: int, open_incident_count: int, declining_metric_count: int) -> float:
+async def injury_risk_environment_context(
+    db: AsyncSession,
+    organization_id: UUID,
+    feedback_rows: list[tuple[TrainingSessionFeedback, TrainingSessionPlan]],
+) -> dict[str, object]:
+    session_plans = [session_plan for _, session_plan in feedback_rows]
+    event_ids = {session_plan.event_id for session_plan in session_plans if session_plan.event_id is not None}
+    weather_rows: list[EventWeatherAssessment] = []
+    if event_ids:
+        weather_rows = list(
+            (
+                await db.scalars(
+                    select(EventWeatherAssessment)
+                    .where(EventWeatherAssessment.organization_id == organization_id)
+                    .where(EventWeatherAssessment.event_id.in_(list(event_ids)))
+                    .order_by(EventWeatherAssessment.observed_at.desc(), EventWeatherAssessment.created_at.desc())
+                )
+            ).all()
+        )
+    alert_weather_rows = [
+        assessment
+        for assessment in weather_rows
+        if assessment.alert_level in {WeatherAlertLevel.ADVISORY, WeatherAlertLevel.WARNING, WeatherAlertLevel.CRITICAL}
+    ]
+    latest_weather = alert_weather_rows[0] if alert_weather_rows else weather_rows[0] if weather_rows else None
+    weather_alert_count = len(alert_weather_rows)
+    weather_score_penalty = sum(weather_alert_score_penalty(assessment.alert_level) for assessment in weather_rows)
+    venue_names = {
+        normalized_surface_label(session_plan.title)
+        for session_plan in session_plans
+        if session_plan.title
+    }
+    event_rows: list[Event] = []
+    if event_ids:
+        event_rows = list(
+            (
+                await db.scalars(
+                    select(Event)
+                    .where(Event.organization_id == organization_id)
+                    .where(Event.id.in_(list(event_ids)))
+                )
+            ).all()
+        )
+        venue_names.update(
+            normalized_surface_label(event.venue_name)
+            for event in event_rows
+            if event.venue_name
+        )
+    facilities = []
+    if venue_names:
+        facilities = list(
+            (
+                await db.scalars(
+                    select(Facility).where(Facility.organization_id == organization_id)
+                )
+            ).all()
+        )
+    surface_labels: list[str] = []
+    for facility in facilities:
+        name = normalized_surface_label(facility.name)
+        if name not in venue_names:
+            continue
+        marker = hazardous_surface_label(facility.surface)
+        if marker and marker not in surface_labels:
+            surface_labels.append(marker)
+    return {
+        "latest_weather_alert_level": latest_weather.alert_level.value if latest_weather is not None else None,
+        "latest_weather_decision": latest_weather.decision.value if latest_weather is not None else None,
+        "weather_alert_count": weather_alert_count,
+        "weather_score_penalty": min(24, weather_score_penalty),
+        "hazardous_surface_count": len(surface_labels),
+        "surface_risk_labels": surface_labels,
+    }
+
+
+def default_injury_risk_environment_context() -> dict[str, object]:
+    return {
+        "latest_weather_alert_level": None,
+        "latest_weather_decision": None,
+        "weather_alert_count": 0,
+        "weather_score_penalty": 0,
+        "hazardous_surface_count": 0,
+        "surface_risk_labels": [],
+    }
+
+
+def weather_alert_score_penalty(alert_level: WeatherAlertLevel) -> int:
+    return {
+        WeatherAlertLevel.INFORMATION: 0,
+        WeatherAlertLevel.ADVISORY: 4,
+        WeatherAlertLevel.WARNING: 8,
+        WeatherAlertLevel.CRITICAL: 14,
+    }[alert_level]
+
+
+def normalized_surface_label(value: str | None) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+def hazardous_surface_label(surface: str | None) -> str | None:
+    normalized = normalized_surface_label(surface)
+    if not normalized:
+        return None
+    markers = {
+        "hard": "hard surface",
+        "concrete": "concrete surface",
+        "asphalt": "asphalt surface",
+        "uneven": "uneven surface",
+        "wet": "wet surface",
+        "mud": "muddy surface",
+        "muddy": "muddy surface",
+        "slippery": "slippery surface",
+        "poor": "poor surface",
+        "damaged": "damaged surface",
+        "synthetic": "synthetic surface",
+        "artificial": "artificial surface",
+    }
+    for marker, label in markers.items():
+        if marker in normalized:
+            return label
+    return None
+
+
+def injury_risk_confidence(
+    feedback_count: int,
+    open_incident_count: int,
+    declining_metric_count: int,
+    environmental_risk_count: int = 0,
+) -> float:
     evidence_bonus = min(0.45, feedback_count * 0.06)
     incident_bonus = 0.12 if open_incident_count else 0.0
     trend_bonus = min(0.15, declining_metric_count * 0.04)
-    return round(min(0.95, 0.35 + evidence_bonus + incident_bonus + trend_bonus), 2)
+    environment_bonus = min(0.1, environmental_risk_count * 0.03)
+    return round(min(0.95, 0.35 + evidence_bonus + incident_bonus + trend_bonus + environment_bonus), 2)
 
 
 def injury_risk_recommendation(band: str) -> str:

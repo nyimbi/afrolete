@@ -543,12 +543,54 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
         )
         assert response.status_code == 201
 
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Main Field",
+            "facility_type": "field",
+            "sport": "football",
+            "surface": "wet uneven natural grass",
+            "capacity": 500,
+            "condition": "poor",
+        },
+    )
+    assert facility.status_code == 201
+    event = client.post(
+        "/api/v1/events",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "event_type": "training",
+            "title": "Storm training block",
+            "starts_at": "2026-06-03T15:00:00Z",
+            "ends_at": "2026-06-03T16:30:00Z",
+            "venue_name": "Main Field",
+        },
+    )
+    assert event.status_code == 201
+    weather = client.post(
+        f"/api/v1/events/{event.json()['id']}/weather-assessments",
+        headers=identity_headers,
+        json={
+            "source": "manual",
+            "observed_at": "2026-06-03T14:30:00Z",
+            "wbgt_c": 33,
+            "lightning_distance_km": 9,
+            "precipitation_mm_per_hr": 18,
+            "notes": "Storm cell and wet pitch before conditioning.",
+        },
+    )
+    assert weather.status_code == 201
     session = client.post(
         "/api/v1/training/sessions",
         headers=identity_headers,
         json={
             "organization_id": organization["id"],
             "team_id": team["id"],
+            "event_id": event.json()["id"],
             "title": "High load conditioning",
             "scheduled_for": "2026-06-03T15:00:00Z",
             "duration_minutes": 75,
@@ -596,7 +638,7 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
 
     assert response.status_code == 200
     risk = response.json()
-    assert risk["model_policy"] == "deterministic_injury_risk_v1"
+    assert risk["model_policy"] == "deterministic_injury_risk_v2_environmental"
     assert risk["score"] == 100
     assert risk["risk_band"] == "critical"
     assert risk["latest_readiness_score"] == 42
@@ -605,7 +647,14 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
     assert risk["latest_load"] == 950.0
     assert risk["open_incident_count"] == 1
     assert risk["declining_metric_count"] == 1
+    assert risk["latest_weather_alert_level"] == "critical"
+    assert risk["weather_alert_count"] == 1
+    assert risk["hazardous_surface_count"] == 1
+    assert risk["environmental_risk_count"] == 2
+    assert risk["surface_risk_labels"] == ["uneven surface"]
     assert any("open injury" in driver for driver in risk["drivers"])
+    assert any("weather risk" in driver for driver in risk["drivers"])
+    assert any("surface risk" in driver for driver in risk["drivers"])
     assert "medical or safeguarding review" in risk["recommendation"]
 
     scan_response = client.post(
