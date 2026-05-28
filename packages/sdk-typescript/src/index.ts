@@ -86,6 +86,16 @@ export interface Team {
   season_label: string | null;
 }
 
+export interface TeamCreate {
+  organization_id: UUID;
+  name: string;
+  sport: string;
+  sport_format?: string;
+  age_group?: string | null;
+  gender_category?: string | null;
+  season_label?: string | null;
+}
+
 export interface EventCreate {
   organization_id: UUID;
   team_id?: UUID | null;
@@ -165,6 +175,11 @@ export class AfroLeteClient {
     list: (params: { organizationId: UUID }): Promise<Team[]> =>
       this.request<Team[]>("/teams", {
         query: { organization_id: params.organizationId },
+      }),
+    create: (payload: TeamCreate): Promise<Team> =>
+      this.request<Team>("/teams", {
+        method: "POST",
+        body: payload,
       }),
   };
 

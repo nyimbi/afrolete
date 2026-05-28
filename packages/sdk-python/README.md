@@ -12,6 +12,13 @@ client = AfroLeteClient(
 
 organization = client.organization.get(organization_id="tenant-uuid")
 teams = client.teams.list(organization_id=organization["id"])
+team = client.teams.create(
+    {
+        "organization_id": organization["id"],
+        "name": "U17 Girls",
+        "sport": "football",
+    }
+)
 ```
 
 The client sends `X-Afrolete-API-Key` and targets `/api/v1/sdk/*` routes. It

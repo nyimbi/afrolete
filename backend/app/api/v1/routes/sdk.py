@@ -11,8 +11,9 @@ from app.models.training import TrainingDrill
 from app.schemas.developer import DeveloperApiKeyInspectionRead
 from app.schemas.event import EventCreate, EventRead
 from app.schemas.organization import OrganizationRead
-from app.schemas.team import TeamRead
+from app.schemas.team import TeamCreate, TeamRead
 from app.schemas.training import TrainingDrillCreate, TrainingDrillRead
+from app.services.authz.service import AuthorizationService, Relationship, get_authorization_service
 from app.services.developer import (
     deliver_developer_webhook_event,
     ensure_developer_api_scope,
@@ -141,6 +142,34 @@ async def sdk_list_teams(
 ) -> list[TeamRead]:
     ensure_developer_api_scope(credential, organization_id, {"read:organization", "read:teams"})
     return [to_team_read(team) for team in await list_teams_for_organization(db, organization_id)]
+
+
+@router.post("/teams", response_model=TeamRead, status_code=status.HTTP_201_CREATED)
+async def sdk_create_team(
+    payload: TeamCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TeamRead:
+    ensure_developer_api_scope(credential, payload.organization_id, {"write:teams"})
+    organization = await db.get(Organization, payload.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    team = Team(**payload.model_dump())
+    db.add(team)
+    await db.flush()
+    await authz.touch(
+        Relationship(
+            resource_type="organization",
+            resource_id=str(payload.organization_id),
+            relation="member_team",
+            subject_type="team",
+            subject_id=str(team.id),
+        )
+    )
+    await db.commit()
+    await db.refresh(team)
+    return to_team_read(team)
 
 
 @router.post("/events", response_model=EventRead, status_code=status.HTTP_201_CREATED)

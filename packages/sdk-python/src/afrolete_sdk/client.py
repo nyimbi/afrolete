@@ -34,6 +34,9 @@ class _TeamsResource:
     def list(self, *, organization_id: str) -> list[JsonObject]:
         return self.client.request("GET", "/teams", query={"organization_id": organization_id})
 
+    def create(self, payload: JsonObject) -> JsonObject:
+        return self.client.request("POST", "/teams", body=payload)
+
 
 @dataclass(frozen=True)
 class _EventsResource:

@@ -21,6 +21,12 @@ const events = await client.events.list({
 const teams = await client.teams.list({
   organizationId: organization.id,
 });
+
+const team = await client.teams.create({
+  organization_id: organization.id,
+  name: "U17 Girls",
+  sport: "football",
+});
 ```
 
 The client sends `X-Afrolete-API-Key` and targets `/api/v1/sdk/*` routes. It is
