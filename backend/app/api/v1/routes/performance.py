@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.performance import (
+    AssessmentReviewQueueSummaryRead,
     AthleteAssessmentCreate,
     AthleteAssessmentRead,
     AthleteAssessmentReviewAssignmentUpdate,
@@ -33,6 +34,7 @@ from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.performance import (
+    assessment_review_queue_summary,
     create_assessment,
     create_metric_definition,
     create_observation,
@@ -409,6 +411,19 @@ async def list_assessment_review_queue_route(
         )
         for assessment, athlete_profile, person, assignee in rows
     ]
+
+
+@router.get(
+    "/assessments/review-summary",
+    response_model=AssessmentReviewQueueSummaryRead,
+)
+async def assessment_review_queue_summary_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AssessmentReviewQueueSummaryRead:
+    return await assessment_review_queue_summary(db, identity, organization_id, authz)
 
 
 @router.get(

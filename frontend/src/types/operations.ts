@@ -3201,6 +3201,33 @@ export type AthleteAssessmentReviewQueueItemRead = {
   review_age_hours: number;
 };
 
+export type AssessmentReviewLoadRead = {
+  reviewer_person_id: UUID | null;
+  reviewer_name: string;
+  open_count: number;
+  overdue_count: number;
+  urgent_count: number;
+  escalated_count: number;
+  oldest_age_hours: number;
+};
+
+export type AssessmentReviewQueueSummaryRead = {
+  organization_id: UUID;
+  open_count: number;
+  unassigned_count: number;
+  assigned_count: number;
+  overdue_count: number;
+  due_soon_count: number;
+  on_track_count: number;
+  unscheduled_count: number;
+  urgent_count: number;
+  escalated_count: number;
+  average_age_hours: number;
+  oldest_age_hours: number;
+  priority_counts: Record<string, number>;
+  reviewer_loads: AssessmentReviewLoadRead[];
+};
+
 export type AthletePerformanceSummaryRead = {
   athlete_profile_id: UUID;
   latest_overall_score: number | null;

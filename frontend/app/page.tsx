@@ -39,6 +39,7 @@ import type {
   AgentTaskStatus,
   AgentWorkerCallbackRead,
   AccountingExportRead,
+  AssessmentReviewQueueSummaryRead,
   AssetCondition,
   AssetSummaryRead,
   AssetUtilizationRecommendationRead,
@@ -755,6 +756,8 @@ export default function HomePage() {
     useState<PerformanceAssessmentReviewEscalationRunRead | null>(null);
   const [assessments, setAssessments] = useState<AthleteAssessmentRead[]>([]);
   const [assessmentReviewQueue, setAssessmentReviewQueue] = useState<AthleteAssessmentReviewQueueItemRead[]>([]);
+  const [assessmentReviewSummary, setAssessmentReviewSummary] =
+    useState<AssessmentReviewQueueSummaryRead | null>(null);
   const [assessmentReviewQueueFilters, setAssessmentReviewQueueFilters] =
     useState<AssessmentReviewQueueFilters>({ assignment: "all", sla: "all", priority: "all" });
   const [performanceSummary, setPerformanceSummary] =
@@ -1771,6 +1774,14 @@ export default function HomePage() {
     setAssessmentReviewQueue(data);
   }, [identity]);
 
+  const loadAssessmentReviewSummary = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<AssessmentReviewQueueSummaryRead>(
+      `/performance/assessments/review-summary?organization_id=${organizationId}`,
+      { identity }
+    );
+    setAssessmentReviewSummary(data);
+  }, [identity]);
+
   const loadAthletePerformance = useCallback(
     async (organizationId: string, athleteProfileId: string) => {
       const [
@@ -2290,6 +2301,7 @@ export default function HomePage() {
       setPerformanceIngestion(null);
       setAssessments([]);
       setAssessmentReviewQueue([]);
+      setAssessmentReviewSummary(null);
       setPerformanceReviewEscalationRun(null);
       setPerformanceSummary(null);
       setTrainingDrills([]);
@@ -2462,13 +2474,17 @@ export default function HomePage() {
     }
     runAction(
       "load-assessment-review-queue",
-      () => loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters),
+      async () => {
+        await loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters);
+        await loadAssessmentReviewSummary(selectedOrganizationId);
+      },
       () => undefined
     );
   }, [
     selectedOrganizationId,
     assessmentReviewQueueFilters,
     loadAssessmentReviewQueue,
+    loadAssessmentReviewSummary,
     runAction
   ]);
 
@@ -5944,6 +5960,7 @@ export default function HomePage() {
         );
         addLog(`Assessment ${verificationStatus}: ALS ${reviewed.overall_score}`, verificationStatus === "verified" ? "good" : "neutral");
         void loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters);
+        void loadAssessmentReviewSummary(selectedOrganizationId);
         if (selectedAthlete?.athleteProfileId === reviewed.athlete_profile_id) {
           void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
         }
@@ -5988,6 +6005,7 @@ export default function HomePage() {
         );
         addLog(`Assessment queue updated: ${label.replaceAll("-", " ")}`, "good");
         void loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters);
+        void loadAssessmentReviewSummary(selectedOrganizationId);
       }
     );
   };
@@ -6014,6 +6032,7 @@ export default function HomePage() {
           run.escalated_count ? "good" : "neutral"
         );
         void loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters);
+        void loadAssessmentReviewSummary(selectedOrganizationId);
       }
     );
   };
@@ -12906,6 +12925,32 @@ export default function HomePage() {
                 />
               </label>
             </div>
+            {assessmentReviewSummary ? (
+              <div className="task-list">
+                <article className="task-card">
+                  <div>
+                    <strong>Review load · {assessmentReviewSummary.open_count} open</strong>
+                    <span>
+                      {assessmentReviewSummary.urgent_count} urgent · {assessmentReviewSummary.overdue_count} overdue ·{" "}
+                      {assessmentReviewSummary.due_soon_count} due soon · {assessmentReviewSummary.unassigned_count} unassigned
+                    </span>
+                    <small>
+                      Oldest {assessmentReviewSummary.oldest_age_hours}h · average {assessmentReviewSummary.average_age_hours}h ·{" "}
+                      {assessmentReviewSummary.escalated_count} previously escalated
+                    </small>
+                  </div>
+                </article>
+                {assessmentReviewSummary.reviewer_loads.slice(0, 3).map((load) => (
+                  <article key={load.reviewer_person_id ?? "unassigned"} className="task-card">
+                    <div>
+                      <strong>{load.reviewer_name} · {load.open_count} open</strong>
+                      <span>{load.urgent_count} urgent · {load.overdue_count} overdue · {load.escalated_count} escalated</span>
+                      <small>Oldest assigned item {load.oldest_age_hours}h.</small>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : null}
             <div className="task-list">
               {assessmentReviewQueue.slice(0, 6).map((item) => (
                 <article key={`review-${item.assessment.id}`} className="task-card">

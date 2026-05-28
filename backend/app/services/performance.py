@@ -30,6 +30,8 @@ from app.models.performance import (
 )
 from app.models.team import AthleteProfile
 from app.schemas.performance import (
+    AssessmentReviewLoadRead,
+    AssessmentReviewQueueSummaryRead,
     AthleteAssessmentCreate,
     AthleteAssessmentReviewAssignmentUpdate,
     AthleteAssessmentReviewCreate,
@@ -499,6 +501,115 @@ async def list_assessment_review_queue(
         ).limit(limit)
     )
     return list(rows.all())
+
+
+async def assessment_review_queue_summary(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> AssessmentReviewQueueSummaryRead:
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    await ensure_manage_performance(authz, identity, organization_id)
+    assignee = aliased(Person)
+    rows = list(
+        (
+            await db.execute(
+                select(AthleteAssessment)
+                .add_columns(assignee)
+                .outerjoin(assignee, assignee.id == AthleteAssessment.review_assigned_to_person_id)
+                .where(AthleteAssessment.organization_id == organization_id)
+                .where(AthleteAssessment.verification_status == MetricVerificationStatus.PENDING_REVIEW)
+            )
+        ).all()
+    )
+    now = datetime.now(UTC)
+    priority_counts = {"low": 0, "normal": 0, "high": 0, "urgent": 0}
+    reviewer_buckets: dict[UUID | None, dict[str, object]] = {}
+    age_hours: list[int] = []
+    overdue_count = 0
+    due_soon_count = 0
+    on_track_count = 0
+    unscheduled_count = 0
+    urgent_count = 0
+    escalated_count = 0
+    unassigned_count = 0
+
+    for assessment, reviewer in rows:
+        priority_counts[assessment.review_priority] = priority_counts.get(assessment.review_priority, 0) + 1
+        due_at = as_utc_datetime(assessment.review_due_at)
+        if due_at is None:
+            unscheduled_count += 1
+        elif due_at < now:
+            overdue_count += 1
+        elif due_at <= now + timedelta(hours=24):
+            due_soon_count += 1
+        else:
+            on_track_count += 1
+        if assessment.review_priority == "urgent":
+            urgent_count += 1
+        if assessment.review_escalation_count:
+            escalated_count += 1
+        if assessment.review_assigned_to_person_id is None:
+            unassigned_count += 1
+        created_at = as_utc_datetime(assessment.created_at) or as_utc_datetime(assessment.assessed_at) or now
+        item_age = max(0, int((now - created_at).total_seconds() // 3600))
+        age_hours.append(item_age)
+
+        reviewer_key = assessment.review_assigned_to_person_id
+        bucket = reviewer_buckets.setdefault(
+            reviewer_key,
+            {
+                "reviewer_person_id": reviewer_key,
+                "reviewer_name": reviewer.display_name if reviewer is not None else "Unassigned",
+                "open_count": 0,
+                "overdue_count": 0,
+                "urgent_count": 0,
+                "escalated_count": 0,
+                "oldest_age_hours": 0,
+            },
+        )
+        bucket["open_count"] = int(bucket["open_count"]) + 1
+        if due_at is not None and due_at < now:
+            bucket["overdue_count"] = int(bucket["overdue_count"]) + 1
+        if assessment.review_priority == "urgent":
+            bucket["urgent_count"] = int(bucket["urgent_count"]) + 1
+        if assessment.review_escalation_count:
+            bucket["escalated_count"] = int(bucket["escalated_count"]) + 1
+        bucket["oldest_age_hours"] = max(int(bucket["oldest_age_hours"]), item_age)
+
+    reviewer_loads = [
+        AssessmentReviewLoadRead(
+            reviewer_person_id=bucket["reviewer_person_id"],
+            reviewer_name=str(bucket["reviewer_name"]),
+            open_count=int(bucket["open_count"]),
+            overdue_count=int(bucket["overdue_count"]),
+            urgent_count=int(bucket["urgent_count"]),
+            escalated_count=int(bucket["escalated_count"]),
+            oldest_age_hours=int(bucket["oldest_age_hours"]),
+        )
+        for bucket in reviewer_buckets.values()
+    ]
+    reviewer_loads.sort(key=lambda item: (item.overdue_count, item.urgent_count, item.open_count), reverse=True)
+    open_count = len(rows)
+    return AssessmentReviewQueueSummaryRead(
+        organization_id=organization_id,
+        open_count=open_count,
+        unassigned_count=unassigned_count,
+        assigned_count=open_count - unassigned_count,
+        overdue_count=overdue_count,
+        due_soon_count=due_soon_count,
+        on_track_count=on_track_count,
+        unscheduled_count=unscheduled_count,
+        urgent_count=urgent_count,
+        escalated_count=escalated_count,
+        average_age_hours=int(sum(age_hours) // len(age_hours)) if age_hours else 0,
+        oldest_age_hours=max(age_hours) if age_hours else 0,
+        priority_counts=priority_counts,
+        reviewer_loads=reviewer_loads,
+    )
 
 
 async def list_assessments(

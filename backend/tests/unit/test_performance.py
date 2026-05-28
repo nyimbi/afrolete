@@ -264,6 +264,21 @@ def test_coach_can_review_player_self_assessment(client, identity_headers) -> No
     assert filtered_queue[0]["review_sla_state"] == "overdue"
     assert filtered_queue[0]["review_age_hours"] >= 0
 
+    summary = client.get(
+        f"/api/v1/performance/assessments/review-summary?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert summary.status_code == 200
+    summary_data = summary.json()
+    assert summary_data["open_count"] == 1
+    assert summary_data["assigned_count"] == 1
+    assert summary_data["unassigned_count"] == 0
+    assert summary_data["overdue_count"] == 1
+    assert summary_data["urgent_count"] == 1
+    assert summary_data["priority_counts"]["urgent"] == 1
+    assert summary_data["reviewer_loads"][0]["reviewer_name"] == "Owner Example"
+    assert summary_data["reviewer_loads"][0]["open_count"] == 1
+
     unassigned_queue = client.get(
         f"/api/v1/performance/assessments/review-queue?organization_id={organization['id']}"
         "&assignment=unassigned",
@@ -296,6 +311,12 @@ def test_coach_can_review_player_self_assessment(client, identity_headers) -> No
     assert queue_after_escalation[0]["assessment"]["review_escalation_count"] == 1
     assert queue_after_escalation[0]["assessment"]["review_last_escalated_at"] is not None
     assert queue_after_escalation[0]["assessment"]["review_escalation_message_id"] == escalation["message_ids"][0]
+    summary_after_escalation = client.get(
+        f"/api/v1/performance/assessments/review-summary?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert summary_after_escalation["escalated_count"] == 1
+    assert summary_after_escalation["reviewer_loads"][0]["escalated_count"] == 1
 
     response = client.patch(
         f"/api/v1/performance/assessments/{pending['id']}/review",

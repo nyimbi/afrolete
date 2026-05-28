@@ -186,6 +186,33 @@ class AthleteAssessmentReviewQueueItemRead(BaseModel):
     review_age_hours: int
 
 
+class AssessmentReviewLoadRead(BaseModel):
+    reviewer_person_id: UUID | None
+    reviewer_name: str
+    open_count: int
+    overdue_count: int
+    urgent_count: int
+    escalated_count: int
+    oldest_age_hours: int
+
+
+class AssessmentReviewQueueSummaryRead(BaseModel):
+    organization_id: UUID
+    open_count: int
+    unassigned_count: int
+    assigned_count: int
+    overdue_count: int
+    due_soon_count: int
+    on_track_count: int
+    unscheduled_count: int
+    urgent_count: int
+    escalated_count: int
+    average_age_hours: int
+    oldest_age_hours: int
+    priority_counts: dict[str, int]
+    reviewer_loads: list[AssessmentReviewLoadRead]
+
+
 class AthletePerformanceSummaryRead(BaseModel):
     athlete_profile_id: UUID
     latest_overall_score: float | None
