@@ -395,6 +395,7 @@ async def list_my_player_performance_route(
                 PerformanceForecastWhatIfRead(**scenario)
                 for scenario in profile["what_if_scenarios"]
             ],
+            injury_risk=PerformanceInjuryRiskRead(**profile["injury_risk"]),
             benchmarks=[
                 PerformanceMetricBenchmarkRead(**benchmark) for benchmark in profile["benchmarks"]
             ],

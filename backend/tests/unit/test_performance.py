@@ -175,6 +175,10 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert profile["what_if_scenarios"][0]["metric_name"] == "Pace"
     assert profile["what_if_scenarios"][0]["scenario_label"] == "baseline load, readiness 70"
     assert profile["what_if_scenarios"][0]["model_policy"] == "deterministic_what_if_forecast_v1"
+    assert profile["injury_risk"]["model_policy"] == "deterministic_injury_risk_v3_biomarker_environmental"
+    assert profile["injury_risk"]["athlete_profile_id"] == roster["athlete_profile_id"]
+    assert profile["injury_risk"]["risk_band"] in {"low", "watch", "high", "critical"}
+    assert "No athlete-specific training feedback" in profile["injury_risk"]["drivers"][0]
     assert profile["benchmarks"][0]["cohort_scope"] == "tenant"
     assert profile["benchmarks"][0]["cohort_label"] == "All athletes"
     assert profile["benchmarks"][0]["metric_name"] == "Pace"

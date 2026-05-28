@@ -2802,6 +2802,7 @@ async def list_my_player_performance(
             readiness_score=what_if_readiness_score,
             horizon=what_if_horizon,
         )
+        injury_risk = await performance_injury_risk(db, organization_id, profile.id)
         benchmarks = await performance_metric_benchmarks(
             db,
             organization_id,
@@ -2831,6 +2832,7 @@ async def list_my_player_performance(
                 "trend_series": trend_series,
                 "forecast_scenarios": forecast_scenarios,
                 "what_if_scenarios": what_if_scenarios,
+                "injury_risk": injury_risk,
                 "benchmarks": benchmarks,
                 "cohort_comparisons": cohort_comparisons,
             }

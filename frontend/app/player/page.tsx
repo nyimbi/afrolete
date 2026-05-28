@@ -36,6 +36,19 @@ function boundedPercent(value: number | null | undefined) {
   return Math.max(4, Math.min(100, value));
 }
 
+function playerRiskColor(riskBand: string) {
+  if (riskBand === "critical") {
+    return "var(--red)";
+  }
+  if (riskBand === "high") {
+    return "var(--orange)";
+  }
+  if (riskBand === "watch") {
+    return "var(--amber)";
+  }
+  return "var(--green)";
+}
+
 function goalProgress(goal: PlayerPerformanceProfileRead["goals"][number]) {
   if (typeof goal.current_value !== "number") {
     return 4;
@@ -51,6 +64,7 @@ function goalProgress(goal: PlayerPerformanceProfileRead["goals"][number]) {
 
 function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfileRead }) {
   const latestAssessment = profile.latest_assessment;
+  const injuryRisk = profile.injury_risk;
   const visibleSeries = profile.trend_series.filter((series) => series.points.length > 0).slice(0, 4);
   const visibleForecasts = profile.forecast_scenarios.filter((scenario) => scenario.sample_size > 0).slice(0, 4);
   const visibleWhatIfs = profile.what_if_scenarios.filter((scenario) => scenario.sample_size > 0).slice(0, 4);
@@ -249,6 +263,53 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
 
         <article className="player-chart-card">
         <div>
+          <span>Safety signal</span>
+          <strong>{injuryRisk.risk_band.replaceAll("_", " ")} · {injuryRisk.score}/100</strong>
+          <small>{Math.round(injuryRisk.confidence * 100)}% confidence · {injuryRisk.model_policy.replaceAll("_", " ")}</small>
+        </div>
+        <div className="chart-bars">
+          <div className="chart-bar-row">
+            <span>Overall risk</span>
+            <div className="chart-track">
+              <div
+                className="chart-fill"
+                style={{ width: `${boundedPercent(injuryRisk.score)}%`, backgroundColor: playerRiskColor(injuryRisk.risk_band) }}
+              />
+            </div>
+            <strong>{injuryRisk.risk_band.replaceAll("_", " ")}</strong>
+          </div>
+          <div className="chart-bar-row">
+            <span>Readiness</span>
+            <div className="chart-track">
+              <div
+                className="chart-fill"
+                style={{
+                  width: `${boundedPercent(injuryRisk.latest_readiness_score ?? injuryRisk.average_readiness_score)}%`,
+                  backgroundColor: "var(--teal)"
+                }}
+              />
+            </div>
+            <strong>{injuryRisk.latest_readiness_score ?? injuryRisk.average_readiness_score ?? "n/a"}</strong>
+          </div>
+          <div className="chart-bar-row">
+            <span>Load ratio</span>
+            <div className="chart-track">
+              <div
+                className="chart-fill"
+                style={{
+                  width: `${boundedPercent((injuryRisk.acute_chronic_ratio ?? 0) * 50)}%`,
+                  backgroundColor: "var(--violet)"
+                }}
+              />
+            </div>
+            <strong>{injuryRisk.acute_chronic_ratio ?? "n/a"}</strong>
+          </div>
+        </div>
+        <small>{injuryRisk.drivers[0] ?? injuryRisk.recommendation}</small>
+        </article>
+
+        <article className="player-chart-card">
+        <div>
           <span>Goal pace</span>
           <strong>{profile.active_goal_count}/{profile.achieved_goal_count}</strong>
           <small>Active progress and achieved targets.</small>
@@ -373,6 +434,30 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
             <small>{scenario.recommendation}</small>
           </article>
         ))}
+        <article className="player-chart-card">
+          <div>
+            <span>Risk drivers</span>
+            <strong>{injuryRisk.risk_band.replaceAll("_", " ")} injury-risk context</strong>
+            <small>{injuryRisk.recommendation}</small>
+          </div>
+          <div className="chart-bars">
+            {injuryRisk.drivers.slice(0, 4).map((driver, index) => (
+              <div className="chart-bar-row" key={`${driver}-${index}`}>
+                <span>{driver}</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{
+                      width: `${boundedPercent(injuryRisk.score - index * 12)}%`,
+                      backgroundColor: playerRiskColor(injuryRisk.risk_band)
+                    }}
+                  />
+                </div>
+                <strong>{index + 1}</strong>
+              </div>
+            ))}
+          </div>
+        </article>
         {visibleSeries.map((series, index) => (
           <article className="player-chart-card" key={`${series.metric_definition_id}-player-series`}>
             <div>
@@ -557,6 +642,7 @@ export default function PlayerPerformancePage() {
 
   const strongestTrend = selectedProfile?.trends.find((trend) => trend.trend_direction === "improving");
   const watchBenchmark = selectedProfile?.benchmarks.find((benchmark) => benchmark.benchmark_band === "watch");
+  const injuryRisk = selectedProfile?.injury_risk;
 
   const submitSelfAssessment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -719,6 +805,11 @@ export default function PlayerPerformancePage() {
                 <span>Focus</span>
                 <strong>{watchBenchmark?.metric_name ?? "No urgent cohort gap"}</strong>
                 <p>{watchBenchmark?.recommendation ?? "Current benchmark cards do not show a watch-band priority."}</p>
+              </article>
+              <article>
+                <span>Safety</span>
+                <strong>{injuryRisk ? `${injuryRisk.risk_band.replaceAll("_", " ")} · ${injuryRisk.score}/100` : "Awaiting risk signal"}</strong>
+                <p>{injuryRisk?.drivers[0] ?? "Readiness, workload, incidents, weather, surfaces, and wearable signals will shape this card."}</p>
               </article>
             </section>
 
