@@ -2113,6 +2113,8 @@ async def performance_metric_trends(
     organization_id: UUID,
     athlete_profile_id: UUID,
     sport: str | None = None,
+    period_start: date | None = None,
+    period_end: date | None = None,
 ) -> list[dict[str, object]]:
     await get_athlete_profile(db, athlete_profile_id, organization_id)
     metrics = await list_metric_definitions(db, organization_id, sport=sport)
@@ -2120,23 +2122,27 @@ async def performance_metric_trends(
     if not metric_by_id:
         return []
 
+    start_at, end_at = performance_observation_period_bounds(period_start, period_end)
+    observation_query = (
+        select(AthletePerformanceObservation)
+        .where(AthletePerformanceObservation.organization_id == organization_id)
+        .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+        .where(AthletePerformanceObservation.metric_definition_id.in_(list(metric_by_id)))
+        .where(
+            AthletePerformanceObservation.verification_status
+            != MetricVerificationStatus.REJECTED
+        )
+        .order_by(
+            AthletePerformanceObservation.metric_definition_id,
+            AthletePerformanceObservation.observed_at,
+        )
+    )
+    if start_at is not None:
+        observation_query = observation_query.where(AthletePerformanceObservation.observed_at >= start_at)
+    if end_at is not None:
+        observation_query = observation_query.where(AthletePerformanceObservation.observed_at <= end_at)
     observations = list(
-        (
-            await db.scalars(
-                select(AthletePerformanceObservation)
-                .where(AthletePerformanceObservation.organization_id == organization_id)
-                .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
-                .where(AthletePerformanceObservation.metric_definition_id.in_(list(metric_by_id)))
-                .where(
-                    AthletePerformanceObservation.verification_status
-                    != MetricVerificationStatus.REJECTED
-                )
-                .order_by(
-                    AthletePerformanceObservation.metric_definition_id,
-                    AthletePerformanceObservation.observed_at,
-                )
-            )
-        ).all()
+        (await db.scalars(observation_query)).all()
     )
     observations_by_metric: dict[UUID, list[AthletePerformanceObservation]] = {}
     for observation in observations:
@@ -2156,6 +2162,8 @@ async def performance_metric_trends(
                 "category": metric.category,
                 "unit": metric.unit,
                 "higher_is_better": metric.higher_is_better,
+                "period_start": period_start,
+                "period_end": period_end,
                 **trend,
             }
         )
@@ -2168,6 +2176,8 @@ async def performance_metric_trend_series(
     athlete_profile_id: UUID,
     sport: str | None = None,
     limit_per_metric: int = 12,
+    period_start: date | None = None,
+    period_end: date | None = None,
 ) -> list[dict[str, object]]:
     await get_athlete_profile(db, athlete_profile_id, organization_id)
     metrics = await list_metric_definitions(db, organization_id, sport=sport)
@@ -2175,23 +2185,27 @@ async def performance_metric_trend_series(
     if not metric_by_id:
         return []
 
+    start_at, end_at = performance_observation_period_bounds(period_start, period_end)
+    observation_query = (
+        select(AthletePerformanceObservation)
+        .where(AthletePerformanceObservation.organization_id == organization_id)
+        .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+        .where(AthletePerformanceObservation.metric_definition_id.in_(list(metric_by_id)))
+        .where(
+            AthletePerformanceObservation.verification_status
+            != MetricVerificationStatus.REJECTED
+        )
+        .order_by(
+            AthletePerformanceObservation.metric_definition_id,
+            AthletePerformanceObservation.observed_at.desc(),
+        )
+    )
+    if start_at is not None:
+        observation_query = observation_query.where(AthletePerformanceObservation.observed_at >= start_at)
+    if end_at is not None:
+        observation_query = observation_query.where(AthletePerformanceObservation.observed_at <= end_at)
     observations = list(
-        (
-            await db.scalars(
-                select(AthletePerformanceObservation)
-                .where(AthletePerformanceObservation.organization_id == organization_id)
-                .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
-                .where(AthletePerformanceObservation.metric_definition_id.in_(list(metric_by_id)))
-                .where(
-                    AthletePerformanceObservation.verification_status
-                    != MetricVerificationStatus.REJECTED
-                )
-                .order_by(
-                    AthletePerformanceObservation.metric_definition_id,
-                    AthletePerformanceObservation.observed_at.desc(),
-                )
-            )
-        ).all()
+        (await db.scalars(observation_query)).all()
     )
     observations_by_metric: dict[UUID, list[AthletePerformanceObservation]] = {}
     for observation in observations:
@@ -2219,6 +2233,8 @@ async def performance_metric_trend_series(
                 "category": metric.category,
                 "unit": metric.unit,
                 "higher_is_better": metric.higher_is_better,
+                "period_start": period_start,
+                "period_end": period_end,
                 "sample_size": len(metric_observations),
                 "latest_value": trend["latest_value"],
                 "forecast_next_value": trend["forecast_next_value"],
@@ -3181,6 +3197,20 @@ def benchmark_band(
     if percentile_rank >= 40:
         return "on_track"
     return "watch"
+
+
+def performance_observation_period_bounds(
+    period_start: date | None,
+    period_end: date | None,
+) -> tuple[datetime | None, datetime | None]:
+    if period_start is not None and period_end is not None and period_end < period_start:
+        raise HTTPException(
+            status_code=422,
+            detail="period_end must be on or after period_start",
+        )
+    start_at = datetime.combine(period_start, datetime.min.time(), UTC) if period_start else None
+    end_at = datetime.combine(period_end, datetime.max.time(), UTC) if period_end else None
+    return start_at, end_at
 
 
 def normalize_benchmark_scope(cohort_scope: str) -> str:

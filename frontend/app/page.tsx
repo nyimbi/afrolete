@@ -1371,6 +1371,8 @@ export default function HomePage() {
   const [performanceCohortComparisons, setPerformanceCohortComparisons] = useState<PerformanceCohortComparisonRead[]>([]);
   const [performanceTrends, setPerformanceTrends] = useState<PerformanceMetricTrendRead[]>([]);
   const [performanceTrendSeries, setPerformanceTrendSeries] = useState<PerformanceMetricTrendSeriesRead[]>([]);
+  const [performanceTrendPeriodStart, setPerformanceTrendPeriodStart] = useState("");
+  const [performanceTrendPeriodEnd, setPerformanceTrendPeriodEnd] = useState("");
   const [performanceForecastScenarios, setPerformanceForecastScenarios] = useState<PerformanceForecastScenarioRead[]>([]);
   const [performanceWhatIfScenarios, setPerformanceWhatIfScenarios] = useState<PerformanceForecastWhatIfRead[]>([]);
   const [performanceWhatIfAdjustment, setPerformanceWhatIfAdjustment] = useState(15);
@@ -2427,6 +2429,13 @@ export default function HomePage() {
 
   const loadAthletePerformance = useCallback(
     async (organizationId: string, athleteProfileId: string) => {
+      const trendParams = new URLSearchParams({ organization_id: organizationId });
+      if (performanceTrendPeriodStart) {
+        trendParams.set("period_start", performanceTrendPeriodStart);
+      }
+      if (performanceTrendPeriodEnd) {
+        trendParams.set("period_end", performanceTrendPeriodEnd);
+      }
       const [
         observationData,
         assessmentData,
@@ -2458,10 +2467,10 @@ export default function HomePage() {
           `/performance/athletes/${athleteProfileId}/cohort-comparisons?organization_id=${organizationId}`
         ),
         apiRequest<PerformanceMetricTrendRead[]>(
-          `/performance/athletes/${athleteProfileId}/trends?organization_id=${organizationId}`
+          `/performance/athletes/${athleteProfileId}/trends?${trendParams.toString()}`
         ),
         apiRequest<PerformanceMetricTrendSeriesRead[]>(
-          `/performance/athletes/${athleteProfileId}/trend-series?organization_id=${organizationId}`
+          `/performance/athletes/${athleteProfileId}/trend-series?${trendParams.toString()}`
         ),
         apiRequest<PerformanceForecastScenarioRead[]>(
           `/performance/athletes/${athleteProfileId}/forecast-scenarios?organization_id=${organizationId}`
@@ -2502,7 +2511,14 @@ export default function HomePage() {
           : observationData[0]?.id ?? ""
       );
     },
-    [identity, performanceBenchmarkScope, performanceWhatIfAdjustment, performanceWhatIfReadiness]
+    [
+      identity,
+      performanceBenchmarkScope,
+      performanceTrendPeriodEnd,
+      performanceTrendPeriodStart,
+      performanceWhatIfAdjustment,
+      performanceWhatIfReadiness
+    ]
   );
 
   const loadTraining = useCallback(async (organizationId: string, teamId?: string) => {
@@ -14056,6 +14072,22 @@ export default function HomePage() {
                   <option value="local_association">Local association</option>
                   <option value="regional_association">Regional association</option>
                 </select>
+              </label>
+              <label>
+                Trend start
+                <input
+                  type="date"
+                  value={performanceTrendPeriodStart}
+                  onChange={(event) => setPerformanceTrendPeriodStart(event.target.value)}
+                />
+              </label>
+              <label>
+                Trend end
+                <input
+                  type="date"
+                  value={performanceTrendPeriodEnd}
+                  onChange={(event) => setPerformanceTrendPeriodEnd(event.target.value)}
+                />
               </label>
               <label>
                 What-if load

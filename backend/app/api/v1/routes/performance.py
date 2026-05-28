@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, status
@@ -947,6 +947,8 @@ async def athlete_performance_trends_route(
     athlete_profile_id: UUID,
     organization_id: UUID = Query(),
     sport: str | None = Query(default=None),
+    period_start: date | None = Query(default=None),
+    period_end: date | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> list[PerformanceMetricTrendRead]:
     return [
@@ -956,6 +958,8 @@ async def athlete_performance_trends_route(
             organization_id,
             athlete_profile_id,
             sport=sport,
+            period_start=period_start,
+            period_end=period_end,
         )
     ]
 
@@ -969,6 +973,8 @@ async def athlete_performance_trend_series_route(
     organization_id: UUID = Query(),
     sport: str | None = Query(default=None),
     limit_per_metric: int = Query(default=12, ge=2, le=50),
+    period_start: date | None = Query(default=None),
+    period_end: date | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> list[PerformanceMetricTrendSeriesRead]:
     return [
@@ -979,6 +985,8 @@ async def athlete_performance_trend_series_route(
             athlete_profile_id,
             sport=sport,
             limit_per_metric=limit_per_metric,
+            period_start=period_start,
+            period_end=period_end,
         )
     ]
 

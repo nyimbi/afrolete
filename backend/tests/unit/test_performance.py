@@ -571,6 +571,39 @@ def test_performance_trend_series_returns_ordered_points(client, identity_header
     assert [point["value"] for point in series["points"]] == [13.0, 12.5, 12.0]
     assert [point["normalized_value"] for point in series["points"]] == [0.0, 50.0, 100.0]
 
+    filtered_trend_response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/trends"
+        f"?organization_id={organization['id']}&period_start=2026-01-08&period_end=2026-01-15",
+        headers=identity_headers,
+    )
+    filtered_series_response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/trend-series"
+        f"?organization_id={organization['id']}&period_end=2026-01-08",
+        headers=identity_headers,
+    )
+    invalid_period_response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/trends"
+        f"?organization_id={organization['id']}&period_start=2026-01-15&period_end=2026-01-08",
+        headers=identity_headers,
+    )
+
+    assert filtered_trend_response.status_code == 200
+    filtered_trend = filtered_trend_response.json()[0]
+    assert filtered_trend["period_start"] == "2026-01-08"
+    assert filtered_trend["period_end"] == "2026-01-15"
+    assert filtered_trend["sample_size"] == 2
+    assert filtered_trend["first_value"] == 12.5
+    assert filtered_trend["latest_value"] == 12.0
+    assert filtered_trend["trend_direction"] == "improving"
+
+    assert filtered_series_response.status_code == 200
+    filtered_series = filtered_series_response.json()[0]
+    assert filtered_series["period_start"] is None
+    assert filtered_series["period_end"] == "2026-01-08"
+    assert filtered_series["sample_size"] == 2
+    assert [point["value"] for point in filtered_series["points"]] == [13.0, 12.5]
+    assert invalid_period_response.status_code == 422
+
 
 def test_performance_forecast_scenarios_project_training_runway(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
