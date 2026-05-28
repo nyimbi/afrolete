@@ -2726,6 +2726,10 @@ async def list_my_player_performance(
     organization_id: UUID,
     observation_limit: int = 10,
     benchmark_cohort_scope: str = "tenant",
+    trend_category: MetricCategory | None = None,
+    trend_metric_code: str | None = None,
+    trend_period_start: date | None = None,
+    trend_period_end: date | None = None,
 ) -> list[dict[str, object]]:
     benchmark_cohort_scope = normalize_benchmark_scope(benchmark_cohort_scope)
     organization = await db.get(Organization, organization_id)
@@ -2760,8 +2764,24 @@ async def list_my_player_performance(
         goals = await list_performance_goals(db, organization_id, profile.id)
         awards = await list_performance_awards(db, organization_id, profile.id)
         observations = (await list_observations(db, organization_id, profile.id))[:observation_limit]
-        trends = await performance_metric_trends(db, organization_id, profile.id)
-        trend_series = await performance_metric_trend_series(db, organization_id, profile.id)
+        trends = await performance_metric_trends(
+            db,
+            organization_id,
+            profile.id,
+            category=trend_category,
+            metric_code=trend_metric_code,
+            period_start=trend_period_start,
+            period_end=trend_period_end,
+        )
+        trend_series = await performance_metric_trend_series(
+            db,
+            organization_id,
+            profile.id,
+            category=trend_category,
+            metric_code=trend_metric_code,
+            period_start=trend_period_start,
+            period_end=trend_period_end,
+        )
         forecast_scenarios = await performance_forecast_scenarios(db, organization_id, profile.id)
         benchmarks = await performance_metric_benchmarks(
             db,

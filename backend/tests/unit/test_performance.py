@@ -178,6 +178,52 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert len(profile["cohort_comparisons"]) == 4
     assert profile["cohort_comparisons"][0]["cohort_scope"] == "tenant"
 
+    touch_metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "first_touch",
+            "name": "First Touch",
+            "category": "technical",
+            "unit": "score",
+            "higher_is_better": True,
+        },
+    ).json()
+    for value, observed_at in [
+        (66.0, "2026-02-01T10:00:00Z"),
+        (74.0, "2026-02-20T10:00:00Z"),
+    ]:
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": touch_metric["id"],
+                "value": value,
+                "observed_at": observed_at,
+                "verification_status": "verified",
+            },
+        )
+        assert response.status_code == 201
+
+    filtered_response = client.get(
+        f"/api/v1/performance/my-profiles?organization_id={organization['id']}"
+        "&trend_category=technical&trend_metric_code=FIRST_TOUCH"
+        "&trend_period_start=2026-02-15&trend_period_end=2026-02-28",
+        headers=player_headers,
+    )
+    assert filtered_response.status_code == 200
+    filtered_profile = filtered_response.json()[0]
+    assert [trend["metric_code"] for trend in filtered_profile["trends"]] == ["first_touch"]
+    assert filtered_profile["trends"][0]["filter_category"] == "technical"
+    assert filtered_profile["trends"][0]["filter_metric_code"] == "first_touch"
+    assert filtered_profile["trends"][0]["period_start"] == "2026-02-15"
+    assert filtered_profile["trends"][0]["sample_size"] == 1
+    assert [series["metric_code"] for series in filtered_profile["trend_series"]] == ["first_touch"]
+    assert [point["value"] for point in filtered_profile["trend_series"][0]["points"]] == [74.0]
+
 
 def test_performance_benchmarks_can_scope_to_position_cohort(client, identity_headers) -> None:
     organization, team, _, roster = create_rostered_athlete(client, identity_headers)

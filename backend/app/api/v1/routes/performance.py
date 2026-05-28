@@ -332,6 +332,10 @@ async def list_my_player_performance_route(
     organization_id: UUID = Query(),
     observation_limit: int = Query(default=10, ge=1, le=50),
     benchmark_cohort_scope: str = Query(default="tenant"),
+    trend_category: MetricCategory | None = Query(default=None),
+    trend_metric_code: str | None = Query(default=None),
+    trend_period_start: date | None = Query(default=None),
+    trend_period_end: date | None = Query(default=None),
     identity: CurrentIdentity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
 ) -> list[PlayerPerformanceProfileRead]:
@@ -341,6 +345,10 @@ async def list_my_player_performance_route(
         organization_id,
         observation_limit=observation_limit,
         benchmark_cohort_scope=benchmark_cohort_scope,
+        trend_category=trend_category,
+        trend_metric_code=trend_metric_code,
+        trend_period_start=trend_period_start,
+        trend_period_end=trend_period_end,
     )
     return [
         PlayerPerformanceProfileRead(

@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
-import type { AthleteAssessmentRead, LocalIdentity, PlayerPerformanceProfileRead } from "@/types/operations";
+import type { AthleteAssessmentRead, LocalIdentity, MetricCategory, PlayerPerformanceProfileRead } from "@/types/operations";
 
 const defaultPlayerIdentity: LocalIdentity = {
   sub: "kc-athlete-1",
@@ -12,6 +12,14 @@ const defaultPlayerIdentity: LocalIdentity = {
 
 const playerChartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--violet)", "var(--green)"];
 type BenchmarkCohortScope = "tenant" | "age_group" | "position" | "region";
+const metricCategoryOptions: MetricCategory[] = [
+  "physical",
+  "technical",
+  "tactical",
+  "mental",
+  "wellness",
+  "competition"
+];
 
 function playerValueLabel(value: number | null | undefined, unit?: string | null) {
   if (typeof value !== "number") {
@@ -353,6 +361,10 @@ export default function PlayerPerformancePage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultPlayerIdentity);
   const [benchmarkScope, setBenchmarkScope] = useState<BenchmarkCohortScope>("tenant");
+  const [trendCategory, setTrendCategory] = useState<MetricCategory | "all">("all");
+  const [trendMetricCode, setTrendMetricCode] = useState("");
+  const [trendPeriodStart, setTrendPeriodStart] = useState("");
+  const [trendPeriodEnd, setTrendPeriodEnd] = useState("");
   const [profiles, setProfiles] = useState<PlayerPerformanceProfileRead[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [selfAssessment, setSelfAssessment] = useState({
@@ -377,18 +389,37 @@ export default function PlayerPerformancePage() {
         organizationId?: string;
         identity?: LocalIdentity;
         benchmarkScope?: BenchmarkCohortScope;
+        trendCategory?: MetricCategory | "all";
+        trendMetricCode?: string;
+        trendPeriodStart?: string;
+        trendPeriodEnd?: string;
       };
       setOrganizationId(parsed.organizationId ?? "");
       setIdentity(parsed.identity ?? defaultPlayerIdentity);
       setBenchmarkScope(parsed.benchmarkScope ?? "tenant");
+      setTrendCategory(parsed.trendCategory ?? "all");
+      setTrendMetricCode(parsed.trendMetricCode ?? "");
+      setTrendPeriodStart(parsed.trendPeriodStart ?? "");
+      setTrendPeriodEnd(parsed.trendPeriodEnd ?? "");
     } catch {
       window.localStorage.removeItem("afrolete.playerPortal");
     }
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("afrolete.playerPortal", JSON.stringify({ organizationId, identity, benchmarkScope }));
-  }, [benchmarkScope, identity, organizationId]);
+    window.localStorage.setItem(
+      "afrolete.playerPortal",
+      JSON.stringify({
+        organizationId,
+        identity,
+        benchmarkScope,
+        trendCategory,
+        trendMetricCode,
+        trendPeriodStart,
+        trendPeriodEnd
+      })
+    );
+  }, [benchmarkScope, identity, organizationId, trendCategory, trendMetricCode, trendPeriodEnd, trendPeriodStart]);
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.athlete_profile_id === selectedProfileId) ?? profiles[0] ?? null,
@@ -404,8 +435,25 @@ export default function PlayerPerformancePage() {
     setBusy(true);
     setError("");
     try {
+      const params = new URLSearchParams({
+        organization_id: organizationId,
+        observation_limit: "8",
+        benchmark_cohort_scope: benchmarkScope
+      });
+      if (trendCategory !== "all") {
+        params.set("trend_category", trendCategory);
+      }
+      if (trendMetricCode.trim()) {
+        params.set("trend_metric_code", trendMetricCode.trim().toLowerCase());
+      }
+      if (trendPeriodStart) {
+        params.set("trend_period_start", trendPeriodStart);
+      }
+      if (trendPeriodEnd) {
+        params.set("trend_period_end", trendPeriodEnd);
+      }
       const rows = await apiRequest<PlayerPerformanceProfileRead[]>(
-        `/performance/my-profiles?organization_id=${encodeURIComponent(organizationId)}&observation_limit=8&benchmark_cohort_scope=${benchmarkScope}`,
+        `/performance/my-profiles?${params.toString()}`,
         { identity }
       );
       setProfiles(rows);
@@ -481,6 +529,30 @@ export default function PlayerPerformancePage() {
             <option value="position">Position</option>
             <option value="region">Country/region</option>
           </select>
+          <select
+            value={trendCategory}
+            onChange={(event) => setTrendCategory(event.target.value as MetricCategory | "all")}
+          >
+            <option value="all">All metric domains</option>
+            {metricCategoryOptions.map((category) => (
+              <option key={category} value={category}>{category}</option>
+            ))}
+          </select>
+          <input
+            placeholder="Trend metric code"
+            value={trendMetricCode}
+            onChange={(event) => setTrendMetricCode(event.target.value)}
+          />
+          <input
+            type="date"
+            value={trendPeriodStart}
+            onChange={(event) => setTrendPeriodStart(event.target.value)}
+          />
+          <input
+            type="date"
+            value={trendPeriodEnd}
+            onChange={(event) => setTrendPeriodEnd(event.target.value)}
+          />
           <button type="submit" disabled={busy}>{busy ? "Loading" : "Refresh"}</button>
         </form>
 
