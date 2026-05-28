@@ -608,6 +608,33 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
     assert any("open injury" in driver for driver in risk["drivers"])
     assert "medical or safeguarding review" in risk["recommendation"]
 
+    alert_response = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/injury-risk/alerts"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert alert_response.status_code == 200
+    alert = alert_response.json()
+    assert alert["sent"] is True
+    assert alert["score"] == 100
+    assert alert["risk_band"] == "critical"
+    assert alert["recipient_count"] >= 2
+    assert alert["message_id"] is not None
+    messages = client.get(
+        f"/api/v1/communications/messages?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    message = next(message for message in messages if message["id"] == alert["message_id"])
+    assert message["urgent"] is True
+    assert "injury risk" in message["subject"]
+    recipients = client.get(
+        f"/api/v1/communications/messages/{alert['message_id']}/recipients",
+        headers=identity_headers,
+    ).json()
+    recipient_ids = {recipient["person_id"] for recipient in recipients}
+    assert member["subject_id"] in recipient_ids
+
 
 def test_player_can_submit_pending_self_assessment(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)

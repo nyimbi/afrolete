@@ -206,6 +206,7 @@ import type {
   PerformanceForecastScenarioRead,
   PerformanceForecastWhatIfRead,
   PerformanceGoalRead,
+  PerformanceInjuryRiskAlertRead,
   PerformanceInjuryRiskRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
@@ -996,7 +997,17 @@ function PerformanceWhatIfScenarioDashboard({ scenarios }: { scenarios: Performa
   );
 }
 
-function PerformanceInjuryRiskCard({ risk }: { risk: PerformanceInjuryRiskRead | null }) {
+function PerformanceInjuryRiskCard({
+  risk,
+  alert,
+  onSendAlert,
+  disabled
+}: {
+  risk: PerformanceInjuryRiskRead | null;
+  alert: PerformanceInjuryRiskAlertRead | null;
+  onSendAlert: () => void;
+  disabled: boolean;
+}) {
   const score = risk?.score ?? 0;
   const riskColor =
     risk?.risk_band === "critical" ? "var(--red)" :
@@ -1049,6 +1060,16 @@ function PerformanceInjuryRiskCard({ risk }: { risk: PerformanceInjuryRiskRead |
       </div>
       <small>{risk?.drivers[0] ?? "Record athlete-specific readiness and session feedback to generate risk drivers."}</small>
       <small>{risk?.recommendation ?? "No risk recommendation is available yet."}</small>
+      <span>
+        <button type="button" onClick={onSendAlert} disabled={disabled || !risk}>Send risk alert</button>
+      </span>
+      {alert ? (
+        <small>
+          {alert.sent
+            ? `Alert sent to ${alert.recipient_count} recipient(s).`
+            : alert.skipped_reason ?? `Dry run: ${alert.recipient_count} recipient(s) would be alerted.`}
+        </small>
+      ) : null}
     </article>
   );
 }
@@ -1199,6 +1220,7 @@ export default function HomePage() {
   const [performanceWhatIfAdjustment, setPerformanceWhatIfAdjustment] = useState(15);
   const [performanceWhatIfReadiness, setPerformanceWhatIfReadiness] = useState(70);
   const [performanceInjuryRisk, setPerformanceInjuryRisk] = useState<PerformanceInjuryRiskRead | null>(null);
+  const [performanceInjuryRiskAlert, setPerformanceInjuryRiskAlert] = useState<PerformanceInjuryRiskAlertRead | null>(null);
   const [performanceGoals, setPerformanceGoals] = useState<PerformanceGoalRead[]>([]);
   const [performanceAwards, setPerformanceAwards] = useState<PerformanceAchievementAwardRead[]>([]);
   const [performanceAchievementRun, setPerformanceAchievementRun] =
@@ -3076,6 +3098,7 @@ export default function HomePage() {
       setPerformanceForecastScenarios([]);
       setPerformanceWhatIfScenarios([]);
       setPerformanceInjuryRisk(null);
+      setPerformanceInjuryRiskAlert(null);
       setPerformanceGoals([]);
       setPerformanceAwards([]);
       setPerformanceAchievementRun(null);
@@ -6516,6 +6539,34 @@ export default function HomePage() {
         );
         void loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters);
         void loadAssessmentReviewSummary(selectedOrganizationId);
+      }
+    );
+  };
+
+  const sendPerformanceInjuryRiskAlert = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete first", "bad");
+      return;
+    }
+    runAction(
+      "performance-injury-risk-alert",
+      () =>
+        apiRequest<PerformanceInjuryRiskAlertRead>(
+          `/performance/athletes/${selectedAthlete.athleteProfileId}/injury-risk/alerts?organization_id=${selectedOrganizationId}`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (alert) => {
+        setPerformanceInjuryRiskAlert(alert);
+        setPerformanceInjuryRisk(alert.risk);
+        addLog(
+          alert.sent
+            ? `Injury-risk alert sent to ${alert.recipient_count} recipient(s)`
+            : alert.skipped_reason ?? "Injury-risk alert was not sent",
+          alert.sent ? "good" : "neutral"
+        );
       }
     );
   };
@@ -13389,7 +13440,12 @@ export default function HomePage() {
               trends={performanceTrends}
               benchmarks={performanceBenchmarks}
             />
-            <PerformanceInjuryRiskCard risk={performanceInjuryRisk} />
+            <PerformanceInjuryRiskCard
+              risk={performanceInjuryRisk}
+              alert={performanceInjuryRiskAlert}
+              onSendAlert={sendPerformanceInjuryRiskAlert}
+              disabled={busyAction !== null}
+            />
             <PerformanceForecastScenarioDashboard scenarios={performanceForecastScenarios} />
             <PerformanceWhatIfScenarioDashboard scenarios={performanceWhatIfScenarios} />
             <PerformanceCohortComparisonDashboard comparisons={performanceCohortComparisons} />

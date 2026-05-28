@@ -21,6 +21,7 @@ from app.schemas.performance import (
     PerformanceAssessmentReviewEscalationRunRead,
     PerformanceGoalCreate,
     PerformanceGoalRead,
+    PerformanceInjuryRiskAlertRead,
     PerformanceInjuryRiskRead,
     PerformanceIngestionCreate,
     PerformanceIngestionRead,
@@ -65,6 +66,7 @@ from app.services.performance import (
     run_assessment_review_escalations,
     review_assessment,
     review_observation,
+    send_performance_injury_risk_alert,
     update_assessment_review_assignment,
 )
 
@@ -691,6 +693,36 @@ async def athlete_performance_injury_risk_route(
 ) -> PerformanceInjuryRiskRead:
     return PerformanceInjuryRiskRead(
         **await performance_injury_risk(db, organization_id, athlete_profile_id)
+    )
+
+
+@router.post(
+    "/athletes/{athlete_profile_id}/injury-risk/alerts",
+    response_model=PerformanceInjuryRiskAlertRead,
+)
+async def athlete_performance_injury_risk_alert_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    threshold_score: int = Query(default=65, ge=0, le=100),
+    dry_run: bool = Query(default=False),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceInjuryRiskAlertRead:
+    result = await send_performance_injury_risk_alert(
+        db,
+        identity,
+        organization_id,
+        athlete_profile_id,
+        authz,
+        threshold_score=threshold_score,
+        dry_run=dry_run,
+    )
+    return PerformanceInjuryRiskAlertRead(
+        **{
+            **result,
+            "risk": PerformanceInjuryRiskRead(**result["risk"]),
+        }
     )
 
 

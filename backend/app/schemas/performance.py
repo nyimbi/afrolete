@@ -356,6 +356,20 @@ class PerformanceInjuryRiskRead(BaseModel):
     recommendation: str
 
 
+class PerformanceInjuryRiskAlertRead(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID
+    score: int
+    risk_band: str
+    threshold_score: int
+    sent: bool
+    dry_run: bool = False
+    recipient_count: int
+    message_id: UUID | None
+    skipped_reason: str | None
+    risk: PerformanceInjuryRiskRead
+
+
 class PerformanceGoalCreate(BaseModel):
     organization_id: UUID
     metric_definition_id: UUID

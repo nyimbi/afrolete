@@ -1146,6 +1146,58 @@ async def performance_injury_risk(
     )
 
 
+async def send_performance_injury_risk_alert(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    authz: AuthorizationService,
+    threshold_score: int = 65,
+    dry_run: bool = False,
+) -> dict[str, object]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    athlete_profile = await get_athlete_profile(db, athlete_profile_id, organization_id)
+    athlete = await db.get(Person, athlete_profile.person_id)
+    if athlete is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete person not found")
+    risk = await performance_injury_risk(db, organization_id, athlete_profile_id)
+    recipient_ids = await injury_risk_alert_recipient_ids(db, organization_id, athlete)
+    sent = False
+    message_id = None
+    skipped_reason = None
+    if int(risk["score"]) < threshold_score:
+        skipped_reason = f"Risk score {risk['score']} is below alert threshold {threshold_score}."
+    elif not recipient_ids:
+        skipped_reason = "No eligible risk-alert recipients found."
+    elif dry_run:
+        sent = False
+    else:
+        message = await create_injury_risk_alert_message(
+            db,
+            organization_id,
+            athlete,
+            risk,
+            recipient_ids,
+        )
+        await db.commit()
+        message_id = message.id
+        sent = True
+
+    return {
+        "organization_id": organization_id,
+        "athlete_profile_id": athlete_profile_id,
+        "score": risk["score"],
+        "risk_band": risk["risk_band"],
+        "threshold_score": threshold_score,
+        "sent": sent,
+        "dry_run": dry_run,
+        "recipient_count": len(recipient_ids),
+        "message_id": message_id,
+        "skipped_reason": skipped_reason,
+        "risk": risk,
+    }
+
+
 async def create_performance_goal(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -2311,6 +2363,102 @@ def injury_risk_recommendation(band: str) -> str:
     if band == "watch":
         return "Keep the athlete on modified monitoring and avoid sharp load increases until drivers improve."
     return "Continue normal progression with routine readiness and workload monitoring."
+
+
+async def injury_risk_alert_recipient_ids(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete: Person,
+) -> set[UUID]:
+    manager_rows = (
+        await db.execute(
+            select(Membership.subject_id)
+            .where(Membership.organization_id == organization_id)
+            .where(Membership.subject_type == MemberSubjectType.PERSON)
+            .where(
+                Membership.role.in_(
+                    [
+                        MembershipRole.OWNER,
+                        MembershipRole.ADMIN,
+                        MembershipRole.STAFF,
+                        MembershipRole.COACH,
+                    ]
+                )
+            )
+            .where(Membership.status == "active")
+        )
+    ).all()
+    recipient_ids = {person_id for (person_id,) in manager_rows}
+    recipient_ids.add(athlete.id)
+    recipient_ids.update(await guardian_person_ids(db, athlete.id))
+    return recipient_ids
+
+
+async def create_injury_risk_alert_message(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete: Person,
+    risk: dict[str, object],
+    recipient_ids: set[UUID],
+) -> CommunicationMessage:
+    now = datetime.now(UTC)
+    message = CommunicationMessage(
+        organization_id=organization_id,
+        template_id=None,
+        created_by_person_id=None,
+        message_type=CommunicationMessageType.ALERT,
+        channel=CommunicationChannel.IN_APP,
+        scope_type=CommunicationScopeType.PERSON,
+        scope_id=athlete.id,
+        subject=injury_risk_alert_subject(athlete, risk),
+        body=injury_risk_alert_body(athlete, risk),
+        urgent=True,
+        quiet_hours_override=True,
+        scheduled_for=None,
+        sent_at=now,
+        status="sent",
+    )
+    db.add(message)
+    await db.flush()
+    for person_id in sorted(recipient_ids, key=str):
+        person = await db.get(Person, person_id)
+        if person is None:
+            continue
+        db.add(
+            MessageRecipient(
+                message_id=message.id,
+                person_id=person.id,
+                destination=destination_for_channel(person, CommunicationChannel.IN_APP),
+                delivery_status=initial_delivery_status(person, CommunicationChannel.IN_APP),
+            )
+        )
+    return message
+
+
+def injury_risk_alert_subject(athlete: Person, risk: dict[str, object]) -> str:
+    return f"{athlete.display_name} injury risk: {risk['risk_band']} ({risk['score']}/100)"[:240]
+
+
+def injury_risk_alert_body(athlete: Person, risk: dict[str, object]) -> str:
+    lines = [
+        f"{athlete.display_name} has a {risk['risk_band']} injury-risk score of {risk['score']}/100.",
+        f"Confidence: {int(float(risk['confidence']) * 100)}%. Model policy: {risk['model_policy']}.",
+        "",
+        "Drivers:",
+    ]
+    drivers = risk.get("drivers", [])
+    if isinstance(drivers, list):
+        for driver in drivers[:6]:
+            lines.append(f"- {driver}")
+    lines.extend(
+        [
+            "",
+            f"Recommendation: {risk['recommendation']}",
+            "",
+            "Review training load, readiness, medical clearance, and guardian communication before the next high-intensity activity.",
+        ]
+    )
+    return "\n".join(lines)[:8000]
 
 
 def directional_change(
