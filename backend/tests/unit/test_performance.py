@@ -610,7 +610,7 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
 
     scan_response = client.post(
         f"/api/v1/performance/injury-risk/alert-scans"
-        f"?organization_id={organization['id']}",
+        f"?organization_id={organization['id']}&channels=in_app&channels=sms&channels=whatsapp",
         headers=identity_headers,
     )
 
@@ -620,7 +620,10 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
     assert scan["scanned_count"] == 1
     assert scan["high_risk_count"] == 1
     assert scan["alerted_count"] == 1
+    assert scan["channels"] == ["in_app", "sms", "whatsapp"]
+    assert scan["channel_count"] == 3
     assert scan["message_ids"]
+    assert len(scan["message_ids"]) == 3
     messages = client.get(
         f"/api/v1/communications/messages?organization_id={organization['id']}",
         headers=identity_headers,

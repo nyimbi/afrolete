@@ -3379,8 +3379,11 @@ export type PerformanceInjuryRiskAlertRead = {
   threshold_score: number;
   sent: boolean;
   dry_run: boolean;
+  channels: CommunicationChannel[];
+  channel_count: number;
   recipient_count: number;
   message_id: UUID | null;
+  message_ids: UUID[];
   skipped_reason: string | null;
   risk: PerformanceInjuryRiskRead;
 };
@@ -3390,6 +3393,8 @@ export type PerformanceInjuryRiskAlertRunRead = {
   threshold_score: number;
   repeat_after_hours: number;
   dry_run: boolean;
+  channels: CommunicationChannel[];
+  channel_count: number;
   eligible_count: number;
   scanned_count: number;
   alerted_count: number;

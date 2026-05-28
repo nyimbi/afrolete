@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.enums import MetricCategory, MetricSource, MetricVerificationStatus
+from app.models.enums import CommunicationChannel, MetricCategory, MetricSource, MetricVerificationStatus
 
 
 class MetricDefinitionCreate(BaseModel):
@@ -364,8 +364,11 @@ class PerformanceInjuryRiskAlertRead(BaseModel):
     threshold_score: int
     sent: bool
     dry_run: bool = False
+    channels: list[CommunicationChannel]
+    channel_count: int
     recipient_count: int
     message_id: UUID | None
+    message_ids: list[UUID]
     skipped_reason: str | None
     risk: PerformanceInjuryRiskRead
 
@@ -375,6 +378,8 @@ class PerformanceInjuryRiskAlertRunRead(BaseModel):
     threshold_score: int
     repeat_after_hours: int
     dry_run: bool = False
+    channels: list[CommunicationChannel]
+    channel_count: int
     eligible_count: int
     scanned_count: int
     alerted_count: int

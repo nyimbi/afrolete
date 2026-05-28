@@ -275,6 +275,8 @@ import type {
   MaintenanceWorkOrderRead
 } from "@/types/operations";
 
+const performanceRiskAlertChannelOptions: CommunicationChannel[] = ["in_app", "push", "sms", "whatsapp"];
+
 type TravelManifestLegacyOfflineCache = EventTravelManifestRead & {
   cached_at: string;
   cache_version: number;
@@ -1067,7 +1069,7 @@ function PerformanceInjuryRiskCard({
       {alert ? (
         <small>
           {alert.sent
-            ? `Alert sent to ${alert.recipient_count} recipient(s).`
+            ? `Alert sent as ${alert.message_ids.length} message(s) across ${alert.channels.join(", ")} to ${alert.recipient_count} delivery target(s).`
             : alert.skipped_reason ?? `Dry run: ${alert.recipient_count} recipient(s) would be alerted.`}
         </small>
       ) : null}
@@ -1220,6 +1222,8 @@ export default function HomePage() {
   const [performanceWhatIfScenarios, setPerformanceWhatIfScenarios] = useState<PerformanceForecastWhatIfRead[]>([]);
   const [performanceWhatIfAdjustment, setPerformanceWhatIfAdjustment] = useState(15);
   const [performanceWhatIfReadiness, setPerformanceWhatIfReadiness] = useState(70);
+  const [performanceRiskAlertChannels, setPerformanceRiskAlertChannels] =
+    useState<CommunicationChannel[]>(["in_app", "push", "sms", "whatsapp"]);
   const [performanceInjuryRisk, setPerformanceInjuryRisk] = useState<PerformanceInjuryRiskRead | null>(null);
   const [performanceInjuryRiskAlert, setPerformanceInjuryRiskAlert] = useState<PerformanceInjuryRiskAlertRead | null>(null);
   const [performanceInjuryRiskAlertRun, setPerformanceInjuryRiskAlertRun] =
@@ -6547,16 +6551,34 @@ export default function HomePage() {
     );
   };
 
+  const riskAlertChannelQuery = () => {
+    const params = new URLSearchParams();
+    const selectedChannels = performanceRiskAlertChannels.length ? performanceRiskAlertChannels : ["in_app" as CommunicationChannel];
+    selectedChannels.forEach((channel) => params.append("channels", channel));
+    return params.toString();
+  };
+
+  const togglePerformanceRiskAlertChannel = (channel: CommunicationChannel) => {
+    setPerformanceRiskAlertChannels((current) => {
+      if (current.includes(channel)) {
+        const next = current.filter((item) => item !== channel);
+        return next.length ? next : ["in_app"];
+      }
+      return [...current, channel];
+    });
+  };
+
   const sendPerformanceInjuryRiskAlert = () => {
     if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
       addLog("Select an athlete first", "bad");
       return;
     }
+    const channelQuery = riskAlertChannelQuery();
     runAction(
       "performance-injury-risk-alert",
       () =>
         apiRequest<PerformanceInjuryRiskAlertRead>(
-          `/performance/athletes/${selectedAthlete.athleteProfileId}/injury-risk/alerts?organization_id=${selectedOrganizationId}`,
+          `/performance/athletes/${selectedAthlete.athleteProfileId}/injury-risk/alerts?organization_id=${selectedOrganizationId}&${channelQuery}`,
           {
             method: "POST",
             identity
@@ -6567,7 +6589,7 @@ export default function HomePage() {
         setPerformanceInjuryRisk(alert.risk);
         addLog(
           alert.sent
-            ? `Injury-risk alert sent to ${alert.recipient_count} recipient(s)`
+            ? `Injury-risk alert sent across ${alert.channel_count} channel(s)`
             : alert.skipped_reason ?? "Injury-risk alert was not sent",
           alert.sent ? "good" : "neutral"
         );
@@ -6580,11 +6602,12 @@ export default function HomePage() {
       addLog("Select an organization first", "bad");
       return;
     }
+    const channelQuery = riskAlertChannelQuery();
     runAction(
       "performance-injury-risk-alert-scan",
       () =>
         apiRequest<PerformanceInjuryRiskAlertRunRead>(
-          `/performance/injury-risk/alert-scans?organization_id=${selectedOrganizationId}`,
+          `/performance/injury-risk/alert-scans?organization_id=${selectedOrganizationId}&${channelQuery}`,
           {
             method: "POST",
             identity
@@ -13466,6 +13489,21 @@ export default function HomePage() {
                   onChange={(event) => setPerformanceWhatIfReadiness(Number(event.target.value))}
                 />
               </label>
+              <label className="wide-field">
+                Risk alert channels
+                <span className="check-row">
+                  {performanceRiskAlertChannelOptions.map((channel) => (
+                    <label key={channel}>
+                      <input
+                        type="checkbox"
+                        checked={performanceRiskAlertChannels.includes(channel)}
+                        onChange={() => togglePerformanceRiskAlertChannel(channel)}
+                      />
+                      {channel.replaceAll("_", " ")}
+                    </label>
+                  ))}
+                </span>
+              </label>
             </div>
             <PerformanceVisualDashboard
               summary={performanceSummary}
@@ -13619,7 +13657,7 @@ export default function HomePage() {
                     <small>
                       {performanceInjuryRiskAlertRun.dry_run
                         ? "Dry run only."
-                        : `${performanceInjuryRiskAlertRun.message_ids.length} urgent alert message(s) created with ${performanceInjuryRiskAlertRun.repeat_after_hours}h duplicate suppression.`}
+                        : `${performanceInjuryRiskAlertRun.message_ids.length} urgent alert message(s) across ${performanceInjuryRiskAlertRun.channels.join(", ")} with ${performanceInjuryRiskAlertRun.repeat_after_hours}h duplicate suppression.`}
                     </small>
                   </div>
                 </article>

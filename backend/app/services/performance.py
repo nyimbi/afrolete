@@ -1156,6 +1156,7 @@ async def send_performance_injury_risk_alert(
     threshold_score: int = 65,
     dry_run: bool = False,
     repeat_after_hours: int = 24,
+    channels: list[CommunicationChannel] | None = None,
 ) -> dict[str, object]:
     await ensure_manage_performance(authz, identity, organization_id)
     return await send_performance_injury_risk_alert_for_athlete(
@@ -1165,6 +1166,7 @@ async def send_performance_injury_risk_alert(
         threshold_score=threshold_score,
         dry_run=dry_run,
         repeat_after_hours=repeat_after_hours,
+        channels=channels,
     )
 
 
@@ -1175,7 +1177,9 @@ async def send_performance_injury_risk_alert_for_athlete(
     threshold_score: int = 65,
     dry_run: bool = False,
     repeat_after_hours: int = 24,
+    channels: list[CommunicationChannel] | None = None,
 ) -> dict[str, object]:
+    alert_channels = normalized_injury_risk_alert_channels(channels)
     athlete_profile = await get_athlete_profile(db, athlete_profile_id, organization_id)
     athlete = await db.get(Person, athlete_profile.person_id)
     if athlete is None:
@@ -1183,7 +1187,7 @@ async def send_performance_injury_risk_alert_for_athlete(
     risk = await performance_injury_risk(db, organization_id, athlete_profile_id)
     recipient_ids = await injury_risk_alert_recipient_ids(db, organization_id, athlete)
     sent = False
-    message_id = None
+    message_ids: list[UUID] = []
     skipped_reason = None
     if int(risk["score"]) < threshold_score:
         skipped_reason = f"Risk score {risk['score']} is below alert threshold {threshold_score}."
@@ -1194,15 +1198,16 @@ async def send_performance_injury_risk_alert_for_athlete(
     elif dry_run:
         sent = False
     else:
-        message = await create_injury_risk_alert_message(
+        messages = await create_injury_risk_alert_messages(
             db,
             organization_id,
             athlete,
             risk,
             recipient_ids,
+            alert_channels,
         )
         await db.commit()
-        message_id = message.id
+        message_ids = [message.id for message in messages]
         sent = True
 
     return {
@@ -1213,8 +1218,11 @@ async def send_performance_injury_risk_alert_for_athlete(
         "threshold_score": threshold_score,
         "sent": sent,
         "dry_run": dry_run,
-        "recipient_count": len(recipient_ids),
-        "message_id": message_id,
+        "channels": alert_channels,
+        "channel_count": len(alert_channels),
+        "recipient_count": len(recipient_ids) * len(alert_channels),
+        "message_id": message_ids[0] if message_ids else None,
+        "message_ids": message_ids,
         "skipped_reason": skipped_reason,
         "risk": risk,
     }
@@ -1229,6 +1237,7 @@ async def run_performance_injury_risk_alert_scan(
     threshold_score: int = 65,
     repeat_after_hours: int = 24,
     dry_run: bool = False,
+    channels: list[CommunicationChannel] | None = None,
 ) -> PerformanceInjuryRiskAlertRunRead:
     await ensure_manage_performance(authz, identity, organization_id)
     return await run_performance_injury_risk_alert_scan_worker(
@@ -1238,6 +1247,7 @@ async def run_performance_injury_risk_alert_scan(
         threshold_score=threshold_score,
         repeat_after_hours=repeat_after_hours,
         dry_run=dry_run,
+        channels=channels,
     )
 
 
@@ -1248,7 +1258,9 @@ async def run_performance_injury_risk_alert_scan_worker(
     threshold_score: int = 65,
     repeat_after_hours: int = 24,
     dry_run: bool = False,
+    channels: list[CommunicationChannel] | None = None,
 ) -> PerformanceInjuryRiskAlertRunRead:
+    alert_channels = normalized_injury_risk_alert_channels(channels)
     athlete_profile_ids = await injury_risk_scan_athlete_ids(db, organization_id, limit)
     scanned_count = 0
     alerted_count = 0
@@ -1273,6 +1285,7 @@ async def run_performance_injury_risk_alert_scan_worker(
                 threshold_score=threshold_score,
                 dry_run=dry_run,
                 repeat_after_hours=repeat_after_hours,
+                channels=alert_channels,
             )
             scanned_count += 1
             processed_ids.append(athlete_profile_id)
@@ -1282,8 +1295,7 @@ async def run_performance_injury_risk_alert_scan_worker(
                 high_risk_count += 1
             if result["sent"]:
                 alerted_count += 1
-                if result["message_id"] is not None:
-                    message_ids.append(result["message_id"])
+                message_ids.extend(result["message_ids"])
             else:
                 skipped_count += 1
                 reason = str(result["skipped_reason"] or ("Dry run only." if dry_run else "Alert not sent."))
@@ -1297,6 +1309,8 @@ async def run_performance_injury_risk_alert_scan_worker(
         threshold_score=threshold_score,
         repeat_after_hours=repeat_after_hours,
         dry_run=dry_run,
+        channels=alert_channels,
+        channel_count=len(alert_channels),
         eligible_count=len(athlete_profile_ids),
         scanned_count=scanned_count,
         alerted_count=alerted_count,
@@ -2547,12 +2561,47 @@ async def recent_injury_risk_alert_exists(
     return existing is not None
 
 
-async def create_injury_risk_alert_message(
+def normalized_injury_risk_alert_channels(
+    channels: list[CommunicationChannel] | None,
+) -> list[CommunicationChannel]:
+    selected = channels or [CommunicationChannel.IN_APP]
+    normalized: list[CommunicationChannel] = []
+    for channel in selected:
+        if channel not in normalized:
+            normalized.append(channel)
+    return normalized or [CommunicationChannel.IN_APP]
+
+
+async def create_injury_risk_alert_messages(
     db: AsyncSession,
     organization_id: UUID,
     athlete: Person,
     risk: dict[str, object],
     recipient_ids: set[UUID],
+    channels: list[CommunicationChannel],
+) -> list[CommunicationMessage]:
+    messages: list[CommunicationMessage] = []
+    for channel in channels:
+        messages.append(
+            await create_injury_risk_alert_message_for_channel(
+                db,
+                organization_id,
+                athlete,
+                risk,
+                recipient_ids,
+                channel,
+            )
+        )
+    return messages
+
+
+async def create_injury_risk_alert_message_for_channel(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete: Person,
+    risk: dict[str, object],
+    recipient_ids: set[UUID],
+    channel: CommunicationChannel,
 ) -> CommunicationMessage:
     now = datetime.now(UTC)
     message = CommunicationMessage(
@@ -2560,7 +2609,7 @@ async def create_injury_risk_alert_message(
         template_id=None,
         created_by_person_id=None,
         message_type=CommunicationMessageType.ALERT,
-        channel=CommunicationChannel.IN_APP,
+        channel=channel,
         scope_type=CommunicationScopeType.PERSON,
         scope_id=athlete.id,
         subject=injury_risk_alert_subject(athlete, risk),
@@ -2581,8 +2630,8 @@ async def create_injury_risk_alert_message(
             MessageRecipient(
                 message_id=message.id,
                 person_id=person.id,
-                destination=destination_for_channel(person, CommunicationChannel.IN_APP),
-                delivery_status=initial_delivery_status(person, CommunicationChannel.IN_APP),
+                destination=destination_for_channel(person, channel),
+                delivery_status=initial_delivery_status(person, channel),
             )
         )
     return message

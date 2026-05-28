@@ -414,6 +414,29 @@ textarea:focus {
   height: 18px;
 }
 
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.check-row label {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  padding: 8px 10px;
+  text-transform: capitalize;
+}
+
+.check-row input {
+  height: 16px;
+  width: 16px;
+}
+
 .wide-field {
   grid-column: 1 / -1;
 }

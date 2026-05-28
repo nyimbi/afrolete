@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.enums import CommunicationChannel
 from app.schemas.performance import (
     AssessmentReviewQueueSummaryRead,
     AthleteAssessmentCreate,
@@ -707,6 +708,7 @@ async def athlete_performance_injury_risk_alert_route(
     organization_id: UUID = Query(),
     threshold_score: int = Query(default=65, ge=0, le=100),
     repeat_after_hours: int = Query(default=24, ge=0, le=720),
+    channels: list[CommunicationChannel] | None = Query(default=None),
     dry_run: bool = Query(default=False),
     identity: CurrentIdentity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
@@ -721,6 +723,7 @@ async def athlete_performance_injury_risk_alert_route(
         threshold_score=threshold_score,
         dry_run=dry_run,
         repeat_after_hours=repeat_after_hours,
+        channels=channels,
     )
     return PerformanceInjuryRiskAlertRead(
         **{
@@ -739,6 +742,7 @@ async def run_performance_injury_risk_alert_scan_route(
     limit: int = Query(default=50, ge=1, le=250),
     threshold_score: int = Query(default=65, ge=0, le=100),
     repeat_after_hours: int = Query(default=24, ge=0, le=720),
+    channels: list[CommunicationChannel] | None = Query(default=None),
     dry_run: bool = Query(default=False),
     identity: CurrentIdentity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
@@ -752,6 +756,7 @@ async def run_performance_injury_risk_alert_scan_route(
         limit=limit,
         threshold_score=threshold_score,
         repeat_after_hours=repeat_after_hours,
+        channels=channels,
         dry_run=dry_run,
     )
 

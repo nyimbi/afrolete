@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import SessionLocal
+from app.models.enums import CommunicationChannel
 from app.services.agents import run_agent_task_worker
 from app.services.developer import run_developer_webhook_retry_due
 from app.services.performance import (
@@ -39,6 +40,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--performance-injury-risk-limit", type=int, default=None)
     parser.add_argument("--performance-injury-risk-threshold", type=int, default=65)
     parser.add_argument("--performance-injury-risk-repeat-after-hours", type=int, default=24)
+    parser.add_argument(
+        "--performance-injury-risk-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        action="append",
+        default=None,
+    )
     parser.add_argument("--dry-run-performance-injury-risk-alerts", action="store_true")
     parser.add_argument("--webhook-max-attempts", type=int, default=3)
     parser.add_argument("--include-recorded-webhooks", action="store_true")
@@ -68,6 +75,7 @@ async def run_due_workers(
     performance_injury_risk_limit: int | None = None,
     performance_injury_risk_threshold: int = 65,
     performance_injury_risk_repeat_after_hours: int = 24,
+    performance_injury_risk_channels: Sequence[CommunicationChannel] | None = None,
     dry_run_performance_injury_risk_alerts: bool = False,
     webhook_max_attempts: int = 3,
     include_recorded_webhooks: bool = False,
@@ -119,6 +127,7 @@ async def run_due_workers(
                 limit=performance_injury_risk_limit or limit,
                 threshold_score=performance_injury_risk_threshold,
                 repeat_after_hours=performance_injury_risk_repeat_after_hours,
+                channels=list(performance_injury_risk_channels) if performance_injury_risk_channels else None,
                 dry_run=dry_run_performance_injury_risk_alerts,
             )
         ).model_dump(mode="json")
@@ -172,6 +181,11 @@ async def run() -> None:
             performance_injury_risk_limit=args.performance_injury_risk_limit,
             performance_injury_risk_threshold=args.performance_injury_risk_threshold,
             performance_injury_risk_repeat_after_hours=args.performance_injury_risk_repeat_after_hours,
+            performance_injury_risk_channels=[
+                CommunicationChannel(channel) for channel in args.performance_injury_risk_channel
+            ]
+            if args.performance_injury_risk_channel
+            else None,
             dry_run_performance_injury_risk_alerts=args.dry_run_performance_injury_risk_alerts,
             webhook_max_attempts=args.webhook_max_attempts,
             include_recorded_webhooks=args.include_recorded_webhooks,
