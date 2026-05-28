@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import parse_positive_int_map
 from app.db.session import SessionLocal
 from app.models.enums import CommunicationChannel
 from app.services.agents import run_agent_task_worker
@@ -52,6 +53,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wearable-pull-limit", type=int, default=None)
     parser.add_argument("--wearable-pull-max-pages", type=int, default=3)
     parser.add_argument("--wearable-pull-default-retry-after-seconds", type=int, default=300)
+    parser.add_argument(
+        "--wearable-pull-provider-retry-after-seconds",
+        default=None,
+        help="Comma-separated provider retry windows, for example whoop=900,garmin=300.",
+    )
+    parser.add_argument(
+        "--wearable-pull-provider-max-pages",
+        default=None,
+        help="Comma-separated provider max-page limits, for example whoop=1,fitbit=5.",
+    )
     parser.add_argument("--webhook-max-attempts", type=int, default=3)
     parser.add_argument("--include-recorded-webhooks", action="store_true")
     parser.add_argument("--pretty", action="store_true")
@@ -85,6 +96,8 @@ async def run_due_workers(
     wearable_pull_limit: int | None = None,
     wearable_pull_max_pages: int = 3,
     wearable_pull_default_retry_after_seconds: int = 300,
+    wearable_pull_provider_retry_after_seconds: dict[str, int] | None = None,
+    wearable_pull_provider_max_pages: dict[str, int] | None = None,
     webhook_max_attempts: int = 3,
     include_recorded_webhooks: bool = False,
 ) -> dict[str, object]:
@@ -147,6 +160,8 @@ async def run_due_workers(
                 limit=wearable_pull_limit or limit,
                 max_pages=wearable_pull_max_pages,
                 default_retry_after_seconds=wearable_pull_default_retry_after_seconds,
+                provider_retry_after_seconds=wearable_pull_provider_retry_after_seconds,
+                provider_max_pages=wearable_pull_provider_max_pages,
             )
         ).model_dump(mode="json")
     return {
@@ -209,6 +224,14 @@ async def run() -> None:
             wearable_pull_limit=args.wearable_pull_limit,
             wearable_pull_max_pages=args.wearable_pull_max_pages,
             wearable_pull_default_retry_after_seconds=args.wearable_pull_default_retry_after_seconds,
+            wearable_pull_provider_retry_after_seconds=parse_positive_int_map(
+                args.wearable_pull_provider_retry_after_seconds
+            )
+            if args.wearable_pull_provider_retry_after_seconds
+            else None,
+            wearable_pull_provider_max_pages=parse_positive_int_map(args.wearable_pull_provider_max_pages)
+            if args.wearable_pull_provider_max_pages
+            else None,
             webhook_max_attempts=args.webhook_max_attempts,
             include_recorded_webhooks=args.include_recorded_webhooks,
         )

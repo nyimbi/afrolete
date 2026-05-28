@@ -5,6 +5,19 @@ from pydantic import AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def parse_positive_int_map(value: str | dict[str, int]) -> dict[str, int]:
+    if isinstance(value, str):
+        entries: dict[str, int] = {}
+        for entry in value.split(","):
+            if not entry.strip():
+                continue
+            key, _, raw_value = entry.partition("=")
+            if key.strip() and raw_value.strip():
+                entries[key.strip().lower()] = max(int(raw_value.strip()), 1)
+        return entries
+    return {key.lower(): max(int(raw_value), 1) for key, raw_value in value.items()}
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AFROLETE_",
@@ -121,6 +134,8 @@ class Settings(BaseSettings):
     performance_wearable_webhook_signing_key_secret_path: str = ""
     performance_wearable_webhook_signing_key_secret_field: str = "value"
     performance_wearable_webhook_tolerance_seconds: int = 300
+    performance_wearable_provider_retry_after_seconds: dict[str, int] = Field(default_factory=dict)
+    performance_wearable_provider_max_pages: dict[str, int] = Field(default_factory=dict)
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"
@@ -171,16 +186,17 @@ class Settings(BaseSettings):
     @field_validator("travel_device_provider_idempotency_days", mode="before")
     @classmethod
     def parse_provider_idempotency_days(cls, value: str | dict[str, int]) -> dict[str, int]:
-        if isinstance(value, str):
-            windows: dict[str, int] = {}
-            for entry in value.split(","):
-                if not entry.strip():
-                    continue
-                provider, _, days = entry.partition("=")
-                if provider.strip() and days.strip():
-                    windows[provider.strip().lower()] = max(int(days.strip()), 1)
-            return windows
-        return {provider.lower(): max(int(days), 1) for provider, days in value.items()}
+        return parse_positive_int_map(value)
+
+    @field_validator("performance_wearable_provider_retry_after_seconds", mode="before")
+    @classmethod
+    def parse_wearable_provider_retry_after_seconds(cls, value: str | dict[str, int]) -> dict[str, int]:
+        return parse_positive_int_map(value)
+
+    @field_validator("performance_wearable_provider_max_pages", mode="before")
+    @classmethod
+    def parse_wearable_provider_max_pages(cls, value: str | dict[str, int]) -> dict[str, int]:
+        return parse_positive_int_map(value)
 
 
 @lru_cache(maxsize=1)

@@ -693,18 +693,34 @@ async def run_wearable_pull_retry_worker(
     limit: int = 25,
     max_pages: int = 3,
     default_retry_after_seconds: int = 300,
+    provider_retry_after_seconds: dict[str, int] | None = None,
+    provider_max_pages: dict[str, int] | None = None,
 ) -> PerformanceWearablePullRetryWorkerRunRead:
+    settings = get_settings()
+    provider_retry_after_seconds = normalized_provider_policy_map(
+        provider_retry_after_seconds
+        if provider_retry_after_seconds is not None
+        else settings.performance_wearable_provider_retry_after_seconds
+    )
+    provider_max_pages = normalized_provider_policy_map(
+        provider_max_pages if provider_max_pages is not None else settings.performance_wearable_provider_max_pages
+    )
     rows = await wearable_pull_retry_rows(
         db,
         organization_id=organization_id,
         limit=limit,
         default_retry_after_seconds=default_retry_after_seconds,
+        provider_retry_after_seconds=provider_retry_after_seconds,
     )
     retried_count = 0
     failed_count = 0
+    provider_policy_matches: dict[str, int] = {}
     connection_ids: list[UUID] = []
     sync_run_ids: list[UUID] = []
     for previous_run, connection in rows:
+        provider = provider_policy_key(connection.provider)
+        if provider in provider_retry_after_seconds or provider in provider_max_pages:
+            provider_policy_matches[provider] = provider_policy_matches.get(provider, 0) + 1
         try:
             retry_run = await execute_wearable_provider_sync(
                 db,
@@ -712,7 +728,7 @@ async def run_wearable_pull_retry_worker(
                 PerformanceWearableSyncRunCreate(
                     sync_mode="pull_retry",
                     metric_definition_ids=decode_uuid_list(connection.default_metric_definition_ids) or None,
-                    max_pages=max_pages,
+                    max_pages=wearable_provider_max_pages(connection, max_pages, provider_max_pages),
                 ),
             )
             retried_count += 1
@@ -733,6 +749,9 @@ async def run_wearable_pull_retry_worker(
         skipped_count=max(len(rows) - retried_count - failed_count, 0),
         failed_count=failed_count,
         rate_limited_count=sum(1 for run, _ in rows if run.provider_rate_limited),
+        provider_retry_after_seconds=provider_retry_after_seconds,
+        provider_max_pages=provider_max_pages,
+        provider_policy_matches=provider_policy_matches,
         connection_ids=connection_ids,
         sync_run_ids=sync_run_ids,
     )
@@ -743,7 +762,9 @@ async def wearable_pull_retry_rows(
     organization_id: UUID | None,
     limit: int,
     default_retry_after_seconds: int,
+    provider_retry_after_seconds: dict[str, int] | None = None,
 ) -> list[tuple[PerformanceWearableProviderSyncRun, PerformanceWearableProviderConnection]]:
+    provider_retry_after_seconds = normalized_provider_policy_map(provider_retry_after_seconds or {})
     now = datetime.now(UTC)
     statement = (
         select(PerformanceWearableProviderSyncRun, PerformanceWearableProviderConnection)
@@ -772,13 +793,53 @@ async def wearable_pull_retry_rows(
         if run.status != "rate_limited" or not run.provider_rate_limited:
             continue
         completed_at = as_utc_datetime(run.completed_at) or as_utc_datetime(run.started_at)
-        retry_after = run.provider_retry_after_seconds or default_retry_after_seconds
+        retry_after = wearable_provider_retry_after_seconds(
+            run,
+            connection,
+            default_retry_after_seconds,
+            provider_retry_after_seconds,
+        )
         if completed_at is not None and completed_at + timedelta(seconds=retry_after) > now:
             continue
         selected.append((run, connection))
         if len(selected) >= limit:
             break
     return selected
+
+
+def provider_policy_key(provider: str) -> str:
+    return provider.strip().lower()
+
+
+def normalized_provider_policy_map(values: dict[str, int]) -> dict[str, int]:
+    return {
+        provider_policy_key(provider): max(int(value), 1)
+        for provider, value in values.items()
+        if provider_policy_key(provider)
+    }
+
+
+def wearable_provider_retry_after_seconds(
+    run: PerformanceWearableProviderSyncRun,
+    connection: PerformanceWearableProviderConnection,
+    default_retry_after_seconds: int,
+    provider_retry_after_seconds: dict[str, int],
+) -> int:
+    if run.provider_retry_after_seconds is not None:
+        return max(run.provider_retry_after_seconds, 0)
+    return provider_retry_after_seconds.get(
+        provider_policy_key(connection.provider),
+        max(default_retry_after_seconds, 0),
+    )
+
+
+def wearable_provider_max_pages(
+    connection: PerformanceWearableProviderConnection,
+    default_max_pages: int,
+    provider_max_pages: dict[str, int],
+) -> int:
+    configured_max_pages = provider_max_pages.get(provider_policy_key(connection.provider), default_max_pages)
+    return min(max(configured_max_pages, 1), 10)
 
 
 async def ingest_wearable_sync_payload(

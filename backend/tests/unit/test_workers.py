@@ -167,3 +167,105 @@ async def test_due_worker_retries_rate_limited_wearable_pull(db_session, monkeyp
         )
     )
     assert retry_count == 1
+
+
+async def test_due_worker_honors_provider_wearable_backoff_policy(db_session, monkeypatch) -> None:
+    organization = Organization(
+        name="Wearable Policy Club",
+        slug="wearable-policy-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    person = Person(display_name="Policy Athlete", primary_email="policy-athlete@example.com")
+    db_session.add(person)
+    await db_session.flush()
+    athlete = AthleteProfile(organization_id=organization.id, person_id=person.id)
+    db_session.add(athlete)
+    await db_session.flush()
+    connection = PerformanceWearableProviderConnection(
+        organization_id=organization.id,
+        athlete_profile_id=athlete.id,
+        provider="WHOOP",
+        display_name="WHOOP policy",
+        external_athlete_ref="policy-athlete",
+        access_token_secret_path="secret/data/afrolete/wearables/whoop/policy",
+        provider_pull_url="https://whoop.example/v1/recovery",
+    )
+    db_session.add(connection)
+    await db_session.flush()
+    old_run = PerformanceWearableProviderSyncRun(
+        organization_id=organization.id,
+        connection_id=connection.id,
+        athlete_profile_id=athlete.id,
+        provider="WHOOP",
+        status="rate_limited",
+        sync_mode="pull",
+        started_at=datetime.now(UTC) - timedelta(minutes=2),
+        completed_at=datetime.now(UTC) - timedelta(minutes=2),
+        provider_status_code=429,
+        provider_response_hash="policy-rate-limit-hash",
+        provider_page_count=0,
+        provider_rate_limited=True,
+        provider_retry_after_seconds=None,
+        message="Rate limited by provider without Retry-After.",
+    )
+    db_session.add(old_run)
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("wearable-pull-retries",),
+        wearable_pull_default_retry_after_seconds=60,
+        wearable_pull_provider_retry_after_seconds={"whoop": 900},
+    )
+
+    assert result["summary"]["eligible_count"] == 0
+    assert result["results"]["wearable_pull_retries"]["provider_retry_after_seconds"] == {"whoop": 900}
+
+    old_run.completed_at = datetime.now(UTC) - timedelta(minutes=20)
+    old_run.started_at = old_run.completed_at
+    db_session.add(old_run)
+    await db_session.commit()
+    seen_max_pages: list[int] = []
+
+    async def fake_execute(db, retry_connection, payload):
+        seen_max_pages.append(payload.max_pages)
+        retry_run = PerformanceWearableProviderSyncRun(
+            organization_id=retry_connection.organization_id,
+            connection_id=retry_connection.id,
+            athlete_profile_id=retry_connection.athlete_profile_id,
+            provider=retry_connection.provider,
+            status="completed",
+            sync_mode=payload.sync_mode,
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+            observation_count=1,
+            provider_status_code=200,
+            provider_response_hash="policy-retry-hash",
+            provider_page_count=1,
+            provider_rate_limited=False,
+            message="Policy retry completed.",
+        )
+        db.add(retry_run)
+        await db.commit()
+        await db.refresh(retry_run)
+        return retry_run
+
+    monkeypatch.setattr(performance_service, "execute_wearable_provider_sync", fake_execute)
+
+    retried = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("wearable-pull-retries",),
+        wearable_pull_provider_retry_after_seconds={"whoop": 900},
+        wearable_pull_provider_max_pages={"whoop": 1},
+    )
+
+    retry_result = retried["results"]["wearable_pull_retries"]
+    assert retry_result["retried_count"] == 1
+    assert retry_result["provider_policy_matches"] == {"whoop": 1}
+    assert retry_result["provider_max_pages"] == {"whoop": 1}
+    assert seen_max_pages == [1]

@@ -237,6 +237,9 @@ class PerformanceWearablePullRetryWorkerRunRead(BaseModel):
     skipped_count: int
     failed_count: int
     rate_limited_count: int
+    provider_retry_after_seconds: dict[str, int]
+    provider_max_pages: dict[str, int]
+    provider_policy_matches: dict[str, int]
     connection_ids: list[UUID]
     sync_run_ids: list[UUID]
 
