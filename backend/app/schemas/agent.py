@@ -335,6 +335,12 @@ class AgentBiasAuditCreate(BaseModel):
     population_slice: str = Field(default="all-participants", min_length=2, max_length=160)
 
 
+class AgentBiasAuditMitigationUpdate(BaseModel):
+    mitigation_status: str = Field(pattern="^(open|in_progress|mitigated|accepted_risk|not_required)$")
+    mitigation_action: str = Field(min_length=2, max_length=4000)
+    mitigation_evidence_ref: str | None = Field(default=None, max_length=500)
+
+
 class AgentBiasAuditRead(BaseModel):
     id: UUID
     organization_id: UUID
@@ -349,6 +355,10 @@ class AgentBiasAuditRead(BaseModel):
     findings: str
     recommendation: str
     mitigation_status: str
+    mitigation_action: str | None
+    mitigation_evidence_ref: str | None
+    mitigated_by_person_id: UUID | None
+    mitigated_at: datetime | None
     audited_by_person_id: UUID | None
     audited_at: datetime
 

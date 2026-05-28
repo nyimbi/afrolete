@@ -8,6 +8,7 @@ from app.schemas.agent import (
     AgentAssignmentCreate,
     AgentAssignmentRead,
     AgentBiasAuditCreate,
+    AgentBiasAuditMitigationUpdate,
     AgentBiasAuditRead,
     AgentDecisionAppealCreate,
     AgentDecisionAppealFormRead,
@@ -111,6 +112,7 @@ from app.services.agents import (
     submit_agent_decision_appeal,
     submit_my_agent_decision_appeal,
     update_agent_decision_appeal,
+    update_agent_bias_audit_mitigation,
     update_agent_governance_policy_rule,
     update_agent_model_registry,
     update_agent_scorecard_comment,
@@ -251,6 +253,10 @@ def to_bias_audit_read(audit) -> AgentBiasAuditRead:
         findings=audit.findings,
         recommendation=audit.recommendation,
         mitigation_status=audit.mitigation_status,
+        mitigation_action=audit.mitigation_action,
+        mitigation_evidence_ref=audit.mitigation_evidence_ref,
+        mitigated_by_person_id=audit.mitigated_by_person_id,
+        mitigated_at=audit.mitigated_at,
         audited_by_person_id=audit.audited_by_person_id,
         audited_at=audit.audited_at,
     )
@@ -732,6 +738,19 @@ async def run_agent_bias_audit_route(
 ) -> AgentBiasAuditRead:
     return to_bias_audit_read(
         await run_agent_bias_audit(db, identity, registry_id, payload, authz)
+    )
+
+
+@router.patch("/bias-audits/{audit_id}/mitigation", response_model=AgentBiasAuditRead)
+async def update_agent_bias_audit_mitigation_route(
+    audit_id: UUID,
+    payload: AgentBiasAuditMitigationUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentBiasAuditRead:
+    return to_bias_audit_read(
+        await update_agent_bias_audit_mitigation(db, identity, audit_id, payload, authz)
     )
 
 

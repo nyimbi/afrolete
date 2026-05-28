@@ -626,3 +626,91 @@ def test_agent_assignment_rejects_cross_organization_scope(client, identity_head
     assert second_org["id"] != first_org["id"]
     assert response.status_code == 422
     assert response.json()["detail"] == "Assignment scope belongs to another organization"
+
+
+def test_agent_bias_audit_mitigation_lifecycle_updates_scorecard(client, identity_headers) -> None:
+    organization, _ = create_org_and_team(client, identity_headers, "bias-mitigation")
+    registry_response = client.post(
+        "/api/v1/agents/model-registry",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "model_policy": "selection-recommendation-bias-v1",
+            "provider": "local",
+            "model_family": "deterministic-governance",
+            "version": "2026-05",
+            "use_case": "Selection recommendations with age, gender, regional, club, and school bias review.",
+            "risk_tier": "high",
+            "review_status": "blocked",
+            "documentation_url": "https://docs.example.test/selection-bias",
+            "evaluation_summary": "Initial model card requires bias mitigation evidence.",
+            "bias_notes": "Audit all participant cohorts before release.",
+            "data_residency": "tenant-region",
+        },
+    )
+    assert registry_response.status_code == 201
+    registry = registry_response.json()
+
+    audit_response = client.post(
+        f"/api/v1/agents/model-registry/{registry['id']}/bias-audits",
+        headers=identity_headers,
+        json={
+            "audit_dimension": "age_gender_region_club_school",
+            "population_slice": "all-participants",
+        },
+    )
+    assert audit_response.status_code == 201
+    audit = audit_response.json()
+    assert audit["mitigation_status"] == "open"
+    assert audit["mitigation_action"] is None
+    assert audit["mitigated_at"] is None
+
+    scorecard_with_open_audit = client.get(
+        f"/api/v1/agents/ethical-scorecard?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert scorecard_with_open_audit["open_mitigations"] == 1
+
+    in_progress_response = client.patch(
+        f"/api/v1/agents/bias-audits/{audit['id']}/mitigation",
+        headers=identity_headers,
+        json={
+            "mitigation_status": "in_progress",
+            "mitigation_action": "Review cohort outcomes and pause recommendations until reviewer approval.",
+            "mitigation_evidence_ref": "risk-register:selection-recommendation-bias-v1",
+        },
+    )
+    assert in_progress_response.status_code == 200
+    in_progress = in_progress_response.json()
+    assert in_progress["mitigation_status"] == "in_progress"
+    assert in_progress["mitigated_by_person_id"] is None
+    assert in_progress["mitigated_at"] is None
+
+    mitigated_response = client.patch(
+        f"/api/v1/agents/bias-audits/{audit['id']}/mitigation",
+        headers=identity_headers,
+        json={
+            "mitigation_status": "mitigated",
+            "mitigation_action": "Balanced cohort sampling and required human review for high-impact outputs.",
+            "mitigation_evidence_ref": "risk-register:selection-recommendation-bias-v1#mitigated",
+        },
+    )
+    assert mitigated_response.status_code == 200
+    mitigated = mitigated_response.json()
+    assert mitigated["mitigation_status"] == "mitigated"
+    assert mitigated["mitigation_action"].startswith("Balanced cohort sampling")
+    assert mitigated["mitigation_evidence_ref"].endswith("#mitigated")
+    assert mitigated["mitigated_by_person_id"] is not None
+    assert mitigated["mitigated_at"] is not None
+
+    scorecard_after_mitigation = client.get(
+        f"/api/v1/agents/ethical-scorecard?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert scorecard_after_mitigation["open_mitigations"] == 0
+
+    registry_after_mitigation = client.get(
+        f"/api/v1/agents/model-registry?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()[0]
+    assert registry_after_mitigation["review_status"] == "in_review"

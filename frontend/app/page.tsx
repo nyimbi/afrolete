@@ -6923,6 +6923,46 @@ export default function HomePage() {
     );
   };
 
+  const updateAgentBiasAuditMitigation = (
+    audit: AgentBiasAuditRead,
+    mitigationStatus: "in_progress" | "mitigated" | "accepted_risk"
+  ) => {
+    const actionByStatus: Record<"in_progress" | "mitigated" | "accepted_risk", string> = {
+      in_progress:
+        "Mitigation opened from the operations console; review affected model outputs and update registry controls.",
+      mitigated:
+        "Mitigation completed from the operations console after governance review and model-risk triage.",
+      accepted_risk:
+        "Risk accepted from the operations console with monitoring required on the next ethical scorecard cycle."
+    };
+    runAction(
+      `agent-bias-mitigation-${audit.id}-${mitigationStatus}`,
+      () =>
+        apiRequest<AgentBiasAuditRead>(`/agents/bias-audits/${audit.id}/mitigation`, {
+          method: "PATCH",
+          identity,
+          body: {
+            mitigation_status: mitigationStatus,
+            mitigation_action: actionByStatus[mitigationStatus],
+            mitigation_evidence_ref: `agent-bias-audit:${audit.id}`
+          }
+        }),
+      (updatedAudit) => {
+        setAgentBiasAudits((current) => [
+          updatedAudit,
+          ...current.filter((item) => item.id !== updatedAudit.id)
+        ]);
+        addLog(
+          `${updatedAudit.model_policy} mitigation ${updatedAudit.mitigation_status.replaceAll("_", " ")}`,
+          updatedAudit.mitigation_status === "in_progress" ? "neutral" : "good"
+        );
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
+      }
+    );
+  };
+
   const submitAgentDecisionAppeal = (task: AgentTaskRead) => {
     runAction(
       `agent-decision-appeal-${task.id}`,
@@ -16655,6 +16695,26 @@ export default function HomePage() {
                     <span>{audit.audit_dimension} · {audit.population_slice} · score {audit.disparity_score.toFixed(3)}</span>
                     <span>{audit.severity} · sample {audit.sample_size} · {audit.mitigation_status}</span>
                     <span>{audit.recommendation}</span>
+                    {audit.mitigation_action ? <span>{audit.mitigation_action}</span> : null}
+                    {audit.mitigation_evidence_ref ? <span>Evidence {audit.mitigation_evidence_ref}</span> : null}
+                    {audit.mitigated_at ? (
+                      <span>Closed {new Date(audit.mitigated_at).toLocaleString()}</span>
+                    ) : null}
+                  </div>
+                  <div className="event-toolbar">
+                    <button
+                      type="button"
+                      onClick={() => updateAgentBiasAuditMitigation(audit, "in_progress")}
+                      disabled={audit.mitigation_status === "in_progress"}
+                    >
+                      Mitigate
+                    </button>
+                    <button type="button" onClick={() => updateAgentBiasAuditMitigation(audit, "mitigated")}>
+                      Close
+                    </button>
+                    <button type="button" onClick={() => updateAgentBiasAuditMitigation(audit, "accepted_risk")}>
+                      Accept risk
+                    </button>
                   </div>
                 </article>
               ))}

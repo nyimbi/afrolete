@@ -43,6 +43,7 @@ from app.models.team import AthleteProfile, GuardianRelationship, Team
 from app.schemas.agent import (
     AgentAssignmentCreate,
     AgentBiasAuditCreate,
+    AgentBiasAuditMitigationUpdate,
     AgentCreate,
     AgentDecisionAppealCreate,
     AgentDecisionAppealUpdate,
@@ -707,6 +708,45 @@ async def run_agent_bias_audit(
     return audit
 
 
+async def update_agent_bias_audit_mitigation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    audit_id: UUID,
+    payload: AgentBiasAuditMitigationUpdate,
+    authz: AuthorizationService,
+) -> AgentBiasAudit:
+    audit = await db.get(AgentBiasAudit, audit_id)
+    if audit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent bias audit not found")
+    await ensure_manage_organization(authz, identity, audit.organization_id)
+    audit.mitigation_status = payload.mitigation_status
+    audit.mitigation_action = payload.mitigation_action
+    audit.mitigation_evidence_ref = payload.mitigation_evidence_ref
+    if payload.mitigation_status in {"mitigated", "accepted_risk", "not_required"}:
+        audit.mitigated_by_person_id = identity.person_id
+        audit.mitigated_at = datetime.now(UTC)
+    else:
+        audit.mitigated_by_person_id = None
+        audit.mitigated_at = None
+
+    registry = await db.get(AgentModelRegistry, audit.model_registry_id)
+    if registry is not None:
+        if (
+            payload.mitigation_status in {"mitigated", "accepted_risk", "not_required"}
+            and registry.review_status == "blocked"
+        ):
+            registry.review_status = "in_review"
+            registry.approved_by_person_id = None
+            registry.approved_at = None
+        elif payload.mitigation_status in {"open", "in_progress"} and audit.status == "fail":
+            registry.review_status = "blocked"
+            registry.approved_by_person_id = None
+            registry.approved_at = None
+    await db.commit()
+    await db.refresh(audit)
+    return audit
+
+
 async def create_agent_model_registry(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1240,7 +1280,7 @@ async def agent_ethical_scorecard(
     undocumented_models = sum(1 for item in registry if not item.documentation_url)
     passing_bias_audits = sum(1 for audit in audits if audit.status == "pass")
     failing_bias_audits = sum(1 for audit in audits if audit.status == "fail")
-    open_mitigations = sum(1 for audit in audits if audit.mitigation_status == "open")
+    open_mitigations = sum(1 for audit in audits if audit.mitigation_status in {"open", "in_progress"})
     pending_appeals = sum(1 for appeal in appeals if appeal.status in {"pending", "under_review"})
     resolved_appeals = sum(1 for appeal in appeals if appeal.resolved_at is not None)
     human_review_required = count_tasks(tasks, AgentTaskStatus.WAITING_FOR_REVIEW)

@@ -182,6 +182,10 @@ class AgentBiasAudit(IdMixin, TimestampMixin, Base):
     findings: Mapped[str] = mapped_column(Text, nullable=False)
     recommendation: Mapped[str] = mapped_column(Text, nullable=False)
     mitigation_status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
+    mitigation_action: Mapped[str | None] = mapped_column(Text)
+    mitigation_evidence_ref: Mapped[str | None] = mapped_column(String(500))
+    mitigated_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    mitigated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     audited_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     audited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 

@@ -3456,6 +3456,10 @@ export type AgentBiasAuditRead = {
   findings: string;
   recommendation: string;
   mitigation_status: string;
+  mitigation_action: string | null;
+  mitigation_evidence_ref: string | null;
+  mitigated_by_person_id: UUID | null;
+  mitigated_at: string | null;
   audited_by_person_id: UUID | null;
   audited_at: string;
 };
