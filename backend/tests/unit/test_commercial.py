@@ -134,6 +134,7 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
             "invoice_number": "INV-1",
             "title": "Sponsor activation",
             "amount_due": "100.00",
+            "due_on": "2026-06-30",
         },
     ).json()
     payment = client.post(
@@ -160,6 +161,23 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     ).json()
     assert tax["tax_amount"] == "16.00"
     assert tax["total"] == "116.00"
+    filing = client.post(
+        "/api/v1/commercial/tax-filing/deliver",
+        headers=identity_headers,
+        params={
+            "organization_id": organization["id"],
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-30",
+            "jurisdiction": "KE",
+            "tax_rate": "16.00",
+        },
+    ).json()
+    assert filing["delivery_mode"] == "record_only"
+    assert filing["delivered"] is False
+    assert filing["invoice_count"] == 1
+    assert filing["taxable_subtotal"] == "100.00"
+    assert filing["tax_amount"] == "16.00"
+    assert filing["filing_reference"].startswith("COMTAX-KE-")
 
     settlement = client.get(
         "/api/v1/commercial/settlements",
@@ -515,5 +533,87 @@ def test_commercial_accounting_sync_delivers_signed_webhook(
     ).hexdigest()
     assert headers["X-Afrolete-Commercial-Accounting-Key"] == "accounting-secret"
     assert headers["X-Afrolete-Commercial-Accounting-Signature"] == f"sha256={expected_signature}"
+
+    commercial_service.get_settings.cache_clear()
+
+
+def test_commercial_tax_filing_delivers_signed_webhook(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json, headers):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return SimpleNamespace(status_code=201, text="filed")
+
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_TAX_FILING_DELIVERY_MODE", "webhook")
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_TAX_FILING_WEBHOOK_URL", "https://tax.example/commercial")
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_TAX_FILING_WEBHOOK_KEY", "commercial-tax-secret")
+    commercial_service.get_settings.cache_clear()
+    monkeypatch.setattr(commercial_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    organization, team, _ = create_commercial_context(client, identity_headers)
+    client.post(
+        "/api/v1/commercial/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "invoice_number": "COM-TAX-1",
+            "title": "Commercial tax filing invoice",
+            "amount_due": "125.00",
+            "due_on": "2026-07-15",
+        },
+    )
+
+    filing_response = client.post(
+        "/api/v1/commercial/tax-filing/deliver",
+        headers=identity_headers,
+        params={
+            "organization_id": organization["id"],
+            "period_start": "2026-07-01",
+            "period_end": "2026-07-31",
+            "jurisdiction": "ke",
+            "tax_rate": "16.00",
+        },
+    )
+    assert filing_response.status_code == 200
+    filing = filing_response.json()
+    assert filing["delivery_mode"] == "webhook"
+    assert filing["delivery_attempted"] is True
+    assert filing["delivered"] is True
+    assert filing["provider_status_code"] == 201
+    assert filing["taxable_subtotal"] == "125.00"
+    assert filing["tax_amount"] == "20.00"
+    assert captured["url"] == "https://tax.example/commercial"
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["event_type"] == "commercial.tax_filing"
+    assert payload["filing_reference"] == filing["filing_reference"]
+    assert payload["invoice_count"] == 1
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    timestamp = headers["X-Afrolete-Commercial-Tax-Timestamp"]
+    expected_signature = hmac.new(
+        b"commercial-tax-secret",
+        timestamp.encode() + b"." + json.dumps(payload, sort_keys=True, default=str).encode(),
+        sha256,
+    ).hexdigest()
+    assert headers["X-Afrolete-Commercial-Tax-Key"] == "commercial-tax-secret"
+    assert headers["X-Afrolete-Commercial-Tax-Signature"] == f"sha256={expected_signature}"
 
     commercial_service.get_settings.cache_clear()

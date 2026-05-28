@@ -1,7 +1,7 @@
 import json
 import time
 from typing import Any
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from decimal import InvalidOperation
 import hmac
@@ -42,6 +42,7 @@ from app.schemas.commercial import (
     CommercialSummaryRead,
     CommercialRefundCreate,
     CommercialRefundRead,
+    CommercialTaxFilingRead,
     DonationCreate,
     FinanceInvoiceCreate,
     FinancePaymentCreate,
@@ -464,6 +465,92 @@ async def tax_quote(
         reverse_charge=reverse_charge,
         rationale="Tax estimate for checkout, invoicing, and donation receipt review.",
     )
+
+
+async def deliver_commercial_tax_filing(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    period_start: date,
+    period_end: date,
+    jurisdiction: str,
+    tax_rate: Decimal,
+    reverse_charge: bool,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> CommercialTaxFilingRead:
+    await ensure_manage_commercial(authz, identity, organization_id)
+    if period_end < period_start:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="period_end must be on or after period_start")
+    selected_settings = settings or get_settings()
+    invoices = [
+        invoice
+        for invoice in await list_invoices(db, organization_id)
+        if period_start <= commercial_invoice_filing_date(invoice) <= period_end
+    ]
+    taxable_subtotal = sum((invoice.amount_due for invoice in invoices), Decimal("0")).quantize(Decimal("0.01"))
+    effective_rate = Decimal("0") if reverse_charge else tax_rate
+    tax_amount = (taxable_subtotal * effective_rate / Decimal("100")).quantize(Decimal("0.01"))
+    gross_total = (taxable_subtotal + tax_amount).quantize(Decimal("0.01"))
+    outstanding_total = sum((commercial_invoice_open_amount(invoice) for invoice in invoices), Decimal("0")).quantize(Decimal("0.01"))
+    currency = commercial_filing_currency(invoices)
+    filed_at = datetime.now(UTC)
+    filing_reference = commercial_tax_filing_reference(organization_id, jurisdiction, period_start, period_end)
+
+    result = CommercialTaxFilingRead(
+        organization_id=organization_id,
+        jurisdiction=jurisdiction.upper(),
+        period_start=period_start,
+        period_end=period_end,
+        invoice_count=len(invoices),
+        taxable_subtotal=taxable_subtotal,
+        tax_rate=effective_rate,
+        tax_amount=tax_amount,
+        gross_total=gross_total,
+        outstanding_total=outstanding_total,
+        currency=currency,
+        reverse_charge=reverse_charge,
+        filing_reference=filing_reference,
+        delivery_mode=selected_settings.commercial_tax_filing_delivery_mode,
+        delivery_attempted=False,
+        delivered=False,
+        destination=selected_settings.commercial_tax_filing_webhook_url or None,
+        provider_status_code=None,
+        failure_reason=None,
+        filed_at=filed_at,
+    )
+    if selected_settings.commercial_tax_filing_delivery_mode == "record_only":
+        return result.model_copy(update={"failure_reason": "Record-only filing mode; commercial tax package prepared for manual submission."})
+    if not selected_settings.commercial_tax_filing_webhook_url:
+        return result.model_copy(update={"failure_reason": "Commercial tax filing webhook mode is enabled but no webhook URL is configured."})
+
+    payload = commercial_tax_filing_payload(result)
+    raw_body = json.dumps(payload, sort_keys=True, default=str).encode()
+    timestamp = str(int(time.time()))
+    headers = await commercial_tax_filing_headers(selected_settings, raw_body, timestamp)
+    try:
+        async with httpx.AsyncClient(timeout=selected_settings.commercial_tax_filing_timeout_seconds) as client:
+            response = await client.post(
+                selected_settings.commercial_tax_filing_webhook_url,
+                json=payload,
+                headers=headers,
+            )
+        delivered = 200 <= response.status_code < 300
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "delivered": delivered,
+                "provider_status_code": response.status_code,
+                "failure_reason": None if delivered else f"Commercial tax filing webhook returned {response.status_code}: {response.text[:500]}",
+            }
+        )
+    except httpx.HTTPError as error:
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "failure_reason": f"Commercial tax filing webhook failed: {error}",
+            }
+        )
 
 
 async def payment_settlement(
@@ -1235,6 +1322,80 @@ async def commercial_accounting_sync_headers(
     if key:
         headers["X-Afrolete-Commercial-Accounting-Key"] = key
         headers["X-Afrolete-Commercial-Accounting-Signature"] = "sha256=" + hmac.new(
+            key.encode(),
+            timestamp.encode() + b"." + raw_body,
+            sha256,
+        ).hexdigest()
+    return headers
+
+
+def commercial_invoice_filing_date(invoice: FinanceInvoice) -> date:
+    if invoice.due_on is not None:
+        return invoice.due_on
+    created_at = invoice.created_at
+    if created_at.tzinfo is None:
+        return created_at.date()
+    return created_at.astimezone(UTC).date()
+
+
+def commercial_filing_currency(invoices: list[FinanceInvoice]) -> str:
+    currencies = {invoice.currency for invoice in invoices}
+    if len(currencies) == 1:
+        return next(iter(currencies))
+    return "mixed" if currencies else "USD"
+
+
+def commercial_tax_filing_reference(
+    organization_id: UUID,
+    jurisdiction: str,
+    period_start: date,
+    period_end: date,
+) -> str:
+    return (
+        f"COMTAX-{jurisdiction.upper()}-{str(organization_id)[:8]}-"
+        f"{period_start.strftime('%Y%m%d')}-{period_end.strftime('%Y%m%d')}"
+    )
+
+
+def commercial_tax_filing_payload(filing: CommercialTaxFilingRead) -> dict[str, Any]:
+    return {
+        "event_type": "commercial.tax_filing",
+        "organization_id": str(filing.organization_id),
+        "jurisdiction": filing.jurisdiction,
+        "period_start": filing.period_start.isoformat(),
+        "period_end": filing.period_end.isoformat(),
+        "invoice_count": filing.invoice_count,
+        "taxable_subtotal": str(filing.taxable_subtotal),
+        "tax_rate": str(filing.tax_rate),
+        "tax_amount": str(filing.tax_amount),
+        "gross_total": str(filing.gross_total),
+        "outstanding_total": str(filing.outstanding_total),
+        "currency": filing.currency,
+        "reverse_charge": filing.reverse_charge,
+        "filing_reference": filing.filing_reference,
+        "filed_at": filing.filed_at.isoformat(),
+    }
+
+
+async def commercial_tax_filing_headers(
+    settings: Settings,
+    raw_body: bytes,
+    timestamp: str,
+) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "X-Afrolete-Commercial-Tax-Timestamp": timestamp,
+    }
+    key = await resolve_commercial_secret(
+        settings,
+        env_value=settings.commercial_tax_filing_webhook_key,
+        path=settings.commercial_tax_filing_webhook_key_secret_path,
+        field_name=settings.commercial_tax_filing_webhook_key_secret_field,
+        label="commercial tax filing webhook key",
+    )
+    if key:
+        headers["X-Afrolete-Commercial-Tax-Key"] = key
+        headers["X-Afrolete-Commercial-Tax-Signature"] = "sha256=" + hmac.new(
             key.encode(),
             timestamp.encode() + b"." + raw_body,
             sha256,

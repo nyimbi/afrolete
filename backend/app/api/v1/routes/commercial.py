@@ -1,4 +1,5 @@
 from typing import Any
+from datetime import date
 from uuid import UUID
 from decimal import Decimal
 
@@ -15,6 +16,7 @@ from app.schemas.commercial import (
     CommercialSummaryRead,
     CommercialRefundCreate,
     CommercialRefundRead,
+    CommercialTaxFilingRead,
     DonationCreate,
     DonationRead,
     FinanceInvoiceCreate,
@@ -51,6 +53,7 @@ from app.services.commercial import (
     create_sponsorship,
     create_ticket_order,
     create_ticket_product,
+    deliver_commercial_tax_filing,
     get_commercial_invoice_hosted_checkout,
     ingest_commercial_invoice_payment_webhook,
     list_campaigns,
@@ -362,6 +365,31 @@ async def tax_quote_route(
     db: AsyncSession = Depends(get_db),
 ) -> TaxQuoteRead:
     return await tax_quote(db, organization_id, subtotal, tax_rate, jurisdiction, reverse_charge)
+
+
+@router.post("/tax-filing/deliver", response_model=CommercialTaxFilingRead)
+async def deliver_commercial_tax_filing_route(
+    organization_id: UUID = Query(),
+    period_start: date = Query(),
+    period_end: date = Query(),
+    jurisdiction: str = Query(default="KE", min_length=2, max_length=8),
+    tax_rate: Decimal = Query(default=Decimal("0"), ge=0, le=100),
+    reverse_charge: bool = Query(default=False),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommercialTaxFilingRead:
+    return await deliver_commercial_tax_filing(
+        db,
+        identity,
+        organization_id,
+        period_start,
+        period_end,
+        jurisdiction,
+        tax_rate,
+        reverse_charge,
+        authz,
+    )
 
 
 @router.get("/settlements", response_model=PaymentSettlementRead)

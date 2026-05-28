@@ -69,6 +69,7 @@ import type {
   CommunicationEscalationRunRead,
   CommunicationInboxItemRead,
   CommercialSummaryRead,
+  CommercialTaxFilingRead,
   CommunicationChannel,
   CommunicationMessageRead,
   CommunicationMessageType,
@@ -1493,6 +1494,7 @@ export default function HomePage() {
   const [payments, setPayments] = useState<FinancePaymentRead[]>([]);
   const [commercialSummary, setCommercialSummary] = useState<CommercialSummaryRead | null>(null);
   const [taxQuote, setTaxQuote] = useState<TaxQuoteRead | null>(null);
+  const [commercialTaxFiling, setCommercialTaxFiling] = useState<CommercialTaxFilingRead | null>(null);
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlementRead | null>(null);
   const [accountingExport, setAccountingExport] = useState<AccountingExportRead | null>(null);
   const [accountingSync, setAccountingSync] = useState<AccountingSyncRead | null>(null);
@@ -2066,7 +2068,11 @@ export default function HomePage() {
     due_on: "2026-06-30",
     memo: "Membership, facility, and program participation.",
     payment_amount: 250,
-    method: "card"
+    method: "card",
+    tax_jurisdiction: "KE",
+    tax_rate: 16,
+    tax_period_start: "2026-06-01",
+    tax_period_end: "2026-06-30"
   });
   const [reportForm, setReportForm] = useState({
     name: "Weekly intelligence brief",
@@ -3152,6 +3158,7 @@ export default function HomePage() {
       setPayments([]);
       setCommercialSummary(null);
       setTaxQuote(null);
+      setCommercialTaxFiling(null);
       setPaymentSettlement(null);
       setAccountingExport(null);
       setAccountingSync(null);
@@ -9372,11 +9379,36 @@ export default function HomePage() {
       "commercial-tax-quote",
       () =>
         apiRequest<TaxQuoteRead>(
-          `/commercial/tax-quote?organization_id=${selectedOrganizationId}&subtotal=${invoiceForm.amount_due}&tax_rate=16&jurisdiction=local`
+          `/commercial/tax-quote?organization_id=${selectedOrganizationId}&subtotal=${invoiceForm.amount_due}&tax_rate=${invoiceForm.tax_rate}&jurisdiction=${invoiceForm.tax_jurisdiction}`
         ),
       (quote) => {
         setTaxQuote(quote);
         addLog(`Tax quote total ${quote.total}`, "good");
+      }
+    );
+  };
+
+  const fileCommercialTax = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "commercial-tax-filing",
+      () =>
+        apiRequest<CommercialTaxFilingRead>(
+          `/commercial/tax-filing/deliver?organization_id=${selectedOrganizationId}&period_start=${invoiceForm.tax_period_start}&period_end=${invoiceForm.tax_period_end}&jurisdiction=${invoiceForm.tax_jurisdiction}&tax_rate=${invoiceForm.tax_rate}`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (filing) => {
+        setCommercialTaxFiling(filing);
+        addLog(
+          filing.delivered ? "Commercial tax filing delivered" : filing.failure_reason ?? "Commercial tax filing package prepared",
+          filing.delivered ? "good" : "neutral"
+        );
       }
     );
   };
@@ -12701,6 +12733,7 @@ export default function HomePage() {
                 <button type="button" onClick={createInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
                 <button type="button" onClick={refundSelectedInvoice} disabled={busyAction !== null}>Refund invoice</button>
                 <button type="button" onClick={quoteCommercialTax} disabled={busyAction !== null}>Tax</button>
+                <button type="button" onClick={fileCommercialTax} disabled={busyAction !== null}>File tax</button>
                 <button type="button" onClick={settleCommercialPayments} disabled={busyAction !== null}>Settle</button>
                 <button type="button" onClick={exportCommercialAccounting} disabled={busyAction !== null}>Export</button>
                 <button type="button" onClick={syncCommercialAccounting} disabled={busyAction !== null}>Sync</button>
@@ -12761,6 +12794,22 @@ export default function HomePage() {
                 Payment
                 <input type="number" min="0" value={invoiceForm.payment_amount} onChange={(event) => setInvoiceForm({ ...invoiceForm, payment_amount: Number(event.target.value) })} />
               </label>
+              <label>
+                Tax country
+                <input value={invoiceForm.tax_jurisdiction} onChange={(event) => setInvoiceForm({ ...invoiceForm, tax_jurisdiction: event.target.value.toUpperCase() })} />
+              </label>
+              <label>
+                Tax rate
+                <input type="number" min="0" value={invoiceForm.tax_rate} onChange={(event) => setInvoiceForm({ ...invoiceForm, tax_rate: Number(event.target.value) })} />
+              </label>
+              <label>
+                Period start
+                <input type="date" value={invoiceForm.tax_period_start} onChange={(event) => setInvoiceForm({ ...invoiceForm, tax_period_start: event.target.value })} />
+              </label>
+              <label>
+                Period end
+                <input type="date" value={invoiceForm.tax_period_end} onChange={(event) => setInvoiceForm({ ...invoiceForm, tax_period_end: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
               {taxQuote ? (
@@ -12768,6 +12817,17 @@ export default function HomePage() {
                   <div>
                     <strong>Tax {taxQuote.jurisdiction}: {taxQuote.tax_amount}</strong>
                     <span>{taxQuote.subtotal} subtotal · {taxQuote.total} total</span>
+                  </div>
+                </article>
+              ) : null}
+              {commercialTaxFiling ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{commercialTaxFiling.jurisdiction} filing · {commercialTaxFiling.tax_amount}</strong>
+                    <span>
+                      {commercialTaxFiling.invoice_count} invoices · {commercialTaxFiling.delivery_mode} ·{" "}
+                      {commercialTaxFiling.delivered ? "delivered" : commercialTaxFiling.failure_reason ?? "prepared"}
+                    </span>
                   </div>
                 </article>
               ) : null}

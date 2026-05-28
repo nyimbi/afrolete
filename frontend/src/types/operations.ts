@@ -1907,6 +1907,29 @@ export type TaxQuoteRead = {
   rationale: string;
 };
 
+export type CommercialTaxFilingRead = {
+  organization_id: UUID;
+  jurisdiction: string;
+  period_start: string;
+  period_end: string;
+  invoice_count: number;
+  taxable_subtotal: string;
+  tax_rate: string;
+  tax_amount: string;
+  gross_total: string;
+  outstanding_total: string;
+  currency: string;
+  reverse_charge: boolean;
+  filing_reference: string;
+  delivery_mode: string;
+  delivery_attempted: boolean;
+  delivered: boolean;
+  destination: string | null;
+  provider_status_code: number | null;
+  failure_reason: string | null;
+  filed_at: string;
+};
+
 export type PaymentSettlementRead = {
   organization_id: UUID;
   provider: string;

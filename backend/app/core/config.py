@@ -105,6 +105,12 @@ class Settings(BaseSettings):
     commercial_accounting_webhook_key_secret_path: str = ""
     commercial_accounting_webhook_key_secret_field: str = "value"
     commercial_accounting_timeout_seconds: float = 5.0
+    commercial_tax_filing_delivery_mode: Literal["record_only", "webhook"] = "record_only"
+    commercial_tax_filing_webhook_url: str = ""
+    commercial_tax_filing_webhook_key: str = ""
+    commercial_tax_filing_webhook_key_secret_path: str = ""
+    commercial_tax_filing_webhook_key_secret_field: str = "value"
+    commercial_tax_filing_timeout_seconds: float = 5.0
 
     report_artifact_dir: str = "data/report-artifacts"
     report_artifact_url_prefix: str = "local://reports"
