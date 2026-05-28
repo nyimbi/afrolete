@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     billing_tax_filing_webhook_key_secret_field: str = "value"
     billing_tax_filing_timeout_seconds: float = 5.0
 
+    commercial_payment_webhook_signing_key: str = ""
+    commercial_payment_webhook_signing_key_secret_path: str = ""
+    commercial_payment_webhook_signing_key_secret_field: str = "value"
+    commercial_payment_webhook_tolerance_seconds: int = 300
+
     report_artifact_dir: str = "data/report-artifacts"
     report_artifact_url_prefix: str = "local://reports"
     report_artifact_signing_key: str = "local-report-artifact-key"

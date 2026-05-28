@@ -1,3 +1,12 @@
+import hmac
+import json
+import time
+from hashlib import sha256
+from types import SimpleNamespace
+
+from app.services import commercial as commercial_service
+
+
 def create_commercial_context(client, identity_headers):
     organization = client.post(
         "/api/v1/organizations",
@@ -323,3 +332,96 @@ def test_sponsor_contact_can_open_self_service_portal(client, identity_headers) 
         },
     )
     assert outsider_response.status_code == 404
+
+
+def test_commercial_invoice_payment_webhook_accepts_signed_stripe_event(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_PAYMENT_WEBHOOK_SIGNING_KEY", "commercial-webhook-secret")
+    commercial_service.get_settings.cache_clear()
+    organization, team, _ = create_commercial_context(client, identity_headers)
+    sponsor = client.post(
+        "/api/v1/commercial/sponsors",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Stripe Sponsor",
+            "contact_email": "stripe-sponsor@example.com",
+        },
+    ).json()
+    invoice = client.post(
+        "/api/v1/commercial/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "sponsor_id": sponsor["id"],
+            "invoice_number": "SPONSOR-STRIPE-1",
+            "title": "Stripe sponsor package",
+            "amount_due": "99.00",
+        },
+    ).json()
+    stripe_session_id = commercial_service.commercial_invoice_checkout_session_id(
+        SimpleNamespace(**invoice),
+        "stripe",
+    )
+    webhook_payload = {
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_sponsor",
+                "payment_intent": "pi_sponsor_1",
+                "amount_total": 9900,
+                "currency": "usd",
+                "payment_status": "paid",
+                "metadata": {
+                    "invoice_id": invoice["id"],
+                    "session_id": stripe_session_id,
+                },
+            }
+        },
+    }
+    raw_body = json.dumps(webhook_payload, separators=(",", ":"), sort_keys=True)
+    timestamp = str(int(time.time()))
+    signature = hmac.new(
+        b"commercial-webhook-secret",
+        timestamp.encode() + b"." + raw_body.encode(),
+        sha256,
+    ).hexdigest()
+
+    webhook_response = client.post(
+        "/api/v1/commercial/invoice-payment-webhooks?provider=stripe",
+        content=raw_body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Afrolete-Commercial-Timestamp": timestamp,
+            "X-Afrolete-Commercial-Signature": f"sha256={signature}",
+        },
+    )
+    assert webhook_response.status_code == 200
+    settlement = webhook_response.json()
+    assert settlement["accepted"] is True
+    assert settlement["signature_required"] is True
+    assert settlement["signature_validated"] is True
+    assert settlement["invoice_status"] == "paid"
+    assert settlement["amount_paid"] == "99.00"
+    assert settlement["open_amount"] == "0.00"
+
+    duplicate_response = client.post(
+        "/api/v1/commercial/invoice-payment-webhooks?provider=stripe",
+        content=raw_body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Afrolete-Commercial-Timestamp": timestamp,
+            "X-Afrolete-Commercial-Signature": f"sha256={signature}",
+        },
+    )
+    assert duplicate_response.status_code == 200
+    duplicate = duplicate_response.json()
+    assert duplicate["accepted"] is False
+    assert duplicate["amount_paid"] == "99.00"
+    assert duplicate["open_amount"] == "0.00"
+
+    commercial_service.get_settings.cache_clear()

@@ -1,5 +1,9 @@
+import json
+import time
+from typing import Any
 from datetime import UTC, datetime
 from decimal import Decimal
+from decimal import InvalidOperation
 import hmac
 from hashlib import sha256
 from re import sub
@@ -10,6 +14,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.models.commercial import (
     Donation,
     FinanceInvoice,
@@ -31,6 +36,7 @@ from app.schemas.commercial import (
     CommercialInvoiceCheckoutSettlementCreate,
     CommercialInvoiceCheckoutSettlementRead,
     CommercialInvoiceHostedCheckoutRead,
+    CommercialInvoicePaymentWebhookCreate,
     CommercialSummaryRead,
     CommercialRefundCreate,
     CommercialRefundRead,
@@ -54,6 +60,7 @@ from app.schemas.commercial import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.secrets import resolve_secret
 
 
 async def ensure_manage_commercial(
@@ -352,6 +359,50 @@ async def settle_commercial_invoice_checkout(
         open_amount=commercial_invoice_open_amount(invoice),
         session_status=commercial_invoice_checkout_session_status(invoice),
         message=message,
+    )
+
+
+async def ingest_commercial_invoice_payment_webhook(
+    db: AsyncSession,
+    payload: CommercialInvoicePaymentWebhookCreate | dict[str, Any],
+    provider_hint: str | None = None,
+    signature_required: bool = False,
+    signature_validated: bool = False,
+) -> CommercialInvoiceCheckoutSettlementRead:
+    normalized = normalize_commercial_invoice_payment_webhook(payload, provider_hint)
+    if normalized.invoice_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Commercial payment webhook invoice_id required")
+    if normalized.session_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Commercial payment webhook session_id required")
+    success_events = {
+        "payment.succeeded",
+        "invoice.paid",
+        "charge.succeeded",
+        "checkout.session.completed",
+        "mpesa.stk_callback",
+        "PAYMENT.CAPTURE.COMPLETED",
+    }
+    settlement_status = (
+        "succeeded"
+        if normalized.status == "succeeded" and normalized.event_type in success_events
+        else normalized.status if normalized.status in {"failed", "cancelled"} else "pending"
+    )
+    settlement_payload = CommercialInvoiceCheckoutSettlementCreate(
+        invoice_id=normalized.invoice_id,
+        provider=normalized.provider,
+        amount=normalized.amount,
+        currency=normalized.currency,
+        method=normalized.method,
+        external_payment_id=normalized.external_payment_id,
+        status=settlement_status,
+        raw_reference=normalized.raw_reference,
+    )
+    return await settle_commercial_invoice_checkout(
+        db,
+        normalized.session_id,
+        settlement_payload,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
     )
 
 
@@ -889,6 +940,230 @@ def commercial_invoice_hosted_checkout_read(
             if open_amount > 0
             else f"{invoice.title} is fully paid."
         ),
+    )
+
+
+def normalize_commercial_invoice_payment_webhook(
+    payload: CommercialInvoicePaymentWebhookCreate | dict[str, Any],
+    provider_hint: str | None = None,
+) -> CommercialInvoicePaymentWebhookCreate:
+    if isinstance(payload, CommercialInvoicePaymentWebhookCreate):
+        return payload
+    provider_payload = payload.get("raw_payload") if isinstance(payload.get("raw_payload"), dict) else payload
+    provider = (provider_hint or str(payload.get("provider") or "")).strip().lower()
+    if not provider:
+        provider = detect_commercial_payment_provider(provider_payload)
+    if has_commercial_internal_payment_shape(payload) or has_commercial_internal_payment_shape(provider_payload):
+        normalized = dict(provider_payload if has_commercial_internal_payment_shape(provider_payload) else payload)
+        normalized["provider"] = normalized.get("provider") or provider or "provider_neutral"
+        return CommercialInvoicePaymentWebhookCreate.model_validate(normalized)
+    if provider == "stripe":
+        return normalize_stripe_commercial_payment(provider_payload)
+    if provider in {"mpesa", "m-pesa", "safaricom_mpesa"}:
+        return normalize_mpesa_commercial_payment(provider_payload)
+    if provider == "paypal":
+        return normalize_paypal_commercial_payment(provider_payload)
+    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported commercial payment webhook payload")
+
+
+def has_commercial_internal_payment_shape(payload: dict[str, Any]) -> bool:
+    return bool(payload.get("invoice_id") and payload.get("session_id"))
+
+
+def detect_commercial_payment_provider(payload: dict[str, Any]) -> str:
+    if "Body" in payload and isinstance(payload.get("Body"), dict):
+        return "mpesa"
+    if "data" in payload and "type" in payload:
+        return "stripe"
+    if "resource" in payload and "event_type" in payload:
+        return "paypal"
+    return "provider_neutral"
+
+
+def normalize_stripe_commercial_payment(payload: dict[str, Any]) -> CommercialInvoicePaymentWebhookCreate:
+    event_type = str(payload.get("type") or "payment.succeeded")
+    obj = nested_dict(payload, "data", "object")
+    metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+    amount = decimal_minor_units(obj.get("amount_total") or obj.get("amount_paid"))
+    payment_status = str(obj.get("payment_status") or obj.get("status") or "").lower()
+    return CommercialInvoicePaymentWebhookCreate(
+        invoice_id=uuid_or_none(metadata.get("invoice_id") or metadata.get("afrolete_invoice_id")),
+        session_id=string_or_none(metadata.get("session_id") or metadata.get("afrolete_session_id")),
+        provider="stripe",
+        event_type=event_type,
+        amount=amount,
+        currency=string_or_none(obj.get("currency"), upper=True),
+        method="stripe_checkout",
+        external_payment_id=string_or_none(obj.get("payment_intent") or obj.get("id")),
+        status="succeeded" if event_type == "checkout.session.completed" or payment_status == "paid" else "pending",
+        raw_reference=json.dumps(payload, sort_keys=True)[:2000],
+    )
+
+
+def normalize_mpesa_commercial_payment(payload: dict[str, Any]) -> CommercialInvoicePaymentWebhookCreate:
+    callback = nested_dict(payload, "Body", "stkCallback")
+    items = callback_metadata_items(callback)
+    result_code = str(callback.get("ResultCode") or "")
+    metadata = callback.get("Metadata") if isinstance(callback.get("Metadata"), dict) else payload.get("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return CommercialInvoicePaymentWebhookCreate(
+        invoice_id=uuid_or_none(metadata.get("invoice_id") or metadata.get("afrolete_invoice_id")),
+        session_id=string_or_none(metadata.get("session_id") or metadata.get("afrolete_session_id")),
+        provider="mpesa",
+        event_type="mpesa.stk_callback",
+        amount=decimal_or_none(items.get("Amount")),
+        currency=string_or_none(metadata.get("currency"), upper=True) or "KES",
+        method="mpesa_stk",
+        external_payment_id=string_or_none(items.get("MpesaReceiptNumber") or callback.get("CheckoutRequestID")),
+        status="succeeded" if result_code == "0" else "failed",
+        raw_reference=json.dumps(payload, sort_keys=True)[:2000],
+    )
+
+
+def normalize_paypal_commercial_payment(payload: dict[str, Any]) -> CommercialInvoicePaymentWebhookCreate:
+    event_type = str(payload.get("event_type") or "")
+    resource = payload.get("resource") if isinstance(payload.get("resource"), dict) else {}
+    purchase_unit = first_dict(resource.get("purchase_units"))
+    capture = first_dict(nested_dict(purchase_unit, "payments").get("captures"))
+    amount_payload = capture.get("amount") if isinstance(capture.get("amount"), dict) else resource.get("amount", {})
+    reference_metadata = parse_payment_reference(str(purchase_unit.get("reference_id") or resource.get("custom_id") or ""))
+    return CommercialInvoicePaymentWebhookCreate(
+        invoice_id=uuid_or_none(reference_metadata.get("invoice_id") or resource.get("invoice_id")),
+        session_id=string_or_none(reference_metadata.get("session_id")),
+        provider="paypal",
+        event_type=event_type or "PAYMENT.CAPTURE.COMPLETED",
+        amount=decimal_or_none(amount_payload.get("value")),
+        currency=string_or_none(amount_payload.get("currency_code"), upper=True),
+        method="paypal_checkout",
+        external_payment_id=string_or_none(capture.get("id") or resource.get("id")),
+        status="succeeded" if event_type == "PAYMENT.CAPTURE.COMPLETED" or capture.get("status") == "COMPLETED" else "pending",
+        raw_reference=json.dumps(payload, sort_keys=True)[:2000],
+    )
+
+
+def nested_dict(payload: dict[str, Any], *keys: str) -> dict[str, Any]:
+    current: Any = payload
+    for key in keys:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
+
+
+def first_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                return item
+    return value if isinstance(value, dict) else {}
+
+
+def callback_metadata_items(callback: dict[str, Any]) -> dict[str, Any]:
+    metadata = callback.get("CallbackMetadata")
+    items = metadata.get("Item") if isinstance(metadata, dict) else []
+    result: dict[str, Any] = {}
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict) and item.get("Name"):
+                result[str(item["Name"])] = item.get("Value")
+    return result
+
+
+def parse_payment_reference(value: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for part in value.replace("|", ";").split(";"):
+        if "=" not in part:
+            continue
+        key, item_value = part.split("=", 1)
+        result[key.strip()] = item_value.strip()
+    return result
+
+
+def uuid_or_none(value: Any) -> UUID | None:
+    if value is None:
+        return None
+    try:
+        return UUID(str(value))
+    except ValueError:
+        return None
+
+
+def string_or_none(value: Any, upper: bool = False) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text.upper() if upper else text
+
+
+def decimal_or_none(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"))
+    except InvalidOperation as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid payment amount") from exc
+
+
+def decimal_minor_units(value: Any) -> Decimal | None:
+    amount = decimal_or_none(value)
+    if amount is None:
+        return None
+    return (amount / Decimal("100")).quantize(Decimal("0.01"))
+
+
+async def validate_commercial_invoice_payment_webhook_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> tuple[bool, bool]:
+    selected_settings = settings or get_settings()
+    signing_key = await resolve_commercial_secret(
+        selected_settings,
+        env_value=selected_settings.commercial_payment_webhook_signing_key,
+        path=selected_settings.commercial_payment_webhook_signing_key_secret_path,
+        field_name=selected_settings.commercial_payment_webhook_signing_key_secret_field,
+        label="commercial payment webhook signing key",
+    )
+    if not signing_key:
+        return False, False
+    if not timestamp_header or not signature_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing commercial payment webhook signature")
+    try:
+        timestamp = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid commercial payment webhook timestamp") from exc
+    age = abs(int(time.time()) - timestamp)
+    if age > selected_settings.commercial_payment_webhook_tolerance_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Stale commercial payment webhook signature")
+    expected = hmac.new(
+        signing_key.encode(),
+        timestamp_header.encode() + b"." + raw_body,
+        sha256,
+    ).hexdigest()
+    submitted = signature_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, submitted):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid commercial payment webhook signature")
+    return True, True
+
+
+async def resolve_commercial_secret(
+    settings: Settings,
+    *,
+    env_value: str,
+    path: str,
+    field_name: str,
+    label: str,
+) -> str:
+    return await resolve_secret(
+        settings,
+        env_value=env_value,
+        path=path,
+        field_name=field_name,
+        label=label,
     )
 
 

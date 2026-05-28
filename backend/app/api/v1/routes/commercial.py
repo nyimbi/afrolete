@@ -1,7 +1,8 @@
+from typing import Any
 from uuid import UUID
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -50,6 +51,7 @@ from app.services.commercial import (
     create_ticket_order,
     create_ticket_product,
     get_commercial_invoice_hosted_checkout,
+    ingest_commercial_invoice_payment_webhook,
     list_campaigns,
     list_invoices,
     list_sponsors,
@@ -65,6 +67,7 @@ from app.services.commercial import (
     sponsor_portal,
     sponsorship_dashboard,
     tax_quote,
+    validate_commercial_invoice_payment_webhook_signature,
 )
 
 router = APIRouter(prefix="/commercial", tags=["commercial"])
@@ -292,6 +295,38 @@ async def settle_commercial_invoice_checkout_route(
     db: AsyncSession = Depends(get_db),
 ) -> CommercialInvoiceCheckoutSettlementRead:
     return await settle_commercial_invoice_checkout(db, session_id, payload)
+
+
+@router.post(
+    "/invoice-payment-webhooks",
+    response_model=CommercialInvoiceCheckoutSettlementRead,
+)
+async def commercial_invoice_payment_webhook_route(
+    request: Request,
+    payload: dict[str, Any],
+    provider: str | None = Query(default=None),
+    x_afrolete_commercial_timestamp: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Commercial-Timestamp",
+    ),
+    x_afrolete_commercial_signature: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Commercial-Signature",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> CommercialInvoiceCheckoutSettlementRead:
+    signature_required, signature_validated = await validate_commercial_invoice_payment_webhook_signature(
+        await request.body(),
+        x_afrolete_commercial_timestamp,
+        x_afrolete_commercial_signature,
+    )
+    return await ingest_commercial_invoice_payment_webhook(
+        db,
+        payload,
+        provider_hint=provider,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+    )
 
 
 @router.post("/invoices/{invoice_id}/refund", response_model=CommercialRefundRead)
