@@ -167,6 +167,42 @@ class AgentGovernancePolicyReportRead(BaseModel):
     recommendation: str
 
 
+class AgentGovernancePolicyHistoryBucketRead(BaseModel):
+    label: str
+    task_count: int
+    approval_required_count: int
+    completed_count: int
+    waiting_for_review_count: int
+    failed_count: int
+
+
+class AgentGovernancePolicyHistoryItemRead(BaseModel):
+    policy_code: str
+    decision: str
+    risk_level: str
+    task_count: int
+    approval_required_count: int
+    completed_count: int
+    waiting_for_review_count: int
+    latest_task_title: str | None
+    latest_task_at: datetime | None
+
+
+class AgentGovernancePolicyHistoryRead(BaseModel):
+    organization_id: UUID
+    generated_at: datetime
+    governed_task_count: int
+    approval_required_count: int
+    completed_count: int
+    waiting_for_review_count: int
+    failed_count: int
+    policy_count: int
+    latest_policy_code: str | None
+    timeline: list[AgentGovernancePolicyHistoryBucketRead]
+    policies: list[AgentGovernancePolicyHistoryItemRead]
+    recommendation: str
+
+
 class AgentTaskApprovalRequestCreate(BaseModel):
     required_count: int = Field(default=2, ge=1, le=10)
     reviewer_person_ids: list[UUID] = Field(default_factory=list, max_length=10)

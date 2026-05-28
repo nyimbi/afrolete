@@ -382,6 +382,18 @@ def test_agent_governance_policy_requires_approvals_and_blocks_tasks(client, ide
     assert report["governed_task_count"] == 1
     assert report["recent_policy_codes"] == ["safeguarding.selection.review"]
 
+    history = client.get(
+        f"/api/v1/agents/governance-policy-rules/history?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert history["governed_task_count"] == 1
+    assert history["approval_required_count"] == 1
+    assert history["policy_count"] == 1
+    assert history["latest_policy_code"] == "safeguarding.selection.review"
+    assert history["timeline"][0]["task_count"] == 1
+    assert history["policies"][0]["policy_code"] == "safeguarding.selection.review"
+    assert history["policies"][0]["latest_task_title"] == "Recommend tournament squad"
+
 
 async def test_agent_task_worker_executes_queued_tasks(db_session) -> None:
     organization = Organization(

@@ -262,6 +262,44 @@ async def agent_governance_policy_report(
     }
 
 
+async def agent_governance_policy_history(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    limit: int = 120,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    bounded_limit = min(max(limit, 10), 500)
+    tasks = list(
+        (
+            await db.scalars(
+                select(AgentTask)
+                .where(AgentTask.organization_id == organization_id)
+                .where(AgentTask.governance_policy_code.is_not(None))
+                .order_by(AgentTask.created_at.desc())
+                .limit(bounded_limit)
+            )
+        ).all()
+    )
+    timeline = agent_governance_policy_timeline(tasks)
+    policies = agent_governance_policy_history_items(tasks)
+    return {
+        "organization_id": organization_id,
+        "generated_at": datetime.now(UTC),
+        "governed_task_count": len(tasks),
+        "approval_required_count": sum(1 for task in tasks if task.governance_policy_decision == "require_approval"),
+        "completed_count": count_tasks(tasks, AgentTaskStatus.COMPLETED),
+        "waiting_for_review_count": count_tasks(tasks, AgentTaskStatus.WAITING_FOR_REVIEW),
+        "failed_count": count_tasks(tasks, AgentTaskStatus.FAILED),
+        "policy_count": len(policies),
+        "latest_policy_code": tasks[0].governance_policy_code if tasks else None,
+        "timeline": timeline,
+        "policies": policies,
+        "recommendation": agent_governance_policy_history_recommendation(tasks, policies),
+    }
+
+
 async def simulate_agent_governance_policy(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3296,6 +3334,69 @@ def agent_governance_policy_report_recommendation(
     if any(rule.decision == "block" for rule in active_rules) and any(rule.decision == "require_approval" for rule in active_rules):
         return "Policy set includes blocking and approval controls; continue monitoring ledger outcomes."
     return "Add both blocking and approval-gating rules for a stronger tenant AI control posture."
+
+
+def agent_governance_policy_timeline(tasks: list[AgentTask]) -> list[dict[str, object]]:
+    buckets: dict[str, list[AgentTask]] = {}
+    for task in tasks:
+        label = task.created_at.date().isoformat()
+        buckets.setdefault(label, []).append(task)
+    return [
+        {
+            "label": label,
+            "task_count": len(bucket_tasks),
+            "approval_required_count": sum(
+                1 for task in bucket_tasks if task.governance_policy_decision == "require_approval"
+            ),
+            "completed_count": count_tasks(bucket_tasks, AgentTaskStatus.COMPLETED),
+            "waiting_for_review_count": count_tasks(bucket_tasks, AgentTaskStatus.WAITING_FOR_REVIEW),
+            "failed_count": count_tasks(bucket_tasks, AgentTaskStatus.FAILED),
+        }
+        for label, bucket_tasks in sorted(buckets.items(), reverse=True)[:14]
+    ]
+
+
+def agent_governance_policy_history_items(tasks: list[AgentTask]) -> list[dict[str, object]]:
+    grouped: dict[str, list[AgentTask]] = {}
+    for task in tasks:
+        if task.governance_policy_code:
+            grouped.setdefault(task.governance_policy_code, []).append(task)
+    items: list[dict[str, object]] = []
+    for policy_code, policy_tasks in grouped.items():
+        latest_task = max(policy_tasks, key=lambda task: task.created_at)
+        items.append(
+            {
+                "policy_code": policy_code,
+                "decision": latest_task.governance_policy_decision or "unknown",
+                "risk_level": latest_task.governance_policy_risk_level or "unclassified",
+                "task_count": len(policy_tasks),
+                "approval_required_count": sum(
+                    1 for task in policy_tasks if task.governance_policy_decision == "require_approval"
+                ),
+                "completed_count": count_tasks(policy_tasks, AgentTaskStatus.COMPLETED),
+                "waiting_for_review_count": count_tasks(policy_tasks, AgentTaskStatus.WAITING_FOR_REVIEW),
+                "latest_task_title": latest_task.title,
+                "latest_task_at": latest_task.created_at,
+            }
+        )
+    return sorted(items, key=lambda item: (-int(item["task_count"]), str(item["policy_code"])))[:20]
+
+
+def agent_governance_policy_history_recommendation(
+    tasks: list[AgentTask],
+    policies: list[dict[str, object]],
+) -> str:
+    if not tasks:
+        return "No governed agent tasks have been queued yet; simulate and queue a governed task to start the history."
+    failed_count = count_tasks(tasks, AgentTaskStatus.FAILED)
+    if failed_count:
+        return "Review failed governed agent tasks before increasing live model-provider automation."
+    waiting_count = count_tasks(tasks, AgentTaskStatus.WAITING_FOR_REVIEW)
+    if waiting_count:
+        return "Resolve pending governed reviews to keep AI-assisted operations moving."
+    if len(policies) < 2:
+        return "Add policy coverage for another sensitive task family so governance history is not one-dimensional."
+    return "Governed AI task history is healthy; keep monitoring policy mix and review latency."
 
 
 def agent_credential_status(settings: Settings) -> dict[str, object]:

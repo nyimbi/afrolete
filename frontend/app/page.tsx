@@ -16,6 +16,7 @@ import type {
   AgentBiasAuditRead,
   AgentDecisionAppealRead,
   AgentEthicalScorecardRead,
+  AgentGovernancePolicyHistoryRead,
   AgentGovernancePolicyRuleRead,
   AgentGovernancePolicyReportRead,
   AgentGovernancePolicySimulationRead,
@@ -1387,6 +1388,8 @@ export default function HomePage() {
   const [agentGovernancePolicyRules, setAgentGovernancePolicyRules] = useState<AgentGovernancePolicyRuleRead[]>([]);
   const [agentGovernancePolicyReport, setAgentGovernancePolicyReport] =
     useState<AgentGovernancePolicyReportRead | null>(null);
+  const [agentGovernancePolicyHistory, setAgentGovernancePolicyHistory] =
+    useState<AgentGovernancePolicyHistoryRead | null>(null);
   const [agentGovernancePolicySimulation, setAgentGovernancePolicySimulation] =
     useState<AgentGovernancePolicySimulationRead | null>(null);
   const [agentTransparency, setAgentTransparency] = useState<AgentModelTransparencyReportRead | null>(null);
@@ -2481,12 +2484,13 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, policyRules, policyReport, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
+    const [tasks, runs, governance, policyRules, policyReport, policyHistory, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
       apiRequest<AgentGovernancePolicyRuleRead[]>(`/agents/governance-policy-rules?organization_id=${organizationId}`),
       apiRequest<AgentGovernancePolicyReportRead>(`/agents/governance-policy-rules/report?organization_id=${organizationId}`),
+      apiRequest<AgentGovernancePolicyHistoryRead>(`/agents/governance-policy-rules/history?organization_id=${organizationId}`),
       apiRequest<AgentRunLedgerVerificationRead>(`/agents/runs/verify?organization_id=${organizationId}`),
       apiRequest<AgentModelTransparencyReportRead>(`/agents/model-transparency?organization_id=${organizationId}`),
       apiRequest<AgentModelRegistryRead[]>(`/agents/model-registry?organization_id=${organizationId}`),
@@ -2523,6 +2527,7 @@ export default function HomePage() {
     setAgentGovernance(governance);
     setAgentGovernancePolicyRules(policyRules);
     setAgentGovernancePolicyReport(policyReport);
+    setAgentGovernancePolicyHistory(policyHistory);
     setAgentLedgerVerification(ledgerVerification);
     setAgentTransparency(transparency);
     setAgentModelRegistry(registry);
@@ -3173,6 +3178,7 @@ export default function HomePage() {
       setAgentGovernance(null);
       setAgentGovernancePolicyRules([]);
       setAgentGovernancePolicyReport(null);
+      setAgentGovernancePolicyHistory(null);
       setAgentGovernancePolicySimulation(null);
       setAgentTransparency(null);
       setAgentModelRegistry([]);
@@ -16326,6 +16332,41 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {agentGovernancePolicyHistory ? (
+                <article className="task-card">
+                  <div>
+                    <strong>AI policy history · {agentGovernancePolicyHistory.governed_task_count} governed tasks</strong>
+                    <span>
+                      {agentGovernancePolicyHistory.approval_required_count} approval-gated · {agentGovernancePolicyHistory.completed_count} complete · {agentGovernancePolicyHistory.waiting_for_review_count} in review
+                    </span>
+                    <span>
+                      {agentGovernancePolicyHistory.policy_count} policies used · latest {agentGovernancePolicyHistory.latest_policy_code ?? "none"}
+                    </span>
+                    <span>{agentGovernancePolicyHistory.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {agentGovernancePolicyHistory?.timeline.slice(0, 4).map((bucket) => (
+                <article key={bucket.label} className="task-card">
+                  <div>
+                    <strong>{bucket.label} · {bucket.task_count} governed tasks</strong>
+                    <span>
+                      {bucket.approval_required_count} approval · {bucket.completed_count} complete · {bucket.waiting_for_review_count} review · {bucket.failed_count} failed
+                    </span>
+                  </div>
+                </article>
+              ))}
+              {agentGovernancePolicyHistory?.policies.slice(0, 3).map((policy) => (
+                <article key={policy.policy_code} className="task-card">
+                  <div>
+                    <strong>{policy.policy_code} · {policy.task_count} tasks</strong>
+                    <span>
+                      {policy.decision.replaceAll("_", " ")} · {policy.risk_level} · {policy.approval_required_count} approval-gated
+                    </span>
+                    <span>{policy.latest_task_title ?? "No recent task title"}</span>
+                  </div>
+                </article>
+              ))}
               {agentGovernancePolicyRules.slice(0, 3).map((rule) => (
                 <article key={rule.id} className="task-card">
                   <div>

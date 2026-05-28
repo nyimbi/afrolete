@@ -17,6 +17,7 @@ from app.schemas.agent import (
     AgentFamilyTaskRead,
     AgentGovernancePolicyRuleCreate,
     AgentGovernancePolicyReportRead,
+    AgentGovernancePolicyHistoryRead,
     AgentGovernancePolicyRuleRead,
     AgentGovernancePolicySimulationCreate,
     AgentGovernancePolicySimulationRead,
@@ -65,6 +66,7 @@ from app.services.agents import (
     apply_agent_worker_callback,
     agent_ethical_scorecard,
     agent_governance_policy_report,
+    agent_governance_policy_history,
     agent_governance_summary,
     agent_model_transparency_report,
     agent_scorecard_publication_readiness,
@@ -807,6 +809,19 @@ async def agent_governance_policy_report_route(
 ) -> AgentGovernancePolicyReportRead:
     return AgentGovernancePolicyReportRead(
         **await agent_governance_policy_report(db, identity, organization_id, authz)
+    )
+
+
+@router.get("/governance-policy-rules/history", response_model=AgentGovernancePolicyHistoryRead)
+async def agent_governance_policy_history_route(
+    organization_id: UUID = Query(),
+    limit: int = Query(default=120, ge=10, le=500),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentGovernancePolicyHistoryRead:
+    return AgentGovernancePolicyHistoryRead(
+        **await agent_governance_policy_history(db, identity, organization_id, authz, limit=limit)
     )
 
 

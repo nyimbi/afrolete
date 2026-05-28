@@ -3361,6 +3361,42 @@ export type AgentGovernancePolicyReportRead = {
   recommendation: string;
 };
 
+export type AgentGovernancePolicyHistoryBucketRead = {
+  label: string;
+  task_count: number;
+  approval_required_count: number;
+  completed_count: number;
+  waiting_for_review_count: number;
+  failed_count: number;
+};
+
+export type AgentGovernancePolicyHistoryItemRead = {
+  policy_code: string;
+  decision: string;
+  risk_level: string;
+  task_count: number;
+  approval_required_count: number;
+  completed_count: number;
+  waiting_for_review_count: number;
+  latest_task_title: string | null;
+  latest_task_at: string | null;
+};
+
+export type AgentGovernancePolicyHistoryRead = {
+  organization_id: UUID;
+  generated_at: string;
+  governed_task_count: number;
+  approval_required_count: number;
+  completed_count: number;
+  waiting_for_review_count: number;
+  failed_count: number;
+  policy_count: number;
+  latest_policy_code: string | null;
+  timeline: AgentGovernancePolicyHistoryBucketRead[];
+  policies: AgentGovernancePolicyHistoryItemRead[];
+  recommendation: string;
+};
+
 export type AgentTaskApprovalRead = {
   id: UUID;
   organization_id: UUID;
