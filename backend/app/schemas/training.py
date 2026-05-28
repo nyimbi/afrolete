@@ -226,3 +226,17 @@ class TrainingAvailabilityRead(BaseModel):
     team_id: UUID
     duration_minutes: int
     slots: list[TrainingAvailabilitySlotRead]
+
+
+class TrainingCalendarArtifactRead(BaseModel):
+    organization_id: UUID
+    team_id: UUID | None
+    generated_at: datetime
+    starts_at: datetime
+    ends_at: datetime
+    session_count: int
+    content_type: str
+    download_filename: str
+    content: str
+    checksum: str
+    size_bytes: int

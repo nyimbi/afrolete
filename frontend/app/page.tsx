@@ -303,6 +303,7 @@ import type {
   TeamRole,
   TravelPlanStatus,
   TrainingAvailabilityRead,
+  TrainingCalendarArtifactRead,
   TrainingDrillRead,
   TrainingPlanItemRead,
   TrainingPlanRead,
@@ -8632,6 +8633,32 @@ export default function HomePage() {
     );
   };
 
+  const downloadTrainingCalendar = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const query = new URLSearchParams({
+      organization_id: selectedOrganizationId,
+      starts_at: new Date(`${trainingPlanForm.period_start}T00:00:00`).toISOString(),
+      ends_at: new Date(`${trainingPlanForm.period_end}T23:59:59`).toISOString()
+    });
+    if (selectedTeamId) {
+      query.set("team_id", selectedTeamId);
+    }
+    runAction(
+      "download-training-calendar",
+      () =>
+        apiRequest<TrainingCalendarArtifactRead>(`/training/calendar-artifact?${query.toString()}`, {
+          identity
+        }),
+      (artifact) => {
+        downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
+        addLog(`Downloaded ${artifact.session_count} training calendar session(s)`, "good");
+      }
+    );
+  };
+
   const createCompetition = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -16227,6 +16254,7 @@ export default function HomePage() {
                 <button type="button" onClick={createTrainingSession} disabled={busyAction !== null}>Session</button>
                 <button type="button" onClick={suggestTrainingAvailability} disabled={busyAction !== null}>Availability</button>
                 <button type="button" onClick={recordTrainingFeedback} disabled={busyAction !== null}>Feedback</button>
+                <button type="button" onClick={downloadTrainingCalendar} disabled={busyAction !== null}>Calendar</button>
               </div>
             </div>
             <div className="score-summary">

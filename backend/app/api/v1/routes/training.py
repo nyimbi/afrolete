@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -8,6 +9,7 @@ from app.schemas.training import (
     GeneratedTrainingPlanRead,
     TrainingAvailabilityCreate,
     TrainingAvailabilityRead,
+    TrainingCalendarArtifactRead,
     TrainingDrillCreate,
     TrainingDrillRead,
     TrainingPlanGenerateCreate,
@@ -28,6 +30,7 @@ from app.services.training import (
     create_training_drill,
     create_training_plan,
     create_training_session_plan,
+    export_training_calendar_artifact,
     generate_training_plan,
     list_training_drills,
     list_training_plan_items,
@@ -237,6 +240,29 @@ async def list_training_session_plans_route(
         to_session_plan_read(session_plan)
         for session_plan in await list_training_session_plans(db, organization_id, team_id=team_id)
     ]
+
+
+@router.get("/calendar-artifact", response_model=TrainingCalendarArtifactRead)
+async def export_training_calendar_artifact_route(
+    organization_id: UUID = Query(),
+    team_id: UUID | None = Query(default=None),
+    starts_at: datetime | None = Query(default=None),
+    ends_at: datetime | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TrainingCalendarArtifactRead:
+    return TrainingCalendarArtifactRead(
+        **await export_training_calendar_artifact(
+            db,
+            identity,
+            organization_id,
+            authz,
+            team_id=team_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+    )
 
 
 @router.post("/availability", response_model=TrainingAvailabilityRead)

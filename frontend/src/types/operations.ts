@@ -4636,6 +4636,20 @@ export type TrainingAvailabilityRead = {
   slots: TrainingAvailabilitySlotRead[];
 };
 
+export type TrainingCalendarArtifactRead = {
+  organization_id: UUID;
+  team_id: UUID | null;
+  generated_at: string;
+  starts_at: string;
+  ends_at: string;
+  session_count: number;
+  content_type: string;
+  download_filename: string;
+  content: string;
+  checksum: string;
+  size_bytes: number;
+};
+
 export type CompetitionRead = {
   id: UUID;
   organization_id: UUID;

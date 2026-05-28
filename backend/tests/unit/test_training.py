@@ -138,6 +138,34 @@ def test_training_drill_plan_item_and_session_workflow(client, identity_headers)
     ).json()
     assert [session["id"] for session in sessions] == [session_plan["id"]]
 
+    calendar_artifact = client.get(
+        (
+            f"/api/v1/training/calendar-artifact?organization_id={organization['id']}"
+            f"&team_id={team['id']}&starts_at=2026-06-01T00:00:00Z&ends_at=2026-06-30T00:00:00Z"
+        ),
+        headers=identity_headers,
+    ).json()
+    assert calendar_artifact["content_type"] == "text/calendar; charset=utf-8"
+    assert calendar_artifact["download_filename"].endswith(".ics")
+    assert calendar_artifact["session_count"] == 1
+    assert calendar_artifact["checksum"]
+    assert "BEGIN:VCALENDAR" in calendar_artifact["content"]
+    assert "METHOD:PUBLISH" in calendar_artifact["content"]
+    assert "SUMMARY:Awareness session" in calendar_artifact["content"]
+    assert "DTSTART:20260603T150000Z" in calendar_artifact["content"]
+    assert "DTEND:20260603T161500Z" in calendar_artifact["content"]
+    assert "Target RPE: 7" in calendar_artifact["content"]
+
+    invalid_range = client.get(
+        (
+            f"/api/v1/training/calendar-artifact?organization_id={organization['id']}"
+            f"&starts_at=2026-06-30T00:00:00Z&ends_at=2026-06-01T00:00:00Z"
+        ),
+        headers=identity_headers,
+    )
+    assert invalid_range.status_code == 422
+    assert invalid_range.json()["detail"] == "ends_at must be after starts_at"
+
 
 def test_training_plan_rejects_team_from_other_organization(client, identity_headers) -> None:
     organization, _, _, roster = create_training_context(client, identity_headers, "First Club")

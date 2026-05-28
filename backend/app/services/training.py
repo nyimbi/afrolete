@@ -1,3 +1,5 @@
+import hashlib
+import re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -341,6 +343,51 @@ async def list_training_session_plans(
     )
 
 
+async def export_training_calendar_artifact(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    team_id: UUID | None = None,
+    starts_at: datetime | None = None,
+    ends_at: datetime | None = None,
+) -> dict[str, object]:
+    organization = await get_organization(db, organization_id)
+    await ensure_manage_training(authz, identity, organization_id)
+    team = await get_team_for_organization(db, team_id, organization_id) if team_id else None
+    generated_at = datetime.now(UTC)
+    range_start = ensure_utc(starts_at) if starts_at else generated_at - timedelta(days=1)
+    range_end = ensure_utc(ends_at) if ends_at else generated_at + timedelta(days=90)
+    if range_end <= range_start:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="ends_at must be after starts_at")
+    statement = (
+        select(TrainingSessionPlan)
+        .where(TrainingSessionPlan.organization_id == organization_id)
+        .where(TrainingSessionPlan.scheduled_for >= range_start)
+        .where(TrainingSessionPlan.scheduled_for < range_end)
+        .order_by(TrainingSessionPlan.scheduled_for, TrainingSessionPlan.title)
+    )
+    if team_id is not None:
+        statement = statement.where(TrainingSessionPlan.team_id == team_id)
+    sessions = list((await db.scalars(statement)).all())
+    content = render_training_calendar_ics(organization, team, sessions, generated_at)
+    content_bytes = content.encode()
+    filename_scope = slug_for_training_calendar(team.name if team else organization.name)
+    return {
+        "organization_id": organization_id,
+        "team_id": team_id,
+        "generated_at": generated_at,
+        "starts_at": range_start,
+        "ends_at": range_end,
+        "session_count": len(sessions),
+        "content_type": "text/calendar; charset=utf-8",
+        "download_filename": f"afrolete-training-{filename_scope}-{range_start.date()}-{range_end.date()}.ics",
+        "content": content,
+        "checksum": hashlib.sha256(content_bytes).hexdigest(),
+        "size_bytes": len(content_bytes),
+    }
+
+
 async def record_training_session_feedback(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -608,6 +655,94 @@ def availability_recommendation(score: int, conflicts: list[str]) -> str:
     if score >= 65:
         return f"Usable with review; check {', '.join(conflicts[:2])}."
     return "Avoid this slot unless conflicts are moved or the session is split."
+
+
+def render_training_calendar_ics(
+    organization: Organization,
+    team: Team | None,
+    sessions: list[TrainingSessionPlan],
+    generated_at: datetime,
+) -> str:
+    calendar_name = f"{organization.name} training" if team is None else f"{team.name} training"
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//AfroLete//Training Calendar//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{ics_escape(calendar_name)}",
+        f"X-WR-CALDESC:{ics_escape('AfroLete training schedule export')}",
+    ]
+    for session in sessions:
+        starts_at = ensure_utc(session.scheduled_for)
+        ends_at = starts_at + timedelta(minutes=session.duration_minutes)
+        description_parts = [
+            f"Status: {session.status.value}",
+            f"Target RPE: {session.rpe_target}",
+            f"Load score: {session.load_score:g}",
+        ]
+        if session.objectives:
+            description_parts.append(f"Objectives: {session.objectives}")
+        lines.extend(
+            [
+                "BEGIN:VEVENT",
+                f"UID:training-session-{session.id}@afrolete",
+                f"DTSTAMP:{ics_datetime(generated_at)}",
+                f"DTSTART:{ics_datetime(starts_at)}",
+                f"DTEND:{ics_datetime(ends_at)}",
+                f"SUMMARY:{ics_escape(session.title)}",
+                f"DESCRIPTION:{ics_escape(chr(10).join(description_parts))}",
+                f"CATEGORIES:{ics_escape('Training')}",
+                f"STATUS:{ics_status(session.status)}",
+                "END:VEVENT",
+            ]
+        )
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(fold_ics_line(line) for line in lines) + "\r\n"
+
+
+def ics_datetime(value: datetime) -> str:
+    return ensure_utc(value).strftime("%Y%m%dT%H%M%SZ")
+
+
+def ensure_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def ics_escape(value: object) -> str:
+    text = str(value)
+    return (
+        text.replace("\\", "\\\\")
+        .replace("\n", "\\n")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+    )
+
+
+def ics_status(status_value: TrainingSessionStatus) -> str:
+    if status_value == TrainingSessionStatus.CANCELLED:
+        return "CANCELLED"
+    if status_value == TrainingSessionStatus.COMPLETED:
+        return "CONFIRMED"
+    return "TENTATIVE" if status_value == TrainingSessionStatus.PLANNED else "CONFIRMED"
+
+
+def fold_ics_line(line: str) -> str:
+    if len(line) <= 75:
+        return line
+    chunks = [line[:75]]
+    remaining = line[75:]
+    while remaining:
+        chunks.append(f" {remaining[:74]}")
+        remaining = remaining[74:]
+    return "\r\n".join(chunks)
+
+
+def slug_for_training_calendar(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "schedule"
 
 
 def infer_focus_area(assessments: list[AthleteAssessment], readiness_score: int) -> str:
