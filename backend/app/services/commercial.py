@@ -10,6 +10,7 @@ from re import sub
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,7 @@ from app.models.team import Team
 from app.schemas.commercial import (
     AccountingExportRead,
     AccountingExportRow,
+    AccountingSyncRead,
     CommercialInvoiceCheckoutSettlementCreate,
     CommercialInvoiceCheckoutSettlementRead,
     CommercialInvoiceHostedCheckoutRead,
@@ -551,6 +553,72 @@ async def accounting_export(
         rows=rows,
         debit_total=debit_total.quantize(Decimal("0.01")),
         credit_total=credit_total.quantize(Decimal("0.01")),
+    )
+
+
+async def sync_accounting_export(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    system: str,
+    basis: str,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> AccountingSyncRead:
+    await ensure_manage_commercial(authz, identity, organization_id)
+    export = await accounting_export(db, organization_id, system, basis)
+    selected_settings = settings or get_settings()
+    sync_reference = commercial_accounting_sync_reference(export)
+    webhook_configured = bool(selected_settings.commercial_accounting_webhook_url)
+    if selected_settings.commercial_accounting_sync_mode != "webhook" or not webhook_configured:
+        return AccountingSyncRead(
+            organization_id=organization_id,
+            basis=basis,
+            system=system,
+            mode=selected_settings.commercial_accounting_sync_mode,
+            delivered=False,
+            row_count=len(export.rows),
+            debit_total=export.debit_total,
+            credit_total=export.credit_total,
+            sync_reference=sync_reference,
+            failure_reason=None if webhook_configured else "Accounting webhook URL is not configured.",
+            webhook_configured=webhook_configured,
+        )
+
+    payload = commercial_accounting_sync_payload(export, sync_reference)
+    raw_body = json.dumps(payload, sort_keys=True, default=str).encode()
+    timestamp = str(int(time.time()))
+    headers = await commercial_accounting_sync_headers(selected_settings, raw_body, timestamp)
+    provider_status_code: int | None = None
+    failure_reason: str | None = None
+    delivered = False
+    try:
+        async with httpx.AsyncClient(timeout=selected_settings.commercial_accounting_timeout_seconds) as client:
+            response = await client.post(
+                selected_settings.commercial_accounting_webhook_url,
+                json=payload,
+                headers=headers,
+            )
+        provider_status_code = response.status_code
+        delivered = 200 <= response.status_code < 300
+        if not delivered:
+            failure_reason = f"Accounting webhook returned {response.status_code}: {response.text[:500]}"
+    except httpx.HTTPError as error:
+        failure_reason = f"Accounting webhook failed: {error}"
+
+    return AccountingSyncRead(
+        organization_id=organization_id,
+        basis=basis,
+        system=system,
+        mode=selected_settings.commercial_accounting_sync_mode,
+        delivered=delivered,
+        row_count=len(export.rows),
+        debit_total=export.debit_total,
+        credit_total=export.credit_total,
+        sync_reference=sync_reference,
+        provider_status_code=provider_status_code,
+        failure_reason=failure_reason,
+        webhook_configured=webhook_configured,
     )
 
 
@@ -1112,6 +1180,66 @@ def decimal_minor_units(value: Any) -> Decimal | None:
     if amount is None:
         return None
     return (amount / Decimal("100")).quantize(Decimal("0.01"))
+
+
+def commercial_accounting_sync_reference(export: AccountingExportRead) -> str:
+    payload = commercial_accounting_sync_payload(export, sync_reference=None)
+    digest = sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+    return f"acct_{export.system}_{export.basis}_{digest[:16]}"
+
+
+def commercial_accounting_sync_payload(
+    export: AccountingExportRead,
+    sync_reference: str | None,
+) -> dict[str, Any]:
+    return {
+        "organization_id": str(export.organization_id),
+        "system": export.system,
+        "basis": export.basis,
+        "sync_reference": sync_reference,
+        "row_count": len(export.rows),
+        "debit_total": str(export.debit_total),
+        "credit_total": str(export.credit_total),
+        "rows": [
+            {
+                "row_type": row.row_type,
+                "source_id": str(row.source_id),
+                "account_code": row.account_code,
+                "memo": row.memo,
+                "debit": str(row.debit),
+                "credit": str(row.credit),
+                "currency": row.currency,
+                "external_reference": row.external_reference,
+            }
+            for row in export.rows
+        ],
+    }
+
+
+async def commercial_accounting_sync_headers(
+    settings: Settings,
+    raw_body: bytes,
+    timestamp: str,
+) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "X-Afrolete-Commercial-Accounting-Timestamp": timestamp,
+    }
+    key = await resolve_commercial_secret(
+        settings,
+        env_value=settings.commercial_accounting_webhook_key,
+        path=settings.commercial_accounting_webhook_key_secret_path,
+        field_name=settings.commercial_accounting_webhook_key_secret_field,
+        label="commercial accounting webhook key",
+    )
+    if key:
+        headers["X-Afrolete-Commercial-Accounting-Key"] = key
+        headers["X-Afrolete-Commercial-Accounting-Signature"] = "sha256=" + hmac.new(
+            key.encode(),
+            timestamp.encode() + b"." + raw_body,
+            sha256,
+        ).hexdigest()
+    return headers
 
 
 async def validate_commercial_invoice_payment_webhook_signature(

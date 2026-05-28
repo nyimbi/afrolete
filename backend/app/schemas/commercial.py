@@ -291,6 +291,21 @@ class AccountingExportRead(BaseModel):
     credit_total: Decimal
 
 
+class AccountingSyncRead(BaseModel):
+    organization_id: UUID
+    basis: str
+    system: str
+    mode: str
+    delivered: bool
+    row_count: int
+    debit_total: Decimal
+    credit_total: Decimal
+    sync_reference: str
+    provider_status_code: int | None = None
+    failure_reason: str | None = None
+    webhook_configured: bool
+
+
 class SponsorshipDashboardRead(BaseModel):
     sponsor_id: UUID
     sponsor_name: str

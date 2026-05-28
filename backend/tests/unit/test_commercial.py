@@ -196,6 +196,15 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     assert export["system"] == "quickbooks"
     assert len(export["rows"]) >= 3
     assert export["credit_total"] >= "130.00"
+    sync = client.post(
+        "/api/v1/commercial/accounting-export/sync",
+        headers=identity_headers,
+        params={"organization_id": organization["id"], "system": "quickbooks", "basis": "cash"},
+    ).json()
+    assert sync["mode"] == "record_only"
+    assert sync["delivered"] is False
+    assert sync["row_count"] == len(export["rows"])
+    assert sync["sync_reference"].startswith("acct_quickbooks_cash_")
 
     dashboard = client.get(
         f"/api/v1/commercial/sponsorship-dashboard?organization_id={organization['id']}"
@@ -423,5 +432,88 @@ def test_commercial_invoice_payment_webhook_accepts_signed_stripe_event(
     assert duplicate["accepted"] is False
     assert duplicate["amount_paid"] == "99.00"
     assert duplicate["open_amount"] == "0.00"
+
+    commercial_service.get_settings.cache_clear()
+
+
+def test_commercial_accounting_sync_delivers_signed_webhook(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json, headers):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return SimpleNamespace(status_code=202, text="accepted")
+
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_ACCOUNTING_SYNC_MODE", "webhook")
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_ACCOUNTING_WEBHOOK_URL", "https://accounting.example/sync")
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_ACCOUNTING_WEBHOOK_KEY", "accounting-secret")
+    commercial_service.get_settings.cache_clear()
+    monkeypatch.setattr(commercial_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    organization, team, _ = create_commercial_context(client, identity_headers)
+    invoice = client.post(
+        "/api/v1/commercial/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "invoice_number": "ACCT-SYNC-1",
+            "title": "Accounting sync package",
+            "amount_due": "60.00",
+        },
+    ).json()
+    client.post(
+        "/api/v1/commercial/payments",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "invoice_id": invoice["id"],
+            "amount": "60.00",
+            "method": "bank",
+            "external_reference": "ACCT-SYNC-PAYMENT",
+        },
+    )
+
+    sync_response = client.post(
+        "/api/v1/commercial/accounting-export/sync",
+        headers=identity_headers,
+        params={"organization_id": organization["id"], "system": "quickbooks", "basis": "cash"},
+    )
+    assert sync_response.status_code == 200
+    sync = sync_response.json()
+    assert sync["mode"] == "webhook"
+    assert sync["delivered"] is True
+    assert sync["provider_status_code"] == 202
+    assert sync["row_count"] == 2
+    assert captured["url"] == "https://accounting.example/sync"
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["sync_reference"] == sync["sync_reference"]
+    assert len(payload["rows"]) == 2
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    timestamp = headers["X-Afrolete-Commercial-Accounting-Timestamp"]
+    expected_signature = hmac.new(
+        b"accounting-secret",
+        timestamp.encode() + b"." + json.dumps(payload, sort_keys=True, default=str).encode(),
+        sha256,
+    ).hexdigest()
+    assert headers["X-Afrolete-Commercial-Accounting-Key"] == "accounting-secret"
+    assert headers["X-Afrolete-Commercial-Accounting-Signature"] == f"sha256={expected_signature}"
 
     commercial_service.get_settings.cache_clear()

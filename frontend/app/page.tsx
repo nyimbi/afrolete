@@ -39,6 +39,7 @@ import type {
   AgentTaskStatus,
   AgentWorkerCallbackRead,
   AccountingExportRead,
+  AccountingSyncRead,
   AssessmentReviewQueueSummaryRead,
   AssetCondition,
   AssetSummaryRead,
@@ -1494,6 +1495,7 @@ export default function HomePage() {
   const [taxQuote, setTaxQuote] = useState<TaxQuoteRead | null>(null);
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlementRead | null>(null);
   const [accountingExport, setAccountingExport] = useState<AccountingExportRead | null>(null);
+  const [accountingSync, setAccountingSync] = useState<AccountingSyncRead | null>(null);
   const [commercialRefund, setCommercialRefund] = useState<CommercialRefundRead | null>(null);
   const [sponsorshipDashboard, setSponsorshipDashboard] = useState<SponsorshipDashboardRead[]>([]);
   const [reportDefinitions, setReportDefinitions] = useState<ReportDefinitionRead[]>([]);
@@ -3152,6 +3154,7 @@ export default function HomePage() {
       setTaxQuote(null);
       setPaymentSettlement(null);
       setAccountingExport(null);
+      setAccountingSync(null);
       setCommercialRefund(null);
       setSponsorshipDashboard([]);
       setReportDefinitions([]);
@@ -9414,6 +9417,33 @@ export default function HomePage() {
     );
   };
 
+  const syncCommercialAccounting = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "commercial-accounting-sync",
+      () =>
+        apiRequest<AccountingSyncRead>(
+          `/commercial/accounting-export/sync?organization_id=${selectedOrganizationId}&system=generic&basis=cash`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (sync) => {
+        setAccountingSync(sync);
+        addLog(
+          sync.delivered
+            ? `Accounting sync delivered: ${sync.sync_reference}`
+            : `Accounting sync prepared: ${sync.sync_reference}`,
+          sync.failure_reason ? "neutral" : "good"
+        );
+      }
+    );
+  };
+
   const refundSelectedTicket = () => {
     if (!selectedOrganizationId || !selectedTicketId) {
       addLog("Select a ticket first", "bad");
@@ -12673,6 +12703,7 @@ export default function HomePage() {
                 <button type="button" onClick={quoteCommercialTax} disabled={busyAction !== null}>Tax</button>
                 <button type="button" onClick={settleCommercialPayments} disabled={busyAction !== null}>Settle</button>
                 <button type="button" onClick={exportCommercialAccounting} disabled={busyAction !== null}>Export</button>
+                <button type="button" onClick={syncCommercialAccounting} disabled={busyAction !== null}>Sync</button>
               </div>
             </div>
             <div className="consent-grid">
@@ -12753,6 +12784,18 @@ export default function HomePage() {
                   <div>
                     <strong>{accountingExport.system} export</strong>
                     <span>{accountingExport.rows.length} rows · debit {accountingExport.debit_total} · credit {accountingExport.credit_total}</span>
+                  </div>
+                </article>
+              ) : null}
+              {accountingSync ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{accountingSync.delivered ? "Accounting delivered" : "Accounting prepared"}</strong>
+                    <span>
+                      {accountingSync.row_count} rows · {accountingSync.mode}
+                      {accountingSync.provider_status_code ? ` · ${accountingSync.provider_status_code}` : ""}
+                    </span>
+                    {accountingSync.failure_reason ? <small>{accountingSync.failure_reason}</small> : null}
                   </div>
                 </article>
               ) : null}

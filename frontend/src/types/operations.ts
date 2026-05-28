@@ -1941,6 +1941,21 @@ export type AccountingExportRead = {
   credit_total: string;
 };
 
+export type AccountingSyncRead = {
+  organization_id: UUID;
+  basis: string;
+  system: string;
+  mode: string;
+  delivered: boolean;
+  row_count: number;
+  debit_total: string;
+  credit_total: string;
+  sync_reference: string;
+  provider_status_code: number | null;
+  failure_reason: string | null;
+  webhook_configured: boolean;
+};
+
 export type SponsorshipDashboardRead = {
   sponsor_id: UUID;
   sponsor_name: string;

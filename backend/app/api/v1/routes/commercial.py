@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.commercial import (
     AccountingExportRead,
+    AccountingSyncRead,
     CommercialInvoiceCheckoutSettlementCreate,
     CommercialInvoiceCheckoutSettlementRead,
     CommercialInvoiceHostedCheckoutRead,
@@ -66,6 +67,7 @@ from app.services.commercial import (
     settle_commercial_invoice_checkout,
     sponsor_portal,
     sponsorship_dashboard,
+    sync_accounting_export,
     tax_quote,
     validate_commercial_invoice_payment_webhook_signature,
 )
@@ -381,6 +383,18 @@ async def accounting_export_route(
     db: AsyncSession = Depends(get_db),
 ) -> AccountingExportRead:
     return await accounting_export(db, organization_id, system, basis)
+
+
+@router.post("/accounting-export/sync", response_model=AccountingSyncRead)
+async def sync_accounting_export_route(
+    organization_id: UUID = Query(),
+    system: str = Query(default="generic"),
+    basis: str = Query(default="cash"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AccountingSyncRead:
+    return await sync_accounting_export(db, identity, organization_id, system, basis, authz)
 
 
 @router.get("/sponsorship-dashboard", response_model=list[SponsorshipDashboardRead])
