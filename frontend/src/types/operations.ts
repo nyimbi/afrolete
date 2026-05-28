@@ -3273,6 +3273,26 @@ export type PerformanceAchievementRunRead = {
   awards: PerformanceAchievementAwardRead[];
 };
 
+export type PlayerPerformanceProfileRead = {
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  athlete_person_id: UUID;
+  athlete_name: string;
+  latest_overall_score: number | null;
+  observation_count: number;
+  assessment_count: number;
+  latest_assessment_id: UUID | null;
+  rating: string | null;
+  active_goal_count: number;
+  achieved_goal_count: number;
+  award_count: number;
+  observations: PerformanceObservationRead[];
+  goals: PerformanceGoalRead[];
+  awards: PerformanceAchievementAwardRead[];
+  trends: PerformanceMetricTrendRead[];
+  benchmarks: PerformanceMetricBenchmarkRead[];
+};
+
 export type TrainingDrillRead = {
   id: UUID;
   organization_id: UUID;

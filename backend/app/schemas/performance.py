@@ -244,3 +244,23 @@ class PerformanceAchievementWorkerRunRead(BaseModel):
     athlete_profile_ids: list[UUID]
     awarded_count: int
     updated_goals: int
+
+
+class PlayerPerformanceProfileRead(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID
+    athlete_person_id: UUID
+    athlete_name: str
+    latest_overall_score: float | None
+    observation_count: int
+    assessment_count: int
+    latest_assessment_id: UUID | None
+    rating: str | None
+    active_goal_count: int
+    achieved_goal_count: int
+    award_count: int
+    observations: list[PerformanceObservationRead]
+    goals: list[PerformanceGoalRead]
+    awards: list[PerformanceAchievementAwardRead]
+    trends: list[PerformanceMetricTrendRead]
+    benchmarks: list[PerformanceMetricBenchmarkRead]

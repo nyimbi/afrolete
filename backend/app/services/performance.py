@@ -7,8 +7,15 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.event import Event
 from app.models.communication import CommunicationMessage, MessageRecipient
+from app.models.enums import (
+    CommunicationChannel,
+    CommunicationMessageType,
+    CommunicationScopeType,
+    MetricSource,
+    MetricVerificationStatus,
+)
+from app.models.event import Event
 from app.models.identity import Person
 from app.models.organization import Organization
 from app.models.performance import (
@@ -18,19 +25,12 @@ from app.models.performance import (
     PerformanceGoal,
     PerformanceMetricDefinition,
 )
-from app.models.enums import (
-    CommunicationChannel,
-    CommunicationMessageType,
-    CommunicationScopeType,
-    MetricSource,
-    MetricVerificationStatus,
-)
 from app.models.team import AthleteProfile
 from app.schemas.performance import (
     AthleteAssessmentCreate,
     MetricDefinitionCreate,
-    PerformanceGoalCreate,
     PerformanceAchievementWorkerRunRead,
+    PerformanceGoalCreate,
     PerformanceIngestionCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
@@ -542,6 +542,65 @@ async def list_performance_awards(
             )
         ).all()
     )
+
+
+async def list_my_player_performance(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    observation_limit: int = 10,
+) -> list[dict[str, object]]:
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    profiles = list(
+        (
+            await db.scalars(
+                select(AthleteProfile)
+                .where(AthleteProfile.organization_id == organization_id)
+                .where(AthleteProfile.person_id == identity.person_id)
+                .order_by(AthleteProfile.created_at.desc())
+            )
+        ).all()
+    )
+    athlete = await db.get(Person, identity.person_id)
+    athlete_name = athlete.display_name if athlete is not None else identity.display_name
+    results: list[dict[str, object]] = []
+    for profile in profiles:
+        score, observation_count, assessment_count, latest_assessment_id, rating = (
+            await performance_summary(db, organization_id, profile.id)
+        )
+        goals = await list_performance_goals(db, organization_id, profile.id)
+        awards = await list_performance_awards(db, organization_id, profile.id)
+        observations = (await list_observations(db, organization_id, profile.id))[:observation_limit]
+        trends = await performance_metric_trends(db, organization_id, profile.id)
+        benchmarks = await performance_metric_benchmarks(
+            db,
+            organization_id,
+            athlete_profile_id=profile.id,
+        )
+        results.append(
+            {
+                "organization_id": organization_id,
+                "athlete_profile_id": profile.id,
+                "athlete_person_id": profile.person_id,
+                "athlete_name": athlete_name,
+                "latest_overall_score": score,
+                "observation_count": observation_count,
+                "assessment_count": assessment_count,
+                "latest_assessment_id": latest_assessment_id,
+                "rating": rating,
+                "active_goal_count": sum(1 for goal in goals if goal.status == "active"),
+                "achieved_goal_count": sum(1 for goal in goals if goal.status == "achieved"),
+                "award_count": len(awards),
+                "observations": observations,
+                "goals": goals,
+                "awards": awards,
+                "trends": trends,
+                "benchmarks": benchmarks,
+            }
+        )
+    return results
 
 
 async def evaluate_performance_achievements(

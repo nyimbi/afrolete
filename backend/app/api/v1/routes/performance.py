@@ -14,28 +14,30 @@ from app.schemas.performance import (
     PerformanceAchievementRunRead,
     PerformanceGoalCreate,
     PerformanceGoalRead,
-    PerformanceMetricBenchmarkRead,
-    PerformanceMetricTrendRead,
     PerformanceIngestionCreate,
     PerformanceIngestionRead,
+    PerformanceMetricBenchmarkRead,
+    PerformanceMetricTrendRead,
     PerformanceObservationCreate,
     PerformanceObservationRead,
     PerformanceObservationReviewCreate,
+    PlayerPerformanceProfileRead,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.performance import (
     create_assessment,
-    create_performance_goal,
     create_metric_definition,
     create_observation,
+    create_performance_goal,
     evaluate_performance_achievements,
     ingest_performance_evidence,
+    list_assessments,
     list_performance_awards,
     list_performance_goals,
-    list_assessments,
     list_metric_definitions,
+    list_my_player_performance,
     list_observations,
     performance_metric_benchmarks,
     performance_metric_trends,
@@ -156,6 +158,49 @@ async def list_metric_definitions_route(
     return [
         to_metric_read(metric)
         for metric in await list_metric_definitions(db, organization_id, sport=sport)
+    ]
+
+
+@router.get("/my-profiles", response_model=list[PlayerPerformanceProfileRead])
+async def list_my_player_performance_route(
+    organization_id: UUID = Query(),
+    observation_limit: int = Query(default=10, ge=1, le=50),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> list[PlayerPerformanceProfileRead]:
+    profiles = await list_my_player_performance(
+        db,
+        identity,
+        organization_id,
+        observation_limit=observation_limit,
+    )
+    return [
+        PlayerPerformanceProfileRead(
+            organization_id=profile["organization_id"],
+            athlete_profile_id=profile["athlete_profile_id"],
+            athlete_person_id=profile["athlete_person_id"],
+            athlete_name=profile["athlete_name"],
+            latest_overall_score=profile["latest_overall_score"],
+            observation_count=profile["observation_count"],
+            assessment_count=profile["assessment_count"],
+            latest_assessment_id=profile["latest_assessment_id"],
+            rating=profile["rating"],
+            active_goal_count=profile["active_goal_count"],
+            achieved_goal_count=profile["achieved_goal_count"],
+            award_count=profile["award_count"],
+            observations=[
+                to_observation_read(observation) for observation in profile["observations"]
+            ],
+            goals=[to_goal_read(goal) for goal in profile["goals"]],
+            awards=[to_award_read(award) for award in profile["awards"]],
+            trends=[
+                PerformanceMetricTrendRead(**trend) for trend in profile["trends"]
+            ],
+            benchmarks=[
+                PerformanceMetricBenchmarkRead(**benchmark) for benchmark in profile["benchmarks"]
+            ],
+        )
+        for profile in profiles
     ]
 
 

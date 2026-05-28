@@ -82,6 +82,84 @@ def test_performance_achievements_create_in_app_notification(client, identity_he
     assert [recipient["person_id"] for recipient in recipients] == [member["subject_id"]]
 
 
+def test_player_can_load_own_performance_profile(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "pace",
+            "name": "Pace",
+            "category": "physical",
+            "unit": "seconds",
+            "higher_is_better": False,
+        },
+    ).json()
+    observation = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "metric_definition_id": metric["id"],
+            "value": 12.4,
+        },
+    )
+    assert observation.status_code == 201
+    assessment = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/assessments",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "physical_score": 82,
+            "technical_score": 76,
+            "tactical_score": 72,
+            "mental_score": 79,
+        },
+    )
+    assert assessment.status_code == 201
+    goal = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/goals",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "metric_definition_id": metric["id"],
+            "title": "Lower sprint time",
+            "target_value": 12.0,
+            "starts_at": "2026-01-01",
+        },
+    )
+    assert goal.status_code == 201
+
+    player_headers = {
+        "X-Afrolete-Sub": "kc-athlete-1",
+        "X-Afrolete-Email": "performance-athlete@example.com",
+        "X-Afrolete-Name": "Performance Athlete",
+    }
+    response = client.get(
+        f"/api/v1/performance/my-profiles?organization_id={organization['id']}",
+        headers=player_headers,
+    )
+
+    assert response.status_code == 200
+    profiles = response.json()
+    assert len(profiles) == 1
+    profile = profiles[0]
+    assert profile["athlete_profile_id"] == roster["athlete_profile_id"]
+    assert profile["athlete_name"] == "Performance Athlete"
+    assert profile["latest_overall_score"] == 76.95
+    assert profile["rating"] == "good"
+    assert profile["observation_count"] == 1
+    assert profile["assessment_count"] == 1
+    assert profile["active_goal_count"] == 1
+    assert profile["award_count"] == 0
+    assert profile["goals"][0]["title"] == "Lower sprint time"
+    assert profile["observations"][0]["value"] == 12.4
+    assert profile["trends"][0]["metric_name"] == "Pace"
+    assert profile["benchmarks"][0]["metric_name"] == "Pace"
+
+
 def create_rostered_athlete(client, identity_headers):
     organization = client.post(
         "/api/v1/organizations",

@@ -1217,6 +1217,191 @@ textarea:focus {
   margin: 0;
 }
 
+.player-page {
+  min-height: 100vh;
+  background: #eef3ee;
+  padding: 24px;
+}
+
+.player-shell {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.player-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(180px, 0.8fr) minmax(200px, 0.9fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.player-toolbar div {
+  display: grid;
+  gap: 3px;
+}
+
+.player-toolbar strong {
+  font-size: 22px;
+}
+
+.player-toolbar span,
+.player-message,
+.player-empty span {
+  color: var(--muted);
+}
+
+.player-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.player-tabs button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 12px;
+}
+
+.player-tabs button.selected {
+  border-color: var(--teal);
+  box-shadow: inset 0 -3px 0 var(--teal);
+}
+
+.player-hero {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 16px;
+  align-items: stretch;
+}
+
+.player-hero > div,
+.player-hero dl,
+.player-insights article,
+.player-list article,
+.player-list > span,
+.player-awards article,
+.player-awards > span,
+.player-empty,
+.player-message {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.player-hero > div {
+  padding: 18px;
+  display: grid;
+  align-content: center;
+}
+
+.player-hero span,
+.player-insights span,
+.player-list span,
+.player-list small,
+.player-awards span,
+.player-awards small {
+  color: var(--muted);
+}
+
+.player-hero strong {
+  font-size: 54px;
+  line-height: 1;
+  margin-top: 8px;
+}
+
+.player-hero dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+}
+
+.player-hero dl div {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  padding: 18px;
+  border-left: 1px solid var(--line);
+}
+
+.player-hero dl div:first-child {
+  border-left: 0;
+}
+
+.player-hero dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.player-hero dd {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 800;
+}
+
+.player-insights,
+.player-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.player-insights article,
+.player-empty,
+.player-message {
+  padding: 14px;
+}
+
+.player-insights strong,
+.player-insights p,
+.player-list strong,
+.player-list span,
+.player-list small,
+.player-awards strong,
+.player-awards span,
+.player-awards small,
+.player-empty strong,
+.player-empty span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.player-insights p {
+  margin: 8px 0 0;
+}
+
+.player-columns h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.player-list,
+.player-awards {
+  display: grid;
+  gap: 8px;
+}
+
+.player-list article,
+.player-list > span,
+.player-awards article,
+.player-awards > span {
+  padding: 12px;
+}
+
+.player-awards article {
+  border-color: #d7b85b;
+  background: #fffaf0;
+}
+
+.player-empty {
+  margin-top: 16px;
+}
+
 .public-site-page {
   --site-primary: var(--teal);
   --site-secondary: var(--amber);
@@ -2091,8 +2276,26 @@ textarea:focus {
   .family-layout,
   .family-athletes,
   .family-ai-appeals,
-  .family-ai-appeals form {
+  .family-ai-appeals form,
+  .player-toolbar,
+  .player-hero,
+  .player-insights,
+  .player-columns {
     grid-template-columns: 1fr;
+  }
+
+  .player-hero dl {
+    grid-template-columns: 1fr;
+  }
+
+  .player-hero dl div,
+  .player-hero dl div:first-child {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .player-hero dl div:first-child {
+    border-top: 0;
   }
 
   .family-events article {
