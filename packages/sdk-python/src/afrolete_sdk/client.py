@@ -98,6 +98,43 @@ class _TrainingResource:
     drills: _TrainingDrillsResource
 
 
+@dataclass(frozen=True)
+class _PerformanceMetricsResource:
+    client: AfroLeteClient
+
+    def list(self, *, organization_id: str, sport: str | None = None) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            "/performance/metrics",
+            query={"organization_id": organization_id, "sport": sport},
+        )
+
+
+@dataclass(frozen=True)
+class _PerformanceObservationsResource:
+    client: AfroLeteClient
+
+    def list(self, athlete_profile_id: str, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            f"/performance/athletes/{athlete_profile_id}/observations",
+            query={"organization_id": organization_id},
+        )
+
+    def create(self, athlete_profile_id: str, payload: JsonObject) -> JsonObject:
+        return self.client.request(
+            "POST",
+            f"/performance/athletes/{athlete_profile_id}/observations",
+            body=payload,
+        )
+
+
+@dataclass(frozen=True)
+class _PerformanceResource:
+    metrics: _PerformanceMetricsResource
+    observations: _PerformanceObservationsResource
+
+
 class AfroLeteClient:
     def __init__(self, *, base_url: str, api_key: str, timeout: float = 30.0) -> None:
         self.base_url = base_url.rstrip("/")
@@ -108,6 +145,10 @@ class AfroLeteClient:
         self.teams = _TeamsResource(self)
         self.events = _EventsResource(self)
         self.training = _TrainingResource(drills=_TrainingDrillsResource(self))
+        self.performance = _PerformanceResource(
+            metrics=_PerformanceMetricsResource(self),
+            observations=_PerformanceObservationsResource(self),
+        )
 
     def me(self) -> JsonObject:
         return self.request("GET", "/me")

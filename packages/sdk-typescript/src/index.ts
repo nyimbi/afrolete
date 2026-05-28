@@ -252,6 +252,51 @@ export interface TrainingDrillCreate {
   status?: string;
 }
 
+export interface PerformanceMetricDefinition {
+  id: UUID;
+  organization_id: UUID;
+  sport: string | null;
+  code: string;
+  name: string;
+  category: string;
+  unit: string | null;
+  description: string | null;
+  min_value: number | null;
+  max_value: number | null;
+  weight: number;
+  higher_is_better: boolean;
+  status: string;
+}
+
+export interface PerformanceObservationCreate {
+  organization_id: UUID;
+  metric_definition_id: UUID;
+  event_id?: UUID | null;
+  value: number;
+  raw_value?: string | null;
+  observed_at?: ISODateTime | null;
+  source?: string;
+  confidence?: number | null;
+  verification_status?: string;
+  notes?: string | null;
+}
+
+export interface PerformanceObservation {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  metric_definition_id: UUID;
+  event_id: UUID | null;
+  recorded_by_person_id: UUID | null;
+  value: number;
+  raw_value: string | null;
+  observed_at: ISODateTime;
+  source: string;
+  confidence: number | null;
+  verification_status: string;
+  notes: string | null;
+}
+
 interface QueryValue {
   toString(): string;
 }
@@ -331,6 +376,32 @@ export class AfroLeteClient {
         }),
       create: (payload: TrainingDrillCreate): Promise<TrainingDrill> =>
         this.request<TrainingDrill>("/training/drills", {
+          method: "POST",
+          body: payload,
+        }),
+    },
+  };
+
+  readonly performance = {
+    metrics: {
+      list: (params: { organizationId: UUID; sport?: string | null }): Promise<PerformanceMetricDefinition[]> =>
+        this.request<PerformanceMetricDefinition[]>("/performance/metrics", {
+          query: { organization_id: params.organizationId, sport: params.sport },
+        }),
+    },
+    observations: {
+      list: (
+        athleteProfileId: UUID,
+        params: { organizationId: UUID },
+      ): Promise<PerformanceObservation[]> =>
+        this.request<PerformanceObservation[]>(`/performance/athletes/${athleteProfileId}/observations`, {
+          query: { organization_id: params.organizationId },
+        }),
+      create: (
+        athleteProfileId: UUID,
+        payload: PerformanceObservationCreate,
+      ): Promise<PerformanceObservation> =>
+        this.request<PerformanceObservation>(`/performance/athletes/${athleteProfileId}/observations`, {
           method: "POST",
           body: payload,
         }),

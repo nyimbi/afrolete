@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from secrets import token_urlsafe
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from app.models.enums import ConsentRequestStatus, MemberSubjectType, Membership
 from app.models.event import ConsentRequest, Event
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
+from app.models.performance import AthletePerformanceObservation, PerformanceMetricDefinition
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.models.training import TrainingDrill
 from app.schemas.developer import (
@@ -23,6 +25,11 @@ from app.schemas.developer import (
 )
 from app.schemas.event import EventCreate, EventRead
 from app.schemas.organization import OrganizationRead
+from app.schemas.performance import (
+    MetricDefinitionRead,
+    PerformanceObservationCreate,
+    PerformanceObservationRead,
+)
 from app.schemas.team import TeamCreate, TeamMemberAdd, TeamRead, TeamRosterEntryRead
 from app.schemas.training import TrainingDrillCreate, TrainingDrillRead
 from app.services.authz.service import (
@@ -37,6 +44,7 @@ from app.services.developer import (
 )
 from app.services.events import list_events
 from app.services.organizations import organization_member_relation
+from app.services.performance import list_metric_definitions, list_observations
 from app.services.safeguarding import consent_destination, hash_token, normalized_scope_id, utc_now
 from app.services.teams import list_teams_for_organization, team_member_relation
 from app.services.training import list_training_drills
@@ -105,6 +113,44 @@ def to_event_read(event: Event) -> EventRead:
         timezone=event.timezone,
         venue_name=event.venue_name,
         notes=event.notes,
+    )
+
+
+def to_metric_read(metric: PerformanceMetricDefinition) -> MetricDefinitionRead:
+    return MetricDefinitionRead(
+        id=metric.id,
+        organization_id=metric.organization_id,
+        sport=metric.sport,
+        code=metric.code,
+        name=metric.name,
+        category=metric.category,
+        unit=metric.unit,
+        description=metric.description,
+        min_value=metric.min_value,
+        max_value=metric.max_value,
+        weight=metric.weight,
+        higher_is_better=metric.higher_is_better,
+        status=metric.status,
+    )
+
+
+def to_performance_observation_read(
+    observation: AthletePerformanceObservation,
+) -> PerformanceObservationRead:
+    return PerformanceObservationRead(
+        id=observation.id,
+        organization_id=observation.organization_id,
+        athlete_profile_id=observation.athlete_profile_id,
+        metric_definition_id=observation.metric_definition_id,
+        event_id=observation.event_id,
+        recorded_by_person_id=observation.recorded_by_person_id,
+        value=observation.value,
+        raw_value=observation.raw_value,
+        observed_at=observation.observed_at,
+        source=observation.source,
+        confidence=observation.confidence,
+        verification_status=observation.verification_status,
+        notes=observation.notes,
     )
 
 
@@ -635,6 +681,101 @@ async def sdk_create_event(
         },
     )
     return to_event_read(event)
+
+
+@router.get("/performance/metrics", response_model=list[MetricDefinitionRead])
+async def sdk_list_performance_metrics(
+    organization_id: UUID = Query(),
+    sport: str | None = Query(default=None),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[MetricDefinitionRead]:
+    ensure_developer_api_scope(
+        credential,
+        organization_id,
+        {"read:performance", "write:performance"},
+    )
+    return [
+        to_metric_read(metric)
+        for metric in await list_metric_definitions(db, organization_id, sport=sport)
+    ]
+
+
+@router.get(
+    "/performance/athletes/{athlete_profile_id}/observations",
+    response_model=list[PerformanceObservationRead],
+)
+async def sdk_list_performance_observations(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceObservationRead]:
+    ensure_developer_api_scope(
+        credential,
+        organization_id,
+        {"read:performance", "write:performance"},
+    )
+    return [
+        to_performance_observation_read(observation)
+        for observation in await list_observations(db, organization_id, athlete_profile_id)
+    ]
+
+
+@router.post(
+    "/performance/athletes/{athlete_profile_id}/observations",
+    response_model=PerformanceObservationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sdk_create_performance_observation(
+    athlete_profile_id: UUID,
+    payload: PerformanceObservationCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> PerformanceObservationRead:
+    ensure_developer_api_scope(credential, payload.organization_id, {"write:performance"})
+    athlete_profile = await db.get(AthleteProfile, athlete_profile_id)
+    if athlete_profile is None or athlete_profile.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    metric = await db.get(PerformanceMetricDefinition, payload.metric_definition_id)
+    if metric is None or metric.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metric not found")
+    if payload.event_id is not None:
+        event = await db.get(Event, payload.event_id)
+        if event is None or event.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+
+    observation = AthletePerformanceObservation(
+        athlete_profile_id=athlete_profile.id,
+        recorded_by_person_id=None,
+        observed_at=payload.observed_at or datetime.now(UTC),
+        **payload.model_dump(exclude={"observed_at"}),
+    )
+    db.add(observation)
+    await db.commit()
+    await db.refresh(observation)
+    await deliver_developer_webhook_event(
+        db,
+        payload.organization_id,
+        "performance.observation.created",
+        str(observation.id),
+        {
+            "id": str(observation.id),
+            "organization_id": str(observation.organization_id),
+            "athlete_profile_id": str(observation.athlete_profile_id),
+            "metric_definition_id": str(observation.metric_definition_id),
+            "metric_code": metric.code,
+            "metric_name": metric.name,
+            "unit": metric.unit,
+            "value": observation.value,
+            "source": observation.source.value,
+            "confidence": observation.confidence,
+            "verification_status": observation.verification_status.value,
+            "observed_at": observation.observed_at.isoformat(),
+            "origin": "developer_api",
+        },
+    )
+    return to_performance_observation_read(observation)
 
 
 @router.get("/training/drills", response_model=list[TrainingDrillRead])

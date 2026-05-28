@@ -53,6 +53,22 @@ client.teams.add_member(
         "role": "player",
     },
 )
+metrics = client.performance.metrics.list(
+    organization_id=organization["id"],
+    sport="football",
+)
+if metrics:
+    client.performance.observations.create(
+        "athlete-profile-uuid",
+        {
+            "organization_id": organization["id"],
+            "metric_definition_id": metrics[0]["id"],
+            "value": 8.7,
+            "source": "wearable",
+            "confidence": 0.91,
+            "verification_status": "pending_review",
+        },
+    )
 ```
 
 The client sends `X-Afrolete-API-Key` and targets `/api/v1/sdk/*` routes. It
