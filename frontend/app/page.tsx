@@ -459,7 +459,7 @@ type AssessmentReviewQueueFilters = {
 };
 
 const chartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--red)", "var(--violet)"];
-type BenchmarkCohortScope = "tenant" | "age_group" | "position";
+type BenchmarkCohortScope = "tenant" | "age_group" | "position" | "region";
 
 function infrastructureTone(component: InfrastructureComponent) {
   if (component.configured || component.status === "local") {
@@ -1148,6 +1148,7 @@ export default function HomePage() {
   const [athleteForm, setAthleteForm] = useState({
     display_name: "Amani Otieno",
     email: "amani@example.com",
+    country_code: "KE",
     role: "player" as TeamRole,
     primary_position: "Midfielder",
     jersey_number: "8",
@@ -2959,6 +2960,7 @@ export default function HomePage() {
           body: {
             email: athleteForm.email,
             display_name: athleteForm.display_name,
+            country_code: athleteForm.country_code,
             role: "athlete",
             title: athleteForm.primary_position
           }
@@ -9750,6 +9752,10 @@ export default function HomePage() {
                 <input value={athleteForm.email} onChange={(event) => setAthleteForm({ ...athleteForm, email: event.target.value })} />
               </label>
               <label>
+                Country
+                <input maxLength={2} value={athleteForm.country_code} onChange={(event) => setAthleteForm({ ...athleteForm, country_code: event.target.value.toUpperCase() })} />
+              </label>
+              <label>
                 Role
                 <select value={athleteForm.role} onChange={(event) => setAthleteForm({ ...athleteForm, role: event.target.value as TeamRole })}>
                   <option value="player">Player</option>
@@ -13082,6 +13088,7 @@ export default function HomePage() {
                   <option value="tenant">All athletes</option>
                   <option value="age_group">Age group</option>
                   <option value="position">Position</option>
+                  <option value="region">Country/region</option>
                 </select>
               </label>
             </div>

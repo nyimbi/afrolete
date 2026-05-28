@@ -1499,11 +1499,11 @@ def benchmark_band(
 
 def normalize_benchmark_scope(cohort_scope: str) -> str:
     normalized = cohort_scope.strip().lower()
-    if normalized in {"tenant", "age_group", "position"}:
+    if normalized in {"tenant", "age_group", "position", "region"}:
         return normalized
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        detail="cohort_scope must be one of tenant, age_group, or position",
+        detail="cohort_scope must be one of tenant, age_group, position, or region",
     )
 
 
@@ -1519,6 +1519,7 @@ async def athlete_benchmark_contexts(
             select(
                 AthleteProfile.id,
                 Person.date_of_birth,
+                Person.country_code,
                 TeamRosterEntry.primary_position,
                 Team.age_group,
             )
@@ -1533,15 +1534,17 @@ async def athlete_benchmark_contexts(
         )
     ).all()
     contexts: dict[UUID, dict[str, str | None]] = {}
-    for athlete_profile_id, date_of_birth, primary_position, team_age_group in rows:
+    for athlete_profile_id, date_of_birth, country_code, primary_position, team_age_group in rows:
         context = contexts.setdefault(
             athlete_profile_id,
-            {"age_group": None, "position": None},
+            {"age_group": None, "position": None, "region": None},
         )
         if context["age_group"] is None:
             context["age_group"] = team_age_group or age_group_from_birthdate(date_of_birth)
         if context["position"] is None and primary_position:
             context["position"] = primary_position
+        if context["region"] is None and country_code:
+            context["region"] = country_code.upper()
     return contexts
 
 

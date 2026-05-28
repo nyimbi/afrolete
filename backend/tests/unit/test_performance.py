@@ -248,6 +248,83 @@ def test_performance_benchmarks_can_scope_to_position_cohort(client, identity_he
     assert benchmark["percentile_rank"] == 100.0
 
 
+def test_performance_benchmarks_can_scope_to_region_cohort(client, identity_headers) -> None:
+    organization, team, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "vertical_jump",
+            "name": "Vertical Jump",
+            "category": "physical",
+            "unit": "cm",
+            "higher_is_better": True,
+        },
+    ).json()
+    cohort_entries = [
+        ("Kenya Peer", "kenya-peer@example.com", "KE", 61),
+        ("Uganda Peer", "uganda-peer@example.com", "UG", 80),
+    ]
+    for display_name, email, country_code, value in cohort_entries:
+        member = client.post(
+            f"/api/v1/organizations/{organization['id']}/members",
+            headers=identity_headers,
+            json={
+                "email": email,
+                "display_name": display_name,
+                "country_code": country_code,
+                "role": "athlete",
+            },
+        ).json()
+        peer_roster = client.post(
+            f"/api/v1/teams/{team['id']}/members",
+            headers=identity_headers,
+            json={
+                "person_id": member["subject_id"],
+                "role": "player",
+                "status": "active",
+                "primary_position": "Forward",
+            },
+        ).json()
+        response = client.post(
+            f"/api/v1/performance/athletes/{peer_roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": metric["id"],
+                "value": value,
+            },
+        )
+        assert response.status_code == 201
+    target = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "metric_definition_id": metric["id"],
+            "value": 62,
+        },
+    )
+    assert target.status_code == 201
+
+    response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/benchmarks"
+        f"?organization_id={organization['id']}&cohort_scope=region",
+        headers=identity_headers,
+    )
+
+    assert response.status_code == 200
+    benchmark = response.json()[0]
+    assert benchmark["cohort_scope"] == "region"
+    assert benchmark["cohort_label"] == "KE"
+    assert benchmark["sample_size"] == 2
+    assert benchmark["cohort_average"] == 61.5
+    assert benchmark["cohort_max"] == 62.0
+    assert benchmark["percentile_rank"] == 100.0
+
+
 def test_performance_trend_series_returns_ordered_points(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(
@@ -540,6 +617,7 @@ def create_rostered_athlete(client, identity_headers):
         json={
             "email": "performance-athlete@example.com",
             "display_name": "Performance Athlete",
+            "country_code": "KE",
             "role": "athlete",
         },
     ).json()

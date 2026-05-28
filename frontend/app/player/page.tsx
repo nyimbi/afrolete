@@ -11,7 +11,7 @@ const defaultPlayerIdentity: LocalIdentity = {
 };
 
 const playerChartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--violet)", "var(--green)"];
-type BenchmarkCohortScope = "tenant" | "age_group" | "position";
+type BenchmarkCohortScope = "tenant" | "age_group" | "position" | "region";
 
 function playerValueLabel(value: number | null | undefined, unit?: string | null) {
   if (typeof value !== "number") {
@@ -371,6 +371,7 @@ export default function PlayerPerformancePage() {
             <option value="tenant">All athletes</option>
             <option value="age_group">Age group</option>
             <option value="position">Position</option>
+            <option value="region">Country/region</option>
           </select>
           <button type="submit" disabled={busy}>{busy ? "Loading" : "Refresh"}</button>
         </form>

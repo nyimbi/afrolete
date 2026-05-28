@@ -166,6 +166,7 @@ class MemberAdd(BaseModel):
     subject_id: UUID | None = None
     email: str | None = Field(default=None, max_length=320)
     display_name: str | None = Field(default=None, min_length=2, max_length=240)
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
     role: MembershipRole
     title: str | None = Field(default=None, max_length=160)
 
