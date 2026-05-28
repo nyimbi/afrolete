@@ -402,6 +402,7 @@ def test_agent_governance_policy_requires_approvals_and_blocks_tasks(client, ide
     assert csv_export["content_type"].startswith("text/csv")
     assert csv_export["download_filename"].endswith(".csv")
     assert csv_export["governed_task_count"] == 1
+    assert "summary,all,governed_task_count,1" in csv_export["content"]
     assert "safeguarding.selection.review" in csv_export["content"]
     assert csv_export["checksum"]
     assert csv_export["size_bytes"] == len(csv_export["content"].encode())

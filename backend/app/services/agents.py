@@ -3547,7 +3547,8 @@ def render_agent_governance_policy_history_csv(history: dict[str, object]) -> st
         "latest_policy_code",
         "recommendation",
     ]:
-        writer.writerow(["summary", "all", metric, history.get(metric) or ""])
+        value = history.get(metric)
+        writer.writerow(["summary", "all", metric, "" if value is None else value])
     writer.writerow([])
     writer.writerow(["timeline_label", "task_count", "approval_required_count", "completed_count", "waiting_for_review_count", "failed_count"])
     for bucket in list(history["timeline"]):
