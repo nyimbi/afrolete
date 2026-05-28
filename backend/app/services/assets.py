@@ -452,7 +452,7 @@ def incident_type_for_emergency(emergency_type) -> SafeguardingIncidentType:
         "medical": SafeguardingIncidentType.MEDICAL,
         "fire": SafeguardingIncidentType.FACILITY,
         "weather": SafeguardingIncidentType.WEATHER,
-        "security": SafeguardingIncidentType.SAFEGUARDING,
+        "security": SafeguardingIncidentType.SECURITY,
         "evacuation": SafeguardingIncidentType.FACILITY,
         "missing_person": SafeguardingIncidentType.SAFEGUARDING,
         "other": SafeguardingIncidentType.OTHER,

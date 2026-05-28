@@ -201,6 +201,7 @@ class SafeguardingIncidentType(StrEnum):
     FACILITY = "facility"
     TRANSPORT = "transport"
     WEATHER = "weather"
+    SECURITY = "security"
     OTHER = "other"
 
 

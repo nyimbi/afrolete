@@ -21,6 +21,12 @@ from app.models.developer import (
     DeveloperWebhookDelivery,
     DeveloperWebhookSubscription,
 )
+from app.models.enums import (
+    SafeguardingIncidentSeverity,
+    SafeguardingIncidentStatus,
+    SafeguardingIncidentType,
+)
+from app.models.event import SafeguardingIncident
 from app.models.organization import Organization
 from app.schemas.developer import (
     DeveloperApiKeyCreate,
@@ -968,13 +974,67 @@ async def mark_reused_refresh_family(
             )
         ).all()
     )
+    incident = await create_oauth_refresh_compromise_incident(db, reused_key, family_keys, detected_at)
     for family_key in family_keys:
         family_key.status = "revoked"
         family_key.refresh_token_hash = None
         family_key.refresh_rotated_at = family_key.refresh_rotated_at or detected_at
         if "refresh token family compromised" not in (family_key.notes or ""):
-            family_key.notes = f"{family_key.notes or ''}\nOAuth refresh token family compromised at {detected_at.isoformat()}.".strip()
+            family_key.notes = (
+                f"{family_key.notes or ''}\nOAuth refresh token family compromised at "
+                f"{detected_at.isoformat()} after security incident {incident.id}."
+            ).strip()
     await db.commit()
+
+
+async def create_oauth_refresh_compromise_incident(
+    db: AsyncSession,
+    reused_key: DeveloperApiKey,
+    family_keys: list[DeveloperApiKey],
+    detected_at: datetime,
+) -> SafeguardingIncident:
+    open_statuses = (
+        SafeguardingIncidentStatus.OPEN,
+        SafeguardingIncidentStatus.TRIAGED,
+        SafeguardingIncidentStatus.INVESTIGATING,
+    )
+    family_id = str(reused_key.refresh_token_family_id)
+    existing_incident = await db.scalar(
+        select(SafeguardingIncident)
+        .where(
+            SafeguardingIncident.organization_id == reused_key.organization_id,
+            SafeguardingIncident.incident_type == SafeguardingIncidentType.SECURITY,
+            SafeguardingIncident.status.in_(open_statuses),
+            SafeguardingIncident.description.contains(family_id),
+        )
+        .order_by(SafeguardingIncident.created_at.desc())
+    )
+    if existing_incident is not None:
+        return existing_incident
+
+    incident = SafeguardingIncident(
+        organization_id=reused_key.organization_id,
+        incident_type=SafeguardingIncidentType.SECURITY,
+        severity=SafeguardingIncidentSeverity.HIGH,
+        status=SafeguardingIncidentStatus.OPEN,
+        occurred_at=detected_at,
+        location="Developer OAuth",
+        title="OAuth refresh-token replay detected",
+        description=(
+            "A previously rotated OAuth refresh token was presented again. "
+            f"Application ID: {reused_key.application_id}. "
+            f"Refresh-token family ID: {family_id}. "
+            f"Reused key ID: {reused_key.id}. "
+            f"Affected OAuth key count: {len(family_keys)}. "
+            f"Detected at: {detected_at.isoformat()}."
+        ),
+        immediate_action="Revoked active OAuth tokens in the compromised refresh-token family.",
+        medical_follow_up_required="not_applicable",
+        regulatory_report_required=False,
+    )
+    db.add(incident)
+    await db.flush()
+    return incident
 
 
 def build_oauth_api_key(

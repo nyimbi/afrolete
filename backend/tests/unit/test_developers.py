@@ -191,6 +191,14 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         },
     )
     assert reused_refresh_response.status_code == 401
+    duplicate_reused_refresh_response = client.post(
+        "/api/v1/developers/oauth/refresh",
+        json={
+            "client_id": application["client_id"],
+            "refresh_token": oauth_token["refresh_token"],
+        },
+    )
+    assert duplicate_reused_refresh_response.status_code == 401
     compromised_oauth_inspect_response = client.get(
         "/api/v1/developers/auth/inspect",
         headers={"X-Afrolete-API-Key": refreshed_oauth["access_token"]},
@@ -206,6 +214,25 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         key for key in compromised_keys_response.json() if key["environment"] == "oauth" and key["refresh_reused_at"]
     ]
     assert len(compromised_oauth_keys) == 1
+    assert "security incident" in compromised_oauth_keys[0]["notes"]
+
+    incidents_response = client.get(
+        f"/api/v1/safeguarding/incidents?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert incidents_response.status_code == 200
+    replay_incidents = [
+        incident
+        for incident in incidents_response.json()
+        if incident["title"] == "OAuth refresh-token replay detected"
+    ]
+    assert len(replay_incidents) == 1
+    replay_incident = replay_incidents[0]
+    assert replay_incident["incident_type"] == "security"
+    assert replay_incident["severity"] == "high"
+    assert replay_incident["status"] == "open"
+    assert "Refresh-token family ID" in replay_incident["description"]
+    assert "Revoked active OAuth tokens" in replay_incident["immediate_action"]
 
     reused_oauth_token_response = client.post(
         "/api/v1/developers/oauth/token",
