@@ -3,9 +3,19 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 
 from app.models.agent import Agent, AgentRunRecord, AgentTask
-from app.models.enums import AgentKind, AgentTaskStatus, MetricCategory, MetricSource, OrganizationType
+from app.models.communication import CommunicationMessage, MessageRecipient
+from app.models.enums import (
+    AgentKind,
+    AgentTaskStatus,
+    CommunicationChannel,
+    MemberSubjectType,
+    MembershipRole,
+    MetricCategory,
+    MetricSource,
+    OrganizationType,
+)
 from app.models.identity import Person
-from app.models.organization import Organization
+from app.models.organization import Membership, Organization
 from app.models.performance import (
     AthletePerformanceObservation,
     PerformanceForecastValidationRun,
@@ -147,6 +157,85 @@ async def test_due_worker_runs_forecast_validation_lane(db_session) -> None:
         )
     )
     assert run_count == 1
+
+
+async def test_due_worker_auto_alerts_forecast_validation_drift(db_session) -> None:
+    organization = Organization(
+        name="Forecast Alert Worker Club",
+        slug="forecast-alert-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    manager = Person(
+        display_name="Forecast Manager",
+        primary_email="forecast-manager@example.com",
+        primary_phone="+15550123000",
+    )
+    athlete_person = Person(display_name="Drift Athlete", primary_email="drift-athlete@example.com")
+    db_session.add_all([manager, athlete_person])
+    await db_session.flush()
+    db_session.add(
+        Membership(
+            organization_id=organization.id,
+            subject_type=MemberSubjectType.PERSON,
+            subject_id=manager.id,
+            role=MembershipRole.COACH,
+        )
+    )
+    athlete = AthleteProfile(organization_id=organization.id, person_id=athlete_person.id)
+    metric = PerformanceMetricDefinition(
+        organization_id=organization.id,
+        sport="football",
+        code="power_score",
+        name="Power Score",
+        category=MetricCategory.PHYSICAL,
+        unit="points",
+        higher_is_better=True,
+    )
+    db_session.add_all([athlete, metric])
+    await db_session.flush()
+    for index, value in enumerate([10.0, 10.0, 10.0, 30.0]):
+        db_session.add(
+            AthletePerformanceObservation(
+                organization_id=organization.id,
+                athlete_profile_id=athlete.id,
+                metric_definition_id=metric.id,
+                value=value,
+                observed_at=datetime(2026, 2, 1 + index * 7, 10, tzinfo=UTC),
+                source=MetricSource.COACH_EVALUATION,
+            )
+        )
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("performance-forecast-validations",),
+        limit=10,
+        auto_alert_performance_forecast_drift=True,
+        performance_forecast_drift_channels=[CommunicationChannel.IN_APP, CommunicationChannel.SMS],
+    )
+
+    validation = result["results"]["performance_forecast_validations"]
+    assert validation["executed_count"] == 1
+    assert validation["high_count"] == 1
+    assert validation["alerted_count"] == 1
+    assert validation["alert_channel_count"] == 2
+    assert validation["alert_skipped_count"] == 0
+    assert validation["alert_failed_count"] == 0
+    assert len(validation["alert_message_ids"]) == 2
+    assert result["summary"]["processed_count"] == 1
+    message_count = await db_session.scalar(
+        select(func.count(CommunicationMessage.id)).where(
+            CommunicationMessage.organization_id == organization.id,
+            CommunicationMessage.subject.ilike("%forecast drift high%"),
+        )
+    )
+    recipient_count = await db_session.scalar(select(func.count(MessageRecipient.id)))
+    assert message_count == 2
+    assert recipient_count == 2
 
 
 async def test_due_worker_retries_rate_limited_wearable_pull(db_session, monkeypatch) -> None:

@@ -505,6 +505,26 @@ async def send_performance_forecast_validation_alert(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Forecast validation run not found")
     await ensure_manage_performance(authz, identity, run.organization_id)
+    return await send_performance_forecast_validation_alert_for_run(
+        db,
+        validation_run_id,
+        repeat_after_hours=repeat_after_hours,
+        channels=channels,
+        dry_run=dry_run,
+    )
+
+
+async def send_performance_forecast_validation_alert_for_run(
+    db: AsyncSession,
+    validation_run_id: UUID,
+    *,
+    repeat_after_hours: int = 24,
+    channels: list[CommunicationChannel] | None = None,
+    dry_run: bool = False,
+) -> dict[str, object]:
+    run = await db.get(PerformanceForecastValidationRun, validation_run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Forecast validation run not found")
     alert_channels = normalized_performance_alert_channels(channels)
     recipient_ids = await performance_manager_recipient_ids(db, run.organization_id)
     sent = False
@@ -550,16 +570,26 @@ async def run_performance_forecast_validation_worker(
     db: AsyncSession,
     organization_id: UUID | None = None,
     limit: int = 25,
+    auto_alerts: bool = False,
+    alert_repeat_after_hours: int = 24,
+    alert_channels: list[CommunicationChannel] | None = None,
+    dry_run_alerts: bool = False,
 ) -> PerformanceForecastValidationWorkerRunRead:
+    normalized_alert_channels = normalized_performance_alert_channels(alert_channels)
     organization_ids = await forecast_validation_worker_organization_ids(db, organization_id, limit)
     executed_count = 0
     failed_count = 0
     run_ids: list[UUID] = []
+    alert_message_ids: list[UUID] = []
+    alert_skipped_reasons: dict[str, int] = {}
     metric_count = 0
     evaluated_count = 0
     drift_count = 0
     watch_count = 0
     high_count = 0
+    alerted_count = 0
+    alert_skipped_count = 0
+    alert_failed_count = 0
 
     for org_id in organization_ids:
         try:
@@ -573,12 +603,38 @@ async def run_performance_forecast_validation_worker(
                 watch_count += 1
             if run["drift_level"] == "high":
                 high_count += 1
+            if auto_alerts:
+                try:
+                    alert = await send_performance_forecast_validation_alert_for_run(
+                        db,
+                        run["id"],
+                        repeat_after_hours=alert_repeat_after_hours,
+                        channels=normalized_alert_channels,
+                        dry_run=dry_run_alerts,
+                    )
+                    if alert["sent"]:
+                        alerted_count += 1
+                        alert_message_ids.extend(alert["message_ids"])
+                    else:
+                        alert_skipped_count += 1
+                        reason = str(
+                            alert["skipped_reason"] or ("Dry run only." if dry_run_alerts else "Alert not sent.")
+                        )
+                        alert_skipped_reasons[reason] = alert_skipped_reasons.get(reason, 0) + 1
+                except Exception:
+                    alert_failed_count += 1
+                    await db.rollback()
         except Exception:
             failed_count += 1
             await db.rollback()
 
     return PerformanceForecastValidationWorkerRunRead(
         organization_id=organization_id,
+        auto_alerts=auto_alerts,
+        dry_run_alerts=dry_run_alerts,
+        alert_repeat_after_hours=alert_repeat_after_hours,
+        alert_channels=normalized_alert_channels,
+        alert_channel_count=len(normalized_alert_channels),
         eligible_count=len(organization_ids),
         executed_count=executed_count,
         skipped_count=max(len(organization_ids) - executed_count - failed_count, 0),
@@ -589,6 +645,11 @@ async def run_performance_forecast_validation_worker(
         drift_count=drift_count,
         watch_count=watch_count,
         high_count=high_count,
+        alerted_count=alerted_count,
+        alert_skipped_count=alert_skipped_count,
+        alert_failed_count=alert_failed_count,
+        alert_message_ids=alert_message_ids,
+        alert_skipped_reasons=alert_skipped_reasons,
     )
 
 

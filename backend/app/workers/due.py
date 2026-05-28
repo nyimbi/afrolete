@@ -39,6 +39,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--webhook-limit", type=int, default=None)
     parser.add_argument("--performance-limit", type=int, default=None)
     parser.add_argument("--performance-forecast-validation-limit", type=int, default=None)
+    parser.add_argument("--auto-alert-performance-forecast-drift", action="store_true")
+    parser.add_argument("--performance-forecast-drift-repeat-after-hours", type=int, default=24)
+    parser.add_argument(
+        "--performance-forecast-drift-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        action="append",
+        default=None,
+    )
+    parser.add_argument("--dry-run-performance-forecast-drift-alerts", action="store_true")
     parser.add_argument("--performance-review-limit", type=int, default=None)
     parser.add_argument("--performance-review-horizon-hours", type=int, default=24)
     parser.add_argument("--performance-review-repeat-after-hours", type=int, default=24)
@@ -88,6 +97,10 @@ async def run_due_workers(
     webhook_limit: int | None = None,
     performance_limit: int | None = None,
     performance_forecast_validation_limit: int | None = None,
+    auto_alert_performance_forecast_drift: bool = False,
+    performance_forecast_drift_repeat_after_hours: int = 24,
+    performance_forecast_drift_channels: Sequence[CommunicationChannel] | None = None,
+    dry_run_performance_forecast_drift_alerts: bool = False,
     performance_review_limit: int | None = None,
     performance_review_horizon_hours: int = 24,
     performance_review_repeat_after_hours: int = 24,
@@ -139,6 +152,12 @@ async def run_due_workers(
                 db,
                 organization_id=organization_id,
                 limit=performance_forecast_validation_limit or performance_limit or limit,
+                auto_alerts=auto_alert_performance_forecast_drift,
+                alert_repeat_after_hours=performance_forecast_drift_repeat_after_hours,
+                alert_channels=list(performance_forecast_drift_channels)
+                if performance_forecast_drift_channels
+                else None,
+                dry_run_alerts=dry_run_performance_forecast_drift_alerts,
             )
         ).model_dump(mode="json")
     if "performance-review-escalations" in active_lanes:
@@ -205,7 +224,9 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             or 0
         )
         summary["skipped_count"] += int(result.get("skipped_count") or 0)
-        summary["failed_count"] += int(result.get("failed_count") or 0)
+        summary["failed_count"] += int(result.get("failed_count") or 0) + int(
+            result.get("alert_failed_count") or 0
+        )
     return summary
 
 
@@ -221,6 +242,14 @@ async def run() -> None:
             webhook_limit=args.webhook_limit,
             performance_limit=args.performance_limit,
             performance_forecast_validation_limit=args.performance_forecast_validation_limit,
+            auto_alert_performance_forecast_drift=args.auto_alert_performance_forecast_drift,
+            performance_forecast_drift_repeat_after_hours=args.performance_forecast_drift_repeat_after_hours,
+            performance_forecast_drift_channels=[
+                CommunicationChannel(channel) for channel in args.performance_forecast_drift_channel
+            ]
+            if args.performance_forecast_drift_channel
+            else None,
+            dry_run_performance_forecast_drift_alerts=args.dry_run_performance_forecast_drift_alerts,
             performance_review_limit=args.performance_review_limit,
             performance_review_horizon_hours=args.performance_review_horizon_hours,
             performance_review_repeat_after_hours=args.performance_review_repeat_after_hours,

@@ -858,6 +858,11 @@ class PerformanceAchievementWorkerRunRead(BaseModel):
 
 class PerformanceForecastValidationWorkerRunRead(BaseModel):
     organization_id: UUID | None
+    auto_alerts: bool = False
+    dry_run_alerts: bool = False
+    alert_repeat_after_hours: int = 24
+    alert_channels: list[CommunicationChannel] = Field(default_factory=lambda: [CommunicationChannel.IN_APP])
+    alert_channel_count: int = 1
     eligible_count: int
     executed_count: int
     skipped_count: int
@@ -868,6 +873,11 @@ class PerformanceForecastValidationWorkerRunRead(BaseModel):
     drift_count: int
     watch_count: int
     high_count: int
+    alerted_count: int = 0
+    alert_skipped_count: int = 0
+    alert_failed_count: int = 0
+    alert_message_ids: list[UUID] = Field(default_factory=list)
+    alert_skipped_reasons: dict[str, int] = Field(default_factory=dict)
 
 
 class PerformanceAssessmentReviewEscalationRunRead(BaseModel):
