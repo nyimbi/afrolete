@@ -42,6 +42,7 @@ from app.schemas.commercial import (
     CommercialSummaryRead,
     CommercialRefundCreate,
     CommercialRefundRead,
+    CommercialSettlementPayoutRead,
     CommercialTaxFilingRead,
     DonationCreate,
     FinanceInvoiceCreate,
@@ -583,6 +584,72 @@ async def payment_settlement(
         payout_reference=f"SETTLE-{datetime.now(UTC).strftime('%Y%m%d')}-{str(organization_id)[:8]}",
         line_count=line_count,
     )
+
+
+async def execute_payment_settlement_payout(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    provider: str,
+    fee_rate: Decimal,
+    fixed_fee: Decimal,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> CommercialSettlementPayoutRead:
+    await ensure_manage_commercial(authz, identity, organization_id)
+    settlement = await payment_settlement(db, organization_id, provider, fee_rate, fixed_fee)
+    selected_settings = settings or get_settings()
+    batch_reference = commercial_payout_batch_reference(settlement)
+    result = CommercialSettlementPayoutRead(
+        organization_id=organization_id,
+        provider=provider,
+        currency=settlement.currency,
+        delivery_mode=selected_settings.commercial_payout_delivery_mode,
+        delivery_attempted=False,
+        delivered=False,
+        payout_reference=settlement.payout_reference,
+        payout_batch_reference=batch_reference,
+        gross_amount=settlement.gross_amount,
+        fee_amount=settlement.fee_amount,
+        net_amount=settlement.net_amount,
+        line_count=settlement.line_count,
+        destination=selected_settings.commercial_payout_webhook_url or None,
+        provider_status_code=None,
+        failure_reason=None,
+        executed_at=datetime.now(UTC),
+    )
+    if selected_settings.commercial_payout_delivery_mode == "record_only":
+        return result.model_copy(update={"failure_reason": "Record-only payout mode; settlement prepared for manual payout."})
+    if not selected_settings.commercial_payout_webhook_url:
+        return result.model_copy(update={"failure_reason": "Commercial payout webhook mode is enabled but no webhook URL is configured."})
+
+    payload = commercial_payout_payload(result)
+    raw_body = json.dumps(payload, sort_keys=True, default=str).encode()
+    timestamp = str(int(time.time()))
+    headers = await commercial_payout_headers(selected_settings, raw_body, timestamp)
+    try:
+        async with httpx.AsyncClient(timeout=selected_settings.commercial_payout_timeout_seconds) as client:
+            response = await client.post(
+                selected_settings.commercial_payout_webhook_url,
+                json=payload,
+                headers=headers,
+            )
+        delivered = 200 <= response.status_code < 300
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "delivered": delivered,
+                "provider_status_code": response.status_code,
+                "failure_reason": None if delivered else f"Commercial payout webhook returned {response.status_code}: {response.text[:500]}",
+            }
+        )
+    except httpx.HTTPError as error:
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "failure_reason": f"Commercial payout webhook failed: {error}",
+            }
+        )
 
 
 async def accounting_export(
@@ -1396,6 +1463,63 @@ async def commercial_tax_filing_headers(
     if key:
         headers["X-Afrolete-Commercial-Tax-Key"] = key
         headers["X-Afrolete-Commercial-Tax-Signature"] = "sha256=" + hmac.new(
+            key.encode(),
+            timestamp.encode() + b"." + raw_body,
+            sha256,
+        ).hexdigest()
+    return headers
+
+
+def commercial_payout_batch_reference(settlement: PaymentSettlementRead) -> str:
+    payload = {
+        "organization_id": str(settlement.organization_id),
+        "provider": settlement.provider,
+        "payout_reference": settlement.payout_reference,
+        "gross_amount": str(settlement.gross_amount),
+        "fee_amount": str(settlement.fee_amount),
+        "net_amount": str(settlement.net_amount),
+        "currency": settlement.currency,
+        "line_count": settlement.line_count,
+    }
+    digest = sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    return f"payout_{settlement.provider}_{digest[:16]}"
+
+
+def commercial_payout_payload(payout: CommercialSettlementPayoutRead) -> dict[str, Any]:
+    return {
+        "event_type": "commercial.settlement_payout",
+        "organization_id": str(payout.organization_id),
+        "provider": payout.provider,
+        "payout_reference": payout.payout_reference,
+        "payout_batch_reference": payout.payout_batch_reference,
+        "gross_amount": str(payout.gross_amount),
+        "fee_amount": str(payout.fee_amount),
+        "net_amount": str(payout.net_amount),
+        "currency": payout.currency,
+        "line_count": payout.line_count,
+        "executed_at": payout.executed_at.isoformat(),
+    }
+
+
+async def commercial_payout_headers(
+    settings: Settings,
+    raw_body: bytes,
+    timestamp: str,
+) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "X-Afrolete-Commercial-Payout-Timestamp": timestamp,
+    }
+    key = await resolve_commercial_secret(
+        settings,
+        env_value=settings.commercial_payout_webhook_key,
+        path=settings.commercial_payout_webhook_key_secret_path,
+        field_name=settings.commercial_payout_webhook_key_secret_field,
+        label="commercial payout webhook key",
+    )
+    if key:
+        headers["X-Afrolete-Commercial-Payout-Key"] = key
+        headers["X-Afrolete-Commercial-Payout-Signature"] = "sha256=" + hmac.new(
             key.encode(),
             timestamp.encode() + b"." + raw_body,
             sha256,

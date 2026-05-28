@@ -232,6 +232,25 @@ class PaymentSettlementRead(BaseModel):
     line_count: int
 
 
+class CommercialSettlementPayoutRead(BaseModel):
+    organization_id: UUID
+    provider: str
+    currency: str
+    delivery_mode: str
+    delivery_attempted: bool
+    delivered: bool
+    payout_reference: str
+    payout_batch_reference: str
+    gross_amount: Decimal
+    fee_amount: Decimal
+    net_amount: Decimal
+    line_count: int
+    destination: str | None
+    provider_status_code: int | None
+    failure_reason: str | None
+    executed_at: datetime
+
+
 class CommercialInvoiceHostedCheckoutRead(BaseModel):
     invoice_id: UUID
     invoice_number: str

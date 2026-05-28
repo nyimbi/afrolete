@@ -201,6 +201,7 @@ import type {
   OrganizationType,
   ParticipationClearanceRead,
   PaymentSettlementRead,
+  CommercialSettlementPayoutRead,
   PerformanceAchievementAwardRead,
   PerformanceAchievementRunRead,
   PerformanceAssessmentReviewEscalationRunRead,
@@ -1496,6 +1497,7 @@ export default function HomePage() {
   const [taxQuote, setTaxQuote] = useState<TaxQuoteRead | null>(null);
   const [commercialTaxFiling, setCommercialTaxFiling] = useState<CommercialTaxFilingRead | null>(null);
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlementRead | null>(null);
+  const [commercialPayout, setCommercialPayout] = useState<CommercialSettlementPayoutRead | null>(null);
   const [accountingExport, setAccountingExport] = useState<AccountingExportRead | null>(null);
   const [accountingSync, setAccountingSync] = useState<AccountingSyncRead | null>(null);
   const [commercialRefund, setCommercialRefund] = useState<CommercialRefundRead | null>(null);
@@ -3160,6 +3162,7 @@ export default function HomePage() {
       setTaxQuote(null);
       setCommercialTaxFiling(null);
       setPaymentSettlement(null);
+      setCommercialPayout(null);
       setAccountingExport(null);
       setAccountingSync(null);
       setCommercialRefund(null);
@@ -9431,6 +9434,33 @@ export default function HomePage() {
     );
   };
 
+  const executeCommercialPayout = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "commercial-payout",
+      () =>
+        apiRequest<CommercialSettlementPayoutRead>(
+          `/commercial/settlements/payout?organization_id=${selectedOrganizationId}&provider=manual_gateway&fee_rate=2.9&fixed_fee=0.3`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (payout) => {
+        setCommercialPayout(payout);
+        addLog(
+          payout.delivered
+            ? `Payout delivered: ${payout.payout_batch_reference}`
+            : `Payout prepared: ${payout.payout_batch_reference}`,
+          payout.failure_reason ? "neutral" : "good"
+        );
+      }
+    );
+  };
+
   const exportCommercialAccounting = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -12735,6 +12765,7 @@ export default function HomePage() {
                 <button type="button" onClick={quoteCommercialTax} disabled={busyAction !== null}>Tax</button>
                 <button type="button" onClick={fileCommercialTax} disabled={busyAction !== null}>File tax</button>
                 <button type="button" onClick={settleCommercialPayments} disabled={busyAction !== null}>Settle</button>
+                <button type="button" onClick={executeCommercialPayout} disabled={busyAction !== null}>Payout</button>
                 <button type="button" onClick={exportCommercialAccounting} disabled={busyAction !== null}>Export</button>
                 <button type="button" onClick={syncCommercialAccounting} disabled={busyAction !== null}>Sync</button>
               </div>
@@ -12836,6 +12867,18 @@ export default function HomePage() {
                   <div>
                     <strong>{paymentSettlement.payout_reference}</strong>
                     <span>{paymentSettlement.gross_amount} gross · {paymentSettlement.net_amount} net</span>
+                  </div>
+                </article>
+              ) : null}
+              {commercialPayout ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{commercialPayout.delivered ? "Payout delivered" : "Payout prepared"}</strong>
+                    <span>
+                      {commercialPayout.net_amount} {commercialPayout.currency} · {commercialPayout.delivery_mode}
+                      {commercialPayout.provider_status_code ? ` · ${commercialPayout.provider_status_code}` : ""}
+                    </span>
+                    {commercialPayout.failure_reason ? <small>{commercialPayout.failure_reason}</small> : null}
                   </div>
                 </article>
               ) : null}

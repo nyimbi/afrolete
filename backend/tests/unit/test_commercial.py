@@ -191,6 +191,22 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     assert settlement["gross_amount"] == "150.00"
     assert settlement["net_amount"] == "145.50"
 
+    payout = client.post(
+        "/api/v1/commercial/settlements/payout",
+        headers=identity_headers,
+        params={
+            "organization_id": organization["id"],
+            "provider": "manual_gateway",
+            "fee_rate": "3.00",
+            "fixed_fee": "0.00",
+        },
+    ).json()
+    assert payout["delivery_mode"] == "record_only"
+    assert payout["delivered"] is False
+    assert payout["gross_amount"] == "150.00"
+    assert payout["net_amount"] == "145.50"
+    assert payout["payout_batch_reference"].startswith("payout_manual_gateway_")
+
     ticket_refund = client.post(
         f"/api/v1/commercial/tickets/{ticket_id}/refund",
         headers=identity_headers,
@@ -615,5 +631,97 @@ def test_commercial_tax_filing_delivers_signed_webhook(
     ).hexdigest()
     assert headers["X-Afrolete-Commercial-Tax-Key"] == "commercial-tax-secret"
     assert headers["X-Afrolete-Commercial-Tax-Signature"] == f"sha256={expected_signature}"
+
+    commercial_service.get_settings.cache_clear()
+
+
+def test_commercial_settlement_payout_delivers_signed_webhook(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json, headers):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return SimpleNamespace(status_code=202, text="queued")
+
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_PAYOUT_DELIVERY_MODE", "webhook")
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_PAYOUT_WEBHOOK_URL", "https://payout.example/commercial")
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_PAYOUT_WEBHOOK_KEY", "commercial-payout-secret")
+    commercial_service.get_settings.cache_clear()
+    monkeypatch.setattr(commercial_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    organization, team, _ = create_commercial_context(client, identity_headers)
+    invoice = client.post(
+        "/api/v1/commercial/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "invoice_number": "COM-PAYOUT-1",
+            "title": "Commercial payout invoice",
+            "amount_due": "60.00",
+        },
+    ).json()
+    client.post(
+        "/api/v1/commercial/payments",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "invoice_id": invoice["id"],
+            "amount": "60.00",
+            "method": "card",
+            "external_reference": "COM-PAYOUT-PAYMENT",
+        },
+    )
+
+    payout_response = client.post(
+        "/api/v1/commercial/settlements/payout",
+        headers=identity_headers,
+        params={
+            "organization_id": organization["id"],
+            "provider": "bank_gateway",
+            "fee_rate": "2.90",
+            "fixed_fee": "0.30",
+        },
+    )
+    assert payout_response.status_code == 200
+    payout = payout_response.json()
+    assert payout["delivery_mode"] == "webhook"
+    assert payout["delivery_attempted"] is True
+    assert payout["delivered"] is True
+    assert payout["provider_status_code"] == 202
+    assert payout["gross_amount"] == "60.00"
+    assert payout["fee_amount"] == "2.04"
+    assert payout["net_amount"] == "57.96"
+    assert captured["url"] == "https://payout.example/commercial"
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["event_type"] == "commercial.settlement_payout"
+    assert payload["payout_batch_reference"] == payout["payout_batch_reference"]
+    assert payload["net_amount"] == "57.96"
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    timestamp = headers["X-Afrolete-Commercial-Payout-Timestamp"]
+    expected_signature = hmac.new(
+        b"commercial-payout-secret",
+        timestamp.encode() + b"." + json.dumps(payload, sort_keys=True, default=str).encode(),
+        sha256,
+    ).hexdigest()
+    assert headers["X-Afrolete-Commercial-Payout-Key"] == "commercial-payout-secret"
+    assert headers["X-Afrolete-Commercial-Payout-Signature"] == f"sha256={expected_signature}"
 
     commercial_service.get_settings.cache_clear()

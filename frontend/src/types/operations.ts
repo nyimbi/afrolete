@@ -1944,6 +1944,25 @@ export type PaymentSettlementRead = {
   line_count: number;
 };
 
+export type CommercialSettlementPayoutRead = {
+  organization_id: UUID;
+  provider: string;
+  currency: string;
+  delivery_mode: string;
+  delivery_attempted: boolean;
+  delivered: boolean;
+  payout_reference: string;
+  payout_batch_reference: string;
+  gross_amount: string;
+  fee_amount: string;
+  net_amount: string;
+  line_count: number;
+  destination: string | null;
+  provider_status_code: number | null;
+  failure_reason: string | null;
+  executed_at: string;
+};
+
 export type AccountingExportRow = {
   row_type: string;
   source_id: UUID;

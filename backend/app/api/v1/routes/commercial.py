@@ -16,6 +16,7 @@ from app.schemas.commercial import (
     CommercialSummaryRead,
     CommercialRefundCreate,
     CommercialRefundRead,
+    CommercialSettlementPayoutRead,
     CommercialTaxFilingRead,
     DonationCreate,
     DonationRead,
@@ -54,6 +55,7 @@ from app.services.commercial import (
     create_ticket_order,
     create_ticket_product,
     deliver_commercial_tax_filing,
+    execute_payment_settlement_payout,
     get_commercial_invoice_hosted_checkout,
     ingest_commercial_invoice_payment_webhook,
     list_campaigns,
@@ -401,6 +403,19 @@ async def payment_settlement_route(
     db: AsyncSession = Depends(get_db),
 ) -> PaymentSettlementRead:
     return await payment_settlement(db, organization_id, provider, fee_rate, fixed_fee)
+
+
+@router.post("/settlements/payout", response_model=CommercialSettlementPayoutRead)
+async def execute_payment_settlement_payout_route(
+    organization_id: UUID = Query(),
+    provider: str = Query(default="manual_gateway"),
+    fee_rate: Decimal = Query(default=Decimal("2.90"), ge=0, le=100),
+    fixed_fee: Decimal = Query(default=Decimal("0.30"), ge=0),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommercialSettlementPayoutRead:
+    return await execute_payment_settlement_payout(db, identity, organization_id, provider, fee_rate, fixed_fee, authz)
 
 
 @router.get("/accounting-export", response_model=AccountingExportRead)
