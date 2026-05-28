@@ -16,6 +16,7 @@ from app.schemas.performance import (
     MetricDefinitionRead,
     PerformanceAchievementAwardRead,
     PerformanceAchievementRunRead,
+    PerformanceAssessmentReviewEscalationRunRead,
     PerformanceGoalCreate,
     PerformanceGoalRead,
     PerformanceIngestionCreate,
@@ -49,6 +50,7 @@ from app.services.performance import (
     performance_metric_benchmarks,
     performance_metric_trends,
     performance_summary,
+    run_assessment_review_escalations,
     review_assessment,
     review_observation,
     update_assessment_review_assignment,
@@ -116,6 +118,9 @@ def to_assessment_read(assessment) -> AthleteAssessmentRead:
         review_notes=assessment.review_notes,
         reviewed_by_person_id=assessment.reviewed_by_person_id,
         reviewed_at=assessment.reviewed_at,
+        review_last_escalated_at=assessment.review_last_escalated_at,
+        review_escalation_count=assessment.review_escalation_count,
+        review_escalation_message_id=assessment.review_escalation_message_id,
         verification_status=assessment.verification_status,
     )
 
@@ -340,6 +345,32 @@ async def update_assessment_review_assignment_route(
 ) -> AthleteAssessmentRead:
     return to_assessment_read(
         await update_assessment_review_assignment(db, identity, assessment_id, payload, authz)
+    )
+
+
+@router.post(
+    "/assessments/review-escalations",
+    response_model=PerformanceAssessmentReviewEscalationRunRead,
+)
+async def run_assessment_review_escalations_route(
+    organization_id: UUID = Query(),
+    limit: int = Query(default=25, ge=1, le=100),
+    horizon_hours: int = Query(default=24, ge=0, le=168),
+    repeat_after_hours: int = Query(default=24, ge=1, le=168),
+    dry_run: bool = Query(default=False),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceAssessmentReviewEscalationRunRead:
+    return await run_assessment_review_escalations(
+        db,
+        identity,
+        organization_id,
+        authz,
+        limit=limit,
+        horizon_hours=horizon_hours,
+        repeat_after_hours=repeat_after_hours,
+        dry_run=dry_run,
     )
 
 

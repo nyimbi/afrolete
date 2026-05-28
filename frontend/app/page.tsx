@@ -200,6 +200,7 @@ import type {
   PaymentSettlementRead,
   PerformanceAchievementAwardRead,
   PerformanceAchievementRunRead,
+  PerformanceAssessmentReviewEscalationRunRead,
   PerformanceGoalRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
@@ -750,6 +751,8 @@ export default function HomePage() {
   const [performanceAwards, setPerformanceAwards] = useState<PerformanceAchievementAwardRead[]>([]);
   const [performanceAchievementRun, setPerformanceAchievementRun] =
     useState<PerformanceAchievementRunRead | null>(null);
+  const [performanceReviewEscalationRun, setPerformanceReviewEscalationRun] =
+    useState<PerformanceAssessmentReviewEscalationRunRead | null>(null);
   const [assessments, setAssessments] = useState<AthleteAssessmentRead[]>([]);
   const [assessmentReviewQueue, setAssessmentReviewQueue] = useState<AthleteAssessmentReviewQueueItemRead[]>([]);
   const [assessmentReviewQueueFilters, setAssessmentReviewQueueFilters] =
@@ -2287,6 +2290,7 @@ export default function HomePage() {
       setPerformanceIngestion(null);
       setAssessments([]);
       setAssessmentReviewQueue([]);
+      setPerformanceReviewEscalationRun(null);
       setPerformanceSummary(null);
       setTrainingDrills([]);
       setTrainingPlans([]);
@@ -5983,6 +5987,32 @@ export default function HomePage() {
           )
         );
         addLog(`Assessment queue updated: ${label.replaceAll("-", " ")}`, "good");
+        void loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters);
+      }
+    );
+  };
+
+  const runAssessmentReviewEscalations = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "assessment-review-escalations",
+      () =>
+        apiRequest<PerformanceAssessmentReviewEscalationRunRead>(
+          `/performance/assessments/review-escalations?organization_id=${selectedOrganizationId}`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (run) => {
+        setPerformanceReviewEscalationRun(run);
+        addLog(
+          `Review escalation sent ${run.escalated_count}/${run.eligible_count} item(s)`,
+          run.escalated_count ? "good" : "neutral"
+        );
         void loadAssessmentReviewQueue(selectedOrganizationId, assessmentReviewQueueFilters);
       }
     );
@@ -12750,6 +12780,7 @@ export default function HomePage() {
                 <button type="button" onClick={reviewSelectedObservation} disabled={busyAction !== null}>Review</button>
                 <button type="button" onClick={createPerformanceGoal} disabled={busyAction !== null}>Goal</button>
                 <button type="button" onClick={evaluatePerformanceAchievements} disabled={busyAction !== null}>Award</button>
+                <button type="button" onClick={runAssessmentReviewEscalations} disabled={busyAction !== null}>Escalate</button>
               </div>
             </div>
             <div className="form-grid">
@@ -12899,6 +12930,20 @@ export default function HomePage() {
                   </span>
                 </article>
               ))}
+              {performanceReviewEscalationRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Review escalation · {performanceReviewEscalationRun.escalated_count} escalated</strong>
+                    <span>
+                      {performanceReviewEscalationRun.overdue_count} overdue · {performanceReviewEscalationRun.due_soon_count} due soon ·{" "}
+                      {performanceReviewEscalationRun.message_ids.length} alert message(s)
+                    </span>
+                    <small>
+                      {performanceReviewEscalationRun.dry_run ? "Dry run only." : "In-app alerts sent to performance reviewers and assigned coaches."}
+                    </small>
+                  </div>
+                </article>
+              ) : null}
               {performanceAchievementRun ? (
                 <article className="task-card">
                   <div>

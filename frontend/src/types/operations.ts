@@ -3186,6 +3186,9 @@ export type AthleteAssessmentRead = {
   review_notes: string | null;
   reviewed_by_person_id: UUID | null;
   reviewed_at: string | null;
+  review_last_escalated_at: string | null;
+  review_escalation_count: number;
+  review_escalation_message_id: UUID | null;
   verification_status: MetricVerificationStatus;
 };
 
@@ -3288,6 +3291,19 @@ export type PerformanceAchievementRunRead = {
   awarded_count: number;
   updated_goals: number;
   awards: PerformanceAchievementAwardRead[];
+};
+
+export type PerformanceAssessmentReviewEscalationRunRead = {
+  organization_id: UUID | null;
+  eligible_count: number;
+  escalated_count: number;
+  skipped_count: number;
+  failed_count: number;
+  overdue_count: number;
+  due_soon_count: number;
+  assessment_ids: UUID[];
+  message_ids: UUID[];
+  dry_run: boolean;
 };
 
 export type PlayerPerformanceProfileRead = {

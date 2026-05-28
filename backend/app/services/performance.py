@@ -14,6 +14,7 @@ from app.models.enums import (
     CommunicationMessageType,
     CommunicationScopeType,
     MemberSubjectType,
+    MembershipRole,
     MetricSource,
     MetricVerificationStatus,
 )
@@ -32,6 +33,7 @@ from app.schemas.performance import (
     AthleteAssessmentCreate,
     AthleteAssessmentReviewAssignmentUpdate,
     AthleteAssessmentReviewCreate,
+    PerformanceAssessmentReviewEscalationRunRead,
     MetricDefinitionCreate,
     PerformanceAchievementWorkerRunRead,
     PerformanceGoalCreate,
@@ -96,6 +98,14 @@ def self_assessment_priority(overall_score: float, perceived_exertion: float) ->
     if perceived_exertion >= 8 or overall_score < 65:
         return "high"
     return "normal"
+
+
+def as_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 async def create_metric_definition(
@@ -920,6 +930,245 @@ async def run_performance_achievement_worker(
         awarded_count=awarded_count,
         updated_goals=updated_goals,
     )
+
+
+async def run_assessment_review_escalations(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    limit: int = 25,
+    horizon_hours: int = 24,
+    repeat_after_hours: int = 24,
+    dry_run: bool = False,
+) -> PerformanceAssessmentReviewEscalationRunRead:
+    await ensure_manage_performance(authz, identity, organization_id)
+    return await run_assessment_review_escalation_worker(
+        db,
+        organization_id=organization_id,
+        limit=limit,
+        horizon_hours=horizon_hours,
+        repeat_after_hours=repeat_after_hours,
+        dry_run=dry_run,
+    )
+
+
+async def run_assessment_review_escalation_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    limit: int = 25,
+    horizon_hours: int = 24,
+    repeat_after_hours: int = 24,
+    dry_run: bool = False,
+) -> PerformanceAssessmentReviewEscalationRunRead:
+    rows = await assessment_review_escalation_rows(
+        db,
+        organization_id=organization_id,
+        limit=limit,
+        horizon_hours=horizon_hours,
+        repeat_after_hours=repeat_after_hours,
+    )
+    grouped: dict[UUID, list[tuple[AthleteAssessment, AthleteProfile, Person, Person | None]]] = {}
+    for row in rows:
+        grouped.setdefault(row[0].organization_id, []).append(row)
+
+    now = datetime.now(UTC)
+    escalated_ids: list[UUID] = []
+    message_ids: list[UUID] = []
+    skipped_count = 0
+    failed_count = 0
+    overdue_count = 0
+    due_soon_count = 0
+    for org_id, org_rows in grouped.items():
+        local_overdue = sum(
+            1
+            for assessment, *_ in org_rows
+            if (due_at := as_utc_datetime(assessment.review_due_at)) is not None and due_at < now
+        )
+        overdue_count += local_overdue
+        due_soon_count += len(org_rows) - local_overdue
+        try:
+            recipient_ids = await assessment_review_escalation_recipient_ids(db, org_id, org_rows)
+            if not recipient_ids:
+                skipped_count += len(org_rows)
+                continue
+            if dry_run:
+                escalated_ids.extend(assessment.id for assessment, *_ in org_rows)
+                continue
+            message = await create_assessment_review_escalation_message(db, org_id, org_rows, recipient_ids, now)
+            message_ids.append(message.id)
+            for assessment, *_ in org_rows:
+                assessment.review_last_escalated_at = now
+                assessment.review_escalation_count = (assessment.review_escalation_count or 0) + 1
+                assessment.review_escalation_message_id = message.id
+                escalated_ids.append(assessment.id)
+            await db.commit()
+        except Exception:
+            failed_count += len(org_rows)
+            await db.rollback()
+
+    return PerformanceAssessmentReviewEscalationRunRead(
+        organization_id=organization_id,
+        eligible_count=len(rows),
+        escalated_count=len(escalated_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        overdue_count=overdue_count,
+        due_soon_count=due_soon_count,
+        assessment_ids=escalated_ids,
+        message_ids=message_ids,
+        dry_run=dry_run,
+    )
+
+
+async def assessment_review_escalation_rows(
+    db: AsyncSession,
+    organization_id: UUID | None,
+    limit: int,
+    horizon_hours: int,
+    repeat_after_hours: int,
+) -> list[tuple[AthleteAssessment, AthleteProfile, Person, Person | None]]:
+    assignee = aliased(Person)
+    now = datetime.now(UTC)
+    statement = (
+        select(AthleteAssessment, AthleteProfile, Person)
+        .add_columns(assignee)
+        .join(AthleteProfile, AthleteProfile.id == AthleteAssessment.athlete_profile_id)
+        .join(Person, Person.id == AthleteProfile.person_id)
+        .outerjoin(assignee, assignee.id == AthleteAssessment.review_assigned_to_person_id)
+        .where(AthleteAssessment.verification_status == MetricVerificationStatus.PENDING_REVIEW)
+        .where(AthleteAssessment.review_due_at.is_not(None))
+        .where(AthleteAssessment.review_due_at <= now + timedelta(hours=horizon_hours))
+        .where(
+            (AthleteAssessment.review_last_escalated_at.is_(None))
+            | (AthleteAssessment.review_last_escalated_at <= now - timedelta(hours=repeat_after_hours))
+        )
+        .order_by(
+            AthleteAssessment.review_due_at.asc(),
+            AthleteAssessment.review_priority.desc(),
+            AthleteAssessment.created_at.asc(),
+        )
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(AthleteAssessment.organization_id == organization_id)
+    return list((await db.execute(statement)).all())
+
+
+async def assessment_review_escalation_recipient_ids(
+    db: AsyncSession,
+    organization_id: UUID,
+    rows: list[tuple[AthleteAssessment, AthleteProfile, Person, Person | None]],
+) -> set[UUID]:
+    manager_rows = (
+        await db.execute(
+            select(Membership.subject_id)
+            .where(Membership.organization_id == organization_id)
+            .where(Membership.subject_type == MemberSubjectType.PERSON)
+            .where(
+                Membership.role.in_(
+                    [
+                        MembershipRole.OWNER,
+                        MembershipRole.ADMIN,
+                        MembershipRole.STAFF,
+                        MembershipRole.COACH,
+                    ]
+                )
+            )
+            .where(Membership.status == "active")
+        )
+    ).all()
+    recipient_ids = {person_id for (person_id,) in manager_rows}
+    recipient_ids.update(
+        assessment.review_assigned_to_person_id
+        for assessment, *_ in rows
+        if assessment.review_assigned_to_person_id is not None
+    )
+    return recipient_ids
+
+
+async def create_assessment_review_escalation_message(
+    db: AsyncSession,
+    organization_id: UUID,
+    rows: list[tuple[AthleteAssessment, AthleteProfile, Person, Person | None]],
+    recipient_ids: set[UUID],
+    now: datetime,
+) -> CommunicationMessage:
+    subject = assessment_review_escalation_subject(rows, now)
+    body = assessment_review_escalation_body(rows, now)
+    message = CommunicationMessage(
+        organization_id=organization_id,
+        template_id=None,
+        created_by_person_id=None,
+        message_type=CommunicationMessageType.ALERT,
+        channel=CommunicationChannel.IN_APP,
+        scope_type=CommunicationScopeType.ORGANIZATION,
+        scope_id=organization_id,
+        subject=subject,
+        body=body,
+        urgent=True,
+        quiet_hours_override=True,
+        scheduled_for=None,
+        sent_at=now,
+        status="sent",
+    )
+    db.add(message)
+    await db.flush()
+    for person_id in sorted(recipient_ids, key=str):
+        person = await db.get(Person, person_id)
+        if person is None:
+            continue
+        db.add(
+            MessageRecipient(
+                message_id=message.id,
+                person_id=person.id,
+                destination=destination_for_channel(person, CommunicationChannel.IN_APP),
+                delivery_status=initial_delivery_status(person, CommunicationChannel.IN_APP),
+            )
+        )
+    return message
+
+
+def assessment_review_escalation_subject(
+    rows: list[tuple[AthleteAssessment, AthleteProfile, Person, Person | None]],
+    now: datetime,
+) -> str:
+    overdue = sum(
+        1
+        for assessment, *_ in rows
+        if (due_at := as_utc_datetime(assessment.review_due_at)) is not None and due_at < now
+    )
+    if overdue:
+        return f"{overdue} overdue performance assessment review{'s' if overdue != 1 else ''}"[:240]
+    return f"{len(rows)} performance assessment review{'s' if len(rows) != 1 else ''} due soon"[:240]
+
+
+def assessment_review_escalation_body(
+    rows: list[tuple[AthleteAssessment, AthleteProfile, Person, Person | None]],
+    now: datetime,
+) -> str:
+    lines = [
+        "Performance assessment reviews need coach attention.",
+        "",
+    ]
+    for assessment, _, athlete, assignee in rows[:10]:
+        due_at = as_utc_datetime(assessment.review_due_at)
+        sla = "overdue" if due_at and due_at < now else "due soon"
+        assignee_name = assignee.display_name if assignee is not None else "unassigned"
+        due_text = due_at.isoformat() if due_at else "unscheduled"
+        lines.append(
+            f"- {athlete.display_name}: ALS {assessment.overall_score:g}, "
+            f"{assessment.review_priority} priority, {sla}, due {due_text}, {assignee_name}."
+        )
+    if len(rows) > 10:
+        lines.append(f"- Plus {len(rows) - 10} more pending review item(s).")
+    lines.extend(
+        [
+            "",
+            "Open the performance review queue, assign ownership, and verify or reject submissions before using them as trusted ALS evidence.",
+        ]
+    )
+    return "\n".join(lines)[:8000]
 
 
 async def achievement_worker_athlete_ids(

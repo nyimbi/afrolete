@@ -171,6 +171,9 @@ class AthleteAssessmentRead(BaseModel):
     review_notes: str | None
     reviewed_by_person_id: UUID | None
     reviewed_at: datetime | None
+    review_last_escalated_at: datetime | None
+    review_escalation_count: int
+    review_escalation_message_id: UUID | None
     verification_status: MetricVerificationStatus
 
 
@@ -297,6 +300,19 @@ class PerformanceAchievementWorkerRunRead(BaseModel):
     athlete_profile_ids: list[UUID]
     awarded_count: int
     updated_goals: int
+
+
+class PerformanceAssessmentReviewEscalationRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    escalated_count: int
+    skipped_count: int
+    failed_count: int
+    overdue_count: int
+    due_soon_count: int
+    assessment_ids: list[UUID]
+    message_ids: list[UUID]
+    dry_run: bool = False
 
 
 class PlayerPerformanceProfileRead(BaseModel):

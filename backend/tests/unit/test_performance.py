@@ -271,6 +271,32 @@ def test_coach_can_review_player_self_assessment(client, identity_headers) -> No
     ).json()
     assert unassigned_queue == []
 
+    escalation_response = client.post(
+        f"/api/v1/performance/assessments/review-escalations?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert escalation_response.status_code == 200
+    escalation = escalation_response.json()
+    assert escalation["eligible_count"] == 1
+    assert escalation["escalated_count"] == 1
+    assert escalation["overdue_count"] == 1
+    assert escalation["message_ids"]
+
+    messages = client.get(
+        f"/api/v1/communications/messages?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert any(message["id"] == escalation["message_ids"][0] for message in messages)
+
+    queue_after_escalation = client.get(
+        f"/api/v1/performance/assessments/review-queue?organization_id={organization['id']}"
+        "&assignment=mine&sla=overdue&priority=urgent",
+        headers=identity_headers,
+    ).json()
+    assert queue_after_escalation[0]["assessment"]["review_escalation_count"] == 1
+    assert queue_after_escalation[0]["assessment"]["review_last_escalated_at"] is not None
+    assert queue_after_escalation[0]["assessment"]["review_escalation_message_id"] == escalation["message_ids"][0]
+
     response = client.patch(
         f"/api/v1/performance/assessments/{pending['id']}/review",
         headers=identity_headers,
