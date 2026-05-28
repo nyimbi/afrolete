@@ -313,9 +313,13 @@ class CommercialInvoiceProviderCheckoutCreate(BaseModel):
 
 
 class CommercialInvoiceProviderCheckoutRead(BaseModel):
+    id: UUID | None = None
     invoice_id: UUID
+    organization_id: UUID
+    sponsor_id: UUID
     provider: str
     mode: str
+    status: str
     provider_session_id: str
     local_session_id: str
     client_reference: str
@@ -324,10 +328,14 @@ class CommercialInvoiceProviderCheckoutRead(BaseModel):
     redirect_url: str
     success_url: str | None
     cancel_url: str | None
+    customer_email: str | None = None
+    payment_method: str
     provider_status_code: int | None = None
+    provider_response: str | None = None
     failure_reason: str | None = None
     webhook_configured: bool = False
     created_at: datetime
+    updated_at: datetime | None = None
 
 
 class CommercialInvoiceCheckoutSettlementCreate(BaseModel):

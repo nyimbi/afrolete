@@ -783,9 +783,13 @@ export type CommercialInvoiceHostedCheckoutRead = {
 };
 
 export type CommercialInvoiceProviderCheckoutRead = {
+  id: UUID | null;
   invoice_id: UUID;
+  organization_id: UUID;
+  sponsor_id: UUID;
   provider: string;
   mode: string;
+  status: string;
   provider_session_id: string;
   local_session_id: string;
   client_reference: string;
@@ -794,10 +798,14 @@ export type CommercialInvoiceProviderCheckoutRead = {
   redirect_url: string;
   success_url: string | null;
   cancel_url: string | null;
+  customer_email: string | null;
+  payment_method: string;
   provider_status_code: number | null;
+  provider_response: string | null;
   failure_reason: string | null;
   webhook_configured: boolean;
   created_at: string;
+  updated_at: string | null;
 };
 
 export type CommercialInvoiceCheckoutSettlementRead = {

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.models.commercial import (
+    CommercialPaymentSession,
     CommercialSettlementPayout,
     Donation,
     FinanceInvoice,
@@ -324,29 +325,58 @@ async def create_commercial_invoice_provider_checkout(
     selected_settings = settings or get_settings()
     created_at = datetime.now(UTC)
     local_redirect_url = commercial_invoice_checkout_session_url("/pay/sessions", session_id, invoice, provider)
-    result = CommercialInvoiceProviderCheckoutRead(
+    existing = await db.scalar(
+        select(CommercialPaymentSession).where(
+            CommercialPaymentSession.organization_id == invoice.organization_id,
+            CommercialPaymentSession.provider == provider,
+            CommercialPaymentSession.local_session_id == session_id,
+        )
+    )
+    session = existing or CommercialPaymentSession(
+        organization_id=invoice.organization_id,
         invoice_id=invoice.id,
+        sponsor_id=invoice.sponsor_id,
         provider=provider,
-        mode=selected_settings.commercial_payment_session_mode,
-        provider_session_id=commercial_invoice_provider_session_id(invoice, provider),
         local_session_id=session_id,
+        provider_session_id=commercial_invoice_provider_session_id(invoice, provider),
         client_reference=f"sponsor-invoice-checkout:{invoice.id}",
         amount=open_amount,
         currency=invoice.currency,
         redirect_url=local_redirect_url,
-        success_url=payload.success_url,
-        cancel_url=payload.cancel_url,
-        provider_status_code=None,
-        failure_reason=None,
-        webhook_configured=bool(selected_settings.commercial_payment_session_webhook_url),
         created_at=created_at,
     )
+    session.invoice_id = invoice.id
+    session.sponsor_id = invoice.sponsor_id
+    session.mode = selected_settings.commercial_payment_session_mode
+    session.status = "creating"
+    session.provider_session_id = commercial_invoice_provider_session_id(invoice, provider)
+    session.client_reference = f"sponsor-invoice-checkout:{invoice.id}"
+    session.amount = open_amount
+    session.currency = invoice.currency
+    session.redirect_url = local_redirect_url
+    session.success_url = payload.success_url
+    session.cancel_url = payload.cancel_url
+    session.customer_email = payload.customer_email
+    session.payment_method = payload.payment_method
+    session.webhook_configured = bool(selected_settings.commercial_payment_session_webhook_url)
+    session.provider_status_code = None
+    session.provider_response = None
+    session.failure_reason = None
+    db.add(session)
     if selected_settings.commercial_payment_session_mode == "local":
-        return result.model_copy(update={"failure_reason": "Local payment-session mode; using AfroLete hosted checkout page."})
+        session.status = "local_ready"
+        session.failure_reason = "Local payment-session mode; using AfroLete hosted checkout page."
+        await db.commit()
+        await db.refresh(session)
+        return commercial_payment_session_read(session)
     if not selected_settings.commercial_payment_session_webhook_url:
-        return result.model_copy(update={"failure_reason": "Payment session webhook mode is enabled but no webhook URL is configured."})
+        session.status = "configuration_required"
+        session.failure_reason = "Payment session webhook mode is enabled but no webhook URL is configured."
+        await db.commit()
+        await db.refresh(session)
+        return commercial_payment_session_read(session)
 
-    provider_payload = commercial_invoice_provider_checkout_payload(invoice, result, payload)
+    provider_payload = commercial_invoice_provider_checkout_payload(invoice, commercial_payment_session_read(session), payload)
     raw_body = json.dumps(provider_payload, sort_keys=True, default=str).encode()
     timestamp = str(int(time.time()))
     headers = await commercial_payment_session_headers(selected_settings, raw_body, timestamp)
@@ -361,18 +391,36 @@ async def create_commercial_invoice_provider_checkout(
         if not isinstance(response_payload, dict):
             response_payload = {}
         delivered = 200 <= response.status_code < 300
-        redirect_url = str(response_payload.get("redirect_url") or response_payload.get("url") or result.redirect_url)
-        provider_session_id = str(response_payload.get("provider_session_id") or response_payload.get("id") or result.provider_session_id)
-        return result.model_copy(
-            update={
-                "provider_status_code": response.status_code,
-                "provider_session_id": provider_session_id,
-                "redirect_url": redirect_url,
-                "failure_reason": None if delivered else f"Payment session webhook returned {response.status_code}: {response.text[:500]}",
-            }
-        )
+        session.status = "created" if delivered else "failed"
+        session.provider_status_code = response.status_code
+        session.provider_session_id = str(response_payload.get("provider_session_id") or response_payload.get("id") or session.provider_session_id)
+        session.redirect_url = str(response_payload.get("redirect_url") or response_payload.get("url") or session.redirect_url)
+        session.provider_response = commercial_payment_session_provider_response(response.status_code, response.text)
+        session.failure_reason = None if delivered else f"Payment session webhook returned {response.status_code}: {response.text[:500]}"
     except (ValueError, httpx.HTTPError) as error:
-        return result.model_copy(update={"failure_reason": f"Payment session webhook failed: {error}"})
+        session.status = "failed"
+        session.failure_reason = f"Payment session webhook failed: {error}"
+
+    await db.commit()
+    await db.refresh(session)
+    return commercial_payment_session_read(session)
+
+
+async def list_commercial_payment_sessions(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[CommercialInvoiceProviderCheckoutRead]:
+    await get_organization(db, organization_id)
+    sessions = list(
+        (
+            await db.scalars(
+                select(CommercialPaymentSession)
+                .where(CommercialPaymentSession.organization_id == organization_id)
+                .order_by(CommercialPaymentSession.created_at.desc())
+            )
+        ).all()
+    )
+    return [commercial_payment_session_read(session) for session in sessions]
 
 
 async def settle_commercial_invoice_checkout(
@@ -1389,6 +1437,44 @@ def commercial_invoice_provider_checkout_payload(
         "webhook_event": "commercial.invoice_payment_webhook",
         "created_at": session.created_at.isoformat(),
     }
+
+
+def commercial_payment_session_provider_response(status_code: int, body: str) -> str:
+    return json.dumps(
+        {
+            "provider_status_code": status_code,
+            "body": body[:1000],
+        },
+        sort_keys=True,
+    )
+
+
+def commercial_payment_session_read(session: CommercialPaymentSession) -> CommercialInvoiceProviderCheckoutRead:
+    return CommercialInvoiceProviderCheckoutRead(
+        id=session.id,
+        invoice_id=session.invoice_id,
+        organization_id=session.organization_id,
+        sponsor_id=session.sponsor_id,
+        provider=session.provider,
+        mode=session.mode,
+        status=session.status,
+        provider_session_id=session.provider_session_id,
+        local_session_id=session.local_session_id,
+        client_reference=session.client_reference,
+        amount=session.amount,
+        currency=session.currency,
+        redirect_url=session.redirect_url,
+        success_url=session.success_url,
+        cancel_url=session.cancel_url,
+        customer_email=session.customer_email,
+        payment_method=session.payment_method,
+        provider_status_code=session.provider_status_code,
+        provider_response=session.provider_response,
+        failure_reason=session.failure_reason,
+        webhook_configured=session.webhook_configured,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
 
 
 async def commercial_payment_session_headers(

@@ -66,6 +66,7 @@ from app.services.commercial import (
     list_commercial_settlement_payouts,
     list_campaigns,
     list_invoices,
+    list_commercial_payment_sessions,
     list_sponsors,
     list_sponsorships,
     list_ticket_products,
@@ -312,6 +313,14 @@ async def create_commercial_invoice_provider_checkout_route(
     db: AsyncSession = Depends(get_db),
 ) -> CommercialInvoiceProviderCheckoutRead:
     return await create_commercial_invoice_provider_checkout(db, session_id, invoice_id, provider, payload)
+
+
+@router.get("/payment-sessions", response_model=list[CommercialInvoiceProviderCheckoutRead])
+async def list_commercial_payment_sessions_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[CommercialInvoiceProviderCheckoutRead]:
+    return await list_commercial_payment_sessions(db, organization_id)
 
 
 @router.post(

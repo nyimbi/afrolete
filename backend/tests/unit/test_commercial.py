@@ -353,6 +353,7 @@ def test_sponsor_contact_can_open_self_service_portal(client, identity_headers) 
     assert provider_session_response.status_code == 200
     provider_session = provider_session_response.json()
     assert provider_session["mode"] == "local"
+    assert provider_session["status"] == "local_ready"
     assert provider_session["amount"] == "300.00"
     assert provider_session["provider_session_id"].startswith("cpay_manual-gateway_")
     assert provider_session["redirect_url"].startswith("/pay/sessions/")
@@ -477,6 +478,8 @@ def test_commercial_provider_checkout_session_delivers_signed_webhook(
     assert response.status_code == 200
     session = response.json()
     assert session["mode"] == "webhook"
+    assert session["status"] == "created"
+    assert session["id"] is not None
     assert session["provider_session_id"] == "psp_123"
     assert session["redirect_url"] == "https://pay.example/session/123"
     assert session["provider_status_code"] == 201
@@ -496,6 +499,17 @@ def test_commercial_provider_checkout_session_delivers_signed_webhook(
     ).hexdigest()
     assert headers["X-Afrolete-Commercial-Session-Key"] == "session-secret"
     assert headers["X-Afrolete-Commercial-Session-Signature"] == f"sha256={expected_signature}"
+
+    sessions_response = client.get(
+        "/api/v1/commercial/payment-sessions",
+        params={"organization_id": organization["id"]},
+    )
+    assert sessions_response.status_code == 200
+    sessions = sessions_response.json()
+    assert len(sessions) == 1
+    assert sessions[0]["provider_session_id"] == "psp_123"
+    assert sessions[0]["status"] == "created"
+    assert sessions[0]["provider_response"] is not None
 
     commercial_service.get_settings.cache_clear()
 

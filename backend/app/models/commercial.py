@@ -177,6 +177,32 @@ class FinancePayment(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class CommercialPaymentSession(IdMixin, TimestampMixin, Base):
+    __tablename__ = "commercial_payment_sessions"
+    __table_args__ = (UniqueConstraint("organization_id", "provider", "local_session_id"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    invoice_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("finance_invoices.id"), index=True)
+    sponsor_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("sponsors.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    mode: Mapped[str] = mapped_column(String(40), default="local", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="local_ready", nullable=False, index=True)
+    provider_session_id: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    local_session_id: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    client_reference: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    redirect_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    success_url: Mapped[str | None] = mapped_column(String(800))
+    cancel_url: Mapped[str | None] = mapped_column(String(800))
+    customer_email: Mapped[str | None] = mapped_column(String(320), index=True)
+    payment_method: Mapped[str] = mapped_column(String(80), default="card", nullable=False, index=True)
+    webhook_configured: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    provider_status_code: Mapped[int | None] = mapped_column(Integer)
+    provider_response: Mapped[str | None] = mapped_column(Text)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+
+
 class CommercialSettlementPayout(IdMixin, TimestampMixin, Base):
     __tablename__ = "commercial_settlement_payouts"
     __table_args__ = (UniqueConstraint("organization_id", "provider", "payout_batch_reference"),)

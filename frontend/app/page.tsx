@@ -201,6 +201,7 @@ import type {
   OrganizationType,
   ParticipationClearanceRead,
   PaymentSettlementRead,
+  CommercialInvoiceProviderCheckoutRead,
   CommercialSettlementPayoutRead,
   CommercialSettlementPayoutCallbackRead,
   PerformanceAchievementAwardRead,
@@ -1500,6 +1501,7 @@ export default function HomePage() {
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlementRead | null>(null);
   const [commercialPayout, setCommercialPayout] = useState<CommercialSettlementPayoutRead | null>(null);
   const [commercialPayouts, setCommercialPayouts] = useState<CommercialSettlementPayoutRead[]>([]);
+  const [commercialPaymentSessions, setCommercialPaymentSessions] = useState<CommercialInvoiceProviderCheckoutRead[]>([]);
   const [accountingExport, setAccountingExport] = useState<AccountingExportRead | null>(null);
   const [accountingSync, setAccountingSync] = useState<AccountingSyncRead | null>(null);
   const [commercialRefund, setCommercialRefund] = useState<CommercialRefundRead | null>(null);
@@ -2786,7 +2788,8 @@ export default function HomePage() {
       invoiceData,
       summaryData,
       dashboardData,
-      payoutData
+      payoutData,
+      paymentSessionData
     ] = await Promise.all([
       apiRequest<SponsorRead[]>(`/commercial/sponsors?organization_id=${organizationId}`),
       apiRequest<SponsorshipAgreementRead[]>(`/commercial/sponsorships?organization_id=${organizationId}`),
@@ -2798,7 +2801,8 @@ export default function HomePage() {
       apiRequest<SponsorshipDashboardRead[]>(
         `/commercial/sponsorship-dashboard?organization_id=${organizationId}`
       ),
-      apiRequest<CommercialSettlementPayoutRead[]>(`/commercial/settlements/payouts?organization_id=${organizationId}`)
+      apiRequest<CommercialSettlementPayoutRead[]>(`/commercial/settlements/payouts?organization_id=${organizationId}`),
+      apiRequest<CommercialInvoiceProviderCheckoutRead[]>(`/commercial/payment-sessions?organization_id=${organizationId}`)
     ]);
     setSponsors(sponsorData);
     setSponsorships(sponsorshipData);
@@ -2809,6 +2813,7 @@ export default function HomePage() {
     setCommercialSummary(summaryData);
     setSponsorshipDashboard(dashboardData);
     setCommercialPayouts(payoutData);
+    setCommercialPaymentSessions(paymentSessionData);
     setSelectedSponsorId((current) =>
       sponsorData.some((sponsor) => sponsor.id === current) ? current : sponsorData[0]?.id ?? ""
     );
@@ -3169,6 +3174,7 @@ export default function HomePage() {
       setPaymentSettlement(null);
       setCommercialPayout(null);
       setCommercialPayouts([]);
+      setCommercialPaymentSessions([]);
       setAccountingExport(null);
       setAccountingSync(null);
       setCommercialRefund(null);
@@ -12934,6 +12940,15 @@ export default function HomePage() {
                     <span>{payout.net_amount} {payout.currency} · {payout.provider}</span>
                   </div>
                 </button>
+              ))}
+              {commercialPaymentSessions.slice(0, 3).map((session) => (
+                <article key={session.id ?? session.local_session_id} className="task-card">
+                  <div>
+                    <strong>{session.status} · {session.provider_session_id}</strong>
+                    <span>{session.amount} {session.currency} · {session.provider} · {session.payment_method}</span>
+                    {session.failure_reason ? <small>{session.failure_reason}</small> : null}
+                  </div>
+                </article>
               ))}
               {accountingExport ? (
                 <article className="task-card">
