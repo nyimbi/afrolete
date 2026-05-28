@@ -35,6 +35,7 @@ import type {
   AgentScorecardPublicationReadinessRead,
   AgentScorecardPublicationReminderRead,
   AgentScorecardPublicationReminderRunRead,
+  AgentTaskApprovalRead,
   AgentTaskRead,
   AgentTaskStatus,
   AgentWorkerCallbackRead,
@@ -1353,6 +1354,7 @@ export default function HomePage() {
   const [travelGeofenceZones, setTravelGeofenceZones] = useState<EventTravelGeofenceZoneRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
+  const [agentTaskApprovals, setAgentTaskApprovals] = useState<AgentTaskApprovalRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
   const [agentLedgerVerification, setAgentLedgerVerification] =
     useState<AgentRunLedgerVerificationRead | null>(null);
@@ -2417,6 +2419,12 @@ export default function HomePage() {
       )
     ]);
     setAgentTasks(tasks);
+    const approvalLists = await Promise.all(
+      tasks.slice(0, 20).map((task) =>
+        apiRequest<AgentTaskApprovalRead[]>(`/agents/tasks/${task.id}/approvals`)
+      )
+    );
+    setAgentTaskApprovals(approvalLists.flat());
     setAgentRuns(runs);
     setAgentGovernance(governance);
     setAgentLedgerVerification(ledgerVerification);
@@ -3063,6 +3071,7 @@ export default function HomePage() {
       setTravelGeofenceZones([]);
       setAgents([]);
       setAgentTasks([]);
+      setAgentTaskApprovals([]);
       setAgentRuns([]);
       setAgentLedgerVerification(null);
       setAgentGovernance(null);
@@ -6450,6 +6459,59 @@ export default function HomePage() {
       (task) => {
         setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
         addLog(`Task moved to ${task.status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
+      }
+    );
+  };
+
+  const requestAgentTaskApprovals = (task: AgentTaskRead) => {
+    runAction(
+      `agent-task-${task.id}-approval-request`,
+      () =>
+        apiRequest<AgentTaskApprovalRead[]>(`/agents/tasks/${task.id}/approvals`, {
+          method: "POST",
+          identity,
+          body: {
+            required_count: 2,
+            request_notes: `Two-person approval required before ${task.title} is accepted.`
+          }
+        }),
+      (approvals) => {
+        setAgentTaskApprovals((current) => [
+          ...approvals,
+          ...current.filter((approval) => approval.task_id !== task.id)
+        ]);
+        addLog(`Requested ${approvals.length} approval slots for agent output`, "good");
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
+      }
+    );
+  };
+
+  const decideAgentTaskApproval = (approval: AgentTaskApprovalRead, status: "approved" | "rejected") => {
+    runAction(
+      `agent-approval-${approval.id}-${status}`,
+      () =>
+        apiRequest<AgentTaskApprovalRead>(`/agents/approvals/${approval.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            decision_notes:
+              status === "approved"
+                ? "Reviewer accepted this governed agent output from the operations console."
+                : "Reviewer rejected this governed agent output for operator correction."
+          }
+        }),
+      (updated) => {
+        setAgentTaskApprovals((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`Agent approval ${updated.status}`, updated.status === "approved" ? "good" : "bad");
         if (selectedOrganizationId) {
           void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
         }
@@ -15302,6 +15364,10 @@ export default function HomePage() {
                 <strong>{agentGovernance?.waiting_for_review ?? 0}</strong>
               </div>
               <div>
+                <span className="muted">Approvals</span>
+                <strong>{agentGovernance?.approval_pending ?? 0}</strong>
+              </div>
+              <div>
                 <span className="muted">Failed</span>
                 <strong>{agentGovernance?.failed_tasks ?? 0}</strong>
               </div>
@@ -15643,23 +15709,41 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
-              {agentTasks.map((task) => (
-                <article key={task.id} className="task-card">
-                  <div>
-                    <strong>{task.title}</strong>
-                    <span>{task.task_type} · {task.status}</span>
-                    {task.output_ref ? <span>{task.output_ref}</span> : null}
-                    {task.review_notes ? <span>{task.review_notes}</span> : null}
-                  </div>
-                  <div className="event-toolbar">
-                    <button type="button" onClick={() => executeAgentTask(task.id)}>Run</button>
-                    <button type="button" onClick={() => applyAgentWorkerCallback(task)}>Callback</button>
-                    <button type="button" onClick={() => submitAgentDecisionAppeal(task)}>Appeal</button>
-                    <button type="button" onClick={() => updateAgentTask(task.id, "waiting_for_review")}>Review</button>
-                    <button type="button" onClick={() => updateAgentTask(task.id, "completed")}>Done</button>
-                  </div>
-                </article>
-              ))}
+              {agentTasks.map((task) => {
+                const approvals = agentTaskApprovals.filter((approval) => approval.task_id === task.id);
+                return (
+                  <article key={task.id} className="task-card">
+                    <div>
+                      <strong>{task.title}</strong>
+                      <span>{task.task_type} · {task.status}</span>
+                      <span>
+                        Approval {task.approval_status.replaceAll("_", " ")} · {task.approval_approved_count}/{task.approval_required_count || approvals.length || 0} accepted · {task.approval_pending_count} pending
+                      </span>
+                      {task.output_ref ? <span>{task.output_ref}</span> : null}
+                      {task.review_notes ? <span>{task.review_notes}</span> : null}
+                      {approvals.slice(0, 3).map((approval) => (
+                        <span key={approval.id}>
+                          {approval.reviewer_label ?? "Reviewer"} · {approval.status}
+                          {approval.decision_notes ? ` · ${approval.decision_notes}` : ""}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="event-toolbar">
+                      <button type="button" onClick={() => executeAgentTask(task.id)}>Run</button>
+                      <button type="button" onClick={() => applyAgentWorkerCallback(task)}>Callback</button>
+                      <button type="button" onClick={() => requestAgentTaskApprovals(task)}>Approvals</button>
+                      <button type="button" onClick={() => submitAgentDecisionAppeal(task)}>Appeal</button>
+                      <button type="button" onClick={() => updateAgentTask(task.id, "waiting_for_review")}>Review</button>
+                      <button type="button" onClick={() => updateAgentTask(task.id, "completed")}>Done</button>
+                      {approvals.filter((approval) => approval.status === "pending").slice(0, 2).map((approval) => (
+                        <button key={approval.id} type="button" onClick={() => decideAgentTaskApproval(approval, "approved")}>
+                          Approve {approval.sequence}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </form>
         </section>

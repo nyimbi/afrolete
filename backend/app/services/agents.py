@@ -26,6 +26,7 @@ from app.models.agent import (
     AgentScorecardComment,
     AgentScorecardPublication,
     AgentTask,
+    AgentTaskApproval,
 )
 from app.models.enums import (
     AgentTaskStatus,
@@ -56,6 +57,8 @@ from app.schemas.agent import (
     AgentScorecardPublicationReminderCreate,
     AgentScorecardPublicationReminderRunCreate,
     AgentTaskCreate,
+    AgentTaskApprovalDecisionUpdate,
+    AgentTaskApprovalRequestCreate,
     AgentTaskWorkerRunRead,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
@@ -652,6 +655,160 @@ async def list_agent_tasks(
     )
 
 
+async def list_agent_task_approvals(
+    db: AsyncSession,
+    task_id: UUID,
+) -> list[AgentTaskApproval]:
+    task = await db.get(AgentTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+    return list(
+        (
+            await db.scalars(
+                select(AgentTaskApproval)
+                .where(AgentTaskApproval.task_id == task_id)
+                .order_by(AgentTaskApproval.sequence, AgentTaskApproval.created_at)
+            )
+        ).all()
+    )
+
+
+async def request_agent_task_approvals(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    task_id: UUID,
+    payload: AgentTaskApprovalRequestCreate,
+    authz: AuthorizationService,
+) -> list[AgentTaskApproval]:
+    task = await db.get(AgentTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+    await ensure_manage_organization(authz, identity, task.organization_id)
+    agent = await db.get(Agent, task.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    existing = list(
+        (
+            await db.scalars(
+                select(AgentTaskApproval)
+                .where(AgentTaskApproval.task_id == task.id)
+                .order_by(AgentTaskApproval.sequence)
+            )
+        ).all()
+    )
+    existing_reviewer_ids = {approval.reviewer_person_id for approval in existing if approval.reviewer_person_id is not None}
+    existing_sequences = [approval.sequence for approval in existing]
+    next_sequence = max(existing_sequences, default=0) + 1
+    requested: list[AgentTaskApproval] = []
+    for reviewer_person_id in payload.reviewer_person_ids:
+        if reviewer_person_id in existing_reviewer_ids:
+            continue
+        reviewer = await db.get(Person, reviewer_person_id)
+        if reviewer is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approval reviewer not found")
+        approval = AgentTaskApproval(
+            organization_id=task.organization_id,
+            task_id=task.id,
+            reviewer_person_id=reviewer_person_id,
+            reviewer_label=reviewer.display_name or reviewer.email,
+            requested_by_person_id=identity.person_id,
+            status="pending",
+            request_notes=payload.request_notes,
+            sequence=next_sequence,
+        )
+        next_sequence += 1
+        db.add(approval)
+        requested.append(approval)
+
+    target_slots = max(payload.required_count, len(payload.reviewer_person_ids), len(existing))
+    while len(existing) + len(requested) < target_slots:
+        approval = AgentTaskApproval(
+            organization_id=task.organization_id,
+            task_id=task.id,
+            reviewer_label=f"Reviewer {next_sequence}",
+            requested_by_person_id=identity.person_id,
+            status="pending",
+            request_notes=payload.request_notes,
+            sequence=next_sequence,
+        )
+        next_sequence += 1
+        db.add(approval)
+        requested.append(approval)
+
+    task.approval_required_count = payload.required_count
+    await refresh_agent_task_approval_state(db, task)
+    await append_agent_run_record(
+        db,
+        agent,
+        task,
+        identity,
+        event_type="approval_requested",
+        settings=get_settings(),
+        governance_note=agent_task_approval_governance_note(task),
+    )
+    await db.commit()
+    for approval in requested:
+        await db.refresh(approval)
+    await db.refresh(task)
+    return list(
+        (
+            await db.scalars(
+                select(AgentTaskApproval)
+                .where(AgentTaskApproval.task_id == task.id)
+                .order_by(AgentTaskApproval.sequence, AgentTaskApproval.created_at)
+            )
+        ).all()
+    )
+
+
+async def decide_agent_task_approval(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    approval_id: UUID,
+    payload: AgentTaskApprovalDecisionUpdate,
+    authz: AuthorizationService,
+) -> AgentTaskApproval:
+    approval = await db.get(AgentTaskApproval, approval_id)
+    if approval is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task approval not found")
+    task = await db.get(AgentTask, approval.task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+    await ensure_manage_organization(authz, identity, task.organization_id)
+    agent = await db.get(Agent, task.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    approval.status = payload.status
+    approval.decision_notes = payload.decision_notes
+    approval.decided_by_person_id = identity.person_id
+    approval.decided_at = datetime.now(UTC)
+    if approval.reviewer_person_id is None:
+        approval.reviewer_person_id = identity.person_id
+    await refresh_agent_task_approval_state(db, task)
+    if task.approval_status == "approved" and task.status == AgentTaskStatus.WAITING_FOR_REVIEW:
+        task.status = AgentTaskStatus.COMPLETED
+        task.review_notes = append_review_note(task.review_notes, "Required human approvals accepted the agent output.")
+    elif task.approval_status == "rejected" and task.status != AgentTaskStatus.CANCELLED:
+        task.status = AgentTaskStatus.WAITING_FOR_REVIEW
+        task.review_notes = append_review_note(task.review_notes, "At least one approval rejected the agent output.")
+    await append_agent_run_record(
+        db,
+        agent,
+        task,
+        identity,
+        event_type="approval_decided",
+        settings=get_settings(),
+        finished_at=approval.decided_at,
+        governance_note=agent_task_approval_governance_note(task),
+    )
+    await db.commit()
+    await db.refresh(approval)
+    await db.refresh(task)
+    return approval
+
+
 async def agent_run_records(
     db: AsyncSession,
     organization_id: UUID,
@@ -712,6 +869,9 @@ async def agent_governance_summary(
         "failed_tasks": count_tasks(tasks, AgentTaskStatus.FAILED),
         "cancelled_tasks": count_tasks(tasks, AgentTaskStatus.CANCELLED),
         "human_review_required": sum(1 for task in tasks if task.status == AgentTaskStatus.WAITING_FOR_REVIEW),
+        "approval_pending": sum(1 for task in tasks if task.approval_status == "pending"),
+        "approval_approved": sum(1 for task in tasks if task.approval_status == "approved"),
+        "approval_rejected": sum(1 for task in tasks if task.approval_status == "rejected"),
         "credential_status": agent_credential_status(settings),
     }
 
@@ -2171,6 +2331,11 @@ async def update_agent_task(
     await ensure_manage_organization(authz, identity, task.organization_id)
 
     if payload.status is not None:
+        if payload.status == AgentTaskStatus.COMPLETED and task.approval_status in {"pending", "rejected"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Agent task still requires approval before completion",
+            )
         task.status = payload.status
     if payload.output_ref is not None:
         task.output_ref = payload.output_ref
@@ -2676,6 +2841,50 @@ def apply_agent_webhook_response(task: AgentTask, response: httpx.Response) -> N
 
 def count_tasks(tasks: list[AgentTask], status_value: AgentTaskStatus) -> int:
     return sum(1 for task in tasks if task.status == status_value)
+
+
+async def refresh_agent_task_approval_state(db: AsyncSession, task: AgentTask) -> None:
+    approvals = list(
+        (
+            await db.scalars(
+                select(AgentTaskApproval).where(AgentTaskApproval.task_id == task.id)
+            )
+        ).all()
+    )
+    approved_count = sum(1 for approval in approvals if approval.status == "approved")
+    rejected_count = sum(1 for approval in approvals if approval.status == "rejected")
+    pending_count = sum(1 for approval in approvals if approval.status == "pending")
+    task.approval_approved_count = approved_count
+    task.approval_rejected_count = rejected_count
+    decided_at_values = [approval.decided_at for approval in approvals if approval.decided_at is not None]
+    task.approval_last_decided_at = max(decided_at_values, key=lambda value: value.timestamp()) if decided_at_values else None
+    if rejected_count:
+        task.approval_status = "rejected"
+    elif approvals and approved_count >= max(task.approval_required_count, 1):
+        task.approval_status = "approved"
+    elif approvals or task.approval_required_count:
+        task.approval_status = "pending" if pending_count else "incomplete"
+    else:
+        task.approval_status = "not_requested"
+
+
+def append_review_note(existing: str | None, note: str) -> str:
+    if not existing:
+        return note
+    if note in existing:
+        return existing
+    return f"{existing}\n{note}"[:4000]
+
+
+def agent_task_approval_governance_note(task: AgentTask) -> str:
+    pending_count = max(task.approval_required_count - task.approval_approved_count, 0)
+    if task.approval_status == "approved":
+        return f"Agent output accepted after {task.approval_approved_count}/{task.approval_required_count} required approvals."
+    if task.approval_status == "rejected":
+        return f"Agent output rejected by {task.approval_rejected_count} reviewer(s); operator review remains required."
+    if task.approval_status == "pending":
+        return f"Agent output is waiting for {pending_count} more approval(s)."
+    return "Agent output approval routing is tracked for human governance."
 
 
 def agent_credential_status(settings: Settings) -> dict[str, object]:

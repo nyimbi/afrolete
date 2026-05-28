@@ -130,6 +130,107 @@ def test_agent_assignment_and_task_review_workflow(client, identity_headers) -> 
     assert "human review" in reviewed["review_notes"]
 
 
+def test_agent_task_multi_approval_routing(client, identity_headers) -> None:
+    organization, team = create_org_and_team(client, identity_headers, "approval")
+    agent = client.post(
+        "/api/v1/agents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Approval Steward",
+            "kind": "operations",
+            "purpose": "Route sensitive AI recommendations through human approvals.",
+            "model_policy": "two_person_review",
+        },
+    ).json()
+    task = client.post(
+        f"/api/v1/agents/{agent['id']}/tasks",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "task_type": "selection_recommendation",
+            "title": "Approve matchday selection recommendation",
+            "input_ref": f"team:{team['id']}",
+        },
+    ).json()
+    executed = client.post(f"/api/v1/agents/tasks/{task['id']}/execute", headers=identity_headers).json()
+    assert executed["status"] == "waiting_for_review"
+
+    approval_response = client.post(
+        f"/api/v1/agents/tasks/{task['id']}/approvals",
+        headers=identity_headers,
+        json={
+            "required_count": 2,
+            "request_notes": "Selection advice needs two humans before it can be accepted.",
+        },
+    )
+
+    assert approval_response.status_code == 201
+    approvals = approval_response.json()
+    assert len(approvals) == 2
+    assert {approval["status"] for approval in approvals} == {"pending"}
+
+    blocked_completion = client.patch(
+        f"/api/v1/agents/tasks/{task['id']}",
+        headers=identity_headers,
+        json={"status": "completed"},
+    )
+    assert blocked_completion.status_code == 409
+
+    first_decision = client.patch(
+        f"/api/v1/agents/approvals/{approvals[0]['id']}",
+        headers=identity_headers,
+        json={"status": "approved", "decision_notes": "Coach accepted the recommendation."},
+    )
+    assert first_decision.status_code == 200
+    first = first_decision.json()
+    assert first["status"] == "approved"
+
+    task_after_first = client.get(
+        f"/api/v1/agents/tasks?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()[0]
+    assert task_after_first["approval_status"] == "pending"
+    assert task_after_first["approval_approved_count"] == 1
+    assert task_after_first["status"] == "waiting_for_review"
+
+    second_decision = client.patch(
+        f"/api/v1/agents/approvals/{approvals[1]['id']}",
+        headers=identity_headers,
+        json={"status": "approved", "decision_notes": "Manager accepted the recommendation."},
+    )
+    assert second_decision.status_code == 200
+
+    task_after_second = client.get(
+        f"/api/v1/agents/tasks?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()[0]
+    assert task_after_second["approval_status"] == "approved"
+    assert task_after_second["approval_approved_count"] == 2
+    assert task_after_second["approval_pending_count"] == 0
+    assert task_after_second["status"] == "completed"
+
+    approvals_list = client.get(
+        f"/api/v1/agents/tasks/{task['id']}/approvals",
+        headers=identity_headers,
+    ).json()
+    assert [approval["status"] for approval in approvals_list] == ["approved", "approved"]
+
+    governance = client.get(
+        f"/api/v1/agents/governance?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert governance["approval_approved"] == 1
+    assert governance["approval_pending"] == 0
+
+    runs = client.get(
+        f"/api/v1/agents/runs?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert "approval_requested" in [run["event_type"] for run in runs]
+    assert "approval_decided" in [run["event_type"] for run in runs]
+
+
 async def test_agent_task_worker_executes_queued_tasks(db_session) -> None:
     organization = Organization(
         name="Agent Worker Club",

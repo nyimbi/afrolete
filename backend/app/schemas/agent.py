@@ -57,6 +57,38 @@ class AgentTaskRead(BaseModel):
     input_ref: str | None
     output_ref: str | None
     review_notes: str | None
+    approval_required_count: int
+    approval_approved_count: int
+    approval_rejected_count: int
+    approval_pending_count: int
+    approval_status: str
+    approval_last_decided_at: datetime | None
+
+
+class AgentTaskApprovalRequestCreate(BaseModel):
+    required_count: int = Field(default=2, ge=1, le=10)
+    reviewer_person_ids: list[UUID] = Field(default_factory=list, max_length=10)
+    request_notes: str | None = Field(default=None, max_length=4000)
+
+
+class AgentTaskApprovalDecisionUpdate(BaseModel):
+    status: str = Field(pattern="^(approved|rejected|cancelled)$")
+    decision_notes: str | None = Field(default=None, max_length=4000)
+
+
+class AgentTaskApprovalRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    task_id: UUID
+    reviewer_person_id: UUID | None
+    reviewer_label: str | None
+    requested_by_person_id: UUID | None
+    status: str
+    request_notes: str | None
+    decision_notes: str | None
+    decided_by_person_id: UUID | None
+    decided_at: datetime | None
+    sequence: int
 
 
 class AgentTaskWorkerRunRead(BaseModel):
@@ -293,6 +325,9 @@ class AgentGovernanceSummaryRead(BaseModel):
     failed_tasks: int
     cancelled_tasks: int
     human_review_required: int
+    approval_pending: int
+    approval_approved: int
+    approval_rejected: int
     credential_status: AgentCredentialStatusRead
 
 

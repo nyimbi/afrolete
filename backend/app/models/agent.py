@@ -52,6 +52,29 @@ class AgentTask(IdMixin, TimestampMixin, Base):
     input_ref: Mapped[str | None] = mapped_column(String(500))
     output_ref: Mapped[str | None] = mapped_column(String(500))
     review_notes: Mapped[str | None] = mapped_column(Text)
+    approval_required_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    approval_approved_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    approval_rejected_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    approval_status: Mapped[str] = mapped_column(String(40), default="not_requested", nullable=False, index=True)
+    approval_last_decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AgentTaskApproval(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_task_approvals"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    task_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("agent_tasks.id"), index=True)
+    reviewer_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reviewer_label: Mapped[str | None] = mapped_column(String(160), index=True)
+    requested_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    request_notes: Mapped[str | None] = mapped_column(Text)
+    decision_notes: Mapped[str | None] = mapped_column(Text)
+    decided_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    sequence: Mapped[int] = mapped_column(Integer, default=1, nullable=False, index=True)
 
 
 class AgentRunRecord(IdMixin, TimestampMixin, Base):

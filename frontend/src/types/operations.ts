@@ -2958,6 +2958,27 @@ export type AgentTaskRead = {
   input_ref: string | null;
   output_ref: string | null;
   review_notes: string | null;
+  approval_required_count: number;
+  approval_approved_count: number;
+  approval_rejected_count: number;
+  approval_pending_count: number;
+  approval_status: string;
+  approval_last_decided_at: string | null;
+};
+
+export type AgentTaskApprovalRead = {
+  id: UUID;
+  organization_id: UUID;
+  task_id: UUID;
+  reviewer_person_id: UUID | null;
+  reviewer_label: string | null;
+  requested_by_person_id: UUID | null;
+  status: string;
+  request_notes: string | null;
+  decision_notes: string | null;
+  decided_by_person_id: UUID | null;
+  decided_at: string | null;
+  sequence: number;
 };
 
 export type AgentWorkerCallbackRead = {
@@ -3077,6 +3098,9 @@ export type AgentGovernanceSummaryRead = {
   failed_tasks: number;
   cancelled_tasks: number;
   human_review_required: number;
+  approval_pending: number;
+  approval_approved: number;
+  approval_rejected: number;
   credential_status: AgentCredentialStatusRead;
 };
 

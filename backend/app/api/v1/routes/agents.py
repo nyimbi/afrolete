@@ -47,6 +47,9 @@ from app.schemas.agent import (
     AgentCreate,
     AgentRead,
     AgentTaskCreate,
+    AgentTaskApprovalDecisionUpdate,
+    AgentTaskApprovalRead,
+    AgentTaskApprovalRequestCreate,
     AgentTaskRead,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
@@ -73,6 +76,7 @@ from app.services.agents import (
     list_agent_bias_audits,
     list_agent_decision_appeals,
     list_agent_model_registry,
+    list_agent_task_approvals,
     list_agent_scorecard_comments,
     list_agent_scorecard_comments_for_moderation,
     list_agent_scorecard_publications,
@@ -81,6 +85,8 @@ from app.services.agents import (
     list_my_agent_family_tasks,
     list_my_agent_decision_appeals,
     queue_agent_task,
+    request_agent_task_approvals,
+    decide_agent_task_approval,
     publish_agent_scorecard,
     read_signed_agent_scorecard_publication_artifact,
     record_scorecard_artifact_access,
@@ -147,6 +153,12 @@ def to_assignment_read(assignment) -> AgentAssignmentRead:
 
 
 def to_task_read(task) -> AgentTaskRead:
+    approval_pending_count = max(
+        int(task.approval_required_count or 0)
+        - int(task.approval_approved_count or 0)
+        - int(task.approval_rejected_count or 0),
+        0,
+    )
     return AgentTaskRead(
         id=task.id,
         agent_id=task.agent_id,
@@ -158,6 +170,29 @@ def to_task_read(task) -> AgentTaskRead:
         input_ref=task.input_ref,
         output_ref=task.output_ref,
         review_notes=task.review_notes,
+        approval_required_count=task.approval_required_count or 0,
+        approval_approved_count=task.approval_approved_count or 0,
+        approval_rejected_count=task.approval_rejected_count or 0,
+        approval_pending_count=approval_pending_count,
+        approval_status=task.approval_status or "not_requested",
+        approval_last_decided_at=task.approval_last_decided_at,
+    )
+
+
+def to_task_approval_read(approval) -> AgentTaskApprovalRead:
+    return AgentTaskApprovalRead(
+        id=approval.id,
+        organization_id=approval.organization_id,
+        task_id=approval.task_id,
+        reviewer_person_id=approval.reviewer_person_id,
+        reviewer_label=approval.reviewer_label,
+        requested_by_person_id=approval.requested_by_person_id,
+        status=approval.status,
+        request_notes=approval.request_notes,
+        decision_notes=approval.decision_notes,
+        decided_by_person_id=approval.decided_by_person_id,
+        decided_at=approval.decided_at,
+        sequence=approval.sequence,
     )
 
 
@@ -764,6 +799,44 @@ async def list_agent_tasks_route(
         to_task_read(task)
         for task in await list_agent_tasks(db, organization_id, agent_id=agent_id)
     ]
+
+
+@router.get("/tasks/{task_id}/approvals", response_model=list[AgentTaskApprovalRead])
+async def list_agent_task_approvals_route(
+    task_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentTaskApprovalRead]:
+    return [
+        to_task_approval_read(approval)
+        for approval in await list_agent_task_approvals(db, task_id)
+    ]
+
+
+@router.post("/tasks/{task_id}/approvals", response_model=list[AgentTaskApprovalRead], status_code=201)
+async def request_agent_task_approvals_route(
+    task_id: UUID,
+    payload: AgentTaskApprovalRequestCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[AgentTaskApprovalRead]:
+    return [
+        to_task_approval_read(approval)
+        for approval in await request_agent_task_approvals(db, identity, task_id, payload, authz)
+    ]
+
+
+@router.patch("/approvals/{approval_id}", response_model=AgentTaskApprovalRead)
+async def decide_agent_task_approval_route(
+    approval_id: UUID,
+    payload: AgentTaskApprovalDecisionUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentTaskApprovalRead:
+    return to_task_approval_read(
+        await decide_agent_task_approval(db, identity, approval_id, payload, authz)
+    )
 
 
 @router.get("/runs", response_model=list[AgentRunRecordRead])
