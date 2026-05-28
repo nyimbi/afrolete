@@ -43,6 +43,8 @@ from app.schemas.safeguarding import (
     FamilyEventRsvpCreate,
     FamilyPerformanceSummaryRead,
     GuardianAccountReadinessRead,
+    GuardianPortalInviteBatchCreate,
+    GuardianPortalInviteBatchRead,
     GuardianPortalInviteCreate,
     GuardianPortalInviteRead,
     GuardianRelationshipCreate,
@@ -101,6 +103,7 @@ from app.services.safeguarding import (
     create_consent_request,
     create_guardian_relationship,
     create_guardian_portal_invite,
+    create_guardian_portal_invite_batch,
     create_signed_incident_report_package_artifact_link,
     create_incident_insurance_claim,
     create_incident_medical_clearance,
@@ -388,6 +391,19 @@ async def list_guardian_account_readiness_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> list[GuardianAccountReadinessRead]:
     return await list_guardian_account_readiness(db, identity, organization_id, authz)
+
+
+@router.post(
+    "/guardian-account-readiness/invite-batch",
+    response_model=GuardianPortalInviteBatchRead,
+)
+async def create_guardian_portal_invite_batch_route(
+    payload: GuardianPortalInviteBatchCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GuardianPortalInviteBatchRead:
+    return await create_guardian_portal_invite_batch(db, identity, payload, authz)
 
 
 @router.post(

@@ -122,6 +122,33 @@ class GuardianPortalInviteRead(BaseModel):
     recommended_action: str
 
 
+class GuardianPortalInviteBatchCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    portal_url: str = Field(default="https://afrolete.lindela.io/family", max_length=500)
+    dispatch_now: bool = True
+    include_linked_accounts: bool = False
+    skip_recent_hours: int = Field(default=24, ge=0, le=720)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class GuardianPortalInviteBatchRead(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel
+    considered: int
+    invited: int
+    skipped_recent: int
+    skipped_no_destination: int
+    skipped_not_ready: int
+    skipped_linked: int
+    dispatch_attempted: int
+    dispatch_delivered: int
+    dispatch_queued: int
+    dispatch_failed: int
+    invites: list[GuardianPortalInviteRead]
+    skipped: list[str]
+
+
 class FamilyAthleteSummaryRead(BaseModel):
     athlete_person_id: UUID
     athlete_name: str

@@ -88,6 +88,8 @@ from app.schemas.safeguarding import (
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
     GuardianAccountReadinessRead,
+    GuardianPortalInviteBatchCreate,
+    GuardianPortalInviteBatchRead,
     GuardianPortalInviteCreate,
     GuardianPortalInviteRead,
     FamilyPerformanceAwardRead,
@@ -5095,7 +5097,7 @@ async def list_guardian_account_readiness(
                 .where(func.lower(AppUser.email) == guardian.primary_email.lower())
                 .order_by(AppUser.created_at.desc())
                 .limit(1)
-        )
+            )
         status_value, action = guardian_account_status(guardian, linked_user, email_user)
         latest_invite = await latest_guardian_portal_invite(db, organization_id, guardian.id)
         latest_message, latest_recipient = latest_invite if latest_invite else (None, None)
@@ -5123,6 +5125,82 @@ async def list_guardian_account_readiness(
             )
         )
     return readiness
+
+
+async def create_guardian_portal_invite_batch(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GuardianPortalInviteBatchCreate,
+    authz: AuthorizationService,
+) -> GuardianPortalInviteBatchRead:
+    readiness = await list_guardian_account_readiness(db, identity, payload.organization_id, authz)
+    invited: list[GuardianPortalInviteRead] = []
+    skipped: list[str] = []
+    skipped_recent = 0
+    skipped_no_destination = 0
+    skipped_not_ready = 0
+    skipped_linked = 0
+    cutoff = utc_now() - timedelta(hours=payload.skip_recent_hours)
+    invite_statuses = {"invite_ready", "pending_link"}
+
+    for item in readiness[: payload.limit]:
+        if item.account_status == "linked" and not payload.include_linked_accounts:
+            skipped_linked += 1
+            skipped.append(f"{item.guardian_name}: already linked")
+            continue
+        if item.account_status not in invite_statuses and item.account_status != "linked":
+            skipped_not_ready += 1
+            skipped.append(f"{item.guardian_name}: {item.account_status}")
+            continue
+        if (
+            payload.skip_recent_hours > 0
+            and item.last_invite_created_at is not None
+            and not datetime_is_before(item.last_invite_created_at, cutoff)
+        ):
+            skipped_recent += 1
+            skipped.append(f"{item.guardian_name}: invited recently")
+            continue
+        if payload.channel != CommunicationChannel.IN_APP:
+            has_destination = item.guardian_email if payload.channel == CommunicationChannel.EMAIL else item.guardian_phone
+            if not has_destination:
+                skipped_no_destination += 1
+                skipped.append(f"{item.guardian_name}: no {payload.channel.value} destination")
+                continue
+        try:
+            invite = await create_guardian_portal_invite(
+                db,
+                identity,
+                item.relationship_id,
+                GuardianPortalInviteCreate(
+                    organization_id=payload.organization_id,
+                    channel=payload.channel,
+                    portal_url=payload.portal_url,
+                    dispatch_now=payload.dispatch_now,
+                ),
+                authz,
+            )
+        except HTTPException as error:
+            skipped_no_destination += 1
+            skipped.append(f"{item.guardian_name}: {error.detail}")
+            continue
+        invited.append(invite)
+
+    return GuardianPortalInviteBatchRead(
+        organization_id=payload.organization_id,
+        channel=payload.channel,
+        considered=len(readiness[: payload.limit]),
+        invited=len(invited),
+        skipped_recent=skipped_recent,
+        skipped_no_destination=skipped_no_destination,
+        skipped_not_ready=skipped_not_ready,
+        skipped_linked=skipped_linked,
+        dispatch_attempted=sum(item.dispatch_attempted for item in invited),
+        dispatch_delivered=sum(item.dispatch_delivered for item in invited),
+        dispatch_queued=sum(item.dispatch_queued for item in invited),
+        dispatch_failed=sum(item.dispatch_failed for item in invited),
+        invites=invited,
+        skipped=skipped[:25],
+    )
 
 
 async def latest_guardian_portal_invite(

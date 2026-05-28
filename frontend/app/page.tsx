@@ -191,6 +191,7 @@ import type {
   BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
   GuardianAccountReadinessRead,
+  GuardianPortalInviteBatchRead,
   GuardianPortalInviteRead,
   GuardianRelationshipRead,
   SafeguardingEvidencePolicyRuleRead,
@@ -1620,6 +1621,8 @@ export default function HomePage() {
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [guardianAccountReadiness, setGuardianAccountReadiness] = useState<GuardianAccountReadinessRead[]>([]);
   const [guardianPortalInvite, setGuardianPortalInvite] = useState<GuardianPortalInviteRead | null>(null);
+  const [guardianPortalInviteBatch, setGuardianPortalInviteBatch] =
+    useState<GuardianPortalInviteBatchRead | null>(null);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
   const [clearance, setClearance] = useState<ParticipationClearanceRead | null>(null);
   const [safeguardingIncidents, setSafeguardingIncidents] = useState<SafeguardingIncidentRead[]>([]);
@@ -3283,6 +3286,7 @@ export default function HomePage() {
       setSafeguardingIncidents([]);
       setGuardianAccountReadiness([]);
       setGuardianPortalInvite(null);
+      setGuardianPortalInviteBatch(null);
       setIncidentInvestigationAction(null);
       setIncidentEvidenceUpload(null);
       setIncidentEvidenceLink(null);
@@ -5674,6 +5678,38 @@ export default function HomePage() {
         setGuardianPortalInvite(invite);
         void loadGuardianAccountReadiness(selectedOrganizationId);
         addLog(`Family portal invite queued for ${invite.guardian_name}`, "good");
+      }
+    );
+  };
+
+  const sendGuardianPortalInviteBatch = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const portalUrl = `${window.location.origin}/family`;
+    runAction(
+      "guardian-portal-invite-batch",
+      () =>
+        apiRequest<GuardianPortalInviteBatchRead>("/safeguarding/guardian-account-readiness/invite-batch", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            channel: "email",
+            portal_url: portalUrl,
+            dispatch_now: true,
+            skip_recent_hours: 24,
+            limit: 100
+          }
+        }),
+      (batch) => {
+        setGuardianPortalInviteBatch(batch);
+        if (batch.invites[0]) {
+          setGuardianPortalInvite(batch.invites[0]);
+        }
+        void loadGuardianAccountReadiness(selectedOrganizationId);
+        addLog(`Family portal batch invited ${batch.invited}, skipped ${batch.skipped.length}`, batch.invited > 0 ? "good" : "neutral");
       }
     );
   };
@@ -17027,6 +17063,13 @@ export default function HomePage() {
               >
                 Check family accounts
               </button>
+              <button
+                type="button"
+                onClick={sendGuardianPortalInviteBatch}
+                disabled={busyAction !== null || !selectedOrganizationId}
+              >
+                Invite ready families
+              </button>
               <button type="button" onClick={requestConsent} disabled={busyAction !== null}>Request consent</button>
               <button type="button" onClick={createBackgroundCheck} disabled={busyAction !== null}>Request check</button>
               <button type="button" onClick={createComplianceCredential} disabled={busyAction !== null}>Track credential</button>
@@ -17127,6 +17170,18 @@ export default function HomePage() {
                 {guardianPortalInvite.dispatch_attempted} attempted · {guardianPortalInvite.dispatch_delivered} delivered · {guardianPortalInvite.dispatch_queued} queued · {guardianPortalInvite.dispatch_failed} failed
               </p>
               <small>{guardianPortalInvite.portal_url}</small>
+            </div>
+          ) : null}
+          {guardianPortalInviteBatch ? (
+            <div className="result-card">
+              <span className="muted">Family portal batch</span>
+              <strong>{guardianPortalInviteBatch.invited}/{guardianPortalInviteBatch.considered} invited</strong>
+              <p>
+                {guardianPortalInviteBatch.dispatch_attempted} attempted · {guardianPortalInviteBatch.dispatch_delivered} delivered · {guardianPortalInviteBatch.dispatch_queued} queued · {guardianPortalInviteBatch.dispatch_failed} failed
+              </p>
+              <small>
+                {guardianPortalInviteBatch.skipped_recent} recent · {guardianPortalInviteBatch.skipped_no_destination} no destination · {guardianPortalInviteBatch.skipped_linked} linked · {guardianPortalInviteBatch.skipped_not_ready} not ready
+              </small>
             </div>
           ) : null}
           <div className="form-grid three">

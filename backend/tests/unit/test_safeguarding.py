@@ -200,6 +200,18 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
             "can_sign_consent": True,
         },
     ).json()
+    batch_ready = client.post(
+        "/api/v1/safeguarding/guardians",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_person_id": member["subject_id"],
+            "guardian_email": "batch-ready-parent@example.com",
+            "guardian_display_name": "Batch Ready Parent",
+            "relationship_kind": "parent",
+            "can_sign_consent": True,
+        },
+    ).json()
     db_session.add(
         AppUser(
             keycloak_sub="kc-linked-parent",
@@ -221,6 +233,7 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
     assert readiness[invite_ready["guardian_person_id"]]["can_receive_invite"] is True
     assert readiness[invite_ready["guardian_person_id"]]["last_invite_message_id"] is None
     assert "identity bridge" in readiness[invite_ready["guardian_person_id"]]["recommended_action"]
+    assert readiness[batch_ready["guardian_person_id"]]["account_status"] == "invite_ready"
     assert readiness[linked["guardian_person_id"]]["account_status"] == "linked"
     assert readiness[linked["guardian_person_id"]]["linked_app_user_id"]
     assert readiness[linked["guardian_person_id"]]["keycloak_sub"] == "kc-linked-parent"
@@ -267,6 +280,28 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
     assert invite_ready_after["last_invite_destination"] == "invite-ready-parent@example.com"
     assert invite_ready_after["last_invite_delivery_status"] == "queued"
     assert invite_ready_after["last_invite_sent_at"]
+    batch_response = client.post(
+        "/api/v1/safeguarding/guardian-account-readiness/invite-batch",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "email",
+            "portal_url": "http://localhost:3000/family",
+            "dispatch_now": True,
+            "skip_recent_hours": 24,
+        },
+    )
+    assert batch_response.status_code == 200
+    batch = batch_response.json()
+    assert batch["considered"] == 3
+    assert batch["invited"] == 1
+    assert batch["skipped_recent"] == 1
+    assert batch["skipped_linked"] == 1
+    assert batch["dispatch_attempted"] == 1
+    assert batch["dispatch_queued"] == 1
+    assert batch["invites"][0]["guardian_person_id"] == batch_ready["guardian_person_id"]
+    assert any("invited recently" in item for item in batch["skipped"])
+    assert any("already linked" in item for item in batch["skipped"])
 
 
 async def test_family_dashboard_summarizes_parent_actions(client, identity_headers, db_session) -> None:

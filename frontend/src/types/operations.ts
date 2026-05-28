@@ -1399,6 +1399,23 @@ export type GuardianPortalInviteRead = {
   recommended_action: string;
 };
 
+export type GuardianPortalInviteBatchRead = {
+  organization_id: UUID;
+  channel: CommunicationChannel;
+  considered: number;
+  invited: number;
+  skipped_recent: number;
+  skipped_no_destination: number;
+  skipped_not_ready: number;
+  skipped_linked: number;
+  dispatch_attempted: number;
+  dispatch_delivered: number;
+  dispatch_queued: number;
+  dispatch_failed: number;
+  invites: GuardianPortalInviteRead[];
+  skipped: string[];
+};
+
 export type FamilyAthleteSummaryRead = {
   athlete_person_id: UUID;
   athlete_name: string;
