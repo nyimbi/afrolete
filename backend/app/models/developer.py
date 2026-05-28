@@ -59,6 +59,8 @@ class DeveloperOAuthAuthorization(IdMixin, TimestampMixin, Base):
     granted_scopes: Mapped[str] = mapped_column(Text, nullable=False)
     state: Mapped[str | None] = mapped_column(String(500))
     code_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    code_challenge: Mapped[str | None] = mapped_column(String(256))
+    code_challenge_method: Mapped[str | None] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(40), default="granted", nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

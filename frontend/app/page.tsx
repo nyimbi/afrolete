@@ -1430,6 +1430,8 @@ export default function HomePage() {
     api_key_name: "Sandbox SDK Key",
     api_key_environment: "sandbox",
     api_key_rate_limit: 120,
+    oauth_code_challenge: "",
+    oauth_code_challenge_method: "S256",
     webhook_name: "Event Updates",
     webhook_url: "https://sync.example/webhooks/afrolete",
     webhook_events: "events.created,events.updated",
@@ -8630,7 +8632,11 @@ export default function HomePage() {
             client_id: application.client_id,
             redirect_uri: redirectUri,
             scopes: parseCommaList(developerForm.app_scopes),
-            state: `console-${Date.now()}`
+            state: `console-${Date.now()}`,
+            code_challenge: developerForm.oauth_code_challenge || null,
+            code_challenge_method: developerForm.oauth_code_challenge
+              ? developerForm.oauth_code_challenge_method
+              : null
           }
         }),
       (authorization) => {
@@ -11735,6 +11741,17 @@ export default function HomePage() {
                 <input type="number" min="1" value={developerForm.api_key_rate_limit} onChange={(event) => setDeveloperForm({ ...developerForm, api_key_rate_limit: Number(event.target.value) })} />
               </label>
               <label>
+                PKCE challenge
+                <input value={developerForm.oauth_code_challenge} onChange={(event) => setDeveloperForm({ ...developerForm, oauth_code_challenge: event.target.value })} />
+              </label>
+              <label>
+                PKCE method
+                <select value={developerForm.oauth_code_challenge_method} onChange={(event) => setDeveloperForm({ ...developerForm, oauth_code_challenge_method: event.target.value })}>
+                  <option value="S256">S256</option>
+                  <option value="plain">Plain</option>
+                </select>
+              </label>
+              <label>
                 Webhook
                 <input value={developerForm.webhook_name} onChange={(event) => setDeveloperForm({ ...developerForm, webhook_name: event.target.value })} />
               </label>
@@ -11830,7 +11847,9 @@ export default function HomePage() {
                 <article key={authorization.id} className="task-card">
                   <div>
                     <strong>{authorization.application_name} OAuth · {authorization.status}</strong>
-                    <span>{authorization.granted_scopes.join(", ")} · expires {new Date(authorization.expires_at).toLocaleString()}</span>
+                    <span>
+                      {authorization.public_client ? `PKCE ${authorization.code_challenge_method}` : "confidential"} · {authorization.granted_scopes.join(", ")} · expires {new Date(authorization.expires_at).toLocaleString()}
+                    </span>
                   </div>
                 </article>
               ))}

@@ -1,3 +1,7 @@
+import base64
+import hashlib
+
+
 def create_developer_org(client, identity_headers):
     response = client.post(
         "/api/v1/organizations",
@@ -162,6 +166,49 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         },
     )
     assert reused_oauth_token_response.status_code == 422
+
+    pkce_verifier = "public-client-verifier-for-afrolete-oauth"
+    pkce_challenge = base64.urlsafe_b64encode(hashlib.sha256(pkce_verifier.encode()).digest()).decode().rstrip("=")
+    pkce_authorization_response = client.post(
+        "/api/v1/developers/oauth/authorizations",
+        json={
+            "organization_id": organization["id"],
+            "client_id": application["client_id"],
+            "redirect_uri": "https://sync.example/callback",
+            "scopes": ["read:organization"],
+            "state": "pkce-public-client",
+            "code_challenge": pkce_challenge,
+            "code_challenge_method": "S256",
+        },
+        headers=identity_headers,
+    )
+    assert pkce_authorization_response.status_code == 201
+    pkce_authorization = pkce_authorization_response.json()
+    assert pkce_authorization["public_client"] is True
+    assert pkce_authorization["code_challenge_method"] == "S256"
+
+    missing_verifier_response = client.post(
+        "/api/v1/developers/oauth/token",
+        json={
+            "client_id": application["client_id"],
+            "code": pkce_authorization["authorization_code"],
+            "redirect_uri": "https://sync.example/callback",
+        },
+    )
+    assert missing_verifier_response.status_code == 401
+
+    pkce_token_response = client.post(
+        "/api/v1/developers/oauth/token",
+        json={
+            "client_id": application["client_id"],
+            "code": pkce_authorization["authorization_code"],
+            "redirect_uri": "https://sync.example/callback",
+            "code_verifier": pkce_verifier,
+        },
+    )
+    assert pkce_token_response.status_code == 200
+    assert pkce_token_response.json()["api_key"]["environment"] == "oauth"
+    assert pkce_token_response.json()["scopes"] == ["read:organization"]
 
     sdk_me_response = client.get(
         "/api/v1/sdk/me",
@@ -398,8 +445,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert summary_response.status_code == 200
     summary = summary_response.json()
     assert summary["application_count"] == 1
-    assert summary["api_key_count"] == 4
-    assert summary["active_api_key_count"] == 4
+    assert summary["api_key_count"] == 5
+    assert summary["active_api_key_count"] == 5
     assert summary["webhook_subscription_count"] == 2
     assert summary["marketplace_listing_count"] == 1
     assert summary["approved_marketplace_listing_count"] == 1

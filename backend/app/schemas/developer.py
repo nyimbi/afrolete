@@ -78,6 +78,8 @@ class DeveloperOAuthAuthorizationCreate(BaseModel):
     redirect_uri: str = Field(min_length=8, max_length=500)
     scopes: list[str] = Field(min_length=1, max_length=40)
     state: str | None = Field(default=None, max_length=500)
+    code_challenge: str | None = Field(default=None, min_length=8, max_length=256)
+    code_challenge_method: str | None = Field(default=None, max_length=16)
 
 
 class DeveloperOAuthAuthorizationRead(BaseModel):
@@ -90,6 +92,8 @@ class DeveloperOAuthAuthorizationRead(BaseModel):
     requested_scopes: list[str]
     granted_scopes: list[str]
     state: str | None
+    code_challenge_method: str | None
+    public_client: bool
     status: str
     expires_at: datetime
     consented_at: datetime | None
@@ -100,9 +104,10 @@ class DeveloperOAuthAuthorizationRead(BaseModel):
 
 class DeveloperOAuthTokenExchange(BaseModel):
     client_id: str = Field(min_length=8, max_length=160)
-    client_secret: str = Field(min_length=8, max_length=500)
+    client_secret: str | None = Field(default=None, min_length=8, max_length=500)
     code: str = Field(min_length=16, max_length=500)
     redirect_uri: str = Field(min_length=8, max_length=500)
+    code_verifier: str | None = Field(default=None, min_length=8, max_length=256)
 
 
 class DeveloperOAuthTokenRead(BaseModel):

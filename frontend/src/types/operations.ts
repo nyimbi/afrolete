@@ -2273,6 +2273,8 @@ export type DeveloperOAuthAuthorizationRead = {
   requested_scopes: string[];
   granted_scopes: string[];
   state: string | null;
+  code_challenge_method: string | null;
+  public_client: boolean;
   status: string;
   expires_at: string;
   consented_at: string | null;

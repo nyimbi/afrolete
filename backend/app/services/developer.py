@@ -1,6 +1,7 @@
 import hmac
 import json
 import time
+from base64 import urlsafe_b64encode
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
@@ -233,6 +234,7 @@ async def create_developer_oauth_authorization(
     requested_scopes = [scope for scope in payload.scopes if scope in application_scopes]
     if len(requested_scopes) != len(payload.scopes):
         raise HTTPException(status_code=422, detail="Requested scope is not allowed for this application")
+    code_challenge_method = normalized_pkce_method(payload.code_challenge, payload.code_challenge_method)
     authorization_code = token_urlsafe(32)
     now = datetime.now(UTC)
     authorization = DeveloperOAuthAuthorization(
@@ -244,6 +246,8 @@ async def create_developer_oauth_authorization(
         granted_scopes=pack_list(requested_scopes),
         state=payload.state,
         code_hash=hash_secret(authorization_code),
+        code_challenge=payload.code_challenge,
+        code_challenge_method=code_challenge_method,
         status="granted",
         expires_at=now + timedelta(minutes=10),
         consented_at=now,
@@ -295,7 +299,7 @@ async def exchange_developer_oauth_token(
     payload: DeveloperOAuthTokenExchange,
 ) -> DeveloperOAuthTokenRead:
     application = await get_developer_application_by_client_id(db, payload.client_id)
-    if application.status != "active" or application.client_secret_hash != hash_secret(payload.client_secret):
+    if application.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OAuth client credentials")
     authorization = await db.scalar(
         select(DeveloperOAuthAuthorization).where(
@@ -314,6 +318,10 @@ async def exchange_developer_oauth_token(
         authorization.status = "expired"
         await db.commit()
         raise HTTPException(status_code=422, detail="OAuth authorization code has expired")
+    if authorization.code_challenge:
+        verify_pkce_challenge(authorization, payload.code_verifier)
+    elif payload.client_secret is None or application.client_secret_hash != hash_secret(payload.client_secret):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OAuth client credentials")
     raw_key = build_api_key("oauth", "oauth")
     api_key = DeveloperApiKey(
         organization_id=authorization.organization_id,
@@ -897,6 +905,8 @@ def oauth_authorization_read(
         requested_scopes=unpack_list(authorization.requested_scopes),
         granted_scopes=unpack_list(authorization.granted_scopes),
         state=authorization.state,
+        code_challenge_method=authorization.code_challenge_method,
+        public_client=authorization.code_challenge is not None,
         status=authorization.status,
         expires_at=authorization.expires_at,
         consented_at=authorization.consented_at,
@@ -904,6 +914,29 @@ def oauth_authorization_read(
         authorization_code=authorization_code,
         redirect_url=redirect_url,
     )
+
+
+def normalized_pkce_method(code_challenge: str | None, code_challenge_method: str | None) -> str | None:
+    if code_challenge is None:
+        if code_challenge_method:
+            raise HTTPException(status_code=422, detail="PKCE code challenge method requires a code challenge")
+        return None
+    method = code_challenge_method or "S256"
+    if method not in {"S256", "plain"}:
+        raise HTTPException(status_code=422, detail="Unsupported PKCE code challenge method")
+    return method
+
+
+def verify_pkce_challenge(authorization: DeveloperOAuthAuthorization, code_verifier: str | None) -> None:
+    if not code_verifier:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OAuth PKCE verifier is required")
+    method = authorization.code_challenge_method or "S256"
+    if method == "plain":
+        actual_challenge = code_verifier
+    else:
+        actual_challenge = urlsafe_b64encode(sha256(code_verifier.encode("utf-8")).digest()).decode("ascii").rstrip("=")
+    if not hmac.compare_digest(actual_challenge, authorization.code_challenge or ""):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OAuth PKCE verifier is invalid")
 
 
 async def get_organization(db: AsyncSession, organization_id: UUID) -> Organization:
@@ -1218,11 +1251,11 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
         DeveloperQuickstartRead(
             title="Exchange an OAuth code",
             language="HTTP",
-            description="Redeem a tenant-approved authorization code for an expiring AfroLete API token.",
+            description="Redeem a tenant-approved authorization code for an expiring AfroLete API token with client-secret or PKCE proof.",
             steps=[
                 "Register a developer application with a redirect URI and allowed scopes.",
-                "Ask a tenant manager to grant OAuth consent for the requested scopes.",
-                "POST the authorization code, client secret, and redirect URI to /api/v1/developers/oauth/token.",
+                "Ask a tenant manager to grant OAuth consent for the requested scopes and optional PKCE code challenge.",
+                "POST the authorization code, redirect URI, and either client_secret or code_verifier to /api/v1/developers/oauth/token.",
             ],
             code_sample=(
                 "curl -s \"$AFROLETE_API/api/v1/developers/oauth/token\" \\\n"
