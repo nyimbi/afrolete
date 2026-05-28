@@ -1,3 +1,4 @@
+from secrets import token_urlsafe
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -5,14 +6,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models.enums import MemberSubjectType, MembershipRole
-from app.models.event import Event
+from app.models.enums import ConsentRequestStatus, MemberSubjectType, MembershipRole
+from app.models.event import ConsentRequest, Event
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.models.training import TrainingDrill
 from app.schemas.developer import (
     DeveloperApiKeyInspectionRead,
+    DeveloperConsentRequestCreate,
+    DeveloperConsentRequestRead,
     DeveloperGuardianRelationshipCreate,
     DeveloperGuardianRelationshipRead,
     DeveloperPersonCreate,
@@ -34,6 +37,7 @@ from app.services.developer import (
 )
 from app.services.events import list_events
 from app.services.organizations import organization_member_relation
+from app.services.safeguarding import consent_destination, hash_token, normalized_scope_id, utc_now
 from app.services.teams import list_teams_for_organization, team_member_relation
 from app.services.training import list_training_drills
 
@@ -158,6 +162,28 @@ def to_developer_guardian_relationship_read(
         can_pick_up=relationship.can_pick_up,
         is_primary=relationship.is_primary,
         notes=relationship.notes,
+    )
+
+
+def to_developer_consent_request_read(
+    request: ConsentRequest,
+    one_time_token: str,
+) -> DeveloperConsentRequestRead:
+    return DeveloperConsentRequestRead(
+        id=request.id,
+        organization_id=request.organization_id,
+        athlete_person_id=request.athlete_person_id,
+        guardian_person_id=request.guardian_person_id,
+        scope_type=request.scope_type,
+        scope_id=request.scope_id,
+        channel=request.channel,
+        destination=request.destination,
+        status=request.status,
+        expires_at=request.expires_at,
+        sent_at=request.sent_at,
+        fulfilled_at=request.fulfilled_at,
+        external_message_id=request.external_message_id,
+        one_time_token=one_time_token,
     )
 
 
@@ -404,6 +430,78 @@ async def sdk_link_guardian(
     await db.refresh(guardian)
     await db.refresh(relationship)
     return to_developer_guardian_relationship_read(relationship, payload.organization_id, guardian)
+
+
+@router.post(
+    "/people/{athlete_person_id}/consent-requests",
+    response_model=DeveloperConsentRequestRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sdk_create_consent_request(
+    athlete_person_id: UUID,
+    payload: DeveloperConsentRequestCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> DeveloperConsentRequestRead:
+    ensure_developer_api_scope(
+        credential,
+        payload.organization_id,
+        {"write:consent", "write:guardians", "write:roster"},
+    )
+    relationship = await db.scalar(
+        select(GuardianRelationship).where(
+            GuardianRelationship.athlete_person_id == athlete_person_id,
+            GuardianRelationship.guardian_person_id == payload.guardian_person_id,
+            GuardianRelationship.can_sign_consent.is_(True),
+        )
+    )
+    if relationship is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Guardian cannot sign consent for athlete",
+        )
+    athlete_membership = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == payload.organization_id,
+            Membership.subject_type == MemberSubjectType.PERSON,
+            Membership.subject_id == athlete_person_id,
+        )
+    )
+    athlete_profile = await db.scalar(
+        select(AthleteProfile).where(
+            AthleteProfile.organization_id == payload.organization_id,
+            AthleteProfile.person_id == athlete_person_id,
+        )
+    )
+    if athlete_membership is None and athlete_profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Athlete is not linked to this organization",
+        )
+    token = token_urlsafe(32)
+    request = ConsentRequest(
+        organization_id=payload.organization_id,
+        athlete_person_id=athlete_person_id,
+        guardian_person_id=payload.guardian_person_id,
+        scope_type=payload.scope_type,
+        scope_id=normalized_scope_id(
+            payload.organization_id,
+            payload.scope_type,
+            payload.scope_id,
+        ),
+        channel=payload.channel,
+        destination=await consent_destination(db, payload),
+        token_hash=hash_token(token),
+        status=ConsentRequestStatus.PENDING,
+        expires_at=payload.expires_at,
+        sent_at=utc_now(),
+        external_message_id=payload.external_message_id,
+        notes=payload.notes,
+    )
+    db.add(request)
+    await db.commit()
+    await db.refresh(request)
+    return to_developer_consent_request_read(request, token)
 
 
 @router.post("/teams", response_model=TeamRead, status_code=status.HTTP_201_CREATED)

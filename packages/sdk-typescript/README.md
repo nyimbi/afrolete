@@ -29,12 +29,19 @@ const athlete = await client.people.create({
   membership_role: "athlete",
 });
 
-await client.people.linkGuardian(athlete.id, {
+const guardianLink = await client.people.linkGuardian(athlete.id, {
   organization_id: organization.id,
   guardian_email: "parent@example.org",
   guardian_display_name: "Parent Otieno",
   relationship_kind: "parent",
   can_sign_consent: true,
+});
+
+const request = await client.people.createConsentRequest(athlete.id, {
+  organization_id: organization.id,
+  guardian_person_id: guardianLink.guardian_person_id,
+  scope_type: "organization",
+  channel: "email",
 });
 
 const team = await client.teams.create({

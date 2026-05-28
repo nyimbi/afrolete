@@ -41,6 +41,13 @@ class _PeopleResource:
             body=payload,
         )
 
+    def create_consent_request(self, athlete_person_id: str, payload: JsonObject) -> JsonObject:
+        return self.client.request(
+            "POST",
+            f"/people/{athlete_person_id}/consent-requests",
+            body=payload,
+        )
+
 
 @dataclass(frozen=True)
 class _TeamsResource:

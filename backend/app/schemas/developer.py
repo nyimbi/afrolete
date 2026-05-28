@@ -3,7 +3,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import GuardianRelationshipKind, MembershipRole
+from app.models.enums import (
+    ConsentCaptureChannel,
+    ConsentRequestStatus,
+    ConsentScopeType,
+    GuardianRelationshipKind,
+    MembershipRole,
+)
 
 
 class DeveloperApplicationCreate(BaseModel):
@@ -208,6 +214,35 @@ class DeveloperGuardianRelationshipRead(BaseModel):
     can_pick_up: bool
     is_primary: bool
     notes: str | None
+
+
+class DeveloperConsentRequestCreate(BaseModel):
+    organization_id: UUID
+    guardian_person_id: UUID
+    scope_type: ConsentScopeType
+    scope_id: UUID | None = None
+    channel: ConsentCaptureChannel
+    destination: str | None = Field(default=None, max_length=320)
+    expires_at: datetime | None = None
+    external_message_id: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class DeveloperConsentRequestRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    athlete_person_id: UUID
+    guardian_person_id: UUID
+    scope_type: ConsentScopeType
+    scope_id: UUID | None
+    channel: ConsentCaptureChannel
+    destination: str
+    status: ConsentRequestStatus
+    expires_at: datetime | None
+    sent_at: datetime | None
+    fulfilled_at: datetime | None
+    external_message_id: str | None
+    one_time_token: str
 
 
 class DeveloperWebhookSubscriptionCreate(BaseModel):

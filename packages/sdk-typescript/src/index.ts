@@ -124,6 +124,35 @@ export interface GuardianRelationship {
   notes: string | null;
 }
 
+export interface ConsentRequestCreate {
+  organization_id: UUID;
+  guardian_person_id: UUID;
+  scope_type: string;
+  scope_id?: UUID | null;
+  channel: string;
+  destination?: string | null;
+  expires_at?: string | null;
+  external_message_id?: string | null;
+  notes?: string | null;
+}
+
+export interface ConsentRequest {
+  id: UUID;
+  organization_id: UUID;
+  athlete_person_id: UUID;
+  guardian_person_id: UUID;
+  scope_type: string;
+  scope_id: UUID | null;
+  channel: string;
+  destination: string;
+  status: string;
+  expires_at: string | null;
+  sent_at: string | null;
+  fulfilled_at: string | null;
+  external_message_id: string | null;
+  one_time_token: string;
+}
+
 export interface Event {
   id: UUID;
   organization_id: UUID;
@@ -252,6 +281,14 @@ export class AfroLeteClient {
       payload: GuardianLinkCreate,
     ): Promise<GuardianRelationship> =>
       this.request<GuardianRelationship>(`/people/${athletePersonId}/guardians`, {
+        method: "POST",
+        body: payload,
+      }),
+    createConsentRequest: (
+      athletePersonId: UUID,
+      payload: ConsentRequestCreate,
+    ): Promise<ConsentRequest> =>
+      this.request<ConsentRequest>(`/people/${athletePersonId}/consent-requests`, {
         method: "POST",
         body: payload,
       }),
