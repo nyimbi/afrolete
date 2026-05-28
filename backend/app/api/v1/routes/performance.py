@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -35,6 +35,8 @@ from app.schemas.performance import (
     PerformanceObservationCreate,
     PerformanceObservationRead,
     PerformanceObservationReviewCreate,
+    PerformanceWearableWebhookCreate,
+    PerformanceWearableWebhookRead,
     PlayerSelfAssessmentCreate,
     PlayerPerformanceProfileRead,
 )
@@ -50,6 +52,7 @@ from app.services.performance import (
     create_player_self_assessment,
     evaluate_performance_achievements,
     ingest_performance_evidence,
+    ingest_performance_wearable_webhook,
     list_assessment_review_queue,
     list_assessments,
     list_performance_awards,
@@ -71,6 +74,7 @@ from app.services.performance import (
     review_observation,
     send_performance_injury_risk_alert,
     update_assessment_review_assignment,
+    validate_performance_wearable_webhook_signature,
 )
 
 router = APIRouter(prefix="/performance", tags=["performance"])
@@ -340,6 +344,39 @@ async def ingest_performance_evidence_route(
         parser_confidence_reason=result["parser_confidence_reason"],
         parser_warnings=result["parser_warnings"],
         parsed_fields=result["parsed_fields"],
+    )
+
+
+@router.post(
+    "/webhooks/wearables",
+    response_model=PerformanceWearableWebhookRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_performance_wearable_webhook_route(
+    request: Request,
+    payload: PerformanceWearableWebhookCreate,
+    x_afrolete_performance_timestamp: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Performance-Timestamp",
+    ),
+    x_afrolete_performance_signature: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Performance-Signature",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> PerformanceWearableWebhookRead:
+    signature_required, signature_validated = await validate_performance_wearable_webhook_signature(
+        await request.body(),
+        x_afrolete_performance_timestamp,
+        x_afrolete_performance_signature,
+    )
+    return PerformanceWearableWebhookRead(
+        **await ingest_performance_wearable_webhook(
+            db,
+            payload,
+            signature_required=signature_required,
+            signature_validated=signature_validated,
+        )
     )
 
 

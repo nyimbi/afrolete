@@ -3169,6 +3169,22 @@ export type PerformanceIngestionRead = {
   parsed_fields: Record<string, string>;
 };
 
+export type PerformanceWearableWebhookRead = {
+  ingest_event_id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  source_provider: string;
+  external_event_id: string;
+  replayed: boolean;
+  signature_required: boolean;
+  signature_validated: boolean;
+  observation_count: number;
+  skipped_metric_count: number;
+  observation_ids: UUID[];
+  payload_hash: string;
+  received_at: string;
+};
+
 export type AthleteAssessmentRead = {
   id: UUID;
   organization_id: UUID;

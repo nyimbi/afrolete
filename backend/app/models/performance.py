@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -63,6 +63,35 @@ class AthletePerformanceObservation(IdMixin, TimestampMixin, Base):
         index=True,
     )
     notes: Mapped[str | None] = mapped_column(Text)
+
+
+class PerformanceWearableIngestEvent(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_wearable_ingest_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "athlete_profile_id",
+            "provider",
+            "external_event_id",
+            name="uq_performance_wearable_ingest_events_replay",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), nullable=False, index=True
+    )
+    event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    external_event_id: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    signature_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    signature_validated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    observation_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    skipped_metric_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
 class AthleteAssessment(IdMixin, TimestampMixin, Base):

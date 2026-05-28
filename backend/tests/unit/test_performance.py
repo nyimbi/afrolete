@@ -1229,6 +1229,88 @@ def test_performance_ingestion_normalizes_garmin_wellness_schema(client, identit
     assert ingestion["parser_confidence_reason"].startswith("Normalized a garmin")
 
 
+def test_performance_wearable_webhook_creates_pending_observations_once(
+    client, identity_headers
+) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    hrv_metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "hrv",
+            "name": "Heart Rate Variability",
+            "category": "wellness",
+            "unit": "ms",
+        },
+    ).json()
+    resting_hr_metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "resting_heart_rate",
+            "name": "Resting Heart Rate",
+            "category": "wellness",
+            "unit": "bpm",
+        },
+    ).json()
+
+    payload = {
+        "organization_id": organization["id"],
+        "athlete_profile_id": roster["athlete_profile_id"],
+        "source_provider": "whoop",
+        "external_event_id": "whoop-cycle-2026-06-05",
+        "metric_definition_ids": [hrv_metric["id"], resting_hr_metric["id"]],
+        "payload": {
+            "recovery": {
+                "score": 44,
+                "hrv_rmssd_milli": 33,
+                "resting_heart_rate": 99,
+            },
+            "created_at": "2026-06-05T06:15:00Z",
+        },
+    }
+
+    response = client.post("/api/v1/performance/webhooks/wearables", json=payload)
+
+    assert response.status_code == 202
+    ingest = response.json()
+    assert ingest["source_provider"] == "whoop"
+    assert ingest["external_event_id"] == "whoop-cycle-2026-06-05"
+    assert ingest["replayed"] is False
+    assert ingest["signature_required"] is False
+    assert ingest["observation_count"] == 2
+    assert ingest["skipped_metric_count"] == 0
+    assert len(ingest["observation_ids"]) == 2
+
+    observations = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert {observation["value"] for observation in observations} == {33, 99}
+    assert {observation["verification_status"] for observation in observations} == {"pending_review"}
+    assert all("whoop:whoop-cycle-2026-06-05" in observation["notes"] for observation in observations)
+
+    replay = client.post("/api/v1/performance/webhooks/wearables", json=payload)
+
+    assert replay.status_code == 202
+    replay_body = replay.json()
+    assert replay_body["replayed"] is True
+    assert replay_body["observation_count"] == 2
+    assert replay_body["observation_ids"] == []
+
+    observations_after_replay = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert len(observations_after_replay) == 2
+
+
 def test_performance_ingestion_uses_metric_specific_video_text(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(

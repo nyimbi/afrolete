@@ -214,6 +214,7 @@ import type {
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceObservationRead,
+  PerformanceWearableWebhookRead,
   NotificationFrequency,
   NotificationPreferenceRead,
   PredictiveRiskScoreRead,
@@ -276,6 +277,48 @@ import type {
 } from "@/types/operations";
 
 const performanceRiskAlertChannelOptions: CommunicationChannel[] = ["in_app", "push", "sms", "whatsapp"];
+
+function wearableWebhookPayload(provider: string): Record<string, unknown> {
+  if (provider === "garmin") {
+    return {
+      provider: "garmin",
+      summaryType: "daily",
+      calendarDate: "2026-06-05",
+      wellnessData: {
+        restingHeartRate: 92,
+        averageStressLevel: 74,
+        bodyBatteryMostRecentValue: 42
+      }
+    };
+  }
+  if (provider === "apple_health") {
+    return {
+      provider: "apple_health",
+      samples: [
+        { type: "HKQuantityTypeIdentifierHeartRateVariabilitySDNN", value: 38, unit: "ms", startDate: "2026-06-05T06:00:00Z" },
+        { type: "HKQuantityTypeIdentifierRestingHeartRate", value: 91, unit: "count/min", startDate: "2026-06-05T06:00:00Z" }
+      ]
+    };
+  }
+  if (provider === "fitbit") {
+    return {
+      provider: "fitbit",
+      summary: { restingHeartRate: 88 },
+      sleep: { summary: { totalMinutesAsleep: 325, efficiency: 71 } },
+      dateOfSleep: "2026-06-05"
+    };
+  }
+  return {
+    provider: "whoop",
+    recovery: {
+      score: 44,
+      hrv_rmssd_milli: 33,
+      resting_heart_rate: 99
+    },
+    strain: { score: 17.4 },
+    created_at: "2026-06-05T06:15:00Z"
+  };
+}
 
 type TravelManifestLegacyOfflineCache = EventTravelManifestRead & {
   cached_at: string;
@@ -1265,6 +1308,7 @@ export default function HomePage() {
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
+  const [performanceWebhookIngest, setPerformanceWebhookIngest] = useState<PerformanceWearableWebhookRead | null>(null);
   const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
   const [performanceBenchmarkScope, setPerformanceBenchmarkScope] = useState<BenchmarkCohortScope>("tenant");
   const [performanceCohortComparisons, setPerformanceCohortComparisons] = useState<PerformanceCohortComparisonRead[]>([]);
@@ -2858,6 +2902,7 @@ export default function HomePage() {
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
+      setPerformanceWebhookIngest(null);
       setAssessments([]);
       setAssessmentReviewQueue([]);
       setAssessmentReviewSummary(null);
@@ -6371,6 +6416,48 @@ export default function HomePage() {
         ]);
         setSelectedObservationId(ingestion.observation.id);
         addLog(`${ingestion.extractor} queued observation review`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const ingestPerformanceWearableWebhook = () => {
+    const provider = observationForm.source_provider || "whoop";
+    const metrics = metricDefinitions.filter((metric) =>
+      [
+        "hrv",
+        "resting_heart_rate",
+        "recovery_score",
+        "hydration_score",
+        "sleep_quality",
+        "sleep_minutes",
+        "stress",
+        "strain",
+        "temperature"
+      ].includes(metric.code)
+    );
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || metrics.length === 0) {
+      addLog("Select an athlete and create wearable metric definitions first", "bad");
+      return;
+    }
+    runAction(
+      "wearable-webhook-ingest",
+      () =>
+        apiRequest<PerformanceWearableWebhookRead>("/performance/webhooks/wearables", {
+          method: "POST",
+          body: {
+            organization_id: selectedOrganizationId,
+            athlete_profile_id: selectedAthlete.athleteProfileId,
+            source_provider: provider,
+            external_event_id: `${provider}-console-${Date.now()}`,
+            event_id: selectedEventId || null,
+            metric_definition_ids: metrics.map((metric) => metric.id),
+            payload: wearableWebhookPayload(provider)
+          }
+        }),
+      (ingest) => {
+        setPerformanceWebhookIngest(ingest);
+        addLog(`${ingest.source_provider} webhook accepted ${ingest.observation_count} observation(s)`, "good");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
       }
     );
@@ -13446,6 +13533,7 @@ export default function HomePage() {
                 <button type="button" onClick={createMetricDefinition} disabled={busyAction !== null}>Metric</button>
                 <button type="button" onClick={recordObservation} disabled={busyAction !== null}>Observe</button>
                 <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
+                <button type="button" onClick={ingestPerformanceWearableWebhook} disabled={busyAction !== null}>Webhook</button>
                 <button type="button" onClick={reviewSelectedObservation} disabled={busyAction !== null}>Review</button>
                 <button type="button" onClick={createPerformanceGoal} disabled={busyAction !== null}>Goal</button>
                 <button type="button" onClick={evaluatePerformanceAchievements} disabled={busyAction !== null}>Award</button>
@@ -13772,6 +13860,24 @@ export default function HomePage() {
                     {performanceIngestion.parser_warnings.length ? (
                       <small>{performanceIngestion.parser_warnings.join(" · ")}</small>
                     ) : null}
+                  </div>
+                </article>
+              ) : null}
+              {performanceWebhookIngest ? (
+                <article className="task-card">
+                  <div>
+                    <strong>
+                      {performanceWebhookIngest.source_provider} webhook ·{" "}
+                      {performanceWebhookIngest.replayed ? "replayed" : "accepted"}
+                    </strong>
+                    <span>
+                      {performanceWebhookIngest.observation_count} observation(s) ·{" "}
+                      {performanceWebhookIngest.skipped_metric_count} skipped ·{" "}
+                      {performanceWebhookIngest.signature_required
+                        ? performanceWebhookIngest.signature_validated ? "signed" : "signature failed"
+                        : "signature optional"}
+                    </span>
+                    <small>{performanceWebhookIngest.external_event_id} · {performanceWebhookIngest.payload_hash.slice(0, 12)}</small>
                   </div>
                 </article>
               ) : null}

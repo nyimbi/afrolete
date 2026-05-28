@@ -1,6 +1,9 @@
 from datetime import UTC, date, datetime, timedelta
+import hmac
+import hashlib
 import json
 import re
+import time
 from statistics import pstdev
 from uuid import UUID
 
@@ -32,6 +35,7 @@ from app.models.performance import (
     PerformanceAchievementAward,
     PerformanceGoal,
     PerformanceMetricDefinition,
+    PerformanceWearableIngestEvent,
 )
 from app.models.team import AthleteProfile, Team, TeamRosterEntry
 from app.models.training import TrainingSessionFeedback, TrainingSessionPlan
@@ -49,8 +53,10 @@ from app.schemas.performance import (
     PerformanceIngestionCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
+    PerformanceWearableWebhookCreate,
     PlayerSelfAssessmentCreate,
 )
+from app.core.config import Settings, get_settings
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
 from app.services.communications import (
@@ -58,6 +64,7 @@ from app.services.communications import (
     guardian_person_ids,
     initial_delivery_status,
 )
+from app.services.secrets import resolve_secret
 
 
 async def ensure_manage_performance(
@@ -254,6 +261,171 @@ async def ingest_performance_evidence(
         "parser_warnings": parser_warnings,
         "parsed_fields": parsed["fields"],
     }
+
+
+async def ingest_performance_wearable_webhook(
+    db: AsyncSession,
+    payload: PerformanceWearableWebhookCreate,
+    *,
+    signature_required: bool,
+    signature_validated: bool,
+) -> dict[str, object]:
+    athlete_profile = await get_athlete_profile(db, payload.athlete_profile_id, payload.organization_id)
+    if payload.event_id is not None:
+        event = await db.get(Event, payload.event_id)
+        if event is None or event.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+
+    provider = normalized_provider_name(payload.source_provider) or "wearable"
+    payload_hash = stable_payload_hash(payload.payload)
+    existing = await db.scalar(
+        select(PerformanceWearableIngestEvent)
+        .where(PerformanceWearableIngestEvent.organization_id == payload.organization_id)
+        .where(PerformanceWearableIngestEvent.athlete_profile_id == athlete_profile.id)
+        .where(PerformanceWearableIngestEvent.provider == provider)
+        .where(PerformanceWearableIngestEvent.external_event_id == payload.external_event_id)
+    )
+    if existing is not None:
+        return wearable_webhook_result(existing, replayed=True, observation_ids=[])
+
+    metrics = await wearable_webhook_metric_definitions(db, payload)
+    observation_ids: list[UUID] = []
+    skipped_metric_count = 0
+    evidence_text = stable_payload_text(payload.payload)
+    received_at = datetime.now(UTC)
+
+    for metric in metrics:
+        provider_match = provider_specific_metric_match(payload.payload, metric, provider)
+        structured_match = provider_match or structured_metric_match(payload.payload, metric)
+        if structured_match is None:
+            skipped_metric_count += 1
+            continue
+        parsed_payload = PerformanceIngestionCreate(
+            organization_id=payload.organization_id,
+            athlete_profile_id=athlete_profile.id,
+            metric_definition_id=metric.id,
+            event_id=payload.event_id,
+            source=MetricSource.WEARABLE,
+            source_provider=provider,
+            evidence_ref=f"{provider}://webhook/{payload.external_event_id}",
+            evidence_text=evidence_text,
+        )
+        parsed = parse_performance_evidence(parsed_payload, metric)
+        value = float(parsed["value"])
+        parser_warnings = list(parsed["warnings"])
+        observation = AthletePerformanceObservation(
+            organization_id=payload.organization_id,
+            athlete_profile_id=athlete_profile.id,
+            metric_definition_id=metric.id,
+            event_id=payload.event_id,
+            recorded_by_person_id=None,
+            value=value,
+            raw_value=evidence_raw_value(evidence_text, value),
+            observed_at=parsed["observed_at"] or received_at,
+            source=MetricSource.WEARABLE,
+            confidence=float(parsed["confidence"]),
+            verification_status=MetricVerificationStatus.PENDING_REVIEW,
+            notes=(
+                f"Wearable webhook {provider}:{payload.external_event_id} parsed {metric.name} "
+                f"via {parsed['method']}. "
+                f"{'Warnings: ' + '; '.join(parser_warnings) + '. ' if parser_warnings else ''}"
+                "Review before promoting to verified."
+            ),
+        )
+        db.add(observation)
+        await db.flush()
+        observation_ids.append(observation.id)
+
+    ingest_event = PerformanceWearableIngestEvent(
+        organization_id=payload.organization_id,
+        athlete_profile_id=athlete_profile.id,
+        event_id=payload.event_id,
+        provider=provider,
+        external_event_id=payload.external_event_id,
+        payload_hash=payload_hash,
+        received_at=received_at,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        observation_count=len(observation_ids),
+        skipped_metric_count=skipped_metric_count,
+    )
+    db.add(ingest_event)
+    await db.commit()
+    await db.refresh(ingest_event)
+    return wearable_webhook_result(ingest_event, replayed=False, observation_ids=observation_ids)
+
+
+async def wearable_webhook_metric_definitions(
+    db: AsyncSession,
+    payload: PerformanceWearableWebhookCreate,
+) -> list[PerformanceMetricDefinition]:
+    statement = select(PerformanceMetricDefinition).where(
+        PerformanceMetricDefinition.organization_id == payload.organization_id
+    )
+    if payload.metric_definition_ids:
+        statement = statement.where(PerformanceMetricDefinition.id.in_(payload.metric_definition_ids))
+    else:
+        statement = statement.where(PerformanceMetricDefinition.status == "active")
+    return list((await db.scalars(statement.order_by(PerformanceMetricDefinition.code))).all())
+
+
+def wearable_webhook_result(
+    ingest_event: PerformanceWearableIngestEvent,
+    *,
+    replayed: bool,
+    observation_ids: list[UUID],
+) -> dict[str, object]:
+    return {
+        "ingest_event_id": ingest_event.id,
+        "organization_id": ingest_event.organization_id,
+        "athlete_profile_id": ingest_event.athlete_profile_id,
+        "source_provider": ingest_event.provider,
+        "external_event_id": ingest_event.external_event_id,
+        "replayed": replayed,
+        "signature_required": ingest_event.signature_required,
+        "signature_validated": ingest_event.signature_validated,
+        "observation_count": ingest_event.observation_count,
+        "skipped_metric_count": ingest_event.skipped_metric_count,
+        "observation_ids": observation_ids,
+        "payload_hash": ingest_event.payload_hash,
+        "received_at": ingest_event.received_at,
+    }
+
+
+async def validate_performance_wearable_webhook_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> tuple[bool, bool]:
+    selected_settings = settings or get_settings()
+    signing_key = await resolve_secret(
+        selected_settings,
+        env_value=selected_settings.performance_wearable_webhook_signing_key,
+        path=selected_settings.performance_wearable_webhook_signing_key_secret_path,
+        field_name=selected_settings.performance_wearable_webhook_signing_key_secret_field,
+        label="performance wearable webhook signing key",
+    )
+    if not signing_key:
+        return False, False
+    if not timestamp_header or not signature_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing wearable webhook signature")
+    try:
+        timestamp = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid wearable webhook timestamp") from exc
+    age = abs(int(time.time()) - timestamp)
+    if age > selected_settings.performance_wearable_webhook_tolerance_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Stale wearable webhook signature")
+    expected = hmac.new(
+        signing_key.encode(),
+        timestamp_header.encode() + b"." + raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    submitted = signature_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, submitted):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid wearable webhook signature")
+    return True, True
 
 
 async def review_observation(
@@ -3268,6 +3440,14 @@ def extract_numeric_value(text: str | None) -> float | None:
         return None
     match = re.search(r"-?\d+(?:\.\d+)?", text)
     return float(match.group(0)) if match else None
+
+
+def stable_payload_text(payload: dict[str, object]) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def stable_payload_hash(payload: dict[str, object]) -> str:
+    return hashlib.sha256(stable_payload_text(payload).encode()).hexdigest()
 
 
 def parse_performance_evidence(

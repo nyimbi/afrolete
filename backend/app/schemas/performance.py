@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -97,6 +98,32 @@ class PerformanceIngestionRead(BaseModel):
     parser_confidence_reason: str
     parser_warnings: list[str]
     parsed_fields: dict[str, str]
+
+
+class PerformanceWearableWebhookCreate(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID
+    source_provider: str = Field(min_length=2, max_length=80)
+    external_event_id: str = Field(min_length=2, max_length=180)
+    payload: dict[str, Any]
+    event_id: UUID | None = None
+    metric_definition_ids: list[UUID] | None = None
+
+
+class PerformanceWearableWebhookRead(BaseModel):
+    ingest_event_id: UUID
+    organization_id: UUID
+    athlete_profile_id: UUID
+    source_provider: str
+    external_event_id: str
+    replayed: bool
+    signature_required: bool
+    signature_validated: bool
+    observation_count: int
+    skipped_metric_count: int
+    observation_ids: list[UUID]
+    payload_hash: str
+    received_at: datetime
 
 
 class PerformanceObservationReviewCreate(BaseModel):

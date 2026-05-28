@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     travel_device_secret_vault_provider: str = "openbao"
     travel_device_secret_vault_path_prefix: str = "secret/data/afrolete/travel-devices"
     travel_device_secret_vault_field: str = "value"
+    performance_wearable_webhook_signing_key: str = ""
+    performance_wearable_webhook_signing_key_secret_path: str = ""
+    performance_wearable_webhook_signing_key_secret_field: str = "value"
+    performance_wearable_webhook_tolerance_seconds: int = 300
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"
