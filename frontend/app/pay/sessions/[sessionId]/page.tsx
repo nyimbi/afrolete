@@ -6,6 +6,7 @@ import { apiRequest } from "@/lib/api";
 import type {
   CommercialInvoiceCheckoutSettlementRead,
   CommercialInvoiceHostedCheckoutRead,
+  CommercialInvoiceProviderCheckoutRead,
   EventTravelFeeCheckoutSettlementRead,
   EventTravelFeeHostedCheckoutRead
 } from "@/types/operations";
@@ -29,6 +30,7 @@ function HostedPaymentExperience() {
   const provider = searchParams.get("provider") ?? "manual_gateway";
   const checkoutKind: CheckoutKind = searchParams.get("kind") === "commercial" ? "commercial" : "travel";
   const [checkout, setCheckout] = useState<HostedCheckoutRead | null>(null);
+  const [providerSession, setProviderSession] = useState<CommercialInvoiceProviderCheckoutRead | null>(null);
   const [settlement, setSettlement] = useState<HostedCheckoutSettlementRead | null>(null);
   const [method, setMethod] = useState("mobile_money");
   const [error, setError] = useState("");
@@ -115,6 +117,35 @@ function HostedPaymentExperience() {
     }
   };
 
+  const openProviderCheckout = async () => {
+    if (!checkout || checkoutKind !== "commercial") {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const session = await apiRequest<CommercialInvoiceProviderCheckoutRead>(
+        `/commercial/invoice-checkout-sessions/${encodeURIComponent(checkout.session_id)}/provider-session?invoice_id=${encodeURIComponent(checkout.invoice_id)}&provider=${encodeURIComponent(checkout.provider)}`,
+        {
+          method: "POST",
+          body: {
+            success_url: window.location.href,
+            cancel_url: window.location.href,
+            payment_method: method
+          }
+        }
+      );
+      setProviderSession(session);
+      if (session.mode !== "local" && !session.failure_reason) {
+        window.location.assign(session.redirect_url);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Provider checkout could not be created");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="payment-page">
       <section className="payment-shell">
@@ -166,7 +197,17 @@ function HostedPaymentExperience() {
               <button type="button" onClick={settle} disabled={busy || checkout.session_status === "paid"}>
                 {checkout.session_status === "paid" ? "Paid" : busy ? "Recording" : "Confirm payment"}
               </button>
+              {checkoutKind === "commercial" ? (
+                <button type="button" className="secondary" onClick={openProviderCheckout} disabled={busy || checkout.session_status === "paid"}>
+                  {busy ? "Preparing" : "Provider checkout"}
+                </button>
+              ) : null}
               {settlement ? <p className="payment-result">{settlement.message}</p> : null}
+              {providerSession ? (
+                <p className="payment-result">
+                  {providerSession.failure_reason ?? `Provider session ${providerSession.provider_session_id} ready`}
+                </p>
+              ) : null}
               <small>{checkout.client_reference}</small>
             </article>
           </div>

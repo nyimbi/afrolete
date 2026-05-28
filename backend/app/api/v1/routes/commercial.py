@@ -14,6 +14,8 @@ from app.schemas.commercial import (
     CommercialInvoiceCheckoutSettlementRead,
     CommercialInvoiceHostedCheckoutRead,
     CommercialSummaryRead,
+    CommercialInvoiceProviderCheckoutCreate,
+    CommercialInvoiceProviderCheckoutRead,
     CommercialRefundCreate,
     CommercialRefundRead,
     CommercialSettlementPayoutCallbackCreate,
@@ -52,6 +54,7 @@ from app.services.commercial import (
     commercial_summary,
     create_campaign,
     create_invoice,
+    create_commercial_invoice_provider_checkout,
     create_sponsor,
     create_sponsorship,
     create_ticket_order,
@@ -295,6 +298,20 @@ async def get_commercial_invoice_checkout_session_route(
     db: AsyncSession = Depends(get_db),
 ) -> CommercialInvoiceHostedCheckoutRead:
     return await get_commercial_invoice_hosted_checkout(db, session_id, invoice_id, provider)
+
+
+@router.post(
+    "/invoice-checkout-sessions/{session_id}/provider-session",
+    response_model=CommercialInvoiceProviderCheckoutRead,
+)
+async def create_commercial_invoice_provider_checkout_route(
+    session_id: str,
+    payload: CommercialInvoiceProviderCheckoutCreate,
+    invoice_id: UUID = Query(),
+    provider: str = Query(default="manual_gateway"),
+    db: AsyncSession = Depends(get_db),
+) -> CommercialInvoiceProviderCheckoutRead:
+    return await create_commercial_invoice_provider_checkout(db, session_id, invoice_id, provider, payload)
 
 
 @router.post(

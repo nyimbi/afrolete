@@ -782,6 +782,24 @@ export type CommercialInvoiceHostedCheckoutRead = {
   checkout_summary: string;
 };
 
+export type CommercialInvoiceProviderCheckoutRead = {
+  invoice_id: UUID;
+  provider: string;
+  mode: string;
+  provider_session_id: string;
+  local_session_id: string;
+  client_reference: string;
+  amount: string;
+  currency: string;
+  redirect_url: string;
+  success_url: string | null;
+  cancel_url: string | null;
+  provider_status_code: number | null;
+  failure_reason: string | null;
+  webhook_configured: boolean;
+  created_at: string;
+};
+
 export type CommercialInvoiceCheckoutSettlementRead = {
   invoice_id: UUID;
   provider: string;

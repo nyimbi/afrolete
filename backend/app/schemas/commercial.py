@@ -305,6 +305,31 @@ class CommercialInvoiceHostedCheckoutRead(BaseModel):
     checkout_summary: str
 
 
+class CommercialInvoiceProviderCheckoutCreate(BaseModel):
+    success_url: str | None = Field(default=None, max_length=800)
+    cancel_url: str | None = Field(default=None, max_length=800)
+    customer_email: str | None = Field(default=None, max_length=320)
+    payment_method: str = Field(default="card", min_length=2, max_length=80)
+
+
+class CommercialInvoiceProviderCheckoutRead(BaseModel):
+    invoice_id: UUID
+    provider: str
+    mode: str
+    provider_session_id: str
+    local_session_id: str
+    client_reference: str
+    amount: Decimal
+    currency: str
+    redirect_url: str
+    success_url: str | None
+    cancel_url: str | None
+    provider_status_code: int | None = None
+    failure_reason: str | None = None
+    webhook_configured: bool = False
+    created_at: datetime
+
+
 class CommercialInvoiceCheckoutSettlementCreate(BaseModel):
     invoice_id: UUID
     provider: str = Field(default="manual_gateway", min_length=2, max_length=80)

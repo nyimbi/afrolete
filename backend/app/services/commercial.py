@@ -40,6 +40,8 @@ from app.schemas.commercial import (
     CommercialInvoiceCheckoutSettlementRead,
     CommercialInvoiceHostedCheckoutRead,
     CommercialInvoicePaymentWebhookCreate,
+    CommercialInvoiceProviderCheckoutCreate,
+    CommercialInvoiceProviderCheckoutRead,
     CommercialSummaryRead,
     CommercialRefundCreate,
     CommercialRefundRead,
@@ -299,6 +301,78 @@ async def get_commercial_invoice_hosted_checkout(
     if not hmac.compare_digest(expected_session_id, session_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid checkout session")
     return commercial_invoice_hosted_checkout_read(invoice, provider, session_id)
+
+
+async def create_commercial_invoice_provider_checkout(
+    db: AsyncSession,
+    session_id: str,
+    invoice_id: UUID,
+    provider: str,
+    payload: CommercialInvoiceProviderCheckoutCreate,
+    settings: Settings | None = None,
+) -> CommercialInvoiceProviderCheckoutRead:
+    invoice = await db.get(FinanceInvoice, invoice_id)
+    if invoice is None or invoice.sponsor_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor invoice checkout session not found")
+    expected_session_id = commercial_invoice_checkout_session_id(invoice, provider)
+    if not hmac.compare_digest(expected_session_id, session_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid checkout session")
+    open_amount = commercial_invoice_open_amount(invoice)
+    if open_amount <= 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invoice is already paid")
+
+    selected_settings = settings or get_settings()
+    created_at = datetime.now(UTC)
+    local_redirect_url = commercial_invoice_checkout_session_url("/pay/sessions", session_id, invoice, provider)
+    result = CommercialInvoiceProviderCheckoutRead(
+        invoice_id=invoice.id,
+        provider=provider,
+        mode=selected_settings.commercial_payment_session_mode,
+        provider_session_id=commercial_invoice_provider_session_id(invoice, provider),
+        local_session_id=session_id,
+        client_reference=f"sponsor-invoice-checkout:{invoice.id}",
+        amount=open_amount,
+        currency=invoice.currency,
+        redirect_url=local_redirect_url,
+        success_url=payload.success_url,
+        cancel_url=payload.cancel_url,
+        provider_status_code=None,
+        failure_reason=None,
+        webhook_configured=bool(selected_settings.commercial_payment_session_webhook_url),
+        created_at=created_at,
+    )
+    if selected_settings.commercial_payment_session_mode == "local":
+        return result.model_copy(update={"failure_reason": "Local payment-session mode; using AfroLete hosted checkout page."})
+    if not selected_settings.commercial_payment_session_webhook_url:
+        return result.model_copy(update={"failure_reason": "Payment session webhook mode is enabled but no webhook URL is configured."})
+
+    provider_payload = commercial_invoice_provider_checkout_payload(invoice, result, payload)
+    raw_body = json.dumps(provider_payload, sort_keys=True, default=str).encode()
+    timestamp = str(int(time.time()))
+    headers = await commercial_payment_session_headers(selected_settings, raw_body, timestamp)
+    try:
+        async with httpx.AsyncClient(timeout=selected_settings.commercial_payment_session_timeout_seconds) as client:
+            response = await client.post(
+                selected_settings.commercial_payment_session_webhook_url,
+                json=provider_payload,
+                headers=headers,
+            )
+        response_payload = response.json() if response.content else {}
+        if not isinstance(response_payload, dict):
+            response_payload = {}
+        delivered = 200 <= response.status_code < 300
+        redirect_url = str(response_payload.get("redirect_url") or response_payload.get("url") or result.redirect_url)
+        provider_session_id = str(response_payload.get("provider_session_id") or response_payload.get("id") or result.provider_session_id)
+        return result.model_copy(
+            update={
+                "provider_status_code": response.status_code,
+                "provider_session_id": provider_session_id,
+                "redirect_url": redirect_url,
+                "failure_reason": None if delivered else f"Payment session webhook returned {response.status_code}: {response.text[:500]}",
+            }
+        )
+    except (ValueError, httpx.HTTPError) as error:
+        return result.model_copy(update={"failure_reason": f"Payment session webhook failed: {error}"})
 
 
 async def settle_commercial_invoice_checkout(
@@ -1228,6 +1302,14 @@ def commercial_invoice_checkout_session_id(invoice: FinanceInvoice, provider: st
     return f"cics_{provider_token}_{token[:24]}"
 
 
+def commercial_invoice_provider_session_id(invoice: FinanceInvoice, provider: str) -> str:
+    token = sha256(
+        f"commercial-provider-session:{invoice.id}:{invoice.invoice_number}:{commercial_invoice_open_amount(invoice)}:{provider}".encode()
+    ).hexdigest()
+    provider_token = sub(r"[^a-z0-9]+", "-", provider.lower()).strip("-")[:24] or "processor"
+    return f"cpay_{provider_token}_{token[:24]}"
+
+
 def commercial_invoice_checkout_session_url(
     base_url: str,
     session_id: str,
@@ -1280,6 +1362,59 @@ def commercial_invoice_hosted_checkout_read(
             else f"{invoice.title} is fully paid."
         ),
     )
+
+
+def commercial_invoice_provider_checkout_payload(
+    invoice: FinanceInvoice,
+    session: CommercialInvoiceProviderCheckoutRead,
+    payload: CommercialInvoiceProviderCheckoutCreate,
+) -> dict[str, Any]:
+    return {
+        "event_type": "commercial.invoice_payment_session.create",
+        "organization_id": str(invoice.organization_id),
+        "invoice_id": str(invoice.id),
+        "sponsor_id": str(invoice.sponsor_id),
+        "invoice_number": invoice.invoice_number,
+        "title": invoice.title,
+        "provider": session.provider,
+        "provider_session_id": session.provider_session_id,
+        "local_session_id": session.local_session_id,
+        "client_reference": session.client_reference,
+        "amount": str(session.amount),
+        "currency": session.currency,
+        "payment_method": payload.payment_method,
+        "customer_email": payload.customer_email,
+        "success_url": payload.success_url,
+        "cancel_url": payload.cancel_url,
+        "webhook_event": "commercial.invoice_payment_webhook",
+        "created_at": session.created_at.isoformat(),
+    }
+
+
+async def commercial_payment_session_headers(
+    settings: Settings,
+    raw_body: bytes,
+    timestamp: str,
+) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "X-Afrolete-Commercial-Session-Timestamp": timestamp,
+    }
+    key = await resolve_commercial_secret(
+        settings,
+        env_value=settings.commercial_payment_session_webhook_key,
+        path=settings.commercial_payment_session_webhook_key_secret_path,
+        field_name=settings.commercial_payment_session_webhook_key_secret_field,
+        label="commercial payment session webhook key",
+    )
+    if key:
+        headers["X-Afrolete-Commercial-Session-Key"] = key
+        headers["X-Afrolete-Commercial-Session-Signature"] = "sha256=" + hmac.new(
+            key.encode(),
+            timestamp.encode() + b"." + raw_body,
+            sha256,
+        ).hexdigest()
+    return headers
 
 
 def normalize_commercial_invoice_payment_webhook(

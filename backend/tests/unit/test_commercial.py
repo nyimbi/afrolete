@@ -338,6 +338,25 @@ def test_sponsor_contact_can_open_self_service_portal(client, identity_headers) 
     assert checkout["open_amount"] == "300.00"
     assert checkout["settlement_endpoint"].endswith("/settle")
 
+    provider_session_response = client.post(
+        f"/api/v1/commercial/invoice-checkout-sessions/{checkout['session_id']}/provider-session",
+        params={
+            "invoice_id": invoice["id"],
+            "provider": "manual_gateway",
+        },
+        json={
+            "success_url": "https://app.example/pay/success",
+            "cancel_url": "https://app.example/pay/cancel",
+            "payment_method": "card",
+        },
+    )
+    assert provider_session_response.status_code == 200
+    provider_session = provider_session_response.json()
+    assert provider_session["mode"] == "local"
+    assert provider_session["amount"] == "300.00"
+    assert provider_session["provider_session_id"].startswith("cpay_manual-gateway_")
+    assert provider_session["redirect_url"].startswith("/pay/sessions/")
+
     settlement_response = client.post(
         f"/api/v1/commercial/invoice-checkout-sessions/{checkout['session_id']}/settle",
         json={
@@ -375,6 +394,110 @@ def test_sponsor_contact_can_open_self_service_portal(client, identity_headers) 
         },
     )
     assert outsider_response.status_code == 404
+
+
+def test_commercial_provider_checkout_session_delivers_signed_webhook(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json, headers):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return SimpleNamespace(
+                status_code=201,
+                text='{"redirect_url":"https://pay.example/session/123","provider_session_id":"psp_123"}',
+                content=b"{}",
+                json=lambda: {
+                    "redirect_url": "https://pay.example/session/123",
+                    "provider_session_id": "psp_123",
+                },
+            )
+
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_PAYMENT_SESSION_MODE", "webhook")
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_PAYMENT_SESSION_WEBHOOK_URL", "https://payments.example/sessions")
+    monkeypatch.setenv("AFROLETE_COMMERCIAL_PAYMENT_SESSION_WEBHOOK_KEY", "session-secret")
+    commercial_service.get_settings.cache_clear()
+    monkeypatch.setattr(commercial_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    organization, team, _ = create_commercial_context(client, identity_headers)
+    sponsor = client.post(
+        "/api/v1/commercial/sponsors",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Session Sponsor",
+            "contact_email": "session@example.com",
+        },
+    ).json()
+    invoice = client.post(
+        "/api/v1/commercial/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "sponsor_id": sponsor["id"],
+            "invoice_number": "SESSION-1",
+            "title": "Provider session invoice",
+            "amount_due": "88.00",
+        },
+    ).json()
+    session_id = commercial_service.commercial_invoice_checkout_session_id(
+        SimpleNamespace(
+            id=invoice["id"],
+            invoice_number=invoice["invoice_number"],
+            amount_due=invoice["amount_due"],
+        ),
+        "stripe",
+    )
+
+    response = client.post(
+        f"/api/v1/commercial/invoice-checkout-sessions/{session_id}/provider-session",
+        params={"invoice_id": invoice["id"], "provider": "stripe"},
+        json={
+            "success_url": "https://app.example/success",
+            "cancel_url": "https://app.example/cancel",
+            "customer_email": "session@example.com",
+            "payment_method": "card",
+        },
+    )
+    assert response.status_code == 200
+    session = response.json()
+    assert session["mode"] == "webhook"
+    assert session["provider_session_id"] == "psp_123"
+    assert session["redirect_url"] == "https://pay.example/session/123"
+    assert session["provider_status_code"] == 201
+    assert captured["url"] == "https://payments.example/sessions"
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["event_type"] == "commercial.invoice_payment_session.create"
+    assert payload["amount"] == "88.00"
+    assert payload["customer_email"] == "session@example.com"
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    timestamp = headers["X-Afrolete-Commercial-Session-Timestamp"]
+    expected_signature = hmac.new(
+        b"session-secret",
+        timestamp.encode() + b"." + json.dumps(payload, sort_keys=True, default=str).encode(),
+        sha256,
+    ).hexdigest()
+    assert headers["X-Afrolete-Commercial-Session-Key"] == "session-secret"
+    assert headers["X-Afrolete-Commercial-Session-Signature"] == f"sha256={expected_signature}"
+
+    commercial_service.get_settings.cache_clear()
 
 
 def test_commercial_invoice_payment_webhook_accepts_signed_stripe_event(
