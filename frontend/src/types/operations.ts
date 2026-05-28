@@ -2833,6 +2833,25 @@ export type BackgroundCheckProviderResultRead = {
   message: string;
 };
 
+export type BackgroundCheckProviderSubmissionRead = {
+  background_check_id: UUID;
+  organization_id: UUID;
+  person_id: UUID;
+  provider: string;
+  check_type: string;
+  provider_profile: string;
+  provider_schema_id: string;
+  delivery_mode: string;
+  delivery_attempted: boolean;
+  delivered: boolean;
+  provider_status_code: number | null;
+  external_reference: string | null;
+  check_status: BackgroundCheckStatus;
+  provider_payload: Record<string, unknown>;
+  failure_reason: string | null;
+  submitted_at: string;
+};
+
 export type ComplianceQueueItemRead = {
   source: string;
   id: UUID;

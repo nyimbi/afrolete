@@ -177,6 +177,7 @@ import type {
   GeneratedReportRead,
   BackgroundCheckRead,
   BackgroundCheckProviderResultRead,
+  BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
   IncidentReportPackageArtifactRead,
@@ -1566,6 +1567,8 @@ export default function HomePage() {
   const [clearance, setClearance] = useState<ParticipationClearanceRead | null>(null);
   const [safeguardingIncidents, setSafeguardingIncidents] = useState<SafeguardingIncidentRead[]>([]);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
+  const [backgroundCheckProviderSubmission, setBackgroundCheckProviderSubmission] =
+    useState<BackgroundCheckProviderSubmissionRead | null>(null);
   const [backgroundCheckProviderResult, setBackgroundCheckProviderResult] = useState<BackgroundCheckProviderResultRead | null>(null);
   const [complianceCredentials, setComplianceCredentials] = useState<ComplianceCredentialRead[]>([]);
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummaryRead | null>(null);
@@ -3146,6 +3149,7 @@ export default function HomePage() {
       setRegistrationInquiries([]);
       setSafeguardingIncidents([]);
       setBackgroundChecks([]);
+      setBackgroundCheckProviderSubmission(null);
       setBackgroundCheckProviderResult(null);
       setComplianceCredentials([]);
       setComplianceSummary(null);
@@ -5619,6 +5623,26 @@ export default function HomePage() {
         ]);
         addLog(`${updated.check_type} moved to ${updated.status}`, "good");
         refreshSafeguardingCompliance();
+      }
+    );
+  };
+
+  const submitBackgroundCheckToProvider = (check: BackgroundCheckRead) => {
+    runAction(
+      `background-check-submit-provider-${check.id}`,
+      () =>
+        apiRequest<BackgroundCheckProviderSubmissionRead>(
+          `/safeguarding/background-checks/${check.id}/submit-provider`,
+          { method: "POST", identity }
+        ),
+      async (submission) => {
+        setBackgroundCheckProviderSubmission(submission);
+        await loadBackgroundChecks(submission.organization_id);
+        await loadComplianceSummary(submission.organization_id);
+        addLog(
+          `${submission.provider} screening submitted (${submission.delivery_mode}, ${submission.check_status})`,
+          submission.failure_reason ? "neutral" : "good"
+        );
       }
     );
   };
@@ -16387,11 +16411,25 @@ export default function HomePage() {
                   <button type="button" onClick={() => updateBackgroundCheck(check, "in_progress")}>Start</button>
                   <button type="button" onClick={() => updateBackgroundCheck(check, "clear")}>Clear</button>
                   <button type="button" onClick={() => updateBackgroundCheck(check, "review_required")}>Review</button>
+                  <button type="button" onClick={() => submitBackgroundCheckToProvider(check)}>Send</button>
                   <button type="button" onClick={() => simulateBackgroundCheckProviderResult(check, "clear", "low")}>Provider clear</button>
                   <button type="button" onClick={() => simulateBackgroundCheckProviderResult(check, "review_required", "high")}>Provider risk</button>
                 </div>
               </article>
             ))}
+            {backgroundCheckProviderSubmission ? (
+              <article className="task-card">
+                <div>
+                  <strong>Screening provider submission</strong>
+                  <span>
+                    {backgroundCheckProviderSubmission.provider} · {backgroundCheckProviderSubmission.delivery_mode} · {backgroundCheckProviderSubmission.check_status}
+                  </span>
+                  <span>{backgroundCheckProviderSubmission.provider_profile} · {backgroundCheckProviderSubmission.provider_schema_id}</span>
+                  <span>{backgroundCheckProviderSubmission.external_reference ?? "No provider reference"} · {backgroundCheckProviderSubmission.provider_status_code ?? "no HTTP status"}</span>
+                  <span>{backgroundCheckProviderSubmission.failure_reason ?? "Screening submission recorded"}</span>
+                </div>
+              </article>
+            ) : null}
             {backgroundCheckProviderResult ? (
               <article className="task-card">
                 <div>

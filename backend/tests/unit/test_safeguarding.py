@@ -458,6 +458,19 @@ def test_signed_screening_provider_result_updates_background_check(
             "external_reference": "safe-ref-001",
         },
     ).json()
+    submission_response = client.post(
+        f"/api/v1/safeguarding/background-checks/{check['id']}/submit-provider",
+        headers=identity_headers,
+    )
+    assert submission_response.status_code == 200
+    submission = submission_response.json()
+    assert submission["delivery_mode"] == "record_only"
+    assert submission["delivery_attempted"] is False
+    assert submission["check_status"] == "in_progress"
+    assert submission["provider_profile"] == "safe_sport_screening"
+    assert submission["provider_schema_id"] == "safeguarding.screening.safe_sport_screening.v1"
+    assert submission["provider_payload"]["safesport_screening_request"]["case_reference"] == "safe-ref-001"
+    assert submission["failure_reason"].startswith("Record-only screening mode")
     payload = {
         "organization_id": organization["id"],
         "background_check_id": check["id"],

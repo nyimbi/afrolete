@@ -20,6 +20,7 @@ from app.schemas.safeguarding import (
     BackgroundCheckCreate,
     BackgroundCheckProviderResultCreate,
     BackgroundCheckProviderResultRead,
+    BackgroundCheckProviderSubmissionRead,
     BackgroundCheckRead,
     BackgroundCheckUpdate,
     ComplianceCredentialCreate,
@@ -96,6 +97,7 @@ from app.services.safeguarding import (
     respond_to_family_event,
     reconcile_compliance_statuses,
     read_signed_incident_report_package_artifact,
+    submit_background_check_to_screening_provider,
     submit_incident_report_package_to_regulator,
     update_background_check,
     update_compliance_credential,
@@ -688,6 +690,16 @@ async def update_background_check_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> BackgroundCheckRead:
     return to_background_check_read(await update_background_check(db, identity, check_id, payload, authz))
+
+
+@router.post("/background-checks/{check_id}/submit-provider", response_model=BackgroundCheckProviderSubmissionRead)
+async def submit_background_check_to_screening_provider_route(
+    check_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BackgroundCheckProviderSubmissionRead:
+    return await submit_background_check_to_screening_provider(db, identity, check_id, authz)
 
 
 @router.post(

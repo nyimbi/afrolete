@@ -50,6 +50,7 @@ from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRost
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
     BackgroundCheckCreate,
+    BackgroundCheckProviderSubmissionRead,
     BackgroundCheckProviderResultCreate,
     BackgroundCheckProviderResultRead,
     BackgroundCheckUpdate,
@@ -195,6 +196,21 @@ def infer_medical_provider_profile(
     if "return" in text and "play" in text:
         return "return_to_play_clearance"
     return "standard_medical_clearance"
+
+
+def infer_screening_provider_profile(check: BackgroundCheck) -> str:
+    text = " ".join([check.provider, check.check_type]).lower()
+    if "safe" in text and "sport" in text or "safeguard" in text:
+        return "safe_sport_screening"
+    if "checkr" in text:
+        return "checkr_screening"
+    if "first" in text and "advantage" in text:
+        return "first_advantage_screening"
+    if any(marker in text for marker in ["police", "criminal", "government", "dbs"]):
+        return "government_clearance"
+    if any(marker in text for marker in ["coach", "staff", "volunteer"]):
+        return "youth_sport_staff_screening"
+    return "standard_screening"
 
 
 def is_minor_on(person: Person, on_date: date) -> bool | None:
@@ -2313,6 +2329,356 @@ async def update_background_check(
     await db.commit()
     await db.refresh(check)
     return check
+
+
+async def submit_background_check_to_screening_provider(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    check_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> BackgroundCheckProviderSubmissionRead:
+    check = await db.get(BackgroundCheck, check_id)
+    if check is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Background check not found")
+    await ensure_org_manage(authz, check.organization_id, identity)
+    person = await db.get(Person, check.person_id)
+    if person is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+
+    selected_settings = settings or get_settings()
+    now = utc_now()
+    check.status = BackgroundCheckStatus.IN_PROGRESS
+    check.requested_at = check.requested_at or now
+    check.requested_by_person_id = check.requested_by_person_id or identity.person_id
+    check.external_reference = check.external_reference or background_check_external_reference(check)
+    payload = background_check_screening_provider_payload(
+        check,
+        person,
+        selected_settings.safeguarding_screening_submission_provider_profile,
+    )
+    append_background_check_note(
+        check,
+        now,
+        (
+            "Prepared screening provider submission "
+            f"{payload['provider_schema']['schema_id']} in "
+            f"{selected_settings.safeguarding_screening_submission_delivery_mode} mode."
+        ),
+    )
+    result = await deliver_background_check_screening_provider_payload(
+        selected_settings,
+        check,
+        payload,
+        now,
+    )
+    await db.commit()
+    await db.refresh(check)
+    return result.model_copy(
+        update={
+            "external_reference": check.external_reference,
+            "check_status": check.status,
+        }
+    )
+
+
+def background_check_external_reference(check: BackgroundCheck) -> str:
+    provider_slug = normalize_provider_profile(check.provider, "screening")
+    return f"{provider_slug}-{str(check.id)[:8]}"
+
+
+async def deliver_background_check_screening_provider_payload(
+    settings: Settings,
+    check: BackgroundCheck,
+    payload: dict[str, object],
+    submitted_at: datetime,
+) -> BackgroundCheckProviderSubmissionRead:
+    provider_schema = payload.get("provider_schema")
+    provider_payload: dict[str, object] = {}
+    if isinstance(provider_schema, dict) and isinstance(provider_schema.get("provider_payload"), dict):
+        provider_payload = provider_schema["provider_payload"]
+    result = BackgroundCheckProviderSubmissionRead(
+        background_check_id=check.id,
+        organization_id=check.organization_id,
+        person_id=check.person_id,
+        provider=check.provider,
+        check_type=check.check_type,
+        provider_profile=str(payload.get("provider_profile") or "standard_screening"),
+        provider_schema_id=provider_schema_id_from_payload(payload),
+        delivery_mode=settings.safeguarding_screening_submission_delivery_mode,
+        delivery_attempted=False,
+        delivered=False,
+        provider_status_code=None,
+        external_reference=check.external_reference,
+        check_status=check.status,
+        provider_payload=provider_payload,
+        failure_reason=None,
+        submitted_at=submitted_at,
+    )
+    if settings.safeguarding_screening_submission_delivery_mode == "record_only":
+        append_background_check_note(
+            check,
+            submitted_at,
+            "Record-only screening submission; provider packet is ready for manual handling.",
+        )
+        return result.model_copy(
+            update={
+                "failure_reason": "Record-only screening mode; payload prepared for manual provider handling.",
+            }
+        )
+    if not settings.safeguarding_screening_submission_webhook_url:
+        failure = "Screening submission webhook mode is enabled but no webhook URL is configured."
+        append_background_check_note(check, submitted_at, failure)
+        return result.model_copy(update={"failure_reason": failure})
+
+    raw_body = json.dumps(payload, sort_keys=True, default=str).encode()
+    timestamp = str(int(submitted_at.timestamp()))
+    headers = background_check_screening_provider_headers(settings, raw_body, timestamp)
+    try:
+        async with httpx.AsyncClient(timeout=settings.safeguarding_screening_submission_timeout_seconds) as client:
+            response = await client.post(
+                settings.safeguarding_screening_submission_webhook_url,
+                json=payload,
+                headers=headers,
+            )
+        delivered = 200 <= response.status_code < 300
+        response_payload = parse_insurer_response_json(response.text) if response.text else {}
+        if delivered:
+            apply_background_check_screening_submission_response(check, response_payload, submitted_at)
+            append_background_check_note(
+                check,
+                submitted_at,
+                f"Screening provider accepted submission with HTTP {response.status_code}.",
+            )
+        else:
+            append_background_check_note(
+                check,
+                submitted_at,
+                f"Screening provider returned HTTP {response.status_code}.",
+            )
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "delivered": delivered,
+                "provider_status_code": response.status_code,
+                "external_reference": check.external_reference,
+                "check_status": check.status,
+                "failure_reason": None if delivered else f"Screening webhook returned {response.status_code}: {response.text[:500]}",
+            }
+        )
+    except httpx.HTTPError as error:
+        append_background_check_note(
+            check,
+            submitted_at,
+            f"Screening provider delivery failed: {error}",
+        )
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "failure_reason": f"Screening webhook delivery failed: {error}",
+            }
+        )
+
+
+def background_check_screening_provider_payload(
+    check: BackgroundCheck,
+    person: Person,
+    configured_profile: str | None = None,
+) -> dict[str, object]:
+    profile = selected_provider_profile(
+        configured_profile,
+        infer_screening_provider_profile(check),
+    )
+    return {
+        "event_type": "background_check.submit",
+        "provider_profile": profile,
+        "provider_schema": background_check_screening_provider_schema(profile, check, person),
+        "background_check_id": str(check.id),
+        "organization_id": str(check.organization_id),
+        "person_id": str(check.person_id),
+        "provider": check.provider,
+        "check_type": check.check_type,
+        "status": check.status.value,
+        "requested_at": check.requested_at,
+        "expires_at": check.expires_at,
+        "external_reference": check.external_reference,
+        "person": {
+            "display_name": person.display_name,
+            "date_of_birth": person.date_of_birth,
+            "primary_email": person.primary_email,
+            "primary_phone": person.primary_phone,
+            "country_code": person.country_code,
+        },
+    }
+
+
+def background_check_screening_provider_schema(
+    profile: str,
+    check: BackgroundCheck,
+    person: Person,
+) -> dict[str, object]:
+    field_map = {
+        "candidate_reference": "person_id",
+        "candidate_name": "person.display_name",
+        "candidate_email": "person.primary_email",
+        "candidate_phone": "person.primary_phone",
+        "candidate_country": "person.country_code",
+        "screening_package": "check_type",
+        "customer_reference": "external_reference",
+        "requested_at": "requested_at",
+    }
+    if profile == "safe_sport_screening":
+        provider_payload = {
+            "safesport_screening_request": {
+                "member_reference": str(check.person_id),
+                "organization_reference": str(check.organization_id),
+                "screening_level": check.check_type,
+                "candidate_name": person.display_name,
+                "candidate_email": person.primary_email,
+                "country_code": person.country_code,
+                "case_reference": check.external_reference,
+            }
+        }
+    elif profile == "government_clearance":
+        provider_payload = {
+            "government_clearance_application": {
+                "applicant_reference": str(check.person_id),
+                "legal_name": person.display_name,
+                "date_of_birth": person.date_of_birth,
+                "country_code": person.country_code,
+                "clearance_type": check.check_type,
+                "submission_reference": check.external_reference,
+            }
+        }
+    elif profile == "checkr_screening":
+        provider_payload = {
+            "checkr_candidate_package": {
+                "candidate_id": str(check.person_id),
+                "email": person.primary_email,
+                "phone": person.primary_phone,
+                "package": check.check_type,
+                "work_location_country": person.country_code,
+                "external_id": check.external_reference,
+            }
+        }
+    elif profile == "first_advantage_screening":
+        provider_payload = {
+            "first_advantage_order": {
+                "order_reference": check.external_reference,
+                "applicant": {
+                    "id": str(check.person_id),
+                    "name": person.display_name,
+                    "email": person.primary_email,
+                    "phone": person.primary_phone,
+                },
+                "screening_package": check.check_type,
+            }
+        }
+    elif profile == "youth_sport_staff_screening":
+        provider_payload = {
+            "youth_sport_staff_screen": {
+                "staff_person_id": str(check.person_id),
+                "role_screening_type": check.check_type,
+                "candidate_name": person.display_name,
+                "contact_email": person.primary_email,
+                "external_reference": check.external_reference,
+                "safeguarding_context": "minor-facing sports role",
+            }
+        }
+    else:
+        provider_payload = {
+            "standard_screening_request": {
+                "candidate_reference": str(check.person_id),
+                "candidate_name": person.display_name,
+                "candidate_email": person.primary_email,
+                "screening_type": check.check_type,
+                "external_reference": check.external_reference,
+            }
+        }
+    return {
+        "schema_id": provider_schema_id("screening", profile),
+        "version": "1.0",
+        "profile": profile,
+        "required_fields": [
+            "person_id",
+            "person.display_name",
+            "provider",
+            "check_type",
+            "requested_at",
+            "external_reference",
+        ],
+        "field_map": field_map,
+        "status_mapping": {
+            "requested": "requested",
+            "processing": "in_progress",
+            "clear": "clear",
+            "consider": "review_required",
+            "adverse": "failed",
+            "expired": "expired",
+        },
+        "provider_payload": provider_payload,
+    }
+
+
+def background_check_screening_provider_headers(
+    settings: Settings,
+    raw_body: bytes,
+    timestamp: str,
+) -> dict[str, str]:
+    signing_key = resolve_secret_sync(
+        settings,
+        env_value=settings.safeguarding_screening_submission_webhook_key,
+        path=settings.safeguarding_screening_submission_webhook_key_secret_path,
+        field_name=settings.safeguarding_screening_submission_webhook_key_secret_field,
+        label="screening submission webhook key",
+    )
+    key = (signing_key or settings.agent_webhook_key or "local-screening-submission-key").encode()
+    signature = hmac.new(key, timestamp.encode() + b"." + raw_body, sha256).hexdigest()
+    return {
+        "content-type": "application/json",
+        "x-afrolete-screening-timestamp": timestamp,
+        "x-afrolete-screening-signature": signature,
+    }
+
+
+def apply_background_check_screening_submission_response(
+    check: BackgroundCheck,
+    response_payload: dict[str, object],
+    now: datetime,
+) -> None:
+    external_reference = response_payload.get("external_reference") or response_payload.get("provider_reference")
+    if external_reference:
+        check.external_reference = str(external_reference)[:240]
+    status_value = response_payload.get("status") or response_payload.get("provider_status")
+    if status_value:
+        provider_result = BackgroundCheckProviderResultCreate(
+            provider=check.provider,
+            external_reference=check.external_reference,
+            provider_status=str(status_value),
+        )
+        check.status = background_check_status_from_provider(provider_result)
+    if response_payload.get("risk_level"):
+        check.risk_level = str(response_payload["risk_level"])[:40].lower()
+    if response_payload.get("result_summary"):
+        check.result_summary = str(response_payload["result_summary"])[:4000]
+    if check.status in {
+        BackgroundCheckStatus.CLEAR,
+        BackgroundCheckStatus.REVIEW_REQUIRED,
+        BackgroundCheckStatus.FAILED,
+    }:
+        check.completed_at = check.completed_at or now
+    notes = response_payload.get("notes")
+    if notes:
+        append_background_check_note(check, now, str(notes))
+
+
+def append_background_check_note(
+    check: BackgroundCheck,
+    at: datetime,
+    message: str,
+) -> None:
+    entry = f"{at.isoformat()} {message}"
+    check.notes = "\n".join(part for part in [check.notes, entry] if part)
 
 
 async def resolve_safeguarding_screening_webhook_key(settings: Settings) -> str:

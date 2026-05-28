@@ -410,6 +410,25 @@ class BackgroundCheckProviderResultRead(BaseModel):
     message: str
 
 
+class BackgroundCheckProviderSubmissionRead(BaseModel):
+    background_check_id: UUID
+    organization_id: UUID
+    person_id: UUID
+    provider: str
+    check_type: str
+    provider_profile: str
+    provider_schema_id: str
+    delivery_mode: str
+    delivery_attempted: bool
+    delivered: bool
+    provider_status_code: int | None
+    external_reference: str | None
+    check_status: BackgroundCheckStatus
+    provider_payload: dict[str, Any]
+    failure_reason: str | None
+    submitted_at: datetime
+
+
 class ComplianceCredentialCreate(BaseModel):
     organization_id: UUID
     person_id: UUID

@@ -168,6 +168,13 @@ class Settings(BaseSettings):
     safeguarding_screening_webhook_signing_key_secret_path: str = ""
     safeguarding_screening_webhook_signing_key_secret_field: str = "value"
     safeguarding_screening_webhook_tolerance_seconds: int = 300
+    safeguarding_screening_submission_delivery_mode: Literal["record_only", "webhook"] = "record_only"
+    safeguarding_screening_submission_webhook_url: str = ""
+    safeguarding_screening_submission_webhook_key: str = ""
+    safeguarding_screening_submission_webhook_key_secret_path: str = ""
+    safeguarding_screening_submission_webhook_key_secret_field: str = "value"
+    safeguarding_screening_submission_timeout_seconds: float = 5.0
+    safeguarding_screening_submission_provider_profile: str = "auto"
     safeguarding_regulatory_report_delivery_mode: Literal["record_only", "webhook"] = "record_only"
     safeguarding_regulatory_report_webhook_url: str = ""
     safeguarding_regulatory_report_webhook_key: str = ""
