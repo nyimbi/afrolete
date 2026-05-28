@@ -4,25 +4,32 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { apiRequest } from "@/lib/api";
 import type {
+  CommercialInvoiceCheckoutSettlementRead,
+  CommercialInvoiceHostedCheckoutRead,
   EventTravelFeeCheckoutSettlementRead,
   EventTravelFeeHostedCheckoutRead
 } from "@/types/operations";
 
-export default function TravelFeePaymentPage() {
+type HostedCheckoutRead = EventTravelFeeHostedCheckoutRead | CommercialInvoiceHostedCheckoutRead;
+type HostedCheckoutSettlementRead = EventTravelFeeCheckoutSettlementRead | CommercialInvoiceCheckoutSettlementRead;
+type CheckoutKind = "travel" | "commercial";
+
+export default function HostedPaymentPage() {
   return (
     <Suspense fallback={<PaymentLoading />}>
-      <TravelFeePaymentExperience />
+      <HostedPaymentExperience />
     </Suspense>
   );
 }
 
-function TravelFeePaymentExperience() {
+function HostedPaymentExperience() {
   const params = useParams<{ sessionId: string }>();
   const searchParams = useSearchParams();
   const invoiceId = searchParams.get("invoice_id") ?? "";
   const provider = searchParams.get("provider") ?? "manual_gateway";
-  const [checkout, setCheckout] = useState<EventTravelFeeHostedCheckoutRead | null>(null);
-  const [settlement, setSettlement] = useState<EventTravelFeeCheckoutSettlementRead | null>(null);
+  const checkoutKind: CheckoutKind = searchParams.get("kind") === "commercial" ? "commercial" : "travel";
+  const [checkout, setCheckout] = useState<HostedCheckoutRead | null>(null);
+  const [settlement, setSettlement] = useState<HostedCheckoutSettlementRead | null>(null);
   const [method, setMethod] = useState("mobile_money");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -33,8 +40,12 @@ function TravelFeePaymentExperience() {
       setError("Payment session link is missing invoice context.");
       return;
     }
-    apiRequest<EventTravelFeeHostedCheckoutRead>(
-      `/events/travel-fee-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`
+    const checkoutPath =
+      checkoutKind === "commercial"
+        ? `/commercial/invoice-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`
+        : `/events/travel-fee-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`;
+    apiRequest<HostedCheckoutRead>(
+      checkoutPath
     )
       .then((data) => {
         if (!cancelled) {
@@ -50,7 +61,7 @@ function TravelFeePaymentExperience() {
     return () => {
       cancelled = true;
     };
-  }, [invoiceId, params.sessionId, provider]);
+  }, [checkoutKind, invoiceId, params.sessionId, provider]);
 
   const displayAmount = useMemo(() => {
     if (!checkout) {
@@ -69,8 +80,12 @@ function TravelFeePaymentExperience() {
     setBusy(true);
     setError("");
     try {
-      const result = await apiRequest<EventTravelFeeCheckoutSettlementRead>(
-        `/events/travel-fee-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`,
+      const settlementPath =
+        checkoutKind === "commercial"
+          ? `/commercial/invoice-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`
+          : `/events/travel-fee-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`;
+      const result = await apiRequest<HostedCheckoutSettlementRead>(
+        settlementPath,
         {
           method: "POST",
           body: {
@@ -107,7 +122,7 @@ function TravelFeePaymentExperience() {
           <div className="mark">AL</div>
           <div>
             <strong>AfroLete</strong>
-            <span>Secure travel fee portal</span>
+            <span>{checkoutKind === "commercial" ? "Secure sponsor invoice portal" : "Secure travel fee portal"}</span>
           </div>
         </div>
 

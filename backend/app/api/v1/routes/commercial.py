@@ -7,6 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.commercial import (
     AccountingExportRead,
+    CommercialInvoiceCheckoutSettlementCreate,
+    CommercialInvoiceCheckoutSettlementRead,
+    CommercialInvoiceHostedCheckoutRead,
     CommercialSummaryRead,
     CommercialRefundCreate,
     CommercialRefundRead,
@@ -46,6 +49,7 @@ from app.services.commercial import (
     create_sponsorship,
     create_ticket_order,
     create_ticket_product,
+    get_commercial_invoice_hosted_checkout,
     list_campaigns,
     list_invoices,
     list_sponsors,
@@ -57,6 +61,7 @@ from app.services.commercial import (
     record_payment,
     refund_invoice,
     refund_ticket,
+    settle_commercial_invoice_checkout,
     sponsor_portal,
     sponsorship_dashboard,
     tax_quote,
@@ -262,6 +267,31 @@ async def list_invoices_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[FinanceInvoiceRead]:
     return [invoice_read(invoice) for invoice in await list_invoices(db, organization_id)]
+
+
+@router.get(
+    "/invoice-checkout-sessions/{session_id}",
+    response_model=CommercialInvoiceHostedCheckoutRead,
+)
+async def get_commercial_invoice_checkout_session_route(
+    session_id: str,
+    invoice_id: UUID = Query(),
+    provider: str = Query(default="manual_gateway"),
+    db: AsyncSession = Depends(get_db),
+) -> CommercialInvoiceHostedCheckoutRead:
+    return await get_commercial_invoice_hosted_checkout(db, session_id, invoice_id, provider)
+
+
+@router.post(
+    "/invoice-checkout-sessions/{session_id}/settle",
+    response_model=CommercialInvoiceCheckoutSettlementRead,
+)
+async def settle_commercial_invoice_checkout_route(
+    session_id: str,
+    payload: CommercialInvoiceCheckoutSettlementCreate,
+    db: AsyncSession = Depends(get_db),
+) -> CommercialInvoiceCheckoutSettlementRead:
+    return await settle_commercial_invoice_checkout(db, session_id, payload)
 
 
 @router.post("/invoices/{invoice_id}/refund", response_model=CommercialRefundRead)

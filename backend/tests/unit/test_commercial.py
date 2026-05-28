@@ -267,8 +267,52 @@ def test_sponsor_contact_can_open_self_service_portal(client, identity_headers) 
     assert portal["agreements"][0]["deliverables"] == ["Medical tent", "player recovery report"]
     assert portal["invoices"][0]["invoice_number"] == "SPONSOR-1"
     assert portal["invoices"][0]["outstanding_amount"] == "300.00"
+    assert portal["invoices"][0]["payment_session_id"].startswith("cics_manual-gateway_")
+    assert "kind=commercial" in portal["invoices"][0]["payment_session_url"]
+    assert portal["invoices"][0]["payment_session_status"] == "ready"
     assert portal["summary"]["active_value"] == "750.00"
     assert portal["summary"]["outstanding_invoice_amount"] == "300.00"
+
+    checkout_response = client.get(
+        f"/api/v1/commercial/invoice-checkout-sessions/{portal['invoices'][0]['payment_session_id']}",
+        params={
+            "invoice_id": invoice["id"],
+            "provider": "manual_gateway",
+        },
+    )
+    assert checkout_response.status_code == 200
+    checkout = checkout_response.json()
+    assert checkout["invoice_number"] == "SPONSOR-1"
+    assert checkout["open_amount"] == "300.00"
+    assert checkout["settlement_endpoint"].endswith("/settle")
+
+    settlement_response = client.post(
+        f"/api/v1/commercial/invoice-checkout-sessions/{checkout['session_id']}/settle",
+        json={
+            "invoice_id": invoice["id"],
+            "provider": "manual_gateway",
+            "amount": "300.00",
+            "currency": "USD",
+            "method": "mobile_money",
+            "external_payment_id": "SPONSOR-1-HOSTED",
+            "status": "succeeded",
+        },
+    )
+    assert settlement_response.status_code == 200
+    settlement = settlement_response.json()
+    assert settlement["accepted"] is True
+    assert settlement["invoice_status"] == "paid"
+    assert settlement["open_amount"] == "0.00"
+    assert settlement["session_status"] == "paid"
+
+    paid_portal = client.get(
+        f"/api/v1/commercial/sponsor-portal?organization_id={organization['id']}",
+        headers=sponsor_headers,
+    ).json()
+    assert paid_portal["invoices"][0]["outstanding_amount"] == "0.00"
+    assert paid_portal["invoices"][0]["payment_session_url"] is None
+    assert paid_portal["invoices"][0]["payment_session_status"] == "paid"
+    assert paid_portal["summary"]["outstanding_invoice_amount"] == "0.00"
 
     outsider_response = client.get(
         f"/api/v1/commercial/sponsor-portal?organization_id={organization['id']}",

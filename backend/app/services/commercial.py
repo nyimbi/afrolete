@@ -1,5 +1,9 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+import hmac
+from hashlib import sha256
+from re import sub
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
@@ -24,6 +28,9 @@ from app.models.team import Team
 from app.schemas.commercial import (
     AccountingExportRead,
     AccountingExportRow,
+    CommercialInvoiceCheckoutSettlementCreate,
+    CommercialInvoiceCheckoutSettlementRead,
+    CommercialInvoiceHostedCheckoutRead,
     CommercialSummaryRead,
     CommercialRefundCreate,
     CommercialRefundRead,
@@ -265,6 +272,89 @@ async def record_payment(db: AsyncSession, identity: CurrentIdentity, payload: F
     return payment
 
 
+async def get_commercial_invoice_hosted_checkout(
+    db: AsyncSession,
+    session_id: str,
+    invoice_id: UUID,
+    provider: str,
+) -> CommercialInvoiceHostedCheckoutRead:
+    invoice = await db.get(FinanceInvoice, invoice_id)
+    if invoice is None or invoice.sponsor_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor invoice checkout session not found")
+    expected_session_id = commercial_invoice_checkout_session_id(invoice, provider)
+    if not hmac.compare_digest(expected_session_id, session_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid checkout session")
+    return commercial_invoice_hosted_checkout_read(invoice, provider, session_id)
+
+
+async def settle_commercial_invoice_checkout(
+    db: AsyncSession,
+    session_id: str,
+    payload: CommercialInvoiceCheckoutSettlementCreate,
+    signature_required: bool = False,
+    signature_validated: bool = False,
+) -> CommercialInvoiceCheckoutSettlementRead:
+    invoice = await db.get(FinanceInvoice, payload.invoice_id)
+    if invoice is None or invoice.sponsor_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor invoice checkout session not found")
+    expected_session_id = commercial_invoice_checkout_session_id(invoice, payload.provider)
+    if not hmac.compare_digest(expected_session_id, session_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid checkout session")
+    if payload.currency is not None and payload.currency.upper() != invoice.currency:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment currency mismatch")
+
+    open_amount = commercial_invoice_open_amount(invoice)
+    accepted = payload.status == "succeeded" and open_amount > 0
+    payment: FinancePayment | None = None
+    message = "Checkout event recorded as non-settling."
+    if accepted:
+        amount = (payload.amount or open_amount).quantize(Decimal("0.01"))
+        if amount > open_amount:
+            amount = open_amount
+        external_reference = payload.external_payment_id or f"{payload.provider}:{session_id}"
+        existing_payment = await db.scalar(
+            select(FinancePayment).where(
+                FinancePayment.organization_id == invoice.organization_id,
+                FinancePayment.external_reference == external_reference,
+            )
+        )
+        if existing_payment is not None:
+            payment = existing_payment
+            message = "Payment event was already applied."
+        else:
+            payment = FinancePayment(
+                organization_id=invoice.organization_id,
+                invoice_id=invoice.id,
+                amount=amount,
+                currency=invoice.currency,
+                method=payload.method,
+                external_reference=external_reference,
+                received_at=datetime.now(UTC),
+                notes=payload.raw_reference or f"Sponsor invoice checkout settled via {payload.provider}.",
+            )
+            invoice.amount_paid += amount
+            invoice.status = CommercialStatus.PAID if invoice.amount_paid >= invoice.amount_due else CommercialStatus.PARTIAL
+            db.add(payment)
+            await db.commit()
+            await db.refresh(payment)
+            await db.refresh(invoice)
+            message = "Sponsor invoice payment applied."
+
+    return CommercialInvoiceCheckoutSettlementRead(
+        invoice_id=invoice.id,
+        provider=payload.provider,
+        accepted=accepted,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        payment_id=payment.id if payment is not None else None,
+        invoice_status=invoice.status.value,
+        amount_paid=invoice.amount_paid,
+        open_amount=commercial_invoice_open_amount(invoice),
+        session_status=commercial_invoice_checkout_session_status(invoice),
+        message=message,
+    )
+
+
 async def refund_invoice(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -499,7 +589,7 @@ async def sponsor_portal(
         Decimal("0"),
     )
     outstanding_invoice_amount = sum(
-        (invoice.amount_due - invoice.amount_paid for invoice in invoices),
+        (commercial_invoice_open_amount(invoice) for invoice in invoices),
         Decimal("0"),
     )
     deliverable_count = sum(count_deliverables(agreement.deliverables) for agreement in agreements)
@@ -515,6 +605,38 @@ async def sponsor_portal(
         + min(deliverable_count * 5, 25)
         + min(activation_count * 10, 15),
     )
+
+    portal_invoices: list[SponsorPortalInvoiceRead] = []
+    for invoice in invoices:
+        if invoice.organization_id not in organizations or invoice.sponsor_id is None:
+            continue
+        provider = "manual_gateway"
+        session_id = commercial_invoice_checkout_session_id(invoice, provider)
+        open_amount = commercial_invoice_open_amount(invoice)
+        portal_invoices.append(
+            SponsorPortalInvoiceRead(
+                id=invoice.id,
+                organization_id=invoice.organization_id,
+                organization_name=organizations[invoice.organization_id].name,
+                sponsor_id=invoice.sponsor_id,
+                invoice_number=invoice.invoice_number,
+                title=invoice.title,
+                amount_due=invoice.amount_due,
+                amount_paid=invoice.amount_paid,
+                outstanding_amount=open_amount,
+                currency=invoice.currency,
+                due_on=invoice.due_on,
+                status=invoice.status,
+                memo=invoice.memo,
+                payment_session_id=session_id if open_amount > 0 else None,
+                payment_session_url=(
+                    commercial_invoice_checkout_session_url("/pay/sessions", session_id, invoice, provider)
+                    if open_amount > 0
+                    else None
+                ),
+                payment_session_status=commercial_invoice_checkout_session_status(invoice),
+            )
+        )
 
     return SponsorPortalRead(
         identity_email=email,
@@ -560,25 +682,7 @@ async def sponsor_portal(
             for agreement in agreements
             if agreement.organization_id in organizations and agreement.sponsor_id in sponsors_by_id
         ],
-        invoices=[
-            SponsorPortalInvoiceRead(
-                id=invoice.id,
-                organization_id=invoice.organization_id,
-                organization_name=organizations[invoice.organization_id].name,
-                sponsor_id=invoice.sponsor_id,
-                invoice_number=invoice.invoice_number,
-                title=invoice.title,
-                amount_due=invoice.amount_due,
-                amount_paid=invoice.amount_paid,
-                outstanding_amount=max(invoice.amount_due - invoice.amount_paid, Decimal("0")),
-                currency=invoice.currency,
-                due_on=invoice.due_on,
-                status=invoice.status,
-                memo=invoice.memo,
-            )
-            for invoice in invoices
-            if invoice.organization_id in organizations and invoice.sponsor_id is not None
-        ],
+        invoices=portal_invoices,
         summary=SponsorPortalSummaryRead(
             sponsor_count=len(sponsors),
             agreement_count=len(agreements),
@@ -726,6 +830,66 @@ def utc_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def commercial_invoice_checkout_session_id(invoice: FinanceInvoice, provider: str) -> str:
+    token = sha256(f"commercial-session:{invoice.id}:{invoice.invoice_number}:{invoice.amount_due}:{provider}".encode()).hexdigest()
+    provider_token = sub(r"[^a-z0-9]+", "-", provider.lower()).strip("-")[:24] or "processor"
+    return f"cics_{provider_token}_{token[:24]}"
+
+
+def commercial_invoice_checkout_session_url(
+    base_url: str,
+    session_id: str,
+    invoice: FinanceInvoice,
+    provider: str,
+) -> str:
+    provider_token = quote(provider, safe="")
+    return f"{base_url.rstrip('/')}/{session_id}?invoice_id={invoice.id}&provider={provider_token}&kind=commercial"
+
+
+def commercial_invoice_open_amount(invoice: FinanceInvoice) -> Decimal:
+    return max(invoice.amount_due - invoice.amount_paid, Decimal("0.00")).quantize(Decimal("0.01"))
+
+
+def commercial_invoice_checkout_session_status(invoice: FinanceInvoice) -> str:
+    return "paid" if commercial_invoice_open_amount(invoice) <= 0 else "ready"
+
+
+def commercial_invoice_hosted_checkout_read(
+    invoice: FinanceInvoice,
+    provider: str,
+    session_id: str,
+) -> CommercialInvoiceHostedCheckoutRead:
+    if invoice.sponsor_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor invoice checkout session not found")
+    open_amount = commercial_invoice_open_amount(invoice)
+    return CommercialInvoiceHostedCheckoutRead(
+        invoice_id=invoice.id,
+        invoice_number=invoice.invoice_number,
+        organization_id=invoice.organization_id,
+        sponsor_id=invoice.sponsor_id,
+        billed_person_id=invoice.person_id,
+        title=invoice.title,
+        memo=invoice.memo,
+        due_on=invoice.due_on,
+        amount_due=invoice.amount_due,
+        amount_paid=invoice.amount_paid,
+        open_amount=open_amount,
+        currency=invoice.currency,
+        status=invoice.status.value,
+        provider=provider,
+        session_id=session_id,
+        session_status=commercial_invoice_checkout_session_status(invoice),
+        client_reference=f"sponsor-invoice-checkout:{invoice.id}",
+        payment_methods=["card", "mobile_money", "bank_transfer", "cash_office"],
+        settlement_endpoint=f"/api/v1/commercial/invoice-checkout-sessions/{session_id}/settle",
+        checkout_summary=(
+            f"{invoice.title} has {open_amount} {invoice.currency} outstanding."
+            if open_amount > 0
+            else f"{invoice.title} is fully paid."
+        ),
+    )
 
 
 def sponsorship_recommendation(roi_score: int) -> str:

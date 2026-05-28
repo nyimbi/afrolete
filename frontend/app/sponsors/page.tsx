@@ -177,7 +177,9 @@ export default function SponsorPortalPage() {
                     onClick={() => setSelectedInvoiceId(invoice.id)}
                   >
                     <strong>{invoice.invoice_number}</strong>
-                    <span>{invoice.currency} {invoice.outstanding_amount} due · {invoice.status}</span>
+                    <span>
+                      {invoice.currency} {invoice.outstanding_amount} due · {invoice.payment_session_status ?? invoice.status}
+                    </span>
                   </button>
                 ))}
                 {portal.invoices.length === 0 ? <span>No sponsor invoices yet</span> : null}
@@ -274,6 +276,13 @@ function InvoiceDetail({ invoice }: { invoice: SponsorPortalInvoiceRead | null }
         </div>
       </dl>
       <p>{invoice.memo ?? "Payment instructions and settlement references will appear here."}</p>
+      {invoice.payment_session_url ? (
+        <a className="sponsor-pay-link" href={invoice.payment_session_url}>
+          Pay balance
+        </a>
+      ) : (
+        <span className="sponsor-paid-note">No payment is due for this invoice.</span>
+      )}
     </article>
   );
 }
