@@ -48,6 +48,10 @@ a systemd drop-in when a tenant needs different throughput or alert policy:
 | --- | --- | --- |
 | `AFROLETE_DUE_WORKER_LIMIT` | `25` | Default batch size for lanes without a narrower limit. |
 | `AFROLETE_DUE_WORKER_COMMUNICATION_DIGEST_LIMIT` | `100` | Daily/weekly notification preferences processed per digest run. |
+| `AFROLETE_DUE_WORKER_EVENT_TRAVEL_CONSENT_REMINDER_LIMIT` | `50` | Travel events checked for due guardian consent reminders. |
+| `AFROLETE_DUE_WORKER_EVENT_TRAVEL_CONSENT_REMINDER_DUE_WITHIN_HOURS` | `48` | Reminder horizon for travel plans with approaching consent deadlines. |
+| `AFROLETE_DUE_WORKER_EVENT_TRAVEL_CONSENT_REMINDER_REPEAT_AFTER_HOURS` | `24` | Suppression window for repeated scheduled travel consent reminders. |
+| `AFROLETE_DUE_WORKER_EVENT_TRAVEL_CONSENT_REMINDER_CHANNEL` | `email` | Default scheduled travel consent reminder channel. |
 | `AFROLETE_DUE_WORKER_WEBHOOK_MAX_ATTEMPTS` | `5` | Developer webhook retry ceiling. |
 | `AFROLETE_DUE_WORKER_PERFORMANCE_LIMIT` | `25` | Shared performance-lane fallback limit. |
 | `AFROLETE_DUE_WORKER_PERFORMANCE_FORECAST_VALIDATION_LIMIT` | `25` | Forecast validation organizations per run. |

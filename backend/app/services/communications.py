@@ -154,6 +154,61 @@ async def create_message(
     return message
 
 
+async def create_message_for_recipients(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    message_type: CommunicationMessageType,
+    channel: CommunicationChannel,
+    scope_type: CommunicationScopeType,
+    scope_id: UUID,
+    recipient_person_ids: list[UUID],
+    subject: str,
+    body: str,
+    urgent: bool = False,
+    quiet_hours_override: bool = False,
+    scheduled_for: datetime | None = None,
+    created_by_person_id: UUID | None = None,
+) -> CommunicationMessage:
+    await get_organization(db, organization_id)
+    recipient_ids = list(dict.fromkeys(recipient_person_ids))
+    if not recipient_ids:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No recipients")
+    message = CommunicationMessage(
+        organization_id=organization_id,
+        template_id=None,
+        created_by_person_id=created_by_person_id,
+        message_type=message_type,
+        channel=channel,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        subject=subject,
+        body=body,
+        urgent=urgent,
+        quiet_hours_override=quiet_hours_override,
+        scheduled_for=scheduled_for,
+        sent_at=datetime.now(UTC) if scheduled_for is None else None,
+        status="sent" if scheduled_for is None else "scheduled",
+    )
+    db.add(message)
+    await db.flush()
+    for person_id in sorted(recipient_ids, key=str):
+        person = await db.get(Person, person_id)
+        if person is None:
+            continue
+        db.add(
+            MessageRecipient(
+                message_id=message.id,
+                person_id=person_id,
+                destination=destination_for_channel(person, channel),
+                delivery_status=initial_delivery_status(person, channel),
+            )
+        )
+    await db.commit()
+    await db.refresh(message)
+    return message
+
+
 async def list_messages(
     db: AsyncSession,
     organization_id: UUID,

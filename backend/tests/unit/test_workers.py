@@ -11,6 +11,10 @@ from app.models.enums import (
     CommunicationChannel,
     CommunicationMessageType,
     CommunicationScopeType,
+    ConsentCaptureChannel,
+    ConsentRequestStatus,
+    ConsentScopeType,
+    EventType,
     MemberSubjectType,
     MessageDeliveryStatus,
     MembershipRole,
@@ -18,7 +22,9 @@ from app.models.enums import (
     MetricSource,
     NotificationFrequency,
     OrganizationType,
+    TravelPlanStatus,
 )
+from app.models.event import ConsentRequest, Event, EventTravelPlan
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.performance import (
@@ -67,6 +73,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
         "agent-tasks",
         "communication-digests",
         "developer-webhooks",
+        "event-travel-consent-reminders",
         "performance-achievements",
         "performance-forecast-validations",
         "performance-injury-risk-alerts",
@@ -77,6 +84,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["summary"]["processed_count"] == 1
     assert result["results"]["communication_digests"]["eligible_count"] == 0
     assert result["results"]["developer_webhooks"]["eligible_count"] == 0
+    assert result["results"]["event_travel_consent_reminders"]["eligible_count"] == 0
     assert result["results"]["performance_achievements"]["eligible_count"] == 0
     assert result["results"]["performance_forecast_validations"]["eligible_count"] == 0
     assert result["results"]["performance_injury_risk_alerts"]["eligible_count"] == 0
@@ -95,6 +103,7 @@ def test_selected_lanes_expands_all() -> None:
         "agent-tasks",
         "communication-digests",
         "developer-webhooks",
+        "event-travel-consent-reminders",
         "performance-achievements",
         "performance-forecast-validations",
         "performance-injury-risk-alerts",
@@ -169,6 +178,111 @@ async def test_due_worker_runs_communication_digest_lane(db_session) -> None:
     assert digest_message is not None
     assert digest_message.subject == "Digest: daily digest"
     assert "Training update" in digest_message.body
+
+
+async def test_due_worker_sends_travel_consent_reminders_once(db_session) -> None:
+    organization = Organization(
+        name="Travel Reminder Worker Club",
+        slug="travel-reminder-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    athlete = Person(display_name="Minor Traveler", primary_email="minor-traveler@example.com")
+    guardian = Person(
+        display_name="Travel Guardian",
+        primary_email="travel-guardian@example.com",
+        primary_phone="+15550124000",
+    )
+    db_session.add_all([athlete, guardian])
+    await db_session.flush()
+    event = Event(
+        organization_id=organization.id,
+        team_id=None,
+        event_type=EventType.TOURNAMENT,
+        title="Regional Finals",
+        starts_at=datetime(2026, 3, 8, 9, tzinfo=UTC),
+        ends_at=datetime(2026, 3, 8, 17, tzinfo=UTC),
+        venue_name="Regional Stadium",
+    )
+    db_session.add(event)
+    await db_session.flush()
+    plan = EventTravelPlan(
+        organization_id=organization.id,
+        event_id=event.id,
+        status=TravelPlanStatus.READY,
+        destination="Regional Stadium",
+        travel_mode="bus",
+        departure_at=datetime(2026, 3, 8, 6, tzinfo=UTC),
+        consent_required=True,
+        consent_due_at=datetime.now(UTC) + timedelta(hours=12),
+        risk_assessment="Standard supervised team travel.",
+    )
+    request = ConsentRequest(
+        organization_id=organization.id,
+        athlete_person_id=athlete.id,
+        guardian_person_id=guardian.id,
+        scope_type=ConsentScopeType.EVENT,
+        scope_id=event.id,
+        channel=ConsentCaptureChannel.EMAIL,
+        destination="travel-guardian@example.com",
+        token_hash="travel-reminder-worker-token",
+        status=ConsentRequestStatus.PENDING,
+        sent_at=datetime.now(UTC) - timedelta(hours=4),
+        notes="Travel consent pending.",
+    )
+    db_session.add_all([plan, request])
+    await db_session.commit()
+
+    first = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("event-travel-consent-reminders",),
+        event_travel_consent_reminder_channel=CommunicationChannel.IN_APP,
+        event_travel_consent_reminder_due_within_hours=48,
+        event_travel_consent_reminder_repeat_after_hours=24,
+        event_travel_consent_reminder_limit=10,
+    )
+
+    reminder = first["results"]["event_travel_consent_reminders"]
+    assert reminder["eligible_count"] == 1
+    assert reminder["executed_count"] == 1
+    assert reminder["reminded_count"] == 1
+    assert reminder["skipped_count"] == 0
+    assert reminder["due_plan_count"] == 1
+    assert reminder["pending_request_count"] == 1
+    assert reminder["recipient_count"] == 1
+    assert len(reminder["message_ids"]) == 1
+    message = await db_session.get(CommunicationMessage, reminder["message_ids"][0])
+    assert message is not None
+    assert message.subject == "Travel consent deadline approaching: Regional Finals"
+    assert "Regional Stadium" in message.body
+    assert first["summary"]["processed_count"] == 1
+
+    second = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("event-travel-consent-reminders",),
+        event_travel_consent_reminder_channel=CommunicationChannel.IN_APP,
+        event_travel_consent_reminder_due_within_hours=48,
+        event_travel_consent_reminder_repeat_after_hours=24,
+        event_travel_consent_reminder_limit=10,
+    )
+
+    duplicate = second["results"]["event_travel_consent_reminders"]
+    assert duplicate["eligible_count"] == 1
+    assert duplicate["executed_count"] == 1
+    assert duplicate["reminded_count"] == 0
+    assert duplicate["skipped_count"] == 1
+    assert duplicate["message_ids"] == []
+    message_count = await db_session.scalar(
+        select(func.count(CommunicationMessage.id)).where(
+            CommunicationMessage.organization_id == organization.id,
+            CommunicationMessage.subject == "Travel consent deadline approaching: Regional Finals",
+        )
+    )
+    assert message_count == 1
 
 
 async def test_due_worker_runs_forecast_validation_lane(db_session) -> None:

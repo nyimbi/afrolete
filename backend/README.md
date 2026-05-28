@@ -59,15 +59,18 @@ uv run python -m app.workers.due --limit 25
 ```
 
 Use `--lane agent-tasks`, `--lane communication-digests`,
-`--lane developer-webhooks`, `--lane performance-achievements`,
-`--lane performance-forecast-validations`, `--lane performance-review-escalations`,
-`--lane performance-injury-risk-alerts`, or `--lane wearable-pull-retries` to
-run a single lane. The communication digest lane creates daily/weekly digests
-for people with matching notification preferences and unread inbox items. The
-performance achievement lane evaluates active athlete goals and recent
-observations so goal-achieved and personal-best awards are created without a
-coach click. Forecast validation can also send scheduled manager alerts for
-watch/high drift when run with
+`--lane event-travel-consent-reminders`, `--lane developer-webhooks`,
+`--lane performance-achievements`, `--lane performance-forecast-validations`,
+`--lane performance-review-escalations`, `--lane performance-injury-risk-alerts`,
+or `--lane wearable-pull-retries` to run a single lane. The communication
+digest lane creates daily/weekly digests for people with matching notification
+preferences and unread inbox items. The travel consent lane sends scheduled
+guardian reminders for due travel consent requests and suppresses repeats with
+`--event-travel-consent-reminder-repeat-after-hours`. The performance
+achievement lane evaluates active athlete goals and recent observations so
+goal-achieved and personal-best awards are created without a coach click.
+Forecast validation can also send scheduled manager alerts for watch/high drift
+when run with
 `--auto-alert-performance-forecast-drift`; use
 `--performance-forecast-drift-channel`,
 `--performance-forecast-drift-repeat-after-hours`, and

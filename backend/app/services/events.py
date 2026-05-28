@@ -67,6 +67,7 @@ from app.schemas.event import (
     EventTravelConsentReminderRunCreate,
     EventTravelConsentReminderRunPlanRead,
     EventTravelConsentReminderRunRead,
+    EventTravelConsentReminderWorkerRunRead,
     EventTravelConsentRequestCreate,
     EventTravelConsentRequestItemRead,
     EventTravelApprovalCreate,
@@ -162,7 +163,7 @@ from app.schemas.event import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
-from app.services.communications import create_message
+from app.services.communications import create_message, create_message_for_recipients
 from app.services.safeguarding import (
     create_consent_request,
     clearance_for_event,
@@ -683,8 +684,33 @@ async def run_event_travel_consent_reminders(
 ) -> EventTravelConsentReminderRunRead:
     event = await get_event(db, event_id)
     await ensure_manage_event_scope(authz, event.organization_id, identity)
+    return await run_event_travel_consent_reminders_for_event(
+        db,
+        event_id,
+        channel=payload.channel,
+        due_within_hours=payload.due_within_hours,
+        send_reminders=payload.send_reminders,
+        subject=payload.subject,
+        body=payload.body,
+        created_by_person_id=identity.person_id,
+    )
+
+
+async def run_event_travel_consent_reminders_for_event(
+    db: AsyncSession,
+    event_id: UUID,
+    *,
+    channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    due_within_hours: int = 48,
+    send_reminders: bool = True,
+    subject: str | None = None,
+    body: str | None = None,
+    created_by_person_id: UUID | None = None,
+    repeat_after_hours: int = 0,
+) -> EventTravelConsentReminderRunRead:
+    event = await get_event(db, event_id)
     now = datetime.now(UTC)
-    due_by = now + timedelta(hours=payload.due_within_hours)
+    due_by = now + timedelta(hours=due_within_hours)
     due_plans = list(
         (
             await db.scalars(
@@ -702,24 +728,25 @@ async def run_event_travel_consent_reminders(
     guardian_ids = sorted({request.guardian_person_id for request in pending_requests}, key=str)
     message_id: UUID | None = None
     recipient_count = 0
-    if payload.send_reminders and due_plans and guardian_ids:
-        message = await create_message(
+    already_sent = repeat_after_hours > 0 and await recent_travel_consent_reminder_exists(
+        db,
+        event,
+        repeat_after_hours,
+    )
+    if send_reminders and due_plans and guardian_ids and not already_sent:
+        message = await create_message_for_recipients(
             db,
-            identity,
-            CommunicationMessageCreate(
-                organization_id=event.organization_id,
-                message_type=CommunicationMessageType.REMINDER,
-                channel=payload.channel,
-                scope_type=CommunicationScopeType.PERSON,
-                scope_id=guardian_ids[0],
-                recipient_person_ids=guardian_ids,
-                subject=payload.subject or scheduled_travel_consent_reminder_subject(event),
-                body=payload.body or scheduled_travel_consent_reminder_body(event, due_plans, len(pending_requests)),
-                urgent=False,
-                quiet_hours_override=False,
-                copy_guardians_for_minors=False,
-            ),
-            authz,
+            organization_id=event.organization_id,
+            message_type=CommunicationMessageType.REMINDER,
+            channel=channel,
+            scope_type=CommunicationScopeType.PERSON,
+            scope_id=guardian_ids[0],
+            recipient_person_ids=guardian_ids,
+            subject=subject or scheduled_travel_consent_reminder_subject(event),
+            body=body or scheduled_travel_consent_reminder_body(event, due_plans, len(pending_requests)),
+            urgent=False,
+            quiet_hours_override=False,
+            created_by_person_id=created_by_person_id,
         )
         message_id = message.id
         recipient_count = int(
@@ -733,7 +760,7 @@ async def run_event_travel_consent_reminders(
         pending_request_count=len(pending_requests),
         message_id=message_id,
         recipient_count=recipient_count,
-        channel=payload.channel,
+        channel=channel,
         plans=[
             EventTravelConsentReminderRunPlanRead(
                 travel_plan_id=plan.id,
@@ -744,6 +771,68 @@ async def run_event_travel_consent_reminders(
             )
             for plan in due_plans
         ],
+    )
+
+
+async def run_event_travel_consent_reminder_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    due_within_hours: int = 48,
+    repeat_after_hours: int = 24,
+    limit: int = 50,
+    dry_run: bool = False,
+) -> EventTravelConsentReminderWorkerRunRead:
+    event_ids = await travel_consent_reminder_event_ids(db, organization_id, due_within_hours, limit)
+    executed_count = 0
+    reminded_count = 0
+    skipped_count = 0
+    failed_count = 0
+    due_plan_count = 0
+    pending_request_count = 0
+    recipient_count = 0
+    message_ids: list[UUID] = []
+
+    for selected_event_id in event_ids:
+        try:
+            result = await run_event_travel_consent_reminders_for_event(
+                db,
+                selected_event_id,
+                channel=channel,
+                due_within_hours=due_within_hours,
+                send_reminders=not dry_run,
+                repeat_after_hours=repeat_after_hours,
+            )
+            executed_count += 1
+            due_plan_count += result.due_plan_count
+            pending_request_count += result.pending_request_count
+            recipient_count += result.recipient_count
+            if result.message_id is not None:
+                reminded_count += 1
+                message_ids.append(result.message_id)
+            else:
+                skipped_count += 1
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return EventTravelConsentReminderWorkerRunRead(
+        organization_id=organization_id,
+        channel=channel,
+        due_within_hours=due_within_hours,
+        repeat_after_hours=repeat_after_hours,
+        dry_run=dry_run,
+        eligible_count=len(event_ids),
+        executed_count=executed_count,
+        reminded_count=reminded_count,
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        due_plan_count=due_plan_count,
+        pending_request_count=pending_request_count,
+        recipient_count=recipient_count,
+        event_ids=event_ids,
+        message_ids=message_ids,
     )
 
 
@@ -4096,6 +4185,47 @@ async def pending_event_consent_requests(db: AsyncSession, event: Event) -> list
             )
         ).all()
     )
+
+
+async def travel_consent_reminder_event_ids(
+    db: AsyncSession,
+    organization_id: UUID | None,
+    due_within_hours: int,
+    limit: int,
+) -> list[UUID]:
+    due_by = datetime.now(UTC) + timedelta(hours=due_within_hours)
+    statement = (
+        select(Event.id)
+        .join(EventTravelPlan, EventTravelPlan.event_id == Event.id)
+        .where(EventTravelPlan.consent_required.is_(True))
+        .where(EventTravelPlan.status.not_in([TravelPlanStatus.COMPLETED, TravelPlanStatus.CANCELLED]))
+        .where(EventTravelPlan.consent_due_at.is_not(None))
+        .where(EventTravelPlan.consent_due_at <= due_by)
+        .group_by(Event.id)
+        .order_by(func.min(EventTravelPlan.consent_due_at), Event.starts_at)
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(Event.organization_id == organization_id)
+    return list((await db.scalars(statement)).all())
+
+
+async def recent_travel_consent_reminder_exists(
+    db: AsyncSession,
+    event: Event,
+    repeat_after_hours: int,
+) -> bool:
+    sent_after = datetime.now(UTC) - timedelta(hours=repeat_after_hours)
+    existing = await db.scalar(
+        select(CommunicationMessage.id)
+        .where(CommunicationMessage.organization_id == event.organization_id)
+        .where(CommunicationMessage.message_type == CommunicationMessageType.REMINDER)
+        .where(CommunicationMessage.subject == scheduled_travel_consent_reminder_subject(event))
+        .where(CommunicationMessage.sent_at.is_not(None))
+        .where(CommunicationMessage.sent_at >= sent_after)
+        .limit(1)
+    )
+    return existing is not None
 
 
 def decode_upload_content(content_base64: str) -> bytes:

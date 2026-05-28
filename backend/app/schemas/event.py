@@ -244,6 +244,24 @@ class EventTravelConsentReminderRunRead(BaseModel):
     plans: list[EventTravelConsentReminderRunPlanRead]
 
 
+class EventTravelConsentReminderWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    channel: CommunicationChannel
+    due_within_hours: int
+    repeat_after_hours: int
+    dry_run: bool = False
+    eligible_count: int
+    executed_count: int
+    reminded_count: int
+    skipped_count: int
+    failed_count: int
+    due_plan_count: int
+    pending_request_count: int
+    recipient_count: int
+    event_ids: list[UUID]
+    message_ids: list[UUID]
+
+
 class EventTravelManifestParticipantRead(BaseModel):
     person_id: UUID
     display_name: str

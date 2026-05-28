@@ -12,6 +12,7 @@ from app.models.enums import CommunicationChannel, NotificationFrequency
 from app.services.agents import run_agent_task_worker
 from app.services.communications import run_digest_scheduler_worker
 from app.services.developer import run_developer_webhook_retry_due
+from app.services.events import run_event_travel_consent_reminder_worker
 from app.services.performance import (
     run_assessment_review_escalation_worker,
     run_performance_achievement_worker,
@@ -24,6 +25,7 @@ WORKER_LANES = (
     "agent-tasks",
     "communication-digests",
     "developer-webhooks",
+    "event-travel-consent-reminders",
     "performance-achievements",
     "performance-forecast-validations",
     "performance-review-escalations",
@@ -45,6 +47,15 @@ def parse_args() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument("--webhook-limit", type=int, default=None)
+    parser.add_argument("--event-travel-consent-reminder-limit", type=int, default=None)
+    parser.add_argument("--event-travel-consent-reminder-due-within-hours", type=int, default=48)
+    parser.add_argument("--event-travel-consent-reminder-repeat-after-hours", type=int, default=24)
+    parser.add_argument(
+        "--event-travel-consent-reminder-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        default=CommunicationChannel.EMAIL.value,
+    )
+    parser.add_argument("--dry-run-event-travel-consent-reminders", action="store_true")
     parser.add_argument("--performance-limit", type=int, default=None)
     parser.add_argument("--performance-forecast-validation-limit", type=int, default=None)
     parser.add_argument("--auto-alert-performance-forecast-drift", action="store_true")
@@ -105,6 +116,11 @@ async def run_due_workers(
     communication_digest_limit: int | None = None,
     communication_digest_frequency: NotificationFrequency | None = None,
     webhook_limit: int | None = None,
+    event_travel_consent_reminder_limit: int | None = None,
+    event_travel_consent_reminder_due_within_hours: int = 48,
+    event_travel_consent_reminder_repeat_after_hours: int = 24,
+    event_travel_consent_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    dry_run_event_travel_consent_reminders: bool = False,
     performance_limit: int | None = None,
     performance_forecast_validation_limit: int | None = None,
     auto_alert_performance_forecast_drift: bool = False,
@@ -145,6 +161,18 @@ async def run_due_workers(
                 organization_id=organization_id,
                 frequency=communication_digest_frequency,
                 limit=communication_digest_limit or limit,
+            )
+        ).model_dump(mode="json")
+    if "event-travel-consent-reminders" in active_lanes:
+        results["event_travel_consent_reminders"] = (
+            await run_event_travel_consent_reminder_worker(
+                db,
+                organization_id=organization_id,
+                channel=event_travel_consent_reminder_channel,
+                due_within_hours=event_travel_consent_reminder_due_within_hours,
+                repeat_after_hours=event_travel_consent_reminder_repeat_after_hours,
+                limit=event_travel_consent_reminder_limit or limit,
+                dry_run=dry_run_event_travel_consent_reminders,
             )
         ).model_dump(mode="json")
     if "developer-webhooks" in active_lanes:
@@ -239,6 +267,7 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             or result.get("replayed_count")
             or result.get("escalated_count")
             or result.get("alerted_count")
+            or result.get("reminded_count")
             or result.get("retried_count")
             or 0
         )
@@ -263,6 +292,13 @@ async def run() -> None:
             if args.communication_digest_frequency
             else None,
             webhook_limit=args.webhook_limit,
+            event_travel_consent_reminder_limit=args.event_travel_consent_reminder_limit,
+            event_travel_consent_reminder_due_within_hours=args.event_travel_consent_reminder_due_within_hours,
+            event_travel_consent_reminder_repeat_after_hours=args.event_travel_consent_reminder_repeat_after_hours,
+            event_travel_consent_reminder_channel=CommunicationChannel(
+                args.event_travel_consent_reminder_channel
+            ),
+            dry_run_event_travel_consent_reminders=args.dry_run_event_travel_consent_reminders,
             performance_limit=args.performance_limit,
             performance_forecast_validation_limit=args.performance_forecast_validation_limit,
             auto_alert_performance_forecast_drift=args.auto_alert_performance_forecast_drift,
