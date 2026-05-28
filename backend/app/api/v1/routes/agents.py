@@ -16,7 +16,10 @@ from app.schemas.agent import (
     AgentEthicalScorecardRead,
     AgentFamilyTaskRead,
     AgentGovernancePolicyRuleCreate,
+    AgentGovernancePolicyReportRead,
     AgentGovernancePolicyRuleRead,
+    AgentGovernancePolicySimulationCreate,
+    AgentGovernancePolicySimulationRead,
     AgentGovernancePolicyRuleUpdate,
     AgentGovernanceSummaryRead,
     AgentModelRegistryCreate,
@@ -61,6 +64,7 @@ from app.schemas.agent import (
 from app.services.agents import (
     apply_agent_worker_callback,
     agent_ethical_scorecard,
+    agent_governance_policy_report,
     agent_governance_summary,
     agent_model_transparency_report,
     agent_scorecard_publication_readiness,
@@ -101,6 +105,7 @@ from app.services.agents import (
     run_scorecard_artifact_anomaly_alert,
     scorecard_artifact_access_summary,
     signed_agent_scorecard_publication_artifact_access,
+    simulate_agent_governance_policy,
     submit_agent_decision_appeal,
     submit_my_agent_decision_appeal,
     update_agent_decision_appeal,
@@ -791,6 +796,30 @@ async def list_agent_governance_policy_rules_route(
         AgentGovernancePolicyRuleRead(**rule)
         for rule in await list_agent_governance_policy_rules(db, identity, organization_id, authz, active=active)
     ]
+
+
+@router.get("/governance-policy-rules/report", response_model=AgentGovernancePolicyReportRead)
+async def agent_governance_policy_report_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentGovernancePolicyReportRead:
+    return AgentGovernancePolicyReportRead(
+        **await agent_governance_policy_report(db, identity, organization_id, authz)
+    )
+
+
+@router.post("/governance-policy-rules/simulate", response_model=AgentGovernancePolicySimulationRead)
+async def simulate_agent_governance_policy_route(
+    payload: AgentGovernancePolicySimulationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentGovernancePolicySimulationRead:
+    return AgentGovernancePolicySimulationRead(
+        **await simulate_agent_governance_policy(db, identity, payload, authz)
+    )
 
 
 @router.patch("/governance-policy-rules/{rule_id}", response_model=AgentGovernancePolicyRuleRead)

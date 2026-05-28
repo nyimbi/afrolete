@@ -122,6 +122,51 @@ class AgentGovernancePolicyRuleRead(BaseModel):
     updated_at: datetime
 
 
+class AgentGovernancePolicySimulationCreate(BaseModel):
+    organization_id: UUID
+    agent_id: UUID
+    task_type: str = Field(min_length=2, max_length=120)
+    title: str = Field(min_length=2, max_length=240)
+    input_ref: str | None = Field(default=None, max_length=500)
+
+
+class AgentGovernancePolicySimulationRead(BaseModel):
+    organization_id: UUID
+    agent_id: UUID
+    agent_name: str
+    agent_kind: AgentKind
+    model_policy: str
+    task_type: str
+    title: str
+    input_ref: str | None
+    matched: bool
+    matched_rule: AgentGovernancePolicyRuleRead | None
+    decision: str
+    risk_level: str
+    required_approval_count: int
+    would_block: bool
+    would_require_approval: bool
+    rationale: str
+    recommendation: str
+
+
+class AgentGovernancePolicyReportRead(BaseModel):
+    organization_id: UUID
+    active_rule_count: int
+    inactive_rule_count: int
+    blocking_rule_count: int
+    approval_rule_count: int
+    allow_rule_count: int
+    critical_rule_count: int
+    high_rule_count: int
+    medium_rule_count: int
+    low_rule_count: int
+    governed_task_count: int
+    ungoverned_task_count: int
+    recent_policy_codes: list[str]
+    recommendation: str
+
+
 class AgentTaskApprovalRequestCreate(BaseModel):
     required_count: int = Field(default=2, ge=1, le=10)
     reviewer_person_ids: list[UUID] = Field(default_factory=list, max_length=10)

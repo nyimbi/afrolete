@@ -275,6 +275,25 @@ def test_agent_governance_policy_requires_approvals_and_blocks_tasks(client, ide
     policy = policy_response.json()
     assert policy["decision"] == "require_approval"
 
+    simulation_response = client.post(
+        "/api/v1/agents/governance-policy-rules/simulate",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "agent_id": agent["id"],
+            "task_type": "selection_recommendation",
+            "title": "Preview tournament squad recommendation",
+            "input_ref": f"team:{team['id']}",
+        },
+    )
+    assert simulation_response.status_code == 200
+    simulation = simulation_response.json()
+    assert simulation["matched"] is True
+    assert simulation["matched_rule"]["rule_code"] == "safeguarding.selection.review"
+    assert simulation["decision"] == "require_approval"
+    assert simulation["would_require_approval"] is True
+    assert simulation["required_approval_count"] == 2
+
     task_response = client.post(
         f"/api/v1/agents/{agent['id']}/tasks",
         headers=identity_headers,
@@ -325,6 +344,21 @@ def test_agent_governance_policy_requires_approvals_and_blocks_tasks(client, ide
     )
     assert block_response.status_code == 201
 
+    blocked_simulation = client.post(
+        "/api/v1/agents/governance-policy-rules/simulate",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "agent_id": agent["id"],
+            "task_type": "medical_auto_apply",
+            "title": "Preview auto-apply return-to-play clearance",
+            "input_ref": "incident:medical",
+        },
+    ).json()
+    assert blocked_simulation["matched_rule"]["rule_code"] == "medical.autoapply.block"
+    assert blocked_simulation["would_block"] is True
+    assert blocked_simulation["decision"] == "block"
+
     blocked_task = client.post(
         f"/api/v1/agents/{agent['id']}/tasks",
         headers=identity_headers,
@@ -337,6 +371,16 @@ def test_agent_governance_policy_requires_approvals_and_blocks_tasks(client, ide
     )
     assert blocked_task.status_code == 409
     assert "medical.autoapply.block" in blocked_task.json()["detail"]
+
+    report = client.get(
+        f"/api/v1/agents/governance-policy-rules/report?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert report["active_rule_count"] == 2
+    assert report["approval_rule_count"] == 1
+    assert report["blocking_rule_count"] == 1
+    assert report["governed_task_count"] == 1
+    assert report["recent_policy_codes"] == ["safeguarding.selection.review"]
 
 
 async def test_agent_task_worker_executes_queued_tasks(db_session) -> None:

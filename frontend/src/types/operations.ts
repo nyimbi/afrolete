@@ -3324,6 +3324,43 @@ export type AgentGovernancePolicyRuleRead = {
   updated_at: string;
 };
 
+export type AgentGovernancePolicySimulationRead = {
+  organization_id: UUID;
+  agent_id: UUID;
+  agent_name: string;
+  agent_kind: AgentKind;
+  model_policy: string;
+  task_type: string;
+  title: string;
+  input_ref: string | null;
+  matched: boolean;
+  matched_rule: AgentGovernancePolicyRuleRead | null;
+  decision: string;
+  risk_level: string;
+  required_approval_count: number;
+  would_block: boolean;
+  would_require_approval: boolean;
+  rationale: string;
+  recommendation: string;
+};
+
+export type AgentGovernancePolicyReportRead = {
+  organization_id: UUID;
+  active_rule_count: number;
+  inactive_rule_count: number;
+  blocking_rule_count: number;
+  approval_rule_count: number;
+  allow_rule_count: number;
+  critical_rule_count: number;
+  high_rule_count: number;
+  medium_rule_count: number;
+  low_rule_count: number;
+  governed_task_count: number;
+  ungoverned_task_count: number;
+  recent_policy_codes: string[];
+  recommendation: string;
+};
+
 export type AgentTaskApprovalRead = {
   id: UUID;
   organization_id: UUID;

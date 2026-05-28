@@ -17,6 +17,8 @@ import type {
   AgentDecisionAppealRead,
   AgentEthicalScorecardRead,
   AgentGovernancePolicyRuleRead,
+  AgentGovernancePolicyReportRead,
+  AgentGovernancePolicySimulationRead,
   AgentGovernanceSummaryRead,
   AgentKind,
   AgentModelRegistryRead,
@@ -1383,6 +1385,10 @@ export default function HomePage() {
     useState<AgentRunLedgerVerificationRead | null>(null);
   const [agentGovernance, setAgentGovernance] = useState<AgentGovernanceSummaryRead | null>(null);
   const [agentGovernancePolicyRules, setAgentGovernancePolicyRules] = useState<AgentGovernancePolicyRuleRead[]>([]);
+  const [agentGovernancePolicyReport, setAgentGovernancePolicyReport] =
+    useState<AgentGovernancePolicyReportRead | null>(null);
+  const [agentGovernancePolicySimulation, setAgentGovernancePolicySimulation] =
+    useState<AgentGovernancePolicySimulationRead | null>(null);
   const [agentTransparency, setAgentTransparency] = useState<AgentModelTransparencyReportRead | null>(null);
   const [agentModelRegistry, setAgentModelRegistry] = useState<AgentModelRegistryRead[]>([]);
   const [agentBiasAudits, setAgentBiasAudits] = useState<AgentBiasAuditRead[]>([]);
@@ -2475,11 +2481,12 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, policyRules, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
+    const [tasks, runs, governance, policyRules, policyReport, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
       apiRequest<AgentGovernancePolicyRuleRead[]>(`/agents/governance-policy-rules?organization_id=${organizationId}`),
+      apiRequest<AgentGovernancePolicyReportRead>(`/agents/governance-policy-rules/report?organization_id=${organizationId}`),
       apiRequest<AgentRunLedgerVerificationRead>(`/agents/runs/verify?organization_id=${organizationId}`),
       apiRequest<AgentModelTransparencyReportRead>(`/agents/model-transparency?organization_id=${organizationId}`),
       apiRequest<AgentModelRegistryRead[]>(`/agents/model-registry?organization_id=${organizationId}`),
@@ -2515,6 +2522,7 @@ export default function HomePage() {
     setAgentRuns(runs);
     setAgentGovernance(governance);
     setAgentGovernancePolicyRules(policyRules);
+    setAgentGovernancePolicyReport(policyReport);
     setAgentLedgerVerification(ledgerVerification);
     setAgentTransparency(transparency);
     setAgentModelRegistry(registry);
@@ -3164,6 +3172,8 @@ export default function HomePage() {
       setAgentLedgerVerification(null);
       setAgentGovernance(null);
       setAgentGovernancePolicyRules([]);
+      setAgentGovernancePolicyReport(null);
+      setAgentGovernancePolicySimulation(null);
       setAgentTransparency(null);
       setAgentModelRegistry([]);
       setAgentBiasAudits([]);
@@ -6816,6 +6826,37 @@ export default function HomePage() {
         ]);
         addLog(`${rule.title} policy activated`, "good");
         void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+      }
+    );
+  };
+
+  const simulateAgentGovernancePolicy = () => {
+    if (!selectedOrganizationId || !selectedAgentId) {
+      addLog("Select an organization and agent first", "bad");
+      return;
+    }
+    runAction(
+      "simulate-agent-governance-policy",
+      () =>
+        apiRequest<AgentGovernancePolicySimulationRead>("/agents/governance-policy-rules/simulate", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            agent_id: selectedAgentId,
+            task_type: taskForm.task_type,
+            title: taskForm.title,
+            input_ref: taskForm.input_ref || null
+          }
+        }),
+      (simulation) => {
+        setAgentGovernancePolicySimulation(simulation);
+        addLog(
+          simulation.matched
+            ? `${simulation.matched_rule?.rule_code} would ${simulation.decision.replaceAll("_", " ")}`
+            : "No AI policy rule matched the current task",
+          simulation.would_block ? "bad" : "good"
+        );
       }
     );
   };
@@ -16175,6 +16216,7 @@ export default function HomePage() {
                 <button type="button" onClick={() => assignAgent("event")} disabled={busyAction !== null}>Assign event</button>
                 <button type="button" onClick={registerAgentModel} disabled={busyAction !== null}>Register model</button>
                 <button type="button" onClick={createAgentGovernancePolicyRule} disabled={busyAction !== null}>Policy</button>
+                <button type="button" onClick={simulateAgentGovernancePolicy} disabled={busyAction !== null}>Simulate</button>
               </div>
             <div className="selection-list compact">
               {agents.map((agent) => (
@@ -16253,6 +16295,34 @@ export default function HomePage() {
                         Ledger {agentLedgerVerification.verified_records}/{agentLedgerVerification.total_records} · {agentLedgerVerification.latest_record_hash?.slice(0, 12) ?? "empty"}
                       </span>
                     ) : null}
+                  </div>
+                </article>
+              ) : null}
+              {agentGovernancePolicyReport ? (
+                <article className="task-card">
+                  <div>
+                    <strong>AI policy coverage · {agentGovernancePolicyReport.active_rule_count} active rules</strong>
+                    <span>
+                      {agentGovernancePolicyReport.approval_rule_count} approval · {agentGovernancePolicyReport.blocking_rule_count} blocking · {agentGovernancePolicyReport.allow_rule_count} allow
+                    </span>
+                    <span>
+                      {agentGovernancePolicyReport.governed_task_count} governed tasks · {agentGovernancePolicyReport.ungoverned_task_count} ungoverned recent tasks
+                    </span>
+                    <span>{agentGovernancePolicyReport.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {agentGovernancePolicySimulation ? (
+                <article className="task-card">
+                  <div>
+                    <strong>
+                      Simulation · {agentGovernancePolicySimulation.decision.replaceAll("_", " ")} · {agentGovernancePolicySimulation.risk_level}
+                    </strong>
+                    <span>
+                      {agentGovernancePolicySimulation.matched_rule?.rule_code ?? "No matching policy"} · {agentGovernancePolicySimulation.required_approval_count} approvals
+                    </span>
+                    <span>{agentGovernancePolicySimulation.rationale}</span>
+                    <span>{agentGovernancePolicySimulation.recommendation}</span>
                   </div>
                 </article>
               ) : null}

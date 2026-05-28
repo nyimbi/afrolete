@@ -48,6 +48,7 @@ from app.schemas.agent import (
     AgentDecisionAppealUpdate,
     AgentMyDecisionAppealCreate,
     AgentGovernancePolicyRuleCreate,
+    AgentGovernancePolicySimulationCreate,
     AgentGovernancePolicyRuleUpdate,
     AgentModelRegistryCreate,
     AgentModelRegistryUpdate,
@@ -216,21 +217,106 @@ async def list_agent_governance_policy_rules(
     active: bool | None = None,
 ) -> list[dict[str, object]]:
     await ensure_manage_organization(authz, identity, organization_id)
-    statement = select(AgentGovernancePolicyRule).where(AgentGovernancePolicyRule.organization_id == organization_id)
-    if active is not None:
-        statement = statement.where(AgentGovernancePolicyRule.active.is_(active))
-    rules = list(
+    rules = await agent_governance_policy_rule_rows(db, organization_id, active=active)
+    return [agent_governance_policy_rule_read(rule) for rule in rules]
+
+
+async def agent_governance_policy_report(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    rules = await agent_governance_policy_rule_rows(db, organization_id)
+    tasks = list(
         (
             await db.scalars(
-                statement.order_by(
-                    AgentGovernancePolicyRule.active.desc(),
-                    AgentGovernancePolicyRule.risk_level.desc(),
-                    AgentGovernancePolicyRule.rule_code,
-                )
+                select(AgentTask)
+                .where(AgentTask.organization_id == organization_id)
+                .order_by(AgentTask.created_at.desc())
+                .limit(100)
             )
         ).all()
     )
-    return [agent_governance_policy_rule_read(rule) for rule in rules]
+    active_rules = [rule for rule in rules if rule.active]
+    inactive_rules = [rule for rule in rules if not rule.active]
+    governed_tasks = [task for task in tasks if task.governance_policy_code]
+    ungoverned_tasks = [task for task in tasks if not task.governance_policy_code]
+    recent_policy_codes = list(dict.fromkeys(task.governance_policy_code for task in governed_tasks if task.governance_policy_code))[:8]
+    return {
+        "organization_id": organization_id,
+        "active_rule_count": len(active_rules),
+        "inactive_rule_count": len(inactive_rules),
+        "blocking_rule_count": sum(1 for rule in active_rules if rule.decision == "block"),
+        "approval_rule_count": sum(1 for rule in active_rules if rule.decision == "require_approval"),
+        "allow_rule_count": sum(1 for rule in active_rules if rule.decision == "allow"),
+        "critical_rule_count": sum(1 for rule in active_rules if rule.risk_level == "critical"),
+        "high_rule_count": sum(1 for rule in active_rules if rule.risk_level == "high"),
+        "medium_rule_count": sum(1 for rule in active_rules if rule.risk_level == "medium"),
+        "low_rule_count": sum(1 for rule in active_rules if rule.risk_level == "low"),
+        "governed_task_count": len(governed_tasks),
+        "ungoverned_task_count": len(ungoverned_tasks),
+        "recent_policy_codes": recent_policy_codes,
+        "recommendation": agent_governance_policy_report_recommendation(active_rules, ungoverned_tasks),
+    }
+
+
+async def simulate_agent_governance_policy(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentGovernancePolicySimulationCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, payload.organization_id)
+    agent = await get_agent_for_organization(db, payload.agent_id, payload.organization_id)
+    task_payload = AgentTaskCreate(
+        organization_id=payload.organization_id,
+        task_type=payload.task_type,
+        title=payload.title,
+        input_ref=payload.input_ref,
+    )
+    rule = await matching_agent_governance_policy_rule(db, agent, task_payload)
+    model_policy = agent.model_policy or get_settings().agent_default_model
+    if rule is None:
+        return {
+            "organization_id": payload.organization_id,
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "agent_kind": agent.kind,
+            "model_policy": model_policy,
+            "task_type": payload.task_type,
+            "title": payload.title,
+            "input_ref": payload.input_ref,
+            "matched": False,
+            "matched_rule": None,
+            "decision": "allow",
+            "risk_level": "unclassified",
+            "required_approval_count": 0,
+            "would_block": False,
+            "would_require_approval": False,
+            "rationale": "No active AI governance policy rule matched this proposed task.",
+            "recommendation": "Queueing is allowed, but create a policy rule for sensitive task families.",
+        }
+    return {
+        "organization_id": payload.organization_id,
+        "agent_id": agent.id,
+        "agent_name": agent.name,
+        "agent_kind": agent.kind,
+        "model_policy": model_policy,
+        "task_type": payload.task_type,
+        "title": payload.title,
+        "input_ref": payload.input_ref,
+        "matched": True,
+        "matched_rule": agent_governance_policy_rule_read(rule),
+        "decision": rule.decision,
+        "risk_level": rule.risk_level,
+        "required_approval_count": rule.required_approval_count if rule.decision == "require_approval" else 0,
+        "would_block": rule.decision == "block",
+        "would_require_approval": rule.decision == "require_approval",
+        "rationale": rule.rationale,
+        "recommendation": agent_governance_policy_simulation_recommendation(rule),
+    }
 
 
 async def update_agent_governance_policy_rule(
@@ -3088,23 +3174,34 @@ async def matching_agent_governance_policy_rule(
     agent: Agent,
     payload: AgentTaskCreate,
 ) -> AgentGovernancePolicyRule | None:
-    rules = list(
+    rules = await agent_governance_policy_rule_rows(db, payload.organization_id, active=True)
+    for rule in rules:
+        if agent_governance_policy_matches(rule, agent, payload):
+            return rule
+    return None
+
+
+async def agent_governance_policy_rule_rows(
+    db: AsyncSession,
+    organization_id: UUID,
+    active: bool | None = None,
+) -> list[AgentGovernancePolicyRule]:
+    statement = select(AgentGovernancePolicyRule).where(
+        AgentGovernancePolicyRule.organization_id == organization_id
+    )
+    if active is not None:
+        statement = statement.where(AgentGovernancePolicyRule.active.is_(active))
+    return list(
         (
             await db.scalars(
-                select(AgentGovernancePolicyRule)
-                .where(AgentGovernancePolicyRule.organization_id == payload.organization_id)
-                .where(AgentGovernancePolicyRule.active.is_(True))
-                .order_by(
+                statement.order_by(
+                    AgentGovernancePolicyRule.active.desc(),
                     AgentGovernancePolicyRule.risk_level.desc(),
                     AgentGovernancePolicyRule.rule_code,
                 )
             )
         ).all()
     )
-    for rule in rules:
-        if agent_governance_policy_matches(rule, agent, payload):
-            return rule
-    return None
 
 
 def agent_governance_policy_matches(
@@ -3178,6 +3275,27 @@ def agent_governance_policy_rule_read(rule: AgentGovernancePolicyRule) -> dict[s
         "created_at": rule.created_at,
         "updated_at": rule.updated_at,
     }
+
+
+def agent_governance_policy_simulation_recommendation(rule: AgentGovernancePolicyRule) -> str:
+    if rule.decision == "block":
+        return "Do not queue this task; revise the request or change the active tenant policy after review."
+    if rule.decision == "require_approval":
+        return f"Queueing will create {rule.required_approval_count} required human approval slot(s)."
+    return "Queueing is allowed by the active tenant AI governance policy."
+
+
+def agent_governance_policy_report_recommendation(
+    active_rules: list[AgentGovernancePolicyRule],
+    ungoverned_tasks: list[AgentTask],
+) -> str:
+    if not active_rules:
+        return "Create at least one active AI governance policy before live provider execution."
+    if ungoverned_tasks:
+        return "Review recent ungoverned agent tasks and add policy coverage for sensitive task families."
+    if any(rule.decision == "block" for rule in active_rules) and any(rule.decision == "require_approval" for rule in active_rules):
+        return "Policy set includes blocking and approval controls; continue monitoring ledger outcomes."
+    return "Add both blocking and approval-gating rules for a stronger tenant AI control posture."
 
 
 def agent_credential_status(settings: Settings) -> dict[str, object]:
