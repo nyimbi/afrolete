@@ -831,5 +831,6 @@ class PlayerPerformanceProfileRead(BaseModel):
     trends: list[PerformanceMetricTrendRead]
     trend_series: list[PerformanceMetricTrendSeriesRead]
     forecast_scenarios: list[PerformanceForecastScenarioRead]
+    what_if_scenarios: list[PerformanceForecastWhatIfRead]
     benchmarks: list[PerformanceMetricBenchmarkRead]
     cohort_comparisons: list[PerformanceCohortComparisonRead]

@@ -336,6 +336,9 @@ async def list_my_player_performance_route(
     trend_metric_code: str | None = Query(default=None),
     trend_period_start: date | None = Query(default=None),
     trend_period_end: date | None = Query(default=None),
+    what_if_training_adjustment_percent: float = Query(default=0.0, ge=-50, le=50),
+    what_if_readiness_score: int = Query(default=70, ge=0, le=100),
+    what_if_horizon: int = Query(default=4, ge=1, le=8),
     identity: CurrentIdentity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
 ) -> list[PlayerPerformanceProfileRead]:
@@ -349,6 +352,9 @@ async def list_my_player_performance_route(
         trend_metric_code=trend_metric_code,
         trend_period_start=trend_period_start,
         trend_period_end=trend_period_end,
+        what_if_training_adjustment_percent=what_if_training_adjustment_percent,
+        what_if_readiness_score=what_if_readiness_score,
+        what_if_horizon=what_if_horizon,
     )
     return [
         PlayerPerformanceProfileRead(
@@ -384,6 +390,10 @@ async def list_my_player_performance_route(
             forecast_scenarios=[
                 PerformanceForecastScenarioRead(**scenario)
                 for scenario in profile["forecast_scenarios"]
+            ],
+            what_if_scenarios=[
+                PerformanceForecastWhatIfRead(**scenario)
+                for scenario in profile["what_if_scenarios"]
             ],
             benchmarks=[
                 PerformanceMetricBenchmarkRead(**benchmark) for benchmark in profile["benchmarks"]
@@ -1036,6 +1046,8 @@ async def athlete_performance_forecast_what_if_route(
     athlete_profile_id: UUID,
     organization_id: UUID = Query(),
     sport: str | None = Query(default=None),
+    category: MetricCategory | None = Query(default=None),
+    metric_code: str | None = Query(default=None),
     training_adjustment_percent: float = Query(default=0.0, ge=-50, le=50),
     readiness_score: int = Query(default=70, ge=0, le=100),
     horizon: int = Query(default=4, ge=1, le=8),
@@ -1048,6 +1060,8 @@ async def athlete_performance_forecast_what_if_route(
             organization_id,
             athlete_profile_id,
             sport=sport,
+            category=category,
+            metric_code=metric_code,
             training_adjustment_percent=training_adjustment_percent,
             readiness_score=readiness_score,
             horizon=horizon,

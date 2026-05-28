@@ -2354,12 +2354,18 @@ async def performance_forecast_what_if_scenarios(
     organization_id: UUID,
     athlete_profile_id: UUID,
     sport: str | None = None,
+    category: MetricCategory | None = None,
+    metric_code: str | None = None,
     training_adjustment_percent: float = 0.0,
     readiness_score: int = 70,
     horizon: int = 4,
 ) -> list[dict[str, object]]:
     await get_athlete_profile(db, athlete_profile_id, organization_id)
-    metrics = await list_metric_definitions(db, organization_id, sport=sport)
+    metrics = performance_trend_metric_filter(
+        await list_metric_definitions(db, organization_id, sport=sport),
+        category=category,
+        metric_code=metric_code,
+    )
     metric_by_id = {metric.id: metric for metric in metrics}
     if not metric_by_id:
         return []
@@ -2730,6 +2736,9 @@ async def list_my_player_performance(
     trend_metric_code: str | None = None,
     trend_period_start: date | None = None,
     trend_period_end: date | None = None,
+    what_if_training_adjustment_percent: float = 0.0,
+    what_if_readiness_score: int = 70,
+    what_if_horizon: int = 4,
 ) -> list[dict[str, object]]:
     benchmark_cohort_scope = normalize_benchmark_scope(benchmark_cohort_scope)
     organization = await db.get(Organization, organization_id)
@@ -2783,6 +2792,16 @@ async def list_my_player_performance(
             period_end=trend_period_end,
         )
         forecast_scenarios = await performance_forecast_scenarios(db, organization_id, profile.id)
+        what_if_scenarios = await performance_forecast_what_if_scenarios(
+            db,
+            organization_id,
+            profile.id,
+            category=trend_category,
+            metric_code=trend_metric_code,
+            training_adjustment_percent=what_if_training_adjustment_percent,
+            readiness_score=what_if_readiness_score,
+            horizon=what_if_horizon,
+        )
         benchmarks = await performance_metric_benchmarks(
             db,
             organization_id,
@@ -2811,6 +2830,7 @@ async def list_my_player_performance(
                 "trends": trends,
                 "trend_series": trend_series,
                 "forecast_scenarios": forecast_scenarios,
+                "what_if_scenarios": what_if_scenarios,
                 "benchmarks": benchmarks,
                 "cohort_comparisons": cohort_comparisons,
             }

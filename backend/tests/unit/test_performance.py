@@ -172,6 +172,9 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert profile["forecast_scenarios"][0]["metric_name"] == "Pace"
     assert profile["forecast_scenarios"][0]["model_policy"] == "deterministic_forecast_v1"
     assert profile["forecast_scenarios"][0]["data_quality"] == "thin_history"
+    assert profile["what_if_scenarios"][0]["metric_name"] == "Pace"
+    assert profile["what_if_scenarios"][0]["scenario_label"] == "baseline load, readiness 70"
+    assert profile["what_if_scenarios"][0]["model_policy"] == "deterministic_what_if_forecast_v1"
     assert profile["benchmarks"][0]["cohort_scope"] == "tenant"
     assert profile["benchmarks"][0]["cohort_label"] == "All athletes"
     assert profile["benchmarks"][0]["metric_name"] == "Pace"
@@ -211,7 +214,8 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     filtered_response = client.get(
         f"/api/v1/performance/my-profiles?organization_id={organization['id']}"
         "&trend_category=technical&trend_metric_code=FIRST_TOUCH"
-        "&trend_period_start=2026-02-15&trend_period_end=2026-02-28",
+        "&trend_period_start=2026-02-15&trend_period_end=2026-02-28"
+        "&what_if_training_adjustment_percent=15&what_if_readiness_score=82&what_if_horizon=3",
         headers=player_headers,
     )
     assert filtered_response.status_code == 200
@@ -223,6 +227,9 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert filtered_profile["trends"][0]["sample_size"] == 1
     assert [series["metric_code"] for series in filtered_profile["trend_series"]] == ["first_touch"]
     assert [point["value"] for point in filtered_profile["trend_series"][0]["points"]] == [74.0]
+    assert [scenario["metric_code"] for scenario in filtered_profile["what_if_scenarios"]] == ["first_touch"]
+    assert filtered_profile["what_if_scenarios"][0]["scenario_label"] == "+15% load, readiness 82"
+    assert filtered_profile["what_if_scenarios"][0]["horizon"] == 3
 
 
 def test_performance_benchmarks_can_scope_to_position_cohort(client, identity_headers) -> None:

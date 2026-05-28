@@ -53,6 +53,7 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
   const latestAssessment = profile.latest_assessment;
   const visibleSeries = profile.trend_series.filter((series) => series.points.length > 0).slice(0, 4);
   const visibleForecasts = profile.forecast_scenarios.filter((scenario) => scenario.sample_size > 0).slice(0, 4);
+  const visibleWhatIfs = profile.what_if_scenarios.filter((scenario) => scenario.sample_size > 0).slice(0, 4);
   const composition = latestAssessment
     ? [
         { label: "Physical", value: latestAssessment.physical_score, color: "var(--teal)" },
@@ -72,7 +73,7 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
   );
   const forecastMax = Math.max(
     1,
-    ...visibleForecasts.flatMap((scenario) => [
+    ...[...visibleForecasts, ...visibleWhatIfs].flatMap((scenario) => [
       Math.abs(scenario.latest_value ?? 0),
       Math.abs(scenario.forecast_next_value ?? 0),
       ...scenario.projected_points.map((point) => Math.abs(point))
@@ -181,8 +182,8 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
         <article className="player-chart-card">
         <div>
           <span>Forecast scenario</span>
-          <strong>{visibleForecasts.length} metrics</strong>
-          <small>Deterministic runway with confidence and risk flags.</small>
+          <strong>{visibleForecasts.length}/{visibleWhatIfs.length} metrics</strong>
+          <small>Baseline and what-if runways with confidence and risk flags.</small>
         </div>
         <div className="chart-bars">
           {visibleForecasts.map((scenario, index) => {
@@ -203,6 +204,40 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
           {visibleForecasts.length === 0 ? (
             <div className="chart-bar-row">
               <span>No forecast</span>
+              <div className="chart-track">
+                <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--quiet)" }} />
+              </div>
+              <strong>n/a</strong>
+            </div>
+          ) : null}
+        </div>
+        </article>
+
+        <article className="player-chart-card">
+        <div>
+          <span>What-if plan</span>
+          <strong>{visibleWhatIfs[0]?.scenario_label ?? "No scenario"}</strong>
+          <small>Projected response to adjusted load and readiness.</small>
+        </div>
+        <div className="chart-bars">
+          {visibleWhatIfs.map((scenario, index) => {
+            const width = boundedPercent((Math.abs(scenario.forecast_next_value ?? scenario.latest_value ?? 0) / forecastMax) * 100);
+            return (
+              <div className="chart-bar-row" key={`${scenario.metric_definition_id}-player-what-if`}>
+                <span>{scenario.metric_name}</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{ width: `${width}%`, backgroundColor: playerChartColors[(index + 4) % playerChartColors.length] }}
+                  />
+                </div>
+                <strong>{scenario.risk_level.replaceAll("_", " ")}</strong>
+              </div>
+            );
+          })}
+          {visibleWhatIfs.length === 0 ? (
+            <div className="chart-bar-row">
+              <span>No what-if</span>
               <div className="chart-track">
                 <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--quiet)" }} />
               </div>
@@ -313,6 +348,31 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
             <small>{scenario.recommendation}</small>
           </article>
         ))}
+        {visibleWhatIfs.map((scenario, index) => (
+          <article className="player-chart-card" key={`${scenario.metric_definition_id}-player-what-if-scenario`}>
+            <div>
+              <span>What-if runway</span>
+              <strong>{scenario.metric_name}</strong>
+              <small>
+                {scenario.scenario_label} · horizon {scenario.horizon} · next{" "}
+                {playerValueLabel(scenario.forecast_next_value, scenario.unit)}
+              </small>
+            </div>
+            <div className="spark-bars" aria-label={`${scenario.metric_name} player what-if scenario`}>
+              {scenario.projected_points.map((point, pointIndex) => (
+                <i
+                  key={`${scenario.metric_definition_id}-player-what-if-projection-${pointIndex}`}
+                  title={`What-if ${pointIndex + 1} · ${playerValueLabel(point, scenario.unit)}`}
+                  style={{
+                    height: `${boundedPercent((Math.abs(point) / forecastMax) * 100)}%`,
+                    backgroundColor: playerChartColors[(index + pointIndex + 2) % playerChartColors.length]
+                  }}
+                />
+              ))}
+            </div>
+            <small>{scenario.recommendation}</small>
+          </article>
+        ))}
         {visibleSeries.map((series, index) => (
           <article className="player-chart-card" key={`${series.metric_definition_id}-player-series`}>
             <div>
@@ -365,6 +425,9 @@ export default function PlayerPerformancePage() {
   const [trendMetricCode, setTrendMetricCode] = useState("");
   const [trendPeriodStart, setTrendPeriodStart] = useState("");
   const [trendPeriodEnd, setTrendPeriodEnd] = useState("");
+  const [whatIfAdjustment, setWhatIfAdjustment] = useState(10);
+  const [whatIfReadiness, setWhatIfReadiness] = useState(72);
+  const [whatIfHorizon, setWhatIfHorizon] = useState(4);
   const [profiles, setProfiles] = useState<PlayerPerformanceProfileRead[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [selfAssessment, setSelfAssessment] = useState({
@@ -393,6 +456,9 @@ export default function PlayerPerformancePage() {
         trendMetricCode?: string;
         trendPeriodStart?: string;
         trendPeriodEnd?: string;
+        whatIfAdjustment?: number;
+        whatIfReadiness?: number;
+        whatIfHorizon?: number;
       };
       setOrganizationId(parsed.organizationId ?? "");
       setIdentity(parsed.identity ?? defaultPlayerIdentity);
@@ -401,6 +467,9 @@ export default function PlayerPerformancePage() {
       setTrendMetricCode(parsed.trendMetricCode ?? "");
       setTrendPeriodStart(parsed.trendPeriodStart ?? "");
       setTrendPeriodEnd(parsed.trendPeriodEnd ?? "");
+      setWhatIfAdjustment(parsed.whatIfAdjustment ?? 10);
+      setWhatIfReadiness(parsed.whatIfReadiness ?? 72);
+      setWhatIfHorizon(parsed.whatIfHorizon ?? 4);
     } catch {
       window.localStorage.removeItem("afrolete.playerPortal");
     }
@@ -416,10 +485,24 @@ export default function PlayerPerformancePage() {
         trendCategory,
         trendMetricCode,
         trendPeriodStart,
-        trendPeriodEnd
+        trendPeriodEnd,
+        whatIfAdjustment,
+        whatIfReadiness,
+        whatIfHorizon
       })
     );
-  }, [benchmarkScope, identity, organizationId, trendCategory, trendMetricCode, trendPeriodEnd, trendPeriodStart]);
+  }, [
+    benchmarkScope,
+    identity,
+    organizationId,
+    trendCategory,
+    trendMetricCode,
+    trendPeriodEnd,
+    trendPeriodStart,
+    whatIfAdjustment,
+    whatIfHorizon,
+    whatIfReadiness
+  ]);
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.athlete_profile_id === selectedProfileId) ?? profiles[0] ?? null,
@@ -438,7 +521,10 @@ export default function PlayerPerformancePage() {
       const params = new URLSearchParams({
         organization_id: organizationId,
         observation_limit: "8",
-        benchmark_cohort_scope: benchmarkScope
+        benchmark_cohort_scope: benchmarkScope,
+        what_if_training_adjustment_percent: String(whatIfAdjustment),
+        what_if_readiness_score: String(whatIfReadiness),
+        what_if_horizon: String(whatIfHorizon)
       });
       if (trendCategory !== "all") {
         params.set("trend_category", trendCategory);
@@ -545,13 +631,39 @@ export default function PlayerPerformancePage() {
           />
           <input
             type="date"
+            aria-label="Trend start"
             value={trendPeriodStart}
             onChange={(event) => setTrendPeriodStart(event.target.value)}
           />
           <input
             type="date"
+            aria-label="Trend end"
             value={trendPeriodEnd}
             onChange={(event) => setTrendPeriodEnd(event.target.value)}
+          />
+          <input
+            type="number"
+            aria-label="What-if load adjustment"
+            min="-50"
+            max="50"
+            value={whatIfAdjustment}
+            onChange={(event) => setWhatIfAdjustment(Number(event.target.value))}
+          />
+          <input
+            type="number"
+            aria-label="What-if readiness"
+            min="0"
+            max="100"
+            value={whatIfReadiness}
+            onChange={(event) => setWhatIfReadiness(Number(event.target.value))}
+          />
+          <input
+            type="number"
+            aria-label="What-if horizon"
+            min="1"
+            max="8"
+            value={whatIfHorizon}
+            onChange={(event) => setWhatIfHorizon(Number(event.target.value))}
           />
           <button type="submit" disabled={busy}>{busy ? "Loading" : "Refresh"}</button>
         </form>

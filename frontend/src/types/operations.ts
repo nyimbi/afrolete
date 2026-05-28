@@ -3688,6 +3688,7 @@ export type PlayerPerformanceProfileRead = {
   trends: PerformanceMetricTrendRead[];
   trend_series: PerformanceMetricTrendSeriesRead[];
   forecast_scenarios: PerformanceForecastScenarioRead[];
+  what_if_scenarios: PerformanceForecastWhatIfRead[];
   benchmarks: PerformanceMetricBenchmarkRead[];
   cohort_comparisons: PerformanceCohortComparisonRead[];
 };
