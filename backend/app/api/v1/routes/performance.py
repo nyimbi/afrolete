@@ -22,6 +22,7 @@ from app.schemas.performance import (
     PerformanceGoalCreate,
     PerformanceGoalRead,
     PerformanceInjuryRiskAlertRead,
+    PerformanceInjuryRiskAlertRunRead,
     PerformanceInjuryRiskRead,
     PerformanceIngestionCreate,
     PerformanceIngestionRead,
@@ -64,6 +65,7 @@ from app.services.performance import (
     performance_metric_trends,
     performance_summary,
     run_assessment_review_escalations,
+    run_performance_injury_risk_alert_scan,
     review_assessment,
     review_observation,
     send_performance_injury_risk_alert,
@@ -704,6 +706,7 @@ async def athlete_performance_injury_risk_alert_route(
     athlete_profile_id: UUID,
     organization_id: UUID = Query(),
     threshold_score: int = Query(default=65, ge=0, le=100),
+    repeat_after_hours: int = Query(default=24, ge=0, le=720),
     dry_run: bool = Query(default=False),
     identity: CurrentIdentity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
@@ -717,12 +720,39 @@ async def athlete_performance_injury_risk_alert_route(
         authz,
         threshold_score=threshold_score,
         dry_run=dry_run,
+        repeat_after_hours=repeat_after_hours,
     )
     return PerformanceInjuryRiskAlertRead(
         **{
             **result,
             "risk": PerformanceInjuryRiskRead(**result["risk"]),
         }
+    )
+
+
+@router.post(
+    "/injury-risk/alert-scans",
+    response_model=PerformanceInjuryRiskAlertRunRead,
+)
+async def run_performance_injury_risk_alert_scan_route(
+    organization_id: UUID = Query(),
+    limit: int = Query(default=50, ge=1, le=250),
+    threshold_score: int = Query(default=65, ge=0, le=100),
+    repeat_after_hours: int = Query(default=24, ge=0, le=720),
+    dry_run: bool = Query(default=False),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceInjuryRiskAlertRunRead:
+    return await run_performance_injury_risk_alert_scan(
+        db,
+        identity,
+        organization_id,
+        authz,
+        limit=limit,
+        threshold_score=threshold_score,
+        repeat_after_hours=repeat_after_hours,
+        dry_run=dry_run,
     )
 
 

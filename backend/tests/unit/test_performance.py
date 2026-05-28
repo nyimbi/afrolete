@@ -608,6 +608,33 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
     assert any("open injury" in driver for driver in risk["drivers"])
     assert "medical or safeguarding review" in risk["recommendation"]
 
+    scan_response = client.post(
+        f"/api/v1/performance/injury-risk/alert-scans"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert scan_response.status_code == 200
+    scan = scan_response.json()
+    assert scan["eligible_count"] == 1
+    assert scan["scanned_count"] == 1
+    assert scan["high_risk_count"] == 1
+    assert scan["alerted_count"] == 1
+    assert scan["message_ids"]
+    messages = client.get(
+        f"/api/v1/communications/messages?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    message = next(message for message in messages if message["id"] == scan["message_ids"][0])
+    assert message["urgent"] is True
+    assert "injury risk" in message["subject"]
+    recipients = client.get(
+        f"/api/v1/communications/messages/{scan['message_ids'][0]}/recipients",
+        headers=identity_headers,
+    ).json()
+    recipient_ids = {recipient["person_id"] for recipient in recipients}
+    assert member["subject_id"] in recipient_ids
+
     alert_response = client.post(
         f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/injury-risk/alerts"
         f"?organization_id={organization['id']}",
@@ -616,24 +643,11 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
 
     assert alert_response.status_code == 200
     alert = alert_response.json()
-    assert alert["sent"] is True
+    assert alert["sent"] is False
     assert alert["score"] == 100
     assert alert["risk_band"] == "critical"
     assert alert["recipient_count"] >= 2
-    assert alert["message_id"] is not None
-    messages = client.get(
-        f"/api/v1/communications/messages?organization_id={organization['id']}",
-        headers=identity_headers,
-    ).json()
-    message = next(message for message in messages if message["id"] == alert["message_id"])
-    assert message["urgent"] is True
-    assert "injury risk" in message["subject"]
-    recipients = client.get(
-        f"/api/v1/communications/messages/{alert['message_id']}/recipients",
-        headers=identity_headers,
-    ).json()
-    recipient_ids = {recipient["person_id"] for recipient in recipients}
-    assert member["subject_id"] in recipient_ids
+    assert "already sent" in alert["skipped_reason"]
 
 
 def test_player_can_submit_pending_self_assessment(client, identity_headers) -> None:

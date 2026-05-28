@@ -12,9 +12,16 @@ from app.services.developer import run_developer_webhook_retry_due
 from app.services.performance import (
     run_assessment_review_escalation_worker,
     run_performance_achievement_worker,
+    run_performance_injury_risk_alert_scan_worker,
 )
 
-WORKER_LANES = ("agent-tasks", "developer-webhooks", "performance-achievements", "performance-review-escalations")
+WORKER_LANES = (
+    "agent-tasks",
+    "developer-webhooks",
+    "performance-achievements",
+    "performance-review-escalations",
+    "performance-injury-risk-alerts",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,6 +36,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--performance-review-horizon-hours", type=int, default=24)
     parser.add_argument("--performance-review-repeat-after-hours", type=int, default=24)
     parser.add_argument("--dry-run-performance-review-escalations", action="store_true")
+    parser.add_argument("--performance-injury-risk-limit", type=int, default=None)
+    parser.add_argument("--performance-injury-risk-threshold", type=int, default=65)
+    parser.add_argument("--performance-injury-risk-repeat-after-hours", type=int, default=24)
+    parser.add_argument("--dry-run-performance-injury-risk-alerts", action="store_true")
     parser.add_argument("--webhook-max-attempts", type=int, default=3)
     parser.add_argument("--include-recorded-webhooks", action="store_true")
     parser.add_argument("--pretty", action="store_true")
@@ -54,6 +65,10 @@ async def run_due_workers(
     performance_review_horizon_hours: int = 24,
     performance_review_repeat_after_hours: int = 24,
     dry_run_performance_review_escalations: bool = False,
+    performance_injury_risk_limit: int | None = None,
+    performance_injury_risk_threshold: int = 65,
+    performance_injury_risk_repeat_after_hours: int = 24,
+    dry_run_performance_injury_risk_alerts: bool = False,
     webhook_max_attempts: int = 3,
     include_recorded_webhooks: bool = False,
 ) -> dict[str, object]:
@@ -96,6 +111,17 @@ async def run_due_workers(
                 dry_run=dry_run_performance_review_escalations,
             )
         ).model_dump(mode="json")
+    if "performance-injury-risk-alerts" in active_lanes:
+        results["performance_injury_risk_alerts"] = (
+            await run_performance_injury_risk_alert_scan_worker(
+                db,
+                organization_id=organization_id,
+                limit=performance_injury_risk_limit or limit,
+                threshold_score=performance_injury_risk_threshold,
+                repeat_after_hours=performance_injury_risk_repeat_after_hours,
+                dry_run=dry_run_performance_injury_risk_alerts,
+            )
+        ).model_dump(mode="json")
     return {
         "organization_id": str(organization_id) if organization_id else None,
         "lanes": sorted(active_lanes),
@@ -117,7 +143,11 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             continue
         summary["eligible_count"] += int(result.get("eligible_count") or 0)
         summary["processed_count"] += int(
-            result.get("executed_count") or result.get("replayed_count") or result.get("escalated_count") or 0
+            result.get("executed_count")
+            or result.get("replayed_count")
+            or result.get("escalated_count")
+            or result.get("alerted_count")
+            or 0
         )
         summary["skipped_count"] += int(result.get("skipped_count") or 0)
         summary["failed_count"] += int(result.get("failed_count") or 0)
@@ -139,6 +169,10 @@ async def run() -> None:
             performance_review_horizon_hours=args.performance_review_horizon_hours,
             performance_review_repeat_after_hours=args.performance_review_repeat_after_hours,
             dry_run_performance_review_escalations=args.dry_run_performance_review_escalations,
+            performance_injury_risk_limit=args.performance_injury_risk_limit,
+            performance_injury_risk_threshold=args.performance_injury_risk_threshold,
+            performance_injury_risk_repeat_after_hours=args.performance_injury_risk_repeat_after_hours,
+            dry_run_performance_injury_risk_alerts=args.dry_run_performance_injury_risk_alerts,
             webhook_max_attempts=args.webhook_max_attempts,
             include_recorded_webhooks=args.include_recorded_webhooks,
         )

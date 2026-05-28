@@ -370,6 +370,23 @@ class PerformanceInjuryRiskAlertRead(BaseModel):
     risk: PerformanceInjuryRiskRead
 
 
+class PerformanceInjuryRiskAlertRunRead(BaseModel):
+    organization_id: UUID | None
+    threshold_score: int
+    repeat_after_hours: int
+    dry_run: bool = False
+    eligible_count: int
+    scanned_count: int
+    alerted_count: int
+    skipped_count: int
+    failed_count: int
+    high_risk_count: int
+    highest_score: int | None
+    athlete_profile_ids: list[UUID]
+    message_ids: list[UUID]
+    skipped_reasons: dict[str, int]
+
+
 class PerformanceGoalCreate(BaseModel):
     organization_id: UUID
     metric_definition_id: UUID

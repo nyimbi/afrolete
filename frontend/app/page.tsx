@@ -207,6 +207,7 @@ import type {
   PerformanceForecastWhatIfRead,
   PerformanceGoalRead,
   PerformanceInjuryRiskAlertRead,
+  PerformanceInjuryRiskAlertRunRead,
   PerformanceInjuryRiskRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
@@ -1221,6 +1222,8 @@ export default function HomePage() {
   const [performanceWhatIfReadiness, setPerformanceWhatIfReadiness] = useState(70);
   const [performanceInjuryRisk, setPerformanceInjuryRisk] = useState<PerformanceInjuryRiskRead | null>(null);
   const [performanceInjuryRiskAlert, setPerformanceInjuryRiskAlert] = useState<PerformanceInjuryRiskAlertRead | null>(null);
+  const [performanceInjuryRiskAlertRun, setPerformanceInjuryRiskAlertRun] =
+    useState<PerformanceInjuryRiskAlertRunRead | null>(null);
   const [performanceGoals, setPerformanceGoals] = useState<PerformanceGoalRead[]>([]);
   const [performanceAwards, setPerformanceAwards] = useState<PerformanceAchievementAwardRead[]>([]);
   const [performanceAchievementRun, setPerformanceAchievementRun] =
@@ -3099,6 +3102,7 @@ export default function HomePage() {
       setPerformanceWhatIfScenarios([]);
       setPerformanceInjuryRisk(null);
       setPerformanceInjuryRiskAlert(null);
+      setPerformanceInjuryRiskAlertRun(null);
       setPerformanceGoals([]);
       setPerformanceAwards([]);
       setPerformanceAchievementRun(null);
@@ -6567,6 +6571,34 @@ export default function HomePage() {
             : alert.skipped_reason ?? "Injury-risk alert was not sent",
           alert.sent ? "good" : "neutral"
         );
+      }
+    );
+  };
+
+  const runPerformanceInjuryRiskAlertScan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "performance-injury-risk-alert-scan",
+      () =>
+        apiRequest<PerformanceInjuryRiskAlertRunRead>(
+          `/performance/injury-risk/alert-scans?organization_id=${selectedOrganizationId}`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (run) => {
+        setPerformanceInjuryRiskAlertRun(run);
+        addLog(
+          `Injury-risk scan alerted ${run.alerted_count}/${run.high_risk_count} high-risk athlete(s)`,
+          run.alerted_count ? "good" : "neutral"
+        );
+        if (selectedAthlete?.athleteProfileId) {
+          void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+        }
       }
     );
   };
@@ -13337,6 +13369,7 @@ export default function HomePage() {
                 <button type="button" onClick={reviewSelectedObservation} disabled={busyAction !== null}>Review</button>
                 <button type="button" onClick={createPerformanceGoal} disabled={busyAction !== null}>Goal</button>
                 <button type="button" onClick={evaluatePerformanceAchievements} disabled={busyAction !== null}>Award</button>
+                <button type="button" onClick={runPerformanceInjuryRiskAlertScan} disabled={busyAction !== null}>Risk scan</button>
                 <button type="button" onClick={runAssessmentReviewEscalations} disabled={busyAction !== null}>Escalate</button>
               </div>
             </div>
@@ -13571,6 +13604,22 @@ export default function HomePage() {
                     </span>
                     <small>
                       {performanceReviewEscalationRun.dry_run ? "Dry run only." : "In-app alerts sent to performance reviewers and assigned coaches."}
+                    </small>
+                  </div>
+                </article>
+              ) : null}
+              {performanceInjuryRiskAlertRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Injury-risk scan · {performanceInjuryRiskAlertRun.alerted_count} alerted</strong>
+                    <span>
+                      {performanceInjuryRiskAlertRun.scanned_count} scanned · {performanceInjuryRiskAlertRun.high_risk_count} high risk ·{" "}
+                      {performanceInjuryRiskAlertRun.skipped_count} skipped · top score {performanceInjuryRiskAlertRun.highest_score ?? "n/a"}
+                    </span>
+                    <small>
+                      {performanceInjuryRiskAlertRun.dry_run
+                        ? "Dry run only."
+                        : `${performanceInjuryRiskAlertRun.message_ids.length} urgent alert message(s) created with ${performanceInjuryRiskAlertRun.repeat_after_hours}h duplicate suppression.`}
                     </small>
                   </div>
                 </article>

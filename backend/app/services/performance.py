@@ -39,6 +39,7 @@ from app.schemas.performance import (
     AthleteAssessmentReviewAssignmentUpdate,
     AthleteAssessmentReviewCreate,
     PerformanceAssessmentReviewEscalationRunRead,
+    PerformanceInjuryRiskAlertRunRead,
     MetricDefinitionCreate,
     PerformanceAchievementWorkerRunRead,
     PerformanceGoalCreate,
@@ -1154,8 +1155,27 @@ async def send_performance_injury_risk_alert(
     authz: AuthorizationService,
     threshold_score: int = 65,
     dry_run: bool = False,
+    repeat_after_hours: int = 24,
 ) -> dict[str, object]:
     await ensure_manage_performance(authz, identity, organization_id)
+    return await send_performance_injury_risk_alert_for_athlete(
+        db,
+        organization_id,
+        athlete_profile_id,
+        threshold_score=threshold_score,
+        dry_run=dry_run,
+        repeat_after_hours=repeat_after_hours,
+    )
+
+
+async def send_performance_injury_risk_alert_for_athlete(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    threshold_score: int = 65,
+    dry_run: bool = False,
+    repeat_after_hours: int = 24,
+) -> dict[str, object]:
     athlete_profile = await get_athlete_profile(db, athlete_profile_id, organization_id)
     athlete = await db.get(Person, athlete_profile.person_id)
     if athlete is None:
@@ -1169,6 +1189,8 @@ async def send_performance_injury_risk_alert(
         skipped_reason = f"Risk score {risk['score']} is below alert threshold {threshold_score}."
     elif not recipient_ids:
         skipped_reason = "No eligible risk-alert recipients found."
+    elif repeat_after_hours > 0 and await recent_injury_risk_alert_exists(db, athlete.id, repeat_after_hours):
+        skipped_reason = f"An injury-risk alert was already sent within the last {repeat_after_hours} hour(s)."
     elif dry_run:
         sent = False
     else:
@@ -1196,6 +1218,96 @@ async def send_performance_injury_risk_alert(
         "skipped_reason": skipped_reason,
         "risk": risk,
     }
+
+
+async def run_performance_injury_risk_alert_scan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    limit: int = 50,
+    threshold_score: int = 65,
+    repeat_after_hours: int = 24,
+    dry_run: bool = False,
+) -> PerformanceInjuryRiskAlertRunRead:
+    await ensure_manage_performance(authz, identity, organization_id)
+    return await run_performance_injury_risk_alert_scan_worker(
+        db,
+        organization_id=organization_id,
+        limit=limit,
+        threshold_score=threshold_score,
+        repeat_after_hours=repeat_after_hours,
+        dry_run=dry_run,
+    )
+
+
+async def run_performance_injury_risk_alert_scan_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    limit: int = 50,
+    threshold_score: int = 65,
+    repeat_after_hours: int = 24,
+    dry_run: bool = False,
+) -> PerformanceInjuryRiskAlertRunRead:
+    athlete_profile_ids = await injury_risk_scan_athlete_ids(db, organization_id, limit)
+    scanned_count = 0
+    alerted_count = 0
+    skipped_count = 0
+    failed_count = 0
+    high_risk_count = 0
+    highest_score: int | None = None
+    processed_ids: list[UUID] = []
+    message_ids: list[UUID] = []
+    skipped_reasons: dict[str, int] = {}
+
+    for athlete_profile_id in athlete_profile_ids:
+        athlete_profile = await db.get(AthleteProfile, athlete_profile_id)
+        if athlete_profile is None:
+            failed_count += 1
+            continue
+        try:
+            result = await send_performance_injury_risk_alert_for_athlete(
+                db,
+                athlete_profile.organization_id,
+                athlete_profile_id,
+                threshold_score=threshold_score,
+                dry_run=dry_run,
+                repeat_after_hours=repeat_after_hours,
+            )
+            scanned_count += 1
+            processed_ids.append(athlete_profile_id)
+            score = int(result["score"])
+            highest_score = score if highest_score is None else max(highest_score, score)
+            if score >= threshold_score:
+                high_risk_count += 1
+            if result["sent"]:
+                alerted_count += 1
+                if result["message_id"] is not None:
+                    message_ids.append(result["message_id"])
+            else:
+                skipped_count += 1
+                reason = str(result["skipped_reason"] or ("Dry run only." if dry_run else "Alert not sent."))
+                skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return PerformanceInjuryRiskAlertRunRead(
+        organization_id=organization_id,
+        threshold_score=threshold_score,
+        repeat_after_hours=repeat_after_hours,
+        dry_run=dry_run,
+        eligible_count=len(athlete_profile_ids),
+        scanned_count=scanned_count,
+        alerted_count=alerted_count,
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        high_risk_count=high_risk_count,
+        highest_score=highest_score,
+        athlete_profile_ids=processed_ids,
+        message_ids=message_ids,
+        skipped_reasons=skipped_reasons,
+    )
 
 
 async def create_performance_goal(
@@ -2392,6 +2504,47 @@ async def injury_risk_alert_recipient_ids(
     recipient_ids.add(athlete.id)
     recipient_ids.update(await guardian_person_ids(db, athlete.id))
     return recipient_ids
+
+
+async def injury_risk_scan_athlete_ids(
+    db: AsyncSession,
+    organization_id: UUID | None,
+    limit: int,
+) -> list[UUID]:
+    statement = (
+        select(AthleteProfile.id)
+        .outerjoin(TrainingSessionFeedback, TrainingSessionFeedback.athlete_profile_id == AthleteProfile.id)
+        .outerjoin(AthletePerformanceObservation, AthletePerformanceObservation.athlete_profile_id == AthleteProfile.id)
+        .group_by(AthleteProfile.id)
+        .order_by(
+            func.max(TrainingSessionFeedback.recorded_at).desc().nulls_last(),
+            func.max(AthletePerformanceObservation.observed_at).desc().nulls_last(),
+            AthleteProfile.created_at.desc(),
+        )
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(AthleteProfile.organization_id == organization_id)
+    return list((await db.scalars(statement)).all())
+
+
+async def recent_injury_risk_alert_exists(
+    db: AsyncSession,
+    athlete_person_id: UUID,
+    repeat_after_hours: int,
+) -> bool:
+    sent_after = datetime.now(UTC) - timedelta(hours=repeat_after_hours)
+    existing = await db.scalar(
+        select(CommunicationMessage.id)
+        .where(CommunicationMessage.scope_type == CommunicationScopeType.PERSON)
+        .where(CommunicationMessage.scope_id == athlete_person_id)
+        .where(CommunicationMessage.message_type == CommunicationMessageType.ALERT)
+        .where(CommunicationMessage.subject.ilike("%injury risk%"))
+        .where(CommunicationMessage.sent_at.is_not(None))
+        .where(CommunicationMessage.sent_at >= sent_after)
+        .limit(1)
+    )
+    return existing is not None
 
 
 async def create_injury_risk_alert_message(

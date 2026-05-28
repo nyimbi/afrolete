@@ -36,11 +36,19 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
 
     result = await run_due_workers(db_session, organization_id=organization.id, lanes=("all",), limit=10)
 
-    assert result["lanes"] == ["agent-tasks", "developer-webhooks", "performance-achievements"]
+    assert result["lanes"] == [
+        "agent-tasks",
+        "developer-webhooks",
+        "performance-achievements",
+        "performance-injury-risk-alerts",
+        "performance-review-escalations",
+    ]
     assert result["summary"]["eligible_count"] == 1
     assert result["summary"]["processed_count"] == 1
     assert result["results"]["developer_webhooks"]["eligible_count"] == 0
     assert result["results"]["performance_achievements"]["eligible_count"] == 0
+    assert result["results"]["performance_injury_risk_alerts"]["eligible_count"] == 0
+    assert result["results"]["performance_review_escalations"]["eligible_count"] == 0
     await db_session.refresh(task)
     assert task.status == AgentTaskStatus.WAITING_FOR_REVIEW
     record_count = await db_session.scalar(
@@ -54,5 +62,7 @@ def test_selected_lanes_expands_all() -> None:
         "agent-tasks",
         "developer-webhooks",
         "performance-achievements",
+        "performance-injury-risk-alerts",
+        "performance-review-escalations",
     }
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}

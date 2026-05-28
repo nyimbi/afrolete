@@ -3385,6 +3385,23 @@ export type PerformanceInjuryRiskAlertRead = {
   risk: PerformanceInjuryRiskRead;
 };
 
+export type PerformanceInjuryRiskAlertRunRead = {
+  organization_id: UUID | null;
+  threshold_score: number;
+  repeat_after_hours: number;
+  dry_run: boolean;
+  eligible_count: number;
+  scanned_count: number;
+  alerted_count: number;
+  skipped_count: number;
+  failed_count: number;
+  high_risk_count: number;
+  highest_score: number | null;
+  athlete_profile_ids: UUID[];
+  message_ids: UUID[];
+  skipped_reasons: Record<string, number>;
+};
+
 export type PerformanceGoalRead = {
   id: UUID;
   organization_id: UUID;
