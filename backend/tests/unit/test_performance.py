@@ -1231,6 +1231,146 @@ def test_performance_ingestion_normalizes_garmin_wellness_schema(client, identit
     assert ingestion["parser_confidence_reason"].startswith("Normalized a garmin")
 
 
+def test_performance_ingestion_normalizes_polar_hrv_schema(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "hrv",
+            "name": "Heart Rate Variability",
+            "category": "wellness",
+            "unit": "ms",
+            "min_value": 0,
+            "max_value": 200,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/performance/ingest",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "metric_definition_id": metric["id"],
+            "source": "wearable",
+            "evidence_ref": "polar://nightly-recharge/2026-06-05",
+            "evidence_text": json.dumps(
+                {
+                    "provider": "polar",
+                    "date": "2026-06-05",
+                    "heart_rate": {"resting": 82, "average": 143},
+                    "hrv": {"rmssd": 47},
+                    "sleep": {"duration_minutes": 418, "score": 81},
+                }
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    ingestion = response.json()
+    assert ingestion["source_provider"] == "polar"
+    assert ingestion["observation"]["value"] == 47
+    assert ingestion["parser_method"] == "polar_provider_schema"
+    assert ingestion["parsed_fields"]["source_path"] == "hrv.rmssd"
+
+
+def test_performance_ingestion_normalizes_oura_sleep_schema(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "sleep_minutes",
+            "name": "Sleep Minutes",
+            "category": "wellness",
+            "unit": "minutes",
+            "min_value": 0,
+            "max_value": 900,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/performance/ingest",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "metric_definition_id": metric["id"],
+            "source": "wearable",
+            "evidence_ref": "oura://daily-sleep/2026-06-05",
+            "evidence_text": json.dumps(
+                {
+                    "provider": "oura",
+                    "day": "2026-06-05",
+                    "readiness": {"score": 82, "average_hrv": 49, "resting_heart_rate": 57},
+                    "sleep": {"score": 86, "total_sleep_duration": 25200},
+                }
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    ingestion = response.json()
+    assert ingestion["source_provider"] == "oura"
+    assert ingestion["observation"]["value"] == 420
+    assert ingestion["parser_method"] == "oura_provider_schema"
+    assert ingestion["parsed_fields"]["source_path"] == "sleep.total_sleep_duration"
+
+
+def test_performance_ingestion_normalizes_catapult_workload_schema(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "player_load",
+            "name": "Player Load",
+            "category": "physical",
+            "unit": "load",
+            "min_value": 0,
+            "max_value": 1000,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/performance/ingest",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "metric_definition_id": metric["id"],
+            "source": "wearable",
+            "evidence_ref": "catapult://session/2026-06-05",
+            "evidence_text": json.dumps(
+                {
+                    "provider": "catapult",
+                    "session_start": "2026-06-05T16:00:00Z",
+                    "metrics": {
+                        "player_load": 384,
+                        "total_distance_m": 6820,
+                        "max_velocity": 8.4,
+                        "high_speed_distance": 721,
+                    },
+                }
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    ingestion = response.json()
+    assert ingestion["source_provider"] == "catapult"
+    assert ingestion["observation"]["value"] == 384
+    assert ingestion["parser_method"] == "catapult_provider_schema"
+    assert ingestion["parsed_fields"]["source_path"] == "metrics.player_load"
+
+
 def test_performance_wearable_webhook_creates_pending_observations_once(
     client, identity_headers
 ) -> None:

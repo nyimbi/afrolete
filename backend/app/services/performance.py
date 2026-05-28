@@ -4568,6 +4568,13 @@ PROVIDER_METRIC_ALIASES: dict[str, set[str]] = {
         "HKQuantityTypeIdentifierBodyTemperature",
     },
     "body_battery": {"body_battery", "bodyBatteryMostRecentValue", "bodyBattery"},
+    "player_load": {"player_load", "playerLoad", "workload", "total_load"},
+    "total_distance": {"total_distance", "total_distance_m", "distance", "distance_meters"},
+    "max_speed": {"max_speed", "max_velocity", "top_speed", "maxVelocity"},
+    "high_speed_distance": {"high_speed_distance", "highSpeedRunningDistance", "hsr_distance"},
+    "accelerations": {"accelerations", "acceleration_count", "high_intensity_accelerations"},
+    "decelerations": {"decelerations", "deceleration_count", "high_intensity_decelerations"},
+    "average_heart_rate": {"average_heart_rate", "avg_hr", "averageHeartRate", "heart_rate_average"},
 }
 
 
@@ -4616,6 +4623,12 @@ def provider_from_structured_payload(data: object | None) -> str | None:
         return "apple_health"
     if {"activities", "sleep", "summary"} & keys and "fitbit" in json.dumps(data).lower():
         return "fitbit"
+    if {"polar_user", "heart_rate", "hrv", "sleep"} & keys:
+        return "polar"
+    if {"readiness", "daily_readiness", "sleep", "daily_sleep"} & keys and "oura" in json.dumps(data).lower():
+        return "oura"
+    if {"playerLoad", "player_load", "athlete_load", "total_distance_m", "max_velocity"} & keys:
+        return "catapult"
     return None
 
 
@@ -4639,6 +4652,12 @@ def provider_specific_metric_candidates(data: object, provider: str) -> list[dic
         return apple_health_metric_candidates(data)
     if provider == "fitbit":
         return fitbit_metric_candidates(data)
+    if provider == "polar":
+        return polar_metric_candidates(data)
+    if provider == "oura":
+        return oura_metric_candidates(data)
+    if provider in {"catapult", "statsports", "playertek"}:
+        return gps_workload_metric_candidates(data, provider)
     return []
 
 
@@ -4755,6 +4774,165 @@ def fitbit_metric_candidates(data: object) -> list[dict[str, object]]:
         "sleep.summary.efficiency",
     )
     return candidates
+
+
+def polar_metric_candidates(data: object) -> list[dict[str, object]]:
+    payload = first_dict_payload(data)
+    if payload is None:
+        return []
+    observed_at = first_string_value(payload, "observed_at", "date", "recorded_at", "start_time", "timestamp")
+    heart_rate = dict_value(payload, "heart_rate", "heartRate")
+    hrv = dict_value(payload, "hrv", "heart_rate_variability")
+    sleep = dict_value(payload, "sleep", "sleep_summary")
+    candidates: list[dict[str, object]] = []
+    add_provider_candidate(
+        candidates,
+        "resting_heart_rate",
+        nested_number(heart_rate, "resting", "resting_hr", "restingHeartRate") or deep_number(payload, "restingHeartRate"),
+        "polar",
+        observed_at,
+        "heart_rate.resting",
+    )
+    add_provider_candidate(
+        candidates,
+        "average_heart_rate",
+        nested_number(heart_rate, "average", "avg", "averageHeartRate") or deep_number(payload, "averageHeartRate"),
+        "polar",
+        observed_at,
+        "heart_rate.average",
+    )
+    add_provider_candidate(
+        candidates,
+        "hrv",
+        nested_number(hrv, "rmssd", "hrv_rmssd", "nightlyRechargeHrv") or deep_number(payload, "nightlyRechargeHrv"),
+        "polar",
+        observed_at,
+        "hrv.rmssd",
+    )
+    add_provider_candidate(
+        candidates,
+        "sleep_minutes",
+        sleep_duration_minutes(
+            nested_number(sleep, "duration_minutes", "total_sleep_minutes", "sleepDurationMinutes")
+            or deep_number(payload, "sleepDurationMinutes")
+            or nested_number(sleep, "duration_seconds", "total_sleep_seconds")
+        ),
+        "polar",
+        observed_at,
+        "sleep.duration",
+    )
+    add_provider_candidate(
+        candidates,
+        "sleep_quality",
+        nested_number(sleep, "score", "sleep_score", "sleepScore") or deep_number(payload, "sleepScore"),
+        "polar",
+        observed_at,
+        "sleep.score",
+    )
+    return candidates
+
+
+def oura_metric_candidates(data: object) -> list[dict[str, object]]:
+    payload = first_dict_payload(data)
+    if payload is None:
+        return []
+    readiness = dict_value(payload, "readiness", "daily_readiness")
+    sleep = dict_value(payload, "sleep", "daily_sleep")
+    observed_at = first_string_value(payload, "observed_at", "day", "date", "timestamp")
+    candidates: list[dict[str, object]] = []
+    add_provider_candidate(
+        candidates,
+        "recovery_score",
+        nested_number(readiness, "score", "readiness_score") or deep_number(payload, "readiness_score"),
+        "oura",
+        observed_at,
+        "readiness.score",
+    )
+    add_provider_candidate(
+        candidates,
+        "hrv",
+        nested_number(readiness, "average_hrv", "hrv", "rmssd") or deep_number(payload, "average_hrv"),
+        "oura",
+        observed_at,
+        "readiness.average_hrv",
+    )
+    add_provider_candidate(
+        candidates,
+        "resting_heart_rate",
+        nested_number(readiness, "resting_heart_rate", "lowest_resting_heart_rate")
+        or nested_number(sleep, "lowest_resting_heart_rate", "average_heart_rate")
+        or deep_number(payload, "lowest_resting_heart_rate"),
+        "oura",
+        observed_at,
+        "readiness.resting_heart_rate",
+    )
+    add_provider_candidate(
+        candidates,
+        "sleep_minutes",
+        sleep_duration_minutes(
+            nested_number(sleep, "total_sleep_duration", "total_sleep_duration_seconds", "duration_seconds")
+            or deep_number(payload, "total_sleep_duration")
+        ),
+        "oura",
+        observed_at,
+        "sleep.total_sleep_duration",
+    )
+    add_provider_candidate(
+        candidates,
+        "sleep_quality",
+        nested_number(sleep, "score", "sleep_score") or deep_number(payload, "sleep_score"),
+        "oura",
+        observed_at,
+        "sleep.score",
+    )
+    add_provider_candidate(
+        candidates,
+        "temperature",
+        nested_number(readiness, "temperature_deviation", "temperature") or deep_number(payload, "temperature_deviation"),
+        "oura",
+        observed_at,
+        "readiness.temperature_deviation",
+    )
+    return candidates
+
+
+def gps_workload_metric_candidates(data: object, provider: str) -> list[dict[str, object]]:
+    payload = first_dict_payload(data)
+    if payload is None:
+        return []
+    session = dict_value(payload, "session", "metrics", "summary", "workload")
+    observed_at = first_string_value(payload, "observed_at", "timestamp", "start_time", "session_start", "date")
+    candidates: list[dict[str, object]] = []
+    for code, keys, source_path in (
+        ("player_load", ("playerLoad", "player_load", "athlete_load", "workload", "total_load"), "metrics.player_load"),
+        ("total_distance", ("total_distance_m", "distance_meters", "distance", "totalDistance"), "metrics.total_distance"),
+        ("max_speed", ("max_velocity", "max_speed", "top_speed", "maxVelocity"), "metrics.max_speed"),
+        (
+            "high_speed_distance",
+            ("high_speed_distance", "highSpeedRunningDistance", "hsr_distance"),
+            "metrics.high_speed_distance",
+        ),
+        (
+            "accelerations",
+            ("accelerations", "acceleration_count", "high_intensity_accelerations"),
+            "metrics.accelerations",
+        ),
+        (
+            "decelerations",
+            ("decelerations", "deceleration_count", "high_intensity_decelerations"),
+            "metrics.decelerations",
+        ),
+        ("average_heart_rate", ("average_heart_rate", "avg_hr", "averageHeartRate"), "metrics.average_heart_rate"),
+    ):
+        value = nested_number(session, *keys) or deep_number(payload, *keys)
+        add_provider_candidate(candidates, code, value, provider, observed_at, source_path)
+    return candidates
+
+
+def sleep_duration_minutes(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(value / 60, 2) if value > 1440 else value
 
 
 def add_provider_candidate(

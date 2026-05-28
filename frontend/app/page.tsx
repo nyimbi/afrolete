@@ -314,6 +314,38 @@ function wearableWebhookPayload(provider: string): Record<string, unknown> {
       dateOfSleep: "2026-06-05"
     };
   }
+  if (provider === "polar") {
+    return {
+      provider: "polar",
+      date: "2026-06-05",
+      heart_rate: { resting: 83, average: 144 },
+      hrv: { rmssd: 46 },
+      sleep: { duration_minutes: 411, score: 79 }
+    };
+  }
+  if (provider === "oura") {
+    return {
+      provider: "oura",
+      day: "2026-06-05",
+      readiness: { score: 82, average_hrv: 48, resting_heart_rate: 58, temperature_deviation: 0.2 },
+      sleep: { score: 86, total_sleep_duration: 25620 }
+    };
+  }
+  if (["catapult", "statsports", "playertek"].includes(provider)) {
+    return {
+      provider,
+      session_start: "2026-06-05T16:00:00Z",
+      metrics: {
+        player_load: 384,
+        total_distance_m: 6820,
+        max_velocity: 8.4,
+        high_speed_distance: 721,
+        accelerations: 43,
+        decelerations: 38,
+        average_heart_rate: 151
+      }
+    };
+  }
   return {
     provider: "whoop",
     recovery: {
@@ -13858,6 +13890,11 @@ export default function HomePage() {
                   <option value="garmin">Garmin</option>
                   <option value="apple_health">Apple Health</option>
                   <option value="fitbit">Fitbit</option>
+                  <option value="polar">Polar</option>
+                  <option value="oura">Oura</option>
+                  <option value="catapult">Catapult</option>
+                  <option value="statsports">STATSports</option>
+                  <option value="playertek">Playertek</option>
                   <option value="statsbomb">StatsBomb</option>
                   <option value="wyscout">Wyscout</option>
                 </select>
