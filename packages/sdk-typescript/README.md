@@ -27,6 +27,11 @@ const team = await client.teams.create({
   name: "U17 Girls",
   sport: "football",
 });
+
+await client.teams.addMember(team.id, {
+  person_id: "person-uuid",
+  role: "player",
+});
 ```
 
 The client sends `X-Afrolete-API-Key` and targets `/api/v1/sdk/*` routes. It is

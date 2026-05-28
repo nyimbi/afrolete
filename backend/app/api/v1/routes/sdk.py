@@ -1,26 +1,32 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.event import Event
+from app.models.identity import Person
 from app.models.organization import Organization
-from app.models.team import Team
+from app.models.team import AthleteProfile, Team, TeamRosterEntry
 from app.models.training import TrainingDrill
 from app.schemas.developer import DeveloperApiKeyInspectionRead
 from app.schemas.event import EventCreate, EventRead
 from app.schemas.organization import OrganizationRead
-from app.schemas.team import TeamCreate, TeamRead
+from app.schemas.team import TeamCreate, TeamMemberAdd, TeamRead, TeamRosterEntryRead
 from app.schemas.training import TrainingDrillCreate, TrainingDrillRead
-from app.services.authz.service import AuthorizationService, Relationship, get_authorization_service
+from app.services.authz.service import (
+    AuthorizationService,
+    Relationship,
+    get_authorization_service,
+)
 from app.services.developer import (
     deliver_developer_webhook_event,
     ensure_developer_api_scope,
     inspect_developer_api_key,
 )
 from app.services.events import list_events
-from app.services.teams import list_teams_for_organization
+from app.services.teams import list_teams_for_organization, team_member_relation
 from app.services.training import list_training_drills
 
 router = APIRouter(prefix="/sdk", tags=["sdk"])
@@ -170,6 +176,78 @@ async def sdk_create_team(
     await db.commit()
     await db.refresh(team)
     return to_team_read(team)
+
+
+@router.post(
+    "/teams/{team_id}/members",
+    response_model=TeamRosterEntryRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sdk_add_team_member(
+    team_id: UUID,
+    payload: TeamMemberAdd,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TeamRosterEntryRead:
+    team = await db.get(Team, team_id)
+    if team is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    ensure_developer_api_scope(credential, team.organization_id, {"write:roster", "write:teams"})
+    person = await db.get(Person, payload.person_id)
+    if person is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+    athlete_profile = await db.scalar(
+        select(AthleteProfile).where(
+            AthleteProfile.organization_id == team.organization_id,
+            AthleteProfile.person_id == payload.person_id,
+        )
+    )
+    if athlete_profile is None:
+        athlete_profile = AthleteProfile(
+            organization_id=team.organization_id,
+            person_id=payload.person_id,
+        )
+        db.add(athlete_profile)
+        await db.flush()
+    roster_entry = await db.scalar(
+        select(TeamRosterEntry).where(
+            TeamRosterEntry.team_id == team_id,
+            TeamRosterEntry.athlete_profile_id == athlete_profile.id,
+        )
+    )
+    if roster_entry is None:
+        roster_entry = TeamRosterEntry(
+            team_id=team_id,
+            athlete_profile_id=athlete_profile.id,
+            role=payload.role,
+            status=payload.status,
+            primary_position=payload.primary_position,
+            jersey_number=payload.jersey_number,
+            is_captain=payload.is_captain,
+        )
+        db.add(roster_entry)
+        await authz.touch(
+            Relationship(
+                resource_type="team",
+                resource_id=str(team_id),
+                relation=team_member_relation(payload.role),
+                subject_type="person",
+                subject_id=str(payload.person_id),
+            )
+        )
+        await db.commit()
+        await db.refresh(roster_entry)
+    return TeamRosterEntryRead(
+        id=roster_entry.id,
+        team_id=roster_entry.team_id,
+        athlete_profile_id=roster_entry.athlete_profile_id,
+        role=roster_entry.role,
+        primary_position=roster_entry.primary_position,
+        jersey_number=roster_entry.jersey_number,
+        is_captain=roster_entry.is_captain,
+        status=roster_entry.status,
+    )
 
 
 @router.post("/events", response_model=EventRead, status_code=status.HTTP_201_CREATED)

@@ -96,6 +96,26 @@ export interface TeamCreate {
   season_label?: string | null;
 }
 
+export interface TeamMemberAdd {
+  person_id: UUID;
+  role?: string;
+  status?: string;
+  primary_position?: string | null;
+  jersey_number?: string | null;
+  is_captain?: boolean;
+}
+
+export interface TeamRosterEntry {
+  id: UUID;
+  team_id: UUID;
+  athlete_profile_id: UUID;
+  role: string;
+  primary_position: string | null;
+  jersey_number: string | null;
+  is_captain: boolean;
+  status: string;
+}
+
 export interface EventCreate {
   organization_id: UUID;
   team_id?: UUID | null;
@@ -178,6 +198,11 @@ export class AfroLeteClient {
       }),
     create: (payload: TeamCreate): Promise<Team> =>
       this.request<Team>("/teams", {
+        method: "POST",
+        body: payload,
+      }),
+    addMember: (teamId: UUID, payload: TeamMemberAdd): Promise<TeamRosterEntry> =>
+      this.request<TeamRosterEntry>(`/teams/${teamId}/members`, {
         method: "POST",
         body: payload,
       }),

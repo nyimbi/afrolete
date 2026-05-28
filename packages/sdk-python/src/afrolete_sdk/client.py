@@ -37,6 +37,9 @@ class _TeamsResource:
     def create(self, payload: JsonObject) -> JsonObject:
         return self.client.request("POST", "/teams", body=payload)
 
+    def add_member(self, team_id: str, payload: JsonObject) -> JsonObject:
+        return self.client.request("POST", f"/teams/{team_id}/members", body=payload)
+
 
 @dataclass(frozen=True)
 class _EventsResource:
