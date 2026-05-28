@@ -42,6 +42,7 @@ from app.schemas.safeguarding import (
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
     FamilyPerformanceSummaryRead,
+    GuardianAccountReadinessRead,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
     SafeguardingEvidencePolicyRuleCreate,
@@ -112,6 +113,7 @@ from app.services.safeguarding import (
     list_background_check_evidence_documents,
     list_background_checks,
     list_compliance_credentials,
+    list_guardian_account_readiness,
     list_guardians_for_athlete,
     get_my_family_dashboard,
     list_incident_insurance_claims,
@@ -373,6 +375,16 @@ async def list_guardians_route(
         to_guardian_read(relationship)
         for relationship in await list_guardians_for_athlete(db, athlete_person_id)
     ]
+
+
+@router.get("/guardian-account-readiness", response_model=list[GuardianAccountReadinessRead])
+async def list_guardian_account_readiness_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[GuardianAccountReadinessRead]:
+    return await list_guardian_account_readiness(db, identity, organization_id, authz)
 
 
 @router.get("/my-family", response_model=list[FamilyAthleteSummaryRead])

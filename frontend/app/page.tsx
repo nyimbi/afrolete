@@ -190,6 +190,7 @@ import type {
   BackgroundCheckProviderResultRead,
   BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
+  GuardianAccountReadinessRead,
   GuardianRelationshipRead,
   SafeguardingEvidencePolicyRuleRead,
   SafeguardingIncidentAccessGrantRead,
@@ -329,6 +330,25 @@ const metricCategoryOptions: MetricCategory[] = [
   "wellness",
   "competition"
 ];
+
+function guardianAccountStatusLabel(status: string): string {
+  if (status === "linked") {
+    return "Portal ready";
+  }
+  if (status === "invite_ready") {
+    return "Invite ready";
+  }
+  if (status === "pending_link") {
+    return "Sign-in pending";
+  }
+  if (status === "email_conflict") {
+    return "Email conflict";
+  }
+  if (status === "phone_only") {
+    return "Needs email";
+  }
+  return "Missing contact";
+}
 
 function wearableWebhookPayload(provider: string): Record<string, unknown> {
   if (provider === "garmin") {
@@ -1597,6 +1617,7 @@ export default function HomePage() {
   const [inquiryReviewForms, setInquiryReviewForms] = useState<Record<string, InquiryReviewForm>>({});
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
+  const [guardianAccountReadiness, setGuardianAccountReadiness] = useState<GuardianAccountReadinessRead[]>([]);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
   const [clearance, setClearance] = useState<ParticipationClearanceRead | null>(null);
   const [safeguardingIncidents, setSafeguardingIncidents] = useState<SafeguardingIncidentRead[]>([]);
@@ -2405,6 +2426,14 @@ export default function HomePage() {
       { identity }
     );
     setSafeguardingIncidents(data);
+  }, [identity]);
+
+  const loadGuardianAccountReadiness = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<GuardianAccountReadinessRead[]>(
+      `/safeguarding/guardian-account-readiness?organization_id=${organizationId}`,
+      { identity }
+    );
+    setGuardianAccountReadiness(data);
   }, [identity]);
 
   const loadIncidentEvidenceReviewQueue = useCallback(async (organizationId: string, reviewStatus?: string) => {
@@ -3250,6 +3279,7 @@ export default function HomePage() {
       setOfficialAssignments([]);
       setRegistrationInquiries([]);
       setSafeguardingIncidents([]);
+      setGuardianAccountReadiness([]);
       setIncidentInvestigationAction(null);
       setIncidentEvidenceUpload(null);
       setIncidentEvidenceLink(null);
@@ -3371,6 +3401,7 @@ export default function HomePage() {
       await loadRegistrationInquiries(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
       await loadSafeguardingIncidents(selectedOrganizationId);
+      await loadGuardianAccountReadiness(selectedOrganizationId);
       await loadIncidentEvidenceReviewQueue(selectedOrganizationId);
       await loadSafeguardingEvidencePolicyRules(selectedOrganizationId);
       await loadBackgroundChecks(selectedOrganizationId);
@@ -3398,6 +3429,7 @@ export default function HomePage() {
     loadRegistrationInquiries,
     loadEvents,
     loadSafeguardingIncidents,
+    loadGuardianAccountReadiness,
     loadIncidentEvidenceReviewQueue,
     loadSafeguardingEvidencePolicyRules,
     loadBackgroundChecks,
@@ -5607,6 +5639,7 @@ export default function HomePage() {
         }),
       (guardian) => {
         setGuardians((current) => [guardian, ...current.filter((item) => item.id !== guardian.id)]);
+        void loadGuardianAccountReadiness(selectedOrganizationId);
         addLog(`${guardianForm.guardian_display_name} linked as guardian`, "good");
       }
     );
@@ -16946,6 +16979,21 @@ export default function HomePage() {
             </div>
             <div className="event-toolbar">
               <button type="button" onClick={createGuardian} disabled={busyAction !== null}>Link guardian</button>
+              <button
+                type="button"
+                onClick={() =>
+                  selectedOrganizationId
+                    ? void runAction(
+                        "guardian-account-readiness",
+                        () => loadGuardianAccountReadiness(selectedOrganizationId),
+                        () => addLog("Guardian account readiness refreshed", "good")
+                      )
+                    : undefined
+                }
+                disabled={busyAction !== null || !selectedOrganizationId}
+              >
+                Check family accounts
+              </button>
               <button type="button" onClick={requestConsent} disabled={busyAction !== null}>Request consent</button>
               <button type="button" onClick={createBackgroundCheck} disabled={busyAction !== null}>Request check</button>
               <button type="button" onClick={createComplianceCredential} disabled={busyAction !== null}>Track credential</button>
@@ -16979,6 +17027,13 @@ export default function HomePage() {
               <span className="muted">Regulatory</span>
               <strong>{complianceSummary?.regulatory_incidents ?? 0}</strong>
             </div>
+            <div>
+              <span className="muted">Family accounts</span>
+              <strong>
+                {guardianAccountReadiness.filter((item) => item.account_status === "linked").length}
+                /{guardianAccountReadiness.length}
+              </strong>
+            </div>
           </div>
           <div className="form-grid three">
             <label>
@@ -16993,6 +17048,25 @@ export default function HomePage() {
               Phone
               <input value={guardianForm.guardian_phone} onChange={(event) => setGuardianForm({ ...guardianForm, guardian_phone: event.target.value })} />
             </label>
+          </div>
+          <div className="mini-grid">
+            {guardianAccountReadiness.slice(0, 6).map((item) => (
+              <article className="mini-card" key={item.relationship_id}>
+                <span className="muted">{guardianAccountStatusLabel(item.account_status)}</span>
+                <strong>{item.guardian_name}</strong>
+                <p>{item.athlete_name}</p>
+                <small>
+                  {item.guardian_email ?? item.guardian_phone ?? "No contact"} · {item.recommended_action}
+                </small>
+              </article>
+            ))}
+            {guardianAccountReadiness.length === 0 ? (
+              <article className="mini-card">
+                <span className="muted">Family accounts</span>
+                <strong>No guardians loaded</strong>
+                <p>Link a guardian or refresh account readiness.</p>
+              </article>
+            ) : null}
           </div>
           <div className="form-grid three">
             <label>

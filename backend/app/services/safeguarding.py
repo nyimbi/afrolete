@@ -16,6 +16,7 @@ import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.config import Settings, get_settings
 from app.models.enums import (
@@ -83,6 +84,7 @@ from app.schemas.safeguarding import (
     FamilyConsentResponseCreate,
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
+    GuardianAccountReadinessRead,
     FamilyPerformanceAwardRead,
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
@@ -5045,6 +5047,103 @@ async def list_guardians_for_athlete(
                 .order_by(GuardianRelationship.is_primary.desc())
             )
         ).all()
+    )
+
+
+async def list_guardian_account_readiness(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> list[GuardianAccountReadinessRead]:
+    await ensure_org_manage(authz, organization_id, identity)
+    athlete_person = aliased(Person)
+    guardian_person = aliased(Person)
+    rows = (
+        await db.execute(
+            select(GuardianRelationship, athlete_person, AthleteProfile, guardian_person)
+            .join(athlete_person, athlete_person.id == GuardianRelationship.athlete_person_id)
+            .join(AthleteProfile, AthleteProfile.person_id == GuardianRelationship.athlete_person_id)
+            .join(
+                guardian_person,
+                guardian_person.id == GuardianRelationship.guardian_person_id,
+                isouter=False,
+            )
+            .where(AthleteProfile.organization_id == organization_id)
+            .order_by(athlete_person.display_name, GuardianRelationship.is_primary.desc())
+        )
+    ).all()
+
+    readiness: list[GuardianAccountReadinessRead] = []
+    for relationship, athlete, _, guardian in rows:
+        linked_user = await db.scalar(
+            select(AppUser)
+            .where(AppUser.person_id == guardian.id)
+            .order_by(AppUser.created_at.desc())
+            .limit(1)
+        )
+        email_user = None
+        if guardian.primary_email:
+            email_user = await db.scalar(
+                select(AppUser)
+                .where(func.lower(AppUser.email) == guardian.primary_email.lower())
+                .order_by(AppUser.created_at.desc())
+                .limit(1)
+            )
+        status_value, action = guardian_account_status(guardian, linked_user, email_user)
+        readiness.append(
+            GuardianAccountReadinessRead(
+                relationship_id=relationship.id,
+                athlete_person_id=relationship.athlete_person_id,
+                athlete_name=athlete.display_name,
+                guardian_person_id=guardian.id,
+                guardian_name=guardian.display_name,
+                guardian_email=guardian.primary_email,
+                guardian_phone=guardian.primary_phone,
+                account_status=status_value,
+                linked_app_user_id=linked_user.id if linked_user else None,
+                keycloak_sub=linked_user.keycloak_sub if linked_user else None,
+                email_matches_app_user=email_user is not None,
+                can_receive_invite=bool(guardian.primary_email),
+                recommended_action=action,
+            )
+        )
+    return readiness
+
+
+def guardian_account_status(
+    guardian: Person,
+    linked_user: AppUser | None,
+    email_user: AppUser | None,
+) -> tuple[str, str]:
+    if linked_user is not None:
+        return (
+            "linked",
+            "Guardian has a linked AfroLete account and can use authenticated family workflows.",
+        )
+    if email_user is not None and email_user.person_id is None:
+        return (
+            "pending_link",
+            "Ask the guardian to sign in once; the identity bridge will attach this email-matched account.",
+        )
+    if email_user is not None and email_user.person_id != guardian.id:
+        return (
+            "email_conflict",
+            "Resolve the existing app user using this email before inviting the guardian.",
+        )
+    if guardian.primary_email:
+        return (
+            "invite_ready",
+            "Invite this guardian to sign in with the recorded email; the identity bridge will attach the account.",
+        )
+    if guardian.primary_phone:
+        return (
+            "phone_only",
+            "Collect an email address before Keycloak self-service onboarding.",
+        )
+    return (
+        "missing_contact",
+        "Add guardian email or phone contact details before issuing portal access.",
     )
 
 

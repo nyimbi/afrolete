@@ -17,7 +17,7 @@ from app.models.enums import (
     OrganizationType,
 )
 from app.models.event import ActivityConsent, Event
-from app.models.identity import Person
+from app.models.identity import AppUser, Person
 from app.services import safeguarding as safeguarding_service
 from app.services.authz.service import authorization_service
 from app.services.safeguarding import clearance_for_event
@@ -131,6 +131,97 @@ def test_guardian_can_consent_by_known_sms_number(client, identity_headers, athl
     assert guardian["relationship_kind"] == "legal_guardian"
     assert consent_response.status_code == 200
     assert consent_response.json()["capture_channel"] == "sms"
+
+
+async def test_guardian_account_readiness_maps_portal_onboarding_status(
+    client,
+    identity_headers,
+    db_session,
+) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Guardian Account Club",
+            "organization_type": "club",
+            "primary_sport": "football",
+        },
+    ).json()
+    member = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "readiness-athlete@example.com",
+            "display_name": "Readiness Athlete",
+            "role": "athlete",
+        },
+    ).json()
+    team = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Readiness U14",
+            "sport": "football",
+            "sport_format": "team",
+        },
+    ).json()
+    client.post(
+        f"/api/v1/teams/{team['id']}/members",
+        headers=identity_headers,
+        json={
+            "person_id": member["subject_id"],
+            "role": "player",
+            "status": "active",
+        },
+    )
+    invite_ready = client.post(
+        "/api/v1/safeguarding/guardians",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_person_id": member["subject_id"],
+            "guardian_email": "invite-ready-parent@example.com",
+            "guardian_display_name": "Invite Ready Parent",
+            "relationship_kind": "parent",
+            "can_sign_consent": True,
+        },
+    ).json()
+    linked = client.post(
+        "/api/v1/safeguarding/guardians",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_person_id": member["subject_id"],
+            "guardian_email": "linked-parent@example.com",
+            "guardian_display_name": "Linked Parent",
+            "relationship_kind": "legal_guardian",
+            "can_sign_consent": True,
+        },
+    ).json()
+    db_session.add(
+        AppUser(
+            keycloak_sub="kc-linked-parent",
+            person_id=linked["guardian_person_id"],
+            email="linked-parent@example.com",
+            display_name="Linked Parent",
+        )
+    )
+    await db_session.commit()
+
+    response = client.get(
+        f"/api/v1/safeguarding/guardian-account-readiness?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert response.status_code == 200
+    readiness = {item["guardian_person_id"]: item for item in response.json()}
+    assert readiness[invite_ready["guardian_person_id"]]["account_status"] == "invite_ready"
+    assert readiness[invite_ready["guardian_person_id"]]["can_receive_invite"] is True
+    assert "identity bridge" in readiness[invite_ready["guardian_person_id"]]["recommended_action"]
+    assert readiness[linked["guardian_person_id"]]["account_status"] == "linked"
+    assert readiness[linked["guardian_person_id"]]["linked_app_user_id"]
+    assert readiness[linked["guardian_person_id"]]["keycloak_sub"] == "kc-linked-parent"
 
 
 async def test_family_dashboard_summarizes_parent_actions(client, identity_headers, db_session) -> None:

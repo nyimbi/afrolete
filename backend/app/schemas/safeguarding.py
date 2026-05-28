@@ -67,6 +67,22 @@ class GuardianRelationshipRead(BaseModel):
     notes: str | None
 
 
+class GuardianAccountReadinessRead(BaseModel):
+    relationship_id: UUID
+    athlete_person_id: UUID
+    athlete_name: str
+    guardian_person_id: UUID
+    guardian_name: str
+    guardian_email: str | None
+    guardian_phone: str | None
+    account_status: str
+    linked_app_user_id: UUID | None
+    keycloak_sub: str | None
+    email_matches_app_user: bool
+    can_receive_invite: bool
+    recommended_action: str
+
+
 class FamilyAthleteSummaryRead(BaseModel):
     athlete_person_id: UUID
     athlete_name: str

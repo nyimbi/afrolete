@@ -1354,6 +1354,22 @@ export type GuardianRelationshipRead = {
   notes: string | null;
 };
 
+export type GuardianAccountReadinessRead = {
+  relationship_id: UUID;
+  athlete_person_id: UUID;
+  athlete_name: string;
+  guardian_person_id: UUID;
+  guardian_name: string;
+  guardian_email: string | null;
+  guardian_phone: string | null;
+  account_status: string;
+  linked_app_user_id: UUID | null;
+  keycloak_sub: string | null;
+  email_matches_app_user: boolean;
+  can_receive_invite: boolean;
+  recommended_action: string;
+};
+
 export type FamilyAthleteSummaryRead = {
   athlete_person_id: UUID;
   athlete_name: string;
