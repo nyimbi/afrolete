@@ -3076,7 +3076,11 @@ export type AgentDecisionAppealFormRead = {
   generated_at: string;
   download_filename: string;
   content_type: string;
+  artifact_format: "markdown" | "pdf";
   content: string;
+  content_base64: string | null;
+  checksum: string;
+  size_bytes: number;
 };
 
 export type AgentCredentialStatusRead = {

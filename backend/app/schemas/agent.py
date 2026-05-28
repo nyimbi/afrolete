@@ -278,7 +278,11 @@ class AgentDecisionAppealFormRead(BaseModel):
     generated_at: datetime
     download_filename: str
     content_type: str
+    artifact_format: str
     content: str
+    content_base64: str | None = None
+    checksum: str
+    size_bytes: int
 
 
 class AgentRunRecordRead(BaseModel):

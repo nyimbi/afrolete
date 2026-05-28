@@ -1,9 +1,12 @@
 from sqlalchemy import select
 
 from app.models.agent import Agent, AgentRunRecord, AgentTask
-from app.models.enums import AgentKind, AgentTaskStatus, OrganizationType
+from app.models.enums import AgentKind, AgentTaskStatus, GuardianRelationshipKind, OrganizationType
 from app.models.organization import Organization
-from app.services.agents import run_agent_task_worker
+from app.models.identity import Person
+from app.models.team import AthleteProfile, GuardianRelationship
+from app.services.agents import get_my_agent_decision_appeal_form, run_agent_task_worker
+from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import authorization_service
 
 
@@ -278,6 +281,76 @@ async def test_agent_task_worker_executes_queued_tasks(db_session) -> None:
     assert [record.event_type for record in records] == ["execution_started", "execution_finished"]
     assert records[0].record_hash
     assert records[1].previous_record_hash == records[0].record_hash
+
+
+async def test_family_ai_appeal_form_renders_markdown_and_pdf(db_session) -> None:
+    organization = Organization(
+        name="Agent Appeal Club",
+        slug="agent-appeal-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    athlete = Person(display_name="Appeal Athlete", primary_email="appeal-athlete@example.com")
+    guardian = Person(display_name="Appeal Guardian", primary_email="appeal-guardian@example.com")
+    db_session.add_all([organization, athlete, guardian])
+    await db_session.flush()
+    profile = AthleteProfile(
+        organization_id=organization.id,
+        person_id=athlete.id,
+        athlete_code="AP-10",
+    )
+    relationship = GuardianRelationship(
+        athlete_person_id=athlete.id,
+        guardian_person_id=guardian.id,
+        relationship_kind=GuardianRelationshipKind.PARENT,
+        relationship="parent",
+        can_sign_consent=True,
+    )
+    agent = Agent(
+        organization_id=organization.id,
+        name="Family Explainability Agent",
+        kind=AgentKind.SAFEGUARDING,
+        purpose="Explain AI recommendations to families before decisions are finalized.",
+        model_policy="family_review_model",
+    )
+    db_session.add_all([profile, relationship, agent])
+    await db_session.flush()
+    task = AgentTask(
+        organization_id=organization.id,
+        agent_id=agent.id,
+        task_type="family_recommendation_review",
+        title="Review athlete workload recommendation",
+        status=AgentTaskStatus.WAITING_FOR_REVIEW,
+        input_ref=f"athlete_profile:{profile.id}",
+        output_ref=f"agent://tasks/family/{profile.id}",
+        review_notes="Recommend reducing load after soreness signal.",
+    )
+    db_session.add(task)
+    await db_session.commit()
+    identity = CurrentIdentity(
+        user_id=guardian.id,
+        person_id=guardian.id,
+        keycloak_sub="kc-parent-appeal",
+        email="appeal-guardian@example.com",
+        display_name="Appeal Guardian",
+    )
+
+    markdown = await get_my_agent_decision_appeal_form(db_session, identity, organization.id, task.id)
+    assert markdown["artifact_format"] == "markdown"
+    assert markdown["download_filename"].endswith(".md")
+    assert markdown["content_type"].startswith("text/markdown")
+    assert "AfroLete AI Decision Appeal Form" in str(markdown["content"])
+    assert markdown["content_base64"] is None
+    assert markdown["checksum"]
+    assert markdown["size_bytes"] > 100
+
+    pdf = await get_my_agent_decision_appeal_form(db_session, identity, organization.id, task.id, "pdf")
+    assert pdf["artifact_format"] == "pdf"
+    assert pdf["download_filename"].endswith(".pdf")
+    assert pdf["content_type"] == "application/pdf"
+    assert pdf["content"] == ""
+    assert isinstance(pdf["content_base64"], str)
+    assert pdf["size_bytes"] > 500
 
 
 def test_agent_assignment_rejects_cross_organization_scope(client, identity_headers) -> None:

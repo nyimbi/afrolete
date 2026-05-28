@@ -282,6 +282,7 @@ async def get_my_agent_decision_appeal_form(
     identity: CurrentIdentity,
     organization_id: UUID,
     task_id: UUID,
+    artifact_format: str = "markdown",
     settings: Settings | None = None,
 ) -> dict[str, object]:
     task = await db.get(AgentTask, task_id)
@@ -317,13 +318,35 @@ async def get_my_agent_decision_appeal_form(
         model_policy=agent.model_policy or settings.agent_default_model,
         settings=settings,
     )
+    normalized_format = artifact_format.lower().strip()
+    if normalized_format not in {"markdown", "pdf"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported appeal form format")
+    if normalized_format == "pdf":
+        content_bytes = render_agent_decision_appeal_pdf(content, task, generated_at)
+        return {
+            "organization_id": organization_id,
+            "task_id": task.id,
+            "generated_at": generated_at,
+            "download_filename": f"afrolete-ai-appeal-{filename_name}-{str(task.id)[:8]}.pdf",
+            "content_type": "application/pdf",
+            "artifact_format": "pdf",
+            "content": "",
+            "content_base64": base64.b64encode(content_bytes).decode(),
+            "checksum": hashlib.sha256(content_bytes).hexdigest(),
+            "size_bytes": len(content_bytes),
+        }
+    content_bytes = content.encode()
     return {
         "organization_id": organization_id,
         "task_id": task.id,
         "generated_at": generated_at,
         "download_filename": f"afrolete-ai-appeal-{filename_name}-{str(task.id)[:8]}.md",
         "content_type": "text/markdown; charset=utf-8",
+        "artifact_format": "markdown",
         "content": content,
+        "content_base64": None,
+        "checksum": hashlib.sha256(content_bytes).hexdigest(),
+        "size_bytes": len(content_bytes),
     }
 
 
@@ -3190,6 +3213,36 @@ def render_agent_decision_appeal_form(
             "Submit this form through the AfroLete family portal or attach it to the relevant support message.",
         ]
     )
+
+
+def render_agent_decision_appeal_pdf(
+    markdown_content: str,
+    task: AgentTask,
+    generated_at: datetime,
+) -> bytes:
+    lines: list[str] = []
+    for raw_line in markdown_content.splitlines():
+        line = raw_line.strip()
+        if line.startswith("# "):
+            lines.extend(["AfroLete AI Decision Appeal Form", ""])
+            continue
+        if line.startswith("## "):
+            lines.extend(["", line[3:], ""])
+            continue
+        if not line:
+            lines.append("")
+            continue
+        lines.extend(wrapped_pdf_lines(line, 92))
+    lines.extend(
+        [
+            "",
+            "Artifact integrity",
+            f"Task ID: {task.id}",
+            f"Generated: {generated_at.isoformat()}",
+            "This PDF was generated from the same appeal data available in the family portal.",
+        ]
+    )
+    return simple_pdf_from_lines(lines, title=f"AI appeal {str(task.id)[:8]}")
 
 
 def agent_bias_disparity_score(records: list[AgentRunRecord], registry: AgentModelRegistry) -> float:

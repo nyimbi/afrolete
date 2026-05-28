@@ -416,11 +416,12 @@ async def list_my_agent_family_tasks_route(
 async def get_my_agent_decision_appeal_form_route(
     task_id: UUID,
     organization_id: UUID = Query(),
+    artifact_format: str = Query(default="markdown", pattern="^(markdown|pdf)$"),
     identity: CurrentIdentity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
 ) -> AgentDecisionAppealFormRead:
     return AgentDecisionAppealFormRead(
-        **await get_my_agent_decision_appeal_form(db, identity, organization_id, task_id)
+        **await get_my_agent_decision_appeal_form(db, identity, organization_id, task_id, artifact_format)
     )
 
 

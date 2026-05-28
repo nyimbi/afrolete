@@ -252,7 +252,16 @@ export default function FamilyPortalPage() {
     }
   };
 
-  const downloadAiAppealForm = async (taskId: string) => {
+  const base64ToBlob = (value: string, contentType: string) => {
+    const binary = window.atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: contentType });
+  };
+
+  const downloadAiAppealForm = async (taskId: string, artifactFormat: "markdown" | "pdf" = "markdown") => {
     if (!organizationId) {
       setError("Organization id is required");
       return;
@@ -261,10 +270,13 @@ export default function FamilyPortalPage() {
     setError("");
     try {
       const form = await apiRequest<AgentDecisionAppealFormRead>(
-        `/agents/my-family-tasks/${taskId}/appeal-form?organization_id=${encodeURIComponent(organizationId)}`,
+        `/agents/my-family-tasks/${taskId}/appeal-form?organization_id=${encodeURIComponent(organizationId)}&artifact_format=${artifactFormat}`,
         { identity }
       );
-      const blob = new Blob([form.content], { type: form.content_type });
+      const blob =
+        form.content_base64 !== null
+          ? base64ToBlob(form.content_base64, form.content_type)
+          : new Blob([form.content], { type: form.content_type });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -479,8 +491,11 @@ export default function FamilyPortalPage() {
                 <small>{task.data_summary}</small>
                 <small>{task.governance_note}</small>
                 <small>{task.appeal_status ? `Appeal ${task.appeal_status}` : "No appeal opened"}</small>
-                <button type="button" onClick={() => downloadAiAppealForm(task.id)} disabled={busy}>
-                  Download appeal form
+                <button type="button" onClick={() => downloadAiAppealForm(task.id, "markdown")} disabled={busy}>
+                  Markdown form
+                </button>
+                <button type="button" onClick={() => downloadAiAppealForm(task.id, "pdf")} disabled={busy}>
+                  PDF form
                 </button>
               </article>
             ))}
