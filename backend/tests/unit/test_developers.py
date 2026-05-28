@@ -1,5 +1,6 @@
 import base64
 import hashlib
+from datetime import UTC, datetime, timedelta
 
 
 def create_developer_org(client, identity_headers):
@@ -328,12 +329,41 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert catalog["auth_header"] == "X-Afrolete-API-Key"
     assert "training.drill.created" in catalog["configured_event_types"]
     assert "read:organization" in {scope["scope"] for scope in catalog["scopes"]}
+    assert "read:events" in {scope["scope"] for scope in catalog["scopes"]}
     training_event = next(
         event for event in catalog["webhook_events"] if event["event_type"] == "training.drill.created"
     )
     assert training_event["emission_status"] == "active"
     assert "write:training" in training_event["recommended_scopes"]
+    sdk_event_created = next(
+        event for event in catalog["webhook_events"] if event["event_type"] == "events.created"
+    )
+    assert sdk_event_created["emission_status"] == "active"
+    assert "write:events" in sdk_event_created["recommended_scopes"]
     assert any(sdk["language"] == "Raw HTTP" and sdk["status"] == "active" for sdk in catalog["sdks"])
+
+    event_start = (datetime.now(UTC) + timedelta(days=7)).isoformat()
+    sdk_event_response = client.post(
+        "/api/v1/sdk/events",
+        json={
+            "organization_id": organization["id"],
+            "event_type": "match",
+            "title": "SDK Cup Final",
+            "starts_at": event_start,
+            "timezone": "Africa/Nairobi",
+            "venue_name": "AfroLete Stadium",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_event_response.status_code == 201
+    assert sdk_event_response.json()["title"] == "SDK Cup Final"
+
+    sdk_events_response = client.get(
+        f"/api/v1/sdk/events?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_events_response.status_code == 200
+    assert any(event["title"] == "SDK Cup Final" for event in sdk_events_response.json())
 
     sdk_drill_response = client.post(
         "/api/v1/sdk/training/drills",

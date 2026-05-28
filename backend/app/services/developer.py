@@ -1215,6 +1215,12 @@ def developer_scope_catalog() -> list[DeveloperApiScopeCatalogRead]:
             recommended_for=["calendar sync", "competition systems", "facility schedulers"],
         ),
         DeveloperApiScopeCatalogRead(
+            scope="read:events",
+            category="events",
+            description="Read tenant event, fixture, schedule, and travel-adjacent event metadata.",
+            recommended_for=["calendar sync", "competition portals", "fan engagement"],
+        ),
+        DeveloperApiScopeCatalogRead(
             scope="write:training",
             category="training",
             description="Create training drills and coaching-plan inputs through SDK routes.",
@@ -1286,16 +1292,18 @@ def developer_webhook_event_catalog() -> list[DeveloperWebhookEventCatalogRead]:
         DeveloperWebhookEventCatalogRead(
             event_type="events.created",
             category="events",
-            description="A tenant event or fixture has been created.",
-            emission_status="cataloged",
-            payload_fields=["organization_id", "event_id", "team_id", "event_type", "starts_at"],
+            description="A developer API key created a tenant event or fixture.",
+            emission_status="active",
+            payload_fields=["organization_id", "id", "team_id", "event_type", "title", "starts_at", "source"],
             recommended_scopes=["write:events"],
             example_payload={
                 "organization_id": "tenant-uuid",
-                "event_id": "event-uuid",
+                "id": "event-uuid",
                 "team_id": "team-uuid",
                 "event_type": "match",
+                "title": "U17 League Match",
                 "starts_at": "2026-06-01T15:00:00Z",
+                "source": "developer_api",
             },
         ),
         DeveloperWebhookEventCatalogRead(
@@ -1382,21 +1390,40 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
             package_name="@afrolete/sdk",
             install_command="pnpm add @afrolete/sdk",
             status="planned_public_package",
-            entry_points=["client.organization.get", "client.training.drills.list", "client.training.drills.create"],
+            entry_points=[
+                "client.organization.get",
+                "client.events.list",
+                "client.events.create",
+                "client.training.drills.list",
+                "client.training.drills.create",
+            ],
         ),
         DeveloperSdkCatalogRead(
             language="Python",
             package_name="afrolete-sdk",
             install_command="uv add afrolete-sdk",
             status="planned_public_package",
-            entry_points=["client.organization.get", "client.training.drills.list", "client.training.drills.create"],
+            entry_points=[
+                "client.organization.get",
+                "client.events.list",
+                "client.events.create",
+                "client.training.drills.list",
+                "client.training.drills.create",
+            ],
         ),
         DeveloperSdkCatalogRead(
             language="Raw HTTP",
             package_name="OpenAPI",
             install_command="curl -H 'X-Afrolete-API-Key: ...' /api/v1/sdk/me",
             status="active",
-            entry_points=["GET /sdk/me", "GET /sdk/organization", "GET /sdk/training/drills", "POST /sdk/training/drills"],
+            entry_points=[
+                "GET /sdk/me",
+                "GET /sdk/organization",
+                "GET /sdk/events",
+                "POST /sdk/events",
+                "GET /sdk/training/drills",
+                "POST /sdk/training/drills",
+            ],
         ),
     ]
 
@@ -1433,6 +1460,23 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
                 "  -d '{\"organization_id\":\"'$ORG_ID'\",\"sport\":\"football\","
                 "\"name\":\"Advanced Passing Circuit\",\"focus_area\":\"Passing\","
                 "\"category\":\"technical\",\"description\":\"One-touch passing square.\"}'"
+            ),
+        ),
+        DeveloperQuickstartRead(
+            title="Create a tenant event",
+            language="HTTP",
+            description="Create a tenant schedule item through the SDK route protected by write:events.",
+            steps=[
+                "Grant the API key write:events for the tenant.",
+                "POST an event payload to /api/v1/sdk/events.",
+                "Subscribe to events.created to fan out schedule creation to external systems.",
+            ],
+            code_sample=(
+                "curl -s \"$AFROLETE_API/api/v1/sdk/events\" \\\n"
+                "  -H \"Content-Type: application/json\" \\\n"
+                "  -H \"X-Afrolete-API-Key: $AFROLETE_API_KEY\" \\\n"
+                "  -d '{\"organization_id\":\"'$ORG_ID'\",\"event_type\":\"match\","
+                "\"title\":\"U17 League Match\",\"starts_at\":\"2026-06-01T15:00:00Z\"}'"
             ),
         ),
         DeveloperQuickstartRead(
