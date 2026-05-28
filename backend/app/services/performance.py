@@ -59,6 +59,7 @@ from app.schemas.performance import (
     PerformanceInjuryRiskAlertRunRead,
     MetricDefinitionCreate,
     PerformanceAchievementWorkerRunRead,
+    PerformanceForecastValidationWorkerRunRead,
     PerformanceGoalCreate,
     PerformanceForecastValidationRunCreate,
     PerformanceIngestionCreate,
@@ -409,9 +410,23 @@ async def run_performance_forecast_validation(
     await ensure_manage_performance(authz, identity, payload.organization_id)
     if payload.athlete_profile_id is not None:
         await get_athlete_profile(db, payload.athlete_profile_id, payload.organization_id)
+    return await create_performance_forecast_validation_run(
+        db,
+        payload.organization_id,
+        athlete_profile_id=payload.athlete_profile_id,
+        created_by_person_id=identity.person_id,
+    )
+
+
+async def create_performance_forecast_validation_run(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID | None = None,
+    created_by_person_id: UUID | None = None,
+) -> dict[str, object]:
     settings = get_settings()
-    profile_ids = await forecast_validation_profile_ids(db, payload.organization_id, payload.athlete_profile_id)
-    metric_rows = await forecast_validation_metric_rows(db, payload.organization_id, profile_ids)
+    profile_ids = await forecast_validation_profile_ids(db, organization_id, athlete_profile_id)
+    metric_rows = await forecast_validation_metric_rows(db, organization_id, profile_ids)
     details = [forecast_validation_metric_detail(*row) for row in metric_rows]
     evaluated = [detail for detail in details if detail["absolute_error"] is not None]
     passed_count = sum(1 for detail in evaluated if detail["passed"])
@@ -434,8 +449,8 @@ async def run_performance_forecast_validation(
     drift_level = forecast_validation_drift_level(mean_relative_error, drift_count, len(evaluated))
     recommendation = forecast_validation_recommendation(drift_level, mean_relative_error, drift_count, len(evaluated))
     run = PerformanceForecastValidationRun(
-        organization_id=payload.organization_id,
-        athlete_profile_id=payload.athlete_profile_id,
+        organization_id=organization_id,
+        athlete_profile_id=athlete_profile_id,
         model_policy=forecast_validation_model_policy(settings),
         forecast_mode=settings.performance_forecast_mode,
         metric_count=len(details),
@@ -448,7 +463,7 @@ async def run_performance_forecast_validation(
         drift_level=drift_level,
         recommendation=recommendation,
         details_json=stable_payload_text({"details": details}),
-        created_by_person_id=identity.person_id,
+        created_by_person_id=created_by_person_id,
     )
     db.add(run)
     await db.commit()
@@ -475,6 +490,52 @@ async def list_performance_forecast_validation_runs(
         query = query.where(PerformanceForecastValidationRun.athlete_profile_id == athlete_profile_id)
     rows = list((await db.scalars(query)).all())
     return [forecast_validation_run_read(row) for row in rows]
+
+
+async def run_performance_forecast_validation_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    limit: int = 25,
+) -> PerformanceForecastValidationWorkerRunRead:
+    organization_ids = await forecast_validation_worker_organization_ids(db, organization_id, limit)
+    executed_count = 0
+    failed_count = 0
+    run_ids: list[UUID] = []
+    metric_count = 0
+    evaluated_count = 0
+    drift_count = 0
+    watch_count = 0
+    high_count = 0
+
+    for org_id in organization_ids:
+        try:
+            run = await create_performance_forecast_validation_run(db, org_id)
+            executed_count += 1
+            run_ids.append(run["id"])
+            metric_count += int(run["metric_count"])
+            evaluated_count += int(run["evaluated_count"])
+            drift_count += int(run["drift_count"])
+            if run["drift_level"] == "watch":
+                watch_count += 1
+            if run["drift_level"] == "high":
+                high_count += 1
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return PerformanceForecastValidationWorkerRunRead(
+        organization_id=organization_id,
+        eligible_count=len(organization_ids),
+        executed_count=executed_count,
+        skipped_count=max(len(organization_ids) - executed_count - failed_count, 0),
+        failed_count=failed_count,
+        run_ids=run_ids,
+        metric_count=metric_count,
+        evaluated_count=evaluated_count,
+        drift_count=drift_count,
+        watch_count=watch_count,
+        high_count=high_count,
+    )
 
 
 async def ingest_performance_wearable_webhook(
@@ -5703,6 +5764,32 @@ async def forecast_validation_profile_ids(
             )
         ).all()
     )
+
+
+async def forecast_validation_worker_organization_ids(
+    db: AsyncSession,
+    organization_id: UUID | None,
+    limit: int,
+) -> list[UUID]:
+    if organization_id is not None:
+        has_observations = await db.scalar(
+            select(func.count(AthletePerformanceObservation.id))
+            .where(AthletePerformanceObservation.organization_id == organization_id)
+            .where(AthletePerformanceObservation.verification_status != MetricVerificationStatus.REJECTED)
+        )
+        return [organization_id] if has_observations else []
+    rows = list(
+        (
+            await db.scalars(
+                select(AthletePerformanceObservation.organization_id)
+                .where(AthletePerformanceObservation.verification_status != MetricVerificationStatus.REJECTED)
+                .group_by(AthletePerformanceObservation.organization_id)
+                .order_by(func.max(AthletePerformanceObservation.observed_at).desc())
+                .limit(max(1, min(limit, 100)))
+            )
+        ).all()
+    )
+    return rows
 
 
 async def forecast_validation_metric_rows(

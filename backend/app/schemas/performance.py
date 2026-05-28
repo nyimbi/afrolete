@@ -842,6 +842,20 @@ class PerformanceAchievementWorkerRunRead(BaseModel):
     updated_goals: int
 
 
+class PerformanceForecastValidationWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    executed_count: int
+    skipped_count: int
+    failed_count: int
+    run_ids: list[UUID]
+    metric_count: int
+    evaluated_count: int
+    drift_count: int
+    watch_count: int
+    high_count: int
+
+
 class PerformanceAssessmentReviewEscalationRunRead(BaseModel):
     organization_id: UUID | None
     eligible_count: int

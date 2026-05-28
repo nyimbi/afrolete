@@ -14,6 +14,7 @@ from app.services.developer import run_developer_webhook_retry_due
 from app.services.performance import (
     run_assessment_review_escalation_worker,
     run_performance_achievement_worker,
+    run_performance_forecast_validation_worker,
     run_performance_injury_risk_alert_scan_worker,
     run_wearable_pull_retry_worker,
 )
@@ -22,6 +23,7 @@ WORKER_LANES = (
     "agent-tasks",
     "developer-webhooks",
     "performance-achievements",
+    "performance-forecast-validations",
     "performance-review-escalations",
     "performance-injury-risk-alerts",
     "wearable-pull-retries",
@@ -36,6 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--agent-limit", type=int, default=None)
     parser.add_argument("--webhook-limit", type=int, default=None)
     parser.add_argument("--performance-limit", type=int, default=None)
+    parser.add_argument("--performance-forecast-validation-limit", type=int, default=None)
     parser.add_argument("--performance-review-limit", type=int, default=None)
     parser.add_argument("--performance-review-horizon-hours", type=int, default=24)
     parser.add_argument("--performance-review-repeat-after-hours", type=int, default=24)
@@ -84,6 +87,7 @@ async def run_due_workers(
     agent_limit: int | None = None,
     webhook_limit: int | None = None,
     performance_limit: int | None = None,
+    performance_forecast_validation_limit: int | None = None,
     performance_review_limit: int | None = None,
     performance_review_horizon_hours: int = 24,
     performance_review_repeat_after_hours: int = 24,
@@ -127,6 +131,14 @@ async def run_due_workers(
                 db,
                 organization_id=organization_id,
                 limit=performance_limit or limit,
+            )
+        ).model_dump(mode="json")
+    if "performance-forecast-validations" in active_lanes:
+        results["performance_forecast_validations"] = (
+            await run_performance_forecast_validation_worker(
+                db,
+                organization_id=organization_id,
+                limit=performance_forecast_validation_limit or performance_limit or limit,
             )
         ).model_dump(mode="json")
     if "performance-review-escalations" in active_lanes:
@@ -208,6 +220,7 @@ async def run() -> None:
             agent_limit=args.agent_limit,
             webhook_limit=args.webhook_limit,
             performance_limit=args.performance_limit,
+            performance_forecast_validation_limit=args.performance_forecast_validation_limit,
             performance_review_limit=args.performance_review_limit,
             performance_review_horizon_hours=args.performance_review_horizon_hours,
             performance_review_repeat_after_hours=args.performance_review_repeat_after_hours,
