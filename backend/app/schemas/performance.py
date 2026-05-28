@@ -230,6 +230,8 @@ class PerformanceMetricBenchmarkRead(BaseModel):
     category: MetricCategory
     unit: str | None
     higher_is_better: bool
+    cohort_scope: str
+    cohort_label: str
     sample_size: int
     athlete_value: float | None
     cohort_average: float | None

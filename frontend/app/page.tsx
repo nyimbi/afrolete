@@ -459,6 +459,7 @@ type AssessmentReviewQueueFilters = {
 };
 
 const chartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--red)", "var(--violet)"];
+type BenchmarkCohortScope = "tenant" | "age_group" | "position";
 
 function infrastructureTone(component: InfrastructureComponent) {
   if (component.configured || component.status === "local") {
@@ -725,7 +726,9 @@ function PerformanceVisualDashboard({
       <article className="task-card chart-card">
         <div>
           <strong>Cohort standing · {benchmarks.length} benchmarks</strong>
-          <span>Percentile rank against the active tenant/sport cohort</span>
+          <span>
+            {benchmarks[0]?.cohort_label ?? "All athletes"} · {(benchmarks[0]?.cohort_scope ?? "tenant").replaceAll("_", " ")}
+          </span>
         </div>
         <div className="chart-bars">
           {benchmarks.slice(0, 4).map((benchmark, index) => {
@@ -947,6 +950,7 @@ export default function HomePage() {
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
   const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
+  const [performanceBenchmarkScope, setPerformanceBenchmarkScope] = useState<BenchmarkCohortScope>("tenant");
   const [performanceTrends, setPerformanceTrends] = useState<PerformanceMetricTrendRead[]>([]);
   const [performanceTrendSeries, setPerformanceTrendSeries] = useState<PerformanceMetricTrendSeriesRead[]>([]);
   const [performanceGoals, setPerformanceGoals] = useState<PerformanceGoalRead[]>([]);
@@ -2005,7 +2009,7 @@ export default function HomePage() {
           `/performance/athletes/${athleteProfileId}/summary?organization_id=${organizationId}`
         ),
         apiRequest<PerformanceMetricBenchmarkRead[]>(
-          `/performance/athletes/${athleteProfileId}/benchmarks?organization_id=${organizationId}`
+          `/performance/athletes/${athleteProfileId}/benchmarks?organization_id=${organizationId}&cohort_scope=${performanceBenchmarkScope}`
         ),
         apiRequest<PerformanceMetricTrendRead[]>(
           `/performance/athletes/${athleteProfileId}/trends?organization_id=${organizationId}`
@@ -2034,7 +2038,7 @@ export default function HomePage() {
           : observationData[0]?.id ?? ""
       );
     },
-    []
+    [performanceBenchmarkScope]
   );
 
   const loadTraining = useCallback(async (organizationId: string, teamId?: string) => {
@@ -13069,6 +13073,17 @@ export default function HomePage() {
                 Due
                 <input type="date" value={performanceGoalForm.due_at} onChange={(event) => setPerformanceGoalForm({ ...performanceGoalForm, due_at: event.target.value })} />
               </label>
+              <label>
+                Benchmark cohort
+                <select
+                  value={performanceBenchmarkScope}
+                  onChange={(event) => setPerformanceBenchmarkScope(event.target.value as BenchmarkCohortScope)}
+                >
+                  <option value="tenant">All athletes</option>
+                  <option value="age_group">Age group</option>
+                  <option value="position">Position</option>
+                </select>
+              </label>
             </div>
             <PerformanceVisualDashboard
               summary={performanceSummary}
@@ -13249,6 +13264,7 @@ export default function HomePage() {
                       cohort avg {benchmark.cohort_average ?? "—"}{benchmark.unit ? ` ${benchmark.unit}` : ""}
                     </span>
                     <small>{benchmark.recommendation}</small>
+                    <small>{benchmark.cohort_label} · {benchmark.cohort_scope.replaceAll("_", " ")}</small>
                   </div>
                 </article>
               ))}

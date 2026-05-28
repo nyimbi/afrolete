@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 import re
 from statistics import pstdev
 from uuid import UUID
@@ -28,7 +28,7 @@ from app.models.performance import (
     PerformanceGoal,
     PerformanceMetricDefinition,
 )
-from app.models.team import AthleteProfile
+from app.models.team import AthleteProfile, Team, TeamRosterEntry
 from app.schemas.performance import (
     AssessmentReviewLoadRead,
     AssessmentReviewQueueSummaryRead,
@@ -669,7 +669,9 @@ async def performance_metric_benchmarks(
     organization_id: UUID,
     athlete_profile_id: UUID | None = None,
     sport: str | None = None,
+    cohort_scope: str = "tenant",
 ) -> list[dict[str, object]]:
+    cohort_scope = normalize_benchmark_scope(cohort_scope)
     athlete_profile = None
     if athlete_profile_id is not None:
         athlete_profile = await get_athlete_profile(db, athlete_profile_id, organization_id)
@@ -699,6 +701,20 @@ async def performance_metric_benchmarks(
     for observation in observations:
         key = (observation.metric_definition_id, observation.athlete_profile_id)
         latest_by_metric_athlete.setdefault(key, observation)
+    context_athlete_ids = {athlete_id for _, athlete_id in latest_by_metric_athlete}
+    if athlete_profile is not None:
+        context_athlete_ids.add(athlete_profile.id)
+    context_by_athlete = await athlete_benchmark_contexts(
+        db,
+        organization_id,
+        context_athlete_ids,
+    )
+    target_context = (
+        context_by_athlete.get(athlete_profile.id)
+        if athlete_profile is not None
+        else None
+    )
+    cohort_label = benchmark_cohort_label(cohort_scope, target_context)
 
     benchmarks: list[dict[str, object]] = []
     for metric in metrics:
@@ -706,6 +722,11 @@ async def performance_metric_benchmarks(
             observation
             for (metric_id, _), observation in latest_by_metric_athlete.items()
             if metric_id == metric.id
+            and benchmark_context_matches(
+                cohort_scope,
+                target_context,
+                context_by_athlete.get(observation.athlete_profile_id),
+            )
         ]
         values = [observation.value for observation in cohort_observations]
         athlete_observation = (
@@ -734,6 +755,8 @@ async def performance_metric_benchmarks(
                 "category": metric.category,
                 "unit": metric.unit,
                 "higher_is_better": metric.higher_is_better,
+                "cohort_scope": cohort_scope,
+                "cohort_label": cohort_label,
                 "sample_size": len(values),
                 "athlete_value": athlete_value,
                 "cohort_average": round(average, 2) if average is not None else None,
@@ -969,7 +992,9 @@ async def list_my_player_performance(
     identity: CurrentIdentity,
     organization_id: UUID,
     observation_limit: int = 10,
+    benchmark_cohort_scope: str = "tenant",
 ) -> list[dict[str, object]]:
+    benchmark_cohort_scope = normalize_benchmark_scope(benchmark_cohort_scope)
     organization = await db.get(Organization, organization_id)
     if organization is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
@@ -1008,6 +1033,7 @@ async def list_my_player_performance(
             db,
             organization_id,
             athlete_profile_id=profile.id,
+            cohort_scope=benchmark_cohort_scope,
         )
         results.append(
             {
@@ -1469,6 +1495,104 @@ def benchmark_band(
     if percentile_rank >= 40:
         return "on_track"
     return "watch"
+
+
+def normalize_benchmark_scope(cohort_scope: str) -> str:
+    normalized = cohort_scope.strip().lower()
+    if normalized in {"tenant", "age_group", "position"}:
+        return normalized
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="cohort_scope must be one of tenant, age_group, or position",
+    )
+
+
+async def athlete_benchmark_contexts(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_ids: set[UUID],
+) -> dict[UUID, dict[str, str | None]]:
+    if not athlete_profile_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(
+                AthleteProfile.id,
+                Person.date_of_birth,
+                TeamRosterEntry.primary_position,
+                Team.age_group,
+            )
+            .join(Person, Person.id == AthleteProfile.person_id)
+            .outerjoin(
+                TeamRosterEntry,
+                TeamRosterEntry.athlete_profile_id == AthleteProfile.id,
+            )
+            .outerjoin(Team, Team.id == TeamRosterEntry.team_id)
+            .where(AthleteProfile.organization_id == organization_id)
+            .where(AthleteProfile.id.in_(list(athlete_profile_ids)))
+        )
+    ).all()
+    contexts: dict[UUID, dict[str, str | None]] = {}
+    for athlete_profile_id, date_of_birth, primary_position, team_age_group in rows:
+        context = contexts.setdefault(
+            athlete_profile_id,
+            {"age_group": None, "position": None},
+        )
+        if context["age_group"] is None:
+            context["age_group"] = team_age_group or age_group_from_birthdate(date_of_birth)
+        if context["position"] is None and primary_position:
+            context["position"] = primary_position
+    return contexts
+
+
+def age_group_from_birthdate(date_of_birth: date | None) -> str | None:
+    if date_of_birth is None:
+        return None
+    today = date.today()
+    age = today.year - date_of_birth.year - (
+        (today.month, today.day) < (date_of_birth.month, date_of_birth.day)
+    )
+    if age <= 8:
+        return "U8"
+    if age <= 10:
+        return "U10"
+    if age <= 12:
+        return "U12"
+    if age <= 14:
+        return "U14"
+    if age <= 16:
+        return "U16"
+    if age <= 18:
+        return "U18"
+    return "Adult"
+
+
+def benchmark_cohort_label(cohort_scope: str, target_context: dict[str, str | None] | None) -> str:
+    if cohort_scope == "tenant":
+        return "All athletes"
+    value = target_context.get(cohort_scope) if target_context is not None else None
+    return value or f"Unknown {cohort_scope.replace('_', ' ')}"
+
+
+def benchmark_context_matches(
+    cohort_scope: str,
+    target_context: dict[str, str | None] | None,
+    candidate_context: dict[str, str | None] | None,
+) -> bool:
+    if cohort_scope == "tenant":
+        return True
+    if target_context is None or candidate_context is None:
+        return False
+    target_value = normalized_cohort_value(target_context.get(cohort_scope))
+    candidate_value = normalized_cohort_value(candidate_context.get(cohort_scope))
+    return bool(target_value) and target_value == candidate_value
+
+
+def normalized_cohort_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(value.strip().lower().split())
+    return normalized or None
 
 
 def performance_benchmark_recommendation(

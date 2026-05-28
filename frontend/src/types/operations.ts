@@ -3245,6 +3245,8 @@ export type PerformanceMetricBenchmarkRead = {
   category: MetricCategory;
   unit: string | null;
   higher_is_better: boolean;
+  cohort_scope: string;
+  cohort_label: string;
   sample_size: number;
   athlete_value: number | null;
   cohort_average: number | null;

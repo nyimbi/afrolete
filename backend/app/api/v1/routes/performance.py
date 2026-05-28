@@ -212,6 +212,7 @@ async def list_metric_definitions_route(
 async def list_my_player_performance_route(
     organization_id: UUID = Query(),
     observation_limit: int = Query(default=10, ge=1, le=50),
+    benchmark_cohort_scope: str = Query(default="tenant"),
     identity: CurrentIdentity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
 ) -> list[PlayerPerformanceProfileRead]:
@@ -220,6 +221,7 @@ async def list_my_player_performance_route(
         identity,
         organization_id,
         observation_limit=observation_limit,
+        benchmark_cohort_scope=benchmark_cohort_scope,
     )
     return [
         PlayerPerformanceProfileRead(
@@ -511,6 +513,7 @@ async def performance_benchmarks_route(
     organization_id: UUID = Query(),
     athlete_profile_id: UUID | None = Query(default=None),
     sport: str | None = Query(default=None),
+    cohort_scope: str = Query(default="tenant"),
     db: AsyncSession = Depends(get_db),
 ) -> list[PerformanceMetricBenchmarkRead]:
     return [
@@ -520,6 +523,7 @@ async def performance_benchmarks_route(
             organization_id,
             athlete_profile_id=athlete_profile_id,
             sport=sport,
+            cohort_scope=cohort_scope,
         )
     ]
 
@@ -532,6 +536,7 @@ async def athlete_performance_benchmarks_route(
     athlete_profile_id: UUID,
     organization_id: UUID = Query(),
     sport: str | None = Query(default=None),
+    cohort_scope: str = Query(default="tenant"),
     db: AsyncSession = Depends(get_db),
 ) -> list[PerformanceMetricBenchmarkRead]:
     return [
@@ -541,6 +546,7 @@ async def athlete_performance_benchmarks_route(
             organization_id,
             athlete_profile_id=athlete_profile_id,
             sport=sport,
+            cohort_scope=cohort_scope,
         )
     ]
 

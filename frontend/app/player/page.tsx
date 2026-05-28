@@ -11,6 +11,7 @@ const defaultPlayerIdentity: LocalIdentity = {
 };
 
 const playerChartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--violet)", "var(--green)"];
+type BenchmarkCohortScope = "tenant" | "age_group" | "position";
 
 function playerValueLabel(value: number | null | undefined, unit?: string | null) {
   if (typeof value !== "number") {
@@ -127,7 +128,10 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
         <div>
           <span>Cohort standing</span>
           <strong>{profile.benchmarks.length} benchmarks</strong>
-          <small>Percentile rank inside the current sports cohort.</small>
+          <small>
+            {profile.benchmarks[0]?.cohort_label ?? "All athletes"} ·{" "}
+            {(profile.benchmarks[0]?.cohort_scope ?? "tenant").replaceAll("_", " ")}
+          </small>
         </div>
         <div className="chart-bars">
           {profile.benchmarks.slice(0, 4).map((benchmark, index) => (
@@ -240,6 +244,7 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
 export default function PlayerPerformancePage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultPlayerIdentity);
+  const [benchmarkScope, setBenchmarkScope] = useState<BenchmarkCohortScope>("tenant");
   const [profiles, setProfiles] = useState<PlayerPerformanceProfileRead[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [selfAssessment, setSelfAssessment] = useState({
@@ -260,17 +265,22 @@ export default function PlayerPerformancePage() {
       return;
     }
     try {
-      const parsed = JSON.parse(stored) as { organizationId?: string; identity?: LocalIdentity };
+      const parsed = JSON.parse(stored) as {
+        organizationId?: string;
+        identity?: LocalIdentity;
+        benchmarkScope?: BenchmarkCohortScope;
+      };
       setOrganizationId(parsed.organizationId ?? "");
       setIdentity(parsed.identity ?? defaultPlayerIdentity);
+      setBenchmarkScope(parsed.benchmarkScope ?? "tenant");
     } catch {
       window.localStorage.removeItem("afrolete.playerPortal");
     }
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("afrolete.playerPortal", JSON.stringify({ organizationId, identity }));
-  }, [identity, organizationId]);
+    window.localStorage.setItem("afrolete.playerPortal", JSON.stringify({ organizationId, identity, benchmarkScope }));
+  }, [benchmarkScope, identity, organizationId]);
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.athlete_profile_id === selectedProfileId) ?? profiles[0] ?? null,
@@ -287,7 +297,7 @@ export default function PlayerPerformancePage() {
     setError("");
     try {
       const rows = await apiRequest<PlayerPerformanceProfileRead[]>(
-        `/performance/my-profiles?organization_id=${encodeURIComponent(organizationId)}&observation_limit=8`,
+        `/performance/my-profiles?organization_id=${encodeURIComponent(organizationId)}&observation_limit=8&benchmark_cohort_scope=${benchmarkScope}`,
         { identity }
       );
       setProfiles(rows);
@@ -354,6 +364,14 @@ export default function PlayerPerformancePage() {
             value={identity.email}
             onChange={(event) => setIdentity({ ...identity, email: event.target.value })}
           />
+          <select
+            value={benchmarkScope}
+            onChange={(event) => setBenchmarkScope(event.target.value as BenchmarkCohortScope)}
+          >
+            <option value="tenant">All athletes</option>
+            <option value="age_group">Age group</option>
+            <option value="position">Position</option>
+          </select>
           <button type="submit" disabled={busy}>{busy ? "Loading" : "Refresh"}</button>
         </form>
 
