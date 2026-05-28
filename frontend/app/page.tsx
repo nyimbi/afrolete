@@ -190,6 +190,7 @@ import type {
   MembershipRead,
   MetricCategory,
   MetricDefinitionRead,
+  MetricVerificationStatus,
   MetricSource,
   OfficialRole,
   OrganizationRead,
@@ -5844,6 +5845,39 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== assessment.id)
         ]);
         addLog(`Assessment ALS ${assessment.overall_score}`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const reviewAssessment = (assessment: AthleteAssessmentRead, verificationStatus: MetricVerificationStatus) => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete first", "bad");
+      return;
+    }
+    runAction(
+      `review-assessment-${verificationStatus}`,
+      () =>
+        apiRequest<AthleteAssessmentRead>(
+          `/performance/assessments/${assessment.id}/review`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              verification_status: verificationStatus,
+              recommendations:
+                verificationStatus === "verified"
+                  ? "Coach verified player self-assessment from console."
+                  : "Coach rejected player self-assessment from console."
+            }
+          }
+        ),
+      (reviewed) => {
+        setAssessments((current) => [
+          reviewed,
+          ...current.filter((item) => item.id !== reviewed.id)
+        ]);
+        addLog(`Assessment ${verificationStatus}: ALS ${reviewed.overall_score}`, verificationStatus === "verified" ? "good" : "neutral");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
       }
     );
@@ -12804,9 +12838,18 @@ export default function HomePage() {
               {assessments.slice(0, 3).map((assessment) => (
                 <article key={assessment.id} className="task-card">
                   <div>
-                    <strong>ALS {assessment.overall_score}</strong>
+                    <strong>ALS {assessment.overall_score} · {assessment.verification_status}</strong>
                     <span>{assessment.summary ?? "Assessment recorded"}</span>
+                    <small>
+                      RPE {assessment.perceived_exertion ?? "n/a"} · effort {assessment.effort_rating ?? "n/a"}
+                    </small>
                   </div>
+                  {assessment.verification_status === "pending_review" ? (
+                    <span>
+                      <button type="button" onClick={() => reviewAssessment(assessment, "verified")} disabled={busyAction !== null}>Verify</button>
+                      <button type="button" onClick={() => reviewAssessment(assessment, "rejected")} disabled={busyAction !== null}>Reject</button>
+                    </span>
+                  ) : null}
                 </article>
               ))}
             </div>

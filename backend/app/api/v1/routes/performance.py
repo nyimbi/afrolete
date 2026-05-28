@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.schemas.performance import (
     AthleteAssessmentCreate,
     AthleteAssessmentRead,
+    AthleteAssessmentReviewCreate,
     AthletePerformanceSummaryRead,
     MetricDefinitionCreate,
     MetricDefinitionRead,
@@ -44,6 +45,7 @@ from app.services.performance import (
     performance_metric_benchmarks,
     performance_metric_trends,
     performance_summary,
+    review_assessment,
     review_observation,
 )
 
@@ -277,6 +279,20 @@ async def review_observation_route(
     return to_observation_read(
         await review_observation(db, identity, observation_id, payload, authz)
     )
+
+
+@router.patch(
+    "/assessments/{assessment_id}/review",
+    response_model=AthleteAssessmentRead,
+)
+async def review_assessment_route(
+    assessment_id: UUID,
+    payload: AthleteAssessmentReviewCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AthleteAssessmentRead:
+    return to_assessment_read(await review_assessment(db, identity, assessment_id, payload, authz))
 
 
 @router.get(

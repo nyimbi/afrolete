@@ -192,6 +192,58 @@ def test_player_can_submit_pending_self_assessment(client, identity_headers) -> 
     assert assessment["verification_status"] == "pending_review"
     assert assessment["summary"] == "Felt sharp but tired late."
 
+    summary = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/summary"
+        f"?organization_id={organization['id']}",
+    ).json()
+    assert summary["latest_overall_score"] is None
+    assert summary["assessment_count"] == 1
+
+
+def test_coach_can_review_player_self_assessment(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    player_headers = {
+        "X-Afrolete-Sub": "kc-athlete-1",
+        "X-Afrolete-Email": "performance-athlete@example.com",
+        "X-Afrolete-Name": "Performance Athlete",
+    }
+    pending = client.post(
+        f"/api/v1/performance/my-profiles/{roster['athlete_profile_id']}/self-assessments",
+        headers=player_headers,
+        json={
+            "organization_id": organization["id"],
+            "physical_score": 72,
+            "technical_score": 75,
+            "tactical_score": 68,
+            "mental_score": 81,
+            "perceived_exertion": 6,
+            "effort_rating": 9,
+        },
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/performance/assessments/{pending['id']}/review",
+        headers=identity_headers,
+        json={
+            "verification_status": "verified",
+            "physical_score": 74,
+            "recommendations": "Keep the recovery block and review fatigue next session.",
+        },
+    )
+
+    assert response.status_code == 200
+    reviewed = response.json()
+    assert reviewed["verification_status"] == "verified"
+    assert reviewed["physical_score"] == 74
+    assert reviewed["overall_score"] == 73.9
+    assert reviewed["recommendations"] == "Keep the recovery block and review fatigue next session."
+
+    summary = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/summary"
+        f"?organization_id={organization['id']}",
+    ).json()
+    assert summary["latest_overall_score"] == 73.9
+
 
 def test_player_cannot_submit_self_assessment_for_another_athlete(
     client,

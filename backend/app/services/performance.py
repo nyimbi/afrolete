@@ -28,6 +28,7 @@ from app.models.performance import (
 from app.models.team import AthleteProfile
 from app.schemas.performance import (
     AthleteAssessmentCreate,
+    AthleteAssessmentReviewCreate,
     MetricDefinitionCreate,
     PerformanceAchievementWorkerRunRead,
     PerformanceGoalCreate,
@@ -324,6 +325,45 @@ async def create_player_self_assessment(
     return assessment
 
 
+async def review_assessment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    assessment_id: UUID,
+    payload: AthleteAssessmentReviewCreate,
+    authz: AuthorizationService,
+) -> AthleteAssessment:
+    assessment = await db.get(AthleteAssessment, assessment_id)
+    if assessment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found")
+    await ensure_manage_performance(authz, identity, assessment.organization_id)
+    for field_name in (
+        "physical_score",
+        "technical_score",
+        "tactical_score",
+        "mental_score",
+        "perceived_exertion",
+        "effort_rating",
+    ):
+        value = getattr(payload, field_name)
+        if value is not None:
+            setattr(assessment, field_name, value)
+    assessment.overall_score = round(
+        assessment.physical_score * 0.25
+        + assessment.technical_score * 0.35
+        + assessment.tactical_score * 0.25
+        + assessment.mental_score * 0.15,
+        2,
+    )
+    assessment.verification_status = payload.verification_status
+    if payload.summary is not None:
+        assessment.summary = payload.summary
+    if payload.recommendations is not None:
+        assessment.recommendations = payload.recommendations
+    await db.commit()
+    await db.refresh(assessment)
+    return assessment
+
+
 async def list_assessments(
     db: AsyncSession,
     organization_id: UUID,
@@ -352,6 +392,7 @@ async def performance_summary(
         select(AthleteAssessment)
         .where(AthleteAssessment.organization_id == organization_id)
         .where(AthleteAssessment.athlete_profile_id == athlete_profile_id)
+        .where(AthleteAssessment.verification_status == MetricVerificationStatus.VERIFIED)
         .order_by(AthleteAssessment.assessed_at.desc())
         .limit(1)
     )

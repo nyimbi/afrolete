@@ -128,6 +128,18 @@ class PlayerSelfAssessmentCreate(BaseModel):
     summary: str | None = Field(default=None, max_length=4000)
 
 
+class AthleteAssessmentReviewCreate(BaseModel):
+    verification_status: MetricVerificationStatus
+    physical_score: float | None = Field(default=None, ge=0, le=100)
+    technical_score: float | None = Field(default=None, ge=0, le=100)
+    tactical_score: float | None = Field(default=None, ge=0, le=100)
+    mental_score: float | None = Field(default=None, ge=0, le=100)
+    perceived_exertion: float | None = Field(default=None, ge=0, le=10)
+    effort_rating: float | None = Field(default=None, ge=0, le=10)
+    summary: str | None = Field(default=None, max_length=4000)
+    recommendations: str | None = Field(default=None, max_length=4000)
+
+
 class AthleteAssessmentRead(BaseModel):
     id: UUID
     organization_id: UUID
