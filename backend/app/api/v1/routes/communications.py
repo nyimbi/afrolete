@@ -28,6 +28,8 @@ from app.schemas.communication import (
     MessageRecipientUpdate,
     NotificationPreferenceRead,
     NotificationPreferenceUpsert,
+    ProviderDeliveryWebhookEvent,
+    ProviderDeliveryWebhookRead,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -45,6 +47,7 @@ from app.services.communications import (
     list_templates,
     mark_inbox_item_read,
     record_delivery_event,
+    record_provider_delivery_event,
     resolve_communication_webhook_key,
     run_message_escalation,
     run_message_escalation_scheduler,
@@ -333,20 +336,44 @@ async def record_delivery_event_route(
     settings: Settings = Depends(get_settings),
     db: AsyncSession = Depends(get_db),
 ) -> MessageRecipientRead:
-    key_resolution = await resolve_communication_webhook_key(settings)
-    if key_resolution["failure_reason"]:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Delivery webhook key is unavailable")
-    resolved_key = key_resolution["key"]
-    if resolved_key:
-        if x_afrolete_delivery_key != resolved_key:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    elif settings.env != "local":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    await ensure_delivery_event_key(settings, x_afrolete_delivery_key)
 
     recipient = await record_delivery_event(db, payload)
     rows = await list_recipients(db, recipient.message_id)
     _, person = next(row for row in rows if row[0].id == recipient.id)
     return to_recipient_read(recipient, person)
+
+
+@router.post("/delivery-events/provider", response_model=ProviderDeliveryWebhookRead)
+async def record_provider_delivery_event_route(
+    payload: ProviderDeliveryWebhookEvent,
+    x_afrolete_delivery_key: str | None = Header(default=None, alias="X-Afrolete-Delivery-Key"),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> ProviderDeliveryWebhookRead:
+    await ensure_delivery_event_key(settings, x_afrolete_delivery_key)
+
+    recipient, normalized_status = await record_provider_delivery_event(db, payload)
+    rows = await list_recipients(db, recipient.message_id)
+    _, person = next(row for row in rows if row[0].id == recipient.id)
+    return ProviderDeliveryWebhookRead(
+        provider=payload.provider,
+        provider_status=payload.provider_status,
+        normalized_status=normalized_status,
+        recipient=to_recipient_read(recipient, person),
+    )
+
+
+async def ensure_delivery_event_key(settings: Settings, provided_key: str | None) -> None:
+    key_resolution = await resolve_communication_webhook_key(settings)
+    if key_resolution["failure_reason"]:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Delivery webhook key is unavailable")
+    resolved_key = key_resolution["key"]
+    if resolved_key:
+        if provided_key != resolved_key:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    elif settings.env != "local":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 @router.put("/preferences", response_model=NotificationPreferenceRead)

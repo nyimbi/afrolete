@@ -146,6 +146,87 @@ def test_record_only_dispatch_and_delivery_callback(client, identity_headers) ->
     assert callback["delivered_at"] is not None
 
 
+def test_provider_delivery_callback_normalizes_statuses_and_requires_key(client, identity_headers) -> None:
+    organization, team, _ = create_communications_context(client, identity_headers)
+    message = client.post(
+        "/api/v1/communications/messages",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "message_type": "alert",
+            "channel": "sms",
+            "scope_type": "team",
+            "scope_id": team["id"],
+            "subject": "Fixture delay",
+            "body": "Kickoff has moved by 30 minutes.",
+        },
+    ).json()
+    recipient = client.get(f"/api/v1/communications/messages/{message['id']}/recipients").json()[0]
+    client.app.dependency_overrides[get_settings] = lambda: Settings(env="demo", communication_webhook_key="shared-secret")
+
+    forbidden = client.post(
+        "/api/v1/communications/delivery-events/provider",
+        json={
+            "recipient_id": recipient["id"],
+            "provider": "twilio",
+            "channel": "sms",
+            "provider_status": "delivered",
+        },
+    )
+
+    assert forbidden.status_code == 403
+
+    delivered_response = client.post(
+        "/api/v1/communications/delivery-events/provider",
+        headers={"X-Afrolete-Delivery-Key": "shared-secret"},
+        json={
+            "recipient_id": recipient["id"],
+            "provider": "twilio",
+            "channel": "sms",
+            "provider_status": "delivered",
+            "provider_event_id": "SM-delivered-1",
+        },
+    )
+
+    assert delivered_response.status_code == 200
+    delivered = delivered_response.json()
+    assert delivered["normalized_status"] == "delivered"
+    assert delivered["recipient"]["delivery_status"] == "delivered"
+    assert delivered["recipient"]["delivered_at"] is not None
+
+    read_response = client.post(
+        "/api/v1/communications/delivery-events/provider",
+        headers={"X-Afrolete-Delivery-Key": "shared-secret"},
+        json={
+            "recipient_id": recipient["id"],
+            "provider": "whatsapp",
+            "channel": "whatsapp",
+            "provider_status": "read",
+        },
+    )
+
+    assert read_response.status_code == 409
+
+    failed_response = client.post(
+        "/api/v1/communications/delivery-events/provider",
+        headers={"X-Afrolete-Delivery-Key": "shared-secret"},
+        json={
+            "recipient_id": recipient["id"],
+            "provider": "twilio",
+            "channel": "sms",
+            "provider_status": "undelivered",
+            "provider_event_id": "SM-failed-1",
+            "failure_reason": "Carrier rejected destination",
+        },
+    )
+
+    assert failed_response.status_code == 200
+    failed = failed_response.json()
+    assert failed["normalized_status"] == "failed"
+    assert failed["recipient"]["delivery_status"] == "failed"
+    assert failed["recipient"]["failure_reason"] == "Carrier rejected destination"
+
+
 def test_delivery_readiness_reports_record_only_and_webhook_channels(client, identity_headers) -> None:
     record_only_response = client.get("/api/v1/communications/delivery-readiness", headers=identity_headers)
 

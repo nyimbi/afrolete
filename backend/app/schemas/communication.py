@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -209,6 +210,25 @@ class DeliveryWebhookEvent(BaseModel):
     failure_reason: str | None = Field(default=None, max_length=2000)
     delivered_at: datetime | None = None
     read_at: datetime | None = None
+
+
+class ProviderDeliveryWebhookEvent(BaseModel):
+    recipient_id: UUID
+    provider: str = Field(min_length=2, max_length=80)
+    channel: CommunicationChannel | None = None
+    provider_status: str = Field(min_length=1, max_length=120)
+    provider_event_id: str | None = Field(default=None, max_length=240)
+    provider_message_id: str | None = Field(default=None, max_length=240)
+    failure_reason: str | None = Field(default=None, max_length=2000)
+    occurred_at: datetime | None = None
+    raw_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProviderDeliveryWebhookRead(BaseModel):
+    provider: str
+    provider_status: str
+    normalized_status: MessageDeliveryStatus
+    recipient: MessageRecipientRead
 
 
 class CommunicationDigestCreate(BaseModel):

@@ -4993,6 +4993,13 @@ export type CommunicationInboxItemRead = {
   failure_reason: string | null;
 };
 
+export type ProviderDeliveryWebhookRead = {
+  provider: string;
+  provider_status: string;
+  normalized_status: MessageDeliveryStatus;
+  recipient: MessageRecipientRead;
+};
+
 export type CommunicationDispatchSummary = {
   message_id: UUID;
   attempted: number;

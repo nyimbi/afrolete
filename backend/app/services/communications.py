@@ -47,6 +47,7 @@ from app.schemas.communication import (
     DeliveryWebhookEvent,
     MessageRecipientUpdate,
     NotificationPreferenceUpsert,
+    ProviderDeliveryWebhookEvent,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
@@ -999,6 +1000,33 @@ async def record_delivery_event(
     return recipient
 
 
+async def record_provider_delivery_event(
+    db: AsyncSession,
+    payload: ProviderDeliveryWebhookEvent,
+) -> tuple[MessageRecipient, MessageDeliveryStatus]:
+    recipient = await db.get(MessageRecipient, payload.recipient_id)
+    if recipient is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipient not found")
+    message = await db.get(CommunicationMessage, recipient.message_id)
+    if message is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    if payload.channel is not None and payload.channel != message.channel:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Provider event channel does not match message")
+
+    normalized_status = normalize_provider_delivery_status(payload.provider, payload.provider_status)
+    occurred_at = payload.occurred_at or datetime.now(UTC)
+    recipient.delivery_status = normalized_status
+    recipient.failure_reason = provider_failure_reason(payload, normalized_status)
+    if normalized_status in {MessageDeliveryStatus.DELIVERED, MessageDeliveryStatus.READ}:
+        recipient.delivered_at = recipient.delivered_at or occurred_at
+    if normalized_status == MessageDeliveryStatus.READ:
+        recipient.read_at = recipient.read_at or occurred_at
+
+    await db.commit()
+    await db.refresh(recipient)
+    return recipient, normalized_status
+
+
 async def upsert_preference(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1505,6 +1533,71 @@ def delivery_payload(
             "destination": recipient.destination,
         },
     }
+
+
+def normalize_provider_delivery_status(provider: str, provider_status: str) -> MessageDeliveryStatus:
+    normalized = provider_status.strip().lower().replace("-", "_").replace(" ", "_")
+    provider_key = provider.strip().lower()
+    status_aliases: dict[MessageDeliveryStatus, set[str]] = {
+        MessageDeliveryStatus.QUEUED: {"queued", "scheduled", "deferred"},
+        MessageDeliveryStatus.SENT: {
+            "accepted",
+            "processed",
+            "sent",
+            "submitted",
+            "sending",
+            "enroute",
+            "provider_accepted",
+        },
+        MessageDeliveryStatus.DELIVERED: {"delivered", "delivery", "delivered_to_terminal"},
+        MessageDeliveryStatus.READ: {"read", "opened", "open", "clicked", "click", "seen"},
+        MessageDeliveryStatus.FAILED: {
+            "failed",
+            "failure",
+            "undelivered",
+            "rejected",
+            "bounced",
+            "bounce",
+            "dropped",
+            "blocked",
+            "spamreport",
+            "unsubscribed",
+        },
+        MessageDeliveryStatus.SUPPRESSED: {"suppressed", "skipped", "muted", "opted_out"},
+    }
+    provider_aliases = {
+        "sendgrid": {"processed": MessageDeliveryStatus.SENT, "deferred": MessageDeliveryStatus.QUEUED},
+        "twilio": {"accepted": MessageDeliveryStatus.SENT, "receiving": MessageDeliveryStatus.SENT},
+        "whatsapp": {"sent": MessageDeliveryStatus.SENT, "read": MessageDeliveryStatus.READ},
+        "telegram": {"sent": MessageDeliveryStatus.SENT},
+        "firebase": {"opened": MessageDeliveryStatus.READ},
+        "fcm": {"opened": MessageDeliveryStatus.READ},
+    }
+    if normalized in provider_aliases.get(provider_key, {}):
+        return provider_aliases[provider_key][normalized]
+    for delivery_status, aliases in status_aliases.items():
+        if normalized in aliases:
+            return delivery_status
+    return MessageDeliveryStatus.FAILED
+
+
+def provider_failure_reason(
+    payload: ProviderDeliveryWebhookEvent,
+    normalized_status: MessageDeliveryStatus,
+) -> str | None:
+    if normalized_status != MessageDeliveryStatus.FAILED:
+        return None
+    if payload.failure_reason:
+        return payload.failure_reason
+    refs = [
+        f"provider={payload.provider}",
+        f"status={payload.provider_status}",
+    ]
+    if payload.provider_event_id:
+        refs.append(f"event={payload.provider_event_id}")
+    if payload.provider_message_id:
+        refs.append(f"message={payload.provider_message_id}")
+    return "Provider delivery failure: " + ", ".join(refs)
 
 
 class DeliveryHeaderResolution:
