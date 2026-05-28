@@ -176,6 +176,14 @@ class DeveloperSdkCatalogRead(BaseModel):
     entry_points: list[str]
 
 
+class DeveloperQuickstartRead(BaseModel):
+    title: str
+    language: str
+    description: str
+    steps: list[str]
+    code_sample: str
+
+
 class DeveloperIntegrationCatalogRead(BaseModel):
     organization_id: UUID
     api_base_path: str
@@ -185,6 +193,22 @@ class DeveloperIntegrationCatalogRead(BaseModel):
     webhook_events: list[DeveloperWebhookEventCatalogRead]
     sdks: list[DeveloperSdkCatalogRead]
     configured_event_types: list[str]
+
+
+class DeveloperPublicDocsRead(BaseModel):
+    title: str
+    version: str
+    api_base_path: str
+    authentication: str
+    auth_header: str
+    webhook_signature_header: str
+    webhook_timestamp_header: str
+    quickstarts: list[DeveloperQuickstartRead]
+    scopes: list[DeveloperApiScopeCatalogRead]
+    webhook_events: list[DeveloperWebhookEventCatalogRead]
+    sdks: list[DeveloperSdkCatalogRead]
+    marketplace_categories: list[str]
+    security_requirements: list[str]
 
 
 class DeveloperMarketplaceListingCreate(BaseModel):

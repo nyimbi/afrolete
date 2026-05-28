@@ -11632,6 +11632,7 @@ export default function HomePage() {
                 <button type="button" onClick={createDeveloperApplication} disabled={busyAction !== null}>App</button>
                 <button type="button" onClick={createDeveloperApiKey} disabled={busyAction !== null}>Key</button>
                 <button type="button" onClick={createDeveloperWebhook} disabled={busyAction !== null}>Webhook</button>
+                <button type="button" onClick={() => window.open("/developers", "_blank", "noopener,noreferrer")}>Docs</button>
               </div>
             </div>
             <div className="consent-grid">

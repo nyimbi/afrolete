@@ -28,6 +28,8 @@ from app.schemas.developer import (
     DeveloperMarketplaceListingCreate,
     DeveloperMarketplaceListingReview,
     DeveloperPortalSummaryRead,
+    DeveloperPublicDocsRead,
+    DeveloperQuickstartRead,
     DeveloperSdkCatalogRead,
     DeveloperWebhookEventCatalogRead,
     DeveloperWebhookRetryRunRead,
@@ -604,6 +606,39 @@ async def developer_integration_catalog(
     )
 
 
+def developer_public_docs() -> DeveloperPublicDocsRead:
+    return DeveloperPublicDocsRead(
+        title="AfroLete Developer Platform",
+        version="v1",
+        api_base_path="/api/v1/sdk",
+        authentication="Send tenant developer API keys in the X-Afrolete-API-Key header.",
+        auth_header="X-Afrolete-API-Key",
+        webhook_signature_header="X-Afrolete-Webhook-Signature",
+        webhook_timestamp_header="X-Afrolete-Webhook-Timestamp",
+        quickstarts=developer_quickstarts(),
+        scopes=developer_scope_catalog(),
+        webhook_events=developer_webhook_event_catalog(),
+        sdks=developer_sdk_catalog(),
+        marketplace_categories=[
+            "operations",
+            "performance",
+            "communications",
+            "billing",
+            "compliance",
+            "ai_agents",
+            "media",
+            "hardware",
+        ],
+        security_requirements=[
+            "Store raw API keys and webhook signing secrets outside source control.",
+            "Use sandbox keys until the tenant has approved production access.",
+            "Verify webhook signatures with the timestamped payload before trusting event bodies.",
+            "Request only the scopes needed for the integration workflow.",
+            "Treat cataloged webhook events as contracts in progress unless emission_status is active.",
+        ],
+    )
+
+
 async def developer_portal_summary(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -946,6 +981,58 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
             install_command="curl -H 'X-Afrolete-API-Key: ...' /api/v1/sdk/me",
             status="active",
             entry_points=["GET /sdk/me", "GET /sdk/organization", "GET /sdk/training/drills", "POST /sdk/training/drills"],
+        ),
+    ]
+
+
+def developer_quickstarts() -> list[DeveloperQuickstartRead]:
+    return [
+        DeveloperQuickstartRead(
+            title="Inspect an API key",
+            language="HTTP",
+            description="Confirm a tenant-issued API key and learn its application, scopes, and quota state.",
+            steps=[
+                "Create or select an active developer application in the tenant console.",
+                "Issue a sandbox API key and copy the raw key immediately.",
+                "Call /api/v1/developers/auth/inspect with X-Afrolete-API-Key.",
+            ],
+            code_sample=(
+                "curl -s \"$AFROLETE_API/api/v1/developers/auth/inspect\" \\\n"
+                "  -H \"X-Afrolete-API-Key: $AFROLETE_API_KEY\""
+            ),
+        ),
+        DeveloperQuickstartRead(
+            title="Create a training drill",
+            language="HTTP",
+            description="Write training-library content into a tenant using the SDK route protected by write:training.",
+            steps=[
+                "Grant the API key write:training for the tenant.",
+                "POST a drill payload to /api/v1/sdk/training/drills.",
+                "Subscribe to training.drill.created to fan out the event to external systems.",
+            ],
+            code_sample=(
+                "curl -s \"$AFROLETE_API/api/v1/sdk/training/drills\" \\\n"
+                "  -H \"Content-Type: application/json\" \\\n"
+                "  -H \"X-Afrolete-API-Key: $AFROLETE_API_KEY\" \\\n"
+                "  -d '{\"organization_id\":\"'$ORG_ID'\",\"sport\":\"football\","
+                "\"name\":\"Advanced Passing Circuit\",\"focus_area\":\"Passing\","
+                "\"category\":\"technical\",\"description\":\"One-touch passing square.\"}'"
+            ),
+        ),
+        DeveloperQuickstartRead(
+            title="Verify a webhook",
+            language="TypeScript",
+            description="Validate provider-neutral AfroLete webhooks before processing event payloads.",
+            steps=[
+                "Read the raw request body before JSON parsing.",
+                "Build timestamp.payload and compare the HMAC SHA-256 signature.",
+                "Reject old timestamps or mismatched signatures.",
+            ],
+            code_sample=(
+                "const signed = `${timestamp}.${rawBody}`;\n"
+                "const expected = hmacSha256(signingSecretHash, signed);\n"
+                "if (`sha256=${expected}` !== signatureHeader) throw new Error(\"bad signature\");"
+            ),
         ),
     ]
 

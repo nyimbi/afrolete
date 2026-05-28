@@ -13,6 +13,22 @@ def create_developer_org(client, identity_headers):
     return response.json()
 
 
+def test_public_developer_docs(client) -> None:
+    response = client.get("/api/v1/developers/public/docs")
+    assert response.status_code == 200
+    docs = response.json()
+    assert docs["title"] == "AfroLete Developer Platform"
+    assert docs["api_base_path"] == "/api/v1/sdk"
+    assert docs["auth_header"] == "X-Afrolete-API-Key"
+    assert docs["webhook_signature_header"] == "X-Afrolete-Webhook-Signature"
+    assert len(docs["quickstarts"]) >= 3
+    assert "read:organization" in {scope["scope"] for scope in docs["scopes"]}
+    assert any(event["event_type"] == "training.drill.created" for event in docs["webhook_events"])
+    assert any(sdk["language"] == "Raw HTTP" and sdk["status"] == "active" for sdk in docs["sdks"])
+    assert "operations" in docs["marketplace_categories"]
+    assert docs["security_requirements"]
+
+
 def test_developer_application_webhook_marketplace_workflow(client, identity_headers) -> None:
     organization = create_developer_org(client, identity_headers)
 

@@ -2336,6 +2336,14 @@ export type DeveloperSdkCatalogRead = {
   entry_points: string[];
 };
 
+export type DeveloperQuickstartRead = {
+  title: string;
+  language: string;
+  description: string;
+  steps: string[];
+  code_sample: string;
+};
+
 export type DeveloperIntegrationCatalogRead = {
   organization_id: UUID;
   api_base_path: string;
@@ -2345,6 +2353,22 @@ export type DeveloperIntegrationCatalogRead = {
   webhook_events: DeveloperWebhookEventCatalogRead[];
   sdks: DeveloperSdkCatalogRead[];
   configured_event_types: string[];
+};
+
+export type DeveloperPublicDocsRead = {
+  title: string;
+  version: string;
+  api_base_path: string;
+  authentication: string;
+  auth_header: string;
+  webhook_signature_header: string;
+  webhook_timestamp_header: string;
+  quickstarts: DeveloperQuickstartRead[];
+  scopes: DeveloperApiScopeCatalogRead[];
+  webhook_events: DeveloperWebhookEventCatalogRead[];
+  sdks: DeveloperSdkCatalogRead[];
+  marketplace_categories: string[];
+  security_requirements: string[];
 };
 
 export type DeveloperMarketplaceListingRead = {

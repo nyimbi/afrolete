@@ -17,6 +17,7 @@ from app.schemas.developer import (
     DeveloperMarketplaceListingRead,
     DeveloperMarketplaceListingReview,
     DeveloperPortalSummaryRead,
+    DeveloperPublicDocsRead,
     DeveloperWebhookDeliveryRead,
     DeveloperWebhookRetryRunRead,
     DeveloperWebhookSubscriptionCreate,
@@ -34,6 +35,7 @@ from app.services.developer import (
     create_developer_webhook_subscription,
     developer_integration_catalog,
     developer_portal_summary,
+    developer_public_docs,
     inspect_developer_api_key,
     list_developer_api_keys,
     list_developer_applications,
@@ -142,6 +144,11 @@ def marketplace_listing_read(listing) -> DeveloperMarketplaceListingRead:
         review_status=listing.review_status,
         install_count=listing.install_count,
     )
+
+
+@router.get("/public/docs", response_model=DeveloperPublicDocsRead)
+async def developer_public_docs_route() -> DeveloperPublicDocsRead:
+    return developer_public_docs()
 
 
 @router.post("/api-keys", response_model=DeveloperApiKeyProvisionedRead, status_code=status.HTTP_201_CREATED)
