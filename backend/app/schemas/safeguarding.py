@@ -362,6 +362,27 @@ class SafeguardingIncidentEvidenceUploadRead(BaseModel):
     incident: "SafeguardingIncidentRead"
 
 
+class SafeguardingIncidentEvidenceLinkCreate(BaseModel):
+    storage_key: str = Field(min_length=1, max_length=800)
+    filename: str = Field(min_length=1, max_length=240)
+    content_type: str = Field(default="application/octet-stream", max_length=120)
+    checksum: str | None = Field(default=None, max_length=64)
+    ttl_seconds: int | None = Field(default=None, ge=60, le=86400)
+
+
+class SafeguardingIncidentEvidenceLinkRead(BaseModel):
+    incident_id: UUID
+    organization_id: UUID
+    signed_url: str
+    expires_at: datetime
+    filename: str
+    content_type: str
+    checksum: str
+    size_bytes: int
+    evidence_url: str
+    storage_key: str
+
+
 class SafeguardingIncidentRead(BaseModel):
     id: UUID
     organization_id: UUID

@@ -180,6 +180,7 @@ import type {
   BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
+  SafeguardingIncidentEvidenceLinkRead,
   SafeguardingIncidentEvidenceUploadRead,
   SafeguardingIncidentInvestigationActionRead,
   IncidentReportPackageArtifactRead,
@@ -1573,6 +1574,8 @@ export default function HomePage() {
     useState<SafeguardingIncidentInvestigationActionRead | null>(null);
   const [incidentEvidenceUpload, setIncidentEvidenceUpload] =
     useState<SafeguardingIncidentEvidenceUploadRead | null>(null);
+  const [incidentEvidenceLink, setIncidentEvidenceLink] =
+    useState<SafeguardingIncidentEvidenceLinkRead | null>(null);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
   const [backgroundCheckProviderSubmission, setBackgroundCheckProviderSubmission] =
     useState<BackgroundCheckProviderSubmissionRead | null>(null);
@@ -3157,6 +3160,7 @@ export default function HomePage() {
       setSafeguardingIncidents([]);
       setIncidentInvestigationAction(null);
       setIncidentEvidenceUpload(null);
+      setIncidentEvidenceLink(null);
       setBackgroundChecks([]);
       setBackgroundCheckProviderSubmission(null);
       setBackgroundCheckProviderResult(null);
@@ -5854,6 +5858,31 @@ export default function HomePage() {
         ]);
         setSelectedIncidentEvidenceFile(null);
         addLog(`${upload.filename} incident evidence stored (${upload.size_bytes} bytes)`, "good");
+      }
+    );
+  };
+
+  const shareIncidentEvidence = (upload: SafeguardingIncidentEvidenceUploadRead) => {
+    runAction(
+      `incident-evidence-link-${upload.incident_id}`,
+      () =>
+        apiRequest<SafeguardingIncidentEvidenceLinkRead>(
+          `/safeguarding/incidents/${upload.incident_id}/evidence-link`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              storage_key: upload.storage_key,
+              filename: upload.filename,
+              content_type: upload.content_type,
+              checksum: upload.checksum,
+              ttl_seconds: 900
+            }
+          }
+        ),
+      (link) => {
+        setIncidentEvidenceLink(link);
+        addLog(`${link.filename} evidence link expires ${new Date(link.expires_at).toLocaleString()}`, "good");
       }
     );
   };
@@ -16605,6 +16634,24 @@ export default function HomePage() {
                   <span>{incidentEvidenceUpload.checksum.slice(0, 16)} · {incidentEvidenceUpload.content_type}</span>
                   <span>{incidentEvidenceUpload.evidence_url} · {incidentEvidenceUpload.storage_key}</span>
                 </div>
+                <button type="button" onClick={() => shareIncidentEvidence(incidentEvidenceUpload)}>Link</button>
+              </article>
+            ) : null}
+            {incidentEvidenceLink ? (
+              <article className="task-card">
+                <div>
+                  <strong>{incidentEvidenceLink.filename} signed evidence</strong>
+                  <span>Expires {new Date(incidentEvidenceLink.expires_at).toLocaleString()} · {incidentEvidenceLink.size_bytes} bytes</span>
+                  <span>{incidentEvidenceLink.checksum.slice(0, 16)} · {incidentEvidenceLink.content_type}</span>
+                  <span>{incidentEvidenceLink.evidence_url} · {incidentEvidenceLink.storage_key}</span>
+                </div>
+                <a
+                  href={`${apiBaseUrl}${incidentEvidenceLink.signed_url}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open
+                </a>
               </article>
             ) : null}
           </div>

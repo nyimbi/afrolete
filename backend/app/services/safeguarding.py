@@ -73,6 +73,8 @@ from app.schemas.safeguarding import (
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
+    SafeguardingIncidentEvidenceLinkCreate,
+    SafeguardingIncidentEvidenceLinkRead,
     SafeguardingIncidentEvidenceUploadCreate,
     SafeguardingIncidentEvidenceUploadRead,
     SafeguardingIncidentInvestigationActionCreate,
@@ -595,6 +597,190 @@ async def upload_safeguarding_incident_evidence(
         uploaded_at=uploaded_at,
         incident=safeguarding_incident_read(incident),
     )
+
+
+async def create_signed_safeguarding_incident_evidence_link(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident_id: UUID,
+    payload: SafeguardingIncidentEvidenceLinkCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> SafeguardingIncidentEvidenceLinkRead:
+    incident = await db.get(SafeguardingIncident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    await ensure_org_manage(authz, incident.organization_id, identity)
+    selected_settings = settings or get_settings()
+    storage_name = validate_safeguarding_incident_evidence_storage_key(
+        payload.storage_key,
+        incident.organization_id,
+        incident.id,
+    )
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.safeguarding_incident_evidence_dir,
+        key=payload.storage_key,
+    )
+    checksum = sha256(content).hexdigest()
+    if payload.checksum and payload.checksum != checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Evidence checksum does not match stored object")
+    now = utc_now()
+    expires_at = now + timedelta(
+        seconds=payload.ttl_seconds or selected_settings.safeguarding_incident_evidence_url_ttl_seconds
+    )
+    signed_url = signed_safeguarding_incident_evidence_url(
+        selected_settings,
+        incident.organization_id,
+        incident.id,
+        storage_name,
+        checksum,
+        expires_at,
+    )
+    evidence_url = f"{selected_settings.safeguarding_incident_evidence_url_prefix.rstrip('/')}/{payload.storage_key}"
+    return SafeguardingIncidentEvidenceLinkRead(
+        incident_id=incident.id,
+        organization_id=incident.organization_id,
+        signed_url=signed_url,
+        expires_at=expires_at,
+        filename=payload.filename,
+        content_type=payload.content_type,
+        checksum=checksum,
+        size_bytes=len(content),
+        evidence_url=evidence_url,
+        storage_key=payload.storage_key,
+    )
+
+
+async def read_signed_safeguarding_incident_evidence(
+    organization_id: UUID,
+    incident_id: UUID,
+    filename: str,
+    checksum: str,
+    expires: int,
+    signature: str,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    selected_settings = settings or get_settings()
+    if "/" in filename or "\\" in filename or filename in {"", ".", ".."}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid evidence name")
+    if expires < int(time.time()):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Evidence link expired")
+    expected = safeguarding_incident_evidence_signature(
+        selected_settings,
+        organization_id,
+        incident_id,
+        filename,
+        checksum,
+        expires,
+    )
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid evidence signature")
+    storage_key = (Path(str(organization_id)) / str(incident_id) / filename).as_posix()
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.safeguarding_incident_evidence_dir,
+        key=storage_key,
+    )
+    actual_checksum = sha256(content).hexdigest()
+    if actual_checksum != checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Evidence checksum mismatch")
+    return {
+        "content": content,
+        "content_type": safeguarding_evidence_content_type_for_filename(filename),
+        "filename": public_safeguarding_evidence_filename(filename),
+        "checksum": actual_checksum,
+    }
+
+
+def validate_safeguarding_incident_evidence_storage_key(
+    storage_key: str,
+    organization_id: UUID,
+    incident_id: UUID,
+) -> str:
+    expected_prefix = (Path(str(organization_id)) / str(incident_id)).as_posix() + "/"
+    normalized = storage_key.strip()
+    if (
+        not normalized.startswith(expected_prefix)
+        or "\\" in normalized
+        or "/../" in normalized
+        or normalized.endswith("/")
+    ):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid evidence storage key")
+    storage_name = normalized.rsplit("/", 1)[-1]
+    if storage_name in {"", ".", ".."}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid evidence storage key")
+    return storage_name
+
+
+def signed_safeguarding_incident_evidence_url(
+    settings: Settings,
+    organization_id: UUID,
+    incident_id: UUID,
+    storage_name: str,
+    checksum: str,
+    expires_at: datetime,
+) -> str:
+    expires = int(expires_at.timestamp())
+    signature = safeguarding_incident_evidence_signature(
+        settings,
+        organization_id,
+        incident_id,
+        storage_name,
+        checksum,
+        expires,
+    )
+    safe_name = quote(storage_name, safe="")
+    return (
+        f"{settings.api_prefix}/safeguarding/incident-evidence/{organization_id}/{incident_id}/{safe_name}"
+        f"?checksum={checksum}&expires={expires}&signature={signature}"
+    )
+
+
+def safeguarding_incident_evidence_signature(
+    settings: Settings,
+    organization_id: UUID,
+    incident_id: UUID,
+    storage_name: str,
+    checksum: str,
+    expires: int,
+) -> str:
+    payload = f"{organization_id}/{incident_id}/{storage_name}:{checksum}:{expires}"
+    digest = hmac.new(
+        safeguarding_incident_evidence_signing_key(settings),
+        payload.encode(),
+        sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def safeguarding_incident_evidence_signing_key(settings: Settings) -> bytes:
+    key = resolve_secret_sync(
+        settings,
+        env_value=settings.safeguarding_incident_evidence_signing_key,
+        path=settings.safeguarding_incident_evidence_signing_key_secret_path,
+        field_name=settings.safeguarding_incident_evidence_signing_key_secret_field,
+        label="safeguarding incident evidence signing key",
+    )
+    return (key or "local-safeguarding-evidence-key").encode()
+
+
+def public_safeguarding_evidence_filename(storage_name: str) -> str:
+    parts = storage_name.split("-", 1)
+    return parts[1] if len(parts) == 2 else storage_name
+
+
+def safeguarding_evidence_content_type_for_filename(filename: str) -> str:
+    extension = filename.rsplit(".", 1)[-1].lower()
+    if extension in {"jpg", "jpeg"}:
+        return "image/jpeg"
+    if extension == "png":
+        return "image/png"
+    if extension == "pdf":
+        return "application/pdf"
+    if extension == "txt":
+        return "text/plain; charset=utf-8"
+    return "application/octet-stream"
 
 
 def decode_safeguarding_upload_content(content_base64: str) -> bytes:

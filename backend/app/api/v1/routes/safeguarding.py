@@ -38,6 +38,8 @@ from app.schemas.safeguarding import (
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
+    SafeguardingIncidentEvidenceLinkCreate,
+    SafeguardingIncidentEvidenceLinkRead,
     SafeguardingIncidentEvidenceUploadCreate,
     SafeguardingIncidentEvidenceUploadRead,
     SafeguardingIncidentInvestigationActionCreate,
@@ -70,6 +72,7 @@ from app.services.safeguarding import (
     apply_safeguarding_incident_investigation_action,
     capture_consent_by_known_channel,
     capture_consent_by_token,
+    create_signed_safeguarding_incident_evidence_link,
     clearance_for_event,
     create_activity_consent,
     create_background_check,
@@ -102,6 +105,7 @@ from app.services.safeguarding import (
     respond_to_family_event,
     reconcile_compliance_statuses,
     read_signed_incident_report_package_artifact,
+    read_signed_safeguarding_incident_evidence,
     submit_background_check_to_screening_provider,
     submit_incident_report_package_to_regulator,
     update_background_check,
@@ -426,6 +430,23 @@ async def upload_safeguarding_incident_evidence_route(
     )
 
 
+@router.post("/incidents/{incident_id}/evidence-link", response_model=SafeguardingIncidentEvidenceLinkRead)
+async def create_safeguarding_incident_evidence_link_route(
+    incident_id: UUID,
+    payload: SafeguardingIncidentEvidenceLinkCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentEvidenceLinkRead:
+    return await create_signed_safeguarding_incident_evidence_link(
+        db,
+        identity,
+        incident_id,
+        payload,
+        authz,
+    )
+
+
 @router.post("/incident-report-packages", response_model=IncidentReportPackageRead, status_code=201)
 async def create_incident_report_package_route(
     payload: IncidentReportPackageCreate,
@@ -555,6 +576,33 @@ async def read_incident_report_package_artifact_route(
         headers={
             "Content-Disposition": f"inline; filename={artifact['filename']}",
             "X-Afrolete-Safeguarding-Artifact-Checksum": str(artifact["checksum"]),
+        },
+    )
+
+
+@router.get("/incident-evidence/{organization_id}/{incident_id}/{filename}")
+async def read_safeguarding_incident_evidence_route(
+    organization_id: UUID,
+    incident_id: UUID,
+    filename: str,
+    checksum: str = Query(),
+    expires: int = Query(),
+    signature: str = Query(),
+) -> Response:
+    evidence = await read_signed_safeguarding_incident_evidence(
+        organization_id,
+        incident_id,
+        filename,
+        checksum,
+        expires,
+        signature,
+    )
+    return Response(
+        content=evidence["content"],
+        media_type=str(evidence["content_type"]),
+        headers={
+            "Content-Disposition": f"inline; filename={evidence['filename']}",
+            "X-Afrolete-Safeguarding-Evidence-Checksum": str(evidence["checksum"]),
         },
     )
 

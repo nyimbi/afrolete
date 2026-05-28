@@ -384,6 +384,32 @@ def test_incident_evidence_upload_stores_file_and_case_note(client, identity_hea
     assert upload["incident"]["status"] == "investigating"
     assert "Evidence uploaded" in upload["incident"]["resolution_notes"]
 
+    link_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-link",
+        headers=identity_headers,
+        json={
+            "storage_key": upload["storage_key"],
+            "filename": upload["filename"],
+            "content_type": upload["content_type"],
+            "checksum": upload["checksum"],
+            "ttl_seconds": 600,
+        },
+    )
+    assert link_response.status_code == 200
+    link = link_response.json()
+    assert link["signed_url"].startswith("/api/v1/safeguarding/incident-evidence/")
+    assert link["checksum"] == upload["checksum"]
+    assert link["storage_key"] == upload["storage_key"]
+
+    signed_response = client.get(link["signed_url"])
+    assert signed_response.status_code == 200
+    assert signed_response.content == content
+    assert signed_response.headers["x-afrolete-safeguarding-evidence-checksum"] == upload["checksum"]
+
+    bad_link = link["signed_url"].replace("signature=", "signature=bad", 1)
+    bad_response = client.get(bad_link)
+    assert bad_response.status_code == 403
+
 
 def test_insurance_claim_provider_submit_and_status_poll_record_only(client, identity_headers) -> None:
     organization = client.post(
