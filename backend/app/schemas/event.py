@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -1212,6 +1212,70 @@ class AttendanceRecordUpsert(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
 
 
+AttendancePolicyAction = Literal["block", "warn", "allow"]
+
+
+class EventAttendancePolicyCreate(BaseModel):
+    policy_code: str = Field(default="default", min_length=2, max_length=120, pattern="^[A-Za-z0-9_.-]+$")
+    title: str = Field(default="Default attendance policy", min_length=2, max_length=240)
+    active: bool = True
+    participation_statuses: list[AttendanceStatus] = Field(
+        default_factory=lambda: [AttendanceStatus.CONFIRMED, AttendanceStatus.PRESENT]
+    )
+    require_minor_consent: bool = True
+    require_medical_clearance: bool = True
+    minor_consent_action: AttendancePolicyAction = "block"
+    no_guardian_action: AttendancePolicyAction = "block"
+    denied_consent_action: AttendancePolicyAction = "block"
+    expired_consent_action: AttendancePolicyAction = "block"
+    missing_medical_action: AttendancePolicyAction = "block"
+    not_cleared_medical_action: AttendancePolicyAction = "block"
+    expired_medical_action: AttendancePolicyAction = "block"
+    restricted_medical_action: AttendancePolicyAction = "warn"
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EventAttendancePolicyUpdate(BaseModel):
+    policy_code: str | None = Field(default=None, min_length=2, max_length=120, pattern="^[A-Za-z0-9_.-]+$")
+    title: str | None = Field(default=None, min_length=2, max_length=240)
+    active: bool | None = None
+    participation_statuses: list[AttendanceStatus] | None = None
+    require_minor_consent: bool | None = None
+    require_medical_clearance: bool | None = None
+    minor_consent_action: AttendancePolicyAction | None = None
+    no_guardian_action: AttendancePolicyAction | None = None
+    denied_consent_action: AttendancePolicyAction | None = None
+    expired_consent_action: AttendancePolicyAction | None = None
+    missing_medical_action: AttendancePolicyAction | None = None
+    not_cleared_medical_action: AttendancePolicyAction | None = None
+    expired_medical_action: AttendancePolicyAction | None = None
+    restricted_medical_action: AttendancePolicyAction | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class EventAttendancePolicyRead(BaseModel):
+    id: UUID | None
+    organization_id: UUID
+    event_id: UUID
+    policy_code: str
+    title: str
+    active: bool
+    participation_statuses: list[AttendanceStatus]
+    require_minor_consent: bool
+    require_medical_clearance: bool
+    minor_consent_action: str
+    no_guardian_action: str
+    denied_consent_action: str
+    expired_consent_action: str
+    missing_medical_action: str
+    not_cleared_medical_action: str
+    expired_medical_action: str
+    restricted_medical_action: str
+    notes: str | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
 class AttendanceRecordRead(BaseModel):
     id: UUID
     event_id: UUID
@@ -1224,6 +1288,9 @@ class AttendanceRecordRead(BaseModel):
     medical_clearance_status: MedicalClearanceStatus | None = None
     medical_clearance_id: UUID | None = None
     medical_clearance_reason: str | None = None
+    attendance_policy_code: str | None = None
+    attendance_policy_decision: str | None = None
+    attendance_policy_warnings: list[str] = Field(default_factory=list)
 
 
 class AttendanceSeedRead(BaseModel):

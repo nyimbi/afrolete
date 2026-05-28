@@ -41,6 +41,7 @@ from app.models.event import (
     AttendanceRecord,
     ConsentRequest,
     Event,
+    EventAttendancePolicy,
     EventTravelApproval,
     EventTravelBackupDriver,
     EventTravelCarpoolRide,
@@ -160,6 +161,9 @@ from app.schemas.event import (
     EventWeatherAutomationRunRead,
     EventWeatherAssessmentCreate,
     AttendanceRecordUpsert,
+    EventAttendancePolicyCreate,
+    EventAttendancePolicyRead,
+    EventAttendancePolicyUpdate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
@@ -189,6 +193,9 @@ AttendanceResult = tuple[
     MedicalClearanceStatus | None,
     UUID | None,
     str | None,
+    str | None,
+    str | None,
+    list[str],
 ]
 
 
@@ -5449,6 +5456,197 @@ async def weather_assessment_alert_exists(
     return existing is not None
 
 
+async def upsert_event_attendance_policy(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    event_id: UUID,
+    payload: EventAttendancePolicyCreate,
+    authz: AuthorizationService,
+) -> EventAttendancePolicyRead:
+    event = await get_event(db, event_id)
+    await ensure_manage_event_scope(authz, event.organization_id, identity)
+    policy = await db.scalar(select(EventAttendancePolicy).where(EventAttendancePolicy.event_id == event_id))
+    if policy is None:
+        policy = EventAttendancePolicy(organization_id=event.organization_id, event_id=event.id, title=payload.title)
+        db.add(policy)
+    apply_attendance_policy_payload(policy, payload)
+    await db.commit()
+    await db.refresh(policy)
+    return event_attendance_policy_read(policy)
+
+
+async def get_event_attendance_policy(db: AsyncSession, event_id: UUID) -> EventAttendancePolicyRead:
+    event = await get_event(db, event_id)
+    return event_attendance_policy_read(await selected_event_attendance_policy(db, event))
+
+
+async def update_event_attendance_policy(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    event_id: UUID,
+    payload: EventAttendancePolicyUpdate,
+    authz: AuthorizationService,
+) -> EventAttendancePolicyRead:
+    event = await get_event(db, event_id)
+    await ensure_manage_event_scope(authz, event.organization_id, identity)
+    policy = await selected_event_attendance_policy(db, event)
+    apply_attendance_policy_update(policy, payload)
+    if policy.id is None:
+        db.add(policy)
+    await db.commit()
+    await db.refresh(policy)
+    return event_attendance_policy_read(policy)
+
+
+async def selected_event_attendance_policy(db: AsyncSession, event: Event) -> EventAttendancePolicy:
+    policy = await db.scalar(select(EventAttendancePolicy).where(EventAttendancePolicy.event_id == event.id))
+    if policy is not None:
+        return policy
+    return EventAttendancePolicy(
+        organization_id=event.organization_id,
+        event_id=event.id,
+        policy_code="strict-default",
+        title="Strict default attendance policy",
+        active=True,
+        participation_statuses="confirmed,present",
+        require_minor_consent=True,
+        require_medical_clearance=True,
+        minor_consent_action="block",
+        no_guardian_action="block",
+        denied_consent_action="block",
+        expired_consent_action="block",
+        missing_medical_action="block",
+        not_cleared_medical_action="block",
+        expired_medical_action="block",
+        restricted_medical_action="warn",
+    )
+
+
+def apply_attendance_policy_payload(policy: EventAttendancePolicy, payload: EventAttendancePolicyCreate) -> None:
+    policy.policy_code = payload.policy_code
+    policy.title = payload.title
+    policy.active = payload.active
+    policy.participation_statuses = attendance_statuses_csv(payload.participation_statuses)
+    policy.require_minor_consent = payload.require_minor_consent
+    policy.require_medical_clearance = payload.require_medical_clearance
+    policy.minor_consent_action = payload.minor_consent_action
+    policy.no_guardian_action = payload.no_guardian_action
+    policy.denied_consent_action = payload.denied_consent_action
+    policy.expired_consent_action = payload.expired_consent_action
+    policy.missing_medical_action = payload.missing_medical_action
+    policy.not_cleared_medical_action = payload.not_cleared_medical_action
+    policy.expired_medical_action = payload.expired_medical_action
+    policy.restricted_medical_action = payload.restricted_medical_action
+    policy.notes = payload.notes
+
+
+def apply_attendance_policy_update(policy: EventAttendancePolicy, payload: EventAttendancePolicyUpdate) -> None:
+    for field_name in [
+        "policy_code",
+        "title",
+        "active",
+        "require_minor_consent",
+        "require_medical_clearance",
+        "minor_consent_action",
+        "no_guardian_action",
+        "denied_consent_action",
+        "expired_consent_action",
+        "missing_medical_action",
+        "not_cleared_medical_action",
+        "expired_medical_action",
+        "restricted_medical_action",
+        "notes",
+    ]:
+        value = getattr(payload, field_name)
+        if value is not None:
+            setattr(policy, field_name, value)
+    if payload.participation_statuses is not None:
+        policy.participation_statuses = attendance_statuses_csv(payload.participation_statuses)
+
+
+def attendance_statuses_csv(statuses: list[AttendanceStatus]) -> str:
+    normalized = [status_value.value for status_value in statuses]
+    return ",".join(dict.fromkeys(normalized)) or "confirmed,present"
+
+
+def attendance_statuses_from_csv(value: str) -> list[AttendanceStatus]:
+    statuses: list[AttendanceStatus] = []
+    for item in value.split(","):
+        normalized = item.strip()
+        if not normalized:
+            continue
+        try:
+            statuses.append(AttendanceStatus(normalized))
+        except ValueError:
+            continue
+    return statuses or [AttendanceStatus.CONFIRMED, AttendanceStatus.PRESENT]
+
+
+def event_attendance_policy_read(policy: EventAttendancePolicy) -> EventAttendancePolicyRead:
+    return EventAttendancePolicyRead(
+        id=policy.id,
+        organization_id=policy.organization_id,
+        event_id=policy.event_id,
+        policy_code=policy.policy_code,
+        title=policy.title,
+        active=policy.active,
+        participation_statuses=attendance_statuses_from_csv(policy.participation_statuses),
+        require_minor_consent=policy.require_minor_consent,
+        require_medical_clearance=policy.require_medical_clearance,
+        minor_consent_action=policy.minor_consent_action,
+        no_guardian_action=policy.no_guardian_action,
+        denied_consent_action=policy.denied_consent_action,
+        expired_consent_action=policy.expired_consent_action,
+        missing_medical_action=policy.missing_medical_action,
+        not_cleared_medical_action=policy.not_cleared_medical_action,
+        expired_medical_action=policy.expired_medical_action,
+        restricted_medical_action=policy.restricted_medical_action,
+        notes=policy.notes,
+        created_at=policy.created_at,
+        updated_at=policy.updated_at,
+    )
+
+
+def attendance_policy_consent_action(
+    policy: EventAttendancePolicy,
+    clearance_status: ParticipationClearanceStatus,
+) -> str:
+    if not policy.require_minor_consent:
+        return "allow"
+    return {
+        ParticipationClearanceStatus.NO_GUARDIAN: policy.no_guardian_action,
+        ParticipationClearanceStatus.CONSENT_DENIED: policy.denied_consent_action,
+        ParticipationClearanceStatus.CONSENT_EXPIRED: policy.expired_consent_action,
+        ParticipationClearanceStatus.MINOR_REQUIRES_CONSENT: policy.minor_consent_action,
+    }.get(clearance_status, "allow")
+
+
+def attendance_policy_medical_action(
+    policy: EventAttendancePolicy,
+    gate_status: ParticipationClearanceStatus,
+    medical_status: MedicalClearanceStatus | None,
+) -> str:
+    if not policy.require_medical_clearance:
+        return "allow"
+    if gate_status == ParticipationClearanceStatus.MEDICAL_CLEARANCE_REQUIRED:
+        return policy.missing_medical_action
+    if gate_status == ParticipationClearanceStatus.MEDICAL_CLEARANCE_EXPIRED:
+        return policy.expired_medical_action
+    if gate_status == ParticipationClearanceStatus.MEDICAL_NOT_CLEARED:
+        return policy.not_cleared_medical_action
+    if medical_status == MedicalClearanceStatus.RESTRICTED:
+        return policy.restricted_medical_action
+    return "allow"
+
+
+def attendance_policy_decision(actions: list[str]) -> str:
+    if "block" in actions:
+        return "block"
+    if "warn" in actions:
+        return "warn"
+    return "allow"
+
+
 async def record_attendance(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -5467,17 +5665,28 @@ async def record_attendance(
     medical_clearance_id: UUID | None = None
     medical_clearance_reason: str | None = None
     guardian_consent_id: UUID | None = None
-    if payload.status in PARTICIPATION_STATUSES:
+    attendance_policy = await selected_event_attendance_policy(db, event)
+    policy_code = attendance_policy.policy_code
+    policy_decision = "allow"
+    policy_warnings: list[str] = []
+    policy_participation_statuses = set(attendance_statuses_from_csv(attendance_policy.participation_statuses))
+    if attendance_policy.active and payload.status in policy_participation_statuses:
         clearance_status, _, _, guardian_consent_id, reason = await clearance_for_event(
             db,
             event_id,
             payload.person_id,
         )
-        if clearance_status != ParticipationClearanceStatus.CLEARED:
+        consent_action = attendance_policy_consent_action(attendance_policy, clearance_status)
+        if clearance_status != ParticipationClearanceStatus.CLEARED and consent_action != "allow":
+            policy_warnings.append(reason)
+        if clearance_status != ParticipationClearanceStatus.CLEARED and consent_action == "block":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "clearance_status": clearance_status.value,
+                    "attendance_policy_code": policy_code,
+                    "attendance_policy_decision": "block",
+                    "attendance_policy_warnings": policy_warnings,
                     "reason": reason,
                 },
             )
@@ -5487,7 +5696,21 @@ async def record_attendance(
             medical_clearance_id,
             medical_clearance_reason,
         ) = await medical_clearance_for_event(db, event_id, payload.person_id)
-        if medical_gate_status != ParticipationClearanceStatus.CLEARED:
+        medical_action = attendance_policy_medical_action(
+            attendance_policy,
+            medical_gate_status,
+            medical_clearance_status,
+        )
+        if (
+            medical_gate_status != ParticipationClearanceStatus.CLEARED
+            or medical_clearance_status == MedicalClearanceStatus.RESTRICTED
+        ) and medical_action != "allow":
+            policy_warnings.append(medical_clearance_reason or "Medical clearance warning applies.")
+        policy_decision = attendance_policy_decision([consent_action, medical_action])
+        if (
+            medical_gate_status != ParticipationClearanceStatus.CLEARED
+            or medical_clearance_status == MedicalClearanceStatus.RESTRICTED
+        ) and medical_action == "block":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
@@ -5498,6 +5721,9 @@ async def record_attendance(
                     "medical_clearance_id": str(medical_clearance_id)
                     if medical_clearance_id is not None
                     else None,
+                    "attendance_policy_code": policy_code,
+                    "attendance_policy_decision": "block",
+                    "attendance_policy_warnings": policy_warnings,
                     "reason": medical_clearance_reason,
                 },
             )
@@ -5521,6 +5747,9 @@ async def record_attendance(
             medical_clearance_status,
             medical_clearance_id,
             medical_clearance_reason,
+            policy_code,
+            policy_decision,
+            policy_warnings,
         )
 
     attendance = AttendanceRecord(
@@ -5549,6 +5778,9 @@ async def record_attendance(
         medical_clearance_status,
         medical_clearance_id,
         medical_clearance_reason,
+        policy_code,
+        policy_decision,
+        policy_warnings,
     )
 
 

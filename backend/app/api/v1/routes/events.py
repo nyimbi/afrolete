@@ -11,6 +11,9 @@ from app.schemas.event import (
     AttendanceRecordRead,
     AttendanceRecordUpsert,
     AttendanceSeedRead,
+    EventAttendancePolicyCreate,
+    EventAttendancePolicyRead,
+    EventAttendancePolicyUpdate,
     EventCreate,
     EventRead,
     EventTravelApprovalCreate,
@@ -121,6 +124,7 @@ from app.services.events import (
     create_travel_manifest_offline_link,
     export_travel_manifest,
     generate_travel_fee_invoices,
+    get_event_attendance_policy,
     get_event,
     get_travel_fee_hosted_checkout,
     get_travel_fee_reconciliation,
@@ -158,8 +162,15 @@ from app.services.events import (
     run_event_travel_consent_reminders,
     seed_attendance_from_team_roster,
     seed_travel_checklist_items,
+    selected_event_attendance_policy,
     send_travel_consent_reminders,
     settle_travel_fee_checkout,
+    attendance_policy_consent_action,
+    attendance_policy_decision,
+    attendance_policy_medical_action,
+    attendance_statuses_from_csv,
+    upsert_event_attendance_policy,
+    update_event_attendance_policy,
     update_travel_approval,
     update_travel_backup_driver,
     update_travel_carpool_ride,
@@ -174,7 +185,7 @@ from app.services.events import (
     validate_travel_expense_payout_callback_signature,
     validate_travel_fee_payment_webhook_signature,
 )
-from app.services.safeguarding import medical_clearance_for_event
+from app.services.safeguarding import clearance_for_event, medical_clearance_for_event
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -272,6 +283,9 @@ def to_attendance_read(
     medical_clearance_status=None,
     medical_clearance_id=None,
     medical_clearance_reason=None,
+    attendance_policy_code=None,
+    attendance_policy_decision=None,
+    attendance_policy_warnings=None,
 ) -> AttendanceRecordRead:
     return AttendanceRecordRead(
         id=attendance.id,
@@ -285,6 +299,9 @@ def to_attendance_read(
         medical_clearance_status=medical_clearance_status,
         medical_clearance_id=medical_clearance_id,
         medical_clearance_reason=medical_clearance_reason,
+        attendance_policy_code=attendance_policy_code,
+        attendance_policy_decision=attendance_policy_decision,
+        attendance_policy_warnings=attendance_policy_warnings or [],
     )
 
 
@@ -395,6 +412,9 @@ async def record_attendance_route(
         medical_clearance_status,
         medical_clearance_id,
         medical_clearance_reason,
+        attendance_policy_code,
+        attendance_policy_decision,
+        attendance_policy_warnings,
     ) = await record_attendance(db, identity, event_id, payload, authz)
     return to_attendance_read(
         attendance,
@@ -402,7 +422,40 @@ async def record_attendance_route(
         medical_clearance_status,
         medical_clearance_id,
         medical_clearance_reason,
+        attendance_policy_code,
+        attendance_policy_decision,
+        attendance_policy_warnings,
     )
+
+
+@router.put("/{event_id}/attendance-policy", response_model=EventAttendancePolicyRead)
+async def upsert_event_attendance_policy_route(
+    event_id: UUID,
+    payload: EventAttendancePolicyCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventAttendancePolicyRead:
+    return await upsert_event_attendance_policy(db, identity, event_id, payload, authz)
+
+
+@router.get("/{event_id}/attendance-policy", response_model=EventAttendancePolicyRead)
+async def get_event_attendance_policy_route(
+    event_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> EventAttendancePolicyRead:
+    return await get_event_attendance_policy(db, event_id)
+
+
+@router.patch("/{event_id}/attendance-policy", response_model=EventAttendancePolicyRead)
+async def update_event_attendance_policy_route(
+    event_id: UUID,
+    payload: EventAttendancePolicyUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EventAttendancePolicyRead:
+    return await update_event_attendance_policy(db, identity, event_id, payload, authz)
 
 
 @router.post("/{event_id}/travel-plans", response_model=EventTravelPlanRead, status_code=status.HTTP_201_CREATED)
@@ -1234,18 +1287,47 @@ async def list_attendance_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[AttendanceRecordRead]:
     records = []
+    event = await get_event(db, event_id)
+    policy = await selected_event_attendance_policy(db, event)
+    policy_statuses = set(attendance_statuses_from_csv(policy.participation_statuses))
     for attendance in await list_attendance(db, event_id):
-        _, medical_status, medical_id, medical_reason = await medical_clearance_for_event(
+        clearance_status = None
+        policy_decision = "allow"
+        policy_warnings: list[str] = []
+        if policy.active and attendance.status in policy_statuses:
+            clearance_status, _, _, _, consent_reason = await clearance_for_event(
+                db,
+                event_id,
+                attendance.person_id,
+            )
+            consent_action = attendance_policy_consent_action(policy, clearance_status)
+            if clearance_status.value != "cleared" and consent_action != "allow":
+                policy_warnings.append(consent_reason)
+        else:
+            consent_action = "allow"
+        medical_gate_status, medical_status, medical_id, medical_reason = await medical_clearance_for_event(
             db,
             event_id,
             attendance.person_id,
         )
+        medical_action = (
+            attendance_policy_medical_action(policy, medical_gate_status, medical_status)
+            if policy.active and attendance.status in policy_statuses
+            else "allow"
+        )
+        if policy.active and attendance.status in policy_statuses and medical_action != "allow":
+            policy_warnings.append(medical_reason)
+        policy_decision = attendance_policy_decision([consent_action, medical_action])
         records.append(
             to_attendance_read(
                 attendance,
+                clearance_status=clearance_status,
                 medical_clearance_status=medical_status,
                 medical_clearance_id=medical_id,
                 medical_clearance_reason=medical_reason,
+                attendance_policy_code=policy.policy_code,
+                attendance_policy_decision=policy_decision,
+                attendance_policy_warnings=policy_warnings,
             )
         )
     return records

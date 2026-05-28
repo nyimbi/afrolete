@@ -1306,6 +1306,32 @@ export type AttendanceRecordRead = {
   medical_clearance_status: MedicalClearanceStatus | null;
   medical_clearance_id: UUID | null;
   medical_clearance_reason: string | null;
+  attendance_policy_code: string | null;
+  attendance_policy_decision: string | null;
+  attendance_policy_warnings: string[];
+};
+
+export type EventAttendancePolicyRead = {
+  id: UUID | null;
+  organization_id: UUID;
+  event_id: UUID;
+  policy_code: string;
+  title: string;
+  active: boolean;
+  participation_statuses: AttendanceStatus[];
+  require_minor_consent: boolean;
+  require_medical_clearance: boolean;
+  minor_consent_action: string;
+  no_guardian_action: string;
+  denied_consent_action: string;
+  expired_consent_action: string;
+  missing_medical_action: string;
+  not_cleared_medical_action: string;
+  expired_medical_action: string;
+  restricted_medical_action: string;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 export type AttendanceSeedRead = {

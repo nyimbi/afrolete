@@ -332,6 +332,31 @@ class AttendanceRecord(IdMixin, TimestampMixin, Base):
     note: Mapped[str | None] = mapped_column(Text)
 
 
+class EventAttendancePolicy(IdMixin, TimestampMixin, Base):
+    __tablename__ = "event_attendance_policies"
+    __table_args__ = (
+        UniqueConstraint("event_id", name="uq_event_attendance_policies_event"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    event_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    policy_code: Mapped[str] = mapped_column(String(120), default="default", nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    active: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    participation_statuses: Mapped[str] = mapped_column(String(240), default="confirmed,present", nullable=False)
+    require_minor_consent: Mapped[bool] = mapped_column(default=True, nullable=False)
+    require_medical_clearance: Mapped[bool] = mapped_column(default=True, nullable=False)
+    minor_consent_action: Mapped[str] = mapped_column(String(40), default="block", nullable=False)
+    no_guardian_action: Mapped[str] = mapped_column(String(40), default="block", nullable=False)
+    denied_consent_action: Mapped[str] = mapped_column(String(40), default="block", nullable=False)
+    expired_consent_action: Mapped[str] = mapped_column(String(40), default="block", nullable=False)
+    missing_medical_action: Mapped[str] = mapped_column(String(40), default="block", nullable=False)
+    not_cleared_medical_action: Mapped[str] = mapped_column(String(40), default="block", nullable=False)
+    expired_medical_action: Mapped[str] = mapped_column(String(40), default="block", nullable=False)
+    restricted_medical_action: Mapped[str] = mapped_column(String(40), default="warn", nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class ConsentRequest(IdMixin, TimestampMixin, Base):
     __tablename__ = "consent_requests"
 

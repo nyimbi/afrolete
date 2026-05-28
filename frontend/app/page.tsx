@@ -49,6 +49,7 @@ import type {
   AthleteAssessmentReviewQueueItemRead,
   AthletePerformanceSummaryRead,
   AttendanceRecordRead,
+  EventAttendancePolicyRead,
   AttendanceSeedRead,
   AttendanceStatus,
   BillingCycle,
@@ -1325,6 +1326,7 @@ export default function HomePage() {
   const [teams, setTeams] = useState<TeamRead[]>([]);
   const [events, setEvents] = useState<EventRead[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
+  const [attendancePolicy, setAttendancePolicy] = useState<EventAttendancePolicyRead | null>(null);
   const [weatherAssessments, setWeatherAssessments] = useState<EventWeatherAssessmentRead[]>([]);
   const [weatherAlert, setWeatherAlert] = useState<EventWeatherAlertRead | null>(null);
   const [weatherAutomation, setWeatherAutomation] = useState<EventWeatherAutomationRunRead | null>(null);
@@ -2354,6 +2356,11 @@ export default function HomePage() {
   const loadAttendance = useCallback(async (eventId: string) => {
     const data = await apiRequest<AttendanceRecordRead[]>(`/events/${eventId}/attendance`);
     setAttendance(data);
+  }, []);
+
+  const loadAttendancePolicy = useCallback(async (eventId: string) => {
+    const data = await apiRequest<EventAttendancePolicyRead>(`/events/${eventId}/attendance-policy`);
+    setAttendancePolicy(data);
   }, []);
 
   const loadWeatherAssessments = useCallback(async (eventId: string) => {
@@ -3422,6 +3429,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!selectedEventId) {
       setAttendance([]);
+      setAttendancePolicy(null);
       setWeatherAssessments([]);
       setWeatherAlert(null);
       setWeatherAutomation(null);
@@ -3464,12 +3472,13 @@ export default function HomePage() {
       "load-event-readiness",
       async () => {
         await loadAttendance(selectedEventId);
+        await loadAttendancePolicy(selectedEventId);
         await loadWeatherAssessments(selectedEventId);
         await loadTravelPlans(selectedEventId);
       },
       () => undefined
     );
-  }, [selectedEventId, loadAttendance, loadTravelPlans, loadWeatherAssessments, runAction]);
+  }, [selectedEventId, loadAttendance, loadAttendancePolicy, loadTravelPlans, loadWeatherAssessments, runAction]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -5475,7 +5484,47 @@ export default function HomePage() {
         }),
       (record) => {
         setAttendance((current) => [record, ...current.filter((item) => item.person_id !== record.person_id)]);
-        addLog(`Attendance recorded as ${record.status}`, "good");
+        addLog(
+          `Attendance recorded as ${record.status}${record.attendance_policy_decision === "warn" ? " with policy warning" : ""}`,
+          record.attendance_policy_decision === "warn" ? "neutral" : "good"
+        );
+      }
+    );
+  };
+
+  const enableFlexibleAttendancePolicy = () => {
+    if (!selectedEventId) {
+      addLog("Select an event first", "bad");
+      return;
+    }
+    runAction(
+      `attendance-policy-${selectedEventId}`,
+      () =>
+        apiRequest<EventAttendancePolicyRead>(`/events/${selectedEventId}/attendance-policy`, {
+          method: "PUT",
+          identity,
+          body: {
+            policy_code: "arrival-desk-flex",
+            title: "Arrival desk flexible check-in",
+            active: true,
+            participation_statuses: ["present"],
+            require_minor_consent: true,
+            require_medical_clearance: true,
+            no_guardian_action: "warn",
+            minor_consent_action: "warn",
+            denied_consent_action: "block",
+            expired_consent_action: "warn",
+            missing_medical_action: "block",
+            not_cleared_medical_action: "block",
+            expired_medical_action: "block",
+            restricted_medical_action: "warn",
+            notes: "Front desk can record arrival while safeguarding resolves consent warnings."
+          }
+        }),
+      (policy) => {
+        setAttendancePolicy(policy);
+        void loadAttendance(selectedEventId);
+        addLog(`${policy.title} active`, "good");
       }
     );
   };
@@ -11710,6 +11759,7 @@ export default function HomePage() {
             </div>
             <div className="event-toolbar">
               <button type="button" onClick={seedAttendance} disabled={busyAction !== null}>Seed roster</button>
+              <button type="button" onClick={enableFlexibleAttendancePolicy} disabled={busyAction !== null}>Attendance policy</button>
               <button type="button" onClick={checkClearance} disabled={busyAction !== null}>Clearance</button>
               <button type="button" onClick={assessEventWeather} disabled={busyAction !== null}>Weather check</button>
               <button type="button" onClick={runWeatherAutomation} disabled={busyAction !== null}>Weather automation</button>
@@ -12707,6 +12757,15 @@ export default function HomePage() {
               ))}
             </div>
             <div className="attendance-table">
+              {attendancePolicy ? (
+                <div className="attendance-row">
+                  <span>{attendancePolicy.policy_code}</span>
+                  <strong>{attendancePolicy.title}</strong>
+                  <small>
+                    minor {attendancePolicy.minor_consent_action} · no guardian {attendancePolicy.no_guardian_action} · restricted medical {attendancePolicy.restricted_medical_action}
+                  </small>
+                </div>
+              ) : null}
               {attendance.map((record) => (
                 <div key={record.id} className="attendance-row">
                   <span>{record.person_id.slice(0, 8)}</span>
@@ -12716,6 +12775,12 @@ export default function HomePage() {
                       ? `${record.medical_clearance_status} · ${record.medical_clearance_reason ?? "medical review"}`
                       : record.clearance_status ?? "clearance pending"}
                   </small>
+                  {record.attendance_policy_decision ? (
+                    <small>
+                      {record.attendance_policy_code} · {record.attendance_policy_decision}
+                      {record.attendance_policy_warnings.length > 0 ? ` · ${record.attendance_policy_warnings[0]}` : ""}
+                    </small>
+                  ) : null}
                   <button type="button" onClick={() => recordAttendance(record.person_id, "present")}>
                     Present
                   </button>

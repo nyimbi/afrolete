@@ -182,3 +182,69 @@ def test_minor_attendance_requires_guardian_consent_before_participation(
     assert check_in["status"] == "present"
     assert check_in["guardian_consent_id"] == consent["id"]
     assert check_in["clearance_status"] == "cleared"
+
+
+def test_event_attendance_policy_can_warn_instead_of_blocking_minor_clearance(
+    client,
+    identity_headers,
+    minor_person,
+) -> None:
+    _, team, event = create_org_team_event(client, identity_headers, sport="netball")
+    client.post(
+        f"/api/v1/teams/{team['id']}/members",
+        headers=identity_headers,
+        json={"person_id": str(minor_person.id), "role": "player", "status": "active"},
+    )
+
+    policy_response = client.put(
+        f"/api/v1/events/{event['id']}/attendance-policy",
+        headers=identity_headers,
+        json={
+            "policy_code": "tournament-arrival-desk",
+            "title": "Tournament arrival desk",
+            "participation_statuses": ["present"],
+            "no_guardian_action": "warn",
+            "minor_consent_action": "warn",
+            "denied_consent_action": "block",
+            "expired_consent_action": "warn",
+            "restricted_medical_action": "warn",
+            "notes": "Allow front-desk arrival while safeguarding resolves consent.",
+        },
+    )
+    assert policy_response.status_code == 200
+    policy = policy_response.json()
+    assert policy["policy_code"] == "tournament-arrival-desk"
+    assert policy["no_guardian_action"] == "warn"
+
+    check_in_response = client.post(
+        f"/api/v1/events/{event['id']}/attendance",
+        headers=identity_headers,
+        json={"person_id": str(minor_person.id), "status": "present"},
+    )
+    assert check_in_response.status_code == 201
+    check_in = check_in_response.json()
+    assert check_in["status"] == "present"
+    assert check_in["clearance_status"] == "no_guardian"
+    assert check_in["attendance_policy_code"] == "tournament-arrival-desk"
+    assert check_in["attendance_policy_decision"] == "warn"
+    assert "No guardian with consent authority" in check_in["attendance_policy_warnings"][0]
+
+    listed = client.get(f"/api/v1/events/{event['id']}/attendance").json()
+    assert listed[0]["attendance_policy_code"] == "tournament-arrival-desk"
+    assert listed[0]["attendance_policy_decision"] == "warn"
+
+    strict_response = client.patch(
+        f"/api/v1/events/{event['id']}/attendance-policy",
+        headers=identity_headers,
+        json={"no_guardian_action": "block"},
+    )
+    assert strict_response.status_code == 200
+    assert strict_response.json()["no_guardian_action"] == "block"
+
+    blocked_response = client.post(
+        f"/api/v1/events/{event['id']}/attendance",
+        headers=identity_headers,
+        json={"person_id": str(minor_person.id), "status": "present"},
+    )
+    assert blocked_response.status_code == 409
+    assert blocked_response.json()["detail"]["attendance_policy_code"] == "tournament-arrival-desk"

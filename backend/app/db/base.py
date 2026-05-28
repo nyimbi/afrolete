@@ -71,6 +71,7 @@ from app.models.competition import (  # noqa: F401,E402
 )
 from app.models.event import (  # noqa: F401,E402
     ActivityConsent,
+    EventAttendancePolicy,
     AttendanceRecord,
     BackgroundCheck,
     ComplianceCredential,
