@@ -57,6 +57,33 @@ class AgentTask(IdMixin, TimestampMixin, Base):
     approval_rejected_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     approval_status: Mapped[str] = mapped_column(String(40), default="not_requested", nullable=False, index=True)
     approval_last_decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    governance_policy_rule_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("agent_governance_policy_rules.id"), index=True
+    )
+    governance_policy_code: Mapped[str | None] = mapped_column(String(120), index=True)
+    governance_policy_decision: Mapped[str | None] = mapped_column(String(40), index=True)
+    governance_policy_risk_level: Mapped[str | None] = mapped_column(String(40), index=True)
+    governance_policy_rationale: Mapped[str | None] = mapped_column(Text)
+
+
+class AgentGovernancePolicyRule(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_governance_policy_rules"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "rule_code", name="uq_agent_governance_policy_rules_org_code"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    rule_code: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    active: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    agent_kind: Mapped[str | None] = mapped_column(String(80), index=True)
+    task_type_contains: Mapped[str | None] = mapped_column(String(120), index=True)
+    model_policy_contains: Mapped[str | None] = mapped_column(String(120), index=True)
+    input_ref_contains: Mapped[str | None] = mapped_column(String(160), index=True)
+    decision: Mapped[str] = mapped_column(String(40), default="require_approval", nullable=False, index=True)
+    required_approval_count: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(40), default="high", nullable=False, index=True)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class AgentTaskApproval(IdMixin, TimestampMixin, Base):

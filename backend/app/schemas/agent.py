@@ -63,6 +63,63 @@ class AgentTaskRead(BaseModel):
     approval_pending_count: int
     approval_status: str
     approval_last_decided_at: datetime | None
+    governance_policy_rule_id: UUID | None
+    governance_policy_code: str | None
+    governance_policy_decision: str | None
+    governance_policy_risk_level: str | None
+    governance_policy_rationale: str | None
+
+
+class AgentGovernancePolicyRuleCreate(BaseModel):
+    organization_id: UUID
+    rule_code: str = Field(min_length=2, max_length=120, pattern="^[A-Za-z0-9_.-]+$")
+    title: str = Field(min_length=2, max_length=240)
+    active: bool = True
+    agent_kind: AgentKind | None = None
+    task_type_contains: str | None = Field(default=None, max_length=120)
+    model_policy_contains: str | None = Field(default=None, max_length=120)
+    input_ref_contains: str | None = Field(default=None, max_length=160)
+    decision: str = Field(default="require_approval", pattern="^(allow|require_approval|block)$")
+    required_approval_count: int = Field(default=2, ge=1, le=10)
+    risk_level: str = Field(default="high", pattern="^(low|medium|high|critical)$")
+    rationale: str = Field(min_length=2, max_length=2000)
+
+
+class AgentGovernancePolicyRuleUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=240)
+    active: bool | None = None
+    agent_kind: AgentKind | None = None
+    task_type_contains: str | None = Field(default=None, max_length=120)
+    model_policy_contains: str | None = Field(default=None, max_length=120)
+    input_ref_contains: str | None = Field(default=None, max_length=160)
+    decision: str | None = Field(default=None, pattern="^(allow|require_approval|block)$")
+    required_approval_count: int | None = Field(default=None, ge=1, le=10)
+    risk_level: str | None = Field(default=None, pattern="^(low|medium|high|critical)$")
+    rationale: str | None = Field(default=None, min_length=2, max_length=2000)
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "AgentGovernancePolicyRuleUpdate":
+        if all(value is None for value in self.model_dump().values()):
+            raise ValueError("at least one governance policy rule field is required")
+        return self
+
+
+class AgentGovernancePolicyRuleRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    rule_code: str
+    title: str
+    active: bool
+    agent_kind: AgentKind | None
+    task_type_contains: str | None
+    model_policy_contains: str | None
+    input_ref_contains: str | None
+    decision: str
+    required_approval_count: int
+    risk_level: str
+    rationale: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class AgentTaskApprovalRequestCreate(BaseModel):

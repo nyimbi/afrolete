@@ -15,6 +15,9 @@ from app.schemas.agent import (
     AgentDecisionAppealUpdate,
     AgentEthicalScorecardRead,
     AgentFamilyTaskRead,
+    AgentGovernancePolicyRuleCreate,
+    AgentGovernancePolicyRuleRead,
+    AgentGovernancePolicyRuleUpdate,
     AgentGovernanceSummaryRead,
     AgentModelRegistryCreate,
     AgentModelRegistryRead,
@@ -64,6 +67,7 @@ from app.services.agents import (
     agent_run_records,
     assign_agent,
     create_agent,
+    create_agent_governance_policy_rule,
     create_agent_model_registry,
     create_agent_scorecard_comment,
     deliver_scorecard_artifact_anomaly_alert,
@@ -75,6 +79,7 @@ from app.services.agents import (
     list_agent_assignments,
     list_agent_bias_audits,
     list_agent_decision_appeals,
+    list_agent_governance_policy_rules,
     list_agent_model_registry,
     list_agent_task_approvals,
     list_agent_scorecard_comments,
@@ -99,6 +104,7 @@ from app.services.agents import (
     submit_agent_decision_appeal,
     submit_my_agent_decision_appeal,
     update_agent_decision_appeal,
+    update_agent_governance_policy_rule,
     update_agent_model_registry,
     update_agent_scorecard_comment,
     update_agent_task,
@@ -176,6 +182,11 @@ def to_task_read(task) -> AgentTaskRead:
         approval_pending_count=approval_pending_count,
         approval_status=task.approval_status or "not_requested",
         approval_last_decided_at=task.approval_last_decided_at,
+        governance_policy_rule_id=task.governance_policy_rule_id,
+        governance_policy_code=task.governance_policy_code,
+        governance_policy_decision=task.governance_policy_decision,
+        governance_policy_risk_level=task.governance_policy_risk_level,
+        governance_policy_rationale=task.governance_policy_rationale,
     )
 
 
@@ -753,6 +764,45 @@ async def update_agent_decision_appeal_route(
 ) -> AgentDecisionAppealRead:
     return to_decision_appeal_read(
         await update_agent_decision_appeal(db, identity, appeal_id, payload, authz)
+    )
+
+
+@router.post("/governance-policy-rules", response_model=AgentGovernancePolicyRuleRead, status_code=201)
+async def create_agent_governance_policy_rule_route(
+    payload: AgentGovernancePolicyRuleCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentGovernancePolicyRuleRead:
+    return AgentGovernancePolicyRuleRead(
+        **await create_agent_governance_policy_rule(db, identity, payload, authz)
+    )
+
+
+@router.get("/governance-policy-rules", response_model=list[AgentGovernancePolicyRuleRead])
+async def list_agent_governance_policy_rules_route(
+    organization_id: UUID = Query(),
+    active: bool | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[AgentGovernancePolicyRuleRead]:
+    return [
+        AgentGovernancePolicyRuleRead(**rule)
+        for rule in await list_agent_governance_policy_rules(db, identity, organization_id, authz, active=active)
+    ]
+
+
+@router.patch("/governance-policy-rules/{rule_id}", response_model=AgentGovernancePolicyRuleRead)
+async def update_agent_governance_policy_rule_route(
+    rule_id: UUID,
+    payload: AgentGovernancePolicyRuleUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentGovernancePolicyRuleRead:
+    return AgentGovernancePolicyRuleRead(
+        **await update_agent_governance_policy_rule(db, identity, rule_id, payload, authz)
     )
 
 

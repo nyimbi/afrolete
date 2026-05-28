@@ -20,6 +20,7 @@ from app.models.agent import (
     AgentAssignment,
     AgentBiasAudit,
     AgentDecisionAppeal,
+    AgentGovernancePolicyRule,
     AgentModelRegistry,
     AgentRunRecord,
     AgentScorecardArtifactAccess,
@@ -46,6 +47,8 @@ from app.schemas.agent import (
     AgentDecisionAppealCreate,
     AgentDecisionAppealUpdate,
     AgentMyDecisionAppealCreate,
+    AgentGovernancePolicyRuleCreate,
+    AgentGovernancePolicyRuleUpdate,
     AgentModelRegistryCreate,
     AgentModelRegistryUpdate,
     AgentScorecardAutomationRunCreate,
@@ -166,8 +169,104 @@ async def list_agent_bias_audits(
             await db.scalars(
                 statement.order_by(AgentBiasAudit.audited_at.desc(), AgentBiasAudit.created_at.desc())
             )
+    ).all()
+    )
+
+
+async def create_agent_governance_policy_rule(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentGovernancePolicyRuleCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, payload.organization_id)
+    existing = await db.scalar(
+        select(AgentGovernancePolicyRule).where(
+            AgentGovernancePolicyRule.organization_id == payload.organization_id,
+            AgentGovernancePolicyRule.rule_code == payload.rule_code,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent governance policy rule already exists")
+    rule = AgentGovernancePolicyRule(
+        organization_id=payload.organization_id,
+        rule_code=payload.rule_code,
+        title=payload.title,
+        active=payload.active,
+        agent_kind=payload.agent_kind.value if payload.agent_kind else None,
+        task_type_contains=normalize_policy_match(payload.task_type_contains),
+        model_policy_contains=normalize_policy_match(payload.model_policy_contains),
+        input_ref_contains=normalize_policy_match(payload.input_ref_contains),
+        decision=payload.decision,
+        required_approval_count=payload.required_approval_count,
+        risk_level=payload.risk_level,
+        rationale=payload.rationale,
+    )
+    db.add(rule)
+    await db.commit()
+    await db.refresh(rule)
+    return agent_governance_policy_rule_read(rule)
+
+
+async def list_agent_governance_policy_rules(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    active: bool | None = None,
+) -> list[dict[str, object]]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    statement = select(AgentGovernancePolicyRule).where(AgentGovernancePolicyRule.organization_id == organization_id)
+    if active is not None:
+        statement = statement.where(AgentGovernancePolicyRule.active.is_(active))
+    rules = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    AgentGovernancePolicyRule.active.desc(),
+                    AgentGovernancePolicyRule.risk_level.desc(),
+                    AgentGovernancePolicyRule.rule_code,
+                )
+            )
         ).all()
     )
+    return [agent_governance_policy_rule_read(rule) for rule in rules]
+
+
+async def update_agent_governance_policy_rule(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    rule_id: UUID,
+    payload: AgentGovernancePolicyRuleUpdate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    rule = await db.get(AgentGovernancePolicyRule, rule_id)
+    if rule is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent governance policy rule not found")
+    await ensure_manage_organization(authz, identity, rule.organization_id)
+    if payload.title is not None:
+        rule.title = payload.title
+    if payload.active is not None:
+        rule.active = payload.active
+    if payload.agent_kind is not None:
+        rule.agent_kind = payload.agent_kind.value
+    if payload.task_type_contains is not None:
+        rule.task_type_contains = normalize_policy_match(payload.task_type_contains)
+    if payload.model_policy_contains is not None:
+        rule.model_policy_contains = normalize_policy_match(payload.model_policy_contains)
+    if payload.input_ref_contains is not None:
+        rule.input_ref_contains = normalize_policy_match(payload.input_ref_contains)
+    if payload.decision is not None:
+        rule.decision = payload.decision
+    if payload.required_approval_count is not None:
+        rule.required_approval_count = payload.required_approval_count
+    if payload.risk_level is not None:
+        rule.risk_level = payload.risk_level
+    if payload.rationale is not None:
+        rule.rationale = payload.rationale
+    await db.commit()
+    await db.refresh(rule)
+    return agent_governance_policy_rule_read(rule)
 
 
 async def list_agent_decision_appeals(
@@ -637,6 +736,12 @@ async def queue_agent_task(
 ) -> AgentTask:
     agent = await get_agent_for_organization(db, agent_id, payload.organization_id)
     await ensure_manage_organization(authz, identity, payload.organization_id)
+    policy_rule = await matching_agent_governance_policy_rule(db, agent, payload)
+    if policy_rule is not None and policy_rule.decision == "block":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Agent governance policy {policy_rule.rule_code} blocks this task: {policy_rule.rationale}",
+        )
 
     task = AgentTask(
         agent_id=agent.id,
@@ -646,8 +751,19 @@ async def queue_agent_task(
         requested_by_person_id=identity.person_id,
         input_ref=payload.input_ref,
     )
+    if policy_rule is not None:
+        apply_agent_governance_policy_to_task(task, policy_rule)
     db.add(task)
     await db.flush()
+    if policy_rule is not None and policy_rule.decision == "require_approval":
+        await create_agent_task_approval_slots(
+            db,
+            task=task,
+            requested_by_person_id=identity.person_id,
+            required_count=policy_rule.required_approval_count,
+            request_notes=f"Required by AI governance policy {policy_rule.rule_code}: {policy_rule.rationale}",
+        )
+        await refresh_agent_task_approval_state(db, task)
     await append_agent_run_record(
         db,
         agent,
@@ -655,6 +771,7 @@ async def queue_agent_task(
         identity,
         event_type="queued",
         settings=get_settings(),
+        governance_note=agent_governance_policy_note(task, policy_rule),
     )
     await db.commit()
     await db.refresh(task)
@@ -744,20 +861,17 @@ async def request_agent_task_approvals(
         db.add(approval)
         requested.append(approval)
 
-    target_slots = max(payload.required_count, len(payload.reviewer_person_ids), len(existing))
-    while len(existing) + len(requested) < target_slots:
-        approval = AgentTaskApproval(
-            organization_id=task.organization_id,
-            task_id=task.id,
-            reviewer_label=f"Reviewer {next_sequence}",
+    requested.extend(
+        await create_agent_task_approval_slots(
+            db,
+            task=task,
             requested_by_person_id=identity.person_id,
-            status="pending",
+            required_count=max(payload.required_count, len(payload.reviewer_person_ids), len(existing)),
             request_notes=payload.request_notes,
-            sequence=next_sequence,
+            existing_count=len(existing) + len(requested),
+            next_sequence=next_sequence,
         )
-        next_sequence += 1
-        db.add(approval)
-        requested.append(approval)
+    )
 
     task.approval_required_count = payload.required_count
     await refresh_agent_task_approval_state(db, task)
@@ -2897,6 +3011,34 @@ def count_tasks(tasks: list[AgentTask], status_value: AgentTaskStatus) -> int:
     return sum(1 for task in tasks if task.status == status_value)
 
 
+async def create_agent_task_approval_slots(
+    db: AsyncSession,
+    task: AgentTask,
+    requested_by_person_id: UUID | None,
+    required_count: int,
+    request_notes: str | None,
+    existing_count: int = 0,
+    next_sequence: int = 1,
+) -> list[AgentTaskApproval]:
+    requested: list[AgentTaskApproval] = []
+    target_slots = max(required_count, existing_count)
+    while existing_count + len(requested) < target_slots:
+        approval = AgentTaskApproval(
+            organization_id=task.organization_id,
+            task_id=task.id,
+            reviewer_label=f"Reviewer {next_sequence}",
+            requested_by_person_id=requested_by_person_id,
+            status="pending",
+            request_notes=request_notes,
+            sequence=next_sequence,
+        )
+        next_sequence += 1
+        db.add(approval)
+        requested.append(approval)
+    task.approval_required_count = max(task.approval_required_count or 0, required_count)
+    return requested
+
+
 async def refresh_agent_task_approval_state(db: AsyncSession, task: AgentTask) -> None:
     approvals = list(
         (
@@ -2939,6 +3081,103 @@ def agent_task_approval_governance_note(task: AgentTask) -> str:
     if task.approval_status == "pending":
         return f"Agent output is waiting for {pending_count} more approval(s)."
     return "Agent output approval routing is tracked for human governance."
+
+
+async def matching_agent_governance_policy_rule(
+    db: AsyncSession,
+    agent: Agent,
+    payload: AgentTaskCreate,
+) -> AgentGovernancePolicyRule | None:
+    rules = list(
+        (
+            await db.scalars(
+                select(AgentGovernancePolicyRule)
+                .where(AgentGovernancePolicyRule.organization_id == payload.organization_id)
+                .where(AgentGovernancePolicyRule.active.is_(True))
+                .order_by(
+                    AgentGovernancePolicyRule.risk_level.desc(),
+                    AgentGovernancePolicyRule.rule_code,
+                )
+            )
+        ).all()
+    )
+    for rule in rules:
+        if agent_governance_policy_matches(rule, agent, payload):
+            return rule
+    return None
+
+
+def agent_governance_policy_matches(
+    rule: AgentGovernancePolicyRule,
+    agent: Agent,
+    payload: AgentTaskCreate,
+) -> bool:
+    if rule.agent_kind and rule.agent_kind != agent.kind.value:
+        return False
+    if rule.task_type_contains and rule.task_type_contains not in normalize_policy_match(payload.task_type):
+        return False
+    model_policy = agent.model_policy or get_settings().agent_default_model
+    if rule.model_policy_contains and rule.model_policy_contains not in normalize_policy_match(model_policy):
+        return False
+    if rule.input_ref_contains and rule.input_ref_contains not in normalize_policy_match(payload.input_ref):
+        return False
+    return True
+
+
+def apply_agent_governance_policy_to_task(
+    task: AgentTask,
+    rule: AgentGovernancePolicyRule,
+) -> None:
+    task.governance_policy_rule_id = rule.id
+    task.governance_policy_code = rule.rule_code
+    task.governance_policy_decision = rule.decision
+    task.governance_policy_risk_level = rule.risk_level
+    task.governance_policy_rationale = rule.rationale
+
+
+def agent_governance_policy_note(
+    task: AgentTask,
+    rule: AgentGovernancePolicyRule | None,
+) -> str:
+    if rule is None:
+        return governance_notes_for_queued_task(task)
+    if rule.decision == "require_approval":
+        return (
+            f"AI governance policy {rule.rule_code} classified this task as {rule.risk_level} "
+            f"and required {rule.required_approval_count} approval(s): {rule.rationale}"
+        )
+    return f"AI governance policy {rule.rule_code} allowed this task: {rule.rationale}"
+
+
+def governance_notes_for_queued_task(task: AgentTask) -> str:
+    return "Agent task was queued under the active tenant governance policy set."
+
+
+def normalize_policy_match(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(value.strip().lower().split())
+    return normalized or None
+
+
+def agent_governance_policy_rule_read(rule: AgentGovernancePolicyRule) -> dict[str, object]:
+    return {
+        "id": rule.id,
+        "organization_id": rule.organization_id,
+        "rule_code": rule.rule_code,
+        "title": rule.title,
+        "active": rule.active,
+        "agent_kind": rule.agent_kind,
+        "task_type_contains": rule.task_type_contains,
+        "model_policy_contains": rule.model_policy_contains,
+        "input_ref_contains": rule.input_ref_contains,
+        "decision": rule.decision,
+        "required_approval_count": rule.required_approval_count,
+        "risk_level": rule.risk_level,
+        "rationale": rule.rationale,
+        "created_at": rule.created_at,
+        "updated_at": rule.updated_at,
+    }
 
 
 def agent_credential_status(settings: Settings) -> dict[str, object]:

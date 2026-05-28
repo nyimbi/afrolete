@@ -16,6 +16,7 @@ import type {
   AgentBiasAuditRead,
   AgentDecisionAppealRead,
   AgentEthicalScorecardRead,
+  AgentGovernancePolicyRuleRead,
   AgentGovernanceSummaryRead,
   AgentKind,
   AgentModelRegistryRead,
@@ -1381,6 +1382,7 @@ export default function HomePage() {
   const [agentLedgerVerification, setAgentLedgerVerification] =
     useState<AgentRunLedgerVerificationRead | null>(null);
   const [agentGovernance, setAgentGovernance] = useState<AgentGovernanceSummaryRead | null>(null);
+  const [agentGovernancePolicyRules, setAgentGovernancePolicyRules] = useState<AgentGovernancePolicyRuleRead[]>([]);
   const [agentTransparency, setAgentTransparency] = useState<AgentModelTransparencyReportRead | null>(null);
   const [agentModelRegistry, setAgentModelRegistry] = useState<AgentModelRegistryRead[]>([]);
   const [agentBiasAudits, setAgentBiasAudits] = useState<AgentBiasAuditRead[]>([]);
@@ -2473,10 +2475,11 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
+    const [tasks, runs, governance, policyRules, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
+      apiRequest<AgentGovernancePolicyRuleRead[]>(`/agents/governance-policy-rules?organization_id=${organizationId}`),
       apiRequest<AgentRunLedgerVerificationRead>(`/agents/runs/verify?organization_id=${organizationId}`),
       apiRequest<AgentModelTransparencyReportRead>(`/agents/model-transparency?organization_id=${organizationId}`),
       apiRequest<AgentModelRegistryRead[]>(`/agents/model-registry?organization_id=${organizationId}`),
@@ -2511,6 +2514,7 @@ export default function HomePage() {
     setAgentTaskApprovals(approvalLists.flat());
     setAgentRuns(runs);
     setAgentGovernance(governance);
+    setAgentGovernancePolicyRules(policyRules);
     setAgentLedgerVerification(ledgerVerification);
     setAgentTransparency(transparency);
     setAgentModelRegistry(registry);
@@ -3159,6 +3163,7 @@ export default function HomePage() {
       setAgentRuns([]);
       setAgentLedgerVerification(null);
       setAgentGovernance(null);
+      setAgentGovernancePolicyRules([]);
       setAgentTransparency(null);
       setAgentModelRegistry([]);
       setAgentBiasAudits([]);
@@ -6771,6 +6776,45 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== registry.id)
         ]);
         addLog(`${registry.model_policy} registered for ${registry.review_status}`, "good");
+        void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+      }
+    );
+  };
+
+  const createAgentGovernancePolicyRule = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const agentKind = selectedAgent?.kind ?? agentForm.kind;
+    const taskNeedle = taskForm.task_type.includes("_")
+      ? taskForm.task_type.split("_")[0]
+      : taskForm.task_type || "selection";
+    runAction(
+      `create-agent-governance-policy-${agentKind}-${taskNeedle}`,
+      () =>
+        apiRequest<AgentGovernancePolicyRuleRead>("/agents/governance-policy-rules", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            rule_code: `${agentKind}.${taskNeedle}.human-review`,
+            title: `${agentKind} ${taskNeedle} tasks require review`,
+            agent_kind: agentKind,
+            task_type_contains: taskNeedle,
+            model_policy_contains: selectedAgent?.model_policy ? selectedAgent.model_policy.split("-")[0] : null,
+            decision: "require_approval",
+            required_approval_count: 2,
+            risk_level: ["safeguarding", "analytics"].includes(agentKind) ? "critical" : "high",
+            rationale: "Tenant AI governance requires two human approvals before sensitive agent recommendations are accepted."
+          }
+        }),
+      (rule) => {
+        setAgentGovernancePolicyRules((current) => [
+          rule,
+          ...current.filter((item) => item.id !== rule.id)
+        ]);
+        addLog(`${rule.title} policy activated`, "good");
         void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
       }
     );
@@ -16127,10 +16171,11 @@ export default function HomePage() {
             </div>
             <div className="event-toolbar">
               <button type="button" onClick={() => assignAgent("organization")} disabled={busyAction !== null}>Assign org</button>
-              <button type="button" onClick={() => assignAgent("team")} disabled={busyAction !== null}>Assign team</button>
-              <button type="button" onClick={() => assignAgent("event")} disabled={busyAction !== null}>Assign event</button>
-              <button type="button" onClick={registerAgentModel} disabled={busyAction !== null}>Register model</button>
-            </div>
+                <button type="button" onClick={() => assignAgent("team")} disabled={busyAction !== null}>Assign team</button>
+                <button type="button" onClick={() => assignAgent("event")} disabled={busyAction !== null}>Assign event</button>
+                <button type="button" onClick={registerAgentModel} disabled={busyAction !== null}>Register model</button>
+                <button type="button" onClick={createAgentGovernancePolicyRule} disabled={busyAction !== null}>Policy</button>
+              </div>
             <div className="selection-list compact">
               {agents.map((agent) => (
                 <button
@@ -16211,6 +16256,20 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {agentGovernancePolicyRules.slice(0, 3).map((rule) => (
+                <article key={rule.id} className="task-card">
+                  <div>
+                    <strong>{rule.rule_code} · {rule.decision.replaceAll("_", " ")}</strong>
+                    <span>
+                      {rule.active ? "active" : "inactive"} · {rule.risk_level} · {rule.required_approval_count} approvals
+                    </span>
+                    <span>
+                      {rule.agent_kind ?? "all agents"} · task contains {rule.task_type_contains ?? "any"} · model {rule.model_policy_contains ?? "any"}
+                    </span>
+                    <span>{rule.rationale}</span>
+                  </div>
+                </article>
+              ))}
               {agentTransparency ? (
                 <article className="task-card">
                   <div>
@@ -16525,6 +16584,11 @@ export default function HomePage() {
                       <span>
                         Approval {task.approval_status.replaceAll("_", " ")} · {task.approval_approved_count}/{task.approval_required_count || approvals.length || 0} accepted · {task.approval_pending_count} pending
                       </span>
+                      {task.governance_policy_code ? (
+                        <span>
+                          Policy {task.governance_policy_code} · {task.governance_policy_decision?.replaceAll("_", " ")} · {task.governance_policy_risk_level}
+                        </span>
+                      ) : null}
                       {task.output_ref ? <span>{task.output_ref}</span> : null}
                       {task.review_notes ? <span>{task.review_notes}</span> : null}
                       {approvals.slice(0, 3).map((approval) => (

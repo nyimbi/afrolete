@@ -240,6 +240,105 @@ def test_agent_task_multi_approval_routing(client, identity_headers) -> None:
     assert "approval_decided" in [run["event_type"] for run in runs]
 
 
+def test_agent_governance_policy_requires_approvals_and_blocks_tasks(client, identity_headers) -> None:
+    organization, team = create_org_and_team(client, identity_headers, "policy")
+    agent = client.post(
+        "/api/v1/agents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Policy Steward",
+            "kind": "safeguarding",
+            "purpose": "Apply tenant AI governance rules before sensitive recommendations run.",
+            "model_policy": "sensitive-athlete-model",
+        },
+    ).json()
+
+    policy_response = client.post(
+        "/api/v1/agents/governance-policy-rules",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "rule_code": "safeguarding.selection.review",
+            "title": "Selection advice requires two approvals",
+            "agent_kind": "safeguarding",
+            "task_type_contains": "selection",
+            "model_policy_contains": "sensitive",
+            "decision": "require_approval",
+            "required_approval_count": 2,
+            "risk_level": "critical",
+            "rationale": "Athlete selection advice can materially affect minors and must be human-governed.",
+        },
+    )
+
+    assert policy_response.status_code == 201
+    policy = policy_response.json()
+    assert policy["decision"] == "require_approval"
+
+    task_response = client.post(
+        f"/api/v1/agents/{agent['id']}/tasks",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "task_type": "selection_recommendation",
+            "title": "Recommend tournament squad",
+            "input_ref": f"team:{team['id']}",
+        },
+    )
+
+    assert task_response.status_code == 201
+    task = task_response.json()
+    assert task["governance_policy_code"] == "safeguarding.selection.review"
+    assert task["governance_policy_decision"] == "require_approval"
+    assert task["governance_policy_risk_level"] == "critical"
+    assert task["approval_status"] == "pending"
+    assert task["approval_required_count"] == 2
+    assert task["approval_pending_count"] == 2
+
+    approvals = client.get(
+        f"/api/v1/agents/tasks/{task['id']}/approvals",
+        headers=identity_headers,
+    ).json()
+    assert len(approvals) == 2
+    assert all(approval["request_notes"].startswith("Required by AI governance policy") for approval in approvals)
+
+    runs = client.get(
+        f"/api/v1/agents/runs?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert runs[0]["event_type"] == "queued"
+    assert "safeguarding.selection.review" in runs[0]["governance_notes"]
+
+    block_response = client.post(
+        "/api/v1/agents/governance-policy-rules",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "rule_code": "medical.autoapply.block",
+            "title": "Medical auto-apply is blocked",
+            "task_type_contains": "medical_auto_apply",
+            "decision": "block",
+            "required_approval_count": 1,
+            "risk_level": "critical",
+            "rationale": "Medical clearance side effects must not be automated by an AI agent.",
+        },
+    )
+    assert block_response.status_code == 201
+
+    blocked_task = client.post(
+        f"/api/v1/agents/{agent['id']}/tasks",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "task_type": "medical_auto_apply",
+            "title": "Auto-apply return-to-play clearance",
+            "input_ref": "incident:medical",
+        },
+    )
+    assert blocked_task.status_code == 409
+    assert "medical.autoapply.block" in blocked_task.json()["detail"]
+
+
 async def test_agent_task_worker_executes_queued_tasks(db_session) -> None:
     organization = Organization(
         name="Agent Worker Club",

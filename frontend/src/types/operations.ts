@@ -3299,6 +3299,29 @@ export type AgentTaskRead = {
   approval_pending_count: number;
   approval_status: string;
   approval_last_decided_at: string | null;
+  governance_policy_rule_id: UUID | null;
+  governance_policy_code: string | null;
+  governance_policy_decision: string | null;
+  governance_policy_risk_level: string | null;
+  governance_policy_rationale: string | null;
+};
+
+export type AgentGovernancePolicyRuleRead = {
+  id: UUID;
+  organization_id: UUID;
+  rule_code: string;
+  title: string;
+  active: boolean;
+  agent_kind: AgentKind | null;
+  task_type_contains: string | null;
+  model_policy_contains: string | null;
+  input_ref_contains: string | null;
+  decision: string;
+  required_approval_count: number;
+  risk_level: string;
+  rationale: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AgentTaskApprovalRead = {
