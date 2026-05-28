@@ -1236,6 +1236,40 @@ export type FamilyAthleteSummaryRead = {
   latest_consent_signed_at: string | null;
 };
 
+export type FamilyPerformanceGoalRead = {
+  id: UUID;
+  title: string;
+  target_value: number;
+  current_value: number | null;
+  direction: string;
+  due_at: string | null;
+  status: string;
+  reward_badge: string | null;
+  notes: string | null;
+};
+
+export type FamilyPerformanceAwardRead = {
+  id: UUID;
+  title: string;
+  badge_code: string;
+  achievement_type: string;
+  achieved_value: number | null;
+  threshold_value: number | null;
+  awarded_at: string;
+  source_summary: string | null;
+};
+
+export type FamilyPerformanceSummaryRead = {
+  athlete_person_id: UUID;
+  athlete_profile_id: UUID;
+  athlete_name: string;
+  active_goal_count: number;
+  achieved_goal_count: number;
+  award_count: number;
+  goals: FamilyPerformanceGoalRead[];
+  awards: FamilyPerformanceAwardRead[];
+};
+
 export type FamilyEventSummaryRead = {
   athlete_person_id: UUID;
   athlete_name: string;

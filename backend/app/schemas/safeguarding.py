@@ -80,6 +80,40 @@ class FamilyAthleteSummaryRead(BaseModel):
     latest_consent_signed_at: datetime | None
 
 
+class FamilyPerformanceGoalRead(BaseModel):
+    id: UUID
+    title: str
+    target_value: float
+    current_value: float | None
+    direction: str
+    due_at: date | None
+    status: str
+    reward_badge: str | None
+    notes: str | None
+
+
+class FamilyPerformanceAwardRead(BaseModel):
+    id: UUID
+    title: str
+    badge_code: str
+    achievement_type: str
+    achieved_value: float | None
+    threshold_value: float | None
+    awarded_at: datetime
+    source_summary: str | None
+
+
+class FamilyPerformanceSummaryRead(BaseModel):
+    athlete_person_id: UUID
+    athlete_profile_id: UUID
+    athlete_name: str
+    active_goal_count: int
+    achieved_goal_count: int
+    award_count: int
+    goals: list[FamilyPerformanceGoalRead]
+    awards: list[FamilyPerformanceAwardRead]
+
+
 class FamilyEventSummaryRead(BaseModel):
     athlete_person_id: UUID
     athlete_name: str

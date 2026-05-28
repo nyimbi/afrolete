@@ -35,6 +35,7 @@ from app.models.event import (
     SafeguardingIncident,
 )
 from app.models.identity import Person
+from app.models.performance import PerformanceAchievementAward, PerformanceGoal
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
@@ -51,6 +52,9 @@ from app.schemas.safeguarding import (
     FamilyConsentResponseCreate,
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
+    FamilyPerformanceAwardRead,
+    FamilyPerformanceGoalRead,
+    FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
     IncidentInsuranceClaimCreate,
     IncidentInsuranceClaimUpdate,
@@ -1079,6 +1083,86 @@ async def list_my_family(
                 latest_consent_status=latest_consent.status if latest_consent else None,
                 latest_consent_scope_type=latest_consent.scope_type if latest_consent else None,
                 latest_consent_signed_at=latest_consent.signed_at if latest_consent else None,
+            )
+        )
+    return summaries
+
+
+async def list_my_family_performance(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> list[FamilyPerformanceSummaryRead]:
+    rows = (
+        await db.execute(
+            select(GuardianRelationship, Person, AthleteProfile)
+            .join(Person, Person.id == GuardianRelationship.athlete_person_id)
+            .join(AthleteProfile, AthleteProfile.person_id == GuardianRelationship.athlete_person_id)
+            .where(AthleteProfile.organization_id == organization_id)
+            .where(GuardianRelationship.guardian_person_id == identity.person_id)
+            .order_by(GuardianRelationship.is_primary.desc(), Person.display_name)
+        )
+    ).all()
+
+    summaries: list[FamilyPerformanceSummaryRead] = []
+    for _, athlete, athlete_profile in rows:
+        goals = list(
+            (
+                await db.scalars(
+                    select(PerformanceGoal)
+                    .where(PerformanceGoal.organization_id == organization_id)
+                    .where(PerformanceGoal.athlete_profile_id == athlete_profile.id)
+                    .order_by(PerformanceGoal.status, PerformanceGoal.due_at, PerformanceGoal.created_at.desc())
+                    .limit(6)
+                )
+            ).all()
+        )
+        awards = list(
+            (
+                await db.scalars(
+                    select(PerformanceAchievementAward)
+                    .where(PerformanceAchievementAward.organization_id == organization_id)
+                    .where(PerformanceAchievementAward.athlete_profile_id == athlete_profile.id)
+                    .order_by(PerformanceAchievementAward.awarded_at.desc())
+                    .limit(6)
+                )
+            ).all()
+        )
+        summaries.append(
+            FamilyPerformanceSummaryRead(
+                athlete_person_id=athlete.id,
+                athlete_profile_id=athlete_profile.id,
+                athlete_name=athlete.display_name,
+                active_goal_count=sum(1 for goal in goals if goal.status == "active"),
+                achieved_goal_count=sum(1 for goal in goals if goal.status == "achieved"),
+                award_count=len(awards),
+                goals=[
+                    FamilyPerformanceGoalRead(
+                        id=goal.id,
+                        title=goal.title,
+                        target_value=goal.target_value,
+                        current_value=goal.current_value,
+                        direction=goal.direction,
+                        due_at=goal.due_at,
+                        status=goal.status,
+                        reward_badge=goal.reward_badge,
+                        notes=goal.notes,
+                    )
+                    for goal in goals
+                ],
+                awards=[
+                    FamilyPerformanceAwardRead(
+                        id=award.id,
+                        title=award.title,
+                        badge_code=award.badge_code,
+                        achievement_type=award.achievement_type,
+                        achieved_value=award.achieved_value,
+                        threshold_value=award.threshold_value,
+                        awarded_at=award.awarded_at,
+                        source_summary=award.source_summary,
+                    )
+                    for award in awards
+                ],
             )
         )
     return summaries

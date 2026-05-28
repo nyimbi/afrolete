@@ -13,6 +13,7 @@ import type {
   FamilyAthleteSummaryRead,
   FamilyConsentRequestRead,
   FamilyEventSummaryRead,
+  FamilyPerformanceSummaryRead,
   LocalIdentity,
   MessageRecipientRead
 } from "@/types/operations";
@@ -27,6 +28,7 @@ export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
+  const [performance, setPerformance] = useState<FamilyPerformanceSummaryRead[]>([]);
   const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
   const [consentRequests, setConsentRequests] = useState<FamilyConsentRequestRead[]>([]);
   const [aiAppeals, setAiAppeals] = useState<AgentDecisionAppealRead[]>([]);
@@ -65,6 +67,8 @@ export default function FamilyPortalPage() {
 
   const unreadCount = items.filter((item) => item.delivery_status !== "read").length;
   const pendingConsentCount = consentRequests.length;
+  const awardCount = performance.reduce((total, item) => total + item.award_count, 0);
+  const activeGoalCount = performance.reduce((total, item) => total + item.active_goal_count, 0);
 
   const loadWorkspace = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -76,10 +80,14 @@ export default function FamilyPortalPage() {
     setError("");
     try {
       const organizationQuery = encodeURIComponent(organizationId);
-      const [familyRows, eventRows, pendingRequests, appeals, aiTaskRows, inbox] = await Promise.all([
+      const [familyRows, performanceRows, eventRows, pendingRequests, appeals, aiTaskRows, inbox] = await Promise.all([
         apiRequest<FamilyAthleteSummaryRead[]>(`/safeguarding/my-family?organization_id=${organizationQuery}`, {
           identity
         }),
+        apiRequest<FamilyPerformanceSummaryRead[]>(
+          `/safeguarding/my-family/performance?organization_id=${organizationQuery}`,
+          { identity }
+        ),
         apiRequest<FamilyEventSummaryRead[]>(`/safeguarding/my-family/events?organization_id=${organizationQuery}`, {
           identity
         }),
@@ -98,6 +106,7 @@ export default function FamilyPortalPage() {
         })
       ]);
       setFamily(familyRows);
+      setPerformance(performanceRows);
       setEvents(eventRows);
       setConsentRequests(pendingRequests);
       setAiTasks(aiTaskRows);
@@ -325,6 +334,14 @@ export default function FamilyPortalPage() {
             <strong>{pendingConsentCount}</strong>
           </div>
           <div>
+            <span>Goals</span>
+            <strong>{activeGoalCount}</strong>
+          </div>
+          <div>
+            <span>Awards</span>
+            <strong>{awardCount}</strong>
+          </div>
+          <div>
             <span>AI appeals</span>
             <strong>{aiAppeals.filter((appeal) => !appeal.resolved_at).length}</strong>
           </div>
@@ -383,6 +400,45 @@ export default function FamilyPortalPage() {
             </article>
           ))}
         </div>
+
+        <section className="family-ai-appeals">
+          <div>
+            <p className="section-label">Performance</p>
+            <h2>Goals and achievements</h2>
+            <p>Track active targets, earned badges, and personal bests for linked athletes.</p>
+          </div>
+          <div className="family-appeal-list">
+            {performance.flatMap((athlete) =>
+              athlete.awards.slice(0, 2).map((award) => (
+                <article key={award.id}>
+                  <strong>{award.title}</strong>
+                  <span>{athlete.athlete_name} · {award.achievement_type.replaceAll("_", " ")}</span>
+                  <small>{award.source_summary ?? `Badge ${award.badge_code}`}</small>
+                  <small>Awarded {formatDate(award.awarded_at)}</small>
+                </article>
+              ))
+            )}
+            {performance.every((athlete) => athlete.awards.length === 0) ? (
+              <span>No awards yet</span>
+            ) : null}
+          </div>
+          <div className="family-appeal-list">
+            {performance.flatMap((athlete) =>
+              athlete.goals.slice(0, 2).map((goal) => (
+                <article key={goal.id}>
+                  <strong>{goal.title} · {goal.status}</strong>
+                  <span>
+                    {athlete.athlete_name} · current {goal.current_value ?? "—"} / target {goal.target_value}
+                  </span>
+                  <small>{goal.reward_badge ?? "Performance goal"} · {goal.due_at ? `Due ${formatDate(goal.due_at)}` : "No due date"}</small>
+                </article>
+              ))
+            )}
+            {performance.every((athlete) => athlete.goals.length === 0) ? (
+              <span>No active performance goals yet</span>
+            ) : null}
+          </div>
+        </section>
 
         <section className="family-ai-appeals">
           <div>
