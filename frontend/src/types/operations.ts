@@ -2883,6 +2883,16 @@ export type SafeguardingIncidentEvidenceReviewActionRead = {
   approval_policy: SafeguardingIncidentEvidenceApprovalPolicyRead | null;
 };
 
+export type SafeguardingIncidentAccessControlRead = {
+  incident_id: UUID;
+  organization_id: UUID;
+  relationship_count: number;
+  touched_relationships: string[];
+  can_manage_case: boolean;
+  can_review_evidence: boolean;
+  synced_at: string;
+};
+
 export type BackgroundCheckRead = {
   id: UUID;
   organization_id: UUID;

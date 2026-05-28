@@ -58,7 +58,7 @@ class InMemoryAuthorizationService:
         subject_id: str,
     ) -> bool:
         direct_permissions = {
-            "manage": {"owner", "admin"},
+            "manage": {"owner", "admin", "case_manager", "assigned_to"},
             "manage_roster": {
                 "owner",
                 "admin",
@@ -87,7 +87,16 @@ class InMemoryAuthorizationService:
                 "bench",
                 "individual_athlete",
                 "viewer",
+                "reporter",
+                "case_manager",
+                "assigned_to",
+                "medical_viewer",
+                "evidence_reviewer",
+                "regulator",
             },
+            "view_medical": {"owner", "admin", "case_manager", "assigned_to", "medical_viewer", "guardian"},
+            "review_evidence": {"owner", "admin", "case_manager", "assigned_to", "evidence_reviewer"},
+            "analyze": {"owner", "admin", "case_manager", "assigned_to", "assigned_agent"},
         }
         allowed_relations = direct_permissions.get(permission, {permission})
         return any(

@@ -180,6 +180,7 @@ import type {
   BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
+  SafeguardingIncidentAccessControlRead,
   SafeguardingIncidentEvidenceApprovalPolicyRead,
   SafeguardingIncidentEvidenceReviewActionRead,
   SafeguardingIncidentEvidenceReviewItemRead,
@@ -1585,6 +1586,8 @@ export default function HomePage() {
     useState<SafeguardingIncidentEvidenceReviewActionRead | null>(null);
   const [incidentEvidenceApprovalPolicy, setIncidentEvidenceApprovalPolicy] =
     useState<SafeguardingIncidentEvidenceApprovalPolicyRead | null>(null);
+  const [incidentAccessControlSync, setIncidentAccessControlSync] =
+    useState<SafeguardingIncidentAccessControlRead | null>(null);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
   const [backgroundCheckProviderSubmission, setBackgroundCheckProviderSubmission] =
     useState<BackgroundCheckProviderSubmissionRead | null>(null);
@@ -3182,6 +3185,7 @@ export default function HomePage() {
       setIncidentEvidenceReviewQueue([]);
       setIncidentEvidenceReviewAction(null);
       setIncidentEvidenceApprovalPolicy(null);
+      setIncidentAccessControlSync(null);
       setBackgroundChecks([]);
       setBackgroundCheckProviderSubmission(null);
       setBackgroundCheckProviderResult(null);
@@ -5884,6 +5888,24 @@ export default function HomePage() {
         }
         setSelectedIncidentEvidenceFile(null);
         addLog(`${upload.filename} incident evidence stored (${upload.size_bytes} bytes)`, "good");
+      }
+    );
+  };
+
+  const syncIncidentAccessControls = (incident: SafeguardingIncidentRead) => {
+    runAction(
+      `incident-access-controls-${incident.id}`,
+      () =>
+        apiRequest<SafeguardingIncidentAccessControlRead>(
+          `/safeguarding/incidents/${incident.id}/access-controls/sync`,
+          { method: "POST", identity }
+        ),
+      (sync) => {
+        setIncidentAccessControlSync(sync);
+        addLog(
+          `${incident.title} access controls synced (${sync.relationship_count} relationships)`,
+          sync.can_manage_case && sync.can_review_evidence ? "good" : "neutral"
+        );
       }
     );
   };
@@ -16766,6 +16788,7 @@ export default function HomePage() {
                   <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "follow_up")}>Follow-up</button>
                   <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "escalate")}>Escalate</button>
                   <button type="button" onClick={() => uploadIncidentEvidence(incident)}>Evidence</button>
+                  <button type="button" onClick={() => syncIncidentAccessControls(incident)}>Access</button>
                   <button type="button" onClick={() => createIncidentReportPackage(incident)}>Package</button>
                   <button type="button" onClick={() => createIncidentInsuranceClaim(incident)}>Claim</button>
                   <button type="button" onClick={() => createIncidentMedicalClearance(incident)}>Clearance</button>
@@ -16780,6 +16803,16 @@ export default function HomePage() {
                   <span>{incidentInvestigationAction.action_type} · {incidentInvestigationAction.status} · {incidentInvestigationAction.severity}</span>
                   <span>{incidentInvestigationAction.assigned_to_person_id ?? "Unassigned"} · medical {incidentInvestigationAction.medical_follow_up_required}</span>
                   <span>{incidentInvestigationAction.action_summary}</span>
+                </div>
+              </article>
+            ) : null}
+            {incidentAccessControlSync ? (
+              <article className="task-card">
+                <div>
+                  <strong>Incident access controls</strong>
+                  <span>{incidentAccessControlSync.relationship_count} relationships · manage {incidentAccessControlSync.can_manage_case ? "yes" : "no"} · evidence {incidentAccessControlSync.can_review_evidence ? "yes" : "no"}</span>
+                  <span>Synced {new Date(incidentAccessControlSync.synced_at).toLocaleString()}</span>
+                  <span>{incidentAccessControlSync.touched_relationships.slice(0, 2).join(" · ")}</span>
                 </div>
               </article>
             ) : null}

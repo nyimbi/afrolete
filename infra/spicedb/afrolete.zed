@@ -112,6 +112,27 @@ definition event {
   permission analyze = manage + assigned_agent->review
 }
 
+definition safeguarding_incident {
+  relation parent_org: organization
+  relation event: event
+  relation team: team
+  relation reporter: user | person
+  relation case_manager: user | person
+  relation assigned_to: user | person
+  relation athlete: user | person
+  relation guardian: user | person
+  relation medical_viewer: user | person
+  relation evidence_reviewer: user | person
+  relation regulator: user | person
+  relation assigned_agent: agent
+
+  permission manage = parent_org->manage + case_manager + assigned_to
+  permission view = manage + reporter + athlete + guardian + medical_viewer + regulator + event->view + team->view
+  permission view_medical = manage + medical_viewer + guardian
+  permission review_evidence = manage + evidence_reviewer
+  permission analyze = manage + assigned_agent->review
+}
+
 definition report {
   relation parent_org: organization
   relation author: user

@@ -46,7 +46,7 @@ from app.models.event import (
     IncidentReportPackage,
     SafeguardingIncident,
 )
-from app.models.identity import Person
+from app.models.identity import AppUser, Person
 from app.models.organization import Organization
 from app.models.performance import PerformanceAchievementAward, PerformanceGoal
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
@@ -73,6 +73,7 @@ from app.schemas.safeguarding import (
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
+    SafeguardingIncidentAccessControlRead,
     SafeguardingIncidentEvidenceApprovalPolicyRead,
     SafeguardingIncidentEvidenceReviewActionCreate,
     SafeguardingIncidentEvidenceReviewActionRead,
@@ -305,6 +306,187 @@ async def ensure_org_manage(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
+async def ensure_manage_safeguarding_incident(
+    authz: AuthorizationService,
+    incident: SafeguardingIncident,
+    identity: CurrentIdentity,
+) -> None:
+    can_manage_case = await authz.check(
+        resource_type="safeguarding_incident",
+        resource_id=str(incident.id),
+        permission="manage",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    if can_manage_case:
+        return
+    await ensure_org_manage(authz, incident.organization_id, identity)
+
+
+async def ensure_review_safeguarding_incident_evidence(
+    authz: AuthorizationService,
+    incident: SafeguardingIncident,
+    identity: CurrentIdentity,
+) -> None:
+    can_review = await authz.check(
+        resource_type="safeguarding_incident",
+        resource_id=str(incident.id),
+        permission="review_evidence",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    if can_review:
+        return
+    await ensure_manage_safeguarding_incident(authz, incident, identity)
+
+
+async def sync_safeguarding_incident_access_controls(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident: SafeguardingIncident,
+    authz: AuthorizationService,
+) -> SafeguardingIncidentAccessControlRead:
+    touched: list[str] = []
+
+    async def touch(relationship: Relationship) -> None:
+        await authz.touch(relationship)
+        touched.append(
+            f"{relationship.resource_type}:{relationship.resource_id}#{relationship.relation}@"
+            f"{relationship.subject_type}:{relationship.subject_id}"
+        )
+
+    async def touch_person_and_users(relation: str, person_id: UUID) -> None:
+        await touch(
+            Relationship(
+                resource_type="safeguarding_incident",
+                resource_id=str(incident.id),
+                relation=relation,
+                subject_type="person",
+                subject_id=str(person_id),
+            )
+        )
+        user_ids = await app_user_ids_for_person(db, person_id)
+        for user_id in user_ids:
+            await touch(
+                Relationship(
+                    resource_type="safeguarding_incident",
+                    resource_id=str(incident.id),
+                    relation=relation,
+                    subject_type="user",
+                    subject_id=str(user_id),
+                )
+            )
+
+    await touch(
+        Relationship(
+            resource_type="safeguarding_incident",
+            resource_id=str(incident.id),
+            relation="parent_org",
+            subject_type="organization",
+            subject_id=str(incident.organization_id),
+        )
+    )
+    await touch_person_and_users("case_manager", identity.person_id)
+    await touch(
+        Relationship(
+            resource_type="safeguarding_incident",
+            resource_id=str(incident.id),
+            relation="case_manager",
+            subject_type="user",
+            subject_id=str(identity.user_id),
+        )
+    )
+    await touch(
+        Relationship(
+            resource_type="safeguarding_incident",
+            resource_id=str(incident.id),
+            relation="evidence_reviewer",
+            subject_type="user",
+            subject_id=str(identity.user_id),
+        )
+    )
+    if incident.event_id is not None:
+        await touch(
+            Relationship(
+                resource_type="safeguarding_incident",
+                resource_id=str(incident.id),
+                relation="event",
+                subject_type="event",
+                subject_id=str(incident.event_id),
+            )
+        )
+    if incident.team_id is not None:
+        await touch(
+            Relationship(
+                resource_type="safeguarding_incident",
+                resource_id=str(incident.id),
+                relation="team",
+                subject_type="team",
+                subject_id=str(incident.team_id),
+            )
+        )
+    if incident.reported_by_person_id is not None:
+        await touch_person_and_users("reporter", incident.reported_by_person_id)
+    if incident.assigned_to_person_id is not None:
+        await touch_person_and_users("assigned_to", incident.assigned_to_person_id)
+    if incident.athlete_person_id is not None:
+        await touch_person_and_users("athlete", incident.athlete_person_id)
+        guardians = (
+            await db.scalars(
+                select(GuardianRelationship).where(
+                    GuardianRelationship.athlete_person_id == incident.athlete_person_id
+                )
+            )
+        ).all()
+        for guardian in guardians:
+            await touch_person_and_users("guardian", guardian.guardian_person_id)
+            if guardian.can_view_medical:
+                await touch_person_and_users("medical_viewer", guardian.guardian_person_id)
+    if incident.regulatory_report_required:
+        await touch_person_and_users("regulator", identity.person_id)
+
+    can_manage_case = await authz.check(
+        resource_type="safeguarding_incident",
+        resource_id=str(incident.id),
+        permission="manage",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    can_review_evidence = await authz.check(
+        resource_type="safeguarding_incident",
+        resource_id=str(incident.id),
+        permission="review_evidence",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    return SafeguardingIncidentAccessControlRead(
+        incident_id=incident.id,
+        organization_id=incident.organization_id,
+        relationship_count=len(touched),
+        touched_relationships=touched,
+        can_manage_case=can_manage_case,
+        can_review_evidence=can_review_evidence,
+        synced_at=utc_now(),
+    )
+
+
+async def sync_safeguarding_incident_access_controls_by_id(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident_id: UUID,
+    authz: AuthorizationService,
+) -> SafeguardingIncidentAccessControlRead:
+    incident = await db.get(SafeguardingIncident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    await ensure_manage_safeguarding_incident(authz, incident, identity)
+    return await sync_safeguarding_incident_access_controls(db, identity, incident, authz)
+
+
+async def app_user_ids_for_person(db: AsyncSession, person_id: UUID) -> list[UUID]:
+    return list((await db.scalars(select(AppUser.id).where(AppUser.person_id == person_id))).all())
+
+
 async def create_guardian_relationship(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -404,6 +586,8 @@ async def create_safeguarding_incident(
         **payload.model_dump(),
     )
     db.add(incident)
+    await db.flush()
+    await sync_safeguarding_incident_access_controls(db, identity, incident, authz)
     await db.commit()
     await db.refresh(incident)
     return incident
@@ -441,7 +625,7 @@ async def update_safeguarding_incident(
     incident = await db.get(SafeguardingIncident, incident_id)
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-    await ensure_org_manage(authz, incident.organization_id, identity)
+    await ensure_manage_safeguarding_incident(authz, incident, identity)
 
     if payload.assigned_to_person_id is not None:
         await validate_person_in_organization(db, incident.organization_id, payload.assigned_to_person_id)
@@ -461,6 +645,7 @@ async def update_safeguarding_incident(
     if payload.resolution_notes is not None:
         incident.resolution_notes = payload.resolution_notes
 
+    await sync_safeguarding_incident_access_controls(db, identity, incident, authz)
     await db.commit()
     await db.refresh(incident)
     return incident
@@ -476,7 +661,7 @@ async def apply_safeguarding_incident_investigation_action(
     incident = await db.get(SafeguardingIncident, incident_id)
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-    await ensure_org_manage(authz, incident.organization_id, identity)
+    await ensure_manage_safeguarding_incident(authz, incident, identity)
 
     actioned_at = utc_now()
     normalized_action = normalize_provider_profile(payload.action_type, "investigation")
@@ -524,6 +709,7 @@ async def apply_safeguarding_incident_investigation_action(
         actioned_at,
     )
     append_safeguarding_incident_resolution_note(incident, actioned_at, action_summary)
+    await sync_safeguarding_incident_access_controls(db, identity, incident, authz)
 
     await db.commit()
     await db.refresh(incident)
@@ -553,7 +739,7 @@ async def upload_safeguarding_incident_evidence(
     incident = await db.get(SafeguardingIncident, incident_id)
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-    await ensure_org_manage(authz, incident.organization_id, identity)
+    await ensure_manage_safeguarding_incident(authz, incident, identity)
     content = decode_safeguarding_upload_content(payload.content_base64)
     if not content:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Evidence file is empty")
@@ -585,6 +771,7 @@ async def upload_safeguarding_incident_evidence(
     if payload.review_status == "accepted" and incident.status == SafeguardingIncidentStatus.OPEN:
         incident.status = SafeguardingIncidentStatus.INVESTIGATING
 
+    await sync_safeguarding_incident_access_controls(db, identity, incident, authz)
     await db.commit()
     await db.refresh(incident)
     return SafeguardingIncidentEvidenceUploadRead(
@@ -614,7 +801,7 @@ async def create_signed_safeguarding_incident_evidence_link(
     incident = await db.get(SafeguardingIncident, incident_id)
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-    await ensure_org_manage(authz, incident.organization_id, identity)
+    await ensure_review_safeguarding_incident_evidence(authz, incident, identity)
     selected_settings = settings or get_settings()
     storage_name = validate_safeguarding_incident_evidence_storage_key(
         payload.storage_key,
@@ -695,7 +882,7 @@ async def get_safeguarding_incident_evidence_approval_policy(
     incident = await db.get(SafeguardingIncident, incident_id)
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-    await ensure_org_manage(authz, incident.organization_id, identity)
+    await ensure_review_safeguarding_incident_evidence(authz, incident, identity)
     selected_settings = settings or get_settings()
     validate_safeguarding_incident_evidence_storage_key(
         storage_key,
@@ -776,6 +963,7 @@ async def review_safeguarding_incident_evidence(
         review_notes=payload.review_notes,
     )
     append_safeguarding_incident_resolution_note(incident, reviewed_at, action_summary)
+    await sync_safeguarding_incident_access_controls(db, identity, incident, authz)
 
     await db.commit()
     await db.refresh(incident)

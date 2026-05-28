@@ -19,6 +19,7 @@ from app.models.enums import (
 from app.models.event import ActivityConsent, Event
 from app.models.identity import Person
 from app.services import safeguarding as safeguarding_service
+from app.services.authz.service import authorization_service
 from app.services.safeguarding import clearance_for_event
 
 
@@ -335,6 +336,112 @@ def test_incident_investigation_actions_assign_escalate_and_close(client, identi
     assert synced["assigned_to_person_id"] == assigned["assigned_to_person_id"]
     assert synced["regulatory_report_required"] is True
     assert synced["parent_notified_at"] is not None
+
+
+def test_incident_access_controls_sync_case_relationships(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Access Controlled Safeguarding Club", "organization_type": "club"},
+    ).json()
+    team = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Access Control U15",
+            "sport": "football",
+            "sport_format": "team",
+        },
+    ).json()
+    athlete = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "access-control-athlete@example.com",
+            "display_name": "Access Control Athlete",
+            "country_code": "KE",
+            "role": "athlete",
+        },
+    ).json()
+    roster_response = client.post(
+        f"/api/v1/teams/{team['id']}/members",
+        headers=identity_headers,
+        json={
+            "person_id": athlete["subject_id"],
+            "role": "player",
+            "status": "active",
+        },
+    )
+    assert roster_response.status_code == 201
+    guardian = client.post(
+        "/api/v1/safeguarding/guardians",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_person_id": athlete["subject_id"],
+            "guardian_email": "medical-guardian@example.com",
+            "guardian_display_name": "Medical Guardian",
+            "relationship_kind": "parent",
+            "can_sign_consent": True,
+            "can_view_medical": True,
+        },
+    ).json()
+    incident_response = client.post(
+        "/api/v1/safeguarding/incidents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_person_id": athlete["subject_id"],
+            "team_id": team["id"],
+            "incident_type": "safeguarding",
+            "severity": "high",
+            "occurred_at": "2026-05-28T12:15:00Z",
+            "location": "Medical room",
+            "title": "Access controlled case",
+            "description": "Sensitive safeguarding case with guardian medical visibility.",
+            "immediate_action": "Restricted case access and notified safeguarding lead.",
+            "medical_follow_up_required": "yes",
+            "regulatory_report_required": True,
+        },
+    )
+    assert incident_response.status_code == 201
+    incident = incident_response.json()
+
+    sync_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/access-controls/sync",
+        headers=identity_headers,
+    )
+    assert sync_response.status_code == 200
+    sync = sync_response.json()
+    assert sync["can_manage_case"] is True
+    assert sync["can_review_evidence"] is True
+    assert sync["relationship_count"] >= 8
+    assert any("#parent_org@organization:" in item for item in sync["touched_relationships"])
+    assert any("#case_manager@user:" in item for item in sync["touched_relationships"])
+    assert any(f"#athlete@person:{athlete['subject_id']}" in item for item in sync["touched_relationships"])
+    assert any(f"#guardian@person:{guardian['guardian_person_id']}" in item for item in sync["touched_relationships"])
+    assert any(f"#medical_viewer@person:{guardian['guardian_person_id']}" in item for item in sync["touched_relationships"])
+    assert any("#regulator@person:" in item for item in sync["touched_relationships"])
+
+    authorization_service.relationships = {
+        relationship
+        for relationship in authorization_service.relationships
+        if relationship.resource_type != "organization"
+    }
+    evidence_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence",
+        headers=identity_headers,
+        json={
+            "filename": "Restricted Evidence.txt",
+            "content_type": "text/plain",
+            "content_base64": base64.b64encode(b"restricted evidence").decode(),
+            "evidence_type": "safeguarding_case_note",
+            "review_status": "needs_review",
+        },
+    )
+    assert evidence_response.status_code == 200
+    assert evidence_response.json()["storage_key"].endswith("Restricted-Evidence.txt")
 
 
 def test_incident_evidence_upload_stores_file_and_case_note(client, identity_headers) -> None:

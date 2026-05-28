@@ -38,6 +38,7 @@ from app.schemas.safeguarding import (
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
+    SafeguardingIncidentAccessControlRead,
     SafeguardingIncidentEvidenceApprovalPolicyRead,
     SafeguardingIncidentEvidenceReviewActionCreate,
     SafeguardingIncidentEvidenceReviewActionRead,
@@ -120,6 +121,7 @@ from app.services.safeguarding import (
     update_incident_insurance_claim,
     submit_incident_insurance_claim_to_provider,
     submit_incident_medical_clearance_to_provider,
+    sync_safeguarding_incident_access_controls_by_id,
     upload_safeguarding_incident_evidence,
     update_incident_medical_clearance,
     update_incident_report_package,
@@ -433,6 +435,21 @@ async def apply_safeguarding_incident_investigation_action_route(
         identity,
         incident_id,
         payload,
+        authz,
+    )
+
+
+@router.post("/incidents/{incident_id}/access-controls/sync", response_model=SafeguardingIncidentAccessControlRead)
+async def sync_safeguarding_incident_access_controls_route(
+    incident_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentAccessControlRead:
+    return await sync_safeguarding_incident_access_controls_by_id(
+        db,
+        identity,
+        incident_id,
         authz,
     )
 

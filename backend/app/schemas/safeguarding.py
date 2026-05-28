@@ -452,6 +452,16 @@ class SafeguardingIncidentEvidenceReviewActionRead(BaseModel):
     approval_policy: SafeguardingIncidentEvidenceApprovalPolicyRead | None = None
 
 
+class SafeguardingIncidentAccessControlRead(BaseModel):
+    incident_id: UUID
+    organization_id: UUID
+    relationship_count: int
+    touched_relationships: list[str]
+    can_manage_case: bool
+    can_review_evidence: bool
+    synced_at: datetime
+
+
 class SafeguardingIncidentRead(BaseModel):
     id: UUID
     organization_id: UUID
