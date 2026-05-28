@@ -2254,8 +2254,11 @@ export type DeveloperApiKeyRead = {
   window_started_at: string | null;
   window_request_count: number;
   last_rate_limited_at: string | null;
+  refresh_token_family_id: UUID | null;
+  refresh_parent_key_id: UUID | null;
   refresh_expires_at: string | null;
   refresh_rotated_at: string | null;
+  refresh_reused_at: string | null;
   notes: string | null;
 };
 

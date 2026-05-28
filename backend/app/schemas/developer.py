@@ -63,8 +63,11 @@ class DeveloperApiKeyRead(BaseModel):
     window_started_at: datetime | None
     window_request_count: int
     last_rate_limited_at: datetime | None
+    refresh_token_family_id: UUID | None
+    refresh_parent_key_id: UUID | None
     refresh_expires_at: datetime | None
     refresh_rotated_at: datetime | None
+    refresh_reused_at: datetime | None
     notes: str | None
 
 

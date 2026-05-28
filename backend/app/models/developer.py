@@ -46,8 +46,11 @@ class DeveloperApiKey(IdMixin, TimestampMixin, Base):
     window_request_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_rate_limited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     refresh_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    refresh_token_family_id: Mapped[UUID | None] = mapped_column(GUID(), index=True)
+    refresh_parent_key_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("developer_api_keys.id"), index=True)
     refresh_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     refresh_rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    refresh_reused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

@@ -191,6 +191,21 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         },
     )
     assert reused_refresh_response.status_code == 401
+    compromised_oauth_inspect_response = client.get(
+        "/api/v1/developers/auth/inspect",
+        headers={"X-Afrolete-API-Key": refreshed_oauth["access_token"]},
+    )
+    assert compromised_oauth_inspect_response.status_code == 401
+
+    compromised_keys_response = client.get(
+        f"/api/v1/developers/api-keys?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert compromised_keys_response.status_code == 200
+    compromised_oauth_keys = [
+        key for key in compromised_keys_response.json() if key["environment"] == "oauth" and key["refresh_reused_at"]
+    ]
+    assert len(compromised_oauth_keys) == 1
 
     reused_oauth_token_response = client.post(
         "/api/v1/developers/oauth/token",
@@ -483,7 +498,7 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     summary = summary_response.json()
     assert summary["application_count"] == 1
     assert summary["api_key_count"] == 6
-    assert summary["active_api_key_count"] == 5
+    assert summary["active_api_key_count"] == 4
     assert summary["webhook_subscription_count"] == 2
     assert summary["marketplace_listing_count"] == 1
     assert summary["approved_marketplace_listing_count"] == 1

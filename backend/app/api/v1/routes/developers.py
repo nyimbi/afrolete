@@ -99,8 +99,11 @@ def api_key_read(api_key) -> DeveloperApiKeyRead:
         window_started_at=api_key.window_started_at,
         window_request_count=api_key.window_request_count,
         last_rate_limited_at=api_key.last_rate_limited_at,
+        refresh_token_family_id=api_key.refresh_token_family_id,
+        refresh_parent_key_id=api_key.refresh_parent_key_id,
         refresh_expires_at=api_key.refresh_expires_at,
         refresh_rotated_at=api_key.refresh_rotated_at,
+        refresh_reused_at=api_key.refresh_reused_at,
         notes=api_key.notes,
     )
 

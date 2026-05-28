@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
 from urllib.parse import urlencode
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import HTTPException, status
@@ -323,6 +323,7 @@ async def exchange_developer_oauth_token(
         verify_pkce_challenge(authorization, payload.code_verifier)
     elif payload.client_secret is None or application.client_secret_hash != hash_secret(payload.client_secret):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OAuth client credentials")
+    refresh_family_id = uuid4()
     raw_key, refresh_token, api_key = build_oauth_api_key(
         authorization.organization_id,
         application.id,
@@ -330,6 +331,7 @@ async def exchange_developer_oauth_token(
         now=now,
         token_label=str(authorization.id)[:8],
         notes=f"OAuth token minted from authorization {authorization.id}",
+        refresh_family_id=refresh_family_id,
     )
     authorization.status = "redeemed"
     authorization.redeemed_at = now
@@ -363,6 +365,7 @@ async def refresh_developer_oauth_token(
     )
     now = datetime.now(UTC)
     if current_key is None or current_key.environment != "oauth" or current_key.status != "active":
+        await mark_reused_refresh_family(db, application.id, payload.refresh_token, now)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OAuth refresh token")
     if current_key.refresh_expires_at is None or as_utc(current_key.refresh_expires_at) <= now:
         current_key.status = "expired"
@@ -376,8 +379,13 @@ async def refresh_developer_oauth_token(
         now=now,
         token_label=f"refresh {str(current_key.id)[:8]}",
         notes=f"OAuth token rotated from {current_key.id}",
+        refresh_family_id=current_key.refresh_token_family_id or uuid4(),
+        refresh_parent_key_id=current_key.id,
     )
     current_key.status = "revoked"
+    current_key.notes = (
+        f"{current_key.notes or ''}\nRotated refresh token hash: {current_key.refresh_token_hash}".strip()
+    )
     current_key.refresh_token_hash = None
     current_key.refresh_rotated_at = now
     db.add(new_key)
@@ -924,10 +932,49 @@ def developer_api_key_read(api_key: DeveloperApiKey) -> DeveloperApiKeyRead:
         window_started_at=api_key.window_started_at,
         window_request_count=api_key.window_request_count,
         last_rate_limited_at=api_key.last_rate_limited_at,
+        refresh_token_family_id=api_key.refresh_token_family_id,
+        refresh_parent_key_id=api_key.refresh_parent_key_id,
         refresh_expires_at=api_key.refresh_expires_at,
         refresh_rotated_at=api_key.refresh_rotated_at,
+        refresh_reused_at=api_key.refresh_reused_at,
         notes=api_key.notes,
     )
+
+
+async def mark_reused_refresh_family(
+    db: AsyncSession,
+    application_id: UUID,
+    refresh_token: str,
+    detected_at: datetime,
+) -> None:
+    reused_key = await db.scalar(
+        select(DeveloperApiKey).where(
+            DeveloperApiKey.application_id == application_id,
+            DeveloperApiKey.environment == "oauth",
+            DeveloperApiKey.notes.contains(hash_secret(refresh_token)),
+        )
+    )
+    if reused_key is None or reused_key.refresh_token_family_id is None:
+        return
+    reused_key.refresh_reused_at = detected_at
+    family_keys = list(
+        (
+            await db.scalars(
+                select(DeveloperApiKey).where(
+                    DeveloperApiKey.application_id == application_id,
+                    DeveloperApiKey.refresh_token_family_id == reused_key.refresh_token_family_id,
+                    DeveloperApiKey.environment == "oauth",
+                )
+            )
+        ).all()
+    )
+    for family_key in family_keys:
+        family_key.status = "revoked"
+        family_key.refresh_token_hash = None
+        family_key.refresh_rotated_at = family_key.refresh_rotated_at or detected_at
+        if "refresh token family compromised" not in (family_key.notes or ""):
+            family_key.notes = f"{family_key.notes or ''}\nOAuth refresh token family compromised at {detected_at.isoformat()}.".strip()
+    await db.commit()
 
 
 def build_oauth_api_key(
@@ -938,6 +985,8 @@ def build_oauth_api_key(
     now: datetime,
     token_label: str,
     notes: str,
+    refresh_family_id: UUID,
+    refresh_parent_key_id: UUID | None = None,
 ) -> tuple[str, str, DeveloperApiKey]:
     raw_key = build_api_key("oauth", "oauth")
     refresh_token = token_urlsafe(40)
@@ -952,6 +1001,8 @@ def build_oauth_api_key(
         rate_limit_per_minute=600,
         expires_at=now + timedelta(days=30),
         refresh_token_hash=hash_secret(refresh_token),
+        refresh_token_family_id=refresh_family_id,
+        refresh_parent_key_id=refresh_parent_key_id,
         refresh_expires_at=now + timedelta(days=90),
         notes=notes,
     )
