@@ -194,6 +194,9 @@ def to_wearable_sync_run_read(run) -> PerformanceWearableSyncRunRead:
         replayed=run.replayed,
         provider_status_code=run.provider_status_code,
         provider_response_hash=run.provider_response_hash,
+        provider_page_count=run.provider_page_count,
+        provider_rate_limited=run.provider_rate_limited,
+        provider_retry_after_seconds=run.provider_retry_after_seconds,
         message=run.message,
     )
 

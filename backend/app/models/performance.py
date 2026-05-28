@@ -170,6 +170,9 @@ class PerformanceWearableProviderSyncRun(IdMixin, TimestampMixin, Base):
     replayed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     provider_status_code: Mapped[int | None] = mapped_column(Integer)
     provider_response_hash: Mapped[str | None] = mapped_column(String(64))
+    provider_page_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    provider_rate_limited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    provider_retry_after_seconds: Mapped[int | None] = mapped_column(Integer)
     message: Mapped[str | None] = mapped_column(Text)
 
 

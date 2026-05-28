@@ -3241,6 +3241,9 @@ export type PerformanceWearableSyncRunRead = {
   replayed: boolean;
   provider_status_code: number | null;
   provider_response_hash: string | null;
+  provider_page_count: number;
+  provider_rate_limited: boolean;
+  provider_retry_after_seconds: number | null;
   message: string | null;
 };
 

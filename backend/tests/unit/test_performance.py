@@ -1450,25 +1450,20 @@ def test_performance_wearable_connection_live_pull_adapter_ingests_provider_resp
         return "provider-access-token"
 
     class FakeResponse:
-        status_code = 200
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.status_code = 200
+            self.headers: dict[str, str] = {}
+            self._payload = payload
 
         def raise_for_status(self) -> None:
             return None
 
         def json(self) -> dict[str, object]:
-            return {
-                "external_event_id": "whoop-live-2026-06-07",
-                "next_cursor": "cursor-2",
-                "recovery": {
-                    "hrv_rmssd_milli": 42,
-                    "score": 71,
-                },
-                "created_at": "2026-06-07T06:20:00Z",
-            }
+            return self._payload
 
     class FakeAsyncClient:
         def __init__(self, *_, **__) -> None:
-            self.request_params: dict[str, str] | None = None
+            self.calls = 0
 
         async def __aenter__(self) -> "FakeAsyncClient":
             return self
@@ -1477,11 +1472,33 @@ def test_performance_wearable_connection_live_pull_adapter_ingests_provider_resp
             return None
 
         async def get(self, url: str, *, params: dict[str, str], headers: dict[str, str]) -> FakeResponse:
+            self.calls += 1
             assert url == "https://whoop.example/v1/recovery"
             assert headers["Authorization"] == "Bearer provider-access-token"
             assert headers["X-AfroLete-Athlete-Ref"] == "whoop-live-athlete-1"
             assert params["athlete_ref"] == "whoop-live-athlete-1"
-            return FakeResponse()
+            if self.calls == 1:
+                assert "cursor" not in params
+                return FakeResponse(
+                    {
+                        "external_event_id": "whoop-live-2026-06-07-page-1",
+                        "next_cursor": "cursor-2",
+                        "recovery": {
+                            "hrv_rmssd_milli": 42,
+                        },
+                        "created_at": "2026-06-07T06:20:00Z",
+                    }
+                )
+            assert params["cursor"] == "cursor-2"
+            return FakeResponse(
+                {
+                    "external_event_id": "whoop-live-2026-06-07-page-2",
+                    "recovery": {
+                        "score": 71,
+                    },
+                    "created_at": "2026-06-07T06:30:00Z",
+                }
+            )
 
     monkeypatch.setattr(performance_service, "resolve_wearable_token_secret", fake_resolve)
     monkeypatch.setattr(performance_service.httpx, "AsyncClient", FakeAsyncClient)
@@ -1492,6 +1509,7 @@ def test_performance_wearable_connection_live_pull_adapter_ingests_provider_resp
         json={
             "since": "2026-06-07T00:00:00Z",
             "until": "2026-06-07T23:59:59Z",
+            "max_pages": 2,
         },
     )
 
@@ -1501,7 +1519,9 @@ def test_performance_wearable_connection_live_pull_adapter_ingests_provider_resp
     assert sync_run["observation_count"] == 2
     assert sync_run["provider_status_code"] == 200
     assert sync_run["provider_response_hash"]
-    assert sync_run["external_event_id"] == "whoop-live-2026-06-07"
+    assert sync_run["provider_page_count"] == 2
+    assert sync_run["provider_rate_limited"] is False
+    assert sync_run["external_event_id"].startswith("pull-whoop-")
 
     observations = client.get(
         f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations"
@@ -1515,7 +1535,82 @@ def test_performance_wearable_connection_live_pull_adapter_ingests_provider_resp
         headers=identity_headers,
     ).json()
     assert listed_connections[0]["provider_pull_configured"] is True
-    assert listed_connections[0]["sync_cursor"] == "cursor-2"
+    assert listed_connections[0]["sync_cursor"].startswith("pull-whoop-")
+
+
+def test_performance_wearable_connection_pull_records_rate_limit(
+    client, identity_headers, monkeypatch
+) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "hrv",
+            "name": "Heart Rate Variability",
+            "category": "wellness",
+            "unit": "ms",
+        },
+    ).json()
+    connection = client.post(
+        "/api/v1/performance/wearable-connections",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "provider": "whoop",
+            "display_name": "WHOOP rate limit",
+            "external_athlete_ref": "whoop-rate-limit-athlete",
+            "access_token_secret_path": "secret/data/afrolete/wearables/whoop/rate-limit",
+            "provider_pull_url": "https://whoop.example/v1/recovery",
+            "default_metric_definition_ids": [metric["id"]],
+        },
+    ).json()
+
+    async def fake_resolve(path: str, field_name: str) -> str:
+        assert path == "secret/data/afrolete/wearables/whoop/rate-limit"
+        assert field_name == "access_token"
+        return "provider-access-token"
+
+    class RateLimitedResponse:
+        status_code = 429
+        headers = {"Retry-After": "90"}
+
+        def json(self) -> dict[str, object]:
+            return {"error": "rate_limited"}
+
+    class FakeAsyncClient:
+        def __init__(self, *_, **__) -> None:
+            return None
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get(self, *_: object, **__: object) -> RateLimitedResponse:
+            return RateLimitedResponse()
+
+    monkeypatch.setattr(performance_service, "resolve_wearable_token_secret", fake_resolve)
+    monkeypatch.setattr(performance_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    sync_response = client.post(
+        f"/api/v1/performance/wearable-connections/{connection['id']}/sync-runs",
+        headers=identity_headers,
+        json={"max_pages": 2},
+    )
+
+    assert sync_response.status_code == 202
+    sync_run = sync_response.json()
+    assert sync_run["status"] == "rate_limited"
+    assert sync_run["provider_status_code"] == 429
+    assert sync_run["provider_page_count"] == 0
+    assert sync_run["provider_rate_limited"] is True
+    assert sync_run["provider_retry_after_seconds"] == 90
+    assert sync_run["observation_count"] == 0
 
 
 def test_performance_wearable_connection_oauth_start_and_callback(

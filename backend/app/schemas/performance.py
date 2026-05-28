@@ -195,6 +195,7 @@ class PerformanceWearableSyncRunCreate(BaseModel):
     sync_mode: str = Field(default="pull", max_length=40)
     since: datetime | None = None
     until: datetime | None = None
+    max_pages: int = Field(default=3, ge=1, le=10)
 
 
 class PerformanceWearableSyncRunRead(BaseModel):
@@ -213,6 +214,9 @@ class PerformanceWearableSyncRunRead(BaseModel):
     replayed: bool
     provider_status_code: int | None
     provider_response_hash: str | None
+    provider_page_count: int
+    provider_rate_limited: bool
+    provider_retry_after_seconds: int | None
     message: str | None
 
 

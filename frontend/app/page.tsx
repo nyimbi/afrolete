@@ -14104,7 +14104,13 @@ export default function HomePage() {
                     <strong>{wearableSyncRun.provider} sync · {wearableSyncRun.status}</strong>
                     <span>
                       {wearableSyncRun.observation_count} observation(s) · {wearableSyncRun.skipped_metric_count} skipped ·{" "}
-                      {wearableSyncRun.replayed ? "replayed" : wearableSyncRun.provider_status_code ? `HTTP ${wearableSyncRun.provider_status_code}` : wearableSyncRun.sync_mode}
+                      {wearableSyncRun.provider_rate_limited
+                        ? `rate limited${wearableSyncRun.provider_retry_after_seconds ? ` ${wearableSyncRun.provider_retry_after_seconds}s` : ""}`
+                        : wearableSyncRun.replayed
+                          ? "replayed"
+                          : wearableSyncRun.provider_status_code
+                            ? `HTTP ${wearableSyncRun.provider_status_code}`
+                            : wearableSyncRun.sync_mode} · {wearableSyncRun.provider_page_count || 1} page(s)
                     </span>
                     <small>
                       {wearableSyncRun.message ?? wearableSyncRun.external_event_id ?? "Provider sync run recorded."}
