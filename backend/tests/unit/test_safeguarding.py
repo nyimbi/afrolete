@@ -1,3 +1,4 @@
+import base64
 from datetime import UTC, datetime
 
 import pytest
@@ -123,6 +124,78 @@ def test_guardian_can_consent_by_known_sms_number(client, identity_headers, athl
     assert guardian["relationship_kind"] == "legal_guardian"
     assert consent_response.status_code == 200
     assert consent_response.json()["capture_channel"] == "sms"
+
+
+def test_incident_report_package_exports_markdown_and_pdf(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Regulatory Export Club", "organization_type": "club"},
+    ).json()
+    incident_response = client.post(
+        "/api/v1/safeguarding/incidents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_type": "injury",
+            "severity": "high",
+            "occurred_at": "2026-05-28T10:15:00Z",
+            "location": "Main field",
+            "title": "Concussion protocol report",
+            "description": "Athlete removed after head impact and assessed by medical staff.",
+            "immediate_action": "Removed from play, guardian notified, return-to-play blocked.",
+            "medical_follow_up_required": "yes",
+            "regulatory_report_required": True,
+        },
+    )
+    assert incident_response.status_code == 201
+    incident = incident_response.json()
+
+    package_response = client.post(
+        "/api/v1/safeguarding/incident-report-packages",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_id": incident["id"],
+            "agency_name": "County safeguarding office",
+            "jurisdiction": "Local",
+            "due_at": "2026-06-04",
+            "external_reference": "SAFE-2026-001",
+            "checklist_json": '{"guardian_notification": true, "medical_follow_up": "yes"}',
+            "submission_payload": '{"portal": "local-record-only"}',
+            "notes": "Prepared for statutory review.",
+        },
+    )
+    assert package_response.status_code == 201
+    report_package = package_response.json()
+
+    markdown_response = client.get(
+        f"/api/v1/safeguarding/incident-report-packages/{report_package['id']}/artifact",
+        headers=identity_headers,
+    )
+    assert markdown_response.status_code == 200
+    markdown = markdown_response.json()
+    assert markdown["artifact_format"] == "markdown"
+    assert markdown["download_filename"].endswith(".md")
+    assert markdown["content_base64"] is None
+    assert "Concussion protocol report" in markdown["content"]
+    assert "County safeguarding office" in markdown["content"]
+    assert len(markdown["checksum"]) == 64
+    assert markdown["size_bytes"] > 500
+
+    pdf_response = client.get(
+        f"/api/v1/safeguarding/incident-report-packages/{report_package['id']}/artifact?artifact_format=pdf",
+        headers=identity_headers,
+    )
+    assert pdf_response.status_code == 200
+    pdf = pdf_response.json()
+    assert pdf["artifact_format"] == "pdf"
+    assert pdf["download_filename"].endswith(".pdf")
+    assert pdf["content_type"] == "application/pdf"
+    pdf_bytes = base64.b64decode(pdf["content_base64"])
+    assert pdf_bytes.startswith(b"%PDF-1.4")
+    assert pdf["size_bytes"] == len(pdf_bytes)
+    assert len(pdf["checksum"]) == 64
 
 
 @pytest.mark.asyncio

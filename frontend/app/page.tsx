@@ -178,6 +178,7 @@ import type {
   BackgroundCheckRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
+  IncidentReportPackageArtifactRead,
   IncidentInsuranceClaimRead,
   IncidentMedicalClearanceRead,
   IncidentReportPackageRead,
@@ -1563,6 +1564,7 @@ export default function HomePage() {
   const [complianceCredentials, setComplianceCredentials] = useState<ComplianceCredentialRead[]>([]);
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummaryRead | null>(null);
   const [incidentReportPackages, setIncidentReportPackages] = useState<IncidentReportPackageRead[]>([]);
+  const [incidentReportPackageArtifact, setIncidentReportPackageArtifact] = useState<IncidentReportPackageArtifactRead | null>(null);
   const [incidentInsuranceClaims, setIncidentInsuranceClaims] = useState<IncidentInsuranceClaimRead[]>([]);
   const [incidentMedicalClearances, setIncidentMedicalClearances] = useState<IncidentMedicalClearanceRead[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
@@ -3137,6 +3139,7 @@ export default function HomePage() {
       setComplianceCredentials([]);
       setComplianceSummary(null);
       setIncidentReportPackages([]);
+      setIncidentReportPackageArtifact(null);
       setIncidentInsuranceClaims([]);
       setIncidentMedicalClearances([]);
       setCommunicationTemplates([]);
@@ -5738,6 +5741,32 @@ export default function HomePage() {
         ]);
         refreshSafeguardingCompliance();
         addLog(`${updated.agency_name} report package moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
+  const downloadIncidentReportPackageArtifact = (
+    reportPackage: IncidentReportPackageRead,
+    artifactFormat: "markdown" | "pdf"
+  ) => {
+    runAction(
+      `incident-report-package-artifact-${artifactFormat}-${reportPackage.id}`,
+      () =>
+        apiRequest<IncidentReportPackageArtifactRead>(
+          `/safeguarding/incident-report-packages/${reportPackage.id}/artifact?artifact_format=${artifactFormat}`,
+          { identity }
+        ),
+      (artifact) => {
+        setIncidentReportPackageArtifact(artifact);
+        if (artifact.content_base64) {
+          downloadBase64Artifact(artifact.content_base64, artifact.content_type, artifact.download_filename);
+        } else {
+          downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
+        }
+        addLog(
+          `Downloaded ${artifact.artifact_format} regulatory package (${artifact.size_bytes} bytes)`,
+          "good"
+        );
       }
     );
   };
@@ -16082,9 +16111,20 @@ export default function HomePage() {
                   <button type="button" onClick={() => updateIncidentReportPackage(reportPackage, "submitted")}>Submit</button>
                   <button type="button" onClick={() => updateIncidentReportPackage(reportPackage, "accepted")}>Accept</button>
                   <button type="button" onClick={() => updateIncidentReportPackage(reportPackage, "rejected")}>Reject</button>
+                  <button type="button" onClick={() => downloadIncidentReportPackageArtifact(reportPackage, "markdown")}>Markdown</button>
+                  <button type="button" onClick={() => downloadIncidentReportPackageArtifact(reportPackage, "pdf")}>PDF</button>
                 </div>
               </article>
             ))}
+            {incidentReportPackageArtifact ? (
+              <article className="task-card">
+                <div>
+                  <strong>{incidentReportPackageArtifact.download_filename}</strong>
+                  <span>{incidentReportPackageArtifact.artifact_format} · {incidentReportPackageArtifact.size_bytes} bytes · {incidentReportPackageArtifact.content_type}</span>
+                  <span>{incidentReportPackageArtifact.checksum.slice(0, 16)} · generated {new Date(incidentReportPackageArtifact.generated_at).toLocaleString()}</span>
+                </div>
+              </article>
+            ) : null}
             {incidentInsuranceClaims.slice(0, 4).map((claim) => (
               <article key={claim.id} className="task-card">
                 <div>

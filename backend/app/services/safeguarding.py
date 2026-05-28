@@ -1,3 +1,5 @@
+import base64
+import io
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
@@ -346,6 +348,223 @@ def default_incident_report_narrative(incident: SafeguardingIncident) -> str:
     if incident.medical_follow_up_required != "unknown":
         parts.append(f"Medical follow-up: {incident.medical_follow_up_required}")
     return "\n".join(parts)
+
+
+def slug_for_filename(value: str) -> str:
+    normalized = "".join(character.lower() if character.isalnum() else "-" for character in value)
+    parts = [part for part in normalized.split("-") if part]
+    return "-".join(parts[:6]) or "incident-report"
+
+
+def artifact_field(label: str, value: object | None) -> str:
+    if value is None or value == "":
+        return f"- {label}: not recorded"
+    if isinstance(value, datetime | date):
+        return f"- {label}: {value.isoformat()}"
+    return f"- {label}: {value}"
+
+
+def render_incident_report_package_markdown(
+    package: IncidentReportPackage,
+    incident: SafeguardingIncident,
+    generated_at: datetime,
+) -> str:
+    lines = [
+        "# AfroLete Incident Regulatory Report Package",
+        "",
+        "## Package",
+        artifact_field("Package ID", package.id),
+        artifact_field("Generated", generated_at),
+        artifact_field("Agency", package.agency_name),
+        artifact_field("Jurisdiction", package.jurisdiction),
+        artifact_field("Status", package.status.value),
+        artifact_field("Due", package.due_at),
+        artifact_field("External reference", package.external_reference),
+        artifact_field("Submitted", package.submitted_at),
+        artifact_field("Accepted", package.accepted_at),
+        "",
+        "## Incident",
+        artifact_field("Incident ID", incident.id),
+        artifact_field("Title", incident.title),
+        artifact_field("Type", incident.incident_type.value),
+        artifact_field("Severity", incident.severity.value),
+        artifact_field("Status", incident.status.value),
+        artifact_field("Occurred", incident.occurred_at),
+        artifact_field("Location", incident.location),
+        artifact_field("Event ID", incident.event_id),
+        artifact_field("Team ID", incident.team_id),
+        artifact_field("Athlete person ID", incident.athlete_person_id),
+        "",
+        "## Narrative",
+        package.narrative,
+        "",
+        "## Incident Description",
+        incident.description,
+        "",
+        "## Immediate Action",
+        incident.immediate_action or "Not recorded.",
+        "",
+        "## Guardian and Medical Follow-up",
+        artifact_field("Parent/guardian notified", incident.parent_notified_at),
+        artifact_field("Medical follow-up required", incident.medical_follow_up_required),
+        artifact_field("Regulatory report required", incident.regulatory_report_required),
+        "",
+        "## Checklist",
+        package.checklist_json or "No checklist has been attached.",
+        "",
+        "## Submission Payload",
+        package.submission_payload or "No electronic submission payload has been attached.",
+        "",
+        "## Notes",
+        package.notes or "No operator notes recorded.",
+        "",
+        "## Artifact Integrity",
+        "Generated from current AfroLete incident and regulatory package records.",
+    ]
+    return "\n".join(str(line) for line in lines)
+
+
+def wrapped_pdf_lines(value: str, width: int) -> list[str]:
+    words = value.split()
+    if not words:
+        return [""]
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        if len(current) + len(word) + 1 > width:
+            lines.append(current)
+            current = word
+        else:
+            current = f"{current} {word}"
+    lines.append(current)
+    return lines
+
+
+def pdf_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def simple_pdf_from_lines(lines: list[str], title: str) -> bytes:
+    chunks = [lines[index : index + 46] for index in range(0, len(lines), 46)] or [[]]
+    page_objects: list[bytes] = []
+    page_ids: list[int] = []
+    for page_index, chunk in enumerate(chunks):
+        page_id = 4 + page_index * 2
+        stream_id = page_id + 1
+        page_ids.append(page_id)
+        page_lines = [title, f"Page {page_index + 1} of {len(chunks)}", "", *chunk]
+        text_commands = ["BT", "/F1 9 Tf", "54 748 Td"]
+        for line_index, line in enumerate(page_lines):
+            if line_index:
+                text_commands.append("0 -13 Td")
+            text_commands.append(f"({pdf_escape(line[:112])}) Tj")
+        text_commands.append("ET")
+        stream = "\n".join(text_commands).encode()
+        page_objects.extend(
+            [
+                (
+                    f"{page_id} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                    f"/Resources << /Font << /F1 3 0 R >> >> /Contents {stream_id} 0 R >> endobj\n"
+                ).encode(),
+                (
+                    f"{stream_id} 0 obj << /Length {len(stream)} >> stream\n".encode()
+                    + stream
+                    + b"\nendstream endobj\n"
+                ),
+            ]
+        )
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects = [
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+        f"2 0 obj << /Type /Pages /Kids [{kids}] /Count {len(chunks)} >> endobj\n".encode(),
+        b"3 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n",
+        *page_objects,
+    ]
+    output = io.BytesIO()
+    output.write(b"%PDF-1.4\n")
+    offsets = [0]
+    for item in objects:
+        offsets.append(output.tell())
+        output.write(item)
+    xref_at = output.tell()
+    output.write(f"xref\n0 {len(objects) + 1}\n".encode())
+    output.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.write(f"{offset:010d} 00000 n \n".encode())
+    output.write(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n".encode()
+    )
+    return output.getvalue()
+
+
+def render_incident_report_package_pdf(markdown_content: str, package: IncidentReportPackage) -> bytes:
+    lines: list[str] = []
+    for raw_line in markdown_content.splitlines():
+        line = raw_line.strip()
+        if line.startswith("# "):
+            lines.extend(["AfroLete Incident Regulatory Report Package", ""])
+            continue
+        if line.startswith("## "):
+            lines.extend(["", line[3:], ""])
+            continue
+        if not line:
+            lines.append("")
+            continue
+        lines.extend(wrapped_pdf_lines(line, 92))
+    return simple_pdf_from_lines(lines, title=f"Incident report {str(package.id)[:8]}")
+
+
+async def get_incident_report_package_artifact(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    package_id: UUID,
+    artifact_format: str,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    package = await db.get(IncidentReportPackage, package_id)
+    if package is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report package not found")
+    await ensure_org_manage(authz, package.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, package.incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    normalized_format = artifact_format.lower().strip()
+    if normalized_format not in {"markdown", "pdf"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported report package format")
+
+    generated_at = utc_now()
+    content = render_incident_report_package_markdown(package, incident, generated_at)
+    filename_slug = slug_for_filename(package.agency_name)
+    if normalized_format == "pdf":
+        content_bytes = render_incident_report_package_pdf(content, package)
+        return {
+            "id": package.id,
+            "organization_id": package.organization_id,
+            "incident_id": package.incident_id,
+            "generated_at": generated_at,
+            "download_filename": f"afrolete-incident-report-{filename_slug}-{str(package.id)[:8]}.pdf",
+            "content_type": "application/pdf",
+            "artifact_format": "pdf",
+            "content": "",
+            "content_base64": base64.b64encode(content_bytes).decode(),
+            "checksum": sha256(content_bytes).hexdigest(),
+            "size_bytes": len(content_bytes),
+        }
+    content_bytes = content.encode("utf-8")
+    return {
+        "id": package.id,
+        "organization_id": package.organization_id,
+        "incident_id": package.incident_id,
+        "generated_at": generated_at,
+        "download_filename": f"afrolete-incident-report-{filename_slug}-{str(package.id)[:8]}.md",
+        "content_type": "text/markdown; charset=utf-8",
+        "artifact_format": "markdown",
+        "content": content,
+        "content_base64": None,
+        "checksum": sha256(content_bytes).hexdigest(),
+        "size_bytes": len(content_bytes),
+    }
 
 
 async def create_incident_report_package(

@@ -2881,6 +2881,20 @@ export type IncidentReportPackageRead = {
   created_at: string;
 };
 
+export type IncidentReportPackageArtifactRead = {
+  id: UUID;
+  organization_id: UUID;
+  incident_id: UUID;
+  generated_at: string;
+  download_filename: string;
+  content_type: string;
+  artifact_format: "markdown" | "pdf";
+  content: string;
+  content_base64: string | null;
+  checksum: string;
+  size_bytes: number;
+};
+
 export type IncidentInsuranceClaimRead = {
   id: UUID;
   organization_id: UUID;

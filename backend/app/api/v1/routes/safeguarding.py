@@ -39,6 +39,7 @@ from app.schemas.safeguarding import (
     IncidentMedicalClearanceCreate,
     IncidentMedicalClearanceRead,
     IncidentMedicalClearanceUpdate,
+    IncidentReportPackageArtifactRead,
     IncidentReportPackageCreate,
     IncidentReportPackageRead,
     IncidentReportPackageUpdate,
@@ -67,6 +68,7 @@ from app.services.safeguarding import (
     create_safeguarding_incident,
     ensure_org_manage,
     compliance_summary,
+    get_incident_report_package_artifact,
     list_background_checks,
     list_compliance_credentials,
     list_guardians_for_athlete,
@@ -401,6 +403,28 @@ async def update_incident_report_package_route(
 ) -> IncidentReportPackageRead:
     return to_report_package_read(
         await update_incident_report_package(db, identity, package_id, payload, authz)
+    )
+
+
+@router.get(
+    "/incident-report-packages/{package_id}/artifact",
+    response_model=IncidentReportPackageArtifactRead,
+)
+async def get_incident_report_package_artifact_route(
+    package_id: UUID,
+    artifact_format: str = Query(default="markdown", pattern="^(markdown|pdf)$"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentReportPackageArtifactRead:
+    return IncidentReportPackageArtifactRead(
+        **await get_incident_report_package_artifact(
+            db,
+            identity,
+            package_id,
+            artifact_format,
+            authz,
+        )
     )
 
 
