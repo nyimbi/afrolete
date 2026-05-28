@@ -1672,6 +1672,60 @@ textarea:focus {
   color: var(--muted);
 }
 
+.public-site-list small,
+.public-site-list a {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.public-site-list a {
+  color: var(--site-primary);
+  text-decoration: none;
+}
+
+.public-site-support {
+  margin-bottom: 40px;
+  padding: 0 20px;
+}
+
+.public-site-support-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.public-site-support-heading h2 {
+  margin: 4px 0 0;
+}
+
+.public-site-support-heading p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.public-site-support-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.public-site-support-grid article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.public-site-support-grid h3 {
+  margin: 0 0 14px;
+}
+
 .public-site-scorecard {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) 120px minmax(0, 1.5fr);
@@ -2478,6 +2532,11 @@ textarea:focus {
   }
 
   .public-site-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .public-site-support-heading,
+  .public-site-support-grid {
     grid-template-columns: 1fr;
   }
 

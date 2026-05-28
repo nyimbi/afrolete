@@ -1,4 +1,5 @@
 from uuid import UUID
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +17,11 @@ from app.schemas.organization import (
     OrganizationPublicSiteRead,
     OrganizationRead,
     PublicRegistrationInquiryCreate,
+    PublicSiteFundraisingCampaignRead,
     PublicSiteEventRead,
+    PublicSiteSponsorRead,
     PublicSiteTeamRead,
+    PublicSiteTicketProductRead,
     RegistrationInquiryConversionCreate,
     RegistrationInquiryConversionRead,
     RegistrationInquiryFollowUpCreate,
@@ -72,7 +76,8 @@ def to_organization_read(item) -> OrganizationRead:
 
 
 def to_public_site_read(item) -> OrganizationPublicSiteRead:
-    organization, teams, events = item
+    organization, teams, events, sponsors, sponsorships, campaigns, ticket_products = item
+    events_by_id = {event.id: event for event in events}
     return OrganizationPublicSiteRead(
         id=organization.id,
         name=organization.name,
@@ -113,7 +118,89 @@ def to_public_site_read(item) -> OrganizationPublicSiteRead:
             )
             for event in events
         ],
+        sponsors=[
+            PublicSiteSponsorRead(
+                sponsor_id=sponsor.id,
+                name=sponsor.name,
+                industry=sponsor.industry,
+                website_url=sponsor.website_url,
+                brand_assets_url=sponsor.brand_assets_url,
+                tier=_top_sponsorship_tier(sponsor.id, sponsorships),
+                active_value=sum(
+                    (
+                        agreement.value_amount
+                        for agreement in sponsorships
+                        if agreement.sponsor_id == sponsor.id
+                    ),
+                    Decimal("0"),
+                ),
+                currency=_top_sponsorship_currency(sponsor.id, sponsorships),
+                deliverables=_public_deliverables(sponsor.id, sponsorships),
+                activation_note=_top_activation_note(sponsor.id, sponsorships),
+            )
+            for sponsor in sponsors
+            if any(agreement.sponsor_id == sponsor.id for agreement in sponsorships)
+        ],
+        fundraising_campaigns=[
+            PublicSiteFundraisingCampaignRead(
+                id=campaign.id,
+                name=campaign.name,
+                purpose=campaign.purpose,
+                goal_amount=campaign.goal_amount,
+                raised_amount=campaign.raised_amount,
+                currency=campaign.currency,
+                public_url=campaign.public_url,
+                status=campaign.status.value,
+            )
+            for campaign in campaigns
+        ],
+        ticket_products=[
+            PublicSiteTicketProductRead(
+                id=product.id,
+                event_id=product.event_id,
+                event_title=events_by_id[product.event_id].title if product.event_id in events_by_id else None,
+                event_starts_at=events_by_id[product.event_id].starts_at if product.event_id in events_by_id else None,
+                venue_name=events_by_id[product.event_id].venue_name if product.event_id in events_by_id else None,
+                name=product.name,
+                price=product.price,
+                currency=product.currency,
+                capacity=product.capacity,
+                sold_count=product.sold_count,
+                available_count=max(product.capacity - product.sold_count, 0),
+                access_zone=product.access_zone,
+                status=product.status.value,
+            )
+            for product in ticket_products
+        ],
     )
+
+
+def _top_sponsorship_tier(sponsor_id: UUID, sponsorships) -> str | None:
+    return next((agreement.tier for agreement in sponsorships if agreement.sponsor_id == sponsor_id), None)
+
+
+def _top_sponsorship_currency(sponsor_id: UUID, sponsorships) -> str | None:
+    return next((agreement.currency for agreement in sponsorships if agreement.sponsor_id == sponsor_id), None)
+
+
+def _top_activation_note(sponsor_id: UUID, sponsorships) -> str | None:
+    return next(
+        (
+            agreement.activation_notes
+            for agreement in sponsorships
+            if agreement.sponsor_id == sponsor_id and agreement.activation_notes
+        ),
+        None,
+    )
+
+
+def _public_deliverables(sponsor_id: UUID, sponsorships) -> list[str]:
+    deliverables: list[str] = []
+    for agreement in sponsorships:
+        if agreement.sponsor_id != sponsor_id or not agreement.deliverables:
+            continue
+        deliverables.extend(part.strip() for part in agreement.deliverables.split(",") if part.strip())
+    return deliverables[:6]
 
 
 def to_registration_inquiry_read(inquiry) -> RegistrationInquiryRead:

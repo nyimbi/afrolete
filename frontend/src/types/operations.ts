@@ -306,6 +306,46 @@ export type PublicSiteEventRead = {
   venue_name: string | null;
 };
 
+export type PublicSiteSponsorRead = {
+  sponsor_id: UUID;
+  name: string;
+  industry: string | null;
+  website_url: string | null;
+  brand_assets_url: string | null;
+  tier: string | null;
+  active_value: string;
+  currency: string | null;
+  deliverables: string[];
+  activation_note: string | null;
+};
+
+export type PublicSiteFundraisingCampaignRead = {
+  id: UUID;
+  name: string;
+  purpose: string;
+  goal_amount: string;
+  raised_amount: string;
+  currency: string;
+  public_url: string | null;
+  status: string;
+};
+
+export type PublicSiteTicketProductRead = {
+  id: UUID;
+  event_id: UUID;
+  event_title: string | null;
+  event_starts_at: string | null;
+  venue_name: string | null;
+  name: string;
+  price: string;
+  currency: string;
+  capacity: number;
+  sold_count: number;
+  available_count: number;
+  access_zone: string | null;
+  status: string;
+};
+
 export type OrganizationPublicSiteRead = {
   id: UUID;
   name: string;
@@ -324,6 +364,9 @@ export type OrganizationPublicSiteRead = {
   brand_secondary_color: string | null;
   teams: PublicSiteTeamRead[];
   upcoming_events: PublicSiteEventRead[];
+  sponsors: PublicSiteSponsorRead[];
+  fundraising_campaigns: PublicSiteFundraisingCampaignRead[];
+  ticket_products: PublicSiteTicketProductRead[];
 };
 
 export type RegistrationInquiryRead = {

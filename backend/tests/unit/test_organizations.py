@@ -43,6 +43,114 @@ def test_create_and_list_organization(client, identity_headers) -> None:
     )
 
 
+def test_public_site_exposes_commercial_support_opportunities(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Supporter City FC",
+            "organization_type": "club",
+            "primary_sport": "football",
+            "subdomain": "supporter-city",
+        },
+    ).json()
+    team = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "U17 Supporters",
+            "sport": "football",
+            "sport_format": "team",
+        },
+    ).json()
+    event = client.post(
+        "/api/v1/events",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "event_type": "match",
+            "title": "Sponsor Showcase Derby",
+            "starts_at": "2026-08-01T15:00:00Z",
+            "ends_at": "2026-08-01T17:00:00Z",
+            "venue_name": "Partner Park",
+        },
+    ).json()
+    sponsor = client.post(
+        "/api/v1/commercial/sponsors",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "AfroBank",
+            "industry": "Financial services",
+            "website_url": "https://afrobank.example",
+            "brand_assets_url": "https://cdn.example/afrobank.png",
+        },
+    ).json()
+    client.post(
+        "/api/v1/commercial/sponsorships",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sponsor_id": sponsor["id"],
+            "event_id": event["id"],
+            "name": "Community Match Partner",
+            "tier": "Gold",
+            "value_amount": "2500.00",
+            "deliverables": "Shirt logo, pitch board, livestream mention",
+            "activation_notes": "Family ticket bundle live.",
+        },
+    )
+    campaign = client.post(
+        "/api/v1/commercial/campaigns",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "name": "Boot fund",
+            "purpose": "Boots for academy players",
+            "goal_amount": "1000.00",
+            "public_url": "https://supporter-city.example/boot-fund",
+        },
+    ).json()
+    client.post(
+        "/api/v1/commercial/donations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "campaign_id": campaign["id"],
+            "donor_name": "Local Donor",
+            "amount": "125.00",
+        },
+    )
+    client.post(
+        "/api/v1/commercial/tickets/products",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "event_id": event["id"],
+            "name": "Family Stand",
+            "price": "7.50",
+            "capacity": 120,
+            "access_zone": "East gate",
+        },
+    )
+
+    site_response = client.get("/api/v1/organizations/public/supporter-city")
+
+    assert site_response.status_code == 200
+    site = site_response.json()
+    assert site["sponsors"][0]["name"] == "AfroBank"
+    assert site["sponsors"][0]["tier"] == "Gold"
+    assert site["sponsors"][0]["active_value"] == "2500.00"
+    assert site["sponsors"][0]["deliverables"] == ["Shirt logo", "pitch board", "livestream mention"]
+    assert site["fundraising_campaigns"][0]["raised_amount"] == "125.00"
+    assert site["ticket_products"][0]["name"] == "Family Stand"
+    assert site["ticket_products"][0]["event_title"] == "Sponsor Showcase Derby"
+    assert site["ticket_products"][0]["available_count"] == 120
+
+
 def test_add_member_requires_manage_permission(client, identity_headers) -> None:
     create_response = client.post(
         "/api/v1/organizations",

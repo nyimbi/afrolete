@@ -7,7 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.communication import CommunicationMessage
+from app.models.commercial import FundraisingCampaign, Sponsor, SponsorshipAgreement, TicketProduct
 from app.models.enums import (
+    CommercialStatus,
     CommunicationMessageType,
     CommunicationScopeType,
     GuardianRelationshipKind,
@@ -189,7 +191,15 @@ async def get_organization_for_identity(
 async def get_public_site(
     db: AsyncSession,
     site: str,
-) -> tuple[Organization, list[Team], list[Event]]:
+) -> tuple[
+    Organization,
+    list[Team],
+    list[Event],
+    list[Sponsor],
+    list[SponsorshipAgreement],
+    list[FundraisingCampaign],
+    list[TicketProduct],
+]:
     organization = await db.scalar(
         select(Organization).where(
             (Organization.slug == site) | (Organization.subdomain == site)
@@ -218,7 +228,50 @@ async def get_public_site(
             )
         ).all()
     )
-    return organization, teams, upcoming_events
+    sponsors = list(
+        (
+            await db.scalars(
+                select(Sponsor)
+                .where(Sponsor.organization_id == organization.id)
+                .order_by(Sponsor.name)
+                .limit(12)
+            )
+        ).all()
+    )
+    sponsorships = list(
+        (
+            await db.scalars(
+                select(SponsorshipAgreement)
+                .where(SponsorshipAgreement.organization_id == organization.id)
+                .where(SponsorshipAgreement.status == CommercialStatus.ACTIVE)
+                .order_by(SponsorshipAgreement.value_amount.desc(), SponsorshipAgreement.name)
+                .limit(24)
+            )
+        ).all()
+    )
+    campaigns = list(
+        (
+            await db.scalars(
+                select(FundraisingCampaign)
+                .where(FundraisingCampaign.organization_id == organization.id)
+                .where(FundraisingCampaign.status == CommercialStatus.ACTIVE)
+                .order_by(FundraisingCampaign.ends_on.is_(None), FundraisingCampaign.ends_on, FundraisingCampaign.name)
+                .limit(6)
+            )
+        ).all()
+    )
+    ticket_products = list(
+        (
+            await db.scalars(
+                select(TicketProduct)
+                .where(TicketProduct.organization_id == organization.id)
+                .where(TicketProduct.status == CommercialStatus.ACTIVE)
+                .order_by(TicketProduct.name)
+                .limit(8)
+            )
+        ).all()
+    )
+    return organization, teams, upcoming_events, sponsors, sponsorships, campaigns, ticket_products
 
 
 async def create_public_registration_inquiry(

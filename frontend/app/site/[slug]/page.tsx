@@ -2,6 +2,7 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import { useParams } from "next/navigation";
 import { apiRequest } from "@/lib/api";
 import type {
   AgentEthicalScorecardRead,
@@ -9,7 +10,9 @@ import type {
   RegistrationInquiryRead
 } from "@/types/operations";
 
-export default function PublicOrganizationSitePage({ params }: { params: { slug: string } }) {
+export default function PublicOrganizationSitePage() {
+  const params = useParams<{ slug?: string | string[] }>();
+  const slug = routeParam(params.slug);
   const [site, setSite] = useState<OrganizationPublicSiteRead | null>(null);
   const [scorecard, setScorecard] = useState<AgentEthicalScorecardRead | null>(null);
   const [inquiry, setInquiry] = useState({
@@ -28,8 +31,11 @@ export default function PublicOrganizationSitePage({ params }: { params: { slug:
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (!slug) {
+      return;
+    }
     let cancelled = false;
-    apiRequest<OrganizationPublicSiteRead>(`/organizations/public/${encodeURIComponent(params.slug)}`)
+    apiRequest<OrganizationPublicSiteRead>(`/organizations/public/${encodeURIComponent(slug)}`)
       .then((data) => {
         if (!cancelled) {
           setSite(data);
@@ -55,7 +61,7 @@ export default function PublicOrganizationSitePage({ params }: { params: { slug:
     return () => {
       cancelled = true;
     };
-  }, [params.slug]);
+  }, [slug]);
 
   const colors = useMemo(
     () => ({
@@ -194,6 +200,75 @@ export default function PublicOrganizationSitePage({ params }: { params: { slug:
         </article>
       </section>
 
+      {site.sponsors.length > 0 || site.fundraising_campaigns.length > 0 || site.ticket_products.length > 0 ? (
+        <section className="public-site-shell public-site-support">
+          <div className="public-site-support-heading">
+            <div>
+              <p className="section-label">Support</p>
+              <h2>Back the program</h2>
+            </div>
+            <p>
+              Sponsorship, fundraising, and match-day ticket offers are published from the organization commerce
+              workspace.
+            </p>
+          </div>
+          <div className="public-site-support-grid">
+            <article>
+              <h3>Partners</h3>
+              <div className="public-site-list">
+                {site.sponsors.slice(0, 4).map((sponsor) => (
+                  <div key={sponsor.sponsor_id}>
+                    <strong>{sponsor.name}</strong>
+                    <span>
+                      {sponsor.tier ?? sponsor.industry ?? "Partner"} · {sponsor.currency ?? ""}{" "}
+                      {sponsor.active_value}
+                    </span>
+                    {sponsor.deliverables.length > 0 ? <small>{sponsor.deliverables.join(" · ")}</small> : null}
+                  </div>
+                ))}
+                {site.sponsors.length === 0 ? <span>No public partners yet</span> : null}
+              </div>
+            </article>
+            <article>
+              <h3>Fundraising</h3>
+              <div className="public-site-list">
+                {site.fundraising_campaigns.slice(0, 4).map((campaign) => (
+                  <div key={campaign.id}>
+                    <strong>{campaign.name}</strong>
+                    <span>
+                      {campaign.currency} {campaign.raised_amount} of {campaign.goal_amount} ·{" "}
+                      {fundraisingPercent(campaign.raised_amount, campaign.goal_amount)}%
+                    </span>
+                    <small>{campaign.purpose}</small>
+                    {campaign.public_url ? <a href={campaign.public_url}>Open campaign</a> : null}
+                  </div>
+                ))}
+                {site.fundraising_campaigns.length === 0 ? <span>No public campaigns yet</span> : null}
+              </div>
+            </article>
+            <article>
+              <h3>Tickets</h3>
+              <div className="public-site-list">
+                {site.ticket_products.slice(0, 4).map((product) => (
+                  <div key={product.id}>
+                    <strong>{product.name}</strong>
+                    <span>
+                      {product.currency} {product.price} · {product.available_count}/{product.capacity} available
+                    </span>
+                    <small>
+                      {product.event_title ?? "Event"} ·{" "}
+                      {product.event_starts_at ? formatDate(product.event_starts_at) : "schedule pending"} ·{" "}
+                      {product.venue_name ?? product.access_zone ?? "venue pending"}
+                    </small>
+                  </div>
+                ))}
+                {site.ticket_products.length === 0 ? <span>No public ticket offers yet</span> : null}
+              </div>
+            </article>
+          </div>
+        </section>
+      ) : null}
+
       {scorecard ? (
         <section className="public-site-shell public-site-scorecard">
           <div>
@@ -320,4 +395,20 @@ function initials(value: string): string {
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleString();
+}
+
+function routeParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+  return value ?? "";
+}
+
+function fundraisingPercent(raisedAmount: string, goalAmount: string): number {
+  const raised = Number(raisedAmount);
+  const goal = Number(goalAmount);
+  if (!Number.isFinite(raised) || !Number.isFinite(goal) || goal <= 0) {
+    return 0;
+  }
+  return Math.min(Math.round((raised / goal) * 100), 100);
 }

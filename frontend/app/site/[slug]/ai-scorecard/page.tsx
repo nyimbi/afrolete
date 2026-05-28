@@ -2,6 +2,7 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import { useParams } from "next/navigation";
 import { apiRequest } from "@/lib/api";
 import { apiBaseUrl } from "@/lib/config";
 import type {
@@ -13,7 +14,9 @@ import type {
   OrganizationPublicSiteRead
 } from "@/types/operations";
 
-export default function PublicAiScorecardPage({ params }: { params: { slug: string } }) {
+export default function PublicAiScorecardPage() {
+  const params = useParams<{ slug?: string | string[] }>();
+  const slug = routeParam(params.slug);
   const [site, setSite] = useState<OrganizationPublicSiteRead | null>(null);
   const [scorecard, setScorecard] = useState<AgentEthicalScorecardRead | null>(null);
   const [comments, setComments] = useState<AgentScorecardCommentRead[]>([]);
@@ -32,8 +35,11 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (!slug) {
+      return;
+    }
     let cancelled = false;
-    apiRequest<OrganizationPublicSiteRead>(`/organizations/public/${encodeURIComponent(params.slug)}`)
+    apiRequest<OrganizationPublicSiteRead>(`/organizations/public/${encodeURIComponent(slug)}`)
       .then((siteData) => {
         if (cancelled) {
           return;
@@ -64,7 +70,7 @@ export default function PublicAiScorecardPage({ params }: { params: { slug: stri
     return () => {
       cancelled = true;
     };
-  }, [params.slug]);
+  }, [slug]);
 
   const colors = useMemo(
     () => ({
@@ -357,6 +363,13 @@ function initials(value: string): string {
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString();
+}
+
+function routeParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+  return value ?? "";
 }
 
 function downloadTextArtifact(content: string, contentType: string, filename: string) {

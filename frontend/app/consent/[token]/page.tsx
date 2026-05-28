@@ -1,10 +1,13 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
+import { useParams } from "next/navigation";
 import { apiRequest } from "@/lib/api";
 import type { ActivityConsentRead, ConsentStatus } from "@/types/operations";
 
-export default function ConsentCapturePage({ params }: { params: { token: string } }) {
+export default function ConsentCapturePage() {
+  const params = useParams<{ token?: string | string[] }>();
+  const token = routeParam(params.token);
   const [status, setStatus] = useState<ConsentStatus>("granted");
   const [guardianName, setGuardianName] = useState("");
   const [notes, setNotes] = useState("");
@@ -20,7 +23,7 @@ export default function ConsentCapturePage({ params }: { params: { token: string
       const consent = await apiRequest<ActivityConsentRead>("/safeguarding/consents/by-token", {
         method: "POST",
         body: {
-          token: params.token,
+          token,
           status,
           consent_text: `${guardianName || "Guardian"} responded ${status}.`,
           response_payload: JSON.stringify({ guardianName }),
@@ -93,4 +96,11 @@ export default function ConsentCapturePage({ params }: { params: { token: string
       </section>
     </main>
   );
+}
+
+function routeParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+  return value ?? "";
 }

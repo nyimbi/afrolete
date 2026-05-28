@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+from decimal import Decimal
 
 from app.models.enums import (
     AssociationLevel,
@@ -73,6 +74,46 @@ class PublicSiteEventRead(BaseModel):
     venue_name: str | None
 
 
+class PublicSiteSponsorRead(BaseModel):
+    sponsor_id: UUID
+    name: str
+    industry: str | None
+    website_url: str | None
+    brand_assets_url: str | None
+    tier: str | None
+    active_value: Decimal
+    currency: str | None
+    deliverables: list[str] = Field(default_factory=list)
+    activation_note: str | None
+
+
+class PublicSiteFundraisingCampaignRead(BaseModel):
+    id: UUID
+    name: str
+    purpose: str
+    goal_amount: Decimal
+    raised_amount: Decimal
+    currency: str
+    public_url: str | None
+    status: str
+
+
+class PublicSiteTicketProductRead(BaseModel):
+    id: UUID
+    event_id: UUID
+    event_title: str | None
+    event_starts_at: datetime | None
+    venue_name: str | None
+    name: str
+    price: Decimal
+    currency: str
+    capacity: int
+    sold_count: int
+    available_count: int
+    access_zone: str | None
+    status: str
+
+
 class OrganizationPublicSiteRead(BaseModel):
     id: UUID
     name: str
@@ -91,6 +132,9 @@ class OrganizationPublicSiteRead(BaseModel):
     brand_secondary_color: str | None
     teams: list[PublicSiteTeamRead]
     upcoming_events: list[PublicSiteEventRead]
+    sponsors: list[PublicSiteSponsorRead]
+    fundraising_campaigns: list[PublicSiteFundraisingCampaignRead]
+    ticket_products: list[PublicSiteTicketProductRead]
 
 
 class PublicRegistrationInquiryCreate(BaseModel):
