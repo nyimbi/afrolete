@@ -75,6 +75,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["lanes"] == [
         "agent-tasks",
         "communication-digests",
+        "communication-escalations",
         "compliance-reconciliation",
         "developer-webhooks",
         "event-travel-consent-reminders",
@@ -87,6 +88,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["summary"]["eligible_count"] == 2
     assert result["summary"]["processed_count"] == 2
     assert result["results"]["communication_digests"]["eligible_count"] == 0
+    assert result["results"]["communication_escalations"]["eligible_count"] == 0
     assert result["results"]["compliance_reconciliation"]["eligible_count"] == 1
     assert result["results"]["compliance_reconciliation"]["executed_count"] == 1
     assert result["results"]["developer_webhooks"]["eligible_count"] == 0
@@ -108,6 +110,7 @@ def test_selected_lanes_expands_all() -> None:
     assert selected_lanes(("all",)) == {
         "agent-tasks",
         "communication-digests",
+        "communication-escalations",
         "compliance-reconciliation",
         "developer-webhooks",
         "event-travel-consent-reminders",
@@ -246,6 +249,83 @@ async def test_due_worker_runs_communication_digest_lane(db_session) -> None:
     assert digest_message is not None
     assert digest_message.subject == "Digest: daily digest"
     assert "Training update" in digest_message.body
+
+
+async def test_due_worker_escalates_unresolved_urgent_messages_once(db_session) -> None:
+    organization = Organization(
+        name="Escalation Worker Club",
+        slug="escalation-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    person = Person(display_name="Urgent Parent", primary_email="urgent-parent@example.com")
+    db_session.add(person)
+    await db_session.flush()
+    message = CommunicationMessage(
+        organization_id=organization.id,
+        template_id=None,
+        created_by_person_id=None,
+        message_type=CommunicationMessageType.ALERT,
+        channel=CommunicationChannel.EMAIL,
+        scope_type=CommunicationScopeType.ORGANIZATION,
+        scope_id=organization.id,
+        subject="Storm shelter now",
+        body="Move to the indoor shelter and confirm attendance.",
+        urgent=True,
+        quiet_hours_override=True,
+        sent_at=datetime(2026, 1, 5, 12, tzinfo=UTC),
+        status="sent",
+    )
+    db_session.add(message)
+    await db_session.flush()
+    db_session.add(
+        MessageRecipient(
+            message_id=message.id,
+            person_id=person.id,
+            destination=person.primary_email,
+            delivery_status=MessageDeliveryStatus.QUEUED,
+            failure_reason="Provider queue has not delivered yet.",
+        )
+    )
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("communication-escalations",),
+        communication_escalation_channel=CommunicationChannel.IN_APP,
+        communication_escalation_unresolved_after_minutes=0,
+        communication_escalation_repeat_after_minutes=60,
+        communication_escalation_limit=10,
+    )
+
+    escalation = result["results"]["communication_escalations"]
+    assert escalation["eligible_count"] == 1
+    assert escalation["executed_count"] == 1
+    assert escalation["escalated_count"] == 1
+    assert escalation["skipped_count"] == 0
+    assert len(escalation["escalation_message_ids"]) == 1
+    escalation_message = await db_session.get(CommunicationMessage, escalation["escalation_message_ids"][0])
+    assert escalation_message is not None
+    assert escalation_message.escalates_message_id == message.id
+    assert escalation_message.escalation_level == 2
+    assert escalation_message.quiet_hours_override is True
+
+    repeat = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("communication-escalations",),
+        communication_escalation_channel=CommunicationChannel.IN_APP,
+        communication_escalation_unresolved_after_minutes=0,
+        communication_escalation_repeat_after_minutes=60,
+        communication_escalation_limit=10,
+    )
+    repeat_escalation = repeat["results"]["communication_escalations"]
+    assert repeat_escalation["eligible_count"] == 1
+    assert repeat_escalation["escalated_count"] == 0
+    assert repeat_escalation["skipped_count"] == 1
 
 
 async def test_due_worker_sends_travel_consent_reminders_once(db_session) -> None:

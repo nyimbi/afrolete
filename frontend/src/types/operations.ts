@@ -4680,6 +4680,10 @@ export type CommunicationMessageRead = {
   sent_at: string | null;
   status: string;
   recipient_count: number;
+  escalates_message_id: UUID | null;
+  escalation_level: number;
+  escalation_triggered_at: string | null;
+  escalation_reason: string | null;
 };
 
 export type MessageRecipientRead = {
@@ -4731,6 +4735,18 @@ export type CommunicationEscalationRunRead = {
   recipient_count: number;
   subject: string;
   message: string;
+};
+
+export type CommunicationEscalationSchedulerRunRead = {
+  organization_id: UUID;
+  eligible_count: number;
+  escalated_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  original_message_ids: UUID[];
+  escalation_message_ids: UUID[];
+  runs: CommunicationEscalationRunRead[];
 };
 
 export type CommunicationDigestRead = {

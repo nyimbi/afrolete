@@ -15,6 +15,8 @@ from app.schemas.communication import (
     CommunicationDraftRequest,
     CommunicationEscalationRunCreate,
     CommunicationEscalationRunRead,
+    CommunicationEscalationSchedulerRunCreate,
+    CommunicationEscalationSchedulerRunRead,
     CommunicationInboxItemRead,
     CommunicationMessageCreate,
     CommunicationMessageRead,
@@ -43,6 +45,7 @@ from app.services.communications import (
     record_delivery_event,
     resolve_communication_webhook_key,
     run_message_escalation,
+    run_message_escalation_scheduler,
     run_digest_scheduler,
     update_recipient_status,
     upsert_preference,
@@ -83,6 +86,10 @@ def to_message_read(message, recipient_count: int = 0) -> CommunicationMessageRe
         sent_at=message.sent_at,
         status=message.status,
         recipient_count=recipient_count,
+        escalates_message_id=message.escalates_message_id,
+        escalation_level=message.escalation_level,
+        escalation_triggered_at=message.escalation_triggered_at,
+        escalation_reason=message.escalation_reason,
     )
 
 
@@ -282,6 +289,16 @@ async def escalate_message_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> CommunicationEscalationRunRead:
     return await run_message_escalation(db, identity, message_id, payload, authz)
+
+
+@router.post("/escalations/run", response_model=CommunicationEscalationSchedulerRunRead)
+async def run_message_escalation_scheduler_route(
+    payload: CommunicationEscalationSchedulerRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunicationEscalationSchedulerRunRead:
+    return await run_message_escalation_scheduler(db, identity, payload, authz)
 
 
 @router.patch("/recipients/{recipient_id}", response_model=MessageRecipientRead)

@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 import httpx
@@ -37,6 +37,9 @@ from app.schemas.communication import (
     CommunicationDraftRequest,
     CommunicationEscalationRunCreate,
     CommunicationEscalationRunRead,
+    CommunicationEscalationSchedulerRunCreate,
+    CommunicationEscalationSchedulerRunRead,
+    CommunicationEscalationWorkerRunRead,
     CommunicationMessageCreate,
     CommunicationTemplateCreate,
     DeliveryWebhookEvent,
@@ -169,6 +172,10 @@ async def create_message_for_recipients(
     quiet_hours_override: bool = False,
     scheduled_for: datetime | None = None,
     created_by_person_id: UUID | None = None,
+    escalates_message_id: UUID | None = None,
+    escalation_level: int = 0,
+    escalation_triggered_at: datetime | None = None,
+    escalation_reason: str | None = None,
 ) -> CommunicationMessage:
     await get_organization(db, organization_id)
     recipient_ids = list(dict.fromkeys(recipient_person_ids))
@@ -189,6 +196,10 @@ async def create_message_for_recipients(
         scheduled_for=scheduled_for,
         sent_at=datetime.now(UTC) if scheduled_for is None else None,
         status="sent" if scheduled_for is None else "scheduled",
+        escalates_message_id=escalates_message_id,
+        escalation_level=escalation_level,
+        escalation_triggered_at=escalation_triggered_at,
+        escalation_reason=escalation_reason,
     )
     db.add(message)
     await db.flush()
@@ -654,24 +665,16 @@ async def run_message_escalation(
             message="No unresolved urgent recipients need escalation.",
         )
 
-    target_ids = [recipient.person_id for recipient in targets]
-    escalation = await create_message(
+    escalation = await create_escalation_message_for_targets(
         db,
-        identity,
-        CommunicationMessageCreate(
-            organization_id=message.organization_id,
-            message_type=message.message_type,
-            channel=channel,
-            scope_type=CommunicationScopeType.PERSON,
-            scope_id=target_ids[0],
-            recipient_person_ids=target_ids,
-            subject=subject,
-            body=body,
-            urgent=True,
-            quiet_hours_override=True,
-            copy_guardians_for_minors=False,
-        ),
-        authz,
+        original=message,
+        targets=targets,
+        channel=channel,
+        escalation_level=payload.escalation_level,
+        subject=subject,
+        body=body,
+        reason="Manual urgent communication escalation.",
+        created_by_person_id=identity.person_id,
     )
     recipients = await list_recipients(db, escalation.id)
     return CommunicationEscalationRunRead(
@@ -684,6 +687,184 @@ async def run_message_escalation(
         recipient_count=len(recipients),
         subject=subject,
         message=f"Escalated urgent message to {len(recipients)} unresolved recipients.",
+    )
+
+
+async def run_message_escalation_scheduler(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: CommunicationEscalationSchedulerRunCreate,
+    authz: AuthorizationService,
+) -> CommunicationEscalationSchedulerRunRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_communications(authz, identity, payload.organization_id)
+    return await run_message_escalation_scheduler_for_organization(
+        db,
+        payload.organization_id,
+        channel=payload.channel,
+        escalation_level=payload.escalation_level,
+        failed_only=payload.failed_only,
+        unresolved_after_minutes=payload.unresolved_after_minutes,
+        repeat_after_minutes=payload.repeat_after_minutes,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+        created_by_person_id=identity.person_id,
+    )
+
+
+async def run_message_escalation_scheduler_for_organization(
+    db: AsyncSession,
+    organization_id: UUID,
+    *,
+    channel: CommunicationChannel | None = None,
+    escalation_level: int = 2,
+    failed_only: bool = False,
+    unresolved_after_minutes: int = 15,
+    repeat_after_minutes: int = 60,
+    limit: int = 50,
+    dry_run: bool = False,
+    created_by_person_id: UUID | None = None,
+) -> CommunicationEscalationSchedulerRunRead:
+    await get_organization(db, organization_id)
+    rows = await urgent_messages_due_for_escalation(
+        db,
+        organization_id,
+        unresolved_after_minutes=unresolved_after_minutes,
+        limit=limit,
+    )
+    runs: list[CommunicationEscalationRunRead] = []
+    skipped_count = 0
+    failed_count = 0
+    original_message_ids: list[UUID] = []
+    escalation_message_ids: list[UUID] = []
+    pending_statuses = (
+        {MessageDeliveryStatus.FAILED}
+        if failed_only
+        else {
+            MessageDeliveryStatus.QUEUED,
+            MessageDeliveryStatus.FAILED,
+            MessageDeliveryStatus.SUPPRESSED,
+        }
+    )
+    for message in rows:
+        original_message_ids.append(message.id)
+        recipients = await list_recipients(db, message.id)
+        targets = [recipient for recipient, _person in recipients if recipient.delivery_status in pending_statuses]
+        if not targets:
+            skipped_count += 1
+            continue
+        if await has_recent_escalation(db, message.id, repeat_after_minutes):
+            skipped_count += 1
+            continue
+        run = scheduled_escalation_run_preview(
+            message,
+            targets,
+            channel or escalation_channel(message.channel),
+            escalation_level,
+            skipped_count=len(recipients) - len(targets),
+        )
+        if dry_run:
+            runs.append(run)
+            skipped_count += 1
+            continue
+        try:
+            escalation = await create_escalation_message_for_targets(
+                db,
+                original=message,
+                targets=targets,
+                channel=run.channel,
+                escalation_level=escalation_level,
+                subject=run.subject,
+                body=escalation_body(message, targets, escalation_level),
+                reason=(
+                    f"Scheduled escalation after {unresolved_after_minutes} minutes unresolved; "
+                    f"repeat window {repeat_after_minutes} minutes."
+                ),
+                created_by_person_id=created_by_person_id,
+            )
+            recipients_after = await list_recipients(db, escalation.id)
+            result = run.model_copy(
+                update={
+                    "escalation_message_id": escalation.id,
+                    "recipient_count": len(recipients_after),
+                    "message": f"Scheduled escalation sent to {len(recipients_after)} unresolved recipients.",
+                }
+            )
+            runs.append(result)
+            escalation_message_ids.append(escalation.id)
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+    return CommunicationEscalationSchedulerRunRead(
+        organization_id=organization_id,
+        eligible_count=len(rows),
+        escalated_count=len(escalation_message_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        original_message_ids=original_message_ids,
+        escalation_message_ids=escalation_message_ids,
+        runs=runs,
+    )
+
+
+async def run_message_escalation_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    channel: CommunicationChannel | None = None,
+    escalation_level: int = 2,
+    failed_only: bool = False,
+    unresolved_after_minutes: int = 15,
+    repeat_after_minutes: int = 60,
+    limit: int = 50,
+    dry_run: bool = False,
+) -> CommunicationEscalationWorkerRunRead:
+    organization_ids = await escalation_scheduler_organization_ids(
+        db,
+        organization_id,
+        unresolved_after_minutes=unresolved_after_minutes,
+        limit=limit,
+    )
+    executed_count = 0
+    escalated_count = 0
+    skipped_count = 0
+    failed_count = 0
+    original_message_ids: list[UUID] = []
+    escalation_message_ids: list[UUID] = []
+    for org_id in organization_ids:
+        try:
+            result = await run_message_escalation_scheduler_for_organization(
+                db,
+                org_id,
+                channel=channel,
+                escalation_level=escalation_level,
+                failed_only=failed_only,
+                unresolved_after_minutes=unresolved_after_minutes,
+                repeat_after_minutes=repeat_after_minutes,
+                limit=limit,
+                dry_run=dry_run,
+            )
+            executed_count += 1
+            escalated_count += result.escalated_count
+            skipped_count += result.skipped_count
+            failed_count += result.failed_count
+            original_message_ids.extend(result.original_message_ids)
+            escalation_message_ids.extend(result.escalation_message_ids)
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+    return CommunicationEscalationWorkerRunRead(
+        organization_id=organization_id,
+        eligible_count=len(organization_ids),
+        executed_count=executed_count,
+        escalated_count=escalated_count,
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        organization_ids=organization_ids,
+        original_message_ids=original_message_ids,
+        escalation_message_ids=escalation_message_ids,
     )
 
 
@@ -1006,6 +1187,122 @@ async def digest_scheduler_organization_ids(
     return list((await db.scalars(statement)).all())
 
 
+async def urgent_messages_due_for_escalation(
+    db: AsyncSession,
+    organization_id: UUID,
+    *,
+    unresolved_after_minutes: int,
+    limit: int,
+) -> list[CommunicationMessage]:
+    cutoff = datetime.now(UTC) - timedelta(minutes=unresolved_after_minutes)
+    statement = (
+        select(CommunicationMessage)
+        .join(MessageRecipient, MessageRecipient.message_id == CommunicationMessage.id)
+        .where(CommunicationMessage.organization_id == organization_id)
+        .where(CommunicationMessage.urgent.is_(True))
+        .where(CommunicationMessage.escalates_message_id.is_(None))
+        .where(MessageRecipient.delivery_status.in_(
+            [
+                MessageDeliveryStatus.QUEUED,
+                MessageDeliveryStatus.FAILED,
+                MessageDeliveryStatus.SUPPRESSED,
+            ]
+        ))
+        .where((CommunicationMessage.sent_at.is_(None)) | (CommunicationMessage.sent_at <= cutoff))
+        .group_by(CommunicationMessage.id)
+        .order_by(CommunicationMessage.sent_at.asc().nullsfirst(), CommunicationMessage.created_at.asc())
+        .limit(limit)
+    )
+    return list((await db.scalars(statement)).all())
+
+
+async def escalation_scheduler_organization_ids(
+    db: AsyncSession,
+    organization_id: UUID | None,
+    *,
+    unresolved_after_minutes: int,
+    limit: int,
+) -> list[UUID]:
+    if organization_id is not None:
+        due = await urgent_messages_due_for_escalation(
+            db,
+            organization_id,
+            unresolved_after_minutes=unresolved_after_minutes,
+            limit=1,
+        )
+        return [organization_id] if due else []
+    cutoff = datetime.now(UTC) - timedelta(minutes=unresolved_after_minutes)
+    statement = (
+        select(CommunicationMessage.organization_id)
+        .join(MessageRecipient, MessageRecipient.message_id == CommunicationMessage.id)
+        .where(CommunicationMessage.urgent.is_(True))
+        .where(CommunicationMessage.escalates_message_id.is_(None))
+        .where(MessageRecipient.delivery_status.in_(
+            [
+                MessageDeliveryStatus.QUEUED,
+                MessageDeliveryStatus.FAILED,
+                MessageDeliveryStatus.SUPPRESSED,
+            ]
+        ))
+        .where((CommunicationMessage.sent_at.is_(None)) | (CommunicationMessage.sent_at <= cutoff))
+        .group_by(CommunicationMessage.organization_id)
+        .order_by(func.min(CommunicationMessage.sent_at).asc().nullsfirst())
+        .limit(limit)
+    )
+    return list((await db.scalars(statement)).all())
+
+
+async def has_recent_escalation(
+    db: AsyncSession,
+    message_id: UUID,
+    repeat_after_minutes: int,
+) -> bool:
+    cutoff = datetime.now(UTC) - timedelta(minutes=repeat_after_minutes)
+    return (
+        await db.scalar(
+            select(CommunicationMessage.id)
+            .where(CommunicationMessage.escalates_message_id == message_id)
+            .where(CommunicationMessage.escalation_triggered_at >= cutoff)
+            .limit(1)
+        )
+    ) is not None
+
+
+async def create_escalation_message_for_targets(
+    db: AsyncSession,
+    *,
+    original: CommunicationMessage,
+    targets: list[MessageRecipient],
+    channel: CommunicationChannel,
+    escalation_level: int,
+    subject: str,
+    body: str,
+    reason: str,
+    created_by_person_id: UUID | None,
+) -> CommunicationMessage:
+    if not targets:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No escalation recipients")
+    now = datetime.now(UTC)
+    return await create_message_for_recipients(
+        db,
+        organization_id=original.organization_id,
+        message_type=original.message_type,
+        channel=channel,
+        scope_type=CommunicationScopeType.PERSON,
+        scope_id=targets[0].person_id,
+        recipient_person_ids=[recipient.person_id for recipient in targets],
+        subject=subject,
+        body=body,
+        urgent=True,
+        quiet_hours_override=True,
+        created_by_person_id=created_by_person_id,
+        escalates_message_id=original.id,
+        escalation_level=escalation_level,
+        escalation_triggered_at=now,
+        escalation_reason=reason,
+    )
+
+
 def digest_body(
     person: Person,
     rows: list[tuple[MessageRecipient, CommunicationMessage]],
@@ -1168,6 +1465,28 @@ def escalation_body(message: CommunicationMessage, targets: list[MessageRecipien
         message.body,
     ]
     return "\n".join(lines)[:8000]
+
+
+def scheduled_escalation_run_preview(
+    message: CommunicationMessage,
+    targets: list[MessageRecipient],
+    channel: CommunicationChannel,
+    escalation_level: int,
+    *,
+    skipped_count: int,
+) -> CommunicationEscalationRunRead:
+    subject = f"Escalation L{escalation_level}: {message.subject}"[:240]
+    return CommunicationEscalationRunRead(
+        original_message_id=message.id,
+        escalation_message_id=None,
+        channel=channel,
+        escalation_level=escalation_level,
+        target_count=len(targets),
+        skipped_count=skipped_count,
+        recipient_count=0,
+        subject=subject,
+        message=f"Scheduled escalation due for {len(targets)} unresolved recipients.",
+    )
 
 
 def dispatch_summary(

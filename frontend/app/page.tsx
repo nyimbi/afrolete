@@ -69,6 +69,7 @@ import type {
   CommunicationDispatchSummary,
   CommunicationDraftRead,
   CommunicationEscalationRunRead,
+  CommunicationEscalationSchedulerRunRead,
   CommunicationInboxItemRead,
   CommercialSummaryRead,
   CommercialTaxFilingRead,
@@ -1486,6 +1487,8 @@ export default function HomePage() {
   const [digestRun, setDigestRun] = useState<CommunicationDigestRunRead | null>(null);
   const [draftPreview, setDraftPreview] = useState<CommunicationDraftRead | null>(null);
   const [escalationRun, setEscalationRun] = useState<CommunicationEscalationRunRead | null>(null);
+  const [escalationSchedulerRun, setEscalationSchedulerRun] =
+    useState<CommunicationEscalationSchedulerRunRead | null>(null);
   const [notificationPreference, setNotificationPreference] = useState<NotificationPreferenceRead | null>(null);
   const [facilities, setFacilities] = useState<FacilityRead[]>([]);
   const [emergencyPlans, setEmergencyPlans] = useState<EmergencyActionPlanRead[]>([]);
@@ -3246,6 +3249,7 @@ export default function HomePage() {
       setDigestRun(null);
       setDraftPreview(null);
       setEscalationRun(null);
+      setEscalationSchedulerRun(null);
       setNotificationPreference(null);
       setFacilities([]);
       setEquipmentItems([]);
@@ -8928,6 +8932,42 @@ export default function HomePage() {
           setSelectedMessageId(escalation.escalation_message_id);
         }
         addLog(escalation.message, escalation.target_count > 0 ? "bad" : "neutral");
+        if (selectedOrganizationId) {
+          void loadCommunications(selectedOrganizationId);
+        }
+      }
+    );
+  };
+
+  const runCommunicationEscalationScheduler = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "run-communication-escalations",
+      () =>
+        apiRequest<CommunicationEscalationSchedulerRunRead>("/communications/escalations/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            channel: "in_app",
+            escalation_level: 2,
+            failed_only: false,
+            unresolved_after_minutes: 0,
+            repeat_after_minutes: 60,
+            limit: 50,
+            dry_run: false
+          }
+        }),
+      (run) => {
+        setEscalationSchedulerRun(run);
+        setEscalationRun(run.runs[0] ?? null);
+        addLog(
+          `Escalation timers created ${run.escalated_count} and skipped ${run.skipped_count}`,
+          run.failed_count > 0 ? "bad" : run.escalated_count > 0 ? "bad" : "neutral"
+        );
         if (selectedOrganizationId) {
           void loadCommunications(selectedOrganizationId);
         }
@@ -15008,7 +15048,10 @@ export default function HomePage() {
                   onClick={() => setSelectedMessageId(message.id)}
                 >
                   <span>{message.subject}</span>
-                  <small>{message.message_type} · {message.channel} · {message.recipient_count} recipients</small>
+                  <small>
+                    {message.message_type} · {message.channel} · {message.recipient_count} recipients
+                    {message.escalates_message_id ? ` · escalation L${message.escalation_level}` : ""}
+                  </small>
                 </button>
               ))}
             </div>
@@ -15025,6 +15068,7 @@ export default function HomePage() {
                 <button type="button" onClick={runCommunicationDigestScheduler} disabled={busyAction !== null || !selectedOrganizationId}>Run digests</button>
                 <button type="button" onClick={dispatchSelectedMessage} disabled={busyAction !== null || !selectedMessageId}>Dispatch</button>
                 <button type="button" onClick={escalateSelectedMessage} disabled={busyAction !== null || !selectedMessageId}>Escalate</button>
+                <button type="button" onClick={runCommunicationEscalationScheduler} disabled={busyAction !== null || !selectedOrganizationId}>Timers</button>
                 <button type="button" onClick={saveNotificationPreference} disabled={busyAction !== null}>Preference</button>
               </div>
             </div>
@@ -15067,6 +15111,17 @@ export default function HomePage() {
                     <strong>{escalationRun.subject}</strong>
                     <span>Level {escalationRun.escalation_level} · {escalationRun.channel} · {escalationRun.recipient_count} recipients</span>
                     <span>{escalationRun.message}</span>
+                  </div>
+                </article>
+              ) : null}
+              {escalationSchedulerRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Escalation timers</strong>
+                    <span>
+                      {escalationSchedulerRun.escalated_count} escalated · {escalationSchedulerRun.skipped_count} skipped · {escalationSchedulerRun.failed_count} failed
+                    </span>
+                    <span>{escalationSchedulerRun.eligible_count} urgent messages evaluated</span>
                   </div>
                 </article>
               ) : null}

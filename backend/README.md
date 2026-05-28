@@ -59,12 +59,15 @@ uv run python -m app.workers.due --limit 25
 ```
 
 Use `--lane agent-tasks`, `--lane communication-digests`,
+`--lane communication-escalations`,
 `--lane event-travel-consent-reminders`, `--lane developer-webhooks`,
 `--lane performance-achievements`, `--lane performance-forecast-validations`,
 `--lane performance-review-escalations`, `--lane performance-injury-risk-alerts`,
 or `--lane wearable-pull-retries` to run a single lane. The communication
 digest lane creates daily/weekly digests for people with matching notification
-preferences and unread inbox items. The travel consent lane sends scheduled
+preferences and unread inbox items. The communication escalation lane scans
+unresolved urgent messages and creates quiet-hours-override escalation messages
+with repeat suppression. The travel consent lane sends scheduled
 guardian reminders for due travel consent requests and suppresses repeats with
 `--event-travel-consent-reminder-repeat-after-hours`. The performance
 achievement lane evaluates active athlete goals and recent observations so

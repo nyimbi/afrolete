@@ -74,6 +74,10 @@ class CommunicationMessageRead(BaseModel):
     sent_at: datetime | None
     status: str
     recipient_count: int = 0
+    escalates_message_id: UUID | None = None
+    escalation_level: int = 0
+    escalation_triggered_at: datetime | None = None
+    escalation_reason: str | None = None
 
 
 class MessageRecipientRead(BaseModel):
@@ -138,6 +142,42 @@ class CommunicationEscalationRunRead(BaseModel):
     recipient_count: int
     subject: str
     message: str
+
+
+class CommunicationEscalationSchedulerRunCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel | None = None
+    escalation_level: int = Field(default=2, ge=1, le=5)
+    failed_only: bool = False
+    unresolved_after_minutes: int = Field(default=15, ge=0, le=10080)
+    repeat_after_minutes: int = Field(default=60, ge=1, le=10080)
+    limit: int = Field(default=50, ge=1, le=500)
+    dry_run: bool = False
+
+
+class CommunicationEscalationSchedulerRunRead(BaseModel):
+    organization_id: UUID
+    eligible_count: int
+    escalated_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool
+    original_message_ids: list[UUID]
+    escalation_message_ids: list[UUID]
+    runs: list[CommunicationEscalationRunRead]
+
+
+class CommunicationEscalationWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    executed_count: int
+    escalated_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool
+    organization_ids: list[UUID]
+    original_message_ids: list[UUID]
+    escalation_message_ids: list[UUID]
 
 
 class DeliveryWebhookEvent(BaseModel):

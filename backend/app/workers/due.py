@@ -10,7 +10,7 @@ from app.core.config import parse_positive_int_map
 from app.db.session import SessionLocal
 from app.models.enums import CommunicationChannel, NotificationFrequency
 from app.services.agents import run_agent_task_worker
-from app.services.communications import run_digest_scheduler_worker
+from app.services.communications import run_digest_scheduler_worker, run_message_escalation_worker
 from app.services.developer import run_developer_webhook_retry_due
 from app.services.events import run_event_travel_consent_reminder_worker
 from app.services.performance import (
@@ -25,6 +25,7 @@ from app.services.safeguarding import run_compliance_reconciliation_worker
 WORKER_LANES = (
     "agent-tasks",
     "communication-digests",
+    "communication-escalations",
     "compliance-reconciliation",
     "developer-webhooks",
     "event-travel-consent-reminders",
@@ -43,6 +44,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--agent-limit", type=int, default=None)
     parser.add_argument("--communication-digest-limit", type=int, default=None)
+    parser.add_argument("--communication-escalation-limit", type=int, default=None)
+    parser.add_argument("--communication-escalation-unresolved-after-minutes", type=int, default=15)
+    parser.add_argument("--communication-escalation-repeat-after-minutes", type=int, default=60)
+    parser.add_argument("--communication-escalation-level", type=int, default=2)
+    parser.add_argument("--communication-escalation-failed-only", action="store_true")
+    parser.add_argument("--dry-run-communication-escalations", action="store_true")
+    parser.add_argument(
+        "--communication-escalation-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        default=None,
+    )
     parser.add_argument("--compliance-reconciliation-limit", type=int, default=None)
     parser.add_argument(
         "--communication-digest-frequency",
@@ -118,6 +130,13 @@ async def run_due_workers(
     agent_limit: int | None = None,
     communication_digest_limit: int | None = None,
     communication_digest_frequency: NotificationFrequency | None = None,
+    communication_escalation_limit: int | None = None,
+    communication_escalation_unresolved_after_minutes: int = 15,
+    communication_escalation_repeat_after_minutes: int = 60,
+    communication_escalation_level: int = 2,
+    communication_escalation_failed_only: bool = False,
+    communication_escalation_channel: CommunicationChannel | None = None,
+    dry_run_communication_escalations: bool = False,
     compliance_reconciliation_limit: int | None = None,
     webhook_limit: int | None = None,
     event_travel_consent_reminder_limit: int | None = None,
@@ -165,6 +184,20 @@ async def run_due_workers(
                 organization_id=organization_id,
                 frequency=communication_digest_frequency,
                 limit=communication_digest_limit or limit,
+            )
+        ).model_dump(mode="json")
+    if "communication-escalations" in active_lanes:
+        results["communication_escalations"] = (
+            await run_message_escalation_worker(
+                db,
+                organization_id=organization_id,
+                channel=communication_escalation_channel,
+                escalation_level=communication_escalation_level,
+                failed_only=communication_escalation_failed_only,
+                unresolved_after_minutes=communication_escalation_unresolved_after_minutes,
+                repeat_after_minutes=communication_escalation_repeat_after_minutes,
+                limit=communication_escalation_limit or limit,
+                dry_run=dry_run_communication_escalations,
             )
         ).model_dump(mode="json")
     if "compliance-reconciliation" in active_lanes:
@@ -303,6 +336,15 @@ async def run() -> None:
             communication_digest_frequency=NotificationFrequency(args.communication_digest_frequency)
             if args.communication_digest_frequency
             else None,
+            communication_escalation_limit=args.communication_escalation_limit,
+            communication_escalation_unresolved_after_minutes=args.communication_escalation_unresolved_after_minutes,
+            communication_escalation_repeat_after_minutes=args.communication_escalation_repeat_after_minutes,
+            communication_escalation_level=args.communication_escalation_level,
+            communication_escalation_failed_only=args.communication_escalation_failed_only,
+            communication_escalation_channel=CommunicationChannel(args.communication_escalation_channel)
+            if args.communication_escalation_channel
+            else None,
+            dry_run_communication_escalations=args.dry_run_communication_escalations,
             compliance_reconciliation_limit=args.compliance_reconciliation_limit,
             webhook_limit=args.webhook_limit,
             event_travel_consent_reminder_limit=args.event_travel_consent_reminder_limit,

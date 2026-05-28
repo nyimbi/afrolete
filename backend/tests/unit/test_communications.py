@@ -286,3 +286,74 @@ def test_quiet_hours_override_requires_urgent(client, identity_headers) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_scheduled_urgent_message_escalation_suppresses_repeats(client, identity_headers) -> None:
+    organization, team, _member = create_communications_context(client, identity_headers)
+    message_response = client.post(
+        "/api/v1/communications/messages",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "message_type": "alert",
+            "channel": "email",
+            "scope_type": "team",
+            "scope_id": team["id"],
+            "subject": "Lightning delay",
+            "body": "Lightning has delayed the match. Confirm pickup arrangements.",
+            "urgent": True,
+            "quiet_hours_override": True,
+        },
+    )
+    assert message_response.status_code == 201
+    message = message_response.json()
+
+    run_response = client.post(
+        "/api/v1/communications/escalations/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "escalation_level": 2,
+            "failed_only": False,
+            "unresolved_after_minutes": 0,
+            "repeat_after_minutes": 60,
+            "limit": 10,
+        },
+    )
+    assert run_response.status_code == 200
+    run = run_response.json()
+    assert run["eligible_count"] == 1
+    assert run["escalated_count"] == 1
+    assert run["skipped_count"] == 0
+    assert run["original_message_ids"] == [message["id"]]
+    assert len(run["escalation_message_ids"]) == 1
+    assert run["runs"][0]["recipient_count"] == 1
+
+    messages = client.get(
+        f"/api/v1/communications/messages?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    escalation = next(item for item in messages if item["id"] == run["escalation_message_ids"][0])
+    assert escalation["escalates_message_id"] == message["id"]
+    assert escalation["escalation_level"] == 2
+    assert escalation["escalation_triggered_at"] is not None
+    assert "Scheduled escalation" in escalation["escalation_reason"]
+
+    repeat_response = client.post(
+        "/api/v1/communications/escalations/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "escalation_level": 2,
+            "unresolved_after_minutes": 0,
+            "repeat_after_minutes": 60,
+            "limit": 10,
+        },
+    )
+    assert repeat_response.status_code == 200
+    repeat = repeat_response.json()
+    assert repeat["eligible_count"] == 1
+    assert repeat["escalated_count"] == 0
+    assert repeat["skipped_count"] == 1

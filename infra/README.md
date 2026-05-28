@@ -48,6 +48,11 @@ a systemd drop-in when a tenant needs different throughput or alert policy:
 | --- | --- | --- |
 | `AFROLETE_DUE_WORKER_LIMIT` | `25` | Default batch size for lanes without a narrower limit. |
 | `AFROLETE_DUE_WORKER_COMMUNICATION_DIGEST_LIMIT` | `100` | Daily/weekly notification preferences processed per digest run. |
+| `AFROLETE_DUE_WORKER_COMMUNICATION_ESCALATION_LIMIT` | `100` | Urgent communication messages scanned for scheduled escalation. |
+| `AFROLETE_DUE_WORKER_COMMUNICATION_ESCALATION_UNRESOLVED_AFTER_MINUTES` | `15` | Time an urgent message may remain queued, failed, or suppressed before escalation. |
+| `AFROLETE_DUE_WORKER_COMMUNICATION_ESCALATION_REPEAT_AFTER_MINUTES` | `60` | Suppression window for repeated escalation of the same urgent message. |
+| `AFROLETE_DUE_WORKER_COMMUNICATION_ESCALATION_LEVEL` | `2` | Default escalation level stamped onto scheduled escalation messages. |
+| `AFROLETE_DUE_WORKER_COMMUNICATION_ESCALATION_CHANNEL` | `sms` | Default alternate escalation channel. |
 | `AFROLETE_DUE_WORKER_COMPLIANCE_RECONCILIATION_LIMIT` | `100` | Organizations scanned for expired checks and credential renewals per run. |
 | `AFROLETE_DUE_WORKER_EVENT_TRAVEL_CONSENT_REMINDER_LIMIT` | `50` | Travel events checked for due guardian consent reminders. |
 | `AFROLETE_DUE_WORKER_EVENT_TRAVEL_CONSENT_REMINDER_DUE_WITHIN_HOURS` | `48` | Reminder horizon for travel plans with approaching consent deadlines. |
@@ -70,6 +75,7 @@ a systemd drop-in when a tenant needs different throughput or alert policy:
 | `AFROLETE_DUE_WORKER_WEARABLE_PULL_DEFAULT_RETRY_AFTER_SECONDS` | `300` | Backoff when a provider omits `Retry-After`. |
 
 For a deployment smoke without sending messages, run the command manually with
+`--dry-run-communication-escalations`,
 `--dry-run-performance-forecast-drift-alerts`,
 `--dry-run-performance-injury-risk-alerts`, and
 `--dry-run-performance-review-escalations`, then inspect the JSON summary and

@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -85,6 +85,14 @@ class CommunicationMessage(IdMixin, TimestampMixin, Base):
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     status: Mapped[str] = mapped_column(String(40), default="queued", index=True)
+    escalates_message_id: Mapped[UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("communication_messages.id"),
+        index=True,
+    )
+    escalation_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
+    escalation_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    escalation_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class MessageRecipient(IdMixin, TimestampMixin, Base):
