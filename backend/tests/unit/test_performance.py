@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import json
 
 
 def test_performance_achievements_create_in_app_notification(client, identity_headers) -> None:
@@ -1071,6 +1072,100 @@ def test_performance_metric_observation_assessment_and_summary(client, identity_
     assert summary["observation_count"] == 1
     assert summary["assessment_count"] == 1
     assert summary["latest_assessment_id"] == assessment["id"]
+
+
+def test_performance_ingestion_parses_structured_wearable_payload(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "recovery_score",
+            "name": "Recovery Score",
+            "category": "wellness",
+            "unit": "score",
+            "min_value": 0,
+            "max_value": 100,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/performance/ingest",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "metric_definition_id": metric["id"],
+            "source": "wearable",
+            "evidence_ref": "whoop://recovery/2026-06-03",
+            "evidence_text": json.dumps(
+                {
+                    "provider": "whoop",
+                    "athlete_id": "wearable-athlete-1",
+                    "metrics": [
+                        {"code": "resting_heart_rate", "value": 98, "unit": "bpm"},
+                        {
+                            "code": "recovery_score",
+                            "value": 42,
+                            "unit": "score",
+                            "confidence": 0.91,
+                            "observed_at": "2026-06-03T09:15:00Z",
+                        },
+                    ],
+                }
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    ingestion = response.json()
+    assert ingestion["observation"]["value"] == 42
+    assert ingestion["observation"]["source"] == "wearable"
+    assert ingestion["observation"]["verification_status"] == "pending_review"
+    assert ingestion["observation"]["observed_at"].startswith("2026-06-03T09:15:00")
+    assert ingestion["confidence"] == 0.91
+    assert ingestion["parser_method"] == "structured_provider_payload"
+    assert ingestion["parsed_fields"]["code"] == "recovery_score"
+    assert ingestion["parser_warnings"] == []
+
+
+def test_performance_ingestion_uses_metric_specific_video_text(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "first_touch",
+            "name": "First Touch",
+            "category": "technical",
+            "unit": "score",
+            "min_value": 0,
+            "max_value": 10,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/performance/ingest",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "metric_definition_id": metric["id"],
+            "source": "video_analysis",
+            "evidence_ref": "video://matchday/clip-070",
+            "evidence_text": "70th minute clip: first touch quality 8.4 under pressure after two scans.",
+        },
+    )
+
+    assert response.status_code == 201
+    ingestion = response.json()
+    assert ingestion["observation"]["value"] == 8.4
+    assert ingestion["parser_method"] == "metric_specific_text"
+    assert ingestion["parser_confidence_reason"].startswith("Found the metric label")
 
 
 def test_performance_observation_rejects_metric_from_other_organization(

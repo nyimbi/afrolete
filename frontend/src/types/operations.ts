@@ -3162,6 +3162,10 @@ export type PerformanceIngestionRead = {
   confidence: number;
   review_required: boolean;
   summary: string;
+  parser_method: string;
+  parser_confidence_reason: string;
+  parser_warnings: string[];
+  parsed_fields: Record<string, string>;
 };
 
 export type AthleteAssessmentRead = {

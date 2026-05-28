@@ -91,6 +91,10 @@ class PerformanceIngestionRead(BaseModel):
     confidence: float
     review_required: bool
     summary: str
+    parser_method: str
+    parser_confidence_reason: str
+    parser_warnings: list[str]
+    parsed_fields: dict[str, str]
 
 
 class PerformanceObservationReviewCreate(BaseModel):

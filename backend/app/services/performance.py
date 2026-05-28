@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime, timedelta
+import json
 import re
 from statistics import pstdev
 from uuid import UUID
@@ -211,10 +212,10 @@ async def ingest_performance_evidence(
         if event is None or event.organization_id != payload.organization_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
 
-    value = payload.extracted_value
-    if value is None:
-        value = extract_numeric_value(payload.evidence_text) or default_value_for_metric(metric)
-    confidence = payload.confidence if payload.confidence is not None else source_confidence(payload.source)
+    parsed = parse_performance_evidence(payload, metric)
+    value = float(parsed["value"])
+    confidence = float(parsed["confidence"])
+    parser_warnings = list(parsed["warnings"])
     observation = AthletePerformanceObservation(
         organization_id=payload.organization_id,
         athlete_profile_id=athlete_profile.id,
@@ -222,14 +223,16 @@ async def ingest_performance_evidence(
         event_id=payload.event_id,
         recorded_by_person_id=identity.person_id,
         value=value,
-        raw_value=payload.evidence_text[:160] if payload.evidence_text else str(value),
-        observed_at=payload.observed_at or datetime.now(UTC),
+        raw_value=evidence_raw_value(payload.evidence_text, value),
+        observed_at=payload.observed_at or parsed["observed_at"] or datetime.now(UTC),
         source=payload.source,
         confidence=confidence,
         verification_status=MetricVerificationStatus.PENDING_REVIEW,
         notes=(
             f"Ingested from {payload.source.value} evidence {payload.evidence_ref}. "
-            f"Metric: {metric.name}. Review before promoting to verified."
+            f"Metric: {metric.name}. Parser: {parsed['method']}. "
+            f"{'Warnings: ' + '; '.join(parser_warnings) + '. ' if parser_warnings else ''}"
+            "Review before promoting to verified."
         ),
     )
     db.add(observation)
@@ -243,8 +246,12 @@ async def ingest_performance_evidence(
         "review_required": True,
         "summary": (
             f"Extracted {metric.name}={value:g}{' ' + metric.unit if metric.unit else ''} "
-            f"from {payload.source.value} evidence."
+            f"from {payload.source.value} evidence via {parsed['method']}."
         ),
+        "parser_method": parsed["method"],
+        "parser_confidence_reason": parsed["confidence_reason"],
+        "parser_warnings": parser_warnings,
+        "parsed_fields": parsed["fields"],
     }
 
 
@@ -3260,6 +3267,250 @@ def extract_numeric_value(text: str | None) -> float | None:
         return None
     match = re.search(r"-?\d+(?:\.\d+)?", text)
     return float(match.group(0)) if match else None
+
+
+def parse_performance_evidence(
+    payload: PerformanceIngestionCreate,
+    metric: PerformanceMetricDefinition,
+) -> dict[str, object]:
+    warnings: list[str] = []
+    base_confidence = source_confidence(payload.source)
+    if payload.extracted_value is not None:
+        value = float(payload.extracted_value)
+        method = "operator_supplied_value"
+        fields = {"value": f"{value:g}", "source": payload.source.value}
+        confidence = payload.confidence if payload.confidence is not None else base_confidence
+        reason = "Operator supplied an extracted value; source baseline confidence applied."
+        observed_at = None
+    else:
+        structured_payload = decode_structured_evidence(payload.evidence_text)
+        structured_match = (
+            structured_metric_match(structured_payload, metric) if structured_payload is not None else None
+        )
+        if structured_match is not None:
+            value = float(structured_match["value"])
+            method = "structured_provider_payload"
+            fields = primitive_parser_fields(structured_match)
+            match_confidence = structured_float(structured_match.get("confidence"))
+            confidence = payload.confidence if payload.confidence is not None else (match_confidence or min(base_confidence + 0.05, 0.96))
+            reason = "Matched a structured provider metric by code, name, or single-metric payload."
+            observed_at = parsed_provider_observed_at(structured_match)
+        else:
+            metric_value = extract_metric_specific_text_value(payload.evidence_text, metric)
+            if metric_value is not None:
+                value = metric_value
+                method = "metric_specific_text"
+                fields = {"value": f"{value:g}", "metric": metric.name, "source": payload.source.value}
+                confidence = payload.confidence if payload.confidence is not None else max(base_confidence - 0.04, 0.5)
+                reason = "Found the metric label next to a numeric value in narrative evidence."
+                observed_at = None
+            else:
+                fallback_value = extract_numeric_value(payload.evidence_text)
+                if fallback_value is not None:
+                    value = fallback_value
+                    method = "numeric_text_fallback"
+                    fields = {"value": f"{value:g}", "source": payload.source.value}
+                    confidence = payload.confidence if payload.confidence is not None else max(base_confidence - 0.12, 0.45)
+                    reason = "No metric-specific provider field matched; used the first numeric value in evidence text."
+                    warnings.append("Parser could not bind the number to the selected metric.")
+                else:
+                    value = default_value_for_metric(metric)
+                    method = "metric_default"
+                    fields = {"value": f"{value:g}", "source": payload.source.value}
+                    confidence = payload.confidence if payload.confidence is not None else 0.35
+                    reason = "No parseable provider value was found; queued a metric default for human review."
+                    warnings.append("No parseable numeric value found in evidence.")
+                observed_at = None
+
+    if metric.min_value is not None and value < metric.min_value:
+        warnings.append(f"Parsed value is below configured minimum {metric.min_value:g}.")
+    if metric.max_value is not None and value > metric.max_value:
+        warnings.append(f"Parsed value is above configured maximum {metric.max_value:g}.")
+
+    return {
+        "value": value,
+        "confidence": round(float(confidence), 2),
+        "method": method,
+        "confidence_reason": reason,
+        "warnings": warnings,
+        "fields": fields,
+        "observed_at": observed_at,
+    }
+
+
+def decode_structured_evidence(text: str | None) -> object | None:
+    if not text:
+        return None
+    stripped = text.strip()
+    if not stripped or stripped[0] not in "[{":
+        return None
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+
+
+def structured_metric_match(
+    data: object,
+    metric: PerformanceMetricDefinition,
+) -> dict[str, object] | None:
+    candidates = list(iter_metric_candidates(data))
+    if not candidates:
+        return None
+    metric_tokens = normalized_metric_tokens(metric)
+    scored: list[tuple[int, dict[str, object]]] = []
+    for candidate in candidates:
+        label_tokens = normalized_candidate_tokens(candidate)
+        score = 0
+        if label_tokens & metric_tokens:
+            score += 10
+        if normalized_text(str(candidate.get("metric_definition_id", ""))) == normalized_text(str(metric.id)):
+            score += 20
+        if not label_tokens and len(candidates) == 1:
+            score += 3
+        if score > 0:
+            scored.append((score, candidate))
+    if not scored:
+        return candidates[0] if len(candidates) == 1 else None
+    return sorted(scored, key=lambda item: item[0], reverse=True)[0][1]
+
+
+def iter_metric_candidates(data: object) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    if isinstance(data, list):
+        for item in data:
+            candidates.extend(iter_metric_candidates(item))
+        return candidates
+    if not isinstance(data, dict):
+        return candidates
+
+    value = provider_numeric_value(data)
+    if value is not None:
+        candidate = dict(data)
+        candidate["value"] = value
+        candidates.append(candidate)
+
+    for key, item in data.items():
+        if isinstance(item, (list, dict)) and key in {
+            "data",
+            "metrics",
+            "observations",
+            "readings",
+            "results",
+            "samples",
+            "stats",
+        }:
+            candidates.extend(iter_metric_candidates(item))
+        elif isinstance(item, int | float) and not isinstance(item, bool):
+            candidates.append({"metric": key, "source_key": key, "value": float(item)})
+        elif isinstance(item, str) and key not in {"id", "athlete_id", "timestamp", "observed_at"}:
+            numeric = structured_float(item)
+            if numeric is not None:
+                candidates.append({"metric": key, "source_key": key, "value": numeric})
+    return candidates
+
+
+def provider_numeric_value(data: dict[str, object]) -> float | None:
+    for key in ("value", "metric_value", "score", "result", "reading", "measurement"):
+        value = structured_float(data.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def structured_float(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        match = re.search(r"-?\d+(?:\.\d+)?", value)
+        return float(match.group(0)) if match else None
+    return None
+
+
+def normalized_metric_tokens(metric: PerformanceMetricDefinition) -> set[str]:
+    return {
+        token
+        for token in {
+            normalized_text(metric.code),
+            normalized_text(metric.name),
+            normalized_text(metric.description or ""),
+        }
+        if token
+    }
+
+
+def normalized_candidate_tokens(candidate: dict[str, object]) -> set[str]:
+    labels = []
+    for key in (
+        "code",
+        "metric_code",
+        "metric",
+        "metric_name",
+        "name",
+        "label",
+        "stat",
+        "type",
+        "source_key",
+    ):
+        value = candidate.get(key)
+        if value is not None:
+            labels.append(normalized_text(str(value)))
+    return {label for label in labels if label}
+
+
+def normalized_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def extract_metric_specific_text_value(
+    text: str | None,
+    metric: PerformanceMetricDefinition,
+) -> float | None:
+    if not text:
+        return None
+    labels = [metric.code, metric.name]
+    labels.extend(part for part in re.split(r"[_\-\s]+", metric.name) if len(part) >= 4)
+    for label in labels:
+        escaped = re.escape(label.replace("_", " "))
+        patterns = [
+            rf"{escaped}\D{{0,60}}(-?\d+(?:\.\d+)?)",
+            rf"(-?\d+(?:\.\d+)?)\D{{0,60}}{escaped}",
+        ]
+        normalized = text.replace("_", " ")
+        for pattern in patterns:
+            match = re.search(pattern, normalized, re.IGNORECASE)
+            if match:
+                return float(match.group(1))
+    return None
+
+
+def primitive_parser_fields(candidate: dict[str, object]) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for key, value in candidate.items():
+        if isinstance(value, str | int | float | bool) or value is None:
+            fields[key] = "" if value is None else str(value)
+    return fields
+
+
+def parsed_provider_observed_at(candidate: dict[str, object]) -> datetime | None:
+    for key in ("observed_at", "timestamp", "time", "recorded_at"):
+        value = candidate.get(key)
+        if not isinstance(value, str):
+            continue
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return None
+
+
+def evidence_raw_value(evidence_text: str | None, value: float) -> str:
+    if evidence_text:
+        return evidence_text[:160]
+    return f"{value:g}"
 
 
 def default_value_for_metric(metric: PerformanceMetricDefinition) -> float:

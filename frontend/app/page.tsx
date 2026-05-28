@@ -6354,7 +6354,10 @@ export default function HomePage() {
             source: observationForm.source,
             evidence_ref: observationForm.evidence_ref,
             evidence_text: observationForm.evidence_text,
-            extracted_value: observationForm.value,
+            extracted_value:
+              observationForm.source === "manual" || observationForm.source === "coach_evaluation"
+                ? observationForm.value
+                : undefined,
             confidence: observationForm.confidence
           }
         }),
@@ -13748,6 +13751,12 @@ export default function HomePage() {
                   <div>
                     <strong>{performanceIngestion.extractor}</strong>
                     <span>{performanceIngestion.summary} · confidence {Math.round(performanceIngestion.confidence * 100)}%</span>
+                    <small>
+                      {performanceIngestion.parser_method.replaceAll("_", " ")} · {performanceIngestion.parser_confidence_reason}
+                    </small>
+                    {performanceIngestion.parser_warnings.length ? (
+                      <small>{performanceIngestion.parser_warnings.join(" · ")}</small>
+                    ) : null}
                   </div>
                 </article>
               ) : null}

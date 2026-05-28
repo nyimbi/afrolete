@@ -335,6 +335,10 @@ async def ingest_performance_evidence_route(
         confidence=result["confidence"],
         review_required=result["review_required"],
         summary=result["summary"],
+        parser_method=result["parser_method"],
+        parser_confidence_reason=result["parser_confidence_reason"],
+        parser_warnings=result["parser_warnings"],
+        parsed_fields=result["parsed_fields"],
     )
 
 
