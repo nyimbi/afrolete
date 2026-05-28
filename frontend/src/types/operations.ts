@@ -2824,6 +2824,42 @@ export type SafeguardingIncidentEvidenceLinkRead = {
   storage_key: string;
 };
 
+export type SafeguardingIncidentEvidenceReviewItemRead = {
+  incident_id: UUID;
+  organization_id: UUID;
+  incident_title: string;
+  incident_status: SafeguardingIncidentStatus;
+  incident_severity: SafeguardingIncidentSeverity;
+  filename: string;
+  content_type: string;
+  evidence_type: string;
+  review_status: string;
+  size_bytes: number;
+  checksum: string;
+  evidence_url: string;
+  storage_key: string;
+  uploaded_at: string;
+  latest_reviewed_at: string | null;
+  latest_review_notes: string | null;
+};
+
+export type SafeguardingIncidentEvidenceReviewActionRead = {
+  incident_id: UUID;
+  organization_id: UUID;
+  filename: string;
+  review_status: string;
+  reviewer_person_id: UUID | null;
+  reviewed_at: string;
+  checksum: string;
+  size_bytes: number;
+  storage_key: string;
+  incident_status: SafeguardingIncidentStatus;
+  incident_severity: SafeguardingIncidentSeverity;
+  regulatory_report_required: boolean;
+  action_summary: string;
+  resolution_notes: string | null;
+};
+
 export type BackgroundCheckRead = {
   id: UUID;
   organization_id: UUID;

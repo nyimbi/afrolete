@@ -7,7 +7,7 @@ from binascii import Error as BinasciiError
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
-from re import sub
+from re import search, sub
 from secrets import token_urlsafe
 from urllib.parse import quote
 from uuid import UUID
@@ -73,6 +73,9 @@ from app.schemas.safeguarding import (
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
+    SafeguardingIncidentEvidenceReviewActionCreate,
+    SafeguardingIncidentEvidenceReviewActionRead,
+    SafeguardingIncidentEvidenceReviewItemRead,
     SafeguardingIncidentEvidenceLinkCreate,
     SafeguardingIncidentEvidenceLinkRead,
     SafeguardingIncidentEvidenceUploadCreate,
@@ -652,6 +655,112 @@ async def create_signed_safeguarding_incident_evidence_link(
     )
 
 
+async def list_safeguarding_incident_evidence_review_queue(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    review_status: str | None = None,
+    settings: Settings | None = None,
+) -> list[SafeguardingIncidentEvidenceReviewItemRead]:
+    await ensure_org_manage(authz, organization_id, identity)
+    selected_settings = settings or get_settings()
+    incidents = await list_safeguarding_incidents(db, organization_id)
+    items: list[SafeguardingIncidentEvidenceReviewItemRead] = []
+    for incident in incidents:
+        incident_items = safeguarding_incident_evidence_review_items(
+            incident,
+            selected_settings,
+        )
+        items.extend(incident_items)
+    if review_status:
+        normalized_status = review_status.strip().lower()
+        items = [item for item in items if item.review_status == normalized_status]
+    return sorted(
+        items,
+        key=lambda item: (item.review_status == "needs_review", item.uploaded_at),
+        reverse=True,
+    )
+
+
+async def review_safeguarding_incident_evidence(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident_id: UUID,
+    payload: SafeguardingIncidentEvidenceReviewActionCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> SafeguardingIncidentEvidenceReviewActionRead:
+    incident = await db.get(SafeguardingIncident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    await ensure_org_manage(authz, incident.organization_id, identity)
+    selected_settings = settings or get_settings()
+    storage_name = validate_safeguarding_incident_evidence_storage_key(
+        payload.storage_key,
+        incident.organization_id,
+        incident.id,
+    )
+    existing_items = safeguarding_incident_evidence_review_items(incident, selected_settings)
+    if not any(item.storage_key == payload.storage_key for item in existing_items):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence upload not found in case notes")
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.safeguarding_incident_evidence_dir,
+        key=payload.storage_key,
+    )
+    checksum = sha256(content).hexdigest()
+    if payload.checksum and payload.checksum != checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Evidence checksum does not match stored object")
+
+    reviewed_at = utc_now()
+    normalized_status = payload.review_status.strip().lower()
+    if normalized_status in {"accepted", "needs_review"} and incident.status == SafeguardingIncidentStatus.OPEN:
+        incident.status = SafeguardingIncidentStatus.INVESTIGATING
+    if normalized_status == "escalated" or payload.escalate_incident:
+        incident.status = SafeguardingIncidentStatus.INVESTIGATING
+        if incident.severity in {
+            SafeguardingIncidentSeverity.LOW,
+            SafeguardingIncidentSeverity.MEDIUM,
+        }:
+            incident.severity = SafeguardingIncidentSeverity.HIGH
+        if payload.regulatory_report_required is None:
+            incident.regulatory_report_required = True
+    if payload.regulatory_report_required is not None:
+        incident.regulatory_report_required = payload.regulatory_report_required
+
+    action_summary = safeguarding_evidence_review_summary(
+        filename=payload.filename,
+        storage_key=payload.storage_key,
+        storage_name=storage_name,
+        review_status=normalized_status,
+        reviewer_person_id=identity.person_id,
+        checksum=checksum,
+        size_bytes=len(content),
+        review_notes=payload.review_notes,
+    )
+    append_safeguarding_incident_resolution_note(incident, reviewed_at, action_summary)
+
+    await db.commit()
+    await db.refresh(incident)
+    return SafeguardingIncidentEvidenceReviewActionRead(
+        incident_id=incident.id,
+        organization_id=incident.organization_id,
+        filename=payload.filename,
+        review_status=normalized_status,
+        reviewer_person_id=identity.person_id,
+        reviewed_at=reviewed_at,
+        checksum=checksum,
+        size_bytes=len(content),
+        storage_key=payload.storage_key,
+        incident_status=incident.status,
+        incident_severity=incident.severity,
+        regulatory_report_required=incident.regulatory_report_required,
+        action_summary=action_summary,
+        resolution_notes=incident.resolution_notes,
+    )
+
+
 async def read_signed_safeguarding_incident_evidence(
     organization_id: UUID,
     incident_id: UUID,
@@ -789,6 +898,135 @@ def decode_safeguarding_upload_content(content_base64: str) -> bytes:
         return base64.b64decode(encoded, validate=True)
     except (ValueError, BinasciiError) as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid file encoding") from exc
+
+
+def safeguarding_incident_evidence_review_items(
+    incident: SafeguardingIncident,
+    settings: Settings,
+) -> list[SafeguardingIncidentEvidenceReviewItemRead]:
+    reviews = safeguarding_incident_evidence_review_updates(incident)
+    items: list[SafeguardingIncidentEvidenceReviewItemRead] = []
+    for line in (incident.resolution_notes or "").splitlines():
+        item = parse_safeguarding_incident_evidence_upload_note(incident, settings, line)
+        if item is None:
+            continue
+        review = reviews.get(item.storage_key)
+        if review is not None:
+            item.review_status = review["review_status"]
+            item.latest_reviewed_at = review["reviewed_at"]
+            item.latest_review_notes = review["notes"]
+        items.append(item)
+    return items
+
+
+def parse_safeguarding_incident_evidence_upload_note(
+    incident: SafeguardingIncident,
+    settings: Settings,
+    line: str,
+) -> SafeguardingIncidentEvidenceReviewItemRead | None:
+    match = search(
+        r"^(?P<uploaded_at>\S+) Evidence uploaded: (?P<filename>.+?) "
+        r"\((?P<evidence_type>[^,]+), (?P<review_status>[^,]+), "
+        r"(?P<size_bytes>\d+) bytes, checksum (?P<checksum>[a-fA-F0-9]{64}), "
+        r"(?P<evidence_url>[^)]+)\)\.(?: Notes: (?P<notes>.*))?$",
+        line,
+    )
+    if match is None:
+        return None
+    evidence_url = match.group("evidence_url")
+    storage_key = storage_key_from_safeguarding_incident_evidence_url(settings, evidence_url)
+    if storage_key is None:
+        return None
+    try:
+        validate_safeguarding_incident_evidence_storage_key(
+            storage_key,
+            incident.organization_id,
+            incident.id,
+        )
+        uploaded_at = datetime.fromisoformat(match.group("uploaded_at"))
+    except (HTTPException, ValueError):
+        return None
+    filename = match.group("filename")
+    return SafeguardingIncidentEvidenceReviewItemRead(
+        incident_id=incident.id,
+        organization_id=incident.organization_id,
+        incident_title=incident.title,
+        incident_status=incident.status,
+        incident_severity=incident.severity,
+        filename=filename,
+        content_type=safeguarding_evidence_content_type_for_filename(filename),
+        evidence_type=match.group("evidence_type").strip(),
+        review_status=match.group("review_status").strip().lower(),
+        size_bytes=int(match.group("size_bytes")),
+        checksum=match.group("checksum").lower(),
+        evidence_url=evidence_url,
+        storage_key=storage_key,
+        uploaded_at=uploaded_at,
+        latest_review_notes=match.group("notes"),
+    )
+
+
+def storage_key_from_safeguarding_incident_evidence_url(
+    settings: Settings,
+    evidence_url: str,
+) -> str | None:
+    prefix = settings.safeguarding_incident_evidence_url_prefix.rstrip("/") + "/"
+    if not evidence_url.startswith(prefix):
+        return None
+    storage_key = evidence_url.removeprefix(prefix).strip()
+    return storage_key or None
+
+
+def safeguarding_incident_evidence_review_updates(
+    incident: SafeguardingIncident,
+) -> dict[str, dict[str, object]]:
+    reviews: dict[str, dict[str, object]] = {}
+    for line in (incident.resolution_notes or "").splitlines():
+        match = search(
+            r"^(?P<reviewed_at>\S+) Evidence review: (?P<storage_key>\S+) "
+            r"\((?P<filename>.*?)\) marked "
+            r"(?P<review_status>needs_review|accepted|rejected|escalated) by "
+            r"(?P<reviewer>[^.]+)\. Checksum (?P<checksum>[a-fA-F0-9]{64}), "
+            r"(?P<size_bytes>\d+) bytes\.(?: Notes: (?P<notes>.*))?$",
+            line,
+        )
+        if match is None:
+            continue
+        try:
+            reviewed_at = datetime.fromisoformat(match.group("reviewed_at"))
+        except ValueError:
+            continue
+        storage_key = match.group("storage_key")
+        prior = reviews.get(storage_key)
+        if prior is not None and prior["reviewed_at"] >= reviewed_at:
+            continue
+        reviews[storage_key] = {
+            "review_status": match.group("review_status"),
+            "reviewed_at": reviewed_at,
+            "notes": match.group("notes"),
+        }
+    return reviews
+
+
+def safeguarding_evidence_review_summary(
+    *,
+    filename: str,
+    storage_key: str,
+    storage_name: str,
+    review_status: str,
+    reviewer_person_id: UUID | None,
+    checksum: str,
+    size_bytes: int,
+    review_notes: str | None,
+) -> str:
+    safe_filename = safe_safeguarding_upload_filename(filename, fallback=public_safeguarding_evidence_filename(storage_name))
+    summary = (
+        f"Evidence review: {storage_key} ({safe_filename}) marked {review_status} "
+        f"by {reviewer_person_id or 'unknown'}. Checksum {checksum}, {size_bytes} bytes."
+    )
+    if review_notes:
+        summary = f"{summary} Notes: {review_notes}"
+    return summary
 
 
 def safe_safeguarding_upload_filename(filename: str, *, fallback: str) -> str:

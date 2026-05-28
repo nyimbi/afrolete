@@ -180,6 +180,8 @@ import type {
   BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
+  SafeguardingIncidentEvidenceReviewActionRead,
+  SafeguardingIncidentEvidenceReviewItemRead,
   SafeguardingIncidentEvidenceLinkRead,
   SafeguardingIncidentEvidenceUploadRead,
   SafeguardingIncidentInvestigationActionRead,
@@ -1576,6 +1578,10 @@ export default function HomePage() {
     useState<SafeguardingIncidentEvidenceUploadRead | null>(null);
   const [incidentEvidenceLink, setIncidentEvidenceLink] =
     useState<SafeguardingIncidentEvidenceLinkRead | null>(null);
+  const [incidentEvidenceReviewQueue, setIncidentEvidenceReviewQueue] =
+    useState<SafeguardingIncidentEvidenceReviewItemRead[]>([]);
+  const [incidentEvidenceReviewAction, setIncidentEvidenceReviewAction] =
+    useState<SafeguardingIncidentEvidenceReviewActionRead | null>(null);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
   const [backgroundCheckProviderSubmission, setBackgroundCheckProviderSubmission] =
     useState<BackgroundCheckProviderSubmissionRead | null>(null);
@@ -2354,6 +2360,15 @@ export default function HomePage() {
       { identity }
     );
     setSafeguardingIncidents(data);
+  }, [identity]);
+
+  const loadIncidentEvidenceReviewQueue = useCallback(async (organizationId: string, reviewStatus?: string) => {
+    const statusQuery = reviewStatus ? `&review_status=${reviewStatus}` : "";
+    const data = await apiRequest<SafeguardingIncidentEvidenceReviewItemRead[]>(
+      `/safeguarding/incident-evidence-review-queue?organization_id=${organizationId}${statusQuery}`,
+      { identity }
+    );
+    setIncidentEvidenceReviewQueue(data);
   }, [identity]);
 
   const loadBackgroundChecks = useCallback(async (organizationId: string) => {
@@ -3161,6 +3176,8 @@ export default function HomePage() {
       setIncidentInvestigationAction(null);
       setIncidentEvidenceUpload(null);
       setIncidentEvidenceLink(null);
+      setIncidentEvidenceReviewQueue([]);
+      setIncidentEvidenceReviewAction(null);
       setBackgroundChecks([]);
       setBackgroundCheckProviderSubmission(null);
       setBackgroundCheckProviderResult(null);
@@ -3270,6 +3287,7 @@ export default function HomePage() {
       await loadRegistrationInquiries(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
       await loadSafeguardingIncidents(selectedOrganizationId);
+      await loadIncidentEvidenceReviewQueue(selectedOrganizationId);
       await loadBackgroundChecks(selectedOrganizationId);
       await loadComplianceCredentials(selectedOrganizationId);
       await loadComplianceSummary(selectedOrganizationId);
@@ -3295,6 +3313,7 @@ export default function HomePage() {
     loadRegistrationInquiries,
     loadEvents,
     loadSafeguardingIncidents,
+    loadIncidentEvidenceReviewQueue,
     loadBackgroundChecks,
     loadComplianceCredentials,
     loadComplianceSummary,
@@ -5856,6 +5875,9 @@ export default function HomePage() {
           upload.incident,
           ...current.filter((item) => item.id !== upload.incident.id)
         ]);
+        if (selectedOrganizationId) {
+          void loadIncidentEvidenceReviewQueue(selectedOrganizationId);
+        }
         setSelectedIncidentEvidenceFile(null);
         addLog(`${upload.filename} incident evidence stored (${upload.size_bytes} bytes)`, "good");
       }
@@ -5876,6 +5898,73 @@ export default function HomePage() {
               filename: upload.filename,
               content_type: upload.content_type,
               checksum: upload.checksum,
+              ttl_seconds: 900
+            }
+          }
+        ),
+      (link) => {
+        setIncidentEvidenceLink(link);
+        addLog(`${link.filename} evidence link expires ${new Date(link.expires_at).toLocaleString()}`, "good");
+      }
+    );
+  };
+
+  const reviewIncidentEvidence = (
+    item: SafeguardingIncidentEvidenceReviewItemRead,
+    reviewStatus: "accepted" | "rejected" | "escalated"
+  ) => {
+    runAction(
+      `incident-evidence-review-${item.incident_id}-${reviewStatus}`,
+      () =>
+        apiRequest<SafeguardingIncidentEvidenceReviewActionRead>(
+          `/safeguarding/incidents/${item.incident_id}/evidence-review`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              storage_key: item.storage_key,
+              filename: item.filename,
+              checksum: item.checksum,
+              review_status: reviewStatus,
+              review_notes:
+                reviewStatus === "accepted"
+                  ? "Evidence accepted from the operations console."
+                  : reviewStatus === "rejected"
+                    ? "Evidence rejected from the operations console."
+                    : "Evidence escalated for safeguarding committee review.",
+              escalate_incident: reviewStatus === "escalated"
+            }
+          }
+        ),
+      async (action) => {
+        setIncidentEvidenceReviewAction(action);
+        if (selectedOrganizationId) {
+          await loadIncidentEvidenceReviewQueue(selectedOrganizationId);
+          await loadSafeguardingIncidents(selectedOrganizationId);
+          await loadComplianceSummary(selectedOrganizationId);
+        }
+        addLog(
+          `${action.filename} evidence ${action.review_status} (${action.incident_severity})`,
+          action.review_status === "rejected" ? "neutral" : "good"
+        );
+      }
+    );
+  };
+
+  const shareIncidentEvidenceReviewItem = (item: SafeguardingIncidentEvidenceReviewItemRead) => {
+    runAction(
+      `incident-evidence-link-${item.incident_id}`,
+      () =>
+        apiRequest<SafeguardingIncidentEvidenceLinkRead>(
+          `/safeguarding/incidents/${item.incident_id}/evidence-link`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              storage_key: item.storage_key,
+              filename: item.filename,
+              content_type: item.content_type,
+              checksum: item.checksum,
               ttl_seconds: 900
             }
           }
@@ -6241,6 +6330,7 @@ export default function HomePage() {
       loadBackgroundChecks(selectedOrganizationId),
       loadComplianceCredentials(selectedOrganizationId),
       loadSafeguardingIncidents(selectedOrganizationId),
+      loadIncidentEvidenceReviewQueue(selectedOrganizationId),
       loadComplianceSummary(selectedOrganizationId),
       loadIncidentReportPackages(selectedOrganizationId),
       loadIncidentInsuranceClaims(selectedOrganizationId),
@@ -16412,6 +16502,33 @@ export default function HomePage() {
                 </div>
               </article>
             ))}
+            {incidentEvidenceReviewQueue.slice(0, 4).map((item) => (
+              <article key={`evidence-review-${item.storage_key}`} className="task-card">
+                <div>
+                  <strong>{item.filename}</strong>
+                  <span>{item.incident_title} · {item.evidence_type} · {item.review_status}</span>
+                  <span>{item.incident_severity} · {item.incident_status} · {item.size_bytes} bytes</span>
+                  <span>{item.checksum.slice(0, 16)} · {item.content_type}</span>
+                  {item.latest_review_notes ? <span>{item.latest_review_notes}</span> : null}
+                </div>
+                <div className="event-toolbar">
+                  <button type="button" onClick={() => reviewIncidentEvidence(item, "accepted")}>Accept</button>
+                  <button type="button" onClick={() => reviewIncidentEvidence(item, "rejected")}>Reject</button>
+                  <button type="button" onClick={() => reviewIncidentEvidence(item, "escalated")}>Escalate</button>
+                  <button type="button" onClick={() => shareIncidentEvidenceReviewItem(item)}>Link</button>
+                </div>
+              </article>
+            ))}
+            {incidentEvidenceReviewAction ? (
+              <article className="task-card">
+                <div>
+                  <strong>{incidentEvidenceReviewAction.filename} review</strong>
+                  <span>{incidentEvidenceReviewAction.review_status} · {incidentEvidenceReviewAction.incident_status} · {incidentEvidenceReviewAction.incident_severity}</span>
+                  <span>{incidentEvidenceReviewAction.regulatory_report_required ? "Regulatory reporting required" : "No regulatory report flag"} · {incidentEvidenceReviewAction.size_bytes} bytes</span>
+                  <span>{incidentEvidenceReviewAction.action_summary}</span>
+                </div>
+              </article>
+            ) : null}
             {incidentReportPackages.slice(0, 4).map((reportPackage) => (
               <article key={reportPackage.id} className="task-card">
                 <div>

@@ -383,6 +383,52 @@ class SafeguardingIncidentEvidenceLinkRead(BaseModel):
     storage_key: str
 
 
+class SafeguardingIncidentEvidenceReviewItemRead(BaseModel):
+    incident_id: UUID
+    organization_id: UUID
+    incident_title: str
+    incident_status: SafeguardingIncidentStatus
+    incident_severity: SafeguardingIncidentSeverity
+    filename: str
+    content_type: str
+    evidence_type: str
+    review_status: str
+    size_bytes: int
+    checksum: str
+    evidence_url: str
+    storage_key: str
+    uploaded_at: datetime
+    latest_reviewed_at: datetime | None = None
+    latest_review_notes: str | None = None
+
+
+class SafeguardingIncidentEvidenceReviewActionCreate(BaseModel):
+    storage_key: str = Field(min_length=1, max_length=800)
+    filename: str = Field(min_length=1, max_length=240)
+    checksum: str | None = Field(default=None, max_length=64)
+    review_status: str = Field(pattern="^(needs_review|accepted|rejected|escalated)$")
+    review_notes: str | None = Field(default=None, max_length=2000)
+    escalate_incident: bool = False
+    regulatory_report_required: bool | None = None
+
+
+class SafeguardingIncidentEvidenceReviewActionRead(BaseModel):
+    incident_id: UUID
+    organization_id: UUID
+    filename: str
+    review_status: str
+    reviewer_person_id: UUID | None
+    reviewed_at: datetime
+    checksum: str
+    size_bytes: int
+    storage_key: str
+    incident_status: SafeguardingIncidentStatus
+    incident_severity: SafeguardingIncidentSeverity
+    regulatory_report_required: bool
+    action_summary: str
+    resolution_notes: str | None
+
+
 class SafeguardingIncidentRead(BaseModel):
     id: UUID
     organization_id: UUID

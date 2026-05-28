@@ -411,6 +411,99 @@ def test_incident_evidence_upload_stores_file_and_case_note(client, identity_hea
     assert bad_response.status_code == 403
 
 
+def test_incident_evidence_review_queue_and_actions(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Evidence Queue Club", "organization_type": "club"},
+    ).json()
+    incident = client.post(
+        "/api/v1/safeguarding/incidents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_type": "safeguarding",
+            "severity": "medium",
+            "occurred_at": "2026-05-28T14:45:00Z",
+            "location": "Clubhouse",
+            "title": "Safeguarding evidence queue case",
+            "description": "A safeguarding lead needs to approve submitted evidence.",
+            "immediate_action": "Evidence was quarantined for lead review.",
+            "medical_follow_up_required": "no",
+        },
+    ).json()
+    content = b"Safeguarding evidence that requires review."
+    upload_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence",
+        headers=identity_headers,
+        json={
+            "filename": "Lead Review.txt",
+            "content_type": "text/plain",
+            "content_base64": base64.b64encode(content).decode(),
+            "evidence_type": "case_note",
+            "review_status": "needs_review",
+            "notes": "Awaiting safeguarding lead decision.",
+        },
+    )
+    assert upload_response.status_code == 200
+    upload = upload_response.json()
+
+    queue_response = client.get(
+        f"/api/v1/safeguarding/incident-evidence-review-queue?organization_id={organization['id']}&review_status=needs_review",
+        headers=identity_headers,
+    )
+    assert queue_response.status_code == 200
+    queue = queue_response.json()
+    assert len(queue) == 1
+    assert queue[0]["incident_id"] == incident["id"]
+    assert queue[0]["filename"] == "Lead-Review.txt"
+    assert queue[0]["review_status"] == "needs_review"
+    assert queue[0]["storage_key"] == upload["storage_key"]
+    assert queue[0]["checksum"] == upload["checksum"]
+
+    review_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-review",
+        headers=identity_headers,
+        json={
+            "storage_key": upload["storage_key"],
+            "filename": upload["filename"],
+            "checksum": upload["checksum"],
+            "review_status": "escalated",
+            "review_notes": "Escalate to the safeguarding committee.",
+            "escalate_incident": True,
+        },
+    )
+    assert review_response.status_code == 200
+    review = review_response.json()
+    assert review["review_status"] == "escalated"
+    assert review["incident_status"] == "investigating"
+    assert review["incident_severity"] == "high"
+    assert review["regulatory_report_required"] is True
+    assert "Evidence review" in review["resolution_notes"]
+
+    escalated_queue_response = client.get(
+        f"/api/v1/safeguarding/incident-evidence-review-queue?organization_id={organization['id']}&review_status=escalated",
+        headers=identity_headers,
+    )
+    assert escalated_queue_response.status_code == 200
+    escalated_queue = escalated_queue_response.json()
+    assert len(escalated_queue) == 1
+    assert escalated_queue[0]["review_status"] == "escalated"
+    assert escalated_queue[0]["latest_review_notes"] == "Escalate to the safeguarding committee."
+
+    bad_review = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-review",
+        headers=identity_headers,
+        json={
+            "storage_key": upload["storage_key"],
+            "filename": upload["filename"],
+            "checksum": "0" * 64,
+            "review_status": "accepted",
+        },
+    )
+    assert bad_review.status_code == 409
+
+
 def test_insurance_claim_provider_submit_and_status_poll_record_only(client, identity_headers) -> None:
     organization = client.post(
         "/api/v1/organizations",

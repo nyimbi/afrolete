@@ -38,6 +38,9 @@ from app.schemas.safeguarding import (
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
+    SafeguardingIncidentEvidenceReviewActionCreate,
+    SafeguardingIncidentEvidenceReviewActionRead,
+    SafeguardingIncidentEvidenceReviewItemRead,
     SafeguardingIncidentEvidenceLinkCreate,
     SafeguardingIncidentEvidenceLinkRead,
     SafeguardingIncidentEvidenceUploadCreate,
@@ -96,6 +99,7 @@ from app.services.safeguarding import (
     poll_incident_medical_clearance_provider_status,
     list_incident_medical_clearances,
     list_incident_report_packages,
+    list_safeguarding_incident_evidence_review_queue,
     list_safeguarding_incidents,
     list_my_family_consent_requests,
     list_my_family,
@@ -106,6 +110,7 @@ from app.services.safeguarding import (
     reconcile_compliance_statuses,
     read_signed_incident_report_package_artifact,
     read_signed_safeguarding_incident_evidence,
+    review_safeguarding_incident_evidence,
     submit_background_check_to_screening_provider,
     submit_incident_report_package_to_regulator,
     update_background_check,
@@ -385,6 +390,23 @@ async def list_safeguarding_incidents_route(
     ]
 
 
+@router.get("/incident-evidence-review-queue", response_model=list[SafeguardingIncidentEvidenceReviewItemRead])
+async def list_safeguarding_incident_evidence_review_queue_route(
+    organization_id: UUID = Query(),
+    review_status: str | None = Query(default=None, pattern="^(needs_review|accepted|rejected|escalated)$"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[SafeguardingIncidentEvidenceReviewItemRead]:
+    return await list_safeguarding_incident_evidence_review_queue(
+        db,
+        identity,
+        organization_id,
+        authz,
+        review_status,
+    )
+
+
 @router.patch("/incidents/{incident_id}", response_model=SafeguardingIncidentRead)
 async def update_safeguarding_incident_route(
     incident_id: UUID,
@@ -439,6 +461,23 @@ async def create_safeguarding_incident_evidence_link_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> SafeguardingIncidentEvidenceLinkRead:
     return await create_signed_safeguarding_incident_evidence_link(
+        db,
+        identity,
+        incident_id,
+        payload,
+        authz,
+    )
+
+
+@router.post("/incidents/{incident_id}/evidence-review", response_model=SafeguardingIncidentEvidenceReviewActionRead)
+async def review_safeguarding_incident_evidence_route(
+    incident_id: UUID,
+    payload: SafeguardingIncidentEvidenceReviewActionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentEvidenceReviewActionRead:
+    return await review_safeguarding_incident_evidence(
         db,
         identity,
         incident_id,
