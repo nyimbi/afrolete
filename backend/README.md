@@ -58,7 +58,10 @@ cd backend
 uv run python -m app.workers.due --limit 25
 ```
 
-Use `--lane agent-tasks` or `--lane developer-webhooks` to run a single lane.
+Use `--lane agent-tasks`, `--lane developer-webhooks`, or
+`--lane performance-achievements` to run a single lane. The performance
+achievement lane evaluates active athlete goals and recent observations so
+goal-achieved and personal-best awards are created without a coach click.
 
 ## Responsibilities
 

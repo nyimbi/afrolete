@@ -233,3 +233,14 @@ class PerformanceAchievementRunRead(BaseModel):
     awarded_count: int
     updated_goals: int
     awards: list[PerformanceAchievementAwardRead]
+
+
+class PerformanceAchievementWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    executed_count: int
+    skipped_count: int
+    failed_count: int
+    athlete_profile_ids: list[UUID]
+    awarded_count: int
+    updated_goals: int

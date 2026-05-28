@@ -42,4 +42,6 @@ sudo systemctl list-timers afrolete-due-worker.timer
 
 Override `AFROLETE_DUE_WORKER_LIMIT` or
 `AFROLETE_DUE_WORKER_WEBHOOK_MAX_ATTEMPTS` in the service environment if a
-tenant needs a higher batch size or retry ceiling.
+tenant needs a higher batch size or retry ceiling. Override
+`AFROLETE_DUE_WORKER_PERFORMANCE_LIMIT` to tune automated performance
+goal/achievement scans independently from webhook retries.

@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import SessionLocal
 from app.services.agents import run_agent_task_worker
 from app.services.developer import run_developer_webhook_retry_due
+from app.services.performance import run_performance_achievement_worker
 
-WORKER_LANES = ("agent-tasks", "developer-webhooks")
+WORKER_LANES = ("agent-tasks", "developer-webhooks", "performance-achievements")
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,6 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--agent-limit", type=int, default=None)
     parser.add_argument("--webhook-limit", type=int, default=None)
+    parser.add_argument("--performance-limit", type=int, default=None)
     parser.add_argument("--webhook-max-attempts", type=int, default=3)
     parser.add_argument("--include-recorded-webhooks", action="store_true")
     parser.add_argument("--pretty", action="store_true")
@@ -40,6 +42,7 @@ async def run_due_workers(
     limit: int = 25,
     agent_limit: int | None = None,
     webhook_limit: int | None = None,
+    performance_limit: int | None = None,
     webhook_max_attempts: int = 3,
     include_recorded_webhooks: bool = False,
 ) -> dict[str, object]:
@@ -61,6 +64,14 @@ async def run_due_workers(
                 max_attempts=webhook_max_attempts,
                 limit=webhook_limit or limit,
                 include_recorded=include_recorded_webhooks,
+            )
+        ).model_dump(mode="json")
+    if "performance-achievements" in active_lanes:
+        results["performance_achievements"] = (
+            await run_performance_achievement_worker(
+                db,
+                organization_id=organization_id,
+                limit=performance_limit or limit,
             )
         ).model_dump(mode="json")
     return {
@@ -99,6 +110,7 @@ async def run() -> None:
             limit=args.limit,
             agent_limit=args.agent_limit,
             webhook_limit=args.webhook_limit,
+            performance_limit=args.performance_limit,
             webhook_max_attempts=args.webhook_max_attempts,
             include_recorded_webhooks=args.include_recorded_webhooks,
         )

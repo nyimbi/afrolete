@@ -22,6 +22,7 @@ from app.schemas.performance import (
     AthleteAssessmentCreate,
     MetricDefinitionCreate,
     PerformanceGoalCreate,
+    PerformanceAchievementWorkerRunRead,
     PerformanceIngestionCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
@@ -539,6 +540,15 @@ async def evaluate_performance_achievements(
 ) -> dict[str, object]:
     await get_athlete_profile(db, athlete_profile_id, organization_id)
     await ensure_manage_performance(authz, identity, organization_id)
+    return await evaluate_performance_achievements_for_athlete(db, organization_id, athlete_profile_id)
+
+
+async def evaluate_performance_achievements_for_athlete(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+) -> dict[str, object]:
+    await get_athlete_profile(db, athlete_profile_id, organization_id)
     goals = await list_performance_goals(db, organization_id, athlete_profile_id)
     updated_goals = 0
     awards: list[PerformanceAchievementAward] = []
@@ -578,6 +588,81 @@ async def evaluate_performance_achievements(
         "updated_goals": updated_goals,
         "awards": awards,
     }
+
+
+async def run_performance_achievement_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    limit: int = 25,
+) -> PerformanceAchievementWorkerRunRead:
+    athlete_profile_ids = await achievement_worker_athlete_ids(db, organization_id, limit)
+    executed_count = 0
+    failed_count = 0
+    awarded_count = 0
+    updated_goals = 0
+    processed_ids: list[UUID] = []
+    for athlete_profile_id in athlete_profile_ids:
+        athlete_profile = await db.get(AthleteProfile, athlete_profile_id)
+        if athlete_profile is None:
+            failed_count += 1
+            continue
+        try:
+            result = await evaluate_performance_achievements_for_athlete(
+                db,
+                athlete_profile.organization_id,
+                athlete_profile_id,
+            )
+            executed_count += 1
+            awarded_count += int(result["awarded_count"])
+            updated_goals += int(result["updated_goals"])
+            processed_ids.append(athlete_profile_id)
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+    return PerformanceAchievementWorkerRunRead(
+        organization_id=organization_id,
+        eligible_count=len(athlete_profile_ids),
+        executed_count=executed_count,
+        skipped_count=max(len(athlete_profile_ids) - executed_count - failed_count, 0),
+        failed_count=failed_count,
+        athlete_profile_ids=processed_ids,
+        awarded_count=awarded_count,
+        updated_goals=updated_goals,
+    )
+
+
+async def achievement_worker_athlete_ids(
+    db: AsyncSession,
+    organization_id: UUID | None,
+    limit: int,
+) -> list[UUID]:
+    goal_statement = select(PerformanceGoal.athlete_profile_id).where(PerformanceGoal.status == "active")
+    observation_statement = select(AthletePerformanceObservation.athlete_profile_id).where(
+        AthletePerformanceObservation.verification_status != MetricVerificationStatus.REJECTED
+    )
+    if organization_id is not None:
+        goal_statement = goal_statement.where(PerformanceGoal.organization_id == organization_id)
+        observation_statement = observation_statement.where(
+            AthletePerformanceObservation.organization_id == organization_id
+        )
+    goal_ids = list((await db.scalars(goal_statement.order_by(PerformanceGoal.due_at).limit(limit))).all())
+    observation_ids = list(
+        (
+            await db.scalars(
+                observation_statement.order_by(AthletePerformanceObservation.observed_at.desc()).limit(limit)
+            )
+        ).all()
+    )
+    seen: set[UUID] = set()
+    athlete_profile_ids: list[UUID] = []
+    for athlete_profile_id in [*goal_ids, *observation_ids]:
+        if athlete_profile_id in seen:
+            continue
+        seen.add(athlete_profile_id)
+        athlete_profile_ids.append(athlete_profile_id)
+        if len(athlete_profile_ids) >= limit:
+            break
+    return athlete_profile_ids
 
 
 async def get_athlete_profile(
