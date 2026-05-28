@@ -191,6 +191,7 @@ import type {
   BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
   GuardianAccountReadinessRead,
+  GuardianPortalInviteRead,
   GuardianRelationshipRead,
   SafeguardingEvidencePolicyRuleRead,
   SafeguardingIncidentAccessGrantRead,
@@ -1618,6 +1619,7 @@ export default function HomePage() {
   const [athletes, setAthletes] = useState<AthleteEntry[]>([]);
   const [guardians, setGuardians] = useState<GuardianRelationshipRead[]>([]);
   const [guardianAccountReadiness, setGuardianAccountReadiness] = useState<GuardianAccountReadinessRead[]>([]);
+  const [guardianPortalInvite, setGuardianPortalInvite] = useState<GuardianPortalInviteRead | null>(null);
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
   const [clearance, setClearance] = useState<ParticipationClearanceRead | null>(null);
   const [safeguardingIncidents, setSafeguardingIncidents] = useState<SafeguardingIncidentRead[]>([]);
@@ -3280,6 +3282,7 @@ export default function HomePage() {
       setRegistrationInquiries([]);
       setSafeguardingIncidents([]);
       setGuardianAccountReadiness([]);
+      setGuardianPortalInvite(null);
       setIncidentInvestigationAction(null);
       setIncidentEvidenceUpload(null);
       setIncidentEvidenceLink(null);
@@ -5641,6 +5644,35 @@ export default function HomePage() {
         setGuardians((current) => [guardian, ...current.filter((item) => item.id !== guardian.id)]);
         void loadGuardianAccountReadiness(selectedOrganizationId);
         addLog(`${guardianForm.guardian_display_name} linked as guardian`, "good");
+      }
+    );
+  };
+
+  const sendGuardianPortalInvite = (item: GuardianAccountReadinessRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const portalUrl = `${window.location.origin}/family`;
+    runAction(
+      `guardian-portal-invite-${item.relationship_id}`,
+      () =>
+        apiRequest<GuardianPortalInviteRead>(
+          `/safeguarding/guardian-account-readiness/${item.relationship_id}/invite`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: item.guardian_email ? "email" : "in_app",
+              portal_url: portalUrl
+            }
+          }
+        ),
+      (invite) => {
+        setGuardianPortalInvite(invite);
+        void loadGuardianAccountReadiness(selectedOrganizationId);
+        addLog(`Family portal invite queued for ${invite.guardian_name}`, "good");
       }
     );
   };
@@ -17058,6 +17090,16 @@ export default function HomePage() {
                 <small>
                   {item.guardian_email ?? item.guardian_phone ?? "No contact"} · {item.recommended_action}
                 </small>
+                <button
+                  type="button"
+                  onClick={() => sendGuardianPortalInvite(item)}
+                  disabled={
+                    busyAction !== null ||
+                    (!item.can_receive_invite && item.account_status !== "linked")
+                  }
+                >
+                  Invite
+                </button>
               </article>
             ))}
             {guardianAccountReadiness.length === 0 ? (
@@ -17068,6 +17110,16 @@ export default function HomePage() {
               </article>
             ) : null}
           </div>
+          {guardianPortalInvite ? (
+            <div className="result-card">
+              <span className="muted">Family portal invite</span>
+              <strong>{guardianPortalInvite.guardian_name}</strong>
+              <p>
+                {guardianPortalInvite.channel} · {guardianPortalInvite.destination ?? "in-app"} · {guardianPortalInvite.delivery_status ?? "created"}
+              </p>
+              <small>{guardianPortalInvite.portal_url}</small>
+            </div>
+          ) : null}
           <div className="form-grid three">
             <label>
               Incident

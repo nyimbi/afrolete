@@ -43,6 +43,8 @@ from app.schemas.safeguarding import (
     FamilyEventRsvpCreate,
     FamilyPerformanceSummaryRead,
     GuardianAccountReadinessRead,
+    GuardianPortalInviteCreate,
+    GuardianPortalInviteRead,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
     SafeguardingEvidencePolicyRuleCreate,
@@ -98,6 +100,7 @@ from app.services.safeguarding import (
     create_compliance_credential,
     create_consent_request,
     create_guardian_relationship,
+    create_guardian_portal_invite,
     create_signed_incident_report_package_artifact_link,
     create_incident_insurance_claim,
     create_incident_medical_clearance,
@@ -385,6 +388,20 @@ async def list_guardian_account_readiness_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> list[GuardianAccountReadinessRead]:
     return await list_guardian_account_readiness(db, identity, organization_id, authz)
+
+
+@router.post(
+    "/guardian-account-readiness/{relationship_id}/invite",
+    response_model=GuardianPortalInviteRead,
+)
+async def create_guardian_portal_invite_route(
+    relationship_id: UUID,
+    payload: GuardianPortalInviteCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GuardianPortalInviteRead:
+    return await create_guardian_portal_invite(db, identity, relationship_id, payload, authz)
 
 
 @router.get("/my-family", response_model=list[FamilyAthleteSummaryRead])

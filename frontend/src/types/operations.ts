@@ -1370,6 +1370,23 @@ export type GuardianAccountReadinessRead = {
   recommended_action: string;
 };
 
+export type GuardianPortalInviteRead = {
+  relationship_id: UUID;
+  organization_id: UUID;
+  guardian_person_id: UUID;
+  guardian_name: string;
+  athlete_person_id: UUID;
+  athlete_name: string;
+  account_status: string;
+  channel: CommunicationChannel;
+  destination: string | null;
+  portal_url: string;
+  message_id: UUID;
+  recipient_id: UUID | null;
+  delivery_status: string | null;
+  recommended_action: string;
+};
+
 export type FamilyAthleteSummaryRead = {
   athlete_person_id: UUID;
   athlete_name: string;

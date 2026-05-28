@@ -22,6 +22,9 @@ from app.core.config import Settings, get_settings
 from app.models.enums import (
     AttendanceStatus,
     BackgroundCheckStatus,
+    CommunicationChannel,
+    CommunicationMessageType,
+    CommunicationScopeType,
     ComplianceCredentialStatus,
     ConsentCaptureChannel,
     ConsentRequestStatus,
@@ -85,6 +88,8 @@ from app.schemas.safeguarding import (
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
     GuardianAccountReadinessRead,
+    GuardianPortalInviteCreate,
+    GuardianPortalInviteRead,
     FamilyPerformanceAwardRead,
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
@@ -124,6 +129,7 @@ from app.schemas.safeguarding import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
+from app.services.communications import create_message_for_recipients, destination_for_channel
 from app.services.secrets import resolve_secret, resolve_secret_sync
 from app.services.storage.objects import get_object, put_object
 
@@ -5107,8 +5113,126 @@ async def list_guardian_account_readiness(
                 can_receive_invite=bool(guardian.primary_email),
                 recommended_action=action,
             )
-        )
+    )
     return readiness
+
+
+async def create_guardian_portal_invite(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    relationship_id: UUID,
+    payload: GuardianPortalInviteCreate,
+    authz: AuthorizationService,
+) -> GuardianPortalInviteRead:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    relationship = await db.get(GuardianRelationship, relationship_id)
+    if relationship is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guardian relationship not found")
+    athlete_profile = await db.scalar(
+        select(AthleteProfile).where(
+            AthleteProfile.organization_id == payload.organization_id,
+            AthleteProfile.person_id == relationship.athlete_person_id,
+        )
+    )
+    if athlete_profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guardian relationship not found")
+    organization = await db.get(Organization, payload.organization_id)
+    athlete = await db.get(Person, relationship.athlete_person_id)
+    guardian = await db.get(Person, relationship.guardian_person_id)
+    if organization is None or athlete is None or guardian is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guardian relationship not found")
+    destination = destination_for_channel(guardian, payload.channel)
+    if destination is None and payload.channel != CommunicationChannel.IN_APP:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Guardian has no destination for {payload.channel.value}",
+        )
+
+    linked_user = await db.scalar(
+        select(AppUser)
+        .where(AppUser.person_id == guardian.id)
+        .order_by(AppUser.created_at.desc())
+        .limit(1)
+    )
+    email_user = None
+    if guardian.primary_email:
+        email_user = await db.scalar(
+            select(AppUser)
+            .where(func.lower(AppUser.email) == guardian.primary_email.lower())
+            .order_by(AppUser.created_at.desc())
+            .limit(1)
+        )
+    status_value, action = guardian_account_status(guardian, linked_user, email_user)
+    subject = payload.subject or f"{organization.public_name or organization.name} family portal invitation"
+    body = payload.body or guardian_portal_invite_body(
+        organization=organization,
+        athlete=athlete,
+        guardian=guardian,
+        portal_url=payload.portal_url,
+        account_status=status_value,
+    )
+    message = await create_message_for_recipients(
+        db,
+        organization_id=payload.organization_id,
+        message_type=CommunicationMessageType.REQUEST,
+        channel=payload.channel,
+        scope_type=CommunicationScopeType.PERSON,
+        scope_id=guardian.id,
+        recipient_person_ids=[guardian.id],
+        subject=subject,
+        body=body,
+        urgent=False,
+        created_by_person_id=identity.person_id,
+    )
+    recipient = await db.scalar(
+        select(MessageRecipient).where(
+            MessageRecipient.message_id == message.id,
+            MessageRecipient.person_id == guardian.id,
+        )
+    )
+    return GuardianPortalInviteRead(
+        relationship_id=relationship.id,
+        organization_id=payload.organization_id,
+        guardian_person_id=guardian.id,
+        guardian_name=guardian.display_name,
+        athlete_person_id=athlete.id,
+        athlete_name=athlete.display_name,
+        account_status=status_value,
+        channel=payload.channel,
+        destination=recipient.destination if recipient else destination,
+        portal_url=payload.portal_url,
+        message_id=message.id,
+        recipient_id=recipient.id if recipient else None,
+        delivery_status=recipient.delivery_status.value if recipient else None,
+        recommended_action=action,
+    )
+
+
+def guardian_portal_invite_body(
+    *,
+    organization: Organization,
+    athlete: Person,
+    guardian: Person,
+    portal_url: str,
+    account_status: str,
+) -> str:
+    organization_name = organization.public_name or organization.name
+    account_instruction = (
+        "Your portal account is already linked; sign in to review your family dashboard."
+        if account_status == "linked"
+        else "Sign in using this email address so AfroLete can link your guardian record automatically."
+    )
+    if account_status == "pending_link":
+        account_instruction = "Your sign-in email is recognized; sign in once to complete the account link."
+    return "\n\n".join(
+        [
+            f"Hello {guardian.display_name},",
+            f"{organization_name} has invited you to the AfroLete family portal for {athlete.display_name}.",
+            account_instruction,
+            f"Open the family portal: {portal_url}",
+            "From the portal you can review consent requests, RSVP for events, monitor schedule conflicts, and see family-visible athlete development updates.",
+        ]
+    )
 
 
 def guardian_account_status(

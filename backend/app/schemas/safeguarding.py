@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import (
     AttendanceStatus,
+    CommunicationChannel,
     ConsentCaptureChannel,
     ConsentRequestStatus,
     ConsentScopeType,
@@ -80,6 +81,31 @@ class GuardianAccountReadinessRead(BaseModel):
     keycloak_sub: str | None
     email_matches_app_user: bool
     can_receive_invite: bool
+    recommended_action: str
+
+
+class GuardianPortalInviteCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    portal_url: str = Field(default="https://afrolete.lindela.io/family", max_length=500)
+    subject: str | None = Field(default=None, min_length=2, max_length=240)
+    body: str | None = Field(default=None, min_length=2, max_length=8000)
+
+
+class GuardianPortalInviteRead(BaseModel):
+    relationship_id: UUID
+    organization_id: UUID
+    guardian_person_id: UUID
+    guardian_name: str
+    athlete_person_id: UUID
+    athlete_name: str
+    account_status: str
+    channel: CommunicationChannel
+    destination: str | None
+    portal_url: str
+    message_id: UUID
+    recipient_id: UUID | None
+    delivery_status: str | None
     recommended_action: str
 
 

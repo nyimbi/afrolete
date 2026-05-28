@@ -8,6 +8,7 @@ from hashlib import sha256
 import pytest
 
 from app.core.config import get_settings
+from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.enums import (
     ConsentCaptureChannel,
     ConsentScopeType,
@@ -222,6 +223,32 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
     assert readiness[linked["guardian_person_id"]]["account_status"] == "linked"
     assert readiness[linked["guardian_person_id"]]["linked_app_user_id"]
     assert readiness[linked["guardian_person_id"]]["keycloak_sub"] == "kc-linked-parent"
+
+    invite_response = client.post(
+        f"/api/v1/safeguarding/guardian-account-readiness/{invite_ready['id']}/invite",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "email",
+            "portal_url": "http://localhost:3000/family",
+        },
+    )
+
+    assert invite_response.status_code == 200
+    invite = invite_response.json()
+    assert invite["guardian_person_id"] == invite_ready["guardian_person_id"]
+    assert invite["account_status"] == "invite_ready"
+    assert invite["destination"] == "invite-ready-parent@example.com"
+    assert invite["portal_url"] == "http://localhost:3000/family"
+    assert invite["delivery_status"] == "queued"
+    message = await db_session.get(CommunicationMessage, invite["message_id"])
+    assert message is not None
+    assert message.subject == "Guardian Account Club family portal invitation"
+    assert "Readiness Athlete" in message.body
+    assert "http://localhost:3000/family" in message.body
+    recipient = await db_session.get(MessageRecipient, invite["recipient_id"])
+    assert recipient is not None
+    assert str(recipient.person_id) == invite_ready["guardian_person_id"]
 
 
 async def test_family_dashboard_summarizes_parent_actions(client, identity_headers, db_session) -> None:
