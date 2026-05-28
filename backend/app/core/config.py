@@ -143,6 +143,13 @@ class Settings(BaseSettings):
     performance_model_extraction_webhook_key_secret_path: str = ""
     performance_model_extraction_webhook_key_secret_field: str = "value"
     performance_model_extraction_timeout_seconds: float = 8.0
+    performance_forecast_mode: Literal["off", "deterministic", "webhook"] = "off"
+    performance_forecast_model: str = "afrolete-performance-forecaster-v1"
+    performance_forecast_webhook_url: str = ""
+    performance_forecast_webhook_key: str = ""
+    performance_forecast_webhook_key_secret_path: str = ""
+    performance_forecast_webhook_key_secret_field: str = "value"
+    performance_forecast_timeout_seconds: float = 8.0
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"

@@ -1057,7 +1057,7 @@ function PerformanceWhatIfScenarioDashboard({ scenarios }: { scenarios: Performa
             <strong>{scenario.metric_name} · {scenario.scenario_label}</strong>
             <span>
               {scenario.risk_level.replaceAll("_", " ")} · horizon {scenario.horizon} ·{" "}
-              {Math.round(scenario.confidence * 100)}% confidence
+              {Math.round(scenario.confidence * 100)}% confidence · {scenario.model_policy.replaceAll("_", " ")}
             </span>
           </div>
           <div className="spark-bars" aria-label={`${scenario.metric_name} what-if forecast`}>

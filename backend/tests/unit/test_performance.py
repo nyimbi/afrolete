@@ -768,6 +768,112 @@ def test_performance_forecast_scenarios_project_training_runway(client, identity
     assert "improving scenario" in scenario["recommendation"]
 
 
+def test_performance_forecast_scenarios_use_signed_model_webhook(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    performance_service.get_settings.cache_clear()
+    monkeypatch.setenv("AFROLETE_PERFORMANCE_FORECAST_MODE", "webhook")
+    monkeypatch.setenv("AFROLETE_PERFORMANCE_FORECAST_MODEL", "afrolete-live-forecaster-v2")
+    monkeypatch.setenv("AFROLETE_PERFORMANCE_FORECAST_WEBHOOK_URL", "https://models.example/forecast")
+    monkeypatch.setenv("AFROLETE_PERFORMANCE_FORECAST_WEBHOOK_KEY", "forecast-secret")
+    performance_service.get_settings.cache_clear()
+    calls: list[dict[str, object]] = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout: float) -> None:
+            self.timeout = timeout
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def post(
+            self,
+            url: str,
+            content: bytes,
+            headers: dict[str, str],
+        ) -> performance_service.httpx.Response:
+            calls.append({"url": url, "content": content, "headers": headers, "timeout": self.timeout})
+            return performance_service.httpx.Response(
+                200,
+                request=performance_service.httpx.Request("POST", url),
+                json={
+                    "model": "provider-forecast-v7",
+                    "forecast_next_value": 11.2,
+                    "forecast_low": 10.8,
+                    "forecast_high": 11.7,
+                    "confidence": 0.88,
+                    "data_quality": "model_assisted",
+                    "risk_level": "high_upside",
+                    "projected_points": [11.2, 10.9, 10.6],
+                    "recommendation": "Provider model expects a sharper sprint-time improvement window.",
+                },
+            )
+
+    monkeypatch.setattr(performance_service.httpx, "AsyncClient", FakeAsyncClient)
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "sprint_time",
+            "name": "Sprint Time",
+            "category": "physical",
+            "unit": "seconds",
+            "higher_is_better": False,
+        },
+    ).json()
+    for value, observed_at in [
+        (13.0, "2026-01-01T10:00:00Z"),
+        (12.5, "2026-01-08T10:00:00Z"),
+        (12.0, "2026-01-15T10:00:00Z"),
+    ]:
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": metric["id"],
+                "value": value,
+                "observed_at": observed_at,
+            },
+        )
+        assert response.status_code == 201
+
+    response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/forecast-scenarios"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert response.status_code == 200
+    scenario = response.json()[0]
+    assert scenario["model_policy"] == "provider-forecast-v7"
+    assert scenario["forecast_next_value"] == 11.2
+    assert scenario["forecast_low"] == 10.8
+    assert scenario["forecast_high"] == 11.7
+    assert scenario["confidence"] == 0.88
+    assert scenario["data_quality"] == "model_assisted"
+    assert scenario["risk_level"] == "high_upside"
+    assert scenario["projected_points"] == [11.2, 10.9, 10.6]
+    assert "sharper sprint-time" in scenario["recommendation"]
+    assert calls[0]["url"] == "https://models.example/forecast"
+    headers = calls[0]["headers"]
+    assert isinstance(headers, dict)
+    assert headers["X-Afrolete-Performance-Forecast-Signature"].startswith("sha256=")
+    payload = json.loads(calls[0]["content"])
+    assert payload["event"] == "afrolete.performance.forecast"
+    assert payload["metric"]["code"] == "sprint_time"
+    assert payload["deterministic_baseline"]["forecast_next_value"] == 11.5
+    performance_service.get_settings.cache_clear()
+
+
 def test_performance_what_if_forecast_adjusts_training_runway(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(

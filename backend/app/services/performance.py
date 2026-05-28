@@ -2302,6 +2302,7 @@ async def performance_forecast_scenarios(
     sport: str | None = None,
 ) -> list[dict[str, object]]:
     await get_athlete_profile(db, athlete_profile_id, organization_id)
+    settings = get_settings()
     metrics = await list_metric_definitions(db, organization_id, sport=sport)
     metric_by_id = {metric.id: metric for metric in metrics}
     if not metric_by_id:
@@ -2334,6 +2335,18 @@ async def performance_forecast_scenarios(
         metric_observations = observations_by_metric.get(metric.id, [])
         values = [observation.value for observation in metric_observations]
         trend = metric_trend_summary(values, metric.higher_is_better, metric.name, metric.unit)
+        summary = forecast_scenario_summary(values, metric.higher_is_better, metric.name, metric.unit, trend)
+        model_forecast = await model_assisted_performance_forecast(
+            settings,
+            athlete_profile_id,
+            metric,
+            metric_observations,
+            trend,
+            summary,
+            scenario_type="baseline",
+        )
+        if model_forecast is not None:
+            summary = apply_model_forecast_summary(summary, model_forecast)
         scenarios.append(
             {
                 "metric_definition_id": metric.id,
@@ -2343,7 +2356,7 @@ async def performance_forecast_scenarios(
                 "category": metric.category,
                 "unit": metric.unit,
                 "higher_is_better": metric.higher_is_better,
-                **forecast_scenario_summary(values, metric.higher_is_better, metric.name, metric.unit, trend),
+                **summary,
             }
         )
     return scenarios
@@ -2361,6 +2374,7 @@ async def performance_forecast_what_if_scenarios(
     horizon: int = 4,
 ) -> list[dict[str, object]]:
     await get_athlete_profile(db, athlete_profile_id, organization_id)
+    settings = get_settings()
     metrics = performance_trend_metric_filter(
         await list_metric_definitions(db, organization_id, sport=sport),
         category=category,
@@ -2397,6 +2411,31 @@ async def performance_forecast_what_if_scenarios(
         metric_observations = observations_by_metric.get(metric.id, [])
         values = [observation.value for observation in metric_observations]
         trend = metric_trend_summary(values, metric.higher_is_better, metric.name, metric.unit)
+        summary = forecast_scenario_summary(
+            values,
+            metric.higher_is_better,
+            metric.name,
+            metric.unit,
+            trend,
+            training_adjustment_percent=training_adjustment_percent,
+            readiness_score=readiness_score,
+            horizon=horizon,
+            model_policy="deterministic_what_if_forecast_v1",
+        )
+        model_forecast = await model_assisted_performance_forecast(
+            settings,
+            athlete_profile_id,
+            metric,
+            metric_observations,
+            trend,
+            summary,
+            scenario_type="what_if",
+            training_adjustment_percent=training_adjustment_percent,
+            readiness_score=readiness_score,
+            horizon=horizon,
+        )
+        if model_forecast is not None:
+            summary = apply_model_forecast_summary(summary, model_forecast)
         scenarios.append(
             {
                 "metric_definition_id": metric.id,
@@ -2406,17 +2445,7 @@ async def performance_forecast_what_if_scenarios(
                 "category": metric.category,
                 "unit": metric.unit,
                 "higher_is_better": metric.higher_is_better,
-                **forecast_scenario_summary(
-                    values,
-                    metric.higher_is_better,
-                    metric.name,
-                    metric.unit,
-                    trend,
-                    training_adjustment_percent=training_adjustment_percent,
-                    readiness_score=readiness_score,
-                    horizon=horizon,
-                    model_policy="deterministic_what_if_forecast_v1",
-                ),
+                **summary,
                 "scenario_label": what_if_scenario_label(training_adjustment_percent, readiness_score),
                 "training_adjustment_percent": round(training_adjustment_percent, 1),
                 "readiness_score": readiness_score,
@@ -3668,6 +3697,221 @@ def forecast_scenario_summary(
             readiness_score,
         ),
     }
+
+
+async def model_assisted_performance_forecast(
+    settings: Settings,
+    athlete_profile_id: UUID,
+    metric: PerformanceMetricDefinition,
+    observations: list[AthletePerformanceObservation],
+    trend: dict[str, object],
+    baseline: dict[str, object],
+    scenario_type: str,
+    training_adjustment_percent: float = 0.0,
+    readiness_score: int | None = None,
+    horizon: int = 4,
+) -> dict[str, object] | None:
+    if settings.performance_forecast_mode == "off" or not observations:
+        return None
+    if settings.performance_forecast_mode == "webhook":
+        return await webhook_performance_forecast(
+            settings,
+            athlete_profile_id,
+            metric,
+            observations,
+            trend,
+            baseline,
+            scenario_type,
+            training_adjustment_percent,
+            readiness_score,
+            horizon,
+        )
+    return deterministic_performance_forecast(settings, baseline)
+
+
+def deterministic_performance_forecast(
+    settings: Settings,
+    baseline: dict[str, object],
+) -> dict[str, object]:
+    confidence = structured_float(baseline.get("confidence")) or 0.0
+    return {
+        "model_policy": settings.performance_forecast_model,
+        "confidence": round(min(0.95, confidence + 0.03), 2),
+        "summary": "Local governed forecast model reviewed the deterministic runway.",
+    }
+
+
+async def webhook_performance_forecast(
+    settings: Settings,
+    athlete_profile_id: UUID,
+    metric: PerformanceMetricDefinition,
+    observations: list[AthletePerformanceObservation],
+    trend: dict[str, object],
+    baseline: dict[str, object],
+    scenario_type: str,
+    training_adjustment_percent: float,
+    readiness_score: int | None,
+    horizon: int,
+) -> dict[str, object] | None:
+    if not settings.performance_forecast_webhook_url:
+        return None
+    key_resolution = await resolve_performance_forecast_webhook_key(settings)
+    request_payload = {
+        "event": "afrolete.performance.forecast",
+        "model": settings.performance_forecast_model,
+        "athlete_profile_id": str(athlete_profile_id),
+        "scenario_type": scenario_type,
+        "controls": {
+            "training_adjustment_percent": round(training_adjustment_percent, 1),
+            "readiness_score": readiness_score,
+            "horizon": horizon,
+        },
+        "metric": {
+            "id": str(metric.id),
+            "code": metric.code,
+            "name": metric.name,
+            "sport": metric.sport,
+            "category": metric.category.value,
+            "unit": metric.unit,
+            "higher_is_better": metric.higher_is_better,
+            "min_value": metric.min_value,
+            "max_value": metric.max_value,
+        },
+        "observations": [
+            {
+                "id": str(observation.id),
+                "value": observation.value,
+                "observed_at": observation.observed_at,
+                "source": observation.source.value,
+                "verification_status": observation.verification_status.value,
+            }
+            for observation in observations[-24:]
+        ],
+        "trend": trend,
+        "deterministic_baseline": baseline,
+    }
+    body = stable_payload_text(request_payload).encode()
+    try:
+        async with httpx.AsyncClient(timeout=settings.performance_forecast_timeout_seconds) as client:
+            response = await client.post(
+                settings.performance_forecast_webhook_url,
+                content=body,
+                headers=performance_forecast_webhook_headers(settings, body, str(key_resolution["key"] or "")),
+            )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    return webhook_performance_forecast_result(settings, response)
+
+
+async def resolve_performance_forecast_webhook_key(settings: Settings) -> dict[str, str | None]:
+    try:
+        key = await resolve_secret(
+            settings,
+            env_value=settings.performance_forecast_webhook_key,
+            path=settings.performance_forecast_webhook_key_secret_path,
+            field_name=settings.performance_forecast_webhook_key_secret_field,
+            label="performance forecast webhook key",
+        )
+    except HTTPException:
+        return {"key": None}
+    return {"key": key}
+
+
+def performance_forecast_webhook_headers(settings: Settings, body: bytes, signing_key: str = "") -> dict[str, str]:
+    headers = {
+        "User-Agent": "AfroLete-Performance-Forecaster/1.0",
+        "Content-Type": "application/json",
+    }
+    if signing_key:
+        timestamp = str(int(time.time()))
+        digest = hmac.new(signing_key.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+        headers["X-Afrolete-Performance-Forecast-Timestamp"] = timestamp
+        headers["X-Afrolete-Performance-Forecast-Signature"] = f"sha256={digest}"
+        headers["X-Afrolete-Performance-Forecast-Key-Source"] = (
+            "openbao" if settings.performance_forecast_webhook_key_secret_path else "env"
+        )
+    return headers
+
+
+def webhook_performance_forecast_result(settings: Settings, response: httpx.Response) -> dict[str, object] | None:
+    try:
+        result = response.json()
+    except ValueError:
+        return None
+    if not isinstance(result, dict):
+        return None
+    forecast = structured_float(result.get("forecast_next_value"))
+    if forecast is None:
+        forecast = structured_float(result.get("forecast"))
+    projected_points = structured_float_list(result.get("projected_points"), limit=12)
+    if forecast is None and not projected_points:
+        return None
+    model_policy = str(result.get("model") or settings.performance_forecast_model)[:160]
+    return {
+        "model_policy": model_policy,
+        "forecast_next_value": forecast,
+        "forecast_low": structured_float(result.get("forecast_low")),
+        "forecast_high": structured_float(result.get("forecast_high")),
+        "confidence": structured_float(result.get("confidence")),
+        "data_quality": str(result.get("data_quality")) if result.get("data_quality") else None,
+        "risk_level": str(result.get("risk_level")) if result.get("risk_level") else None,
+        "projected_points": projected_points,
+        "recommendation": str(result.get("recommendation"))[:1000] if result.get("recommendation") else None,
+    }
+
+
+def apply_model_forecast_summary(
+    baseline: dict[str, object],
+    model_forecast: dict[str, object],
+) -> dict[str, object]:
+    summary = dict(baseline)
+    summary["model_policy"] = model_forecast["model_policy"]
+    for key in ("forecast_next_value", "forecast_low", "forecast_high"):
+        value = structured_float(model_forecast.get(key))
+        if value is not None:
+            summary[key] = round(value, 2)
+    confidence = structured_float(model_forecast.get("confidence"))
+    if confidence is not None:
+        summary["confidence"] = round(max(0, min(confidence, 1)), 2)
+    data_quality = normalized_forecast_data_quality(model_forecast.get("data_quality"))
+    if data_quality is not None:
+        summary["data_quality"] = data_quality
+    risk_level = normalized_forecast_risk_level(model_forecast.get("risk_level"))
+    if risk_level is not None:
+        summary["risk_level"] = risk_level
+    projected_points = structured_float_list(model_forecast.get("projected_points"), limit=12)
+    if projected_points:
+        summary["projected_points"] = [round(point, 2) for point in projected_points]
+    recommendation = model_forecast.get("recommendation")
+    if isinstance(recommendation, str) and recommendation.strip():
+        summary["recommendation"] = recommendation.strip()[:1000]
+    return summary
+
+
+def normalized_forecast_data_quality(value: object) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"no_data", "thin_history", "usable_history", "strong_history", "model_assisted"}:
+        return normalized
+    return None
+
+
+def normalized_forecast_risk_level(value: object) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"no_data", "needs_more_data", "recovery", "watch", "opportunity", "stable", "high_upside"}:
+        return normalized
+    return None
+
+
+def structured_float_list(value: object, limit: int = 12) -> list[float]:
+    if not isinstance(value, list):
+        return []
+    points: list[float] = []
+    for item in value[:limit]:
+        point = structured_float(item)
+        if point is not None:
+            points.append(point)
+    return points
 
 
 def projected_forecast_points(

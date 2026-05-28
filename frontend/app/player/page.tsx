@@ -407,6 +407,7 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
                 {scenario.risk_level.replaceAll("_", " ")} · {scenario.data_quality.replaceAll("_", " ")} · next{" "}
                 {playerValueLabel(scenario.forecast_next_value, scenario.unit)}
               </small>
+              <small>{scenario.model_policy.replaceAll("_", " ")}</small>
             </div>
             <div className="spark-bars" aria-label={`${scenario.metric_name} player forecast scenario`}>
               {scenario.projected_points.map((point, pointIndex) => (
@@ -432,6 +433,7 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
                 {scenario.scenario_label} · horizon {scenario.horizon} · next{" "}
                 {playerValueLabel(scenario.forecast_next_value, scenario.unit)}
               </small>
+              <small>{scenario.model_policy.replaceAll("_", " ")}</small>
             </div>
             <div className="spark-bars" aria-label={`${scenario.metric_name} player what-if scenario`}>
               {scenario.projected_points.map((point, pointIndex) => (
