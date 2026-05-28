@@ -24,6 +24,7 @@ from app.schemas.performance import (
     PerformanceIngestionRead,
     PerformanceMetricBenchmarkRead,
     PerformanceMetricTrendRead,
+    PerformanceMetricTrendSeriesRead,
     PerformanceObservationCreate,
     PerformanceObservationRead,
     PerformanceObservationReviewCreate,
@@ -50,6 +51,7 @@ from app.services.performance import (
     list_my_player_performance,
     list_observations,
     performance_metric_benchmarks,
+    performance_metric_trend_series,
     performance_metric_trends,
     performance_summary,
     run_assessment_review_escalations,
@@ -245,6 +247,10 @@ async def list_my_player_performance_route(
             awards=[to_award_read(award) for award in profile["awards"]],
             trends=[
                 PerformanceMetricTrendRead(**trend) for trend in profile["trends"]
+            ],
+            trend_series=[
+                PerformanceMetricTrendSeriesRead(**series)
+                for series in profile["trend_series"]
             ],
             benchmarks=[
                 PerformanceMetricBenchmarkRead(**benchmark) for benchmark in profile["benchmarks"]
@@ -556,6 +562,29 @@ async def athlete_performance_trends_route(
             organization_id,
             athlete_profile_id,
             sport=sport,
+        )
+    ]
+
+
+@router.get(
+    "/athletes/{athlete_profile_id}/trend-series",
+    response_model=list[PerformanceMetricTrendSeriesRead],
+)
+async def athlete_performance_trend_series_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    sport: str | None = Query(default=None),
+    limit_per_metric: int = Query(default=12, ge=2, le=50),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceMetricTrendSeriesRead]:
+    return [
+        PerformanceMetricTrendSeriesRead(**series)
+        for series in await performance_metric_trend_series(
+            db,
+            organization_id,
+            athlete_profile_id,
+            sport=sport,
+            limit_per_metric=limit_per_metric,
         )
     ]
 

@@ -3279,6 +3279,31 @@ export type PerformanceMetricTrendRead = {
   recommendation: string;
 };
 
+export type PerformanceMetricTrendPointRead = {
+  observation_id: UUID;
+  observed_at: string;
+  value: number;
+  normalized_value: number;
+  source: MetricSource;
+  verification_status: MetricVerificationStatus;
+};
+
+export type PerformanceMetricTrendSeriesRead = {
+  metric_definition_id: UUID;
+  metric_code: string;
+  metric_name: string;
+  sport: string | null;
+  category: MetricCategory;
+  unit: string | null;
+  higher_is_better: boolean;
+  sample_size: number;
+  latest_value: number | null;
+  forecast_next_value: number | null;
+  trend_direction: string;
+  recommendation: string;
+  points: PerformanceMetricTrendPointRead[];
+};
+
 export type PerformanceGoalRead = {
   id: UUID;
   organization_id: UUID;
@@ -3351,6 +3376,7 @@ export type PlayerPerformanceProfileRead = {
   goals: PerformanceGoalRead[];
   awards: PerformanceAchievementAwardRead[];
   trends: PerformanceMetricTrendRead[];
+  trend_series: PerformanceMetricTrendSeriesRead[];
   benchmarks: PerformanceMetricBenchmarkRead[];
 };
 

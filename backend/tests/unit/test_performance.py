@@ -164,7 +164,60 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert profile["goals"][0]["title"] == "Lower sprint time"
     assert profile["observations"][0]["value"] == 12.4
     assert profile["trends"][0]["metric_name"] == "Pace"
+    assert profile["trend_series"][0]["metric_name"] == "Pace"
+    assert profile["trend_series"][0]["points"][0]["value"] == 12.4
     assert profile["benchmarks"][0]["metric_name"] == "Pace"
+
+
+def test_performance_trend_series_returns_ordered_points(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "sprint_time",
+            "name": "Sprint Time",
+            "category": "physical",
+            "unit": "seconds",
+            "higher_is_better": False,
+        },
+    ).json()
+    for value, observed_at, status in [
+        (13.0, "2026-01-01T10:00:00Z", "verified"),
+        (12.5, "2026-01-08T10:00:00Z", "verified"),
+        (99.0, "2026-01-09T10:00:00Z", "rejected"),
+        (12.0, "2026-01-15T10:00:00Z", "verified"),
+    ]:
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": metric["id"],
+                "value": value,
+                "observed_at": observed_at,
+                "verification_status": status,
+            },
+        )
+        assert response.status_code == 201
+
+    response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/trend-series"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert response.status_code == 200
+    series = response.json()[0]
+    assert series["metric_name"] == "Sprint Time"
+    assert series["sample_size"] == 3
+    assert series["latest_value"] == 12.0
+    assert series["forecast_next_value"] == 11.5
+    assert series["trend_direction"] == "improving"
+    assert [point["value"] for point in series["points"]] == [13.0, 12.5, 12.0]
+    assert [point["normalized_value"] for point in series["points"]] == [0.0, 50.0, 100.0]
 
 
 def test_player_can_submit_pending_self_assessment(client, identity_headers) -> None:

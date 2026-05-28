@@ -206,6 +206,7 @@ import type {
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
   PerformanceMetricTrendRead,
+  PerformanceMetricTrendSeriesRead,
   PerformanceObservationRead,
   NotificationFrequency,
   NotificationPreferenceRead,
@@ -760,6 +761,55 @@ function PerformanceVisualDashboard({
   );
 }
 
+function PerformanceTrendSeriesDashboard({ series }: { series: PerformanceMetricTrendSeriesRead[] }) {
+  const visibleSeries = series
+    .filter((item) => item.points.length > 0)
+    .slice(0, 4);
+
+  return (
+    <div className="trend-series-grid">
+      {visibleSeries.map((item, index) => (
+        <article className="task-card trend-series-card" key={`${item.metric_definition_id}-series`}>
+          <div>
+            <strong>{item.metric_name} · {item.trend_direction.replaceAll("_", " ")}</strong>
+            <span>
+              {item.sample_size} points · latest {performanceValueLabel(item.latest_value, item.unit)} · forecast{" "}
+              {performanceValueLabel(item.forecast_next_value, item.unit)}
+            </span>
+          </div>
+          <div className="spark-bars" aria-label={`${item.metric_name} time series`}>
+            {item.points.map((point) => (
+              <i
+                key={point.observation_id}
+                title={`${new Date(point.observed_at).toLocaleDateString()} · ${performanceValueLabel(point.value, item.unit)}`}
+                style={{
+                  height: `${Math.max(8, point.normalized_value)}%`,
+                  backgroundColor: chartColors[index % chartColors.length]
+                }}
+              />
+            ))}
+          </div>
+          <small>{item.recommendation}</small>
+        </article>
+      ))}
+      {visibleSeries.length === 0 ? (
+        <article className="task-card trend-series-card">
+          <div>
+            <strong>Metric history</strong>
+            <span>Accepted observations will render as compact time-series bars.</span>
+          </div>
+          <div className="spark-bars empty">
+            <i />
+            <i />
+            <i />
+          </div>
+          <small>No accepted performance observations are available yet.</small>
+        </article>
+      ) : null}
+    </div>
+  );
+}
+
 function downloadTextArtifact(content: string, contentType: string, filename: string) {
   const blob = new Blob([content], { type: contentType });
   const url = window.URL.createObjectURL(blob);
@@ -898,6 +948,7 @@ export default function HomePage() {
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
   const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
   const [performanceTrends, setPerformanceTrends] = useState<PerformanceMetricTrendRead[]>([]);
+  const [performanceTrendSeries, setPerformanceTrendSeries] = useState<PerformanceMetricTrendSeriesRead[]>([]);
   const [performanceGoals, setPerformanceGoals] = useState<PerformanceGoalRead[]>([]);
   const [performanceAwards, setPerformanceAwards] = useState<PerformanceAchievementAwardRead[]>([]);
   const [performanceAchievementRun, setPerformanceAchievementRun] =
@@ -1940,6 +1991,7 @@ export default function HomePage() {
         summaryData,
         benchmarkData,
         trendData,
+        trendSeriesData,
         goalData,
         awardData
       ] = await Promise.all([
@@ -1958,6 +2010,9 @@ export default function HomePage() {
         apiRequest<PerformanceMetricTrendRead[]>(
           `/performance/athletes/${athleteProfileId}/trends?organization_id=${organizationId}`
         ),
+        apiRequest<PerformanceMetricTrendSeriesRead[]>(
+          `/performance/athletes/${athleteProfileId}/trend-series?organization_id=${organizationId}`
+        ),
         apiRequest<PerformanceGoalRead[]>(
           `/performance/athletes/${athleteProfileId}/goals?organization_id=${organizationId}`
         ),
@@ -1970,6 +2025,7 @@ export default function HomePage() {
       setPerformanceSummary(summaryData);
       setPerformanceBenchmarks(benchmarkData);
       setPerformanceTrends(trendData);
+      setPerformanceTrendSeries(trendSeriesData);
       setPerformanceGoals(goalData);
       setPerformanceAwards(awardData);
       setSelectedObservationId((current) =>
@@ -13020,6 +13076,7 @@ export default function HomePage() {
               trends={performanceTrends}
               benchmarks={performanceBenchmarks}
             />
+            <PerformanceTrendSeriesDashboard series={performanceTrendSeries} />
             <div className="form-grid">
               <label>
                 Queue

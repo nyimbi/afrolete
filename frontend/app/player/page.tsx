@@ -42,6 +42,7 @@ function goalProgress(goal: PlayerPerformanceProfileRead["goals"][number]) {
 
 function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfileRead }) {
   const latestAssessment = profile.latest_assessment;
+  const visibleSeries = profile.trend_series.filter((series) => series.points.length > 0).slice(0, 4);
   const composition = latestAssessment
     ? [
         { label: "Physical", value: latestAssessment.physical_score, color: "var(--teal)" },
@@ -61,8 +62,9 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
   );
 
   return (
-    <section className="player-visual-grid">
-      <article className="player-chart-card">
+    <>
+      <section className="player-visual-grid">
+        <article className="player-chart-card">
         <div>
           <span>ALS composition</span>
           <strong>{profile.latest_overall_score?.toFixed(1) ?? "No score"}</strong>
@@ -88,9 +90,9 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
             </div>
           ) : null}
         </div>
-      </article>
+        </article>
 
-      <article className="player-chart-card">
+        <article className="player-chart-card">
         <div>
           <span>Trend runway</span>
           <strong>{profile.trends.length} metrics</strong>
@@ -119,9 +121,9 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
             </div>
           ) : null}
         </div>
-      </article>
+        </article>
 
-      <article className="player-chart-card">
+        <article className="player-chart-card">
         <div>
           <span>Cohort standing</span>
           <strong>{profile.benchmarks.length} benchmarks</strong>
@@ -153,9 +155,9 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
             </div>
           ) : null}
         </div>
-      </article>
+        </article>
 
-      <article className="player-chart-card">
+        <article className="player-chart-card">
         <div>
           <span>Goal pace</span>
           <strong>{profile.active_goal_count}/{profile.achieved_goal_count}</strong>
@@ -187,8 +189,51 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
             </div>
           ) : null}
         </div>
-      </article>
-    </section>
+        </article>
+      </section>
+
+      <section className="player-visual-grid player-history-grid">
+        {visibleSeries.map((series, index) => (
+          <article className="player-chart-card" key={`${series.metric_definition_id}-player-series`}>
+            <div>
+              <span>Metric history</span>
+              <strong>{series.metric_name}</strong>
+              <small>
+                {series.sample_size} points · latest {playerValueLabel(series.latest_value, series.unit)} · forecast{" "}
+                {playerValueLabel(series.forecast_next_value, series.unit)}
+              </small>
+            </div>
+            <div className="spark-bars" aria-label={`${series.metric_name} player time series`}>
+              {series.points.map((point) => (
+                <i
+                  key={point.observation_id}
+                  title={`${new Date(point.observed_at).toLocaleDateString()} · ${playerValueLabel(point.value, series.unit)}`}
+                  style={{
+                    height: `${boundedPercent(point.normalized_value)}%`,
+                    backgroundColor: playerChartColors[index % playerChartColors.length]
+                  }}
+                />
+              ))}
+            </div>
+            <small>{series.recommendation}</small>
+          </article>
+        ))}
+        {visibleSeries.length === 0 ? (
+          <article className="player-chart-card">
+            <div>
+              <span>Metric history</span>
+              <strong>Collecting observations</strong>
+              <small>Accepted observations will render here as athlete-friendly time-series bars.</small>
+            </div>
+            <div className="spark-bars empty">
+              <i />
+              <i />
+              <i />
+            </div>
+          </article>
+        ) : null}
+      </section>
+    </>
   );
 }
 

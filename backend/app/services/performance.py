@@ -811,6 +811,88 @@ async def performance_metric_trends(
     return trends
 
 
+async def performance_metric_trend_series(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    sport: str | None = None,
+    limit_per_metric: int = 12,
+) -> list[dict[str, object]]:
+    await get_athlete_profile(db, athlete_profile_id, organization_id)
+    metrics = await list_metric_definitions(db, organization_id, sport=sport)
+    metric_by_id = {metric.id: metric for metric in metrics}
+    if not metric_by_id:
+        return []
+
+    observations = list(
+        (
+            await db.scalars(
+                select(AthletePerformanceObservation)
+                .where(AthletePerformanceObservation.organization_id == organization_id)
+                .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+                .where(AthletePerformanceObservation.metric_definition_id.in_(list(metric_by_id)))
+                .where(
+                    AthletePerformanceObservation.verification_status
+                    != MetricVerificationStatus.REJECTED
+                )
+                .order_by(
+                    AthletePerformanceObservation.metric_definition_id,
+                    AthletePerformanceObservation.observed_at.desc(),
+                )
+            )
+        ).all()
+    )
+    observations_by_metric: dict[UUID, list[AthletePerformanceObservation]] = {}
+    for observation in observations:
+        metric_observations = observations_by_metric.setdefault(
+            observation.metric_definition_id,
+            [],
+        )
+        if len(metric_observations) < limit_per_metric:
+            metric_observations.append(observation)
+
+    series: list[dict[str, object]] = []
+    for metric in metrics:
+        metric_observations = sorted(
+            observations_by_metric.get(metric.id, []),
+            key=lambda observation: observation.observed_at,
+        )
+        values = [observation.value for observation in metric_observations]
+        trend = metric_trend_summary(values, metric.higher_is_better, metric.name, metric.unit)
+        series.append(
+            {
+                "metric_definition_id": metric.id,
+                "metric_code": metric.code,
+                "metric_name": metric.name,
+                "sport": metric.sport,
+                "category": metric.category,
+                "unit": metric.unit,
+                "higher_is_better": metric.higher_is_better,
+                "sample_size": len(metric_observations),
+                "latest_value": trend["latest_value"],
+                "forecast_next_value": trend["forecast_next_value"],
+                "trend_direction": trend["trend_direction"],
+                "recommendation": trend["recommendation"],
+                "points": [
+                    {
+                        "observation_id": observation.id,
+                        "observed_at": observation.observed_at,
+                        "value": observation.value,
+                        "normalized_value": normalized_trend_value(
+                            observation.value,
+                            values,
+                            metric.higher_is_better,
+                        ),
+                        "source": observation.source,
+                        "verification_status": observation.verification_status,
+                    }
+                    for observation in metric_observations
+                ],
+            }
+        )
+    return series
+
+
 async def create_performance_goal(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -921,6 +1003,7 @@ async def list_my_player_performance(
         awards = await list_performance_awards(db, organization_id, profile.id)
         observations = (await list_observations(db, organization_id, profile.id))[:observation_limit]
         trends = await performance_metric_trends(db, organization_id, profile.id)
+        trend_series = await performance_metric_trend_series(db, organization_id, profile.id)
         benchmarks = await performance_metric_benchmarks(
             db,
             organization_id,
@@ -945,6 +1028,7 @@ async def list_my_player_performance(
                 "goals": goals,
                 "awards": awards,
                 "trends": trends,
+                "trend_series": trend_series,
                 "benchmarks": benchmarks,
             }
         )
@@ -1504,6 +1588,18 @@ def forecast_next_value(values: list[float]) -> float | None:
         return values[-1] if values else None
     deltas = [current - previous for previous, current in zip(values[:-1], values[1:], strict=True)]
     return values[-1] + sum(deltas) / len(deltas)
+
+
+def normalized_trend_value(value: float, values: list[float], higher_is_better: bool) -> float:
+    if not values:
+        return 0
+    low = min(values)
+    high = max(values)
+    if high == low:
+        return 50
+    raw = ((value - low) / (high - low)) * 100
+    normalized = raw if higher_is_better else 100 - raw
+    return round(max(0, min(100, normalized)), 2)
 
 
 def trend_direction(change_from_first: float | None, values: list[float]) -> str:
