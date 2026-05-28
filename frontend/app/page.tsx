@@ -610,6 +610,156 @@ function ArtifactAccessTrendCard({ summary }: { summary: AgentScorecardArtifactA
   );
 }
 
+function performanceValueLabel(value: number | null | undefined, unit?: string | null) {
+  if (typeof value !== "number") {
+    return "n/a";
+  }
+  const rounded = Number.isInteger(value) ? value.toString() : value.toFixed(1);
+  return unit ? `${rounded} ${unit}` : rounded;
+}
+
+function PerformanceVisualDashboard({
+  summary,
+  assessments,
+  trends,
+  benchmarks
+}: {
+  summary: AthletePerformanceSummaryRead | null;
+  assessments: AthleteAssessmentRead[];
+  trends: PerformanceMetricTrendRead[];
+  benchmarks: PerformanceMetricBenchmarkRead[];
+}) {
+  const latestAssessment = assessments.find((assessment) => assessment.id === summary?.latest_assessment_id)
+    ?? assessments.find((assessment) => assessment.verification_status === "verified")
+    ?? assessments[0]
+    ?? null;
+  const composition = latestAssessment
+    ? [
+        ["Physical", latestAssessment.physical_score, "var(--teal)"],
+        ["Technical", latestAssessment.technical_score, "var(--blue)"],
+        ["Tactical", latestAssessment.tactical_score, "var(--amber)"],
+        ["Mental", latestAssessment.mental_score, "var(--violet)"]
+      ]
+    : [];
+  const trendMax = Math.max(
+    1,
+    ...trends.slice(0, 4).flatMap((trend) => [
+      Math.abs(trend.latest_value ?? 0),
+      Math.abs(trend.forecast_next_value ?? 0),
+      Math.abs(trend.best_value ?? 0)
+    ])
+  );
+
+  return (
+    <div className="task-list">
+      <article className="task-card chart-card">
+        <div>
+          <strong>ALS composition · {summary?.latest_overall_score ?? "—"}</strong>
+          <span>{summary?.rating ?? "No verified assessment"} · {summary?.assessment_count ?? 0} assessments</span>
+        </div>
+        <div className="chart-bars">
+          {composition.length ? composition.map(([label, value, color]) => {
+            const score = Number(value);
+            return (
+              <div className="chart-bar-row" key={label}>
+                <span>{label}</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{ width: `${Math.max(4, Math.min(100, score))}%`, backgroundColor: String(color) }}
+                  />
+                </div>
+                <strong>{score}</strong>
+              </div>
+            );
+          }) : (
+            <div className="chart-bar-row">
+              <span>No scores</span>
+              <div className="chart-track">
+                <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--muted)" }} />
+              </div>
+              <strong>0</strong>
+            </div>
+          )}
+        </div>
+      </article>
+
+      <article className="task-card chart-card">
+        <div>
+          <strong>Trend runway · {trends.length} metrics</strong>
+          <span>Latest values compared with the next simple forecast</span>
+        </div>
+        <div className="chart-bars">
+          {trends.slice(0, 4).map((trend, index) => {
+            const latestWidth = Math.max(4, Math.round((Math.abs(trend.latest_value ?? 0) / trendMax) * 100));
+            const forecastWidth = Math.max(4, Math.round((Math.abs(trend.forecast_next_value ?? 0) / trendMax) * 100));
+            return (
+              <div className="chart-bar-row" key={`${trend.metric_definition_id}-visual`}>
+                <span>{trend.metric_name}</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{
+                      width: `${Math.max(latestWidth, forecastWidth)}%`,
+                      backgroundColor: chartColors[index % chartColors.length]
+                    }}
+                  />
+                </div>
+                <strong>{performanceValueLabel(trend.forecast_next_value ?? trend.latest_value, trend.unit)}</strong>
+              </div>
+            );
+          })}
+          {trends.length === 0 ? (
+            <div className="chart-bar-row">
+              <span>No trend data</span>
+              <div className="chart-track">
+                <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--muted)" }} />
+              </div>
+              <strong>n/a</strong>
+            </div>
+          ) : null}
+        </div>
+      </article>
+
+      <article className="task-card chart-card">
+        <div>
+          <strong>Cohort standing · {benchmarks.length} benchmarks</strong>
+          <span>Percentile rank against the active tenant/sport cohort</span>
+        </div>
+        <div className="chart-bars">
+          {benchmarks.slice(0, 4).map((benchmark, index) => {
+            const percentile = benchmark.percentile_rank ?? 0;
+            return (
+              <div className="chart-bar-row" key={`${benchmark.metric_definition_id}-benchmark-visual`}>
+                <span>{benchmark.metric_name}</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{
+                      width: `${Math.max(4, Math.min(100, percentile))}%`,
+                      backgroundColor: chartColors[(index + 1) % chartColors.length]
+                    }}
+                  />
+                </div>
+                <strong>{benchmark.percentile_rank === null ? "n/a" : `${benchmark.percentile_rank}%`}</strong>
+              </div>
+            );
+          })}
+          {benchmarks.length === 0 ? (
+            <div className="chart-bar-row">
+              <span>No benchmark</span>
+              <div className="chart-track">
+                <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--muted)" }} />
+              </div>
+              <strong>n/a</strong>
+            </div>
+          ) : null}
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function downloadTextArtifact(content: string, contentType: string, filename: string) {
   const blob = new Blob([content], { type: contentType });
   const url = window.URL.createObjectURL(blob);
@@ -12864,6 +13014,12 @@ export default function HomePage() {
                 <input type="date" value={performanceGoalForm.due_at} onChange={(event) => setPerformanceGoalForm({ ...performanceGoalForm, due_at: event.target.value })} />
               </label>
             </div>
+            <PerformanceVisualDashboard
+              summary={performanceSummary}
+              assessments={assessments}
+              trends={performanceTrends}
+              benchmarks={performanceBenchmarks}
+            />
             <div className="form-grid">
               <label>
                 Queue
