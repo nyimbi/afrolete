@@ -5,14 +5,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models.enums import MemberSubjectType
+from app.models.enums import MemberSubjectType, MembershipRole
 from app.models.event import Event
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
-from app.models.team import AthleteProfile, Team, TeamRosterEntry
+from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.models.training import TrainingDrill
 from app.schemas.developer import (
     DeveloperApiKeyInspectionRead,
+    DeveloperGuardianRelationshipCreate,
+    DeveloperGuardianRelationshipRead,
     DeveloperPersonCreate,
     DeveloperPersonRead,
 )
@@ -137,6 +139,28 @@ def to_developer_person_read(
     )
 
 
+def to_developer_guardian_relationship_read(
+    relationship: GuardianRelationship,
+    organization_id: UUID,
+    guardian: Person,
+) -> DeveloperGuardianRelationshipRead:
+    return DeveloperGuardianRelationshipRead(
+        id=relationship.id,
+        organization_id=organization_id,
+        athlete_person_id=relationship.athlete_person_id,
+        guardian_person_id=relationship.guardian_person_id,
+        guardian_display_name=guardian.display_name,
+        relationship_kind=relationship.relationship_kind,
+        relationship=relationship.relationship,
+        can_sign_consent=relationship.can_sign_consent,
+        can_view_medical=relationship.can_view_medical,
+        emergency_contact=relationship.emergency_contact,
+        can_pick_up=relationship.can_pick_up,
+        is_primary=relationship.is_primary,
+        notes=relationship.notes,
+    )
+
+
 @router.get("/me", response_model=DeveloperApiKeyInspectionRead)
 async def sdk_me(
     credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
@@ -248,6 +272,138 @@ async def sdk_create_person(
     if membership is not None:
         await db.refresh(membership)
     return to_developer_person_read(person, payload.organization_id, membership)
+
+
+@router.post(
+    "/people/{athlete_person_id}/guardians",
+    response_model=DeveloperGuardianRelationshipRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sdk_link_guardian(
+    athlete_person_id: UUID,
+    payload: DeveloperGuardianRelationshipCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperGuardianRelationshipRead:
+    ensure_developer_api_scope(
+        credential,
+        payload.organization_id,
+        {"write:guardians", "write:roster"},
+    )
+    athlete = await db.get(Person, athlete_person_id)
+    if athlete is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    athlete_membership = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == payload.organization_id,
+            Membership.subject_type == MemberSubjectType.PERSON,
+            Membership.subject_id == athlete_person_id,
+        )
+    )
+    athlete_profile = await db.scalar(
+        select(AthleteProfile).where(
+            AthleteProfile.organization_id == payload.organization_id,
+            AthleteProfile.person_id == athlete_person_id,
+        )
+    )
+    if athlete_membership is None and athlete_profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Athlete is not linked to this organization",
+        )
+
+    guardian = None
+    if payload.guardian_person_id is not None:
+        guardian = await db.get(Person, payload.guardian_person_id)
+        if guardian is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guardian not found")
+    elif payload.guardian_email is not None:
+        guardian = await db.scalar(select(Person).where(Person.primary_email == payload.guardian_email))
+    if guardian is None and payload.guardian_phone is not None:
+        guardian = await db.scalar(select(Person).where(Person.primary_phone == payload.guardian_phone))
+    if guardian is None:
+        if payload.guardian_email is None and payload.guardian_phone is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="guardian_person_id, guardian_email, or guardian_phone is required",
+            )
+        guardian = Person(
+            display_name=payload.guardian_display_name
+            or payload.guardian_email
+            or payload.guardian_phone
+            or "Guardian",
+            primary_email=payload.guardian_email,
+            primary_phone=payload.guardian_phone,
+        )
+        db.add(guardian)
+        await db.flush()
+    elif payload.guardian_phone and not guardian.primary_phone:
+        guardian.primary_phone = payload.guardian_phone
+
+    membership = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == payload.organization_id,
+            Membership.subject_type == MemberSubjectType.PERSON,
+            Membership.subject_id == guardian.id,
+            Membership.role == MembershipRole.GUARDIAN,
+        )
+    )
+    if membership is None:
+        membership = Membership(
+            organization_id=payload.organization_id,
+            subject_type=MemberSubjectType.PERSON,
+            subject_id=guardian.id,
+            role=MembershipRole.GUARDIAN,
+            title="Guardian",
+        )
+        db.add(membership)
+        await authz.touch(
+            Relationship(
+                resource_type="organization",
+                resource_id=str(payload.organization_id),
+                relation=organization_member_relation(
+                    MemberSubjectType.PERSON,
+                    MembershipRole.GUARDIAN,
+                ),
+                subject_type="person",
+                subject_id=str(guardian.id),
+            )
+        )
+
+    relationship = await db.scalar(
+        select(GuardianRelationship).where(
+            GuardianRelationship.athlete_person_id == athlete_person_id,
+            GuardianRelationship.guardian_person_id == guardian.id,
+        )
+    )
+    if relationship is None:
+        relationship = GuardianRelationship(
+            athlete_person_id=athlete_person_id,
+            guardian_person_id=guardian.id,
+            relationship_kind=payload.relationship_kind,
+            relationship=payload.relationship or payload.relationship_kind.value.replace("_", " "),
+            can_sign_consent=payload.can_sign_consent,
+            can_view_medical=payload.can_view_medical,
+            emergency_contact=payload.emergency_contact,
+            can_pick_up=payload.can_pick_up,
+            is_primary=payload.is_primary,
+            notes=payload.notes,
+        )
+        db.add(relationship)
+        await authz.touch(
+            Relationship(
+                resource_type="athlete_profile",
+                resource_id=str(athlete_person_id),
+                relation="guardian",
+                subject_type="person",
+                subject_id=str(guardian.id),
+            )
+        )
+    await db.commit()
+    await db.refresh(guardian)
+    await db.refresh(relationship)
+    return to_developer_guardian_relationship_read(relationship, payload.organization_id, guardian)
 
 
 @router.post("/teams", response_model=TeamRead, status_code=status.HTTP_201_CREATED)

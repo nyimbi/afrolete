@@ -34,6 +34,13 @@ class _PeopleResource:
     def create(self, payload: JsonObject) -> JsonObject:
         return self.client.request("POST", "/people", body=payload)
 
+    def link_guardian(self, athlete_person_id: str, payload: JsonObject) -> JsonObject:
+        return self.client.request(
+            "POST",
+            f"/people/{athlete_person_id}/guardians",
+            body=payload,
+        )
+
 
 @dataclass(frozen=True)
 class _TeamsResource:

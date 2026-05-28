@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import MembershipRole
+from app.models.enums import GuardianRelationshipKind, MembershipRole
 
 
 class DeveloperApplicationCreate(BaseModel):
@@ -176,6 +176,38 @@ class DeveloperPersonRead(BaseModel):
     notes: str | None
     membership_role: MembershipRole | None
     membership_title: str | None
+
+
+class DeveloperGuardianRelationshipCreate(BaseModel):
+    organization_id: UUID
+    guardian_person_id: UUID | None = None
+    guardian_email: str | None = Field(default=None, max_length=320)
+    guardian_phone: str | None = Field(default=None, max_length=64)
+    guardian_display_name: str | None = Field(default=None, min_length=2, max_length=240)
+    relationship_kind: GuardianRelationshipKind = GuardianRelationshipKind.PARENT
+    relationship: str | None = Field(default=None, max_length=80)
+    can_sign_consent: bool = True
+    can_view_medical: bool = False
+    emergency_contact: bool = True
+    can_pick_up: bool = False
+    is_primary: bool = False
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class DeveloperGuardianRelationshipRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    athlete_person_id: UUID
+    guardian_person_id: UUID
+    guardian_display_name: str
+    relationship_kind: GuardianRelationshipKind
+    relationship: str
+    can_sign_consent: bool
+    can_view_medical: bool
+    emergency_contact: bool
+    can_pick_up: bool
+    is_primary: bool
+    notes: str | None
 
 
 class DeveloperWebhookSubscriptionCreate(BaseModel):

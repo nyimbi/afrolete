@@ -20,6 +20,16 @@ athlete = client.people.create(
         "membership_role": "athlete",
     }
 )
+client.people.link_guardian(
+    athlete["id"],
+    {
+        "organization_id": organization["id"],
+        "guardian_email": "parent@example.org",
+        "guardian_display_name": "Parent Otieno",
+        "relationship_kind": "parent",
+        "can_sign_consent": True,
+    },
+)
 team = client.teams.create(
     {
         "organization_id": organization["id"],

@@ -92,6 +92,38 @@ export interface Person {
   membership_title: string | null;
 }
 
+export interface GuardianLinkCreate {
+  organization_id: UUID;
+  guardian_person_id?: UUID | null;
+  guardian_email?: string | null;
+  guardian_phone?: string | null;
+  guardian_display_name?: string | null;
+  relationship_kind?: string;
+  relationship?: string | null;
+  can_sign_consent?: boolean;
+  can_view_medical?: boolean;
+  emergency_contact?: boolean;
+  can_pick_up?: boolean;
+  is_primary?: boolean;
+  notes?: string | null;
+}
+
+export interface GuardianRelationship {
+  id: UUID;
+  organization_id: UUID;
+  athlete_person_id: UUID;
+  guardian_person_id: UUID;
+  guardian_display_name: string;
+  relationship_kind: string;
+  relationship: string;
+  can_sign_consent: boolean;
+  can_view_medical: boolean;
+  emergency_contact: boolean;
+  can_pick_up: boolean;
+  is_primary: boolean;
+  notes: string | null;
+}
+
 export interface Event {
   id: UUID;
   organization_id: UUID;
@@ -212,6 +244,14 @@ export class AfroLeteClient {
   readonly people = {
     create: (payload: PersonCreate): Promise<Person> =>
       this.request<Person>("/people", {
+        method: "POST",
+        body: payload,
+      }),
+    linkGuardian: (
+      athletePersonId: UUID,
+      payload: GuardianLinkCreate,
+    ): Promise<GuardianRelationship> =>
+      this.request<GuardianRelationship>(`/people/${athletePersonId}/guardians`, {
         method: "POST",
         body: payload,
       }),
