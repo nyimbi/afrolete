@@ -66,6 +66,19 @@ AfroLete is designed around these goals:
    tools, school systems, finance systems, analytics tools, and future mobile
    apps.
 
+## Docker Demo
+
+Run a local demo stack with PostgreSQL, FastAPI, Next.js, and the unified
+due-worker:
+
+```bash
+docker compose up --build
+```
+
+Then open http://localhost:3000. The backend runs migrations and seeds a local
+Demo City FC tenant for the default local identity `owner@example.com`. See
+[docs/demo.md](docs/demo.md) for reset, health-check, and seeded-data details.
+
 ## Product Scope
 
 The retained product documents describe a broad eventual platform. Important

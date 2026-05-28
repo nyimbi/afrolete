@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
+from app.db.session import SessionLocal
+from app.services.authz.bootstrap import bootstrap_local_authorization
+from app.services.authz.service import get_configured_authorization_service
 
 
 def create_app() -> FastAPI:
@@ -23,6 +26,14 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router, prefix=settings.api_prefix)
+
+    @app.on_event("startup")
+    async def startup_local_authorization() -> None:
+        if settings.authz_mode != "memory" or not settings.seed_demo:
+            return
+        async with SessionLocal() as db:
+            await bootstrap_local_authorization(db, get_configured_authorization_service())
+
     return app
 
 

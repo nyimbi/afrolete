@@ -1,0 +1,50 @@
+# Docker Demo
+
+AfroLete can run as a local demo stack with PostgreSQL, FastAPI, Next.js, and
+the unified due-worker.
+
+## Start
+
+```bash
+docker compose up --build
+```
+
+Open:
+
+- Frontend: http://localhost:3000
+- Backend health: http://localhost:8000/api/v1/healthz
+- OpenAPI: http://localhost:8000/api/v1/openapi.json
+
+The backend runs Alembic migrations and seeds a local demo tenant on startup
+when `AFROLETE_SEED_DEMO=1`.
+
+## Demo Identity
+
+The frontend defaults to local identity headers:
+
+- Subject: `kc-owner-1`
+- Email: `owner@example.com`
+- Name: `Owner Example`
+
+The demo seed creates the matching user, person, owner membership, Demo City FC
+tenant, team, minor athlete, guardian, travel consent request, travel plan,
+performance observations, inbox item, notification preference, and AI agent
+task.
+
+## Worker
+
+The `due-worker` container runs the unified worker once per minute with local
+record-only delivery. It exercises scheduler-ready behavior such as
+communication digests, travel consent reminders, performance forecast drift
+alerts, performance review escalations, injury-risk scans, achievement scans,
+developer webhook retries, agent tasks, and wearable retry scans when matching
+data exists.
+
+## Reset
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+This drops the local PostgreSQL volume and recreates the seeded demo tenant.

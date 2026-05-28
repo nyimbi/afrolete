@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     auth_mode: Literal["local", "keycloak"] = "local"
     authz_mode: Literal["memory", "spicedb"] = "memory"
     database_url: str = "postgresql+asyncpg:///afrolete"
+    seed_demo: bool = False
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )

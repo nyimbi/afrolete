@@ -1,0 +1,16 @@
+.git
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.DS_Store
+**/__pycache__
+**/*.pyc
+backend/.venv
+backend/.env
+backend/data
+frontend/.next
+frontend/node_modules
+frontend/.env.local
+frontend/tsconfig.tsbuildinfo
+packages/**/.venv
+packages/**/node_modules
