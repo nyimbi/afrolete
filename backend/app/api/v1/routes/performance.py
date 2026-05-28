@@ -24,6 +24,7 @@ from app.schemas.performance import (
     PerformanceIngestionCreate,
     PerformanceIngestionRead,
     PerformanceForecastScenarioRead,
+    PerformanceForecastWhatIfRead,
     PerformanceMetricBenchmarkRead,
     PerformanceMetricTrendRead,
     PerformanceMetricTrendSeriesRead,
@@ -53,6 +54,7 @@ from app.services.performance import (
     list_my_player_performance,
     list_observations,
     performance_forecast_scenarios,
+    performance_forecast_what_if_scenarios,
     performance_metric_benchmarks,
     performance_cohort_comparisons,
     performance_metric_trend_series,
@@ -645,6 +647,33 @@ async def athlete_performance_forecast_scenarios_route(
             organization_id,
             athlete_profile_id,
             sport=sport,
+        )
+    ]
+
+
+@router.get(
+    "/athletes/{athlete_profile_id}/forecast-scenarios/what-if",
+    response_model=list[PerformanceForecastWhatIfRead],
+)
+async def athlete_performance_forecast_what_if_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    sport: str | None = Query(default=None),
+    training_adjustment_percent: float = Query(default=0.0, ge=-50, le=50),
+    readiness_score: int = Query(default=70, ge=0, le=100),
+    horizon: int = Query(default=4, ge=1, le=8),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceForecastWhatIfRead]:
+    return [
+        PerformanceForecastWhatIfRead(**scenario)
+        for scenario in await performance_forecast_what_if_scenarios(
+            db,
+            organization_id,
+            athlete_profile_id,
+            sport=sport,
+            training_adjustment_percent=training_adjustment_percent,
+            readiness_score=readiness_score,
+            horizon=horizon,
         )
     ]
 

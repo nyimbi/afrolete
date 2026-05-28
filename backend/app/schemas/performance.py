@@ -326,6 +326,13 @@ class PerformanceForecastScenarioRead(BaseModel):
     recommendation: str
 
 
+class PerformanceForecastWhatIfRead(PerformanceForecastScenarioRead):
+    scenario_label: str
+    training_adjustment_percent: float
+    readiness_score: int
+    horizon: int
+
+
 class PerformanceGoalCreate(BaseModel):
     organization_id: UUID
     metric_definition_id: UUID

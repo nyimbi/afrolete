@@ -204,6 +204,7 @@ import type {
   PerformanceAssessmentReviewEscalationRunRead,
   PerformanceCohortComparisonRead,
   PerformanceForecastScenarioRead,
+  PerformanceForecastWhatIfRead,
   PerformanceGoalRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
@@ -935,6 +936,65 @@ function PerformanceForecastScenarioDashboard({ scenarios }: { scenarios: Perfor
   );
 }
 
+function PerformanceWhatIfScenarioDashboard({ scenarios }: { scenarios: PerformanceForecastWhatIfRead[] }) {
+  const visibleScenarios = scenarios.filter((scenario) => scenario.sample_size > 0).slice(0, 4);
+  const maxProjection = Math.max(
+    1,
+    ...visibleScenarios.flatMap((scenario) => [
+      Math.abs(scenario.latest_value ?? 0),
+      Math.abs(scenario.forecast_next_value ?? 0),
+      ...scenario.projected_points.map((point) => Math.abs(point))
+    ])
+  );
+
+  return (
+    <div className="trend-series-grid">
+      {visibleScenarios.map((scenario, index) => (
+        <article className="task-card trend-series-card" key={`${scenario.metric_definition_id}-what-if-scenario`}>
+          <div>
+            <strong>{scenario.metric_name} · {scenario.scenario_label}</strong>
+            <span>
+              {scenario.risk_level.replaceAll("_", " ")} · horizon {scenario.horizon} ·{" "}
+              {Math.round(scenario.confidence * 100)}% confidence
+            </span>
+          </div>
+          <div className="spark-bars" aria-label={`${scenario.metric_name} what-if forecast`}>
+            {scenario.projected_points.map((point, pointIndex) => (
+              <i
+                key={`${scenario.metric_definition_id}-what-if-${pointIndex}`}
+                title={`What-if ${pointIndex + 1} · ${performanceValueLabel(point, scenario.unit)}`}
+                style={{
+                  height: `${Math.max(8, Math.min(100, (Math.abs(point) / maxProjection) * 100))}%`,
+                  backgroundColor: chartColors[(index + pointIndex + 2) % chartColors.length]
+                }}
+              />
+            ))}
+          </div>
+          <small>
+            Next {performanceValueLabel(scenario.forecast_next_value, scenario.unit)} · range{" "}
+            {performanceValueLabel(scenario.forecast_low, scenario.unit)} to {performanceValueLabel(scenario.forecast_high, scenario.unit)}
+          </small>
+          <small>{scenario.recommendation}</small>
+        </article>
+      ))}
+      {visibleScenarios.length === 0 ? (
+        <article className="task-card trend-series-card">
+          <div>
+            <strong>What-if scenarios</strong>
+            <span>Coach adjustments will appear once accepted observations exist.</span>
+          </div>
+          <div className="spark-bars empty">
+            <i />
+            <i />
+            <i />
+          </div>
+          <small>No what-if forecast can be calculated yet.</small>
+        </article>
+      ) : null}
+    </div>
+  );
+}
+
 function downloadTextArtifact(content: string, contentType: string, filename: string) {
   const blob = new Blob([content], { type: contentType });
   const url = window.URL.createObjectURL(blob);
@@ -1077,6 +1137,9 @@ export default function HomePage() {
   const [performanceTrends, setPerformanceTrends] = useState<PerformanceMetricTrendRead[]>([]);
   const [performanceTrendSeries, setPerformanceTrendSeries] = useState<PerformanceMetricTrendSeriesRead[]>([]);
   const [performanceForecastScenarios, setPerformanceForecastScenarios] = useState<PerformanceForecastScenarioRead[]>([]);
+  const [performanceWhatIfScenarios, setPerformanceWhatIfScenarios] = useState<PerformanceForecastWhatIfRead[]>([]);
+  const [performanceWhatIfAdjustment, setPerformanceWhatIfAdjustment] = useState(15);
+  const [performanceWhatIfReadiness, setPerformanceWhatIfReadiness] = useState(70);
   const [performanceGoals, setPerformanceGoals] = useState<PerformanceGoalRead[]>([]);
   const [performanceAwards, setPerformanceAwards] = useState<PerformanceAchievementAwardRead[]>([]);
   const [performanceAchievementRun, setPerformanceAchievementRun] =
@@ -2123,6 +2186,7 @@ export default function HomePage() {
         trendData,
         trendSeriesData,
         forecastScenarioData,
+        whatIfScenarioData,
         goalData,
         awardData
       ] = await Promise.all([
@@ -2150,6 +2214,9 @@ export default function HomePage() {
         apiRequest<PerformanceForecastScenarioRead[]>(
           `/performance/athletes/${athleteProfileId}/forecast-scenarios?organization_id=${organizationId}`
         ),
+        apiRequest<PerformanceForecastWhatIfRead[]>(
+          `/performance/athletes/${athleteProfileId}/forecast-scenarios/what-if?organization_id=${organizationId}&training_adjustment_percent=${performanceWhatIfAdjustment}&readiness_score=${performanceWhatIfReadiness}`
+        ),
         apiRequest<PerformanceGoalRead[]>(
           `/performance/athletes/${athleteProfileId}/goals?organization_id=${organizationId}`
         ),
@@ -2165,6 +2232,7 @@ export default function HomePage() {
       setPerformanceTrends(trendData);
       setPerformanceTrendSeries(trendSeriesData);
       setPerformanceForecastScenarios(forecastScenarioData);
+      setPerformanceWhatIfScenarios(whatIfScenarioData);
       setPerformanceGoals(goalData);
       setPerformanceAwards(awardData);
       setSelectedObservationId((current) =>
@@ -2173,7 +2241,7 @@ export default function HomePage() {
           : observationData[0]?.id ?? ""
       );
     },
-    [performanceBenchmarkScope]
+    [performanceBenchmarkScope, performanceWhatIfAdjustment, performanceWhatIfReadiness]
   );
 
   const loadTraining = useCallback(async (organizationId: string, teamId?: string) => {
@@ -2942,6 +3010,7 @@ export default function HomePage() {
       setPerformanceTrends([]);
       setPerformanceTrendSeries([]);
       setPerformanceForecastScenarios([]);
+      setPerformanceWhatIfScenarios([]);
       setPerformanceGoals([]);
       setPerformanceAwards([]);
       setPerformanceAchievementRun(null);
@@ -13228,6 +13297,26 @@ export default function HomePage() {
                   <option value="region">Country/region</option>
                 </select>
               </label>
+              <label>
+                What-if load
+                <input
+                  type="number"
+                  min="-50"
+                  max="50"
+                  value={performanceWhatIfAdjustment}
+                  onChange={(event) => setPerformanceWhatIfAdjustment(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                Readiness
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={performanceWhatIfReadiness}
+                  onChange={(event) => setPerformanceWhatIfReadiness(Number(event.target.value))}
+                />
+              </label>
             </div>
             <PerformanceVisualDashboard
               summary={performanceSummary}
@@ -13236,6 +13325,7 @@ export default function HomePage() {
               benchmarks={performanceBenchmarks}
             />
             <PerformanceForecastScenarioDashboard scenarios={performanceForecastScenarios} />
+            <PerformanceWhatIfScenarioDashboard scenarios={performanceWhatIfScenarios} />
             <PerformanceCohortComparisonDashboard comparisons={performanceCohortComparisons} />
             <PerformanceTrendSeriesDashboard series={performanceTrendSeries} />
             <div className="form-grid">

@@ -1024,6 +1024,77 @@ async def performance_forecast_scenarios(
     return scenarios
 
 
+async def performance_forecast_what_if_scenarios(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    sport: str | None = None,
+    training_adjustment_percent: float = 0.0,
+    readiness_score: int = 70,
+    horizon: int = 4,
+) -> list[dict[str, object]]:
+    await get_athlete_profile(db, athlete_profile_id, organization_id)
+    metrics = await list_metric_definitions(db, organization_id, sport=sport)
+    metric_by_id = {metric.id: metric for metric in metrics}
+    if not metric_by_id:
+        return []
+
+    observations = list(
+        (
+            await db.scalars(
+                select(AthletePerformanceObservation)
+                .where(AthletePerformanceObservation.organization_id == organization_id)
+                .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+                .where(AthletePerformanceObservation.metric_definition_id.in_(list(metric_by_id)))
+                .where(
+                    AthletePerformanceObservation.verification_status
+                    != MetricVerificationStatus.REJECTED
+                )
+                .order_by(
+                    AthletePerformanceObservation.metric_definition_id,
+                    AthletePerformanceObservation.observed_at,
+                )
+            )
+        ).all()
+    )
+    observations_by_metric: dict[UUID, list[AthletePerformanceObservation]] = {}
+    for observation in observations:
+        observations_by_metric.setdefault(observation.metric_definition_id, []).append(observation)
+
+    scenarios: list[dict[str, object]] = []
+    for metric in metrics:
+        metric_observations = observations_by_metric.get(metric.id, [])
+        values = [observation.value for observation in metric_observations]
+        trend = metric_trend_summary(values, metric.higher_is_better, metric.name, metric.unit)
+        scenarios.append(
+            {
+                "metric_definition_id": metric.id,
+                "metric_code": metric.code,
+                "metric_name": metric.name,
+                "sport": metric.sport,
+                "category": metric.category,
+                "unit": metric.unit,
+                "higher_is_better": metric.higher_is_better,
+                **forecast_scenario_summary(
+                    values,
+                    metric.higher_is_better,
+                    metric.name,
+                    metric.unit,
+                    trend,
+                    training_adjustment_percent=training_adjustment_percent,
+                    readiness_score=readiness_score,
+                    horizon=horizon,
+                    model_policy="deterministic_what_if_forecast_v1",
+                ),
+                "scenario_label": what_if_scenario_label(training_adjustment_percent, readiness_score),
+                "training_adjustment_percent": round(training_adjustment_percent, 1),
+                "readiness_score": readiness_score,
+                "horizon": horizon,
+            }
+        )
+    return scenarios
+
+
 async def create_performance_goal(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1828,29 +1899,39 @@ def forecast_scenario_summary(
     metric_name: str,
     unit: str | None,
     trend: dict[str, object],
+    training_adjustment_percent: float = 0.0,
+    readiness_score: int | None = None,
+    horizon: int = 4,
+    model_policy: str = "deterministic_forecast_v1",
 ) -> dict[str, object]:
     sample_size = len(values)
-    forecast = trend["forecast_next_value"]
+    forecast = forecast_next_value(values, training_adjustment_percent, readiness_score, higher_is_better)
     consistency = trend["consistency_index"]
     direction = str(trend["trend_direction"])
-    projected_points = projected_forecast_points(values, horizon=4)
+    projected_points = projected_forecast_points(
+        values,
+        horizon=horizon,
+        training_adjustment_percent=training_adjustment_percent,
+        readiness_score=readiness_score,
+        higher_is_better=higher_is_better,
+    )
     band = forecast_band(values)
     forecast_low = round(float(forecast) - band, 2) if isinstance(forecast, int | float) else None
     forecast_high = round(float(forecast) + band, 2) if isinstance(forecast, int | float) else None
     confidence = forecast_confidence(sample_size, consistency if isinstance(consistency, int | float) else None)
     data_quality = forecast_data_quality(sample_size, confidence)
-    risk_level = forecast_risk_level(direction, confidence, data_quality)
+    risk_level = forecast_risk_level(direction, confidence, data_quality, readiness_score)
     return {
         "sample_size": sample_size,
         "latest_value": trend["latest_value"],
-        "forecast_next_value": forecast,
+        "forecast_next_value": round(forecast, 2) if forecast is not None else None,
         "forecast_low": forecast_low,
         "forecast_high": forecast_high,
         "confidence": confidence,
         "data_quality": data_quality,
         "risk_level": risk_level,
         "trend_direction": direction,
-        "model_policy": "deterministic_forecast_v1",
+        "model_policy": model_policy,
         "projected_points": projected_points,
         "recommendation": forecast_recommendation(
             metric_name,
@@ -1863,20 +1944,59 @@ def forecast_scenario_summary(
             forecast,
             forecast_low,
             forecast_high,
+            training_adjustment_percent,
+            readiness_score,
         ),
     }
 
 
-def projected_forecast_points(values: list[float], horizon: int) -> list[float]:
+def projected_forecast_points(
+    values: list[float],
+    horizon: int,
+    training_adjustment_percent: float = 0.0,
+    readiness_score: int | None = None,
+    higher_is_better: bool = True,
+) -> list[float]:
     if not values:
         return []
-    delta = average_observation_delta(values)
+    delta = adjusted_observation_delta(values, training_adjustment_percent, readiness_score, higher_is_better)
     current = values[-1]
     points: list[float] = []
     for _ in range(horizon):
         current += delta
         points.append(round(current, 2))
     return points
+
+
+def adjusted_observation_delta(
+    values: list[float],
+    training_adjustment_percent: float,
+    readiness_score: int | None,
+    higher_is_better: bool,
+) -> float:
+    if not values:
+        return 0.0
+    baseline = average_observation_delta(values)
+    if training_adjustment_percent == 0:
+        return baseline
+    latest_magnitude = abs(values[-1]) or 1.0
+    baseline_magnitude = max(abs(baseline), latest_magnitude * 0.01)
+    readiness_multiplier = readiness_adjustment_multiplier(readiness_score)
+    adjustment = baseline_magnitude * (training_adjustment_percent / 100.0) * readiness_multiplier
+    direction = 1 if higher_is_better else -1
+    return baseline + (direction * adjustment)
+
+
+def readiness_adjustment_multiplier(readiness_score: int | None) -> float:
+    if readiness_score is None:
+        return 1.0
+    if readiness_score < 45:
+        return 0.35
+    if readiness_score < 65:
+        return 0.65
+    if readiness_score > 85:
+        return 1.1
+    return 1.0
 
 
 def average_observation_delta(values: list[float]) -> float:
@@ -1914,11 +2034,20 @@ def forecast_data_quality(sample_size: int, confidence: float) -> str:
     return "usable_history"
 
 
-def forecast_risk_level(direction: str, confidence: float, data_quality: str) -> str:
+def forecast_risk_level(
+    direction: str,
+    confidence: float,
+    data_quality: str,
+    readiness_score: int | None = None,
+) -> str:
     if data_quality == "no_data":
         return "no_data"
     if data_quality == "thin_history":
         return "needs_more_data"
+    if readiness_score is not None and readiness_score < 45:
+        return "recovery"
+    if readiness_score is not None and readiness_score < 60:
+        return "watch"
     if direction == "declining" or confidence < 0.5:
         return "watch"
     if direction == "improving":
@@ -1937,6 +2066,8 @@ def forecast_recommendation(
     forecast: object,
     forecast_low: float | None,
     forecast_high: float | None,
+    training_adjustment_percent: float = 0.0,
+    readiness_score: int | None = None,
 ) -> str:
     if data_quality == "no_data":
         return f"Record accepted {metric_name} observations before producing a forecast scenario."
@@ -1953,15 +2084,22 @@ def forecast_recommendation(
             f"{metric_name} forecast is based on a thin history; collect another accepted data point "
             f"before changing the plan. Latest {latest_text}, next scenario {forecast_text}."
         )
-    if risk_level == "watch":
+    if risk_level == "recovery":
         return (
-            f"{metric_name} is a watch item with {band_text}. Review load, recovery, and technique "
+            f"{metric_name} what-if scenario is recovery constrained at readiness {readiness_score}. "
+            f"Keep intensity low until readiness improves; latest {latest_text}, next scenario {forecast_text}."
+        )
+    if risk_level == "watch":
+        adjustment_text = f" under {training_adjustment_percent:g}% training adjustment" if training_adjustment_percent else ""
+        return (
+            f"{metric_name} is a watch item{adjustment_text} with {band_text}. Review load, recovery, and technique "
             f"before chasing the next scenario from latest {latest_text}."
         )
     if risk_level == "opportunity":
         action = "raise the target" if higher_is_better else "tighten the target"
+        adjustment_text = f" with a {training_adjustment_percent:g}% training adjustment" if training_adjustment_percent else ""
         return (
-            f"{metric_name} has an improving scenario from latest {latest_text} to {forecast_text}; "
+            f"{metric_name} has an improving scenario{adjustment_text} from latest {latest_text} to {forecast_text}; "
             f"{action} while preserving the current training stimulus."
         )
     if direction == "stable":
@@ -1973,6 +2111,16 @@ def forecast_recommendation(
         f"Keep collecting {metric_name} data; current deterministic scenario projects {forecast_text} "
         f"from latest {latest_text}."
     )
+
+
+def what_if_scenario_label(training_adjustment_percent: float, readiness_score: int) -> str:
+    if training_adjustment_percent > 0:
+        adjustment = f"+{training_adjustment_percent:g}% load"
+    elif training_adjustment_percent < 0:
+        adjustment = f"{training_adjustment_percent:g}% load"
+    else:
+        adjustment = "baseline load"
+    return f"{adjustment}, readiness {readiness_score}"
 
 
 def directional_change(
@@ -1996,11 +2144,20 @@ def consistency_index(values: list[float]) -> float:
     return round(max(0.0, min(100.0, 100.0 - variation * 100.0)), 1)
 
 
-def forecast_next_value(values: list[float]) -> float | None:
+def forecast_next_value(
+    values: list[float],
+    training_adjustment_percent: float = 0.0,
+    readiness_score: int | None = None,
+    higher_is_better: bool = True,
+) -> float | None:
     if len(values) < 2:
         return values[-1] if values else None
-    deltas = [current - previous for previous, current in zip(values[:-1], values[1:], strict=True)]
-    return values[-1] + sum(deltas) / len(deltas)
+    return values[-1] + adjusted_observation_delta(
+        values,
+        training_adjustment_percent,
+        readiness_score,
+        higher_is_better,
+    )
 
 
 def normalized_trend_value(value: float, values: list[float], higher_is_better: bool) -> float:

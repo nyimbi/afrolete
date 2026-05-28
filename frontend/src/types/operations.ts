@@ -3341,6 +3341,13 @@ export type PerformanceForecastScenarioRead = {
   recommendation: string;
 };
 
+export type PerformanceForecastWhatIfRead = PerformanceForecastScenarioRead & {
+  scenario_label: string;
+  training_adjustment_percent: number;
+  readiness_score: number;
+  horizon: number;
+};
+
 export type PerformanceGoalRead = {
   id: UUID;
   organization_id: UUID;

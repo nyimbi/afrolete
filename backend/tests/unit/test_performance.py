@@ -460,6 +460,59 @@ def test_performance_forecast_scenarios_project_training_runway(client, identity
     assert "improving scenario" in scenario["recommendation"]
 
 
+def test_performance_what_if_forecast_adjusts_training_runway(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "sprint_time",
+            "name": "Sprint Time",
+            "category": "physical",
+            "unit": "seconds",
+            "higher_is_better": False,
+        },
+    ).json()
+    for value, observed_at in [
+        (13.0, "2026-01-01T10:00:00Z"),
+        (12.5, "2026-01-08T10:00:00Z"),
+        (12.0, "2026-01-15T10:00:00Z"),
+    ]:
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": metric["id"],
+                "value": value,
+                "observed_at": observed_at,
+            },
+        )
+        assert response.status_code == 201
+
+    response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/forecast-scenarios/what-if"
+        f"?organization_id={organization['id']}&training_adjustment_percent=20&readiness_score=70&horizon=3",
+        headers=identity_headers,
+    )
+
+    assert response.status_code == 200
+    scenario = response.json()[0]
+    assert scenario["scenario_label"] == "+20% load, readiness 70"
+    assert scenario["model_policy"] == "deterministic_what_if_forecast_v1"
+    assert scenario["training_adjustment_percent"] == 20.0
+    assert scenario["readiness_score"] == 70
+    assert scenario["horizon"] == 3
+    assert scenario["forecast_next_value"] == 11.4
+    assert scenario["forecast_low"] == 10.9
+    assert scenario["forecast_high"] == 11.9
+    assert scenario["projected_points"] == [11.4, 10.8, 10.2]
+    assert scenario["risk_level"] == "opportunity"
+    assert "20% training adjustment" in scenario["recommendation"]
+
+
 def test_player_can_submit_pending_self_assessment(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     player_headers = {
