@@ -46,6 +46,7 @@ from app.models.event import (
     IncidentReportPackage,
     SafeguardingEvidencePolicyRule,
     SafeguardingIncident,
+    SafeguardingIncidentAccessGrant,
 )
 from app.models.identity import AppUser, Person
 from app.models.organization import Organization
@@ -77,6 +78,9 @@ from app.schemas.safeguarding import (
     SafeguardingEvidencePolicyRuleCreate,
     SafeguardingEvidencePolicyRuleRead,
     SafeguardingEvidencePolicyRuleUpdate,
+    SafeguardingIncidentAccessGrantCreate,
+    SafeguardingIncidentAccessGrantRead,
+    SafeguardingIncidentAccessGrantRevoke,
     SafeguardingIncidentAccessControlRead,
     SafeguardingIncidentEvidenceApprovalPolicyRead,
     SafeguardingIncidentEvidenceReviewActionCreate,
@@ -448,6 +452,16 @@ async def sync_safeguarding_incident_access_controls(
                 await touch_person_and_users("medical_viewer", guardian.guardian_person_id)
     if incident.regulatory_report_required:
         await touch_person_and_users("regulator", identity.person_id)
+    access_grants = (
+        await db.scalars(
+            select(SafeguardingIncidentAccessGrant).where(
+                SafeguardingIncidentAccessGrant.incident_id == incident.id,
+                SafeguardingIncidentAccessGrant.active.is_(True),
+            )
+        )
+    ).all()
+    for grant in access_grants:
+        await touch_person_and_users(grant.relation, grant.person_id)
 
     can_manage_case = await authz.check(
         resource_type="safeguarding_incident",
@@ -485,6 +499,143 @@ async def sync_safeguarding_incident_access_controls_by_id(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
     await ensure_manage_safeguarding_incident(authz, incident, identity)
     return await sync_safeguarding_incident_access_controls(db, identity, incident, authz)
+
+
+async def create_safeguarding_incident_access_grant(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident_id: UUID,
+    payload: SafeguardingIncidentAccessGrantCreate,
+    authz: AuthorizationService,
+) -> SafeguardingIncidentAccessGrantRead:
+    incident = await db.get(SafeguardingIncident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    await ensure_manage_safeguarding_incident(authz, incident, identity)
+    await validate_person_in_organization(db, incident.organization_id, payload.person_id)
+    grant = SafeguardingIncidentAccessGrant(
+        organization_id=incident.organization_id,
+        incident_id=incident.id,
+        person_id=payload.person_id,
+        relation=payload.relation,
+        active=True,
+        granted_by_person_id=identity.person_id,
+        granted_reason=payload.reason,
+    )
+    db.add(grant)
+    await db.commit()
+    await db.refresh(grant)
+    await apply_safeguarding_incident_access_grant(db, authz, grant)
+    return safeguarding_incident_access_grant_read(grant)
+
+
+async def list_safeguarding_incident_access_grants(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident_id: UUID,
+    authz: AuthorizationService,
+    active: bool | None = None,
+) -> list[SafeguardingIncidentAccessGrantRead]:
+    incident = await db.get(SafeguardingIncident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    await ensure_manage_safeguarding_incident(authz, incident, identity)
+    statement = select(SafeguardingIncidentAccessGrant).where(
+        SafeguardingIncidentAccessGrant.incident_id == incident.id
+    )
+    if active is not None:
+        statement = statement.where(SafeguardingIncidentAccessGrant.active.is_(active))
+    grants = (
+        await db.scalars(
+            statement.order_by(
+                SafeguardingIncidentAccessGrant.active.desc(),
+                SafeguardingIncidentAccessGrant.created_at.desc(),
+            )
+        )
+    ).all()
+    return [safeguarding_incident_access_grant_read(grant) for grant in grants]
+
+
+async def revoke_safeguarding_incident_access_grant(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident_id: UUID,
+    grant_id: UUID,
+    payload: SafeguardingIncidentAccessGrantRevoke,
+    authz: AuthorizationService,
+) -> SafeguardingIncidentAccessGrantRead:
+    incident = await db.get(SafeguardingIncident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    grant = await db.get(SafeguardingIncidentAccessGrant, grant_id)
+    if grant is None or grant.incident_id != incident.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Access grant not found")
+    await ensure_manage_safeguarding_incident(authz, incident, identity)
+    if grant.active:
+        grant.active = False
+        grant.revoked_by_person_id = identity.person_id
+        grant.revoked_reason = payload.reason
+        grant.revoked_at = utc_now()
+        await db.commit()
+        await db.refresh(grant)
+        await delete_safeguarding_incident_access_grant(db, authz, grant)
+    return safeguarding_incident_access_grant_read(grant)
+
+
+async def apply_safeguarding_incident_access_grant(
+    db: AsyncSession,
+    authz: AuthorizationService,
+    grant: SafeguardingIncidentAccessGrant,
+) -> None:
+    for relationship in await safeguarding_incident_person_relationships(
+        db,
+        grant.incident_id,
+        grant.relation,
+        grant.person_id,
+    ):
+        await authz.touch(relationship)
+
+
+async def delete_safeguarding_incident_access_grant(
+    db: AsyncSession,
+    authz: AuthorizationService,
+    grant: SafeguardingIncidentAccessGrant,
+) -> None:
+    for relationship in await safeguarding_incident_person_relationships(
+        db,
+        grant.incident_id,
+        grant.relation,
+        grant.person_id,
+    ):
+        await authz.delete(relationship)
+
+
+async def safeguarding_incident_person_relationships(
+    db: AsyncSession,
+    incident_id: UUID,
+    relation: str,
+    person_id: UUID,
+) -> list[Relationship]:
+    relationships = [
+        Relationship(
+            resource_type="safeguarding_incident",
+            resource_id=str(incident_id),
+            relation=relation,
+            subject_type="person",
+            subject_id=str(person_id),
+        )
+    ]
+    for user_id in await app_user_ids_for_person(db, person_id):
+        relationships.append(
+            Relationship(
+                resource_type="safeguarding_incident",
+                resource_id=str(incident_id),
+                relation=relation,
+                subject_type="user",
+                subject_id=str(user_id),
+            )
+        )
+    return relationships
 
 
 async def app_user_ids_for_person(db: AsyncSession, person_id: UUID) -> list[UUID]:
@@ -1513,6 +1664,26 @@ def safeguarding_evidence_policy_rule_read(
         rationale=rule.rationale,
         created_at=rule.created_at,
         updated_at=rule.updated_at,
+    )
+
+
+def safeguarding_incident_access_grant_read(
+    grant: SafeguardingIncidentAccessGrant,
+) -> SafeguardingIncidentAccessGrantRead:
+    return SafeguardingIncidentAccessGrantRead(
+        id=grant.id,
+        organization_id=grant.organization_id,
+        incident_id=grant.incident_id,
+        person_id=grant.person_id,
+        relation=grant.relation,
+        active=grant.active,
+        granted_by_person_id=grant.granted_by_person_id,
+        revoked_by_person_id=grant.revoked_by_person_id,
+        granted_reason=grant.granted_reason,
+        revoked_reason=grant.revoked_reason,
+        revoked_at=grant.revoked_at,
+        created_at=grant.created_at,
+        updated_at=grant.updated_at,
     )
 
 

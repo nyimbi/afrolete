@@ -181,6 +181,7 @@ import type {
   BackgroundCheckStatus,
   GuardianRelationshipRead,
   SafeguardingEvidencePolicyRuleRead,
+  SafeguardingIncidentAccessGrantRead,
   SafeguardingIncidentAccessControlRead,
   SafeguardingIncidentEvidenceApprovalPolicyRead,
   SafeguardingIncidentEvidenceReviewActionRead,
@@ -1589,6 +1590,8 @@ export default function HomePage() {
     useState<SafeguardingIncidentEvidenceApprovalPolicyRead | null>(null);
   const [safeguardingEvidencePolicyRules, setSafeguardingEvidencePolicyRules] =
     useState<SafeguardingEvidencePolicyRuleRead[]>([]);
+  const [incidentAccessGrants, setIncidentAccessGrants] =
+    useState<SafeguardingIncidentAccessGrantRead[]>([]);
   const [incidentAccessControlSync, setIncidentAccessControlSync] =
     useState<SafeguardingIncidentAccessControlRead | null>(null);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
@@ -3197,6 +3200,7 @@ export default function HomePage() {
       setIncidentEvidenceReviewAction(null);
       setIncidentEvidenceApprovalPolicy(null);
       setSafeguardingEvidencePolicyRules([]);
+      setIncidentAccessGrants([]);
       setIncidentAccessControlSync(null);
       setBackgroundChecks([]);
       setBackgroundCheckProviderSubmission(null);
@@ -5920,6 +5924,59 @@ export default function HomePage() {
           `${incident.title} access controls synced (${sync.relationship_count} relationships)`,
           sync.can_manage_case && sync.can_review_evidence ? "good" : "neutral"
         );
+      }
+    );
+  };
+
+  const grantIncidentEvidenceReviewer = (incident: SafeguardingIncidentRead) => {
+    if (!selectedAthleteId) {
+      addLog("Select a person from the roster first", "bad");
+      return;
+    }
+    runAction(
+      `incident-access-grant-${incident.id}`,
+      () =>
+        apiRequest<SafeguardingIncidentAccessGrantRead>(
+          `/safeguarding/incidents/${incident.id}/access-grants`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              person_id: selectedAthleteId,
+              relation: "evidence_reviewer",
+              reason: `Console-granted evidence review access for ${incident.title}.`
+            }
+          }
+        ),
+      async (grant) => {
+        setIncidentAccessGrants((current) => [
+          grant,
+          ...current.filter((item) => item.id !== grant.id)
+        ]);
+        setIncidentAccessControlSync(null);
+        addLog(`${selectedAthlete?.name ?? "Selected person"} can review ${incident.title} evidence`, "good");
+      }
+    );
+  };
+
+  const revokeIncidentAccessGrant = (grant: SafeguardingIncidentAccessGrantRead) => {
+    runAction(
+      `incident-access-revoke-${grant.id}`,
+      () =>
+        apiRequest<SafeguardingIncidentAccessGrantRead>(
+          `/safeguarding/incidents/${grant.incident_id}/access-grants/${grant.id}/revoke`,
+          {
+            method: "POST",
+            identity,
+            body: { reason: "Console revocation after temporary review window." }
+          }
+        ),
+      (revoked) => {
+        setIncidentAccessGrants((current) => [
+          revoked,
+          ...current.filter((item) => item.id !== revoked.id)
+        ]);
+        addLog(`${revoked.relation} access revoked`, "neutral");
       }
     );
   };
@@ -16861,6 +16918,7 @@ export default function HomePage() {
                   <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "escalate")}>Escalate</button>
                   <button type="button" onClick={() => uploadIncidentEvidence(incident)}>Evidence</button>
                   <button type="button" onClick={() => syncIncidentAccessControls(incident)}>Access</button>
+                  <button type="button" onClick={() => grantIncidentEvidenceReviewer(incident)}>Grant review</button>
                   <button type="button" onClick={() => createIncidentReportPackage(incident)}>Package</button>
                   <button type="button" onClick={() => createIncidentInsuranceClaim(incident)}>Claim</button>
                   <button type="button" onClick={() => createIncidentMedicalClearance(incident)}>Clearance</button>
@@ -16888,6 +16946,19 @@ export default function HomePage() {
                 </div>
               </article>
             ) : null}
+            {incidentAccessGrants.slice(0, 4).map((grant) => (
+              <article key={grant.id} className="task-card">
+                <div>
+                  <strong>{grant.relation.replaceAll("_", " ")} access</strong>
+                  <span>{grant.active ? "active" : "revoked"} · incident {grant.incident_id.slice(0, 8)} · person {grant.person_id.slice(0, 8)}</span>
+                  <span>{grant.granted_reason ?? "No grant reason recorded"}</span>
+                  {grant.revoked_reason ? <span>{grant.revoked_reason}</span> : null}
+                </div>
+                {grant.active ? (
+                  <button type="button" onClick={() => revokeIncidentAccessGrant(grant)}>Revoke</button>
+                ) : null}
+              </article>
+            ))}
             {incidentEvidenceUpload ? (
               <article className="task-card">
                 <div>

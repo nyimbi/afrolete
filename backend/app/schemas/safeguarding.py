@@ -518,6 +518,34 @@ class SafeguardingIncidentAccessControlRead(BaseModel):
     synced_at: datetime
 
 
+class SafeguardingIncidentAccessGrantCreate(BaseModel):
+    person_id: UUID
+    relation: str = Field(
+        pattern="^(case_manager|assigned_to|evidence_reviewer|medical_viewer|regulator|guardian|reporter)$"
+    )
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class SafeguardingIncidentAccessGrantRevoke(BaseModel):
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class SafeguardingIncidentAccessGrantRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    incident_id: UUID
+    person_id: UUID
+    relation: str
+    active: bool
+    granted_by_person_id: UUID | None
+    revoked_by_person_id: UUID | None
+    granted_reason: str | None
+    revoked_reason: str | None
+    revoked_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class SafeguardingIncidentRead(BaseModel):
     id: UUID
     organization_id: UUID

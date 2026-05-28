@@ -424,11 +424,99 @@ def test_incident_access_controls_sync_case_relationships(client, identity_heade
     assert any(f"#medical_viewer@person:{guardian['guardian_person_id']}" in item for item in sync["touched_relationships"])
     assert any("#regulator@person:" in item for item in sync["touched_relationships"])
 
+    reviewer_headers = {
+        "X-Afrolete-Sub": "kc-incident-reviewer",
+        "X-Afrolete-Email": "incident-reviewer@example.com",
+        "X-Afrolete-Name": "Incident Reviewer",
+    }
+    reviewer_member = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "incident-reviewer@example.com",
+            "display_name": "Incident Reviewer",
+            "role": "staff",
+        },
+    ).json()
+    assert client.get("/api/v1/organizations", headers=reviewer_headers).status_code == 200
+    owner_upload_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence",
+        headers=identity_headers,
+        json={
+            "filename": "Grant Evidence.txt",
+            "content_type": "text/plain",
+            "content_base64": base64.b64encode(b"grant evidence").decode(),
+            "evidence_type": "safeguarding_case_note",
+            "review_status": "needs_review",
+        },
+    )
+    assert owner_upload_response.status_code == 200
+    owner_upload = owner_upload_response.json()
+    grant_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/access-grants",
+        headers=identity_headers,
+        json={
+            "person_id": reviewer_member["subject_id"],
+            "relation": "evidence_reviewer",
+            "reason": "Temporary external safeguarding evidence review.",
+        },
+    )
+    assert grant_response.status_code == 201
+    grant = grant_response.json()
+    assert grant["active"] is True
+    assert grant["relation"] == "evidence_reviewer"
+
     authorization_service.relationships = {
         relationship
         for relationship in authorization_service.relationships
         if relationship.resource_type != "organization"
     }
+    reviewer_link_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-link",
+        headers=reviewer_headers,
+        json={
+            "storage_key": owner_upload["storage_key"],
+            "filename": owner_upload["filename"],
+            "content_type": owner_upload["content_type"],
+            "checksum": owner_upload["checksum"],
+            "ttl_seconds": 300,
+        },
+    )
+    assert reviewer_link_response.status_code == 200
+
+    revoke_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/access-grants/{grant['id']}/revoke",
+        headers=identity_headers,
+        json={"reason": "Review window closed."},
+    )
+    assert revoke_response.status_code == 200
+    revoked = revoke_response.json()
+    assert revoked["active"] is False
+    assert revoked["revoked_at"] is not None
+    assert revoked["revoked_reason"] == "Review window closed."
+
+    revoked_link_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-link",
+        headers=reviewer_headers,
+        json={
+            "storage_key": owner_upload["storage_key"],
+            "filename": owner_upload["filename"],
+            "content_type": owner_upload["content_type"],
+            "checksum": owner_upload["checksum"],
+            "ttl_seconds": 300,
+        },
+    )
+    assert revoked_link_response.status_code == 403
+
+    historical_grants_response = client.get(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/access-grants",
+        headers=identity_headers,
+    )
+    assert historical_grants_response.status_code == 200
+    historical_grants = historical_grants_response.json()
+    assert historical_grants[0]["id"] == grant["id"]
+    assert historical_grants[0]["active"] is False
+
     evidence_response = client.post(
         f"/api/v1/safeguarding/incidents/{incident['id']}/evidence",
         headers=identity_headers,

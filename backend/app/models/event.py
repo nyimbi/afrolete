@@ -476,6 +476,21 @@ class SafeguardingEvidencePolicyRule(IdMixin, TimestampMixin, Base):
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class SafeguardingIncidentAccessGrant(IdMixin, TimestampMixin, Base):
+    __tablename__ = "safeguarding_incident_access_grants"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    incident_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("safeguarding_incidents.id"), index=True)
+    person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    relation: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    active: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    granted_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    revoked_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    granted_reason: Mapped[str | None] = mapped_column(Text)
+    revoked_reason: Mapped[str | None] = mapped_column(Text)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class IncidentReportPackage(IdMixin, TimestampMixin, Base):
     __tablename__ = "incident_report_packages"
 

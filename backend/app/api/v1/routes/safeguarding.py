@@ -41,6 +41,9 @@ from app.schemas.safeguarding import (
     SafeguardingEvidencePolicyRuleCreate,
     SafeguardingEvidencePolicyRuleRead,
     SafeguardingEvidencePolicyRuleUpdate,
+    SafeguardingIncidentAccessGrantCreate,
+    SafeguardingIncidentAccessGrantRead,
+    SafeguardingIncidentAccessGrantRevoke,
     SafeguardingIncidentAccessControlRead,
     SafeguardingIncidentEvidenceApprovalPolicyRead,
     SafeguardingIncidentEvidenceReviewActionCreate,
@@ -92,6 +95,7 @@ from app.services.safeguarding import (
     create_incident_medical_clearance,
     create_incident_report_package,
     create_safeguarding_evidence_policy_rule,
+    create_safeguarding_incident_access_grant,
     create_safeguarding_incident,
     ensure_org_manage,
     compliance_summary,
@@ -107,6 +111,7 @@ from app.services.safeguarding import (
     list_incident_medical_clearances,
     list_incident_report_packages,
     list_safeguarding_evidence_policy_rules,
+    list_safeguarding_incident_access_grants,
     list_safeguarding_incident_evidence_review_queue,
     list_safeguarding_incidents,
     list_my_family_consent_requests,
@@ -119,6 +124,7 @@ from app.services.safeguarding import (
     read_signed_incident_report_package_artifact,
     read_signed_safeguarding_incident_evidence,
     review_safeguarding_incident_evidence,
+    revoke_safeguarding_incident_access_grant,
     submit_background_check_to_screening_provider,
     submit_incident_report_package_to_regulator,
     update_background_check,
@@ -456,6 +462,50 @@ async def sync_safeguarding_incident_access_controls_route(
         db,
         identity,
         incident_id,
+        authz,
+    )
+
+
+@router.post("/incidents/{incident_id}/access-grants", response_model=SafeguardingIncidentAccessGrantRead, status_code=201)
+async def create_safeguarding_incident_access_grant_route(
+    incident_id: UUID,
+    payload: SafeguardingIncidentAccessGrantCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentAccessGrantRead:
+    return await create_safeguarding_incident_access_grant(db, identity, incident_id, payload, authz)
+
+
+@router.get("/incidents/{incident_id}/access-grants", response_model=list[SafeguardingIncidentAccessGrantRead])
+async def list_safeguarding_incident_access_grants_route(
+    incident_id: UUID,
+    active: bool | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[SafeguardingIncidentAccessGrantRead]:
+    return await list_safeguarding_incident_access_grants(db, identity, incident_id, authz, active=active)
+
+
+@router.post(
+    "/incidents/{incident_id}/access-grants/{grant_id}/revoke",
+    response_model=SafeguardingIncidentAccessGrantRead,
+)
+async def revoke_safeguarding_incident_access_grant_route(
+    incident_id: UUID,
+    grant_id: UUID,
+    payload: SafeguardingIncidentAccessGrantRevoke,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentAccessGrantRead:
+    return await revoke_safeguarding_incident_access_grant(
+        db,
+        identity,
+        incident_id,
+        grant_id,
+        payload,
         authz,
     )
 

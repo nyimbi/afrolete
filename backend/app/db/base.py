@@ -91,6 +91,7 @@ from app.models.event import (  # noqa: F401,E402
     IncidentReportPackage,
     SafeguardingEvidencePolicyRule,
     SafeguardingIncident,
+    SafeguardingIncidentAccessGrant,
 )
 from app.models.identity import AppUser, Person  # noqa: F401,E402
 from app.models.organization import (  # noqa: F401,E402

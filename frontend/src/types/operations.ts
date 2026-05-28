@@ -2915,6 +2915,22 @@ export type SafeguardingIncidentAccessControlRead = {
   synced_at: string;
 };
 
+export type SafeguardingIncidentAccessGrantRead = {
+  id: UUID;
+  organization_id: UUID;
+  incident_id: UUID;
+  person_id: UUID;
+  relation: string;
+  active: boolean;
+  granted_by_person_id: UUID | null;
+  revoked_by_person_id: UUID | null;
+  granted_reason: string | null;
+  revoked_reason: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type BackgroundCheckRead = {
   id: UUID;
   organization_id: UUID;

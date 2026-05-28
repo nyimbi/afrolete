@@ -30,6 +30,8 @@ class Relationship:
 class AuthorizationService(Protocol):
     async def touch(self, relationship: Relationship) -> None: ...
 
+    async def delete(self, relationship: Relationship) -> None: ...
+
     async def check(
         self,
         *,
@@ -47,6 +49,9 @@ class InMemoryAuthorizationService:
 
     async def touch(self, relationship: Relationship) -> None:
         self.relationships.add(relationship)
+
+    async def delete(self, relationship: Relationship) -> None:
+        self.relationships.discard(relationship)
 
     async def check(
         self,
@@ -134,6 +139,20 @@ class SpiceDBAuthorizationService:
                 updates=[
                     RelationshipUpdate(
                         operation=RelationshipUpdate.OPERATION_TOUCH,
+                        relationship=self._relationship(relationship),
+                    )
+                ]
+            ),
+            metadata=self._metadata,
+            timeout=self.request_timeout_seconds,
+        )
+
+    async def delete(self, relationship: Relationship) -> None:
+        await self._stub.WriteRelationships(
+            WriteRelationshipsRequest(
+                updates=[
+                    RelationshipUpdate(
+                        operation=RelationshipUpdate.OPERATION_DELETE,
                         relationship=self._relationship(relationship),
                     )
                 ]
