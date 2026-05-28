@@ -1,0 +1,113 @@
+import argparse
+import asyncio
+import json
+from collections.abc import Sequence
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.session import SessionLocal
+from app.services.agents import run_agent_task_worker
+from app.services.developer import run_developer_webhook_retry_due
+
+WORKER_LANES = ("agent-tasks", "developer-webhooks")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run due AfroLete background worker lanes.")
+    parser.add_argument("--organization-id", type=UUID, default=None)
+    parser.add_argument("--lane", choices=(*WORKER_LANES, "all"), action="append", default=["all"])
+    parser.add_argument("--limit", type=int, default=25)
+    parser.add_argument("--agent-limit", type=int, default=None)
+    parser.add_argument("--webhook-limit", type=int, default=None)
+    parser.add_argument("--webhook-max-attempts", type=int, default=3)
+    parser.add_argument("--include-recorded-webhooks", action="store_true")
+    parser.add_argument("--pretty", action="store_true")
+    return parser.parse_args()
+
+
+def selected_lanes(lanes: Sequence[str]) -> set[str]:
+    if "all" in lanes:
+        return set(WORKER_LANES)
+    return set(lanes)
+
+
+async def run_due_workers(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None = None,
+    lanes: Sequence[str] = ("all",),
+    limit: int = 25,
+    agent_limit: int | None = None,
+    webhook_limit: int | None = None,
+    webhook_max_attempts: int = 3,
+    include_recorded_webhooks: bool = False,
+) -> dict[str, object]:
+    active_lanes = selected_lanes(lanes)
+    results: dict[str, object] = {}
+    if "agent-tasks" in active_lanes:
+        results["agent_tasks"] = (
+            await run_agent_task_worker(
+                db,
+                organization_id=organization_id,
+                limit=agent_limit or limit,
+            )
+        ).model_dump(mode="json")
+    if "developer-webhooks" in active_lanes:
+        results["developer_webhooks"] = (
+            await run_developer_webhook_retry_due(
+                db,
+                organization_id=organization_id,
+                max_attempts=webhook_max_attempts,
+                limit=webhook_limit or limit,
+                include_recorded=include_recorded_webhooks,
+            )
+        ).model_dump(mode="json")
+    return {
+        "organization_id": str(organization_id) if organization_id else None,
+        "lanes": sorted(active_lanes),
+        "results": results,
+        "summary": worker_summary(results),
+    }
+
+
+def worker_summary(results: dict[str, object]) -> dict[str, int]:
+    summary = {
+        "lane_count": len(results),
+        "eligible_count": 0,
+        "processed_count": 0,
+        "skipped_count": 0,
+        "failed_count": 0,
+    }
+    for result in results.values():
+        if not isinstance(result, dict):
+            continue
+        summary["eligible_count"] += int(result.get("eligible_count") or 0)
+        summary["processed_count"] += int(result.get("executed_count") or result.get("replayed_count") or 0)
+        summary["skipped_count"] += int(result.get("skipped_count") or 0)
+        summary["failed_count"] += int(result.get("failed_count") or 0)
+    return summary
+
+
+async def run() -> None:
+    args = parse_args()
+    async with SessionLocal() as db:
+        result = await run_due_workers(
+            db,
+            organization_id=args.organization_id,
+            lanes=args.lane,
+            limit=args.limit,
+            agent_limit=args.agent_limit,
+            webhook_limit=args.webhook_limit,
+            webhook_max_attempts=args.webhook_max_attempts,
+            include_recorded_webhooks=args.include_recorded_webhooks,
+        )
+    print(json.dumps(result, indent=2 if args.pretty else None))
+
+
+def main() -> None:
+    asyncio.run(run())
+
+
+if __name__ == "__main__":
+    main()

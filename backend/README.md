@@ -51,6 +51,15 @@ The agent worker uses the same deterministic/webhook execution mode as the API,
 appends the same hash-chained run ledger records, and returns a JSON summary for
 schedulers and job logs.
 
+A unified due-worker command runs all currently scheduler-ready lanes:
+
+```bash
+cd backend
+uv run python -m app.workers.due --limit 25
+```
+
+Use `--lane agent-tasks` or `--lane developer-webhooks` to run a single lane.
+
 ## Responsibilities
 
 - Domain API and OpenAPI contract.
