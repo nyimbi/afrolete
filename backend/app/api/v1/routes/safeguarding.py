@@ -36,6 +36,7 @@ from app.schemas.safeguarding import (
     ConsentRequestCreate,
     ConsentRequestRead,
     FamilyAthleteSummaryRead,
+    FamilyDashboardRead,
     FamilyConsentRequestRead,
     FamilyConsentResponseCreate,
     FamilyEventSummaryRead,
@@ -112,6 +113,7 @@ from app.services.safeguarding import (
     list_background_checks,
     list_compliance_credentials,
     list_guardians_for_athlete,
+    get_my_family_dashboard,
     list_incident_insurance_claims,
     poll_incident_insurance_claim_provider_status,
     poll_incident_medical_clearance_provider_status,
@@ -389,6 +391,15 @@ async def list_my_family_performance_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[FamilyPerformanceSummaryRead]:
     return await list_my_family_performance(db, identity, organization_id)
+
+
+@router.get("/my-family/dashboard", response_model=FamilyDashboardRead)
+async def get_my_family_dashboard_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> FamilyDashboardRead:
+    return await get_my_family_dashboard(db, identity, organization_id)
 
 
 @router.post("/incidents", response_model=SafeguardingIncidentRead, status_code=201)

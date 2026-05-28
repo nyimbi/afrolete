@@ -1402,6 +1402,37 @@ export type FamilyPerformanceSummaryRead = {
   awards: FamilyPerformanceAwardRead[];
 };
 
+export type FamilyDashboardActionRead = {
+  priority: string;
+  action_type: string;
+  title: string;
+  detail: string;
+  athlete_person_id: UUID | null;
+  event_id: UUID | null;
+  consent_request_id: UUID | null;
+  due_at: string | null;
+};
+
+export type FamilyDashboardRead = {
+  organization_id: UUID;
+  guardian_person_id: UUID;
+  generated_at: string;
+  child_count: number;
+  pending_consent_count: number;
+  unread_message_count: number;
+  urgent_unread_count: number;
+  upcoming_event_count: number;
+  rsvp_needed_count: number;
+  clearance_blocked_count: number;
+  active_goal_count: number;
+  award_count: number;
+  ai_recommendation_count: number;
+  open_ai_appeal_count: number;
+  next_event_at: string | null;
+  next_action_label: string;
+  action_items: FamilyDashboardActionRead[];
+};
+
 export type FamilyEventSummaryRead = {
   athlete_person_id: UUID;
   athlete_name: string;

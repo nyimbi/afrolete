@@ -12,6 +12,7 @@ import type {
   ConsentStatus,
   FamilyAthleteSummaryRead,
   FamilyConsentRequestRead,
+  FamilyDashboardRead,
   FamilyEventSummaryRead,
   FamilyPerformanceSummaryRead,
   LocalIdentity,
@@ -28,6 +29,7 @@ export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
+  const [dashboard, setDashboard] = useState<FamilyDashboardRead | null>(null);
   const [performance, setPerformance] = useState<FamilyPerformanceSummaryRead[]>([]);
   const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
   const [consentRequests, setConsentRequests] = useState<FamilyConsentRequestRead[]>([]);
@@ -67,8 +69,6 @@ export default function FamilyPortalPage() {
 
   const unreadCount = items.filter((item) => item.delivery_status !== "read").length;
   const pendingConsentCount = consentRequests.length;
-  const awardCount = performance.reduce((total, item) => total + item.award_count, 0);
-  const activeGoalCount = performance.reduce((total, item) => total + item.active_goal_count, 0);
 
   const loadWorkspace = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -80,7 +80,10 @@ export default function FamilyPortalPage() {
     setError("");
     try {
       const organizationQuery = encodeURIComponent(organizationId);
-      const [familyRows, performanceRows, eventRows, pendingRequests, appeals, aiTaskRows, inbox] = await Promise.all([
+      const [dashboardSummary, familyRows, performanceRows, eventRows, pendingRequests, appeals, aiTaskRows, inbox] = await Promise.all([
+        apiRequest<FamilyDashboardRead>(`/safeguarding/my-family/dashboard?organization_id=${organizationQuery}`, {
+          identity
+        }),
         apiRequest<FamilyAthleteSummaryRead[]>(`/safeguarding/my-family?organization_id=${organizationQuery}`, {
           identity
         }),
@@ -105,6 +108,7 @@ export default function FamilyPortalPage() {
           identity
         })
       ]);
+      setDashboard(dashboardSummary);
       setFamily(familyRows);
       setPerformance(performanceRows);
       setEvents(eventRows);
@@ -331,33 +335,57 @@ export default function FamilyPortalPage() {
         <div className="family-metrics">
           <div>
             <span>Unread</span>
-            <strong>{unreadCount}</strong>
+            <strong>{dashboard?.unread_message_count ?? unreadCount}</strong>
           </div>
           <div>
-            <span>Total</span>
-            <strong>{items.length}</strong>
+            <span>Urgent</span>
+            <strong>{dashboard?.urgent_unread_count ?? items.filter((item) => item.urgent && item.delivery_status !== "read").length}</strong>
           </div>
           <div>
             <span>Children</span>
-            <strong>{family.length}</strong>
+            <strong>{dashboard?.child_count ?? family.length}</strong>
           </div>
           <div>
             <span>Consent</span>
-            <strong>{pendingConsentCount}</strong>
+            <strong>{dashboard?.pending_consent_count ?? pendingConsentCount}</strong>
           </div>
           <div>
-            <span>Goals</span>
-            <strong>{activeGoalCount}</strong>
+            <span>RSVPs</span>
+            <strong>{dashboard?.rsvp_needed_count ?? events.filter((event) => event.attendance_status === null).length}</strong>
           </div>
           <div>
-            <span>Awards</span>
-            <strong>{awardCount}</strong>
+            <span>Clearance</span>
+            <strong>{dashboard?.clearance_blocked_count ?? events.filter((event) => event.clearance_status !== "cleared").length}</strong>
           </div>
           <div>
-            <span>AI appeals</span>
-            <strong>{aiAppeals.filter((appeal) => !appeal.resolved_at).length}</strong>
+            <span>AI</span>
+            <strong>{dashboard?.ai_recommendation_count ?? aiTasks.length}</strong>
           </div>
         </div>
+
+        {dashboard ? (
+          <section className="family-ai-appeals">
+            <div>
+              <p className="section-label">Family command</p>
+              <h2>{dashboard.next_action_label}</h2>
+              <p>
+                {dashboard.upcoming_event_count} upcoming events · {dashboard.active_goal_count} goals · {dashboard.award_count} awards
+                {dashboard.next_event_at ? ` · next ${formatDate(dashboard.next_event_at)}` : ""}
+              </p>
+            </div>
+            <div className="family-appeal-list">
+              {dashboard.action_items.map((item) => (
+                <article key={`${item.action_type}-${item.title}-${item.due_at ?? "now"}`}>
+                  <strong>{item.title}</strong>
+                  <span>{item.priority} · {item.action_type.replaceAll("_", " ")}</span>
+                  <small>{item.detail}</small>
+                  <small>{item.due_at ? formatDate(item.due_at) : "Open action"}</small>
+                </article>
+              ))}
+              {dashboard.action_items.length === 0 ? <span>No urgent family actions</span> : null}
+            </div>
+          </section>
+        ) : null}
 
         <div className="family-athletes">
           {family.map((athlete) => (

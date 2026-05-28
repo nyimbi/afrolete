@@ -33,6 +33,7 @@ from app.models.enums import (
     SafeguardingIncidentSeverity,
     SafeguardingIncidentType,
     SafeguardingIncidentStatus,
+    MessageDeliveryStatus,
 )
 from app.models.event import (
     ActivityConsent,
@@ -49,6 +50,8 @@ from app.models.event import (
     SafeguardingIncident,
     SafeguardingIncidentAccessGrant,
 )
+from app.models.agent import AgentDecisionAppeal
+from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.identity import AppUser, Person
 from app.models.organization import Organization
 from app.models.performance import PerformanceAchievementAward, PerformanceGoal
@@ -73,6 +76,8 @@ from app.schemas.safeguarding import (
     ComplianceCredentialUpdate,
     ConsentRequestCreate,
     FamilyAthleteSummaryRead,
+    FamilyDashboardActionRead,
+    FamilyDashboardRead,
     FamilyConsentRequestRead,
     FamilyConsentResponseCreate,
     FamilyEventSummaryRead,
@@ -126,6 +131,14 @@ def hash_token(token: str) -> str:
 
 def utc_now() -> datetime:
     return datetime.now(tz=UTC)
+
+
+def datetime_is_before(value: datetime | None, boundary: datetime) -> bool:
+    if value is None:
+        return False
+    comparable = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    boundary_utc = boundary.replace(tzinfo=UTC) if boundary.tzinfo is None else boundary.astimezone(UTC)
+    return comparable < boundary_utc
 
 
 def today_utc() -> date:
@@ -5165,6 +5178,154 @@ async def list_my_family_performance(
     return summaries
 
 
+async def get_my_family_dashboard(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> FamilyDashboardRead:
+    family = await list_my_family(db, identity, organization_id)
+    performance = await list_my_family_performance(db, identity, organization_id)
+    events = await list_my_family_events(db, identity, organization_id, limit=100)
+    consent_requests = await list_my_family_consent_requests(db, identity, organization_id)
+    inbox_rows = (
+        await db.execute(
+            select(MessageRecipient, CommunicationMessage)
+            .join(CommunicationMessage, CommunicationMessage.id == MessageRecipient.message_id)
+            .where(CommunicationMessage.organization_id == organization_id)
+            .where(MessageRecipient.person_id == identity.person_id)
+        )
+    ).all()
+    unread_rows = [
+        (recipient, message)
+        for recipient, message in inbox_rows
+        if recipient.delivery_status != MessageDeliveryStatus.READ
+    ]
+    urgent_unread_count = sum(1 for _, message in unread_rows if message.urgent)
+    ai_tasks = await family_ai_task_rows(db, identity, organization_id)
+    open_ai_appeal_count = int(
+        await db.scalar(
+            select(func.count(AgentDecisionAppeal.id))
+            .where(AgentDecisionAppeal.organization_id == organization_id)
+            .where(AgentDecisionAppeal.submitted_by_person_id == identity.person_id)
+            .where(AgentDecisionAppeal.resolved_at.is_(None))
+        )
+        or 0
+    )
+    rsvp_needed_events = [event for event in events if event.attendance_status is None]
+    clearance_blocked_events = [
+        event
+        for event in events
+        if event.clearance_status != ParticipationClearanceStatus.CLEARED
+    ]
+    active_goal_count = sum(item.active_goal_count for item in performance)
+    award_count = sum(item.award_count for item in performance)
+    action_items = family_dashboard_actions(
+        consent_requests,
+        rsvp_needed_events,
+        clearance_blocked_events,
+        unread_rows,
+        open_ai_appeal_count,
+    )
+    next_action_label = action_items[0].title if action_items else "Family workspace is current"
+    return FamilyDashboardRead(
+        organization_id=organization_id,
+        guardian_person_id=identity.person_id,
+        generated_at=utc_now(),
+        child_count=len(family),
+        pending_consent_count=len(consent_requests),
+        unread_message_count=len(unread_rows),
+        urgent_unread_count=urgent_unread_count,
+        upcoming_event_count=len(events),
+        rsvp_needed_count=len(rsvp_needed_events),
+        clearance_blocked_count=len(clearance_blocked_events),
+        active_goal_count=active_goal_count,
+        award_count=award_count,
+        ai_recommendation_count=len(ai_tasks),
+        open_ai_appeal_count=open_ai_appeal_count,
+        next_event_at=events[0].starts_at if events else None,
+        next_action_label=next_action_label,
+        action_items=action_items,
+    )
+
+
+async def family_ai_task_rows(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> list[dict[str, object]]:
+    from app.services.agents import list_my_agent_family_tasks
+
+    return await list_my_agent_family_tasks(db, identity, organization_id)
+
+
+def family_dashboard_actions(
+    consent_requests: list[FamilyConsentRequestRead],
+    rsvp_needed_events: list[FamilyEventSummaryRead],
+    clearance_blocked_events: list[FamilyEventSummaryRead],
+    unread_rows: list[tuple[MessageRecipient, CommunicationMessage]],
+    open_ai_appeal_count: int,
+) -> list[FamilyDashboardActionRead]:
+    actions: list[FamilyDashboardActionRead] = []
+    for request in consent_requests[:3]:
+        actions.append(
+            FamilyDashboardActionRead(
+                priority="high",
+                action_type="consent",
+                title=f"Consent needed for {request.athlete_name}",
+                detail=f"{request.scope_type.value} consent via {request.channel.value}.",
+                athlete_person_id=request.athlete_person_id,
+                consent_request_id=request.id,
+                due_at=request.expires_at,
+            )
+        )
+    for event in clearance_blocked_events[:3]:
+        actions.append(
+            FamilyDashboardActionRead(
+                priority="high",
+                action_type="clearance",
+                title=f"Clearance blocked for {event.athlete_name}",
+                detail=f"{event.title}: {event.reason}",
+                athlete_person_id=event.athlete_person_id,
+                event_id=event.event_id,
+                due_at=event.starts_at,
+            )
+        )
+    for event in rsvp_needed_events[:3]:
+        actions.append(
+            FamilyDashboardActionRead(
+                priority="medium",
+                action_type="rsvp",
+                title=f"RSVP for {event.title}",
+                detail=f"{event.athlete_name} is not confirmed yet.",
+                athlete_person_id=event.athlete_person_id,
+                event_id=event.event_id,
+                due_at=event.starts_at,
+            )
+        )
+    for recipient, message in unread_rows[:3]:
+        actions.append(
+            FamilyDashboardActionRead(
+                priority="high" if message.urgent else "medium",
+                action_type="message",
+                title=message.subject,
+                detail=f"{message.message_type.value} message on {message.channel.value}.",
+                due_at=message.sent_at or recipient.created_at,
+            )
+        )
+    if open_ai_appeal_count:
+        actions.append(
+            FamilyDashboardActionRead(
+                priority="medium",
+                action_type="ai_appeal",
+                title="AI appeal awaiting review",
+                detail=f"{open_ai_appeal_count} family AI appeal(s) are still open.",
+            )
+        )
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    actions.sort(key=lambda item: (priority_order.get(item.priority, 9), item.due_at or datetime.max.replace(tzinfo=UTC)))
+    return actions[:8]
+
+
 async def list_my_family_events(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -5327,7 +5488,7 @@ async def list_my_family_consent_requests(
     pending: list[FamilyConsentRequestRead] = []
     expired = False
     for request, athlete in rows:
-        if request.expires_at is not None and request.expires_at < now:
+        if datetime_is_before(request.expires_at, now):
             request.status = ConsentRequestStatus.EXPIRED
             expired = True
             continue
@@ -5359,7 +5520,7 @@ async def respond_to_family_consent_request(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     now = utc_now()
-    if request.expires_at is not None and request.expires_at < now:
+    if datetime_is_before(request.expires_at, now):
         request.status = ConsentRequestStatus.EXPIRED
         await db.commit()
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Consent request expired")
@@ -5615,7 +5776,7 @@ async def capture_consent_by_token(
     if request.status != ConsentRequestStatus.PENDING:
         raise HTTPException(status_code=409, detail="Consent request already used")
     now = utc_now()
-    if request.expires_at is not None and request.expires_at < now:
+    if datetime_is_before(request.expires_at, now):
         request.status = ConsentRequestStatus.EXPIRED
         await db.commit()
         raise HTTPException(status_code=410, detail="Consent request expired")

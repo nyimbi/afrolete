@@ -2,7 +2,7 @@ import base64
 import hmac
 import json
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from hashlib import sha256
 
 import pytest
@@ -131,6 +131,125 @@ def test_guardian_can_consent_by_known_sms_number(client, identity_headers, athl
     assert guardian["relationship_kind"] == "legal_guardian"
     assert consent_response.status_code == 200
     assert consent_response.json()["capture_channel"] == "sms"
+
+
+async def test_family_dashboard_summarizes_parent_actions(client, identity_headers, db_session) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Family Dashboard Club",
+            "organization_type": "club",
+            "primary_sport": "football",
+        },
+    ).json()
+    team = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Family U14",
+            "sport": "football",
+            "sport_format": "team",
+        },
+    ).json()
+    member = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "dashboard-athlete@example.com",
+            "display_name": "Dashboard Athlete",
+            "role": "athlete",
+        },
+    ).json()
+    athlete = await db_session.get(Person, member["subject_id"])
+    athlete.date_of_birth = date(2013, 4, 1)
+    await db_session.commit()
+    client.post(
+        f"/api/v1/teams/{team['id']}/members",
+        headers=identity_headers,
+        json={
+            "person_id": member["subject_id"],
+            "role": "player",
+            "status": "active",
+        },
+    )
+    guardian = client.post(
+        "/api/v1/safeguarding/guardians",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_person_id": member["subject_id"],
+            "guardian_email": "dashboard-parent@example.com",
+            "guardian_display_name": "Dashboard Parent",
+            "relationship_kind": "parent",
+            "can_sign_consent": True,
+            "emergency_contact": True,
+        },
+    ).json()
+    event = client.post(
+        "/api/v1/events",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "event_type": "match",
+            "title": "Family dashboard fixture",
+            "starts_at": "2099-06-10T15:00:00Z",
+            "venue_name": "North Field",
+        },
+    ).json()
+    client.post(
+        "/api/v1/safeguarding/consent-requests",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_person_id": member["subject_id"],
+            "guardian_person_id": guardian["guardian_person_id"],
+            "scope_type": "event",
+            "scope_id": event["id"],
+            "channel": "email",
+            "expires_at": "2099-06-09T12:00:00Z",
+        },
+    )
+    client.post(
+        "/api/v1/communications/messages",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "message_type": "reminder",
+            "channel": "in_app",
+            "scope_type": "person",
+            "scope_id": guardian["guardian_person_id"],
+            "recipient_person_ids": [guardian["guardian_person_id"]],
+            "subject": "Urgent family update",
+            "body": "Please review consent and RSVP before travel.",
+            "urgent": True,
+        },
+    )
+    parent_headers = {
+        "X-Afrolete-Sub": "kc-parent-dashboard",
+        "X-Afrolete-Email": "dashboard-parent@example.com",
+        "X-Afrolete-Name": "Dashboard Parent",
+    }
+
+    dashboard_response = client.get(
+        f"/api/v1/safeguarding/my-family/dashboard?organization_id={organization['id']}",
+        headers=parent_headers,
+    )
+
+    assert dashboard_response.status_code == 200
+    dashboard = dashboard_response.json()
+    assert dashboard["child_count"] == 1
+    assert dashboard["pending_consent_count"] == 1
+    assert dashboard["unread_message_count"] == 1
+    assert dashboard["urgent_unread_count"] == 1
+    assert dashboard["upcoming_event_count"] == 1
+    assert dashboard["rsvp_needed_count"] == 1
+    assert dashboard["clearance_blocked_count"] == 0
+    assert dashboard["next_event_at"].startswith("2099-06-10T15:00:00")
+    action_types = {item["action_type"] for item in dashboard["action_items"]}
+    assert {"consent", "rsvp", "message"}.issubset(action_types)
 
 
 def test_incident_report_package_exports_markdown_and_pdf(client, identity_headers) -> None:

@@ -115,6 +115,37 @@ class FamilyPerformanceSummaryRead(BaseModel):
     awards: list[FamilyPerformanceAwardRead]
 
 
+class FamilyDashboardActionRead(BaseModel):
+    priority: str
+    action_type: str
+    title: str
+    detail: str
+    athlete_person_id: UUID | None = None
+    event_id: UUID | None = None
+    consent_request_id: UUID | None = None
+    due_at: datetime | None = None
+
+
+class FamilyDashboardRead(BaseModel):
+    organization_id: UUID
+    guardian_person_id: UUID
+    generated_at: datetime
+    child_count: int
+    pending_consent_count: int
+    unread_message_count: int
+    urgent_unread_count: int
+    upcoming_event_count: int
+    rsvp_needed_count: int
+    clearance_blocked_count: int
+    active_goal_count: int
+    award_count: int
+    ai_recommendation_count: int
+    open_ai_appeal_count: int
+    next_event_at: datetime | None
+    next_action_label: str
+    action_items: list[FamilyDashboardActionRead]
+
+
 class FamilyEventSummaryRead(BaseModel):
     athlete_person_id: UUID
     athlete_name: str
