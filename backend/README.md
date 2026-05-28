@@ -58,10 +58,18 @@ cd backend
 uv run python -m app.workers.due --limit 25
 ```
 
-Use `--lane agent-tasks`, `--lane developer-webhooks`, or
-`--lane performance-achievements` to run a single lane. The performance
-achievement lane evaluates active athlete goals and recent observations so
-goal-achieved and personal-best awards are created without a coach click.
+Use `--lane agent-tasks`, `--lane developer-webhooks`,
+`--lane performance-achievements`, `--lane performance-forecast-validations`,
+`--lane performance-review-escalations`,
+`--lane performance-injury-risk-alerts`, or `--lane wearable-pull-retries` to
+run a single lane. The performance achievement lane evaluates active athlete
+goals and recent observations so goal-achieved and personal-best awards are
+created without a coach click. Forecast validation can also send scheduled
+manager alerts for watch/high drift when run with
+`--auto-alert-performance-forecast-drift`; use
+`--performance-forecast-drift-channel`,
+`--performance-forecast-drift-repeat-after-hours`, and
+`--dry-run-performance-forecast-drift-alerts` to tune rollout behavior.
 
 ## Responsibilities
 
