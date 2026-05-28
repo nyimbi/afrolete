@@ -394,6 +394,27 @@ def test_agent_governance_policy_requires_approvals_and_blocks_tasks(client, ide
     assert history["policies"][0]["policy_code"] == "safeguarding.selection.review"
     assert history["policies"][0]["latest_task_title"] == "Recommend tournament squad"
 
+    csv_export = client.get(
+        f"/api/v1/agents/governance-policy-rules/history/export?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert csv_export["artifact_format"] == "csv"
+    assert csv_export["content_type"].startswith("text/csv")
+    assert csv_export["download_filename"].endswith(".csv")
+    assert csv_export["governed_task_count"] == 1
+    assert "safeguarding.selection.review" in csv_export["content"]
+    assert csv_export["checksum"]
+    assert csv_export["size_bytes"] == len(csv_export["content"].encode())
+
+    markdown_export = client.get(
+        f"/api/v1/agents/governance-policy-rules/history/export?organization_id={organization['id']}&artifact_format=markdown",
+        headers=identity_headers,
+    ).json()
+    assert markdown_export["artifact_format"] == "markdown"
+    assert markdown_export["download_filename"].endswith(".md")
+    assert "AfroLete AI Governance Policy History" in markdown_export["content"]
+    assert "Recommend tournament squad" in markdown_export["content"]
+
 
 async def test_agent_task_worker_executes_queued_tasks(db_session) -> None:
     organization = Organization(

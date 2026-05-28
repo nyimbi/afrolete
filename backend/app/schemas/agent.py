@@ -203,6 +203,19 @@ class AgentGovernancePolicyHistoryRead(BaseModel):
     recommendation: str
 
 
+class AgentGovernancePolicyHistoryExportRead(BaseModel):
+    organization_id: UUID
+    generated_at: datetime
+    artifact_format: str
+    content_type: str
+    download_filename: str
+    content: str
+    checksum: str
+    size_bytes: int
+    governed_task_count: int
+    policy_count: int
+
+
 class AgentTaskApprovalRequestCreate(BaseModel):
     required_count: int = Field(default=2, ge=1, le=10)
     reviewer_person_ids: list[UUID] = Field(default_factory=list, max_length=10)

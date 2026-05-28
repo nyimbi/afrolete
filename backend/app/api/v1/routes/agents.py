@@ -16,9 +16,10 @@ from app.schemas.agent import (
     AgentDecisionAppealUpdate,
     AgentEthicalScorecardRead,
     AgentFamilyTaskRead,
+    AgentGovernancePolicyHistoryExportRead,
+    AgentGovernancePolicyHistoryRead,
     AgentGovernancePolicyRuleCreate,
     AgentGovernancePolicyReportRead,
-    AgentGovernancePolicyHistoryRead,
     AgentGovernancePolicyRuleRead,
     AgentGovernancePolicySimulationCreate,
     AgentGovernancePolicySimulationRead,
@@ -80,6 +81,7 @@ from app.services.agents import (
     deliver_scorecard_artifact_anomaly_alert,
     deliver_agent_scorecard_publication_reminder,
     execute_agent_task,
+    export_agent_governance_policy_history,
     get_agent_scorecard_publication_artifact,
     get_my_agent_decision_appeal_form,
     list_scorecard_artifact_accesses,
@@ -841,6 +843,27 @@ async def agent_governance_policy_history_route(
 ) -> AgentGovernancePolicyHistoryRead:
     return AgentGovernancePolicyHistoryRead(
         **await agent_governance_policy_history(db, identity, organization_id, authz, limit=limit)
+    )
+
+
+@router.get("/governance-policy-rules/history/export", response_model=AgentGovernancePolicyHistoryExportRead)
+async def export_agent_governance_policy_history_route(
+    organization_id: UUID = Query(),
+    artifact_format: str = Query(default="csv", pattern="^(csv|markdown)$"),
+    limit: int = Query(default=120, ge=10, le=500),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentGovernancePolicyHistoryExportRead:
+    return AgentGovernancePolicyHistoryExportRead(
+        **await export_agent_governance_policy_history(
+            db,
+            identity,
+            organization_id,
+            authz,
+            artifact_format=artifact_format,
+            limit=limit,
+        )
     )
 
 

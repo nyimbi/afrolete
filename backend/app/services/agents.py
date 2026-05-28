@@ -1,4 +1,5 @@
 import base64
+import csv
 import hashlib
 import hmac
 import io
@@ -298,6 +299,42 @@ async def agent_governance_policy_history(
         "timeline": timeline,
         "policies": policies,
         "recommendation": agent_governance_policy_history_recommendation(tasks, policies),
+    }
+
+
+async def export_agent_governance_policy_history(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    artifact_format: str = "csv",
+    limit: int = 120,
+) -> dict[str, object]:
+    normalized_format = artifact_format.lower().strip()
+    if normalized_format not in {"csv", "markdown"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported history export format")
+    history = await agent_governance_policy_history(db, identity, organization_id, authz, limit=limit)
+    generated_at = datetime.now(UTC)
+    if normalized_format == "csv":
+        content = render_agent_governance_policy_history_csv(history)
+        content_type = "text/csv; charset=utf-8"
+        extension = "csv"
+    else:
+        content = render_agent_governance_policy_history_markdown(history)
+        content_type = "text/markdown; charset=utf-8"
+        extension = "md"
+    content_bytes = content.encode()
+    return {
+        "organization_id": organization_id,
+        "generated_at": generated_at,
+        "artifact_format": normalized_format,
+        "content_type": content_type,
+        "download_filename": f"agent-governance-policy-history-{generated_at:%Y%m%d-%H%M%S}.{extension}",
+        "content": content,
+        "checksum": hashlib.sha256(content_bytes).hexdigest(),
+        "size_bytes": len(content_bytes),
+        "governed_task_count": history["governed_task_count"],
+        "policy_count": history["policy_count"],
     }
 
 
@@ -3420,6 +3457,109 @@ def agent_governance_policy_history_items(tasks: list[AgentTask]) -> list[dict[s
             }
         )
     return sorted(items, key=lambda item: (-int(item["task_count"]), str(item["policy_code"])))[:20]
+
+
+def render_agent_governance_policy_history_csv(history: dict[str, object]) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["section", "label", "metric", "value"])
+    for metric in [
+        "governed_task_count",
+        "approval_required_count",
+        "completed_count",
+        "waiting_for_review_count",
+        "failed_count",
+        "policy_count",
+        "latest_policy_code",
+        "recommendation",
+    ]:
+        writer.writerow(["summary", "all", metric, history.get(metric) or ""])
+    writer.writerow([])
+    writer.writerow(["timeline_label", "task_count", "approval_required_count", "completed_count", "waiting_for_review_count", "failed_count"])
+    for bucket in list(history["timeline"]):
+        writer.writerow(
+            [
+                bucket["label"],
+                bucket["task_count"],
+                bucket["approval_required_count"],
+                bucket["completed_count"],
+                bucket["waiting_for_review_count"],
+                bucket["failed_count"],
+            ]
+        )
+    writer.writerow([])
+    writer.writerow(
+        [
+            "policy_code",
+            "decision",
+            "risk_level",
+            "task_count",
+            "approval_required_count",
+            "completed_count",
+            "waiting_for_review_count",
+            "latest_task_title",
+            "latest_task_at",
+        ]
+    )
+    for policy in list(history["policies"]):
+        writer.writerow(
+            [
+                policy["policy_code"],
+                policy["decision"],
+                policy["risk_level"],
+                policy["task_count"],
+                policy["approval_required_count"],
+                policy["completed_count"],
+                policy["waiting_for_review_count"],
+                policy["latest_task_title"] or "",
+                policy["latest_task_at"] or "",
+            ]
+        )
+    return buffer.getvalue()
+
+
+def render_agent_governance_policy_history_markdown(history: dict[str, object]) -> str:
+    lines = [
+        "# AfroLete AI Governance Policy History",
+        "",
+        f"Generated: {history['generated_at']}",
+        f"Governed tasks: {history['governed_task_count']}",
+        f"Approval-gated tasks: {history['approval_required_count']}",
+        f"Completed tasks: {history['completed_count']}",
+        f"Waiting for review: {history['waiting_for_review_count']}",
+        f"Failed tasks: {history['failed_count']}",
+        f"Policies used: {history['policy_count']}",
+        f"Latest policy: {history['latest_policy_code'] or 'none'}",
+        "",
+        f"Recommendation: {history['recommendation']}",
+        "",
+        "## Timeline",
+        "",
+        "| Bucket | Tasks | Approval | Complete | Review | Failed |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for bucket in list(history["timeline"]):
+        lines.append(
+            f"| {bucket['label']} | {bucket['task_count']} | {bucket['approval_required_count']} | "
+            f"{bucket['completed_count']} | {bucket['waiting_for_review_count']} | {bucket['failed_count']} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Policies",
+            "",
+            "| Policy | Decision | Risk | Tasks | Approval | Complete | Review | Latest task |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
+        ]
+    )
+    for policy in list(history["policies"]):
+        lines.append(
+            f"| {policy['policy_code']} | {policy['decision']} | {policy['risk_level']} | {policy['task_count']} | "
+            f"{policy['approval_required_count']} | {policy['completed_count']} | "
+            f"{policy['waiting_for_review_count']} | {policy['latest_task_title'] or ''} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def agent_governance_policy_history_recommendation(

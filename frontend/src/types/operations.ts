@@ -3397,6 +3397,19 @@ export type AgentGovernancePolicyHistoryRead = {
   recommendation: string;
 };
 
+export type AgentGovernancePolicyHistoryExportRead = {
+  organization_id: UUID;
+  generated_at: string;
+  artifact_format: string;
+  content_type: string;
+  download_filename: string;
+  content: string;
+  checksum: string;
+  size_bytes: number;
+  governed_task_count: number;
+  policy_count: number;
+};
+
 export type AgentTaskApprovalRead = {
   id: UUID;
   organization_id: UUID;

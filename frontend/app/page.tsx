@@ -16,6 +16,7 @@ import type {
   AgentBiasAuditRead,
   AgentDecisionAppealRead,
   AgentEthicalScorecardRead,
+  AgentGovernancePolicyHistoryExportRead,
   AgentGovernancePolicyHistoryRead,
   AgentGovernancePolicyRuleRead,
   AgentGovernancePolicyReportRead,
@@ -6862,6 +6863,28 @@ export default function HomePage() {
             ? `${simulation.matched_rule?.rule_code} would ${simulation.decision.replaceAll("_", " ")}`
             : "No AI policy rule matched the current task",
           simulation.would_block ? "bad" : "good"
+        );
+      }
+    );
+  };
+
+  const exportAgentGovernancePolicyHistory = (artifactFormat: "csv" | "markdown") => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      `agent-governance-policy-history-export-${artifactFormat}`,
+      () =>
+        apiRequest<AgentGovernancePolicyHistoryExportRead>(
+          `/agents/governance-policy-rules/history/export?organization_id=${selectedOrganizationId}&artifact_format=${artifactFormat}`,
+          { identity }
+        ),
+      (artifact) => {
+        downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
+        addLog(
+          `Downloaded ${artifact.artifact_format} policy history (${artifact.size_bytes} bytes)`,
+          "good"
         );
       }
     );
@@ -16383,6 +16406,10 @@ export default function HomePage() {
                       {agentGovernancePolicyHistory.policy_count} policies used · latest {agentGovernancePolicyHistory.latest_policy_code ?? "none"}
                     </span>
                     <span>{agentGovernancePolicyHistory.recommendation}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => exportAgentGovernancePolicyHistory("csv")}>CSV</button>
+                    <button type="button" onClick={() => exportAgentGovernancePolicyHistory("markdown")}>Markdown</button>
                   </div>
                 </article>
               ) : null}
