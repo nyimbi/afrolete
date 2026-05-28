@@ -2782,6 +2782,20 @@ export type SafeguardingIncidentRead = {
   created_at: string;
 };
 
+export type SafeguardingIncidentInvestigationActionRead = {
+  incident_id: UUID;
+  organization_id: UUID;
+  action_type: string;
+  status: SafeguardingIncidentStatus;
+  severity: SafeguardingIncidentSeverity;
+  assigned_to_person_id: UUID | null;
+  regulatory_report_required: boolean;
+  medical_follow_up_required: string;
+  action_summary: string;
+  resolution_notes: string | null;
+  actioned_at: string;
+};
+
 export type BackgroundCheckRead = {
   id: UUID;
   organization_id: UUID;

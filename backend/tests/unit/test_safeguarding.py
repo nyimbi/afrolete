@@ -256,6 +256,87 @@ def test_incident_report_package_exports_markdown_and_pdf(client, identity_heade
     assert "Record-only regulatory submission" in synced_package["notes"]
 
 
+def test_incident_investigation_actions_assign_escalate_and_close(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Investigation Workflow Club", "organization_type": "club"},
+    ).json()
+    incident = client.post(
+        "/api/v1/safeguarding/incidents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_type": "safeguarding",
+            "severity": "medium",
+            "occurred_at": "2026-05-28T10:45:00Z",
+            "location": "Away changing room",
+            "title": "Safeguarding concern",
+            "description": "Athlete reported an uncomfortable interaction after training.",
+            "immediate_action": "Separated parties and notified safeguarding lead.",
+            "medical_follow_up_required": "unknown",
+        },
+    ).json()
+
+    assign_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/investigation-actions",
+        headers=identity_headers,
+        json={
+            "action_type": "assign_self",
+            "assign_to_self": True,
+            "next_step": "Lead accepts ownership and starts witness collection.",
+        },
+    )
+    assert assign_response.status_code == 200
+    assigned = assign_response.json()
+    assert assigned["status"] == "triaged"
+    assert assigned["assigned_to_person_id"] is not None
+    assert "Assigned to" in assigned["action_summary"]
+
+    escalate_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/investigation-actions",
+        headers=identity_headers,
+        json={
+            "action_type": "escalate",
+            "finding_summary": "Initial review suggests statutory reporting may be required.",
+            "parent_notified": True,
+            "medical_follow_up_required": "yes",
+        },
+    )
+    assert escalate_response.status_code == 200
+    escalated = escalate_response.json()
+    assert escalated["status"] == "investigating"
+    assert escalated["severity"] == "high"
+    assert escalated["regulatory_report_required"] is True
+    assert escalated["medical_follow_up_required"] == "yes"
+    assert "Regulatory reporting required" in escalated["action_summary"]
+
+    close_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/investigation-actions",
+        headers=identity_headers,
+        json={
+            "action_type": "close",
+            "close_incident": True,
+            "finding_summary": "Case reviewed and controls documented.",
+            "next_step": "Monitor future sessions for recurrence.",
+        },
+    )
+    assert close_response.status_code == 200
+    closed = close_response.json()
+    assert closed["status"] == "closed"
+    assert "Case reviewed" in closed["resolution_notes"]
+
+    incidents = client.get(
+        f"/api/v1/safeguarding/incidents?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    synced = next(item for item in incidents if item["id"] == incident["id"])
+    assert synced["status"] == "closed"
+    assert synced["assigned_to_person_id"] == assigned["assigned_to_person_id"]
+    assert synced["regulatory_report_required"] is True
+    assert synced["parent_notified_at"] is not None
+
+
 def test_insurance_claim_provider_submit_and_status_poll_record_only(client, identity_headers) -> None:
     organization = client.post(
         "/api/v1/organizations",

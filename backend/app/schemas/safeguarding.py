@@ -310,6 +310,34 @@ class SafeguardingIncidentUpdate(BaseModel):
     resolution_notes: str | None = Field(default=None, max_length=4000)
 
 
+class SafeguardingIncidentInvestigationActionCreate(BaseModel):
+    action_type: str = Field(min_length=2, max_length=80)
+    assign_to_self: bool = False
+    assigned_to_person_id: UUID | None = None
+    status: SafeguardingIncidentStatus | None = None
+    severity: SafeguardingIncidentSeverity | None = None
+    finding_summary: str | None = Field(default=None, max_length=2000)
+    next_step: str | None = Field(default=None, max_length=1000)
+    parent_notified: bool = False
+    medical_follow_up_required: str | None = Field(default=None, max_length=40)
+    regulatory_report_required: bool | None = None
+    close_incident: bool = False
+
+
+class SafeguardingIncidentInvestigationActionRead(BaseModel):
+    incident_id: UUID
+    organization_id: UUID
+    action_type: str
+    status: SafeguardingIncidentStatus
+    severity: SafeguardingIncidentSeverity
+    assigned_to_person_id: UUID | None
+    regulatory_report_required: bool
+    medical_follow_up_required: str
+    action_summary: str
+    resolution_notes: str | None
+    actioned_at: datetime
+
+
 class SafeguardingIncidentRead(BaseModel):
     id: UUID
     organization_id: UUID

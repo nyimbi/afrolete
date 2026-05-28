@@ -38,6 +38,8 @@ from app.schemas.safeguarding import (
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
+    SafeguardingIncidentInvestigationActionCreate,
+    SafeguardingIncidentInvestigationActionRead,
     IncidentInsuranceClaimCreate,
     IncidentInsuranceClaimProviderSyncRead,
     IncidentInsuranceClaimRead,
@@ -63,6 +65,7 @@ from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.safeguarding import (
+    apply_safeguarding_incident_investigation_action,
     capture_consent_by_known_channel,
     capture_consent_by_token,
     clearance_for_event,
@@ -384,6 +387,23 @@ async def update_safeguarding_incident_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> SafeguardingIncidentRead:
     return to_incident_read(await update_safeguarding_incident(db, identity, incident_id, payload, authz))
+
+
+@router.post("/incidents/{incident_id}/investigation-actions", response_model=SafeguardingIncidentInvestigationActionRead)
+async def apply_safeguarding_incident_investigation_action_route(
+    incident_id: UUID,
+    payload: SafeguardingIncidentInvestigationActionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentInvestigationActionRead:
+    return await apply_safeguarding_incident_investigation_action(
+        db,
+        identity,
+        incident_id,
+        payload,
+        authz,
+    )
 
 
 @router.post("/incident-report-packages", response_model=IncidentReportPackageRead, status_code=201)

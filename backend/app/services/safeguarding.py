@@ -28,6 +28,7 @@ from app.models.enums import (
     InsuranceClaimStatus,
     MedicalClearanceStatus,
     ParticipationClearanceStatus,
+    SafeguardingIncidentSeverity,
     SafeguardingIncidentType,
     SafeguardingIncidentStatus,
 )
@@ -70,6 +71,8 @@ from app.schemas.safeguarding import (
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
+    SafeguardingIncidentInvestigationActionCreate,
+    SafeguardingIncidentInvestigationActionRead,
     IncidentReportPackageArtifactLinkRead,
     IncidentReportPackageProviderSubmissionRead,
     IncidentInsuranceClaimCreate,
@@ -450,6 +453,123 @@ async def update_safeguarding_incident(
     await db.commit()
     await db.refresh(incident)
     return incident
+
+
+async def apply_safeguarding_incident_investigation_action(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident_id: UUID,
+    payload: SafeguardingIncidentInvestigationActionCreate,
+    authz: AuthorizationService,
+) -> SafeguardingIncidentInvestigationActionRead:
+    incident = await db.get(SafeguardingIncident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    await ensure_org_manage(authz, incident.organization_id, identity)
+
+    actioned_at = utc_now()
+    normalized_action = normalize_provider_profile(payload.action_type, "investigation")
+    assigned_to_person_id = payload.assigned_to_person_id
+    if payload.assign_to_self:
+        assigned_to_person_id = identity.person_id
+    if assigned_to_person_id is not None:
+        await validate_person_in_organization(db, incident.organization_id, assigned_to_person_id)
+        incident.assigned_to_person_id = assigned_to_person_id
+
+    if payload.status is not None:
+        incident.status = payload.status
+    elif normalized_action in {"triage", "assign", "assign_self"}:
+        incident.status = SafeguardingIncidentStatus.TRIAGED
+    elif normalized_action in {"investigate", "finding", "follow_up", "escalate"}:
+        incident.status = SafeguardingIncidentStatus.INVESTIGATING
+    if payload.close_incident or normalized_action in {"resolve", "resolved", "close", "closed"}:
+        incident.status = SafeguardingIncidentStatus.CLOSED if normalized_action in {"close", "closed"} else SafeguardingIncidentStatus.RESOLVED
+        incident.resolved_at = incident.resolved_at or actioned_at
+
+    if payload.severity is not None:
+        incident.severity = payload.severity
+    elif normalized_action == "escalate" and incident.severity in {
+        SafeguardingIncidentSeverity.LOW,
+        SafeguardingIncidentSeverity.MEDIUM,
+    }:
+        incident.severity = SafeguardingIncidentSeverity.HIGH
+
+    if payload.parent_notified:
+        incident.parent_notified_at = incident.parent_notified_at or actioned_at
+    if payload.medical_follow_up_required is not None:
+        incident.medical_follow_up_required = payload.medical_follow_up_required
+    if payload.regulatory_report_required is not None:
+        incident.regulatory_report_required = payload.regulatory_report_required
+    elif normalized_action == "escalate" and incident.severity in {
+        SafeguardingIncidentSeverity.HIGH,
+        SafeguardingIncidentSeverity.CRITICAL,
+    }:
+        incident.regulatory_report_required = True
+
+    action_summary = safeguarding_investigation_action_summary(
+        normalized_action,
+        payload,
+        incident,
+        actioned_at,
+    )
+    append_safeguarding_incident_resolution_note(incident, actioned_at, action_summary)
+
+    await db.commit()
+    await db.refresh(incident)
+    return SafeguardingIncidentInvestigationActionRead(
+        incident_id=incident.id,
+        organization_id=incident.organization_id,
+        action_type=normalized_action,
+        status=incident.status,
+        severity=incident.severity,
+        assigned_to_person_id=incident.assigned_to_person_id,
+        regulatory_report_required=incident.regulatory_report_required,
+        medical_follow_up_required=incident.medical_follow_up_required,
+        action_summary=action_summary,
+        resolution_notes=incident.resolution_notes,
+        actioned_at=actioned_at,
+    )
+
+
+def safeguarding_investigation_action_summary(
+    action_type: str,
+    payload: SafeguardingIncidentInvestigationActionCreate,
+    incident: SafeguardingIncident,
+    actioned_at: datetime,
+) -> str:
+    parts = [
+        f"Investigation action '{action_type}' recorded.",
+        f"Status: {incident.status.value}.",
+        f"Severity: {incident.severity.value}.",
+    ]
+    if incident.assigned_to_person_id is not None:
+        parts.append(f"Assigned to {incident.assigned_to_person_id}.")
+    if payload.finding_summary:
+        parts.append(f"Finding: {payload.finding_summary}")
+    if payload.next_step:
+        parts.append(f"Next step: {payload.next_step}")
+    if payload.parent_notified:
+        parts.append("Parent/guardian notification confirmed.")
+    if incident.medical_follow_up_required in BLOCKING_MEDICAL_FOLLOW_UP_VALUES:
+        parts.append(f"Medical follow-up: {incident.medical_follow_up_required}.")
+    if incident.regulatory_report_required:
+        parts.append("Regulatory reporting required.")
+    if incident.resolved_at is not None and incident.status in {
+        SafeguardingIncidentStatus.RESOLVED,
+        SafeguardingIncidentStatus.CLOSED,
+    }:
+        parts.append(f"Resolved at {incident.resolved_at.isoformat()}.")
+    parts.append(f"Actioned at {actioned_at.isoformat()}.")
+    return " ".join(parts)
+
+
+def append_safeguarding_incident_resolution_note(
+    incident: SafeguardingIncident,
+    at: datetime,
+    message: str,
+) -> None:
+    entry = f"{at.isoformat()} {message}"
+    incident.resolution_notes = "\n".join(part for part in [incident.resolution_notes, entry] if part)
 
 
 def default_incident_report_narrative(incident: SafeguardingIncident) -> str:

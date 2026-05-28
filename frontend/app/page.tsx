@@ -180,6 +180,7 @@ import type {
   BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
+  SafeguardingIncidentInvestigationActionRead,
   IncidentReportPackageArtifactRead,
   IncidentReportPackageArtifactLinkRead,
   IncidentReportPackageProviderSubmissionRead,
@@ -1566,6 +1567,8 @@ export default function HomePage() {
   const [consentRequest, setConsentRequest] = useState<ConsentRequestRead | null>(null);
   const [clearance, setClearance] = useState<ParticipationClearanceRead | null>(null);
   const [safeguardingIncidents, setSafeguardingIncidents] = useState<SafeguardingIncidentRead[]>([]);
+  const [incidentInvestigationAction, setIncidentInvestigationAction] =
+    useState<SafeguardingIncidentInvestigationActionRead | null>(null);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
   const [backgroundCheckProviderSubmission, setBackgroundCheckProviderSubmission] =
     useState<BackgroundCheckProviderSubmissionRead | null>(null);
@@ -3148,6 +3151,7 @@ export default function HomePage() {
       setOfficialAssignments([]);
       setRegistrationInquiries([]);
       setSafeguardingIncidents([]);
+      setIncidentInvestigationAction(null);
       setBackgroundChecks([]);
       setBackgroundCheckProviderSubmission(null);
       setBackgroundCheckProviderResult(null);
@@ -5749,6 +5753,65 @@ export default function HomePage() {
         ]);
         addLog(`${updated.title} credential moved to ${updated.status}`, "good");
         refreshSafeguardingCompliance();
+      }
+    );
+  };
+
+  const applyIncidentInvestigationAction = (
+    incident: SafeguardingIncidentRead,
+    actionType: "assign_self" | "escalate" | "finding" | "follow_up" | "close"
+  ) => {
+    const body =
+      actionType === "assign_self"
+        ? {
+            action_type: actionType,
+            assign_to_self: true,
+            next_step: "Safeguarding lead accepted case ownership."
+          }
+        : actionType === "escalate"
+          ? {
+              action_type: actionType,
+              severity: incident.severity === "critical" ? "critical" : "high",
+              regulatory_report_required: true,
+              next_step: "Escalated for senior safeguarding review and statutory reporting decision."
+            }
+          : actionType === "follow_up"
+            ? {
+                action_type: actionType,
+                medical_follow_up_required: "yes",
+                parent_notified: true,
+                next_step: "Confirm medical, guardian, and participation restrictions before next activity."
+              }
+            : actionType === "close"
+              ? {
+                  action_type: actionType,
+                  close_incident: true,
+                  finding_summary: "Case closed after operator review.",
+                  next_step: "Archive case notes and monitor for recurrence."
+                }
+              : {
+                  action_type: actionType,
+                  status: "investigating",
+                  finding_summary: "Initial investigation finding recorded from the operations console.",
+                  next_step: "Collect witness notes, evidence, and safeguarding lead review."
+                };
+    runAction(
+      `incident-investigation-${incident.id}-${actionType}`,
+      () =>
+        apiRequest<SafeguardingIncidentInvestigationActionRead>(
+          `/safeguarding/incidents/${incident.id}/investigation-actions`,
+          { method: "POST", identity, body }
+        ),
+      async (action) => {
+        setIncidentInvestigationAction(action);
+        if (selectedOrganizationId) {
+          await loadSafeguardingIncidents(selectedOrganizationId);
+          await loadComplianceSummary(selectedOrganizationId);
+        }
+        addLog(
+          `${incident.title} investigation ${action.action_type} recorded (${action.status})`,
+          action.severity === "critical" || action.regulatory_report_required ? "neutral" : "good"
+        );
       }
     );
   };
@@ -16466,13 +16529,27 @@ export default function HomePage() {
                 <div className="event-toolbar">
                   <button type="button" onClick={() => updateSafeguardingIncident(incident, "triaged")}>Triage</button>
                   <button type="button" onClick={() => updateSafeguardingIncident(incident, "investigating")}>Investigate</button>
+                  <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "assign_self")}>Assign me</button>
+                  <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "finding")}>Finding</button>
+                  <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "follow_up")}>Follow-up</button>
+                  <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "escalate")}>Escalate</button>
                   <button type="button" onClick={() => createIncidentReportPackage(incident)}>Package</button>
                   <button type="button" onClick={() => createIncidentInsuranceClaim(incident)}>Claim</button>
                   <button type="button" onClick={() => createIncidentMedicalClearance(incident)}>Clearance</button>
-                  <button type="button" onClick={() => updateSafeguardingIncident(incident, "resolved")}>Resolve</button>
+                  <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "close")}>Close</button>
                 </div>
               </article>
             ))}
+            {incidentInvestigationAction ? (
+              <article className="task-card">
+                <div>
+                  <strong>Investigation action</strong>
+                  <span>{incidentInvestigationAction.action_type} · {incidentInvestigationAction.status} · {incidentInvestigationAction.severity}</span>
+                  <span>{incidentInvestigationAction.assigned_to_person_id ?? "Unassigned"} · medical {incidentInvestigationAction.medical_follow_up_required}</span>
+                  <span>{incidentInvestigationAction.action_summary}</span>
+                </div>
+              </article>
+            ) : null}
           </div>
         </section>
       </section>
