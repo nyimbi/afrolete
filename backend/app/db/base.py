@@ -105,6 +105,8 @@ from app.models.performance import (  # noqa: F401,E402
     PerformanceAchievementAward,
     PerformanceGoal,
     PerformanceMetricDefinition,
+    PerformanceModelExtractionBenchmarkCase,
+    PerformanceModelExtractionBenchmarkDataset,
     PerformanceWearableIngestEvent,
     PerformanceWearableProviderConnection,
     PerformanceWearableProviderSyncRun,

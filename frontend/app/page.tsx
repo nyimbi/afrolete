@@ -211,6 +211,7 @@ import type {
   PerformanceInjuryRiskRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
+  PerformanceModelExtractionBenchmarkDatasetRead,
   PerformanceModelExtractionBenchmarkRunRead,
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
@@ -1349,6 +1350,8 @@ export default function HomePage() {
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
   const [performanceModelBenchmark, setPerformanceModelBenchmark] =
     useState<PerformanceModelExtractionBenchmarkRunRead | null>(null);
+  const [performanceModelBenchmarkDatasets, setPerformanceModelBenchmarkDatasets] =
+    useState<PerformanceModelExtractionBenchmarkDatasetRead[]>([]);
   const [performanceWebhookIngest, setPerformanceWebhookIngest] = useState<PerformanceWearableWebhookRead | null>(null);
   const [wearableConnections, setWearableConnections] = useState<PerformanceWearableConnectionRead[]>([]);
   const [wearableSyncRun, setWearableSyncRun] = useState<PerformanceWearableSyncRunRead | null>(null);
@@ -2408,6 +2411,14 @@ export default function HomePage() {
     setAssessmentReviewSummary(data);
   }, [identity]);
 
+  const loadPerformanceBenchmarkDatasets = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<PerformanceModelExtractionBenchmarkDatasetRead[]>(
+      `/performance/model-extraction/benchmark-datasets?organization_id=${organizationId}`,
+      { identity }
+    );
+    setPerformanceModelBenchmarkDatasets(data);
+  }, [identity]);
+
   const loadAthletePerformance = useCallback(
     async (organizationId: string, athleteProfileId: string) => {
       const [
@@ -2957,6 +2968,7 @@ export default function HomePage() {
       setObservations([]);
       setPerformanceIngestion(null);
       setPerformanceModelBenchmark(null);
+      setPerformanceModelBenchmarkDatasets([]);
       setPerformanceWebhookIngest(null);
       setWearableConnections([]);
       setWearableSyncRun(null);
@@ -3097,6 +3109,7 @@ export default function HomePage() {
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
+      await loadPerformanceBenchmarkDatasets(selectedOrganizationId);
       await loadTraining(selectedOrganizationId);
       await loadCompetitions(selectedOrganizationId);
       await loadCommunications(selectedOrganizationId);
@@ -3121,6 +3134,7 @@ export default function HomePage() {
     loadAgents,
     loadAgentTasks,
     loadMetricDefinitions,
+    loadPerformanceBenchmarkDatasets,
     loadTraining,
     loadCompetitions,
     loadCommunications,
@@ -6487,20 +6501,99 @@ export default function HomePage() {
       addLog("Select an organization before running model extraction benchmarks", "bad");
       return;
     }
+    const dataset = performanceModelBenchmarkDatasets[0] ?? null;
     runAction(
       "performance-model-benchmark",
       () =>
         apiRequest<PerformanceModelExtractionBenchmarkRunRead>("/performance/model-extraction/benchmarks", {
           method: "POST",
           identity,
-          body: { organization_id: selectedOrganizationId }
+          body: {
+            organization_id: selectedOrganizationId,
+            ...(dataset ? { dataset_id: dataset.id } : {})
+          }
         }),
       (benchmark) => {
         setPerformanceModelBenchmark(benchmark);
+        if (dataset) {
+          void loadPerformanceBenchmarkDatasets(selectedOrganizationId);
+        }
         addLog(
-          `${benchmark.model_policy} benchmark ${benchmark.passed_count}/${benchmark.case_count} passed`,
+          `${dataset ? dataset.name : benchmark.model_policy} benchmark ${benchmark.passed_count}/${benchmark.case_count} passed`,
           benchmark.failed_count ? "neutral" : "good"
         );
+      }
+    );
+  };
+
+  const createPerformanceModelBenchmarkDataset = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a benchmark dataset", "bad");
+      return;
+    }
+    runAction(
+      "performance-model-benchmark-dataset",
+      () =>
+        apiRequest<PerformanceModelExtractionBenchmarkDatasetRead>("/performance/model-extraction/benchmark-datasets", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: "Narrative extraction baseline",
+            slug: `narrative-extraction-${Date.now()}`,
+            description: "Reusable parser and model-assisted extraction quality gate for coach, video, and agent narratives.",
+            cases: [
+              {
+                case_id: "sleep-duration-number-word",
+                metric_code: "sleep_minutes",
+                metric_name: "Sleep Minutes",
+                category: "wellness",
+                unit: "minutes",
+                min_value: 0,
+                max_value: 900,
+                source: "audio_narration",
+                evidence_ref: "benchmark://audio/recovery-sleep-word",
+                evidence_text: "Recovery note: sleep duration was seven hours after travel.",
+                expected_value: 420,
+                tolerance: 0.01
+              },
+              {
+                case_id: "video-first-touch-specific-number",
+                metric_code: "first_touch",
+                metric_name: "First Touch",
+                category: "technical",
+                unit: "score",
+                min_value: 0,
+                max_value: 10,
+                source: "video_analysis",
+                evidence_ref: "benchmark://video/first-touch",
+                evidence_text: "Video analysis marked first touch quality at 8.4 during the first phase.",
+                expected_value: 8.4,
+                tolerance: 0.01
+              },
+              {
+                case_id: "agent-recovery-score",
+                metric_code: "recovery_score",
+                metric_name: "Recovery Score",
+                category: "wellness",
+                unit: "score",
+                min_value: 0,
+                max_value: 100,
+                source: "agent_extracted",
+                evidence_ref: "benchmark://agent/recovery-score",
+                evidence_text: "Agent review says the recovery score came out at 74 after combining sleep and HRV.",
+                expected_value: 74,
+                tolerance: 0.01
+              }
+            ]
+          }
+        }),
+      (dataset) => {
+        setPerformanceModelBenchmarkDatasets((current) => [
+          dataset,
+          ...current.filter((item) => item.id !== dataset.id)
+        ]);
+        addLog(`${dataset.name} saved with ${dataset.case_count} benchmark cases`, "good");
       }
     );
   };
@@ -13849,6 +13942,7 @@ export default function HomePage() {
                 <button type="button" onClick={createMetricDefinition} disabled={busyAction !== null}>Metric</button>
                 <button type="button" onClick={recordObservation} disabled={busyAction !== null}>Observe</button>
                 <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
+                <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
                 <button type="button" onClick={ingestPerformanceWearableWebhook} disabled={busyAction !== null}>Webhook</button>
                 <button type="button" onClick={createWearableConnection} disabled={busyAction !== null}>Connect</button>
@@ -14218,6 +14312,29 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {performanceModelBenchmarkDatasets.slice(0, 3).map((dataset) => (
+                <article key={dataset.id} className="task-card">
+                  <div>
+                    <strong>{dataset.name} · {dataset.case_count} case(s)</strong>
+                    <span>
+                      {dataset.last_accuracy === null
+                        ? "not run yet"
+                        : `${Math.round(dataset.last_accuracy * 100)}% latest accuracy`} ·{" "}
+                      {dataset.model_policy ?? "default model policy"}
+                    </span>
+                    <small>
+                      {dataset.last_run_at ? `last run ${new Date(dataset.last_run_at).toLocaleString()}` : dataset.description ?? dataset.slug}
+                    </small>
+                    {dataset.cases.length ? (
+                      <small>
+                        {dataset.cases.slice(0, 3).map((item) =>
+                          `${item.case_id}: ${item.metric_code}=${item.expected_value}`
+                        ).join(" · ")}
+                      </small>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
               {performanceWebhookIngest ? (
                 <article className="task-card">
                   <div>

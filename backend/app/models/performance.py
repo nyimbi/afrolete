@@ -183,6 +183,68 @@ class PerformanceWearableProviderSyncRun(IdMixin, TimestampMixin, Base):
     message: Mapped[str | None] = mapped_column(Text)
 
 
+class PerformanceModelExtractionBenchmarkDataset(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_model_extraction_benchmark_datasets"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "slug",
+            name="uq_performance_model_extraction_benchmark_datasets_slug",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(180), nullable=False)
+    slug: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    model_policy: Mapped[str | None] = mapped_column(String(180), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    owner_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_accuracy: Mapped[float | None] = mapped_column(Float)
+    last_mean_absolute_error: Mapped[float | None] = mapped_column(Float)
+    last_case_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class PerformanceModelExtractionBenchmarkCase(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_model_extraction_benchmark_cases"
+    __table_args__ = (
+        UniqueConstraint(
+            "dataset_id",
+            "case_id",
+            name="uq_performance_model_extraction_benchmark_cases_case_id",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    dataset_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("performance_model_extraction_benchmark_datasets.id"),
+        nullable=False,
+        index=True,
+    )
+    case_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    metric_code: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    metric_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    category: Mapped[MetricCategory] = mapped_column(
+        enum_type(MetricCategory), default=MetricCategory.WELLNESS, nullable=False
+    )
+    unit: Mapped[str | None] = mapped_column(String(40))
+    min_value: Mapped[float | None] = mapped_column(Float)
+    max_value: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[MetricSource] = mapped_column(enum_type(MetricSource), nullable=False, index=True)
+    source_provider: Mapped[str | None] = mapped_column(String(80), index=True)
+    evidence_ref: Mapped[str] = mapped_column(String(500), nullable=False)
+    evidence_text: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_value: Mapped[float] = mapped_column(Float, nullable=False)
+    tolerance: Mapped[float] = mapped_column(Float, default=0.01, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
 class AthleteAssessment(IdMixin, TimestampMixin, Base):
     __tablename__ = "athlete_assessments"
 

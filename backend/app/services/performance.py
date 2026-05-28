@@ -39,6 +39,8 @@ from app.models.performance import (
     PerformanceAchievementAward,
     PerformanceGoal,
     PerformanceMetricDefinition,
+    PerformanceModelExtractionBenchmarkCase,
+    PerformanceModelExtractionBenchmarkDataset,
     PerformanceWearableIngestEvent,
     PerformanceWearableProviderConnection,
     PerformanceWearableProviderSyncRun,
@@ -58,6 +60,7 @@ from app.schemas.performance import (
     PerformanceGoalCreate,
     PerformanceIngestionCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
+    PerformanceModelExtractionBenchmarkDatasetCreate,
     PerformanceModelExtractionBenchmarkRunCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
@@ -297,7 +300,17 @@ async def run_performance_model_extraction_benchmark(
 ) -> dict[str, object]:
     await ensure_manage_performance(authz, identity, payload.organization_id)
     settings = get_settings()
-    cases = payload.cases or default_model_extraction_benchmark_cases()
+    dataset: PerformanceModelExtractionBenchmarkDataset | None = None
+    if payload.dataset_id is not None:
+        dataset = await db.get(PerformanceModelExtractionBenchmarkDataset, payload.dataset_id)
+        if dataset is None or dataset.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Benchmark dataset not found")
+        cases = [
+            benchmark_case_create_from_model(case)
+            for case in await active_benchmark_cases(db, dataset.id)
+        ]
+    else:
+        cases = payload.cases or default_model_extraction_benchmark_cases()
     results = [
         await evaluate_model_extraction_benchmark_case(settings, payload.organization_id, case)
         for case in cases
@@ -308,6 +321,13 @@ async def run_performance_model_extraction_benchmark(
         if results
         else 0.0
     )
+    if dataset is not None:
+        dataset.last_run_at = datetime.now(UTC)
+        dataset.last_accuracy = round(passed_count / len(results), 4) if results else 0.0
+        dataset.last_mean_absolute_error = mean_absolute_error
+        dataset.last_case_count = len(results)
+        db.add(dataset)
+        await db.commit()
     return {
         "organization_id": payload.organization_id,
         "model_policy": settings.performance_model_extraction_model,
@@ -318,6 +338,63 @@ async def run_performance_model_extraction_benchmark(
         "mean_absolute_error": mean_absolute_error,
         "cases": results,
     }
+
+
+async def create_performance_model_extraction_benchmark_dataset(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: PerformanceModelExtractionBenchmarkDatasetCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    settings = get_settings()
+    slug = benchmark_dataset_slug(payload.slug or payload.name)
+    existing = await db.scalar(
+        select(PerformanceModelExtractionBenchmarkDataset)
+        .where(PerformanceModelExtractionBenchmarkDataset.organization_id == payload.organization_id)
+        .where(PerformanceModelExtractionBenchmarkDataset.slug == slug)
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Benchmark dataset slug already exists")
+    dataset = PerformanceModelExtractionBenchmarkDataset(
+        organization_id=payload.organization_id,
+        name=payload.name,
+        slug=slug,
+        description=payload.description,
+        model_policy=payload.model_policy or settings.performance_model_extraction_model,
+        status="active",
+        owner_person_id=identity.person_id,
+        last_case_count=len(payload.cases),
+    )
+    db.add(dataset)
+    await db.flush()
+    dataset_id = dataset.id
+    for case in payload.cases:
+        db.add(performance_model_benchmark_case_model(payload.organization_id, dataset_id, case))
+    await db.commit()
+    return await performance_model_benchmark_dataset_read(db, dataset_id)
+
+
+async def list_performance_model_extraction_benchmark_datasets(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> list[dict[str, object]]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    datasets = list(
+        (
+            await db.scalars(
+                select(PerformanceModelExtractionBenchmarkDataset)
+                .where(PerformanceModelExtractionBenchmarkDataset.organization_id == organization_id)
+                .order_by(
+                    PerformanceModelExtractionBenchmarkDataset.updated_at.desc(),
+                    PerformanceModelExtractionBenchmarkDataset.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+    return [await performance_model_benchmark_dataset_read(db, dataset.id) for dataset in datasets]
 
 
 async def ingest_performance_wearable_webhook(
@@ -4816,6 +4893,113 @@ def default_model_extraction_benchmark_cases() -> list[PerformanceModelExtractio
             tolerance=0.01,
         ),
     ]
+
+
+def benchmark_dataset_slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug[:120] or "performance-model-benchmark"
+
+
+def performance_model_benchmark_case_model(
+    organization_id: UUID,
+    dataset_id: UUID,
+    case: PerformanceModelExtractionBenchmarkCaseCreate,
+) -> PerformanceModelExtractionBenchmarkCase:
+    return PerformanceModelExtractionBenchmarkCase(
+        organization_id=organization_id,
+        dataset_id=dataset_id,
+        case_id=case.case_id,
+        metric_code=case.metric_code,
+        metric_name=case.metric_name,
+        category=case.category,
+        unit=case.unit,
+        min_value=case.min_value,
+        max_value=case.max_value,
+        source=case.source,
+        source_provider=case.source_provider,
+        evidence_ref=case.evidence_ref,
+        evidence_text=case.evidence_text,
+        expected_value=case.expected_value,
+        tolerance=case.tolerance,
+        status="active",
+    )
+
+
+def benchmark_case_create_from_model(
+    case: PerformanceModelExtractionBenchmarkCase,
+) -> PerformanceModelExtractionBenchmarkCaseCreate:
+    return PerformanceModelExtractionBenchmarkCaseCreate(
+        case_id=case.case_id,
+        metric_code=case.metric_code,
+        metric_name=case.metric_name,
+        category=case.category,
+        unit=case.unit,
+        min_value=case.min_value,
+        max_value=case.max_value,
+        source=case.source,
+        source_provider=case.source_provider,
+        evidence_ref=case.evidence_ref,
+        evidence_text=case.evidence_text,
+        expected_value=case.expected_value,
+        tolerance=case.tolerance,
+    )
+
+
+async def active_benchmark_cases(
+    db: AsyncSession,
+    dataset_id: UUID,
+) -> list[PerformanceModelExtractionBenchmarkCase]:
+    return list(
+        (
+            await db.scalars(
+                select(PerformanceModelExtractionBenchmarkCase)
+                .where(PerformanceModelExtractionBenchmarkCase.dataset_id == dataset_id)
+                .where(PerformanceModelExtractionBenchmarkCase.status == "active")
+                .order_by(PerformanceModelExtractionBenchmarkCase.created_at.asc())
+            )
+        ).all()
+    )
+
+
+async def performance_model_benchmark_dataset_read(
+    db: AsyncSession,
+    dataset_id: UUID,
+) -> dict[str, object]:
+    dataset = await db.get(PerformanceModelExtractionBenchmarkDataset, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Benchmark dataset not found")
+    cases = await active_benchmark_cases(db, dataset.id)
+    return {
+        "id": dataset.id,
+        "organization_id": dataset.organization_id,
+        "name": dataset.name,
+        "slug": dataset.slug,
+        "description": dataset.description,
+        "model_policy": dataset.model_policy,
+        "status": dataset.status,
+        "case_count": len(cases),
+        "last_run_at": dataset.last_run_at,
+        "last_accuracy": dataset.last_accuracy,
+        "last_mean_absolute_error": dataset.last_mean_absolute_error,
+        "cases": [
+            {
+                "id": case.id,
+                "dataset_id": case.dataset_id,
+                "case_id": case.case_id,
+                "metric_code": case.metric_code,
+                "metric_name": case.metric_name,
+                "category": case.category,
+                "unit": case.unit,
+                "source": case.source,
+                "source_provider": case.source_provider,
+                "evidence_ref": case.evidence_ref,
+                "expected_value": case.expected_value,
+                "tolerance": case.tolerance,
+                "status": case.status,
+            }
+            for case in cases
+        ],
+    }
 
 
 async def evaluate_model_extraction_benchmark_case(

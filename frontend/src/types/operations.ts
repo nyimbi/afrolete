@@ -3190,6 +3190,37 @@ export type PerformanceModelExtractionBenchmarkCaseRead = {
   summary: string;
 };
 
+export type PerformanceModelExtractionBenchmarkDatasetCaseRead = {
+  id: UUID;
+  dataset_id: UUID;
+  case_id: string;
+  metric_code: string;
+  metric_name: string;
+  category: MetricCategory;
+  unit: string | null;
+  source: MetricSource;
+  source_provider: string | null;
+  evidence_ref: string;
+  expected_value: number;
+  tolerance: number;
+  status: string;
+};
+
+export type PerformanceModelExtractionBenchmarkDatasetRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  slug: string;
+  description: string | null;
+  model_policy: string | null;
+  status: string;
+  case_count: number;
+  last_run_at: string | null;
+  last_accuracy: number | null;
+  last_mean_absolute_error: number | null;
+  cases: PerformanceModelExtractionBenchmarkDatasetCaseRead[];
+};
+
 export type PerformanceModelExtractionBenchmarkRunRead = {
   organization_id: UUID;
   model_policy: string;

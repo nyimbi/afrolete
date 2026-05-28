@@ -30,6 +30,8 @@ from app.schemas.performance import (
     PerformanceForecastScenarioRead,
     PerformanceForecastWhatIfRead,
     PerformanceMetricBenchmarkRead,
+    PerformanceModelExtractionBenchmarkDatasetCreate,
+    PerformanceModelExtractionBenchmarkDatasetRead,
     PerformanceModelExtractionBenchmarkRunCreate,
     PerformanceModelExtractionBenchmarkRunRead,
     PerformanceMetricTrendRead,
@@ -63,6 +65,7 @@ from app.services.performance import (
     create_metric_definition,
     create_observation,
     create_performance_goal,
+    create_performance_model_extraction_benchmark_dataset,
     create_player_self_assessment,
     create_wearable_provider_connection,
     decode_string_list,
@@ -77,6 +80,7 @@ from app.services.performance import (
     list_metric_definitions,
     list_my_player_performance,
     list_observations,
+    list_performance_model_extraction_benchmark_datasets,
     list_wearable_provider_connections,
     list_wearable_provider_sync_runs,
     performance_forecast_scenarios,
@@ -448,6 +452,40 @@ async def ingest_performance_evidence_route(
         model_summary=result["model_summary"],
         model_evaluation=result["model_evaluation"],
     )
+
+
+@router.post(
+    "/model-extraction/benchmark-datasets",
+    response_model=PerformanceModelExtractionBenchmarkDatasetRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_performance_model_extraction_benchmark_dataset_route(
+    payload: PerformanceModelExtractionBenchmarkDatasetCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceModelExtractionBenchmarkDatasetRead:
+    return PerformanceModelExtractionBenchmarkDatasetRead(
+        **await create_performance_model_extraction_benchmark_dataset(db, identity, payload, authz)
+    )
+
+
+@router.get(
+    "/model-extraction/benchmark-datasets",
+    response_model=list[PerformanceModelExtractionBenchmarkDatasetRead],
+)
+async def list_performance_model_extraction_benchmark_datasets_route(
+    organization_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceModelExtractionBenchmarkDatasetRead]:
+    return [
+        PerformanceModelExtractionBenchmarkDatasetRead(**dataset)
+        for dataset in await list_performance_model_extraction_benchmark_datasets(
+            db, identity, organization_id, authz
+        )
+    ]
 
 
 @router.post(

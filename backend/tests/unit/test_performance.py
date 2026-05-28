@@ -1434,6 +1434,108 @@ def test_performance_model_extraction_benchmark_reports_accuracy(client, identit
     assert methods["video-first-touch-specific-number"] == "metric_specific_text"
 
 
+def test_performance_model_extraction_benchmark_dataset_can_be_saved_and_run(
+    client, identity_headers
+) -> None:
+    organization, _, _, _ = create_rostered_athlete(client, identity_headers)
+
+    dataset_response = client.post(
+        "/api/v1/performance/model-extraction/benchmark-datasets",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Narrative Extraction Baseline",
+            "slug": "narrative-extraction-baseline",
+            "description": "Reusable production quality gate for narrative extraction.",
+            "cases": [
+                {
+                    "case_id": "sleep-duration-number-word",
+                    "metric_code": "sleep_minutes",
+                    "metric_name": "Sleep Minutes",
+                    "unit": "minutes",
+                    "min_value": 0,
+                    "max_value": 900,
+                    "source": "audio_narration",
+                    "evidence_ref": "benchmark://performance/sleep-duration-number-word",
+                    "evidence_text": "Recovery note: sleep duration was seven hours after travel.",
+                    "expected_value": 420,
+                    "tolerance": 0.01,
+                },
+                {
+                    "case_id": "video-first-touch-specific-number",
+                    "metric_code": "first_touch",
+                    "metric_name": "First Touch",
+                    "category": "technical",
+                    "unit": "score",
+                    "min_value": 0,
+                    "max_value": 10,
+                    "source": "video_analysis",
+                    "evidence_ref": "benchmark://performance/video-first-touch-specific-number",
+                    "evidence_text": "70th minute clip: first touch quality 8.4 under pressure after two scans.",
+                    "expected_value": 8.4,
+                    "tolerance": 0.01,
+                },
+                {
+                    "case_id": "agent-recovery-score",
+                    "metric_code": "recovery_score",
+                    "metric_name": "Recovery Score",
+                    "unit": "score",
+                    "min_value": 0,
+                    "max_value": 100,
+                    "source": "agent_extracted",
+                    "evidence_ref": "benchmark://performance/agent-recovery-score",
+                    "evidence_text": (
+                        "Agent summary: fatigue was high but readiness improved; "
+                        "recovery score came out at 74."
+                    ),
+                    "expected_value": 74,
+                    "tolerance": 0.01,
+                },
+            ],
+        },
+    )
+
+    assert dataset_response.status_code == 201
+    dataset = dataset_response.json()
+    assert dataset["slug"] == "narrative-extraction-baseline"
+    assert dataset["case_count"] == 3
+    assert dataset["last_run_at"] is None
+    assert {case["case_id"] for case in dataset["cases"]} == {
+        "sleep-duration-number-word",
+        "video-first-touch-specific-number",
+        "agent-recovery-score",
+    }
+
+    list_response = client.get(
+        f"/api/v1/performance/model-extraction/benchmark-datasets?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["id"] == dataset["id"]
+
+    run_response = client.post(
+        "/api/v1/performance/model-extraction/benchmarks",
+        headers=identity_headers,
+        json={"organization_id": organization["id"], "dataset_id": dataset["id"]},
+    )
+
+    assert run_response.status_code == 200
+    benchmark = run_response.json()
+    assert benchmark["case_count"] == 3
+    assert benchmark["passed_count"] == 3
+    assert benchmark["accuracy"] == 1.0
+    assert benchmark["mean_absolute_error"] == 0.0
+
+    updated_list_response = client.get(
+        f"/api/v1/performance/model-extraction/benchmark-datasets?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    updated = updated_list_response.json()[0]
+    assert updated["last_run_at"] is not None
+    assert updated["last_accuracy"] == 1.0
+    assert updated["last_mean_absolute_error"] == 0.0
+
+
 def test_performance_wearable_webhook_creates_pending_observations_once(
     client, identity_headers
 ) -> None:

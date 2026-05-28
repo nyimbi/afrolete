@@ -123,7 +123,48 @@ class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
 
 class PerformanceModelExtractionBenchmarkRunCreate(BaseModel):
     organization_id: UUID
+    dataset_id: UUID | None = None
     cases: list[PerformanceModelExtractionBenchmarkCaseCreate] = Field(default_factory=list, max_length=50)
+
+
+class PerformanceModelExtractionBenchmarkDatasetCreate(BaseModel):
+    organization_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    slug: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    model_policy: str | None = Field(default=None, max_length=180)
+    cases: list[PerformanceModelExtractionBenchmarkCaseCreate] = Field(default_factory=list, min_length=1, max_length=200)
+
+
+class PerformanceModelExtractionBenchmarkDatasetCaseRead(BaseModel):
+    id: UUID
+    dataset_id: UUID
+    case_id: str
+    metric_code: str
+    metric_name: str
+    category: MetricCategory
+    unit: str | None
+    source: MetricSource
+    source_provider: str | None
+    evidence_ref: str
+    expected_value: float
+    tolerance: float
+    status: str
+
+
+class PerformanceModelExtractionBenchmarkDatasetRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    name: str
+    slug: str
+    description: str | None
+    model_policy: str | None
+    status: str
+    case_count: int
+    last_run_at: datetime | None
+    last_accuracy: float | None
+    last_mean_absolute_error: float | None
+    cases: list[PerformanceModelExtractionBenchmarkDatasetCaseRead]
 
 
 class PerformanceModelExtractionBenchmarkCaseRead(BaseModel):
