@@ -32,6 +32,8 @@ from app.schemas.communication import (
     CommunicationDigestRunCreate,
     CommunicationDigestRunRead,
     CommunicationDigestWorkerRunRead,
+    CommunicationDeliveryChannelReadiness,
+    CommunicationDeliveryReadinessRead,
     CommunicationDispatchSummary,
     CommunicationDraftRead,
     CommunicationDraftRequest,
@@ -624,6 +626,111 @@ async def dispatch_message(
 
     await db.commit()
     return dispatch_summary(message.id, rows, settings.communication_delivery_mode)
+
+
+async def communication_delivery_readiness(settings: Settings | None = None) -> CommunicationDeliveryReadinessRead:
+    settings = settings or get_settings()
+    key_resolution = await resolve_communication_webhook_key(settings)
+    key_configured = bool(key_resolution["key"])
+    key_source = str(key_resolution["source"])
+    key_failure_reason = key_resolution["failure_reason"]
+    channels = [
+        communication_channel_readiness(settings, channel, key_configured, key_source, key_failure_reason)
+        for channel in CommunicationChannel
+    ]
+    return CommunicationDeliveryReadinessRead(
+        delivery_mode=settings.communication_delivery_mode,
+        key_source=key_source,
+        key_configured=key_configured,
+        key_failure_reason=key_failure_reason,
+        dispatch_ready_count=sum(1 for channel in channels if channel.dispatch_ready),
+        live_ready_count=sum(1 for channel in channels if channel.live_ready),
+        blocked_count=sum(1 for channel in channels if not channel.dispatch_ready),
+        channels=channels,
+    )
+
+
+def communication_channel_readiness(
+    settings: Settings,
+    channel: CommunicationChannel,
+    key_configured: bool,
+    key_source: str,
+    key_failure_reason: str | None,
+) -> CommunicationDeliveryChannelReadiness:
+    if channel == CommunicationChannel.IN_APP:
+        return CommunicationDeliveryChannelReadiness(
+            channel=channel,
+            status="in_app",
+            dispatch_ready=True,
+            live_ready=True,
+            webhook_configured=False,
+            webhook_source="not_required",
+            key_configured=key_configured,
+            key_source=key_source,
+            details=["In-app delivery is handled inside AfroLete."],
+        )
+
+    webhook_source = delivery_webhook_source_for(settings, channel)
+    webhook_configured = delivery_webhook_url_for(settings, channel) is not None
+    if settings.communication_delivery_mode == "record_only":
+        return CommunicationDeliveryChannelReadiness(
+            channel=channel,
+            status="record_only",
+            dispatch_ready=True,
+            live_ready=False,
+            webhook_configured=webhook_configured,
+            webhook_source=webhook_source,
+            key_configured=key_configured,
+            key_source=key_source,
+            details=["Record-only mode queues recipients without contacting an external provider."],
+        )
+    if not webhook_configured:
+        return CommunicationDeliveryChannelReadiness(
+            channel=channel,
+            status="missing_webhook",
+            dispatch_ready=False,
+            live_ready=False,
+            webhook_configured=False,
+            webhook_source=webhook_source,
+            key_configured=key_configured,
+            key_source=key_source,
+            details=[f"Configure a {channel.value} webhook URL or shared communication webhook URL."],
+        )
+    if key_failure_reason:
+        return CommunicationDeliveryChannelReadiness(
+            channel=channel,
+            status="key_unavailable",
+            dispatch_ready=False,
+            live_ready=False,
+            webhook_configured=True,
+            webhook_source=webhook_source,
+            key_configured=False,
+            key_source=key_source,
+            details=[key_failure_reason],
+        )
+    if not key_configured:
+        return CommunicationDeliveryChannelReadiness(
+            channel=channel,
+            status="webhook_missing_key",
+            dispatch_ready=True,
+            live_ready=False,
+            webhook_configured=True,
+            webhook_source=webhook_source,
+            key_configured=False,
+            key_source=key_source,
+            details=["Webhook dispatch can run, but signed delivery callbacks are not protected by a shared key."],
+        )
+    return CommunicationDeliveryChannelReadiness(
+        channel=channel,
+        status="ready",
+        dispatch_ready=True,
+        live_ready=True,
+        webhook_configured=True,
+        webhook_source=webhook_source,
+        key_configured=True,
+        key_source=key_source,
+        details=["Webhook URL and delivery key are configured for live provider dispatch and callbacks."],
+    )
 
 
 async def run_message_escalation(
@@ -1444,6 +1551,21 @@ def delivery_webhook_url_for(settings: Settings, channel: CommunicationChannel) 
     }
     url = channel_urls.get(channel) or settings.communication_webhook_url
     return url or None
+
+
+def delivery_webhook_source_for(settings: Settings, channel: CommunicationChannel) -> str:
+    channel_urls = {
+        CommunicationChannel.EMAIL: settings.communication_email_webhook_url,
+        CommunicationChannel.SMS: settings.communication_sms_webhook_url,
+        CommunicationChannel.WHATSAPP: settings.communication_whatsapp_webhook_url,
+        CommunicationChannel.TELEGRAM: settings.communication_telegram_webhook_url,
+        CommunicationChannel.PUSH: settings.communication_push_webhook_url,
+    }
+    if channel_urls.get(channel):
+        return "channel"
+    if settings.communication_webhook_url:
+        return "shared"
+    return "unset"
 
 
 def escalation_channel(channel: CommunicationChannel) -> CommunicationChannel:

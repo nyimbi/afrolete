@@ -124,6 +124,29 @@ class CommunicationDispatchSummary(BaseModel):
     transport_mode: str
 
 
+class CommunicationDeliveryChannelReadiness(BaseModel):
+    channel: CommunicationChannel
+    status: str
+    dispatch_ready: bool
+    live_ready: bool
+    webhook_configured: bool
+    webhook_source: str
+    key_configured: bool
+    key_source: str
+    details: list[str]
+
+
+class CommunicationDeliveryReadinessRead(BaseModel):
+    delivery_mode: str
+    key_source: str
+    key_configured: bool
+    key_failure_reason: str | None
+    dispatch_ready_count: int
+    live_ready_count: int
+    blocked_count: int
+    channels: list[CommunicationDeliveryChannelReadiness]
+
+
 class CommunicationEscalationRunCreate(BaseModel):
     channel: CommunicationChannel | None = None
     escalation_level: int = Field(default=2, ge=1, le=5)

@@ -73,6 +73,7 @@ import type {
   ChannelPreference,
   CommunicationDigestRead,
   CommunicationDigestRunRead,
+  CommunicationDeliveryReadinessRead,
   CommunicationDispatchSummary,
   CommunicationDraftRead,
   CommunicationEscalationRunRead,
@@ -1524,6 +1525,8 @@ export default function HomePage() {
   const [inboxItems, setInboxItems] = useState<CommunicationInboxItemRead[]>([]);
   const [digestSummary, setDigestSummary] = useState<CommunicationDigestRead | null>(null);
   const [digestRun, setDigestRun] = useState<CommunicationDigestRunRead | null>(null);
+  const [communicationDeliveryReadiness, setCommunicationDeliveryReadiness] =
+    useState<CommunicationDeliveryReadinessRead | null>(null);
   const [draftPreview, setDraftPreview] = useState<CommunicationDraftRead | null>(null);
   const [escalationRun, setEscalationRun] = useState<CommunicationEscalationRunRead | null>(null);
   const [escalationSchedulerRun, setEscalationSchedulerRun] =
@@ -2820,16 +2823,18 @@ export default function HomePage() {
   }, []);
 
   const loadCommunications = useCallback(async (organizationId: string) => {
-    const [templates, messages] = await Promise.all([
+    const [templates, messages, deliveryReadiness] = await Promise.all([
       apiRequest<CommunicationTemplateRead[]>(`/communications/templates?organization_id=${organizationId}`),
-      apiRequest<CommunicationMessageRead[]>(`/communications/messages?organization_id=${organizationId}`)
+      apiRequest<CommunicationMessageRead[]>(`/communications/messages?organization_id=${organizationId}`),
+      apiRequest<CommunicationDeliveryReadinessRead>("/communications/delivery-readiness", { identity })
     ]);
     setCommunicationTemplates(templates);
     setCommunicationMessages(messages);
+    setCommunicationDeliveryReadiness(deliveryReadiness);
     setSelectedMessageId((current) =>
       messages.some((message) => message.id === current) ? current : messages[0]?.id ?? ""
     );
-  }, []);
+  }, [identity]);
 
   const loadMessageRecipients = useCallback(async (messageId: string) => {
     const data = await apiRequest<MessageRecipientRead[]>(
@@ -3317,6 +3322,7 @@ export default function HomePage() {
       setInboxItems([]);
       setDigestSummary(null);
       setDigestRun(null);
+      setCommunicationDeliveryReadiness(null);
       setDraftPreview(null);
       setEscalationRun(null);
       setEscalationSchedulerRun(null);
@@ -15424,6 +15430,15 @@ export default function HomePage() {
               <span>{selectedMessage?.subject ?? "No message selected"}</span>
               <small>{messageRecipients.length} recipients · {notificationPreference?.frequency ?? "no preference"}</small>
             </div>
+            {communicationDeliveryReadiness ? (
+              <div className="score-summary">
+                <strong>{communicationDeliveryReadiness.live_ready_count}/6</strong>
+                <span>Live provider channels</span>
+                <small>
+                  {communicationDeliveryReadiness.delivery_mode} · key {communicationDeliveryReadiness.key_configured ? communicationDeliveryReadiness.key_source : "missing"} · {communicationDeliveryReadiness.blocked_count} blocked
+                </small>
+              </div>
+            ) : null}
             <div className="form-grid">
               <label>
                 Frequency
@@ -15452,6 +15467,19 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {communicationDeliveryReadiness?.channels.map((channel) => (
+                <article key={channel.channel} className="task-card">
+                  <div>
+                    <strong>{channel.channel.replaceAll("_", " ")}</strong>
+                    <span>
+                      {channel.status} · {channel.dispatch_ready ? "dispatch ready" : "blocked"} · {channel.live_ready ? "live" : "not live"}
+                    </span>
+                    <span>
+                      webhook {channel.webhook_source} · key {channel.key_configured ? channel.key_source : "missing"}
+                    </span>
+                  </div>
+                </article>
+              ))}
               {escalationRun ? (
                 <article className="task-card">
                   <div>

@@ -5004,6 +5004,29 @@ export type CommunicationDispatchSummary = {
   transport_mode: string;
 };
 
+export type CommunicationDeliveryChannelReadiness = {
+  channel: CommunicationChannel;
+  status: string;
+  dispatch_ready: boolean;
+  live_ready: boolean;
+  webhook_configured: boolean;
+  webhook_source: string;
+  key_configured: boolean;
+  key_source: string;
+  details: string[];
+};
+
+export type CommunicationDeliveryReadinessRead = {
+  delivery_mode: string;
+  key_source: string;
+  key_configured: boolean;
+  key_failure_reason: string | null;
+  dispatch_ready_count: number;
+  live_ready_count: number;
+  blocked_count: number;
+  channels: CommunicationDeliveryChannelReadiness[];
+};
+
 export type CommunicationEscalationRunRead = {
   original_message_id: UUID;
   escalation_message_id: UUID | null;

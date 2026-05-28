@@ -10,6 +10,7 @@ from app.schemas.communication import (
     CommunicationDigestRead,
     CommunicationDigestRunCreate,
     CommunicationDigestRunRead,
+    CommunicationDeliveryReadinessRead,
     CommunicationDispatchSummary,
     CommunicationDraftRead,
     CommunicationDraftRequest,
@@ -32,6 +33,7 @@ from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.communications import (
+    communication_delivery_readiness,
     create_digest,
     create_message,
     create_template,
@@ -278,6 +280,15 @@ async def dispatch_message_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> CommunicationDispatchSummary:
     return await dispatch_message(db, identity, message_id, authz)
+
+
+@router.get("/delivery-readiness", response_model=CommunicationDeliveryReadinessRead)
+async def communication_delivery_readiness_route(
+    identity: CurrentIdentity = Depends(get_current_identity),
+    settings: Settings = Depends(get_settings),
+) -> CommunicationDeliveryReadinessRead:
+    _ = identity
+    return await communication_delivery_readiness(settings)
 
 
 @router.post("/messages/{message_id}/escalate", response_model=CommunicationEscalationRunRead)

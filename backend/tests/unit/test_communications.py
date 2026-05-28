@@ -1,3 +1,6 @@
+from app.core.config import Settings, get_settings
+
+
 def create_communications_context(client, identity_headers):
     organization = client.post(
         "/api/v1/organizations",
@@ -141,6 +144,40 @@ def test_record_only_dispatch_and_delivery_callback(client, identity_headers) ->
     callback = callback_response.json()
     assert callback["delivery_status"] == "delivered"
     assert callback["delivered_at"] is not None
+
+
+def test_delivery_readiness_reports_record_only_and_webhook_channels(client, identity_headers) -> None:
+    record_only_response = client.get("/api/v1/communications/delivery-readiness", headers=identity_headers)
+
+    assert record_only_response.status_code == 200
+    record_only = record_only_response.json()
+    assert record_only["delivery_mode"] == "record_only"
+    assert record_only["dispatch_ready_count"] == 6
+    assert record_only["live_ready_count"] == 1
+    channels = {item["channel"]: item for item in record_only["channels"]}
+    assert channels["in_app"]["status"] == "in_app"
+    assert channels["email"]["status"] == "record_only"
+    assert channels["email"]["dispatch_ready"] is True
+    assert channels["email"]["live_ready"] is False
+
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        communication_delivery_mode="webhook",
+        communication_email_webhook_url="https://email-provider.example/dispatch",
+        communication_webhook_key="shared-secret",
+    )
+    webhook_response = client.get("/api/v1/communications/delivery-readiness", headers=identity_headers)
+
+    assert webhook_response.status_code == 200
+    webhook = webhook_response.json()
+    webhook_channels = {item["channel"]: item for item in webhook["channels"]}
+    assert webhook["delivery_mode"] == "webhook"
+    assert webhook["key_source"] == "env"
+    assert webhook["key_configured"] is True
+    assert webhook_channels["email"]["status"] == "ready"
+    assert webhook_channels["email"]["webhook_source"] == "channel"
+    assert webhook_channels["email"]["live_ready"] is True
+    assert webhook_channels["sms"]["status"] == "missing_webhook"
+    assert webhook["blocked_count"] == 4
 
 
 def test_inbox_digest_and_ai_assisted_draft(client, identity_headers) -> None:
