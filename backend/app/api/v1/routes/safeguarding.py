@@ -38,6 +38,7 @@ from app.schemas.safeguarding import (
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
     IncidentInsuranceClaimCreate,
+    IncidentInsuranceClaimProviderSyncRead,
     IncidentInsuranceClaimRead,
     IncidentInsuranceClaimUpdate,
     IncidentMedicalClearanceCreate,
@@ -80,6 +81,7 @@ from app.services.safeguarding import (
     list_compliance_credentials,
     list_guardians_for_athlete,
     list_incident_insurance_claims,
+    poll_incident_insurance_claim_provider_status,
     list_incident_medical_clearances,
     list_incident_report_packages,
     list_safeguarding_incidents,
@@ -94,6 +96,7 @@ from app.services.safeguarding import (
     update_background_check,
     update_compliance_credential,
     update_incident_insurance_claim,
+    submit_incident_insurance_claim_to_provider,
     update_incident_medical_clearance,
     update_incident_report_package,
     update_safeguarding_incident,
@@ -525,6 +528,26 @@ async def update_incident_insurance_claim_route(
     return to_insurance_claim_read(
         await update_incident_insurance_claim(db, identity, claim_id, payload, authz)
     )
+
+
+@router.post("/insurance-claims/{claim_id}/submit-provider", response_model=IncidentInsuranceClaimProviderSyncRead)
+async def submit_incident_insurance_claim_to_provider_route(
+    claim_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentInsuranceClaimProviderSyncRead:
+    return await submit_incident_insurance_claim_to_provider(db, identity, claim_id, authz)
+
+
+@router.post("/insurance-claims/{claim_id}/poll-provider-status", response_model=IncidentInsuranceClaimProviderSyncRead)
+async def poll_incident_insurance_claim_provider_status_route(
+    claim_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> IncidentInsuranceClaimProviderSyncRead:
+    return await poll_incident_insurance_claim_provider_status(db, identity, claim_id, authz)
 
 
 @router.post("/medical-clearances", response_model=IncidentMedicalClearanceRead, status_code=201)

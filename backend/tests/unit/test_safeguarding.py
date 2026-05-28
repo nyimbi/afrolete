@@ -228,6 +228,75 @@ def test_incident_report_package_exports_markdown_and_pdf(client, identity_heade
     assert bad_response.status_code == 403
 
 
+def test_insurance_claim_provider_submit_and_status_poll_record_only(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Claims Integration Club", "organization_type": "club"},
+    ).json()
+    incident = client.post(
+        "/api/v1/safeguarding/incidents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_type": "injury",
+            "severity": "medium",
+            "occurred_at": "2026-05-28T11:15:00Z",
+            "location": "Training pitch",
+            "title": "Ankle injury claim",
+            "description": "Athlete rolled ankle during training.",
+            "immediate_action": "First aid and clinic referral.",
+            "medical_follow_up_required": "yes",
+        },
+    ).json()
+    claim_response = client.post(
+        "/api/v1/safeguarding/insurance-claims",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_id": incident["id"],
+            "provider_name": "Demo Mutual",
+            "policy_number": "POL-2026-CLAIM",
+            "claim_type": "injury_medical",
+            "claimed_amount_cents": 125000,
+            "currency": "USD",
+            "reserve_amount_cents": 150000,
+            "documentation_checklist_json": '{"medical_note": true}',
+        },
+    )
+    assert claim_response.status_code == 201
+    claim = claim_response.json()
+
+    submit_response = client.post(
+        f"/api/v1/safeguarding/insurance-claims/{claim['id']}/submit-provider",
+        headers=identity_headers,
+    )
+    assert submit_response.status_code == 200
+    submitted = submit_response.json()
+    assert submitted["delivery_mode"] == "record_only"
+    assert submitted["delivery_attempted"] is False
+    assert submitted["claim_status"] == "submitted"
+    assert submitted["failure_reason"].startswith("Record-only insurer mode")
+
+    poll_response = client.post(
+        f"/api/v1/safeguarding/insurance-claims/{claim['id']}/poll-provider-status",
+        headers=identity_headers,
+    )
+    assert poll_response.status_code == 200
+    polled = poll_response.json()
+    assert polled["action"] == "status_poll"
+    assert polled["claim_status"] == "submitted"
+
+    claims = client.get(
+        f"/api/v1/safeguarding/insurance-claims?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    synced_claim = next(item for item in claims if item["id"] == claim["id"])
+    assert synced_claim["status"] == "submitted"
+    assert "Record-only insurer status_poll" in synced_claim["communication_log"]
+    assert "incident_insurance_claim.submit" in synced_claim["submission_payload"]
+
+
 def test_signed_screening_provider_result_updates_background_check(
     client,
     identity_headers,

@@ -182,6 +182,7 @@ import type {
   IncidentReportPackageArtifactRead,
   IncidentReportPackageArtifactLinkRead,
   IncidentInsuranceClaimRead,
+  IncidentInsuranceClaimProviderSyncRead,
   IncidentMedicalClearanceRead,
   IncidentReportPackageRead,
   IncidentReportPackageStatus,
@@ -1570,6 +1571,7 @@ export default function HomePage() {
   const [incidentReportPackageArtifact, setIncidentReportPackageArtifact] = useState<IncidentReportPackageArtifactRead | null>(null);
   const [incidentReportPackageArtifactLink, setIncidentReportPackageArtifactLink] = useState<IncidentReportPackageArtifactLinkRead | null>(null);
   const [incidentInsuranceClaims, setIncidentInsuranceClaims] = useState<IncidentInsuranceClaimRead[]>([]);
+  const [incidentInsuranceClaimProviderSync, setIncidentInsuranceClaimProviderSync] = useState<IncidentInsuranceClaimProviderSyncRead | null>(null);
   const [incidentMedicalClearances, setIncidentMedicalClearances] = useState<IncidentMedicalClearanceRead[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
@@ -3147,6 +3149,7 @@ export default function HomePage() {
       setIncidentReportPackageArtifact(null);
       setIncidentReportPackageArtifactLink(null);
       setIncidentInsuranceClaims([]);
+      setIncidentInsuranceClaimProviderSync(null);
       setIncidentMedicalClearances([]);
       setCommunicationTemplates([]);
       setCommunicationMessages([]);
@@ -5922,6 +5925,30 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== updated.id)
         ]);
         addLog(`${updated.provider_name} claim moved to ${updated.status}`, "good");
+      }
+    );
+  };
+
+  const syncIncidentInsuranceClaimProvider = (
+    claim: IncidentInsuranceClaimRead,
+    action: "submit-provider" | "poll-provider-status"
+  ) => {
+    runAction(
+      `incident-insurance-claim-provider-${action}-${claim.id}`,
+      () =>
+        apiRequest<IncidentInsuranceClaimProviderSyncRead>(
+          `/safeguarding/insurance-claims/${claim.id}/${action}`,
+          { method: "POST", identity }
+        ),
+      async (sync) => {
+        setIncidentInsuranceClaimProviderSync(sync);
+        if (selectedOrganizationId) {
+          await loadIncidentInsuranceClaims(selectedOrganizationId);
+        }
+        addLog(
+          `${sync.action === "submit" ? "Submitted claim to insurer adapter" : "Polled insurer claim status"} (${sync.delivery_mode}, ${sync.claim_status})`,
+          sync.failure_reason ? "neutral" : "good"
+        );
       }
     );
   };
@@ -16231,9 +16258,23 @@ export default function HomePage() {
                   <button type="button" onClick={() => updateIncidentInsuranceClaim(claim, "approved")}>Approve</button>
                   <button type="button" onClick={() => updateIncidentInsuranceClaim(claim, "paid")}>Paid</button>
                   <button type="button" onClick={() => updateIncidentInsuranceClaim(claim, "denied")}>Deny</button>
+                  <button type="button" onClick={() => syncIncidentInsuranceClaimProvider(claim, "submit-provider")}>Send</button>
+                  <button type="button" onClick={() => syncIncidentInsuranceClaimProvider(claim, "poll-provider-status")}>Poll</button>
                 </div>
               </article>
             ))}
+            {incidentInsuranceClaimProviderSync ? (
+              <article className="task-card">
+                <div>
+                  <strong>Insurer {incidentInsuranceClaimProviderSync.action}</strong>
+                  <span>
+                    {incidentInsuranceClaimProviderSync.delivery_mode} · {incidentInsuranceClaimProviderSync.claim_status} · {incidentInsuranceClaimProviderSync.delivered ? "delivered" : "not delivered"}
+                  </span>
+                  <span>{incidentInsuranceClaimProviderSync.provider_reference ?? "No provider reference"} · {incidentInsuranceClaimProviderSync.provider_status_code ?? "no HTTP status"}</span>
+                  <span>{incidentInsuranceClaimProviderSync.failure_reason ?? incidentInsuranceClaimProviderSync.tracking_url ?? "Provider sync recorded"}</span>
+                </div>
+              </article>
+            ) : null}
             {incidentMedicalClearances.slice(0, 4).map((clearance) => (
               <article key={clearance.id} className="task-card">
                 <div>

@@ -1,6 +1,7 @@
 import base64
 import hmac
 import io
+import json
 import time
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
@@ -9,6 +10,7 @@ from secrets import token_urlsafe
 from urllib.parse import quote
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,6 +71,7 @@ from app.schemas.safeguarding import (
     GuardianRelationshipCreate,
     IncidentReportPackageArtifactLinkRead,
     IncidentInsuranceClaimCreate,
+    IncidentInsuranceClaimProviderSyncRead,
     IncidentInsuranceClaimUpdate,
     IncidentMedicalClearanceCreate,
     IncidentMedicalClearanceUpdate,
@@ -964,6 +967,268 @@ async def update_incident_insurance_claim(
     await db.commit()
     await db.refresh(claim)
     return claim
+
+
+async def submit_incident_insurance_claim_to_provider(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    claim_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> IncidentInsuranceClaimProviderSyncRead:
+    claim = await db.get(IncidentInsuranceClaim, claim_id)
+    if claim is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insurance claim not found")
+    await ensure_org_manage(authz, claim.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, claim.incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    selected_settings = settings or get_settings()
+    now = utc_now()
+    payload = incident_insurance_claim_provider_payload(claim, incident, "submit")
+    claim.submitted_by_person_id = identity.person_id
+    claim.submitted_at = claim.submitted_at or now
+    claim.status = InsuranceClaimStatus.SUBMITTED
+    claim.submission_payload = json.dumps(payload, sort_keys=True, default=str)
+    append_incident_insurance_claim_log(
+        claim,
+        now,
+        "Prepared insurer claim submission",
+        selected_settings.safeguarding_insurance_claim_delivery_mode,
+    )
+    result = await deliver_incident_insurance_claim_provider_payload(
+        selected_settings,
+        claim,
+        payload,
+        now,
+        action="submit",
+    )
+    await db.commit()
+    await db.refresh(claim)
+    return result.model_copy(update={"claim_status": claim.status})
+
+
+async def poll_incident_insurance_claim_provider_status(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    claim_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> IncidentInsuranceClaimProviderSyncRead:
+    claim = await db.get(IncidentInsuranceClaim, claim_id)
+    if claim is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insurance claim not found")
+    await ensure_org_manage(authz, claim.organization_id, identity)
+    incident = await db.get(SafeguardingIncident, claim.incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    selected_settings = settings or get_settings()
+    now = utc_now()
+    payload = incident_insurance_claim_provider_payload(claim, incident, "status_poll")
+    result = await deliver_incident_insurance_claim_provider_payload(
+        selected_settings,
+        claim,
+        payload,
+        now,
+        action="status_poll",
+    )
+    await db.commit()
+    await db.refresh(claim)
+    return result.model_copy(update={"claim_status": claim.status})
+
+
+async def deliver_incident_insurance_claim_provider_payload(
+    settings: Settings,
+    claim: IncidentInsuranceClaim,
+    payload: dict[str, object],
+    now: datetime,
+    *,
+    action: str,
+) -> IncidentInsuranceClaimProviderSyncRead:
+    result = IncidentInsuranceClaimProviderSyncRead(
+        claim_id=claim.id,
+        organization_id=claim.organization_id,
+        action=action,
+        delivery_mode=settings.safeguarding_insurance_claim_delivery_mode,
+        delivery_attempted=False,
+        delivered=False,
+        provider_status_code=None,
+        provider_reference=claim.claim_number,
+        tracking_url=claim.tracking_url,
+        claim_status=claim.status,
+        failure_reason=None,
+        synced_at=now,
+    )
+    if settings.safeguarding_insurance_claim_delivery_mode == "record_only":
+        append_incident_insurance_claim_log(
+            claim,
+            now,
+            f"Record-only insurer {action}; provider payload stored for manual handling",
+            settings.safeguarding_insurance_claim_delivery_mode,
+        )
+        return result.model_copy(update={"failure_reason": "Record-only insurer mode; payload prepared for manual provider handling."})
+    if not settings.safeguarding_insurance_claim_webhook_url:
+        failure = "Insurer webhook mode is enabled but no webhook URL is configured."
+        append_incident_insurance_claim_log(claim, now, failure, settings.safeguarding_insurance_claim_delivery_mode)
+        return result.model_copy(update={"failure_reason": failure})
+
+    raw_body = json.dumps(payload, sort_keys=True, default=str).encode()
+    timestamp = str(int(now.timestamp()))
+    headers = incident_insurance_claim_provider_headers(settings, raw_body, timestamp)
+    try:
+        async with httpx.AsyncClient(timeout=settings.safeguarding_insurance_claim_timeout_seconds) as client:
+            response = await client.post(
+                settings.safeguarding_insurance_claim_webhook_url,
+                json=payload,
+                headers=headers,
+            )
+        delivered = 200 <= response.status_code < 300
+        response_payload = parse_insurer_response_json(response.text) if response.text else {}
+        if delivered:
+            apply_incident_insurance_claim_provider_response(claim, response_payload, now)
+            append_incident_insurance_claim_log(
+                claim,
+                now,
+                f"Insurer {action} accepted with HTTP {response.status_code}",
+                settings.safeguarding_insurance_claim_delivery_mode,
+            )
+        else:
+            append_incident_insurance_claim_log(
+                claim,
+                now,
+                f"Insurer {action} returned HTTP {response.status_code}",
+                settings.safeguarding_insurance_claim_delivery_mode,
+            )
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "delivered": delivered,
+                "provider_status_code": response.status_code,
+                "provider_reference": claim.claim_number,
+                "tracking_url": claim.tracking_url,
+                "claim_status": claim.status,
+                "failure_reason": None if delivered else f"Insurer webhook returned {response.status_code}: {response.text[:500]}",
+            }
+        )
+    except httpx.HTTPError as error:
+        append_incident_insurance_claim_log(
+            claim,
+            now,
+            f"Insurer {action} delivery failed: {error}",
+            settings.safeguarding_insurance_claim_delivery_mode,
+        )
+        return result.model_copy(
+            update={
+                "delivery_attempted": True,
+                "failure_reason": f"Insurer webhook delivery failed: {error}",
+            }
+        )
+
+
+def incident_insurance_claim_provider_payload(
+    claim: IncidentInsuranceClaim,
+    incident: SafeguardingIncident,
+    action: str,
+) -> dict[str, object]:
+    return {
+        "event_type": f"incident_insurance_claim.{action}",
+        "claim_id": str(claim.id),
+        "organization_id": str(claim.organization_id),
+        "incident_id": str(claim.incident_id),
+        "claim_type": claim.claim_type.value,
+        "status": claim.status.value,
+        "provider_name": claim.provider_name,
+        "policy_number": claim.policy_number,
+        "claim_number": claim.claim_number,
+        "claimed_amount_cents": claim.claimed_amount_cents,
+        "approved_amount_cents": claim.approved_amount_cents,
+        "paid_amount_cents": claim.paid_amount_cents,
+        "reserve_amount_cents": claim.reserve_amount_cents,
+        "currency": claim.currency,
+        "tracking_url": claim.tracking_url,
+        "documentation_checklist_json": claim.documentation_checklist_json,
+        "submission_payload": claim.submission_payload,
+        "incident": {
+            "title": incident.title,
+            "incident_type": incident.incident_type.value,
+            "severity": incident.severity.value,
+            "occurred_at": incident.occurred_at,
+            "location": incident.location,
+            "description": incident.description,
+            "immediate_action": incident.immediate_action,
+            "medical_follow_up_required": incident.medical_follow_up_required,
+        },
+    }
+
+
+def incident_insurance_claim_provider_headers(
+    settings: Settings,
+    raw_body: bytes,
+    timestamp: str,
+) -> dict[str, str]:
+    signing_key = resolve_secret_sync(
+        settings,
+        env_value=settings.safeguarding_insurance_claim_webhook_key,
+        path=settings.safeguarding_insurance_claim_webhook_key_secret_path,
+        field_name=settings.safeguarding_insurance_claim_webhook_key_secret_field,
+        label="insurer claim webhook key",
+    )
+    signature = hmac.new((signing_key or settings.agent_webhook_key or "local-insurer-claim-key").encode(), timestamp.encode() + b"." + raw_body, sha256).hexdigest()
+    return {
+        "content-type": "application/json",
+        "x-afrolete-insurer-timestamp": timestamp,
+        "x-afrolete-insurer-signature": signature,
+    }
+
+
+def parse_insurer_response_json(response_text: str) -> dict[str, object]:
+    try:
+        parsed = json.loads(response_text)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def apply_incident_insurance_claim_provider_response(
+    claim: IncidentInsuranceClaim,
+    response_payload: dict[str, object],
+    now: datetime,
+) -> None:
+    claim_number = response_payload.get("claim_number") or response_payload.get("provider_reference")
+    if claim_number:
+        claim.claim_number = str(claim_number)[:160]
+    tracking_url = response_payload.get("tracking_url")
+    if tracking_url:
+        claim.tracking_url = str(tracking_url)[:500]
+    for field in ["approved_amount_cents", "paid_amount_cents", "reserve_amount_cents"]:
+        value = response_payload.get(field)
+        if isinstance(value, int) and value >= 0:
+            setattr(claim, field, value)
+    status_value = response_payload.get("status") or response_payload.get("claim_status")
+    if status_value:
+        try:
+            claim.status = InsuranceClaimStatus(str(status_value).lower())
+        except ValueError:
+            pass
+    if claim.status in {InsuranceClaimStatus.SUBMITTED, InsuranceClaimStatus.ACKNOWLEDGED, InsuranceClaimStatus.IN_REVIEW}:
+        claim.submitted_at = claim.submitted_at or now
+    if claim.status in {InsuranceClaimStatus.PAID, InsuranceClaimStatus.DENIED, InsuranceClaimStatus.CLOSED}:
+        claim.closed_at = claim.closed_at or now
+    notes = response_payload.get("notes")
+    if notes:
+        claim.notes = str(notes)[:4000]
+
+
+def append_incident_insurance_claim_log(
+    claim: IncidentInsuranceClaim,
+    at: datetime,
+    message: str,
+    mode: str,
+) -> None:
+    entry = f"{at.isoformat()} [{mode}] {message}"
+    claim.communication_log = f"{claim.communication_log}\n{entry}" if claim.communication_log else entry
 
 
 async def create_incident_medical_clearance(

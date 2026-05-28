@@ -651,6 +651,21 @@ class IncidentInsuranceClaimRead(BaseModel):
     created_at: datetime
 
 
+class IncidentInsuranceClaimProviderSyncRead(BaseModel):
+    claim_id: UUID
+    organization_id: UUID
+    action: str
+    delivery_mode: str
+    delivery_attempted: bool
+    delivered: bool
+    provider_status_code: int | None
+    provider_reference: str | None
+    tracking_url: str | None
+    claim_status: InsuranceClaimStatus
+    failure_reason: str | None
+    synced_at: datetime
+
+
 class IncidentMedicalClearanceCreate(BaseModel):
     organization_id: UUID
     incident_id: UUID

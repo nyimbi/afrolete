@@ -2954,6 +2954,21 @@ export type IncidentInsuranceClaimRead = {
   created_at: string;
 };
 
+export type IncidentInsuranceClaimProviderSyncRead = {
+  claim_id: UUID;
+  organization_id: UUID;
+  action: string;
+  delivery_mode: string;
+  delivery_attempted: boolean;
+  delivered: boolean;
+  provider_status_code: number | null;
+  provider_reference: string | null;
+  tracking_url: string | null;
+  claim_status: InsuranceClaimStatus;
+  failure_reason: string | null;
+  synced_at: string;
+};
+
 export type IncidentMedicalClearanceRead = {
   id: UUID;
   organization_id: UUID;
