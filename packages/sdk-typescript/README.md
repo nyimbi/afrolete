@@ -17,6 +17,10 @@ const organization = await client.organization.get({
 const events = await client.events.list({
   organizationId: organization.id,
 });
+
+const teams = await client.teams.list({
+  organizationId: organization.id,
+});
 ```
 
 The client sends `X-Afrolete-API-Key` and targets `/api/v1/sdk/*` routes. It is

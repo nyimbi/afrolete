@@ -11,6 +11,7 @@ from app.models.training import TrainingDrill
 from app.schemas.developer import DeveloperApiKeyInspectionRead
 from app.schemas.event import EventCreate, EventRead
 from app.schemas.organization import OrganizationRead
+from app.schemas.team import TeamRead
 from app.schemas.training import TrainingDrillCreate, TrainingDrillRead
 from app.services.developer import (
     deliver_developer_webhook_event,
@@ -18,6 +19,7 @@ from app.services.developer import (
     inspect_developer_api_key,
 )
 from app.services.events import list_events
+from app.services.teams import list_teams_for_organization
 from app.services.training import list_training_drills
 
 router = APIRouter(prefix="/sdk", tags=["sdk"])
@@ -87,6 +89,19 @@ def to_event_read(event: Event) -> EventRead:
     )
 
 
+def to_team_read(team: Team) -> TeamRead:
+    return TeamRead(
+        id=team.id,
+        organization_id=team.organization_id,
+        name=team.name,
+        sport=team.sport,
+        sport_format=team.sport_format,
+        age_group=team.age_group,
+        gender_category=team.gender_category,
+        season_label=team.season_label,
+    )
+
+
 @router.get("/me", response_model=DeveloperApiKeyInspectionRead)
 async def sdk_me(
     credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
@@ -116,6 +131,16 @@ async def sdk_list_events(
 ) -> list[EventRead]:
     ensure_developer_api_scope(credential, organization_id, {"read:events", "write:events"})
     return [to_event_read(event) for event in await list_events(db, organization_id, team_id=team_id)]
+
+
+@router.get("/teams", response_model=list[TeamRead])
+async def sdk_list_teams(
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[TeamRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:organization", "read:teams"})
+    return [to_team_read(team) for team in await list_teams_for_organization(db, organization_id)]
 
 
 @router.post("/events", response_model=EventRead, status_code=status.HTTP_201_CREATED)

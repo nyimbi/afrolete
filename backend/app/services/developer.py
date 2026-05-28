@@ -1269,6 +1269,18 @@ def developer_scope_catalog() -> list[DeveloperApiScopeCatalogRead]:
             recommended_for=["calendar sync", "competition portals", "fan engagement"],
         ),
         DeveloperApiScopeCatalogRead(
+            scope="read:teams",
+            category="teams",
+            description="Read tenant team directory metadata for roster, schedule, and directory integrations.",
+            recommended_for=["team websites", "fixture imports", "roster-aware analytics"],
+        ),
+        DeveloperApiScopeCatalogRead(
+            scope="read:training",
+            category="training",
+            description="Read training drill library records through SDK routes.",
+            recommended_for=["training libraries", "AI coaching tools", "session planners"],
+        ),
+        DeveloperApiScopeCatalogRead(
             scope="write:training",
             category="training",
             description="Create training drills and coaching-plan inputs through SDK routes.",
@@ -1441,6 +1453,7 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
             entry_points=[
                 "client.me",
                 "client.organization.get",
+                "client.teams.list",
                 "client.events.list",
                 "client.events.create",
                 "client.training.drills.list",
@@ -1468,6 +1481,7 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
             entry_points=[
                 "GET /sdk/me",
                 "GET /sdk/organization",
+                "GET /sdk/teams",
                 "GET /sdk/events",
                 "POST /sdk/events",
                 "GET /sdk/training/drills",

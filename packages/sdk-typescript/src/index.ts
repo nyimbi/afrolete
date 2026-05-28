@@ -75,6 +75,17 @@ export interface Event {
   notes: string | null;
 }
 
+export interface Team {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  sport: string;
+  sport_format: string;
+  age_group: string | null;
+  gender_category: string | null;
+  season_label: string | null;
+}
+
 export interface EventCreate {
   organization_id: UUID;
   team_id?: UUID | null;
@@ -147,6 +158,13 @@ export class AfroLeteClient {
       this.request<Event>("/events", {
         method: "POST",
         body: payload,
+      }),
+  };
+
+  readonly teams = {
+    list: (params: { organizationId: UUID }): Promise<Team[]> =>
+      this.request<Team[]>("/teams", {
+        query: { organization_id: params.organizationId },
       }),
   };
 
