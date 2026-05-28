@@ -145,6 +145,9 @@ class PerformanceWearableConnectionCreate(BaseModel):
     provider_pull_until_param: str | None = Field(default="until", max_length=80)
     sync_cursor: str | None = Field(default=None, max_length=240)
     webhook_registered: bool = False
+    provider_webhook_registration_url: str | None = Field(default=None, max_length=800)
+    provider_webhook_callback_url: str | None = Field(default=None, max_length=800)
+    provider_webhook_event_types: list[str] = Field(default_factory=list)
     default_metric_definition_ids: list[UUID] = Field(default_factory=list)
 
 
@@ -185,6 +188,13 @@ class PerformanceWearableConnectionRead(BaseModel):
     sync_cursor: str | None
     last_sync_at: datetime | None
     webhook_registered: bool
+    provider_webhook_registration_url: str | None
+    provider_webhook_callback_url: str | None
+    provider_webhook_event_types: list[str]
+    provider_webhook_registration_status_code: int | None
+    provider_webhook_registration_hash: str | None
+    provider_webhook_registered_at: datetime | None
+    provider_webhook_registration_error: str | None
     default_metric_definition_ids: list[UUID]
 
 
@@ -229,6 +239,23 @@ class PerformanceWearablePullRetryWorkerRunRead(BaseModel):
     rate_limited_count: int
     connection_ids: list[UUID]
     sync_run_ids: list[UUID]
+
+
+class PerformanceWearableWebhookRegistrationCreate(BaseModel):
+    callback_url: str = Field(min_length=8, max_length=800)
+    registration_url: str | None = Field(default=None, max_length=800)
+    event_types: list[str] = Field(default_factory=list)
+    signing_secret_path: str | None = Field(default=None, max_length=500)
+    provider_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class PerformanceWearableWebhookRegistrationRead(BaseModel):
+    connection: PerformanceWearableConnectionRead
+    status: str
+    registered: bool
+    provider_status_code: int | None
+    registration_payload_hash: str
+    message: str
 
 
 class PerformanceWearableOAuthStartCreate(BaseModel):

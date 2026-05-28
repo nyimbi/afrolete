@@ -66,6 +66,7 @@ from app.schemas.performance import (
     PerformanceWearableSyncRunCreate,
     PerformanceWearableTokenRefreshCreate,
     PerformanceWearableWebhookCreate,
+    PerformanceWearableWebhookRegistrationCreate,
     PlayerSelfAssessmentCreate,
 )
 from app.core.config import Settings, get_settings
@@ -395,6 +396,9 @@ async def create_wearable_provider_connection(
         provider_pull_until_param=payload.provider_pull_until_param,
         sync_cursor=payload.sync_cursor,
         webhook_registered=payload.webhook_registered,
+        provider_webhook_registration_url=payload.provider_webhook_registration_url,
+        provider_webhook_callback_url=payload.provider_webhook_callback_url,
+        provider_webhook_event_types=encode_string_list(payload.provider_webhook_event_types),
         default_metric_definition_ids=encode_uuid_list(payload.default_metric_definition_ids),
     )
     db.add(connection)
@@ -578,6 +582,109 @@ async def list_wearable_provider_sync_runs(
             )
         ).all()
     )
+
+
+async def register_wearable_provider_webhook(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    connection_id: UUID,
+    payload: PerformanceWearableWebhookRegistrationCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    connection = await db.get(PerformanceWearableProviderConnection, connection_id)
+    if connection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wearable connection not found")
+    await ensure_manage_performance(authz, identity, connection.organization_id)
+    now = datetime.now(UTC)
+    registration_url = payload.registration_url or connection.provider_webhook_registration_url
+    event_types = payload.event_types or decode_string_list(connection.provider_webhook_event_types) or [
+        "metrics.created",
+        "recovery.updated",
+        "sleep.updated",
+    ]
+    registration_payload = wearable_webhook_registration_payload(connection, payload, event_types)
+    payload_hash = stable_payload_hash(registration_payload)
+    provider_status_code: int | None = None
+    registered = False
+    error: str | None = None
+    message: str
+
+    if registration_url:
+        if not connection.access_token_secret_path:
+            raise HTTPException(status_code=422, detail="Wearable connection needs an access token before provider webhook registration")
+        access_token = await resolve_wearable_token_secret(connection.access_token_secret_path, "access_token")
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            try:
+                response = await client.post(
+                    registration_url,
+                    json=registration_payload,
+                    headers={
+                        "Accept": "application/json",
+                        "Authorization": f"Bearer {access_token}",
+                        "X-AfroLete-Provider": connection.provider,
+                        "X-AfroLete-Athlete-Ref": connection.external_athlete_ref,
+                    },
+                )
+                provider_status_code = response.status_code
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                provider_status_code = exc.response.status_code
+                error = f"Provider webhook registration failed with HTTP {provider_status_code}"
+            except httpx.HTTPError as exc:
+                error = f"Provider webhook registration failed: {exc}"
+        registered = error is None
+        message = (
+            f"{connection.provider} webhook registration accepted by provider."
+            if registered
+            else str(error)
+        )
+    else:
+        registered = True
+        provider_status_code = None
+        message = f"{connection.provider} webhook registration payload prepared for provider console entry."
+
+    connection.provider_webhook_registration_url = registration_url
+    connection.provider_webhook_callback_url = payload.callback_url
+    connection.provider_webhook_event_types = encode_string_list(event_types)
+    connection.provider_webhook_registration_status_code = provider_status_code
+    connection.provider_webhook_registration_hash = payload_hash
+    connection.provider_webhook_registration_error = error
+    if registered:
+        connection.webhook_registered = True
+        connection.provider_webhook_registered_at = now
+        if payload.signing_secret_path:
+            connection.webhook_secret_path = payload.signing_secret_path
+    else:
+        connection.webhook_registered = False
+    await db.commit()
+    await db.refresh(connection)
+    return {
+        "connection": connection,
+        "status": "registered" if registered else "failed",
+        "registered": registered,
+        "provider_status_code": provider_status_code,
+        "registration_payload_hash": payload_hash,
+        "message": message,
+    }
+
+
+def wearable_webhook_registration_payload(
+    connection: PerformanceWearableProviderConnection,
+    payload: PerformanceWearableWebhookRegistrationCreate,
+    event_types: list[str],
+) -> dict[str, object]:
+    registration_payload: dict[str, object] = {
+        "callback_url": payload.callback_url,
+        "athlete_ref": connection.external_athlete_ref,
+        "event_types": event_types,
+        "connection_id": str(connection.id),
+        "organization_id": str(connection.organization_id),
+        "provider": connection.provider,
+    }
+    if payload.signing_secret_path:
+        registration_payload["signing_secret_path"] = payload.signing_secret_path
+    registration_payload.update(payload.provider_payload)
+    return registration_payload
 
 
 async def run_wearable_pull_retry_worker(

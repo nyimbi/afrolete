@@ -1400,6 +1400,82 @@ def test_performance_wearable_connection_sync_run_ingests_provider_payload(
     assert sync_runs[0]["id"] == sync_run["id"]
 
 
+def test_performance_wearable_webhook_registration_posts_provider_payload(
+    client, identity_headers, monkeypatch
+) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    connection = client.post(
+        "/api/v1/performance/wearable-connections",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "provider": "whoop",
+            "display_name": "WHOOP webhook registration",
+            "external_athlete_ref": "whoop-webhook-athlete",
+            "access_token_secret_path": "secret/data/afrolete/wearables/whoop/webhook",
+            "provider_webhook_registration_url": "https://whoop.example/v1/webhooks",
+            "provider_webhook_event_types": ["recovery.updated"],
+        },
+    ).json()
+
+    async def fake_resolve(path: str, field_name: str) -> str:
+        assert path == "secret/data/afrolete/wearables/whoop/webhook"
+        assert field_name == "access_token"
+        return "provider-access-token"
+
+    class FakeResponse:
+        status_code = 201
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeAsyncClient:
+        def __init__(self, *_, **__) -> None:
+            return None
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def post(self, url: str, *, json: dict[str, object], headers: dict[str, str]) -> FakeResponse:
+            assert url == "https://whoop.example/v1/webhooks"
+            assert headers["Authorization"] == "Bearer provider-access-token"
+            assert json["callback_url"] == "https://app.afrolete.local/api/v1/performance/webhooks/wearables"
+            assert json["athlete_ref"] == "whoop-webhook-athlete"
+            assert json["event_types"] == ["recovery.updated", "sleep.updated"]
+            assert json["replay_protection"] == "external_event_id"
+            assert json["signing_secret_path"] == "secret/data/afrolete/wearables/whoop/webhook-signing"
+            return FakeResponse()
+
+    monkeypatch.setattr(performance_service, "resolve_wearable_token_secret", fake_resolve)
+    monkeypatch.setattr(performance_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        f"/api/v1/performance/wearable-connections/{connection['id']}/webhook-registration",
+        headers=identity_headers,
+        json={
+            "callback_url": "https://app.afrolete.local/api/v1/performance/webhooks/wearables",
+            "event_types": ["recovery.updated", "sleep.updated"],
+            "signing_secret_path": "secret/data/afrolete/wearables/whoop/webhook-signing",
+            "provider_payload": {"replay_protection": "external_event_id"},
+        },
+    )
+
+    assert response.status_code == 200
+    registration = response.json()
+    assert registration["status"] == "registered"
+    assert registration["registered"] is True
+    assert registration["provider_status_code"] == 201
+    assert registration["registration_payload_hash"]
+    assert registration["connection"]["webhook_registered"] is True
+    assert registration["connection"]["provider_webhook_registered_at"] is not None
+    assert registration["connection"]["provider_webhook_event_types"] == ["recovery.updated", "sleep.updated"]
+    assert "provider-access-token" not in response.text
+
+
 def test_performance_wearable_connection_live_pull_adapter_ingests_provider_response(
     client, identity_headers, monkeypatch
 ) -> None:

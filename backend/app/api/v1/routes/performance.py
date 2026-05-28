@@ -46,6 +46,8 @@ from app.schemas.performance import (
     PerformanceWearableTokenRefreshCreate,
     PerformanceWearableTokenRefreshRead,
     PerformanceWearableWebhookCreate,
+    PerformanceWearableWebhookRegistrationCreate,
+    PerformanceWearableWebhookRegistrationRead,
     PerformanceWearableWebhookRead,
     PlayerSelfAssessmentCreate,
     PlayerPerformanceProfileRead,
@@ -87,6 +89,7 @@ from app.services.performance import (
     run_performance_injury_risk_alert_scan,
     run_wearable_provider_sync,
     refresh_wearable_provider_token,
+    register_wearable_provider_webhook,
     start_wearable_provider_oauth,
     review_assessment,
     review_observation,
@@ -173,6 +176,13 @@ def to_wearable_connection_read(connection) -> PerformanceWearableConnectionRead
         sync_cursor=connection.sync_cursor,
         last_sync_at=connection.last_sync_at,
         webhook_registered=connection.webhook_registered,
+        provider_webhook_registration_url=connection.provider_webhook_registration_url,
+        provider_webhook_callback_url=connection.provider_webhook_callback_url,
+        provider_webhook_event_types=decode_string_list(connection.provider_webhook_event_types),
+        provider_webhook_registration_status_code=connection.provider_webhook_registration_status_code,
+        provider_webhook_registration_hash=connection.provider_webhook_registration_hash,
+        provider_webhook_registered_at=connection.provider_webhook_registered_at,
+        provider_webhook_registration_error=connection.provider_webhook_registration_error,
         default_metric_definition_ids=decode_uuid_list(connection.default_metric_definition_ids),
     )
 
@@ -532,6 +542,28 @@ async def list_wearable_connection_sync_runs_route(
         to_wearable_sync_run_read(run)
         for run in await list_wearable_provider_sync_runs(db, identity, connection_id, authz)
     ]
+
+
+@router.post(
+    "/wearable-connections/{connection_id}/webhook-registration",
+    response_model=PerformanceWearableWebhookRegistrationRead,
+)
+async def register_wearable_connection_webhook_route(
+    connection_id: UUID,
+    payload: PerformanceWearableWebhookRegistrationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceWearableWebhookRegistrationRead:
+    result = await register_wearable_provider_webhook(db, identity, connection_id, payload, authz)
+    return PerformanceWearableWebhookRegistrationRead(
+        connection=to_wearable_connection_read(result["connection"]),
+        status=result["status"],
+        registered=result["registered"],
+        provider_status_code=result["provider_status_code"],
+        registration_payload_hash=result["registration_payload_hash"],
+        message=result["message"],
+    )
 
 
 @router.post(

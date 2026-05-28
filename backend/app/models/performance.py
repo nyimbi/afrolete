@@ -144,6 +144,13 @@ class PerformanceWearableProviderConnection(IdMixin, TimestampMixin, Base):
     sync_cursor: Mapped[str | None] = mapped_column(String(240))
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     webhook_registered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    provider_webhook_registration_url: Mapped[str | None] = mapped_column(String(800))
+    provider_webhook_callback_url: Mapped[str | None] = mapped_column(String(800))
+    provider_webhook_event_types: Mapped[str | None] = mapped_column(Text)
+    provider_webhook_registration_status_code: Mapped[int | None] = mapped_column(Integer)
+    provider_webhook_registration_hash: Mapped[str | None] = mapped_column(String(64))
+    provider_webhook_registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    provider_webhook_registration_error: Mapped[str | None] = mapped_column(Text)
     default_metric_definition_ids: Mapped[str | None] = mapped_column(Text)
 
 

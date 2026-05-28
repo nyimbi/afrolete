@@ -3222,6 +3222,13 @@ export type PerformanceWearableConnectionRead = {
   sync_cursor: string | null;
   last_sync_at: string | null;
   webhook_registered: boolean;
+  provider_webhook_registration_url: string | null;
+  provider_webhook_callback_url: string | null;
+  provider_webhook_event_types: string[];
+  provider_webhook_registration_status_code: number | null;
+  provider_webhook_registration_hash: string | null;
+  provider_webhook_registered_at: string | null;
+  provider_webhook_registration_error: string | null;
   default_metric_definition_ids: UUID[];
 };
 
@@ -3245,6 +3252,15 @@ export type PerformanceWearableSyncRunRead = {
   provider_rate_limited: boolean;
   provider_retry_after_seconds: number | null;
   message: string | null;
+};
+
+export type PerformanceWearableWebhookRegistrationRead = {
+  connection: PerformanceWearableConnectionRead;
+  status: string;
+  registered: boolean;
+  provider_status_code: number | null;
+  registration_payload_hash: string;
+  message: string;
 };
 
 export type PerformanceWearableOAuthStartRead = {

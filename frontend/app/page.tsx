@@ -220,6 +220,7 @@ import type {
   PerformanceWearableSyncRunRead,
   PerformanceWearableTokenRefreshRead,
   PerformanceWearableWebhookRead,
+  PerformanceWearableWebhookRegistrationRead,
   NotificationFrequency,
   NotificationPreferenceRead,
   PredictiveRiskScoreRead,
@@ -1319,6 +1320,8 @@ export default function HomePage() {
   const [wearableOAuthStart, setWearableOAuthStart] = useState<PerformanceWearableOAuthStartRead | null>(null);
   const [wearableOAuthCallback, setWearableOAuthCallback] = useState<PerformanceWearableOAuthCallbackRead | null>(null);
   const [wearableTokenRefresh, setWearableTokenRefresh] = useState<PerformanceWearableTokenRefreshRead | null>(null);
+  const [wearableWebhookRegistration, setWearableWebhookRegistration] =
+    useState<PerformanceWearableWebhookRegistrationRead | null>(null);
   const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
   const [performanceBenchmarkScope, setPerformanceBenchmarkScope] = useState<BenchmarkCohortScope>("tenant");
   const [performanceCohortComparisons, setPerformanceCohortComparisons] = useState<PerformanceCohortComparisonRead[]>([]);
@@ -2924,6 +2927,7 @@ export default function HomePage() {
       setWearableOAuthStart(null);
       setWearableOAuthCallback(null);
       setWearableTokenRefresh(null);
+      setWearableWebhookRegistration(null);
       setAssessments([]);
       setAssessmentReviewQueue([]);
       setAssessmentReviewSummary(null);
@@ -6511,7 +6515,9 @@ export default function HomePage() {
             access_token_secret_path: `secret/data/afrolete/wearables/${selectedOrganizationId}/${selectedAthlete.athleteProfileId}/${provider}`,
             webhook_secret_path: `secret/data/afrolete/wearables/${selectedOrganizationId}/${selectedAthlete.athleteProfileId}/${provider}-webhook`,
             provider_pull_url: `https://${provider}.connect.example/api/wearables/pull`,
-            webhook_registered: true,
+            provider_webhook_registration_url: `https://${provider}.connect.example/api/webhooks`,
+            provider_webhook_callback_url: `${window.location.origin}/api/v1/performance/webhooks/wearables`,
+            provider_webhook_event_types: ["metrics.created", "recovery.updated", "sleep.updated"],
             default_metric_definition_ids: wearableMetricIds
           }
         }),
@@ -6573,6 +6579,46 @@ export default function HomePage() {
         setWearableSyncRun(syncRun);
         addLog(`${syncRun.provider} provider pull ${syncRun.status}`, syncRun.status === "completed" ? "good" : "neutral");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const registerWearableWebhook = () => {
+    const connection = wearableConnections[0];
+    if (!connection) {
+      addLog("Create a wearable connection before registering provider webhooks", "bad");
+      return;
+    }
+    runAction(
+      "register-wearable-webhook",
+      () =>
+        apiRequest<PerformanceWearableWebhookRegistrationRead>(
+          `/performance/wearable-connections/${connection.id}/webhook-registration`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              callback_url: connection.provider_webhook_callback_url ?? `${window.location.origin}/api/v1/performance/webhooks/wearables`,
+              registration_url: connection.provider_webhook_registration_url,
+              event_types: connection.provider_webhook_event_types.length
+                ? connection.provider_webhook_event_types
+                : ["metrics.created", "recovery.updated", "sleep.updated"],
+              signing_secret_path:
+                `secret/data/afrolete/wearables/${connection.organization_id}/${connection.athlete_profile_id}/${connection.provider}-webhook`,
+              provider_payload: {
+                athlete_ref: connection.external_athlete_ref,
+                replay_protection: "external_event_id"
+              }
+            }
+          }
+        ),
+      (registration) => {
+        setWearableWebhookRegistration(registration);
+        setWearableConnections((current) => [
+          registration.connection,
+          ...current.filter((item) => item.id !== registration.connection.id)
+        ]);
+        addLog(`${registration.connection.provider} webhook registration ${registration.status}`, registration.registered ? "good" : "bad");
       }
     );
   };
@@ -13748,6 +13794,7 @@ export default function HomePage() {
                 <button type="button" onClick={createWearableConnection} disabled={busyAction !== null}>Connect</button>
                 <button type="button" onClick={runWearableConnectionSync} disabled={busyAction !== null}>Sync</button>
                 <button type="button" onClick={runWearableConnectionPull} disabled={busyAction !== null}>Pull</button>
+                <button type="button" onClick={registerWearableWebhook} disabled={busyAction !== null}>Register</button>
                 <button type="button" onClick={startWearableOAuth} disabled={busyAction !== null}>OAuth</button>
                 <button type="button" onClick={completeWearableOAuth} disabled={busyAction !== null}>Callback</button>
                 <button type="button" onClick={refreshWearableToken} disabled={busyAction !== null}>Refresh</button>
@@ -14149,6 +14196,22 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {wearableWebhookRegistration ? (
+                <article className="task-card">
+                  <div>
+                    <strong>
+                      {wearableWebhookRegistration.connection.provider} webhook registration · {wearableWebhookRegistration.status}
+                    </strong>
+                    <span>
+                      {wearableWebhookRegistration.provider_status_code
+                        ? `HTTP ${wearableWebhookRegistration.provider_status_code}`
+                        : "provider-console payload"} ·{" "}
+                      {wearableWebhookRegistration.registration_payload_hash.slice(0, 12)}
+                    </span>
+                    <small>{wearableWebhookRegistration.message}</small>
+                  </div>
+                </article>
+              ) : null}
               {wearableConnections.slice(0, 3).map((connection) => (
                 <article key={connection.id} className="task-card">
                   <div>
@@ -14160,6 +14223,7 @@ export default function HomePage() {
                     </span>
                     <small>
                       {connection.webhook_registered ? "webhook registered" : "webhook not registered"} ·{" "}
+                      {connection.provider_webhook_registered_at ? `registered ${new Date(connection.provider_webhook_registered_at).toLocaleString()}` : connection.provider_webhook_registration_hash ? "registration prepared" : "registration pending"} ·{" "}
                       {connection.oauth_authorized_at ? `authorized ${new Date(connection.oauth_authorized_at).toLocaleString()}` : connection.oauth_state_pending ? "OAuth pending" : "OAuth not started"} ·{" "}
                       {connection.token_last_refreshed_at ? `token refreshed ${new Date(connection.token_last_refreshed_at).toLocaleString()}` : connection.last_sync_at ? `last sync ${new Date(connection.last_sync_at).toLocaleString()}` : "not synced"}
                     </small>
