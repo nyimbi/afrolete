@@ -1464,9 +1464,11 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
             language="Python",
             package_name="afrolete-sdk",
             install_command="uv add afrolete-sdk",
-            status="planned_public_package",
+            status="repository_package",
             entry_points=[
+                "client.me",
                 "client.organization.get",
+                "client.teams.list",
                 "client.events.list",
                 "client.events.create",
                 "client.training.drills.list",
@@ -1558,6 +1560,24 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
                 "  apiKey: process.env.AFROLETE_API_KEY!,\n"
                 "});\n\n"
                 "const events = await client.events.list({ organizationId: process.env.AFROLETE_ORG_ID! });"
+            ),
+        ),
+        DeveloperQuickstartRead(
+            title="Use the Python SDK",
+            language="Python",
+            description="Use the repository Python package for server-side integrations and scheduled sync jobs.",
+            steps=[
+                "Install afrolete-sdk from the repository package or future registry package.",
+                "Create an AfroLeteClient with base_url and a tenant-issued API key.",
+                "Call organization, teams, events, or training drill helpers from integration jobs.",
+            ],
+            code_sample=(
+                "from afrolete_sdk import AfroLeteClient\n\n"
+                "client = AfroLeteClient(\n"
+                "    base_url=\"https://api.afrolete.example\",\n"
+                "    api_key=\"afl_live_example\",\n"
+                ")\n\n"
+                "teams = client.teams.list(organization_id=\"tenant-uuid\")"
             ),
         ),
         DeveloperQuickstartRead(
