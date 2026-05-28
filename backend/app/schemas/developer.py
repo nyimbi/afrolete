@@ -151,6 +151,42 @@ class DeveloperWebhookRetryRunRead(BaseModel):
     include_recorded: bool
 
 
+class DeveloperApiScopeCatalogRead(BaseModel):
+    scope: str
+    category: str
+    description: str
+    recommended_for: list[str]
+
+
+class DeveloperWebhookEventCatalogRead(BaseModel):
+    event_type: str
+    category: str
+    description: str
+    emission_status: str
+    payload_fields: list[str]
+    recommended_scopes: list[str]
+    example_payload: dict[str, object]
+
+
+class DeveloperSdkCatalogRead(BaseModel):
+    language: str
+    package_name: str
+    install_command: str
+    status: str
+    entry_points: list[str]
+
+
+class DeveloperIntegrationCatalogRead(BaseModel):
+    organization_id: UUID
+    api_base_path: str
+    auth_header: str
+    webhook_signature_header: str
+    scopes: list[DeveloperApiScopeCatalogRead]
+    webhook_events: list[DeveloperWebhookEventCatalogRead]
+    sdks: list[DeveloperSdkCatalogRead]
+    configured_event_types: list[str]
+
+
 class DeveloperMarketplaceListingCreate(BaseModel):
     organization_id: UUID
     application_id: UUID | None = None

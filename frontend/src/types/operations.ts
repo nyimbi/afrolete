@@ -2311,6 +2311,42 @@ export type DeveloperWebhookRetryRunRead = {
   include_recorded: boolean;
 };
 
+export type DeveloperApiScopeCatalogRead = {
+  scope: string;
+  category: string;
+  description: string;
+  recommended_for: string[];
+};
+
+export type DeveloperWebhookEventCatalogRead = {
+  event_type: string;
+  category: string;
+  description: string;
+  emission_status: string;
+  payload_fields: string[];
+  recommended_scopes: string[];
+  example_payload: Record<string, unknown>;
+};
+
+export type DeveloperSdkCatalogRead = {
+  language: string;
+  package_name: string;
+  install_command: string;
+  status: string;
+  entry_points: string[];
+};
+
+export type DeveloperIntegrationCatalogRead = {
+  organization_id: UUID;
+  api_base_path: string;
+  auth_header: string;
+  webhook_signature_header: string;
+  scopes: DeveloperApiScopeCatalogRead[];
+  webhook_events: DeveloperWebhookEventCatalogRead[];
+  sdks: DeveloperSdkCatalogRead[];
+  configured_event_types: string[];
+};
+
 export type DeveloperMarketplaceListingRead = {
   id: UUID;
   organization_id: UUID;

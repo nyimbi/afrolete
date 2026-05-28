@@ -23,9 +23,13 @@ from app.schemas.developer import (
     DeveloperApiKeyCreate,
     DeveloperApiKeyInspectionRead,
     DeveloperApplicationCreate,
+    DeveloperApiScopeCatalogRead,
+    DeveloperIntegrationCatalogRead,
     DeveloperMarketplaceListingCreate,
     DeveloperMarketplaceListingReview,
     DeveloperPortalSummaryRead,
+    DeveloperSdkCatalogRead,
+    DeveloperWebhookEventCatalogRead,
     DeveloperWebhookRetryRunRead,
     DeveloperWebhookSubscriptionCreate,
     DeveloperWebhookSubscriptionUpdate,
@@ -565,6 +569,41 @@ async def record_developer_marketplace_install(
     return listing
 
 
+async def developer_integration_catalog(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> DeveloperIntegrationCatalogRead:
+    await ensure_manage_developer_platform(authz, identity, organization_id)
+    subscriptions = list(
+        (
+            await db.scalars(
+                select(DeveloperWebhookSubscription).where(
+                    DeveloperWebhookSubscription.organization_id == organization_id
+                )
+            )
+        ).all()
+    )
+    configured_event_types = sorted(
+        {
+            event_type
+            for subscription in subscriptions
+            for event_type in unpack_list(subscription.event_types)
+        }
+    )
+    return DeveloperIntegrationCatalogRead(
+        organization_id=organization_id,
+        api_base_path="/api/v1/sdk",
+        auth_header="X-Afrolete-API-Key",
+        webhook_signature_header="X-Afrolete-Webhook-Signature",
+        scopes=developer_scope_catalog(),
+        webhook_events=developer_webhook_event_catalog(),
+        sdks=developer_sdk_catalog(),
+        configured_event_types=configured_event_types,
+    )
+
+
 async def developer_portal_summary(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -708,6 +747,207 @@ def unpack_list(value: str | None) -> list[str]:
     if not value:
         return []
     return [entry for entry in value.splitlines() if entry]
+
+
+def developer_scope_catalog() -> list[DeveloperApiScopeCatalogRead]:
+    return [
+        DeveloperApiScopeCatalogRead(
+            scope="read:organization",
+            category="organization",
+            description="Read tenant identity, branding, and public profile metadata.",
+            recommended_for=["directory sync", "public site integrations", "analytics imports"],
+        ),
+        DeveloperApiScopeCatalogRead(
+            scope="write:events",
+            category="events",
+            description="Create or update tenant event, fixture, and scheduling records.",
+            recommended_for=["calendar sync", "competition systems", "facility schedulers"],
+        ),
+        DeveloperApiScopeCatalogRead(
+            scope="write:training",
+            category="training",
+            description="Create training drills and coaching-plan inputs through SDK routes.",
+            recommended_for=["training libraries", "AI coaching tools", "session planners"],
+        ),
+        DeveloperApiScopeCatalogRead(
+            scope="read:performance",
+            category="performance",
+            description="Read athlete observations, assessments, and performance summaries.",
+            recommended_for=["analytics dashboards", "scouting tools", "wearable imports"],
+        ),
+        DeveloperApiScopeCatalogRead(
+            scope="write:performance",
+            category="performance",
+            description="Submit reviewed or provider-sourced performance observations.",
+            recommended_for=["video analysis", "wearables", "AI evidence ingestion"],
+        ),
+        DeveloperApiScopeCatalogRead(
+            scope="read:communications",
+            category="communications",
+            description="Read communication templates and delivery status metadata.",
+            recommended_for=["CRM sync", "guardian engagement", "message analytics"],
+        ),
+        DeveloperApiScopeCatalogRead(
+            scope="write:communications",
+            category="communications",
+            description="Request tenant-scoped communication delivery through approved channels.",
+            recommended_for=["notification providers", "fan engagement", "emergency messaging"],
+        ),
+        DeveloperApiScopeCatalogRead(
+            scope="read:billing",
+            category="billing",
+            description="Read subscription, invoice, entitlement, and marketplace commerce metadata.",
+            recommended_for=["accounting sync", "marketplace analytics", "finance dashboards"],
+        ),
+        DeveloperApiScopeCatalogRead(
+            scope="write:billing",
+            category="billing",
+            description="Submit approved billing, payment, and settlement updates.",
+            recommended_for=["payment processors", "tax filing adapters", "accounting systems"],
+        ),
+        DeveloperApiScopeCatalogRead(
+            scope="admin:*",
+            category="administration",
+            description="Administrative tenant access for deeply trusted internal integrations.",
+            recommended_for=["first-party automation", "migration tooling", "tenant operations"],
+        ),
+    ]
+
+
+def developer_webhook_event_catalog() -> list[DeveloperWebhookEventCatalogRead]:
+    return [
+        DeveloperWebhookEventCatalogRead(
+            event_type="training.drill.created",
+            category="training",
+            description="A developer API key created a tenant training drill.",
+            emission_status="active",
+            payload_fields=["organization_id", "drill_id", "sport", "name", "focus_area", "source"],
+            recommended_scopes=["write:training"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "drill_id": "drill-uuid",
+                "sport": "football",
+                "name": "Advanced Passing Circuit",
+                "focus_area": "Passing",
+                "source": "developer_api",
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="events.created",
+            category="events",
+            description="A tenant event or fixture has been created.",
+            emission_status="cataloged",
+            payload_fields=["organization_id", "event_id", "team_id", "event_type", "starts_at"],
+            recommended_scopes=["write:events"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "event_id": "event-uuid",
+                "team_id": "team-uuid",
+                "event_type": "match",
+                "starts_at": "2026-06-01T15:00:00Z",
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="events.updated",
+            category="events",
+            description="A tenant event, fixture, travel movement, or attendance-critical schedule changed.",
+            emission_status="cataloged",
+            payload_fields=["organization_id", "event_id", "change_type", "updated_at"],
+            recommended_scopes=["write:events"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "event_id": "event-uuid",
+                "change_type": "time_changed",
+                "updated_at": "2026-06-01T10:00:00Z",
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="performance.observation.created",
+            category="performance",
+            description="A performance observation has been created or accepted from an evidence pipeline.",
+            emission_status="cataloged",
+            payload_fields=["organization_id", "athlete_id", "metric_key", "value", "confidence"],
+            recommended_scopes=["write:performance"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "athlete_id": "person-uuid",
+                "metric_key": "sprint_speed",
+                "value": 8.7,
+                "confidence": 0.91,
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="consent.granted",
+            category="safeguarding",
+            description="A guardian or authorized contact granted consent for a minor activity.",
+            emission_status="cataloged",
+            payload_fields=["organization_id", "minor_person_id", "guardian_person_id", "scope_type", "scope_id"],
+            recommended_scopes=["read:communications"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "minor_person_id": "person-uuid",
+                "guardian_person_id": "guardian-uuid",
+                "scope_type": "event",
+                "scope_id": "event-uuid",
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="agent.task.completed",
+            category="ai_agents",
+            description="A first-class AfroLete AI agent completed a tenant-scoped task.",
+            emission_status="cataloged",
+            payload_fields=["organization_id", "agent_id", "task_id", "task_type", "review_status"],
+            recommended_scopes=["read:organization"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "agent_id": "agent-uuid",
+                "task_id": "task-uuid",
+                "task_type": "scorecard_anomaly_review",
+                "review_status": "pending_human_review",
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="billing.invoice.paid",
+            category="billing",
+            description="A SaaS or tenant invoice was reconciled as paid.",
+            emission_status="cataloged",
+            payload_fields=["organization_id", "invoice_id", "provider", "amount_paid", "currency"],
+            recommended_scopes=["read:billing", "write:billing"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "invoice_id": "invoice-uuid",
+                "provider": "stripe",
+                "amount_paid": "159.00",
+                "currency": "USD",
+            },
+        ),
+    ]
+
+
+def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
+    return [
+        DeveloperSdkCatalogRead(
+            language="TypeScript",
+            package_name="@afrolete/sdk",
+            install_command="pnpm add @afrolete/sdk",
+            status="planned_public_package",
+            entry_points=["client.organization.get", "client.training.drills.list", "client.training.drills.create"],
+        ),
+        DeveloperSdkCatalogRead(
+            language="Python",
+            package_name="afrolete-sdk",
+            install_command="uv add afrolete-sdk",
+            status="planned_public_package",
+            entry_points=["client.organization.get", "client.training.drills.list", "client.training.drills.create"],
+        ),
+        DeveloperSdkCatalogRead(
+            language="Raw HTTP",
+            package_name="OpenAPI",
+            install_command="curl -H 'X-Afrolete-API-Key: ...' /api/v1/sdk/me",
+            status="active",
+            entry_points=["GET /sdk/me", "GET /sdk/organization", "GET /sdk/training/drills", "POST /sdk/training/drills"],
+        ),
+    ]
 
 
 def stable_json(payload: dict[str, object]) -> str:

@@ -123,6 +123,23 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert sdk_webhook_response.status_code == 201
     sdk_webhook = sdk_webhook_response.json()["subscription"]
 
+    catalog_response = client.get(
+        f"/api/v1/developers/catalog?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert catalog_response.status_code == 200
+    catalog = catalog_response.json()
+    assert catalog["api_base_path"] == "/api/v1/sdk"
+    assert catalog["auth_header"] == "X-Afrolete-API-Key"
+    assert "training.drill.created" in catalog["configured_event_types"]
+    assert "read:organization" in {scope["scope"] for scope in catalog["scopes"]}
+    training_event = next(
+        event for event in catalog["webhook_events"] if event["event_type"] == "training.drill.created"
+    )
+    assert training_event["emission_status"] == "active"
+    assert "write:training" in training_event["recommended_scopes"]
+    assert any(sdk["language"] == "Raw HTTP" and sdk["status"] == "active" for sdk in catalog["sdks"])
+
     sdk_drill_response = client.post(
         "/api/v1/sdk/training/drills",
         json={

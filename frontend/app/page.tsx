@@ -94,6 +94,7 @@ import type {
   DeveloperApiKeyRead,
   DeveloperApplicationProvisionedRead,
   DeveloperApplicationRead,
+  DeveloperIntegrationCatalogRead,
   DeveloperMarketplaceListingRead,
   DeveloperPortalSummaryRead,
   DeveloperWebhookDeliveryRead,
@@ -833,6 +834,7 @@ export default function HomePage() {
   const [developerWebhookDeliveries, setDeveloperWebhookDeliveries] = useState<DeveloperWebhookDeliveryRead[]>([]);
   const [developerWebhookRetryRun, setDeveloperWebhookRetryRun] = useState<DeveloperWebhookRetryRunRead | null>(null);
   const [developerListings, setDeveloperListings] = useState<DeveloperMarketplaceListingRead[]>([]);
+  const [developerCatalog, setDeveloperCatalog] = useState<DeveloperIntegrationCatalogRead | null>(null);
   const [developerSummary, setDeveloperSummary] = useState<DeveloperPortalSummaryRead | null>(null);
   const [developerApplicationSecret, setDeveloperApplicationSecret] =
     useState<DeveloperApplicationProvisionedRead | null>(null);
@@ -2024,7 +2026,7 @@ export default function HomePage() {
   }, []);
 
   const loadDevelopers = useCallback(async (organizationId: string) => {
-    const [applications, apiKeys, webhooks, deliveries, listings, summary] = await Promise.all([
+    const [applications, apiKeys, webhooks, deliveries, listings, catalog, summary] = await Promise.all([
       apiRequest<DeveloperApplicationRead[]>(`/developers/applications?organization_id=${organizationId}`),
       apiRequest<DeveloperApiKeyRead[]>(`/developers/api-keys?organization_id=${organizationId}`),
       apiRequest<DeveloperWebhookSubscriptionRead[]>(
@@ -2036,6 +2038,7 @@ export default function HomePage() {
       apiRequest<DeveloperMarketplaceListingRead[]>(
         `/developers/marketplace-listings?organization_id=${organizationId}`
       ),
+      apiRequest<DeveloperIntegrationCatalogRead>(`/developers/catalog?organization_id=${organizationId}`),
       apiRequest<DeveloperPortalSummaryRead>(`/developers/summary?organization_id=${organizationId}`)
     ]);
     setDeveloperApplications(applications);
@@ -2043,6 +2046,7 @@ export default function HomePage() {
     setDeveloperWebhooks(webhooks);
     setDeveloperWebhookDeliveries(deliveries);
     setDeveloperListings(listings);
+    setDeveloperCatalog(catalog);
     setDeveloperSummary(summary);
   }, []);
 
@@ -2300,6 +2304,7 @@ export default function HomePage() {
       setDeveloperWebhookDeliveries([]);
       setDeveloperWebhookRetryRun(null);
       setDeveloperListings([]);
+      setDeveloperCatalog(null);
       setDeveloperSummary(null);
       setDeveloperApplicationSecret(null);
       setDeveloperApiKeySecret(null);
@@ -11721,6 +11726,32 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {developerCatalog ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{developerCatalog.webhook_events.length} webhook events · {developerCatalog.scopes.length} scopes</strong>
+                    <span>
+                      {developerCatalog.api_base_path} · {developerCatalog.auth_header} · {developerCatalog.configured_event_types.length} configured
+                    </span>
+                  </div>
+                </article>
+              ) : null}
+              {developerCatalog?.webhook_events.slice(0, 2).map((event) => (
+                <article key={event.event_type} className="task-card">
+                  <div>
+                    <strong>{event.event_type}</strong>
+                    <span>{event.emission_status} · {event.category} · {event.recommended_scopes.join(", ")}</span>
+                  </div>
+                </article>
+              ))}
+              {developerCatalog?.sdks.slice(0, 2).map((sdk) => (
+                <article key={sdk.language} className="task-card">
+                  <div>
+                    <strong>{sdk.language} SDK · {sdk.status}</strong>
+                    <span>{sdk.package_name} · {sdk.entry_points.slice(0, 2).join(", ")}</span>
+                  </div>
+                </article>
+              ))}
               {developerApplications.slice(0, 3).map((application) => (
                 <article key={application.id} className="task-card">
                   <div>

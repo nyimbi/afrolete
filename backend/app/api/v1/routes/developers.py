@@ -12,6 +12,7 @@ from app.schemas.developer import (
     DeveloperApplicationCreate,
     DeveloperApplicationProvisionedRead,
     DeveloperApplicationRead,
+    DeveloperIntegrationCatalogRead,
     DeveloperMarketplaceListingCreate,
     DeveloperMarketplaceListingRead,
     DeveloperMarketplaceListingReview,
@@ -31,6 +32,7 @@ from app.services.developer import (
     create_developer_application,
     create_developer_marketplace_listing,
     create_developer_webhook_subscription,
+    developer_integration_catalog,
     developer_portal_summary,
     inspect_developer_api_key,
     list_developer_api_keys,
@@ -371,6 +373,16 @@ async def record_developer_marketplace_install_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> DeveloperMarketplaceListingRead:
     return marketplace_listing_read(await record_developer_marketplace_install(db, identity, listing_id, authz))
+
+
+@router.get("/catalog", response_model=DeveloperIntegrationCatalogRead)
+async def developer_integration_catalog_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperIntegrationCatalogRead:
+    return await developer_integration_catalog(db, identity, organization_id, authz)
 
 
 @router.get("/summary", response_model=DeveloperPortalSummaryRead)
