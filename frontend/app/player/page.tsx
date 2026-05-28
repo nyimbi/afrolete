@@ -197,6 +197,46 @@ function PlayerPerformanceVisuals({ profile }: { profile: PlayerPerformanceProfi
       </section>
 
       <section className="player-visual-grid player-history-grid">
+        {profile.cohort_comparisons.slice(0, 4).map((comparison, index) => (
+          <article className="player-chart-card" key={`${comparison.cohort_scope}-player-comparison`}>
+            <div>
+              <span>Cohort comparison</span>
+              <strong>{comparison.cohort_label}</strong>
+              <small>
+                {comparison.cohort_scope.replaceAll("_", " ")} · {comparison.metric_count} metrics · {comparison.watch_count} watch
+              </small>
+            </div>
+            <div className="chart-bars">
+              <div className="chart-bar-row">
+                <span>Average</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{
+                      width: `${boundedPercent(comparison.average_percentile)}%`,
+                      backgroundColor: playerChartColors[index % playerChartColors.length]
+                    }}
+                  />
+                </div>
+                <strong>{comparison.average_percentile === null ? "n/a" : `${comparison.average_percentile}%`}</strong>
+              </div>
+              <div className="chart-bar-row">
+                <span>{comparison.top_metric_name ?? "Top metric"}</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{
+                      width: `${boundedPercent(comparison.top_percentile)}%`,
+                      backgroundColor: playerChartColors[(index + 1) % playerChartColors.length]
+                    }}
+                  />
+                </div>
+                <strong>{comparison.top_percentile === null ? "n/a" : `${comparison.top_percentile}%`}</strong>
+              </div>
+            </div>
+            <small>{comparison.recommendation}</small>
+          </article>
+        ))}
         {visibleSeries.map((series, index) => (
           <article className="player-chart-card" key={`${series.metric_definition_id}-player-series`}>
             <div>

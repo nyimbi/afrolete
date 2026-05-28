@@ -15,6 +15,7 @@ from app.schemas.performance import (
     AthletePerformanceSummaryRead,
     MetricDefinitionCreate,
     MetricDefinitionRead,
+    PerformanceCohortComparisonRead,
     PerformanceAchievementAwardRead,
     PerformanceAchievementRunRead,
     PerformanceAssessmentReviewEscalationRunRead,
@@ -51,6 +52,7 @@ from app.services.performance import (
     list_my_player_performance,
     list_observations,
     performance_metric_benchmarks,
+    performance_cohort_comparisons,
     performance_metric_trend_series,
     performance_metric_trends,
     performance_summary,
@@ -256,6 +258,10 @@ async def list_my_player_performance_route(
             ],
             benchmarks=[
                 PerformanceMetricBenchmarkRead(**benchmark) for benchmark in profile["benchmarks"]
+            ],
+            cohort_comparisons=[
+                PerformanceCohortComparisonRead(**comparison)
+                for comparison in profile["cohort_comparisons"]
             ],
         )
         for profile in profiles
@@ -547,6 +553,27 @@ async def athlete_performance_benchmarks_route(
             athlete_profile_id=athlete_profile_id,
             sport=sport,
             cohort_scope=cohort_scope,
+        )
+    ]
+
+
+@router.get(
+    "/athletes/{athlete_profile_id}/cohort-comparisons",
+    response_model=list[PerformanceCohortComparisonRead],
+)
+async def athlete_performance_cohort_comparisons_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    sport: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceCohortComparisonRead]:
+    return [
+        PerformanceCohortComparisonRead(**comparison)
+        for comparison in await performance_cohort_comparisons(
+            db,
+            organization_id,
+            athlete_profile_id,
+            sport=sport,
         )
     ]
 

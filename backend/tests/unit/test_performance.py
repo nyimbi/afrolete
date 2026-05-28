@@ -169,6 +169,8 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert profile["benchmarks"][0]["cohort_scope"] == "tenant"
     assert profile["benchmarks"][0]["cohort_label"] == "All athletes"
     assert profile["benchmarks"][0]["metric_name"] == "Pace"
+    assert len(profile["cohort_comparisons"]) == 4
+    assert profile["cohort_comparisons"][0]["cohort_scope"] == "tenant"
 
 
 def test_performance_benchmarks_can_scope_to_position_cohort(client, identity_headers) -> None:
@@ -323,6 +325,29 @@ def test_performance_benchmarks_can_scope_to_region_cohort(client, identity_head
     assert benchmark["cohort_average"] == 61.5
     assert benchmark["cohort_max"] == 62.0
     assert benchmark["percentile_rank"] == 100.0
+
+    comparison_response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/cohort-comparisons"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert comparison_response.status_code == 200
+    comparisons = comparison_response.json()
+    assert [comparison["cohort_scope"] for comparison in comparisons] == [
+        "tenant",
+        "age_group",
+        "position",
+        "region",
+    ]
+    region = next(comparison for comparison in comparisons if comparison["cohort_scope"] == "region")
+    assert region["cohort_label"] == "KE"
+    assert region["metric_count"] == 1
+    assert region["sample_size_total"] == 2
+    assert region["average_percentile"] == 100.0
+    assert region["watch_count"] == 0
+    assert region["top_metric_name"] == "Vertical Jump"
+    assert region["benchmarks"][0]["cohort_label"] == "KE"
 
 
 def test_performance_trend_series_returns_ordered_points(client, identity_headers) -> None:

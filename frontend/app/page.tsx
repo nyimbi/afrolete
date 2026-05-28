@@ -202,6 +202,7 @@ import type {
   PerformanceAchievementAwardRead,
   PerformanceAchievementRunRead,
   PerformanceAssessmentReviewEscalationRunRead,
+  PerformanceCohortComparisonRead,
   PerformanceGoalRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
@@ -813,6 +814,63 @@ function PerformanceTrendSeriesDashboard({ series }: { series: PerformanceMetric
   );
 }
 
+function PerformanceCohortComparisonDashboard({ comparisons }: { comparisons: PerformanceCohortComparisonRead[] }) {
+  const visibleComparisons = comparisons.slice(0, 4);
+
+  return (
+    <div className="trend-series-grid">
+      {visibleComparisons.map((comparison, index) => {
+        const percentile = comparison.average_percentile ?? 0;
+        return (
+          <article className="task-card chart-card" key={`${comparison.cohort_scope}-comparison`}>
+            <div>
+              <strong>{comparison.cohort_label} · {comparison.cohort_scope.replaceAll("_", " ")}</strong>
+              <span>
+                {comparison.metric_count} metrics · {comparison.sample_size_total} samples · {comparison.watch_count} watch
+              </span>
+            </div>
+            <div className="chart-bars">
+              <div className="chart-bar-row">
+                <span>Average</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{ width: `${Math.max(4, Math.min(100, percentile))}%`, backgroundColor: chartColors[index % chartColors.length] }}
+                  />
+                </div>
+                <strong>{comparison.average_percentile === null ? "n/a" : `${comparison.average_percentile}%`}</strong>
+              </div>
+              <div className="chart-bar-row">
+                <span>{comparison.top_metric_name ?? "Top metric"}</span>
+                <div className="chart-track">
+                  <div
+                    className="chart-fill"
+                    style={{
+                      width: `${Math.max(4, Math.min(100, comparison.top_percentile ?? 0))}%`,
+                      backgroundColor: chartColors[(index + 1) % chartColors.length]
+                    }}
+                  />
+                </div>
+                <strong>{comparison.top_percentile === null ? "n/a" : `${comparison.top_percentile}%`}</strong>
+              </div>
+            </div>
+            <small>{comparison.recommendation}</small>
+          </article>
+        );
+      })}
+      {visibleComparisons.length === 0 ? (
+        <article className="task-card chart-card">
+          <div>
+            <strong>Cohort comparison</strong>
+            <span>Benchmark scopes will appear after accepted observations are recorded.</span>
+          </div>
+          <small>No cohort comparison data is available yet.</small>
+        </article>
+      ) : null}
+    </div>
+  );
+}
+
 function downloadTextArtifact(content: string, contentType: string, filename: string) {
   const blob = new Blob([content], { type: contentType });
   const url = window.URL.createObjectURL(blob);
@@ -951,6 +1009,7 @@ export default function HomePage() {
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
   const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
   const [performanceBenchmarkScope, setPerformanceBenchmarkScope] = useState<BenchmarkCohortScope>("tenant");
+  const [performanceCohortComparisons, setPerformanceCohortComparisons] = useState<PerformanceCohortComparisonRead[]>([]);
   const [performanceTrends, setPerformanceTrends] = useState<PerformanceMetricTrendRead[]>([]);
   const [performanceTrendSeries, setPerformanceTrendSeries] = useState<PerformanceMetricTrendSeriesRead[]>([]);
   const [performanceGoals, setPerformanceGoals] = useState<PerformanceGoalRead[]>([]);
@@ -1995,6 +2054,7 @@ export default function HomePage() {
         assessmentData,
         summaryData,
         benchmarkData,
+        cohortComparisonData,
         trendData,
         trendSeriesData,
         goalData,
@@ -2011,6 +2071,9 @@ export default function HomePage() {
         ),
         apiRequest<PerformanceMetricBenchmarkRead[]>(
           `/performance/athletes/${athleteProfileId}/benchmarks?organization_id=${organizationId}&cohort_scope=${performanceBenchmarkScope}`
+        ),
+        apiRequest<PerformanceCohortComparisonRead[]>(
+          `/performance/athletes/${athleteProfileId}/cohort-comparisons?organization_id=${organizationId}`
         ),
         apiRequest<PerformanceMetricTrendRead[]>(
           `/performance/athletes/${athleteProfileId}/trends?organization_id=${organizationId}`
@@ -2029,6 +2092,7 @@ export default function HomePage() {
       setAssessments(assessmentData);
       setPerformanceSummary(summaryData);
       setPerformanceBenchmarks(benchmarkData);
+      setPerformanceCohortComparisons(cohortComparisonData);
       setPerformanceTrends(trendData);
       setPerformanceTrendSeries(trendSeriesData);
       setPerformanceGoals(goalData);
@@ -2804,6 +2868,7 @@ export default function HomePage() {
       setObservations([]);
       setAssessments([]);
       setPerformanceBenchmarks([]);
+      setPerformanceCohortComparisons([]);
       setPerformanceTrends([]);
       setPerformanceGoals([]);
       setPerformanceAwards([]);
@@ -13098,6 +13163,7 @@ export default function HomePage() {
               trends={performanceTrends}
               benchmarks={performanceBenchmarks}
             />
+            <PerformanceCohortComparisonDashboard comparisons={performanceCohortComparisons} />
             <PerformanceTrendSeriesDashboard series={performanceTrendSeries} />
             <div className="form-grid">
               <label>

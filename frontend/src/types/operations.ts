@@ -3259,6 +3259,19 @@ export type PerformanceMetricBenchmarkRead = {
   recommendation: string;
 };
 
+export type PerformanceCohortComparisonRead = {
+  cohort_scope: string;
+  cohort_label: string;
+  metric_count: number;
+  sample_size_total: number;
+  average_percentile: number | null;
+  watch_count: number;
+  top_metric_name: string | null;
+  top_percentile: number | null;
+  recommendation: string;
+  benchmarks: PerformanceMetricBenchmarkRead[];
+};
+
 export type PerformanceMetricTrendRead = {
   metric_definition_id: UUID;
   metric_code: string;
@@ -3380,6 +3393,7 @@ export type PlayerPerformanceProfileRead = {
   trends: PerformanceMetricTrendRead[];
   trend_series: PerformanceMetricTrendSeriesRead[];
   benchmarks: PerformanceMetricBenchmarkRead[];
+  cohort_comparisons: PerformanceCohortComparisonRead[];
 };
 
 export type TrainingDrillRead = {

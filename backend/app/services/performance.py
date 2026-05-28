@@ -780,6 +780,60 @@ async def performance_metric_benchmarks(
     return benchmarks
 
 
+async def performance_cohort_comparisons(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    sport: str | None = None,
+    cohort_scopes: tuple[str, ...] = ("tenant", "age_group", "position", "region"),
+) -> list[dict[str, object]]:
+    comparisons: list[dict[str, object]] = []
+    for scope in cohort_scopes:
+        benchmarks = await performance_metric_benchmarks(
+            db,
+            organization_id,
+            athlete_profile_id=athlete_profile_id,
+            sport=sport,
+            cohort_scope=scope,
+        )
+        percentiles = [
+            benchmark["percentile_rank"]
+            for benchmark in benchmarks
+            if isinstance(benchmark["percentile_rank"], int | float)
+        ]
+        top_benchmark = max(
+            (
+                benchmark
+                for benchmark in benchmarks
+                if isinstance(benchmark["percentile_rank"], int | float)
+            ),
+            key=lambda benchmark: benchmark["percentile_rank"],
+            default=None,
+        )
+        watch_count = sum(1 for benchmark in benchmarks if benchmark["benchmark_band"] == "watch")
+        average_percentile = (
+            round(sum(percentiles) / len(percentiles), 1)
+            if percentiles
+            else None
+        )
+        cohort_label = benchmarks[0]["cohort_label"] if benchmarks else benchmark_cohort_label(scope, None)
+        comparisons.append(
+            {
+                "cohort_scope": scope,
+                "cohort_label": cohort_label,
+                "metric_count": len(benchmarks),
+                "sample_size_total": sum(int(benchmark["sample_size"]) for benchmark in benchmarks),
+                "average_percentile": average_percentile,
+                "watch_count": watch_count,
+                "top_metric_name": top_benchmark["metric_name"] if top_benchmark is not None else None,
+                "top_percentile": top_benchmark["percentile_rank"] if top_benchmark is not None else None,
+                "recommendation": cohort_comparison_recommendation(scope, cohort_label, average_percentile, watch_count),
+                "benchmarks": benchmarks,
+            }
+        )
+    return comparisons
+
+
 async def performance_metric_trends(
     db: AsyncSession,
     organization_id: UUID,
@@ -1035,6 +1089,7 @@ async def list_my_player_performance(
             athlete_profile_id=profile.id,
             cohort_scope=benchmark_cohort_scope,
         )
+        cohort_comparisons = await performance_cohort_comparisons(db, organization_id, profile.id)
         results.append(
             {
                 "organization_id": organization_id,
@@ -1056,6 +1111,7 @@ async def list_my_player_performance(
                 "trends": trends,
                 "trend_series": trend_series,
                 "benchmarks": benchmarks,
+                "cohort_comparisons": cohort_comparisons,
             }
         )
     return results
@@ -1596,6 +1652,27 @@ def normalized_cohort_value(value: str | None) -> str | None:
         return None
     normalized = " ".join(value.strip().lower().split())
     return normalized or None
+
+
+def cohort_comparison_recommendation(
+    cohort_scope: str,
+    cohort_label: str,
+    average_percentile: float | None,
+    watch_count: int,
+) -> str:
+    label = cohort_label.lower()
+    scope_label = cohort_scope.replace("_", " ")
+    if average_percentile is None:
+        return f"Capture accepted observations before comparing this athlete against the {label} {scope_label} cohort."
+    if watch_count > 0:
+        return f"Prioritize {watch_count} watch metric(s) inside the {label} {scope_label} cohort."
+    if average_percentile >= 75:
+        return f"This athlete is outperforming the {label} {scope_label} cohort; raise progression targets."
+    if average_percentile >= 55:
+        return f"This athlete is ahead of the {label} {scope_label} cohort; maintain the current development block."
+    if average_percentile >= 40:
+        return f"This athlete is broadly aligned with the {label} {scope_label} cohort; keep monitoring trend movement."
+    return f"This athlete trails the {label} {scope_label} cohort; assign targeted coaching support."
 
 
 def performance_benchmark_recommendation(

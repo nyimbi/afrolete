@@ -244,6 +244,19 @@ class PerformanceMetricBenchmarkRead(BaseModel):
     recommendation: str
 
 
+class PerformanceCohortComparisonRead(BaseModel):
+    cohort_scope: str
+    cohort_label: str
+    metric_count: int
+    sample_size_total: int
+    average_percentile: float | None
+    watch_count: int
+    top_metric_name: str | None
+    top_percentile: float | None
+    recommendation: str
+    benchmarks: list[PerformanceMetricBenchmarkRead]
+
+
 class PerformanceMetricTrendRead(BaseModel):
     metric_definition_id: UUID
     metric_code: str
@@ -389,3 +402,4 @@ class PlayerPerformanceProfileRead(BaseModel):
     trends: list[PerformanceMetricTrendRead]
     trend_series: list[PerformanceMetricTrendSeriesRead]
     benchmarks: list[PerformanceMetricBenchmarkRead]
+    cohort_comparisons: list[PerformanceCohortComparisonRead]
