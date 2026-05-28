@@ -338,6 +338,30 @@ class SafeguardingIncidentInvestigationActionRead(BaseModel):
     actioned_at: datetime
 
 
+class SafeguardingIncidentEvidenceUploadCreate(BaseModel):
+    filename: str = Field(min_length=1, max_length=240)
+    content_type: str = Field(default="application/octet-stream", max_length=120)
+    content_base64: str = Field(min_length=1)
+    evidence_type: str = Field(default="document", min_length=2, max_length=80)
+    review_status: str = Field(default="needs_review", pattern="^(needs_review|accepted|rejected)$")
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class SafeguardingIncidentEvidenceUploadRead(BaseModel):
+    incident_id: UUID
+    organization_id: UUID
+    filename: str
+    content_type: str
+    evidence_type: str
+    review_status: str
+    size_bytes: int
+    checksum: str
+    evidence_url: str
+    storage_key: str
+    uploaded_at: datetime
+    incident: "SafeguardingIncidentRead"
+
+
 class SafeguardingIncidentRead(BaseModel):
     id: UUID
     organization_id: UUID

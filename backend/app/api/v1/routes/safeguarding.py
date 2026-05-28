@@ -38,6 +38,8 @@ from app.schemas.safeguarding import (
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
+    SafeguardingIncidentEvidenceUploadCreate,
+    SafeguardingIncidentEvidenceUploadRead,
     SafeguardingIncidentInvestigationActionCreate,
     SafeguardingIncidentInvestigationActionRead,
     IncidentInsuranceClaimCreate,
@@ -107,6 +109,7 @@ from app.services.safeguarding import (
     update_incident_insurance_claim,
     submit_incident_insurance_claim_to_provider,
     submit_incident_medical_clearance_to_provider,
+    upload_safeguarding_incident_evidence,
     update_incident_medical_clearance,
     update_incident_report_package,
     update_safeguarding_incident,
@@ -398,6 +401,23 @@ async def apply_safeguarding_incident_investigation_action_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> SafeguardingIncidentInvestigationActionRead:
     return await apply_safeguarding_incident_investigation_action(
+        db,
+        identity,
+        incident_id,
+        payload,
+        authz,
+    )
+
+
+@router.post("/incidents/{incident_id}/evidence", response_model=SafeguardingIncidentEvidenceUploadRead)
+async def upload_safeguarding_incident_evidence_route(
+    incident_id: UUID,
+    payload: SafeguardingIncidentEvidenceUploadCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentEvidenceUploadRead:
+    return await upload_safeguarding_incident_evidence(
         db,
         identity,
         incident_id,

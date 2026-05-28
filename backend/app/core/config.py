@@ -175,6 +175,8 @@ class Settings(BaseSettings):
     safeguarding_screening_submission_webhook_key_secret_field: str = "value"
     safeguarding_screening_submission_timeout_seconds: float = 5.0
     safeguarding_screening_submission_provider_profile: str = "auto"
+    safeguarding_incident_evidence_dir: str = "data/safeguarding-incident-evidence"
+    safeguarding_incident_evidence_url_prefix: str = "local://safeguarding-incident-evidence"
     safeguarding_regulatory_report_delivery_mode: Literal["record_only", "webhook"] = "record_only"
     safeguarding_regulatory_report_webhook_url: str = ""
     safeguarding_regulatory_report_webhook_key: str = ""

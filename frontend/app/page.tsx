@@ -180,6 +180,7 @@ import type {
   BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
+  SafeguardingIncidentEvidenceUploadRead,
   SafeguardingIncidentInvestigationActionRead,
   IncidentReportPackageArtifactRead,
   IncidentReportPackageArtifactLinkRead,
@@ -1353,6 +1354,7 @@ export default function HomePage() {
   const [travelExpenses, setTravelExpenses] = useState<EventTravelExpenseRead[]>([]);
   const [travelExpensePayout, setTravelExpensePayout] = useState<EventTravelExpensePayoutRead | null>(null);
   const [selectedTravelReceiptFile, setSelectedTravelReceiptFile] = useState<File | null>(null);
+  const [selectedIncidentEvidenceFile, setSelectedIncidentEvidenceFile] = useState<File | null>(null);
   const [travelCarpoolRides, setTravelCarpoolRides] = useState<EventTravelCarpoolRideRead[]>([]);
   const [travelCarpoolAutoMatch, setTravelCarpoolAutoMatch] = useState<EventTravelCarpoolAutoMatchRead | null>(null);
   const [travelReadiness, setTravelReadiness] = useState<EventTravelReadinessRead | null>(null);
@@ -1569,6 +1571,8 @@ export default function HomePage() {
   const [safeguardingIncidents, setSafeguardingIncidents] = useState<SafeguardingIncidentRead[]>([]);
   const [incidentInvestigationAction, setIncidentInvestigationAction] =
     useState<SafeguardingIncidentInvestigationActionRead | null>(null);
+  const [incidentEvidenceUpload, setIncidentEvidenceUpload] =
+    useState<SafeguardingIncidentEvidenceUploadRead | null>(null);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
   const [backgroundCheckProviderSubmission, setBackgroundCheckProviderSubmission] =
     useState<BackgroundCheckProviderSubmissionRead | null>(null);
@@ -3152,6 +3156,7 @@ export default function HomePage() {
       setRegistrationInquiries([]);
       setSafeguardingIncidents([]);
       setIncidentInvestigationAction(null);
+      setIncidentEvidenceUpload(null);
       setBackgroundChecks([]);
       setBackgroundCheckProviderSubmission(null);
       setBackgroundCheckProviderResult(null);
@@ -5812,6 +5817,43 @@ export default function HomePage() {
           `${incident.title} investigation ${action.action_type} recorded (${action.status})`,
           action.severity === "critical" || action.regulatory_report_required ? "neutral" : "good"
         );
+      }
+    );
+  };
+
+  const uploadIncidentEvidence = (incident: SafeguardingIncidentRead) => {
+    if (!selectedIncidentEvidenceFile) {
+      addLog("Choose an incident evidence file first", "bad");
+      return;
+    }
+    runAction(
+      `incident-evidence-${incident.id}`,
+      async () => {
+        const contentBase64 = await fileToBase64(selectedIncidentEvidenceFile);
+        return apiRequest<SafeguardingIncidentEvidenceUploadRead>(
+          `/safeguarding/incidents/${incident.id}/evidence`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              filename: selectedIncidentEvidenceFile.name,
+              content_type: selectedIncidentEvidenceFile.type || "application/octet-stream",
+              content_base64: contentBase64,
+              evidence_type: selectedIncidentEvidenceFile.type.startsWith("image/") ? "photo" : "document",
+              review_status: "needs_review",
+              notes: `Uploaded from the operations console for ${incident.title}.`
+            }
+          }
+        );
+      },
+      (upload) => {
+        setIncidentEvidenceUpload(upload);
+        setSafeguardingIncidents((current) => [
+          upload.incident,
+          ...current.filter((item) => item.id !== upload.incident.id)
+        ]);
+        setSelectedIncidentEvidenceFile(null);
+        addLog(`${upload.filename} incident evidence stored (${upload.size_bytes} bytes)`, "good");
       }
     );
   };
@@ -16127,6 +16169,10 @@ export default function HomePage() {
               <input type="checkbox" checked={incidentForm.regulatory_report_required} onChange={(event) => setIncidentForm({ ...incidentForm, regulatory_report_required: event.target.checked })} />
               Regulatory report
             </label>
+            <label>
+              Incident evidence
+              <input type="file" accept="image/*,.pdf,.txt,.doc,.docx" onChange={(event) => setSelectedIncidentEvidenceFile(event.target.files?.[0] ?? null)} />
+            </label>
           </div>
           <div className="form-grid three">
             <label>
@@ -16533,6 +16579,7 @@ export default function HomePage() {
                   <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "finding")}>Finding</button>
                   <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "follow_up")}>Follow-up</button>
                   <button type="button" onClick={() => applyIncidentInvestigationAction(incident, "escalate")}>Escalate</button>
+                  <button type="button" onClick={() => uploadIncidentEvidence(incident)}>Evidence</button>
                   <button type="button" onClick={() => createIncidentReportPackage(incident)}>Package</button>
                   <button type="button" onClick={() => createIncidentInsuranceClaim(incident)}>Claim</button>
                   <button type="button" onClick={() => createIncidentMedicalClearance(incident)}>Clearance</button>
@@ -16547,6 +16594,16 @@ export default function HomePage() {
                   <span>{incidentInvestigationAction.action_type} · {incidentInvestigationAction.status} · {incidentInvestigationAction.severity}</span>
                   <span>{incidentInvestigationAction.assigned_to_person_id ?? "Unassigned"} · medical {incidentInvestigationAction.medical_follow_up_required}</span>
                   <span>{incidentInvestigationAction.action_summary}</span>
+                </div>
+              </article>
+            ) : null}
+            {incidentEvidenceUpload ? (
+              <article className="task-card">
+                <div>
+                  <strong>{incidentEvidenceUpload.filename}</strong>
+                  <span>{incidentEvidenceUpload.evidence_type} · {incidentEvidenceUpload.review_status} · {incidentEvidenceUpload.size_bytes} bytes</span>
+                  <span>{incidentEvidenceUpload.checksum.slice(0, 16)} · {incidentEvidenceUpload.content_type}</span>
+                  <span>{incidentEvidenceUpload.evidence_url} · {incidentEvidenceUpload.storage_key}</span>
                 </div>
               </article>
             ) : null}

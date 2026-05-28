@@ -337,6 +337,54 @@ def test_incident_investigation_actions_assign_escalate_and_close(client, identi
     assert synced["parent_notified_at"] is not None
 
 
+def test_incident_evidence_upload_stores_file_and_case_note(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Evidence Review Club", "organization_type": "club"},
+    ).json()
+    incident = client.post(
+        "/api/v1/safeguarding/incidents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_type": "misconduct",
+            "severity": "high",
+            "occurred_at": "2026-05-28T13:45:00Z",
+            "location": "Training pitch",
+            "title": "Evidence review case",
+            "description": "Staff uploaded a written witness statement for review.",
+            "immediate_action": "Safeguarding lead opened an investigation.",
+            "medical_follow_up_required": "no",
+        },
+    ).json()
+    content = b"Witness statement: coach separated the parties and logged the concern."
+
+    response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence",
+        headers=identity_headers,
+        json={
+            "filename": "Witness Statement.txt",
+            "content_type": "text/plain",
+            "content_base64": base64.b64encode(content).decode(),
+            "evidence_type": "witness_statement",
+            "review_status": "accepted",
+            "notes": "Reviewed by safeguarding lead.",
+        },
+    )
+
+    assert response.status_code == 200
+    upload = response.json()
+    assert upload["filename"] == "Witness-Statement.txt"
+    assert upload["content_type"] == "text/plain"
+    assert upload["size_bytes"] == len(content)
+    assert upload["checksum"] == sha256(content).hexdigest()
+    assert upload["evidence_url"].startswith("local://safeguarding-incident-evidence/")
+    assert upload["storage_key"].endswith("Witness-Statement.txt")
+    assert upload["incident"]["status"] == "investigating"
+    assert "Evidence uploaded" in upload["incident"]["resolution_notes"]
+
+
 def test_insurance_claim_provider_submit_and_status_poll_record_only(client, identity_headers) -> None:
     organization = client.post(
         "/api/v1/organizations",

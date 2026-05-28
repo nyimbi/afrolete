@@ -3,9 +3,11 @@ import hmac
 import io
 import json
 import time
+from binascii import Error as BinasciiError
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
+from re import sub
 from secrets import token_urlsafe
 from urllib.parse import quote
 from uuid import UUID
@@ -71,6 +73,8 @@ from app.schemas.safeguarding import (
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
+    SafeguardingIncidentEvidenceUploadCreate,
+    SafeguardingIncidentEvidenceUploadRead,
     SafeguardingIncidentInvestigationActionCreate,
     SafeguardingIncidentInvestigationActionRead,
     IncidentReportPackageArtifactLinkRead,
@@ -85,6 +89,7 @@ from app.schemas.safeguarding import (
     IncidentReportPackageUpdate,
     KnownChannelConsentCapture,
     SafeguardingIncidentCreate,
+    SafeguardingIncidentRead,
     SafeguardingIncidentUpdate,
     TokenConsentCapture,
 )
@@ -528,6 +533,106 @@ async def apply_safeguarding_incident_investigation_action(
         action_summary=action_summary,
         resolution_notes=incident.resolution_notes,
         actioned_at=actioned_at,
+    )
+
+
+async def upload_safeguarding_incident_evidence(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident_id: UUID,
+    payload: SafeguardingIncidentEvidenceUploadCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> SafeguardingIncidentEvidenceUploadRead:
+    incident = await db.get(SafeguardingIncident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    await ensure_org_manage(authz, incident.organization_id, identity)
+    content = decode_safeguarding_upload_content(payload.content_base64)
+    if not content:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Evidence file is empty")
+    selected_settings = settings or get_settings()
+    uploaded_at = utc_now()
+    checksum = sha256(content).hexdigest()
+    safe_name = safe_safeguarding_upload_filename(payload.filename, fallback="incident-evidence")
+    storage_name = f"{checksum[:16]}-{safe_name}"
+    relative_path = (
+        Path(str(incident.organization_id))
+        / str(incident.id)
+        / storage_name
+    ).as_posix()
+    stored = put_object(
+        selected_settings,
+        local_root=selected_settings.safeguarding_incident_evidence_dir,
+        local_url_prefix=selected_settings.safeguarding_incident_evidence_url_prefix,
+        key=relative_path,
+        content=content,
+        content_type=payload.content_type or "application/octet-stream",
+    )
+    evidence_note = (
+        f"Evidence uploaded: {safe_name} ({payload.evidence_type}, {payload.review_status}, "
+        f"{len(content)} bytes, checksum {checksum}, {stored.url})."
+    )
+    if payload.notes:
+        evidence_note = f"{evidence_note} Notes: {payload.notes}"
+    append_safeguarding_incident_resolution_note(incident, uploaded_at, evidence_note)
+    if payload.review_status == "accepted" and incident.status == SafeguardingIncidentStatus.OPEN:
+        incident.status = SafeguardingIncidentStatus.INVESTIGATING
+
+    await db.commit()
+    await db.refresh(incident)
+    return SafeguardingIncidentEvidenceUploadRead(
+        incident_id=incident.id,
+        organization_id=incident.organization_id,
+        filename=safe_name,
+        content_type=payload.content_type or "application/octet-stream",
+        evidence_type=payload.evidence_type,
+        review_status=payload.review_status,
+        size_bytes=len(content),
+        checksum=checksum,
+        evidence_url=stored.url,
+        storage_key=relative_path,
+        uploaded_at=uploaded_at,
+        incident=safeguarding_incident_read(incident),
+    )
+
+
+def decode_safeguarding_upload_content(content_base64: str) -> bytes:
+    encoded = content_base64.split(",", 1)[1] if "," in content_base64 else content_base64
+    try:
+        return base64.b64decode(encoded, validate=True)
+    except (ValueError, BinasciiError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid file encoding") from exc
+
+
+def safe_safeguarding_upload_filename(filename: str, *, fallback: str) -> str:
+    cleaned = sub(r"[^A-Za-z0-9._-]+", "-", Path(filename).name).strip(".-")
+    return cleaned[:180] or fallback
+
+
+def safeguarding_incident_read(incident: SafeguardingIncident) -> SafeguardingIncidentRead:
+    return SafeguardingIncidentRead(
+        id=incident.id,
+        organization_id=incident.organization_id,
+        event_id=incident.event_id,
+        team_id=incident.team_id,
+        athlete_person_id=incident.athlete_person_id,
+        reported_by_person_id=incident.reported_by_person_id,
+        assigned_to_person_id=incident.assigned_to_person_id,
+        incident_type=incident.incident_type,
+        severity=incident.severity,
+        status=incident.status,
+        occurred_at=incident.occurred_at,
+        location=incident.location,
+        title=incident.title,
+        description=incident.description,
+        immediate_action=incident.immediate_action,
+        parent_notified_at=incident.parent_notified_at,
+        medical_follow_up_required=incident.medical_follow_up_required,
+        regulatory_report_required=incident.regulatory_report_required,
+        resolution_notes=incident.resolution_notes,
+        resolved_at=incident.resolved_at,
+        created_at=incident.created_at,
     )
 
 

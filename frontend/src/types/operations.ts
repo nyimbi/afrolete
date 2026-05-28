@@ -2796,6 +2796,21 @@ export type SafeguardingIncidentInvestigationActionRead = {
   actioned_at: string;
 };
 
+export type SafeguardingIncidentEvidenceUploadRead = {
+  incident_id: UUID;
+  organization_id: UUID;
+  filename: string;
+  content_type: string;
+  evidence_type: string;
+  review_status: string;
+  size_bytes: number;
+  checksum: string;
+  evidence_url: string;
+  storage_key: string;
+  uploaded_at: string;
+  incident: SafeguardingIncidentRead;
+};
+
 export type BackgroundCheckRead = {
   id: UUID;
   organization_id: UUID;
