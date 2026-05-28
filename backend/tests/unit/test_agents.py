@@ -1,3 +1,9 @@
+from sqlalchemy import select
+
+from app.models.agent import Agent, AgentRunRecord, AgentTask
+from app.models.enums import AgentKind, AgentTaskStatus, OrganizationType
+from app.models.organization import Organization
+from app.services.agents import run_agent_task_worker
 from app.services.authz.service import authorization_service
 
 
@@ -122,6 +128,55 @@ def test_agent_assignment_and_task_review_workflow(client, identity_headers) -> 
     assert reviewed["status"] == "waiting_for_review"
     assert reviewed["output_ref"] == f"agent-output:{task['id']}"
     assert "human review" in reviewed["review_notes"]
+
+
+async def test_agent_task_worker_executes_queued_tasks(db_session) -> None:
+    organization = Organization(
+        name="Agent Worker Club",
+        slug="agent-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    agent = Agent(
+        organization_id=organization.id,
+        name="Worker Coach",
+        kind=AgentKind.OPERATIONS,
+        purpose="Execute background agent tasks for operations review.",
+        model_policy="worker-local-model",
+    )
+    db_session.add(agent)
+    await db_session.flush()
+    task = AgentTask(
+        agent_id=agent.id,
+        organization_id=organization.id,
+        task_type="schedule_review",
+        title="Review next match logistics",
+        input_ref="event:upcoming",
+    )
+    db_session.add(task)
+    await db_session.commit()
+
+    result = await run_agent_task_worker(db_session, organization_id=organization.id, limit=10)
+
+    assert result.eligible_count == 1
+    assert result.executed_count == 1
+    assert result.skipped_count == 0
+    assert result.statuses["waiting_for_review"] == 1
+    await db_session.refresh(task)
+    assert task.status == AgentTaskStatus.WAITING_FOR_REVIEW
+    assert task.output_ref == f"agent://tasks/{task.id}/outputs/deterministic"
+    records = list(
+        (
+            await db_session.scalars(
+                select(AgentRunRecord).where(AgentRunRecord.task_id == task.id).order_by(AgentRunRecord.ledger_sequence)
+            )
+        ).all()
+    )
+    assert [record.event_type for record in records] == ["execution_started", "execution_finished"]
+    assert records[0].record_hash
+    assert records[1].previous_record_hash == records[0].record_hash
 
 
 def test_agent_assignment_rejects_cross_organization_scope(client, identity_headers) -> None:

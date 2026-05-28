@@ -40,6 +40,17 @@ The worker processes queued/failed deliveries whose `next_attempt_at` is due,
 honors per-delivery attempt limits, and emits a JSON summary suitable for cron,
 Temporal activities, or container job logs.
 
+Queued AI agent tasks can also be executed from a worker:
+
+```bash
+cd backend
+uv run python -m app.workers.agents --limit 25
+```
+
+The agent worker uses the same deterministic/webhook execution mode as the API,
+appends the same hash-chained run ledger records, and returns a JSON summary for
+schedulers and job logs.
+
 ## Responsibilities
 
 - Domain API and OpenAPI contract.

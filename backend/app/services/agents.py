@@ -56,6 +56,7 @@ from app.schemas.agent import (
     AgentScorecardPublicationReminderCreate,
     AgentScorecardPublicationReminderRunCreate,
     AgentTaskCreate,
+    AgentTaskWorkerRunRead,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
 )
@@ -2245,6 +2246,15 @@ async def execute_agent_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
     await ensure_manage_organization(authz, identity, task.organization_id)
+    return await execute_agent_task_instance(db, task, identity, settings=settings)
+
+
+async def execute_agent_task_instance(
+    db: AsyncSession,
+    task: AgentTask,
+    identity: CurrentIdentity | None,
+    settings: Settings | None = None,
+) -> AgentTask:
     if task.status == AgentTaskStatus.CANCELLED:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Task cancelled")
 
@@ -2286,6 +2296,45 @@ async def execute_agent_task(
     await db.commit()
     await db.refresh(task)
     return task
+
+
+async def run_agent_task_worker(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None = None,
+    limit: int = 25,
+    settings: Settings | None = None,
+) -> AgentTaskWorkerRunRead:
+    selected_settings = settings or get_settings()
+    statement = select(AgentTask).where(AgentTask.status == AgentTaskStatus.QUEUED)
+    if organization_id is not None:
+        statement = statement.where(AgentTask.organization_id == organization_id)
+    tasks = list((await db.scalars(statement.order_by(AgentTask.created_at.asc()).limit(limit))).all())
+    executed_count = 0
+    skipped_count = 0
+    for task in tasks:
+        try:
+            await execute_agent_task_instance(db, task, None, settings=selected_settings)
+        except HTTPException:
+            await db.rollback()
+            skipped_count += 1
+    statuses: dict[str, int] = {}
+    for task in tasks:
+        await db.refresh(task)
+        statuses[task.status.value] = statuses.get(task.status.value, 0) + 1
+    executed_count = len(tasks) - skipped_count
+    return AgentTaskWorkerRunRead(
+        organization_id=organization_id,
+        eligible_count=len(tasks),
+        executed_count=executed_count,
+        skipped_count=skipped_count,
+        failed_count=statuses.get(AgentTaskStatus.FAILED.value, 0),
+        task_ids=[task.id for task in tasks],
+        statuses=statuses,
+        organization_count=len({task.organization_id for task in tasks}),
+        execution_mode=selected_settings.agent_execution_mode,
+        limit=limit,
+    )
 
 
 async def append_agent_run_record(
@@ -2472,7 +2521,7 @@ async def execute_with_webhook(
     settings: Settings,
     agent: Agent,
     task: AgentTask,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
 ) -> None:
     if not settings.agent_webhook_url:
         task.status = AgentTaskStatus.FAILED
@@ -2507,7 +2556,7 @@ async def execute_with_webhook(
 def agent_execution_payload(
     agent: Agent,
     task: AgentTask,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     settings: Settings,
 ) -> dict[str, object]:
     return {
@@ -2530,8 +2579,10 @@ def agent_execution_payload(
             "input_ref": task.input_ref,
         },
         "requested_by": {
-            "user_id": str(identity.user_id),
-            "person_id": str(identity.person_id) if identity.person_id else None,
+            "user_id": str(identity.user_id) if identity else None,
+            "person_id": str(identity.person_id) if identity else (
+                str(task.requested_by_person_id) if task.requested_by_person_id else None
+            ),
         },
     }
 

@@ -59,6 +59,19 @@ class AgentTaskRead(BaseModel):
     review_notes: str | None
 
 
+class AgentTaskWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    executed_count: int
+    skipped_count: int
+    failed_count: int
+    task_ids: list[UUID]
+    statuses: dict[str, int]
+    organization_count: int
+    execution_mode: str
+    limit: int
+
+
 class AgentTaskUpdate(BaseModel):
     status: AgentTaskStatus | None = None
     output_ref: str | None = Field(default=None, max_length=500)
