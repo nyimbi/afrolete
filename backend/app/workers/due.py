@@ -20,10 +20,12 @@ from app.services.performance import (
     run_performance_injury_risk_alert_scan_worker,
     run_wearable_pull_retry_worker,
 )
+from app.services.safeguarding import run_compliance_reconciliation_worker
 
 WORKER_LANES = (
     "agent-tasks",
     "communication-digests",
+    "compliance-reconciliation",
     "developer-webhooks",
     "event-travel-consent-reminders",
     "performance-achievements",
@@ -41,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--agent-limit", type=int, default=None)
     parser.add_argument("--communication-digest-limit", type=int, default=None)
+    parser.add_argument("--compliance-reconciliation-limit", type=int, default=None)
     parser.add_argument(
         "--communication-digest-frequency",
         choices=[NotificationFrequency.DAILY_DIGEST.value, NotificationFrequency.WEEKLY_DIGEST.value],
@@ -115,6 +118,7 @@ async def run_due_workers(
     agent_limit: int | None = None,
     communication_digest_limit: int | None = None,
     communication_digest_frequency: NotificationFrequency | None = None,
+    compliance_reconciliation_limit: int | None = None,
     webhook_limit: int | None = None,
     event_travel_consent_reminder_limit: int | None = None,
     event_travel_consent_reminder_due_within_hours: int = 48,
@@ -161,6 +165,14 @@ async def run_due_workers(
                 organization_id=organization_id,
                 frequency=communication_digest_frequency,
                 limit=communication_digest_limit or limit,
+            )
+        ).model_dump(mode="json")
+    if "compliance-reconciliation" in active_lanes:
+        results["compliance_reconciliation"] = (
+            await run_compliance_reconciliation_worker(
+                db,
+                organization_id=organization_id,
+                limit=compliance_reconciliation_limit or limit,
             )
         ).model_dump(mode="json")
     if "event-travel-consent-reminders" in active_lanes:
@@ -291,6 +303,7 @@ async def run() -> None:
             communication_digest_frequency=NotificationFrequency(args.communication_digest_frequency)
             if args.communication_digest_frequency
             else None,
+            compliance_reconciliation_limit=args.compliance_reconciliation_limit,
             webhook_limit=args.webhook_limit,
             event_travel_consent_reminder_limit=args.event_travel_consent_reminder_limit,
             event_travel_consent_reminder_due_within_hours=args.event_travel_consent_reminder_due_within_hours,

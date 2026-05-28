@@ -462,6 +462,18 @@ class ComplianceReconciliationRead(BaseModel):
     credentials_expiring_soon: int
 
 
+class ComplianceReconciliationWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    executed_count: int
+    skipped_count: int
+    failed_count: int
+    organization_ids: list[UUID]
+    background_checks_expired: int
+    credentials_expired: int
+    credentials_expiring_soon: int
+
+
 class IncidentReportPackageCreate(BaseModel):
     organization_id: UUID
     incident_id: UUID

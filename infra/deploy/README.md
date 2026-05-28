@@ -8,11 +8,11 @@ base URL and Keycloak public client metadata.
 
 The due-worker service also reads `/run/pjs/afrolete-backend.env` and should be
 enabled through `afrolete-due-worker.timer`. It runs the unified worker command
-for queued agent tasks, daily/weekly communication digest runs, due travel
-consent reminders, due developer webhook retries, performance achievement
-scans, forecast validation with drift auto-alerting, assessment review
-escalations, injury-risk alert scans, and wearable pull retries, producing JSON
-logs for the system journal.
+for queued agent tasks, daily/weekly communication digest runs, compliance
+expiry reconciliation, due travel consent reminders, due developer webhook
+retries, performance achievement scans, forecast validation with drift
+auto-alerting, assessment review escalations, injury-risk alert scans, and
+wearable pull retries, producing JSON logs for the system journal.
 
 Install flow:
 

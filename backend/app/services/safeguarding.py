@@ -37,6 +37,7 @@ from app.models.event import (
     SafeguardingIncident,
 )
 from app.models.identity import Person
+from app.models.organization import Organization
 from app.models.performance import PerformanceAchievementAward, PerformanceGoal
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.safeguarding import (
@@ -45,6 +46,7 @@ from app.schemas.safeguarding import (
     BackgroundCheckUpdate,
     ComplianceQueueItemRead,
     ComplianceReconciliationRead,
+    ComplianceReconciliationWorkerRunRead,
     ComplianceCredentialCreate,
     ComplianceSummaryRead,
     ComplianceCredentialUpdate,
@@ -984,6 +986,13 @@ async def reconcile_compliance_statuses(
     authz: AuthorizationService,
 ) -> ComplianceReconciliationRead:
     await ensure_org_manage(authz, organization_id, identity)
+    return await reconcile_compliance_for_organization(db, organization_id)
+
+
+async def reconcile_compliance_for_organization(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> ComplianceReconciliationRead:
     now = utc_now()
     today = now.date()
     expiring_cutoff = today + timedelta(days=30)
@@ -1041,6 +1050,53 @@ async def reconcile_compliance_statuses(
     return ComplianceReconciliationRead(
         organization_id=organization_id,
         reconciled_at=now,
+        background_checks_expired=background_checks_expired,
+        credentials_expired=credentials_expired,
+        credentials_expiring_soon=credentials_expiring_soon,
+    )
+
+
+async def compliance_reconciliation_organization_ids(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    limit: int = 25,
+) -> list[UUID]:
+    statement = select(Organization.id).order_by(Organization.created_at, Organization.id).limit(limit)
+    if organization_id is not None:
+        statement = select(Organization.id).where(Organization.id == organization_id).limit(1)
+    return list((await db.scalars(statement)).all())
+
+
+async def run_compliance_reconciliation_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    limit: int = 25,
+) -> ComplianceReconciliationWorkerRunRead:
+    organization_ids = await compliance_reconciliation_organization_ids(db, organization_id, limit)
+    executed_count = 0
+    failed_count = 0
+    background_checks_expired = 0
+    credentials_expired = 0
+    credentials_expiring_soon = 0
+
+    for org_id in organization_ids:
+        try:
+            result = await reconcile_compliance_for_organization(db, org_id)
+            executed_count += 1
+            background_checks_expired += result.background_checks_expired
+            credentials_expired += result.credentials_expired
+            credentials_expiring_soon += result.credentials_expiring_soon
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return ComplianceReconciliationWorkerRunRead(
+        organization_id=organization_id,
+        eligible_count=len(organization_ids),
+        executed_count=executed_count,
+        skipped_count=max(len(organization_ids) - executed_count - failed_count, 0),
+        failed_count=failed_count,
+        organization_ids=organization_ids,
         background_checks_expired=background_checks_expired,
         credentials_expired=credentials_expired,
         credentials_expiring_soon=credentials_expiring_soon,

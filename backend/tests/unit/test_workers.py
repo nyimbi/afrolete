@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select
 
@@ -7,10 +7,13 @@ from app.models.communication import CommunicationMessage, MessageRecipient, Not
 from app.models.enums import (
     AgentKind,
     AgentTaskStatus,
+    BackgroundCheckStatus,
     ChannelPreference,
     CommunicationChannel,
     CommunicationMessageType,
     CommunicationScopeType,
+    ComplianceCredentialStatus,
+    ComplianceCredentialType,
     ConsentCaptureChannel,
     ConsentRequestStatus,
     ConsentScopeType,
@@ -24,7 +27,7 @@ from app.models.enums import (
     OrganizationType,
     TravelPlanStatus,
 )
-from app.models.event import ConsentRequest, Event, EventTravelPlan
+from app.models.event import BackgroundCheck, ComplianceCredential, ConsentRequest, Event, EventTravelPlan
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.performance import (
@@ -72,6 +75,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["lanes"] == [
         "agent-tasks",
         "communication-digests",
+        "compliance-reconciliation",
         "developer-webhooks",
         "event-travel-consent-reminders",
         "performance-achievements",
@@ -80,9 +84,11 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
         "performance-review-escalations",
         "wearable-pull-retries",
     ]
-    assert result["summary"]["eligible_count"] == 1
-    assert result["summary"]["processed_count"] == 1
+    assert result["summary"]["eligible_count"] == 2
+    assert result["summary"]["processed_count"] == 2
     assert result["results"]["communication_digests"]["eligible_count"] == 0
+    assert result["results"]["compliance_reconciliation"]["eligible_count"] == 1
+    assert result["results"]["compliance_reconciliation"]["executed_count"] == 1
     assert result["results"]["developer_webhooks"]["eligible_count"] == 0
     assert result["results"]["event_travel_consent_reminders"]["eligible_count"] == 0
     assert result["results"]["performance_achievements"]["eligible_count"] == 0
@@ -102,6 +108,7 @@ def test_selected_lanes_expands_all() -> None:
     assert selected_lanes(("all",)) == {
         "agent-tasks",
         "communication-digests",
+        "compliance-reconciliation",
         "developer-webhooks",
         "event-travel-consent-reminders",
         "performance-achievements",
@@ -111,6 +118,67 @@ def test_selected_lanes_expands_all() -> None:
         "wearable-pull-retries",
     }
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}
+
+
+async def test_due_worker_reconciles_compliance_expiry(db_session) -> None:
+    organization = Organization(
+        name="Compliance Worker Club",
+        slug="compliance-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    person = Person(display_name="Compliance Coach", primary_email="compliance-coach@example.com")
+    db_session.add_all([organization, person])
+    await db_session.flush()
+    check = BackgroundCheck(
+        organization_id=organization.id,
+        person_id=person.id,
+        provider="Manual",
+        check_type="Safeguarding screen",
+        status=BackgroundCheckStatus.CLEAR,
+        risk_level="low",
+        requested_at=datetime(2025, 1, 1, tzinfo=UTC),
+        expires_at=date(2026, 1, 1),
+    )
+    expired_credential = ComplianceCredential(
+        organization_id=organization.id,
+        person_id=person.id,
+        credential_type=ComplianceCredentialType.SAFEGUARDING_TRAINING,
+        status=ComplianceCredentialStatus.VERIFIED,
+        title="Safeguarding training",
+        expires_at=date(2026, 1, 1),
+    )
+    expiring_credential = ComplianceCredential(
+        organization_id=organization.id,
+        person_id=person.id,
+        credential_type=ComplianceCredentialType.FIRST_AID,
+        status=ComplianceCredentialStatus.VERIFIED,
+        title="First aid",
+        renewal_due_at=date(2026, 5, 1),
+        expires_at=date(2026, 6, 20),
+    )
+    db_session.add_all([check, expired_credential, expiring_credential])
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("compliance-reconciliation",),
+        limit=10,
+    )
+
+    reconciliation = result["results"]["compliance_reconciliation"]
+    assert reconciliation["eligible_count"] == 1
+    assert reconciliation["executed_count"] == 1
+    assert reconciliation["background_checks_expired"] == 1
+    assert reconciliation["credentials_expired"] == 1
+    assert reconciliation["credentials_expiring_soon"] == 1
+    await db_session.refresh(check)
+    await db_session.refresh(expired_credential)
+    await db_session.refresh(expiring_credential)
+    assert check.status == BackgroundCheckStatus.EXPIRED
+    assert expired_credential.status == ComplianceCredentialStatus.EXPIRED
+    assert expiring_credential.status == ComplianceCredentialStatus.EXPIRING_SOON
 
 
 async def test_due_worker_runs_communication_digest_lane(db_session) -> None:
