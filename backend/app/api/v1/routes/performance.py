@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models.enums import CommunicationChannel
+from app.models.enums import CommunicationChannel, MetricCategory
 from app.schemas.performance import (
     AssessmentReviewQueueSummaryRead,
     AthleteAssessmentCreate,
@@ -947,6 +947,8 @@ async def athlete_performance_trends_route(
     athlete_profile_id: UUID,
     organization_id: UUID = Query(),
     sport: str | None = Query(default=None),
+    category: MetricCategory | None = Query(default=None),
+    metric_code: str | None = Query(default=None),
     period_start: date | None = Query(default=None),
     period_end: date | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
@@ -958,6 +960,8 @@ async def athlete_performance_trends_route(
             organization_id,
             athlete_profile_id,
             sport=sport,
+            category=category,
+            metric_code=metric_code,
             period_start=period_start,
             period_end=period_end,
         )
@@ -973,6 +977,8 @@ async def athlete_performance_trend_series_route(
     organization_id: UUID = Query(),
     sport: str | None = Query(default=None),
     limit_per_metric: int = Query(default=12, ge=2, le=50),
+    category: MetricCategory | None = Query(default=None),
+    metric_code: str | None = Query(default=None),
     period_start: date | None = Query(default=None),
     period_end: date | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
@@ -985,6 +991,8 @@ async def athlete_performance_trend_series_route(
             athlete_profile_id,
             sport=sport,
             limit_per_metric=limit_per_metric,
+            category=category,
+            metric_code=metric_code,
             period_start=period_start,
             period_end=period_end,
         )

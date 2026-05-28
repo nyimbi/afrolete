@@ -536,6 +536,19 @@ def test_performance_trend_series_returns_ordered_points(client, identity_header
             "higher_is_better": False,
         },
     ).json()
+    passing_metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "pass_accuracy",
+            "name": "Pass Accuracy",
+            "category": "technical",
+            "unit": "percent",
+            "higher_is_better": True,
+        },
+    ).json()
     for value, observed_at, status in [
         (13.0, "2026-01-01T10:00:00Z", "verified"),
         (12.5, "2026-01-08T10:00:00Z", "verified"),
@@ -554,6 +567,18 @@ def test_performance_trend_series_returns_ordered_points(client, identity_header
             },
         )
         assert response.status_code == 201
+    response = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "metric_definition_id": passing_metric["id"],
+            "value": 81.0,
+            "observed_at": "2026-01-12T10:00:00Z",
+            "verification_status": "verified",
+        },
+    )
+    assert response.status_code == 201
 
     response = client.get(
         f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/trend-series"
@@ -581,6 +606,16 @@ def test_performance_trend_series_returns_ordered_points(client, identity_header
         f"?organization_id={organization['id']}&period_end=2026-01-08",
         headers=identity_headers,
     )
+    category_filtered_response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/trends"
+        f"?organization_id={organization['id']}&category=technical",
+        headers=identity_headers,
+    )
+    metric_filtered_response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/trend-series"
+        f"?organization_id={organization['id']}&metric_code=SPRINT_TIME",
+        headers=identity_headers,
+    )
     invalid_period_response = client.get(
         f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/trends"
         f"?organization_id={organization['id']}&period_start=2026-01-15&period_end=2026-01-08",
@@ -602,6 +637,18 @@ def test_performance_trend_series_returns_ordered_points(client, identity_header
     assert filtered_series["period_end"] == "2026-01-08"
     assert filtered_series["sample_size"] == 2
     assert [point["value"] for point in filtered_series["points"]] == [13.0, 12.5]
+    assert category_filtered_response.status_code == 200
+    category_filtered = category_filtered_response.json()
+    assert [trend["metric_code"] for trend in category_filtered] == ["pass_accuracy"]
+    assert category_filtered[0]["filter_category"] == "technical"
+    assert category_filtered[0]["filter_metric_code"] is None
+    assert category_filtered[0]["sample_size"] == 1
+    assert metric_filtered_response.status_code == 200
+    metric_filtered = metric_filtered_response.json()
+    assert [series["metric_code"] for series in metric_filtered] == ["sprint_time"]
+    assert metric_filtered[0]["filter_category"] is None
+    assert metric_filtered[0]["filter_metric_code"] == "sprint_time"
+    assert [point["value"] for point in metric_filtered[0]["points"]] == [13.0, 12.5, 12.0]
     assert invalid_period_response.status_code == 422
 
 

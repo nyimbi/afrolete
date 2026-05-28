@@ -3466,6 +3466,8 @@ export type PerformanceMetricTrendRead = {
   category: MetricCategory;
   unit: string | null;
   higher_is_better: boolean;
+  filter_category: MetricCategory | null;
+  filter_metric_code: string | null;
   period_start: string | null;
   period_end: string | null;
   sample_size: number;
@@ -3499,6 +3501,8 @@ export type PerformanceMetricTrendSeriesRead = {
   category: MetricCategory;
   unit: string | null;
   higher_is_better: boolean;
+  filter_category: MetricCategory | null;
+  filter_metric_code: string | null;
   period_start: string | null;
   period_end: string | null;
   sample_size: number;

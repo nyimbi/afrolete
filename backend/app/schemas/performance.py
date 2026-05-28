@@ -585,6 +585,8 @@ class PerformanceMetricTrendRead(BaseModel):
     category: MetricCategory
     unit: str | None
     higher_is_better: bool
+    filter_category: MetricCategory | None
+    filter_metric_code: str | None
     period_start: date | None
     period_end: date | None
     sample_size: int
@@ -618,6 +620,8 @@ class PerformanceMetricTrendSeriesRead(BaseModel):
     category: MetricCategory
     unit: str | None
     higher_is_better: bool
+    filter_category: MetricCategory | None
+    filter_metric_code: str | None
     period_start: date | None
     period_end: date | None
     sample_size: int

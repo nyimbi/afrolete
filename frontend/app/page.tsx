@@ -285,6 +285,14 @@ import type {
 } from "@/types/operations";
 
 const performanceRiskAlertChannelOptions: CommunicationChannel[] = ["in_app", "push", "sms", "whatsapp"];
+const metricCategoryOptions: MetricCategory[] = [
+  "physical",
+  "technical",
+  "tactical",
+  "mental",
+  "wellness",
+  "competition"
+];
 
 function wearableWebhookPayload(provider: string): Record<string, unknown> {
   if (provider === "garmin") {
@@ -1373,6 +1381,8 @@ export default function HomePage() {
   const [performanceTrendSeries, setPerformanceTrendSeries] = useState<PerformanceMetricTrendSeriesRead[]>([]);
   const [performanceTrendPeriodStart, setPerformanceTrendPeriodStart] = useState("");
   const [performanceTrendPeriodEnd, setPerformanceTrendPeriodEnd] = useState("");
+  const [performanceTrendCategory, setPerformanceTrendCategory] = useState<MetricCategory | "all">("all");
+  const [performanceTrendMetricCode, setPerformanceTrendMetricCode] = useState("");
   const [performanceForecastScenarios, setPerformanceForecastScenarios] = useState<PerformanceForecastScenarioRead[]>([]);
   const [performanceWhatIfScenarios, setPerformanceWhatIfScenarios] = useState<PerformanceForecastWhatIfRead[]>([]);
   const [performanceWhatIfAdjustment, setPerformanceWhatIfAdjustment] = useState(15);
@@ -2436,6 +2446,12 @@ export default function HomePage() {
       if (performanceTrendPeriodEnd) {
         trendParams.set("period_end", performanceTrendPeriodEnd);
       }
+      if (performanceTrendCategory !== "all") {
+        trendParams.set("category", performanceTrendCategory);
+      }
+      if (performanceTrendMetricCode.trim()) {
+        trendParams.set("metric_code", performanceTrendMetricCode.trim().toLowerCase());
+      }
       const [
         observationData,
         assessmentData,
@@ -2514,6 +2530,8 @@ export default function HomePage() {
     [
       identity,
       performanceBenchmarkScope,
+      performanceTrendCategory,
+      performanceTrendMetricCode,
       performanceTrendPeriodEnd,
       performanceTrendPeriodStart,
       performanceWhatIfAdjustment,
@@ -14087,6 +14105,26 @@ export default function HomePage() {
                   type="date"
                   value={performanceTrendPeriodEnd}
                   onChange={(event) => setPerformanceTrendPeriodEnd(event.target.value)}
+                />
+              </label>
+              <label>
+                Trend domain
+                <select
+                  value={performanceTrendCategory}
+                  onChange={(event) => setPerformanceTrendCategory(event.target.value as MetricCategory | "all")}
+                >
+                  <option value="all">All domains</option>
+                  {metricCategoryOptions.map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Trend metric
+                <input
+                  value={performanceTrendMetricCode}
+                  placeholder="metric code"
+                  onChange={(event) => setPerformanceTrendMetricCode(event.target.value)}
                 />
               </label>
               <label>

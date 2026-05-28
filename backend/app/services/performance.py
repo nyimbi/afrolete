@@ -2108,16 +2108,41 @@ async def performance_cohort_comparisons(
     return comparisons
 
 
+def normalized_performance_metric_code(metric_code: str | None) -> str | None:
+    value = (metric_code or "").strip().lower()
+    return value or None
+
+
+def performance_trend_metric_filter(
+    metrics: list[PerformanceMetricDefinition],
+    category: MetricCategory | None = None,
+    metric_code: str | None = None,
+) -> list[PerformanceMetricDefinition]:
+    normalized_code = normalized_performance_metric_code(metric_code)
+    return [
+        metric
+        for metric in metrics
+        if (category is None or metric.category == category)
+        and (normalized_code is None or metric.code.lower() == normalized_code)
+    ]
+
+
 async def performance_metric_trends(
     db: AsyncSession,
     organization_id: UUID,
     athlete_profile_id: UUID,
     sport: str | None = None,
+    category: MetricCategory | None = None,
+    metric_code: str | None = None,
     period_start: date | None = None,
     period_end: date | None = None,
 ) -> list[dict[str, object]]:
     await get_athlete_profile(db, athlete_profile_id, organization_id)
-    metrics = await list_metric_definitions(db, organization_id, sport=sport)
+    metrics = performance_trend_metric_filter(
+        await list_metric_definitions(db, organization_id, sport=sport),
+        category=category,
+        metric_code=metric_code,
+    )
     metric_by_id = {metric.id: metric for metric in metrics}
     if not metric_by_id:
         return []
@@ -2162,6 +2187,8 @@ async def performance_metric_trends(
                 "category": metric.category,
                 "unit": metric.unit,
                 "higher_is_better": metric.higher_is_better,
+                "filter_category": category,
+                "filter_metric_code": normalized_performance_metric_code(metric_code),
                 "period_start": period_start,
                 "period_end": period_end,
                 **trend,
@@ -2176,11 +2203,17 @@ async def performance_metric_trend_series(
     athlete_profile_id: UUID,
     sport: str | None = None,
     limit_per_metric: int = 12,
+    category: MetricCategory | None = None,
+    metric_code: str | None = None,
     period_start: date | None = None,
     period_end: date | None = None,
 ) -> list[dict[str, object]]:
     await get_athlete_profile(db, athlete_profile_id, organization_id)
-    metrics = await list_metric_definitions(db, organization_id, sport=sport)
+    metrics = performance_trend_metric_filter(
+        await list_metric_definitions(db, organization_id, sport=sport),
+        category=category,
+        metric_code=metric_code,
+    )
     metric_by_id = {metric.id: metric for metric in metrics}
     if not metric_by_id:
         return []
@@ -2233,6 +2266,8 @@ async def performance_metric_trend_series(
                 "category": metric.category,
                 "unit": metric.unit,
                 "higher_is_better": metric.higher_is_better,
+                "filter_category": category,
+                "filter_metric_code": normalized_performance_metric_code(metric_code),
                 "period_start": period_start,
                 "period_end": period_end,
                 "sample_size": len(metric_observations),
