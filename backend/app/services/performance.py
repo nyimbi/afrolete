@@ -36,6 +36,8 @@ from app.models.performance import (
     PerformanceGoal,
     PerformanceMetricDefinition,
     PerformanceWearableIngestEvent,
+    PerformanceWearableProviderConnection,
+    PerformanceWearableProviderSyncRun,
 )
 from app.models.team import AthleteProfile, Team, TeamRosterEntry
 from app.models.training import TrainingSessionFeedback, TrainingSessionPlan
@@ -53,6 +55,8 @@ from app.schemas.performance import (
     PerformanceIngestionCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
+    PerformanceWearableConnectionCreate,
+    PerformanceWearableSyncRunCreate,
     PerformanceWearableWebhookCreate,
     PlayerSelfAssessmentCreate,
 )
@@ -353,6 +357,159 @@ async def ingest_performance_wearable_webhook(
     await db.commit()
     await db.refresh(ingest_event)
     return wearable_webhook_result(ingest_event, replayed=False, observation_ids=observation_ids)
+
+
+async def create_wearable_provider_connection(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: PerformanceWearableConnectionCreate,
+    authz: AuthorizationService,
+) -> PerformanceWearableProviderConnection:
+    athlete_profile = await get_athlete_profile(db, payload.athlete_profile_id, payload.organization_id)
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    provider = normalized_provider_name(payload.provider) or payload.provider
+    connection = PerformanceWearableProviderConnection(
+        organization_id=payload.organization_id,
+        athlete_profile_id=athlete_profile.id,
+        provider=provider,
+        display_name=payload.display_name,
+        external_athlete_ref=payload.external_athlete_ref,
+        status=payload.status,
+        auth_type=payload.auth_type,
+        scopes=encode_string_list(payload.scopes),
+        access_token_secret_path=payload.access_token_secret_path,
+        refresh_token_secret_path=payload.refresh_token_secret_path,
+        webhook_secret_path=payload.webhook_secret_path,
+        token_expires_at=payload.token_expires_at,
+        sync_cursor=payload.sync_cursor,
+        webhook_registered=payload.webhook_registered,
+        default_metric_definition_ids=encode_uuid_list(payload.default_metric_definition_ids),
+    )
+    db.add(connection)
+    await db.commit()
+    await db.refresh(connection)
+    return connection
+
+
+async def list_wearable_provider_connections(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    athlete_profile_id: UUID | None = None,
+) -> list[PerformanceWearableProviderConnection]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceWearableProviderConnection).where(
+        PerformanceWearableProviderConnection.organization_id == organization_id
+    )
+    if athlete_profile_id is not None:
+        statement = statement.where(PerformanceWearableProviderConnection.athlete_profile_id == athlete_profile_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    PerformanceWearableProviderConnection.provider,
+                    PerformanceWearableProviderConnection.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+
+
+async def run_wearable_provider_sync(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    connection_id: UUID,
+    payload: PerformanceWearableSyncRunCreate,
+    authz: AuthorizationService,
+) -> PerformanceWearableProviderSyncRun:
+    connection = await db.get(PerformanceWearableProviderConnection, connection_id)
+    if connection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wearable connection not found")
+    await ensure_manage_performance(authz, identity, connection.organization_id)
+    started_at = datetime.now(UTC)
+    status_value = "needs_credentials"
+    message = "Connection is missing an access-token secret path or sample provider payload."
+    observation_count = 0
+    skipped_metric_count = 0
+    replayed = False
+    external_event_id = payload.external_event_id
+
+    if payload.payload is not None:
+        external_event_id = external_event_id or f"sync-{connection.provider}-{started_at.isoformat()}"
+        metric_ids = payload.metric_definition_ids or decode_uuid_list(connection.default_metric_definition_ids)
+        webhook_payload = PerformanceWearableWebhookCreate(
+            organization_id=connection.organization_id,
+            athlete_profile_id=connection.athlete_profile_id,
+            source_provider=connection.provider,
+            external_event_id=external_event_id,
+            payload=payload.payload,
+            metric_definition_ids=metric_ids or None,
+        )
+        ingest = await ingest_performance_wearable_webhook(
+            db,
+            webhook_payload,
+            signature_required=False,
+            signature_validated=False,
+        )
+        observation_count = int(ingest["observation_count"])
+        skipped_metric_count = int(ingest["skipped_metric_count"])
+        replayed = bool(ingest["replayed"])
+        status_value = "replayed" if replayed else "completed"
+        message = (
+            f"Synced {observation_count} observation(s) from {connection.provider} sample payload."
+            if not replayed
+            else f"Skipped duplicate {connection.provider} provider event {external_event_id}."
+        )
+        connection.last_sync_at = started_at
+        connection.sync_cursor = external_event_id
+        connection.status = "active"
+    elif connection.access_token_secret_path:
+        status_value = "ready_for_live_adapter"
+        message = (
+            f"{connection.provider} credentials are configured in OpenBao/env path; "
+            "live provider pull adapter is not enabled in this environment."
+        )
+    run = PerformanceWearableProviderSyncRun(
+        organization_id=connection.organization_id,
+        connection_id=connection.id,
+        athlete_profile_id=connection.athlete_profile_id,
+        provider=connection.provider,
+        external_event_id=external_event_id,
+        status=status_value,
+        sync_mode=payload.sync_mode,
+        started_at=started_at,
+        completed_at=datetime.now(UTC),
+        observation_count=observation_count,
+        skipped_metric_count=skipped_metric_count,
+        replayed=replayed,
+        message=message,
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    return run
+
+
+async def list_wearable_provider_sync_runs(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    connection_id: UUID,
+    authz: AuthorizationService,
+) -> list[PerformanceWearableProviderSyncRun]:
+    connection = await db.get(PerformanceWearableProviderConnection, connection_id)
+    if connection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wearable connection not found")
+    await ensure_manage_performance(authz, identity, connection.organization_id)
+    return list(
+        (
+            await db.scalars(
+                select(PerformanceWearableProviderSyncRun)
+                .where(PerformanceWearableProviderSyncRun.connection_id == connection.id)
+                .order_by(PerformanceWearableProviderSyncRun.started_at.desc())
+            )
+        ).all()
+    )
 
 
 async def wearable_webhook_metric_definitions(
@@ -3448,6 +3605,33 @@ def stable_payload_text(payload: dict[str, object]) -> str:
 
 def stable_payload_hash(payload: dict[str, object]) -> str:
     return hashlib.sha256(stable_payload_text(payload).encode()).hexdigest()
+
+
+def encode_uuid_list(values: list[UUID]) -> str:
+    return json.dumps([str(value) for value in values])
+
+
+def decode_uuid_list(value: str | None) -> list[UUID]:
+    if not value:
+        return []
+    try:
+        return [UUID(str(item)) for item in json.loads(value)]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+
+
+def encode_string_list(values: list[str]) -> str:
+    return json.dumps([value for value in values if value])
+
+
+def decode_string_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        items = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return [str(item) for item in items if str(item)]
 
 
 def parse_performance_evidence(

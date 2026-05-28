@@ -1311,6 +1311,93 @@ def test_performance_wearable_webhook_creates_pending_observations_once(
     assert len(observations_after_replay) == 2
 
 
+def test_performance_wearable_connection_sync_run_ingests_provider_payload(
+    client, identity_headers
+) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    hrv_metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "hrv",
+            "name": "Heart Rate Variability",
+            "category": "wellness",
+            "unit": "ms",
+        },
+    ).json()
+    resting_hr_metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "resting_heart_rate",
+            "name": "Resting Heart Rate",
+            "category": "wellness",
+            "unit": "bpm",
+        },
+    ).json()
+    connection_response = client.post(
+        "/api/v1/performance/wearable-connections",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "provider": "WHOOP",
+            "display_name": "WHOOP recovery strap",
+            "external_athlete_ref": "whoop-athlete-1",
+            "scopes": ["read:recovery", "read:cycles"],
+            "access_token_secret_path": "secret/data/afrolete/wearables/whoop-athlete-1",
+            "webhook_registered": True,
+            "default_metric_definition_ids": [hrv_metric["id"], resting_hr_metric["id"]],
+        },
+    )
+
+    assert connection_response.status_code == 201
+    connection = connection_response.json()
+    assert connection["provider"] == "whoop"
+    assert connection["access_token_configured"] is True
+    assert connection["webhook_registered"] is True
+    assert set(connection["scopes"]) == {"read:recovery", "read:cycles"}
+
+    sync_response = client.post(
+        f"/api/v1/performance/wearable-connections/{connection['id']}/sync-runs",
+        headers=identity_headers,
+        json={
+            "external_event_id": "whoop-sync-2026-06-06",
+            "payload": {
+                "recovery": {
+                    "hrv_rmssd_milli": 36,
+                    "resting_heart_rate": 94,
+                },
+                "created_at": "2026-06-06T06:20:00Z",
+            },
+        },
+    )
+
+    assert sync_response.status_code == 202
+    sync_run = sync_response.json()
+    assert sync_run["status"] == "completed"
+    assert sync_run["observation_count"] == 2
+    assert sync_run["skipped_metric_count"] == 0
+    assert sync_run["replayed"] is False
+
+    listed_connections = client.get(
+        f"/api/v1/performance/wearable-connections?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert listed_connections[0]["last_sync_at"] is not None
+    assert listed_connections[0]["sync_cursor"] == "whoop-sync-2026-06-06"
+
+    sync_runs = client.get(
+        f"/api/v1/performance/wearable-connections/{connection['id']}/sync-runs",
+        headers=identity_headers,
+    ).json()
+    assert sync_runs[0]["id"] == sync_run["id"]
+
+
 def test_performance_ingestion_uses_metric_specific_video_text(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(

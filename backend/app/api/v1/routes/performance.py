@@ -35,6 +35,10 @@ from app.schemas.performance import (
     PerformanceObservationCreate,
     PerformanceObservationRead,
     PerformanceObservationReviewCreate,
+    PerformanceWearableConnectionCreate,
+    PerformanceWearableConnectionRead,
+    PerformanceWearableSyncRunCreate,
+    PerformanceWearableSyncRunRead,
     PerformanceWearableWebhookCreate,
     PerformanceWearableWebhookRead,
     PlayerSelfAssessmentCreate,
@@ -50,6 +54,9 @@ from app.services.performance import (
     create_observation,
     create_performance_goal,
     create_player_self_assessment,
+    create_wearable_provider_connection,
+    decode_string_list,
+    decode_uuid_list,
     evaluate_performance_achievements,
     ingest_performance_evidence,
     ingest_performance_wearable_webhook,
@@ -60,6 +67,8 @@ from app.services.performance import (
     list_metric_definitions,
     list_my_player_performance,
     list_observations,
+    list_wearable_provider_connections,
+    list_wearable_provider_sync_runs,
     performance_forecast_scenarios,
     performance_forecast_what_if_scenarios,
     performance_injury_risk,
@@ -70,6 +79,7 @@ from app.services.performance import (
     performance_summary,
     run_assessment_review_escalations,
     run_performance_injury_risk_alert_scan,
+    run_wearable_provider_sync,
     review_assessment,
     review_observation,
     send_performance_injury_risk_alert,
@@ -113,6 +123,47 @@ def to_observation_read(observation) -> PerformanceObservationRead:
         confidence=observation.confidence,
         verification_status=observation.verification_status,
         notes=observation.notes,
+    )
+
+
+def to_wearable_connection_read(connection) -> PerformanceWearableConnectionRead:
+    return PerformanceWearableConnectionRead(
+        id=connection.id,
+        organization_id=connection.organization_id,
+        athlete_profile_id=connection.athlete_profile_id,
+        provider=connection.provider,
+        display_name=connection.display_name,
+        external_athlete_ref=connection.external_athlete_ref,
+        status=connection.status,
+        auth_type=connection.auth_type,
+        scopes=decode_string_list(connection.scopes),
+        access_token_configured=bool(connection.access_token_secret_path),
+        refresh_token_configured=bool(connection.refresh_token_secret_path),
+        webhook_secret_configured=bool(connection.webhook_secret_path),
+        token_expires_at=connection.token_expires_at,
+        sync_cursor=connection.sync_cursor,
+        last_sync_at=connection.last_sync_at,
+        webhook_registered=connection.webhook_registered,
+        default_metric_definition_ids=decode_uuid_list(connection.default_metric_definition_ids),
+    )
+
+
+def to_wearable_sync_run_read(run) -> PerformanceWearableSyncRunRead:
+    return PerformanceWearableSyncRunRead(
+        id=run.id,
+        organization_id=run.organization_id,
+        connection_id=run.connection_id,
+        athlete_profile_id=run.athlete_profile_id,
+        provider=run.provider,
+        external_event_id=run.external_event_id,
+        status=run.status,
+        sync_mode=run.sync_mode,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        observation_count=run.observation_count,
+        skipped_metric_count=run.skipped_metric_count,
+        replayed=run.replayed,
+        message=run.message,
     )
 
 
@@ -378,6 +429,75 @@ async def ingest_performance_wearable_webhook_route(
             signature_validated=signature_validated,
         )
     )
+
+
+@router.post(
+    "/wearable-connections",
+    response_model=PerformanceWearableConnectionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_wearable_connection_route(
+    payload: PerformanceWearableConnectionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceWearableConnectionRead:
+    return to_wearable_connection_read(
+        await create_wearable_provider_connection(db, identity, payload, authz)
+    )
+
+
+@router.get("/wearable-connections", response_model=list[PerformanceWearableConnectionRead])
+async def list_wearable_connections_route(
+    organization_id: UUID = Query(),
+    athlete_profile_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceWearableConnectionRead]:
+    return [
+        to_wearable_connection_read(connection)
+        for connection in await list_wearable_provider_connections(
+            db,
+            identity,
+            organization_id,
+            authz,
+            athlete_profile_id,
+        )
+    ]
+
+
+@router.post(
+    "/wearable-connections/{connection_id}/sync-runs",
+    response_model=PerformanceWearableSyncRunRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def run_wearable_connection_sync_route(
+    connection_id: UUID,
+    payload: PerformanceWearableSyncRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceWearableSyncRunRead:
+    return to_wearable_sync_run_read(
+        await run_wearable_provider_sync(db, identity, connection_id, payload, authz)
+    )
+
+
+@router.get(
+    "/wearable-connections/{connection_id}/sync-runs",
+    response_model=list[PerformanceWearableSyncRunRead],
+)
+async def list_wearable_connection_sync_runs_route(
+    connection_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceWearableSyncRunRead]:
+    return [
+        to_wearable_sync_run_read(run)
+        for run in await list_wearable_provider_sync_runs(db, identity, connection_id, authz)
+    ]
 
 
 @router.patch(

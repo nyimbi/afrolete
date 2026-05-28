@@ -214,6 +214,8 @@ import type {
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceObservationRead,
+  PerformanceWearableConnectionRead,
+  PerformanceWearableSyncRunRead,
   PerformanceWearableWebhookRead,
   NotificationFrequency,
   NotificationPreferenceRead,
@@ -1309,6 +1311,8 @@ export default function HomePage() {
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
   const [performanceWebhookIngest, setPerformanceWebhookIngest] = useState<PerformanceWearableWebhookRead | null>(null);
+  const [wearableConnections, setWearableConnections] = useState<PerformanceWearableConnectionRead[]>([]);
+  const [wearableSyncRun, setWearableSyncRun] = useState<PerformanceWearableSyncRunRead | null>(null);
   const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
   const [performanceBenchmarkScope, setPerformanceBenchmarkScope] = useState<BenchmarkCohortScope>("tenant");
   const [performanceCohortComparisons, setPerformanceCohortComparisons] = useState<PerformanceCohortComparisonRead[]>([]);
@@ -2374,7 +2378,8 @@ export default function HomePage() {
         whatIfScenarioData,
         injuryRiskData,
         goalData,
-        awardData
+        awardData,
+        wearableConnectionData
       ] = await Promise.all([
         apiRequest<PerformanceObservationRead[]>(
           `/performance/athletes/${athleteProfileId}/observations?organization_id=${organizationId}`
@@ -2411,6 +2416,10 @@ export default function HomePage() {
         ),
         apiRequest<PerformanceAchievementAwardRead[]>(
           `/performance/athletes/${athleteProfileId}/awards?organization_id=${organizationId}`
+        ),
+        apiRequest<PerformanceWearableConnectionRead[]>(
+          `/performance/wearable-connections?organization_id=${organizationId}&athlete_profile_id=${athleteProfileId}`,
+          { identity }
         )
       ]);
       setObservations(observationData);
@@ -2425,13 +2434,14 @@ export default function HomePage() {
       setPerformanceInjuryRisk(injuryRiskData);
       setPerformanceGoals(goalData);
       setPerformanceAwards(awardData);
+      setWearableConnections(wearableConnectionData);
       setSelectedObservationId((current) =>
         observationData.some((observation) => observation.id === current)
           ? current
           : observationData[0]?.id ?? ""
       );
     },
-    [performanceBenchmarkScope, performanceWhatIfAdjustment, performanceWhatIfReadiness]
+    [identity, performanceBenchmarkScope, performanceWhatIfAdjustment, performanceWhatIfReadiness]
   );
 
   const loadTraining = useCallback(async (organizationId: string, teamId?: string) => {
@@ -2903,6 +2913,8 @@ export default function HomePage() {
       setObservations([]);
       setPerformanceIngestion(null);
       setPerformanceWebhookIngest(null);
+      setWearableConnections([]);
+      setWearableSyncRun(null);
       setAssessments([]);
       setAssessmentReviewQueue([]);
       setAssessmentReviewSummary(null);
@@ -6458,6 +6470,72 @@ export default function HomePage() {
       (ingest) => {
         setPerformanceWebhookIngest(ingest);
         addLog(`${ingest.source_provider} webhook accepted ${ingest.observation_count} observation(s)`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const createWearableConnection = () => {
+    const provider = observationForm.source_provider || "whoop";
+    const wearableMetricIds = metricDefinitions
+      .filter((metric) =>
+        ["hrv", "resting_heart_rate", "recovery_score", "sleep_quality", "stress", "strain"].includes(metric.code)
+      )
+      .map((metric) => metric.id);
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before connecting a wearable provider", "bad");
+      return;
+    }
+    runAction(
+      "create-wearable-connection",
+      () =>
+        apiRequest<PerformanceWearableConnectionRead>("/performance/wearable-connections", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            athlete_profile_id: selectedAthlete.athleteProfileId,
+            provider,
+            display_name: `${provider.replaceAll("_", " ")} wearable feed`,
+            external_athlete_ref: `${provider}-${selectedAthlete.athleteProfileId.slice(0, 8)}`,
+            scopes: ["read:profile", "read:recovery", "read:metrics"],
+            access_token_secret_path: `secret/data/afrolete/wearables/${selectedOrganizationId}/${selectedAthlete.athleteProfileId}/${provider}`,
+            webhook_secret_path: `secret/data/afrolete/wearables/${selectedOrganizationId}/${selectedAthlete.athleteProfileId}/${provider}-webhook`,
+            webhook_registered: true,
+            default_metric_definition_ids: wearableMetricIds
+          }
+        }),
+      (connection) => {
+        setWearableConnections((current) => [
+          connection,
+          ...current.filter((item) => item.id !== connection.id)
+        ]);
+        addLog(`${connection.provider} wearable connection configured`, "good");
+      }
+    );
+  };
+
+  const runWearableConnectionSync = () => {
+    const connection = wearableConnections[0];
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || !connection) {
+      addLog("Create a wearable connection before syncing", "bad");
+      return;
+    }
+    runAction(
+      "sync-wearable-connection",
+      () =>
+        apiRequest<PerformanceWearableSyncRunRead>(`/performance/wearable-connections/${connection.id}/sync-runs`, {
+          method: "POST",
+          identity,
+          body: {
+            external_event_id: `${connection.provider}-sync-${Date.now()}`,
+            payload: wearableWebhookPayload(connection.provider),
+            metric_definition_ids: connection.default_metric_definition_ids
+          }
+        }),
+      (syncRun) => {
+        setWearableSyncRun(syncRun);
+        addLog(`${syncRun.provider} sync ${syncRun.status}: ${syncRun.observation_count} observation(s)`, "good");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
       }
     );
@@ -13534,6 +13612,8 @@ export default function HomePage() {
                 <button type="button" onClick={recordObservation} disabled={busyAction !== null}>Observe</button>
                 <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
                 <button type="button" onClick={ingestPerformanceWearableWebhook} disabled={busyAction !== null}>Webhook</button>
+                <button type="button" onClick={createWearableConnection} disabled={busyAction !== null}>Connect</button>
+                <button type="button" onClick={runWearableConnectionSync} disabled={busyAction !== null}>Sync</button>
                 <button type="button" onClick={reviewSelectedObservation} disabled={busyAction !== null}>Review</button>
                 <button type="button" onClick={createPerformanceGoal} disabled={busyAction !== null}>Goal</button>
                 <button type="button" onClick={evaluatePerformanceAchievements} disabled={busyAction !== null}>Award</button>
@@ -13881,6 +13961,33 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {wearableSyncRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{wearableSyncRun.provider} sync · {wearableSyncRun.status}</strong>
+                    <span>
+                      {wearableSyncRun.observation_count} observation(s) · {wearableSyncRun.skipped_metric_count} skipped ·{" "}
+                      {wearableSyncRun.replayed ? "replayed" : wearableSyncRun.sync_mode}
+                    </span>
+                    <small>{wearableSyncRun.message ?? wearableSyncRun.external_event_id ?? "Provider sync run recorded."}</small>
+                  </div>
+                </article>
+              ) : null}
+              {wearableConnections.slice(0, 3).map((connection) => (
+                <article key={connection.id} className="task-card">
+                  <div>
+                    <strong>{connection.display_name} · {connection.status}</strong>
+                    <span>
+                      {connection.provider} · {connection.external_athlete_ref} ·{" "}
+                      {connection.access_token_configured ? "token path configured" : "token missing"}
+                    </span>
+                    <small>
+                      {connection.webhook_registered ? "webhook registered" : "webhook not registered"} ·{" "}
+                      {connection.last_sync_at ? `last sync ${new Date(connection.last_sync_at).toLocaleString()}` : "not synced"}
+                    </small>
+                  </div>
+                </article>
+              ))}
               {performanceBenchmarks.slice(0, 3).map((benchmark) => (
                 <article key={benchmark.metric_definition_id} className="task-card">
                   <div>

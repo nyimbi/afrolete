@@ -106,6 +106,8 @@ from app.models.performance import (  # noqa: F401,E402
     PerformanceGoal,
     PerformanceMetricDefinition,
     PerformanceWearableIngestEvent,
+    PerformanceWearableProviderConnection,
+    PerformanceWearableProviderSyncRun,
 )
 from app.models.reporting import (  # noqa: F401,E402
     GeneratedReport,

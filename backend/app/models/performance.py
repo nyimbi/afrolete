@@ -94,6 +94,64 @@ class PerformanceWearableIngestEvent(IdMixin, TimestampMixin, Base):
     skipped_metric_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
+class PerformanceWearableProviderConnection(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_wearable_provider_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "athlete_profile_id",
+            "provider",
+            "external_athlete_ref",
+            name="uq_performance_wearable_provider_connections_external_ref",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    external_athlete_ref: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="configured", nullable=False, index=True)
+    auth_type: Mapped[str] = mapped_column(String(40), default="oauth2", nullable=False)
+    scopes: Mapped[str | None] = mapped_column(Text)
+    access_token_secret_path: Mapped[str | None] = mapped_column(String(500))
+    refresh_token_secret_path: Mapped[str | None] = mapped_column(String(500))
+    webhook_secret_path: Mapped[str | None] = mapped_column(String(500))
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    sync_cursor: Mapped[str | None] = mapped_column(String(240))
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    webhook_registered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    default_metric_definition_ids: Mapped[str | None] = mapped_column(Text)
+
+
+class PerformanceWearableProviderSyncRun(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_wearable_provider_sync_runs"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    connection_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_wearable_provider_connections.id"), nullable=False, index=True
+    )
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    external_event_id: Mapped[str | None] = mapped_column(String(180), index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    sync_mode: Mapped[str] = mapped_column(String(40), default="pull", nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    observation_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    skipped_metric_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    replayed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    message: Mapped[str | None] = mapped_column(Text)
+
+
 class AthleteAssessment(IdMixin, TimestampMixin, Base):
     __tablename__ = "athlete_assessments"
 

@@ -126,6 +126,68 @@ class PerformanceWearableWebhookRead(BaseModel):
     received_at: datetime
 
 
+class PerformanceWearableConnectionCreate(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID
+    provider: str = Field(min_length=2, max_length=80)
+    display_name: str = Field(min_length=2, max_length=180)
+    external_athlete_ref: str = Field(min_length=2, max_length=180)
+    status: str = Field(default="configured", max_length=40)
+    auth_type: str = Field(default="oauth2", max_length=40)
+    scopes: list[str] = Field(default_factory=list)
+    access_token_secret_path: str | None = Field(default=None, max_length=500)
+    refresh_token_secret_path: str | None = Field(default=None, max_length=500)
+    webhook_secret_path: str | None = Field(default=None, max_length=500)
+    token_expires_at: datetime | None = None
+    sync_cursor: str | None = Field(default=None, max_length=240)
+    webhook_registered: bool = False
+    default_metric_definition_ids: list[UUID] = Field(default_factory=list)
+
+
+class PerformanceWearableConnectionRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    athlete_profile_id: UUID
+    provider: str
+    display_name: str
+    external_athlete_ref: str
+    status: str
+    auth_type: str
+    scopes: list[str]
+    access_token_configured: bool
+    refresh_token_configured: bool
+    webhook_secret_configured: bool
+    token_expires_at: datetime | None
+    sync_cursor: str | None
+    last_sync_at: datetime | None
+    webhook_registered: bool
+    default_metric_definition_ids: list[UUID]
+
+
+class PerformanceWearableSyncRunCreate(BaseModel):
+    external_event_id: str | None = Field(default=None, max_length=180)
+    payload: dict[str, Any] | None = None
+    metric_definition_ids: list[UUID] | None = None
+    sync_mode: str = Field(default="pull", max_length=40)
+
+
+class PerformanceWearableSyncRunRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    connection_id: UUID
+    athlete_profile_id: UUID
+    provider: str
+    external_event_id: str | None
+    status: str
+    sync_mode: str
+    started_at: datetime
+    completed_at: datetime | None
+    observation_count: int
+    skipped_metric_count: int
+    replayed: bool
+    message: str | None
+
+
 class PerformanceObservationReviewCreate(BaseModel):
     verification_status: MetricVerificationStatus
     value: float | None = None

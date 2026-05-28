@@ -3185,6 +3185,43 @@ export type PerformanceWearableWebhookRead = {
   received_at: string;
 };
 
+export type PerformanceWearableConnectionRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  provider: string;
+  display_name: string;
+  external_athlete_ref: string;
+  status: string;
+  auth_type: string;
+  scopes: string[];
+  access_token_configured: boolean;
+  refresh_token_configured: boolean;
+  webhook_secret_configured: boolean;
+  token_expires_at: string | null;
+  sync_cursor: string | null;
+  last_sync_at: string | null;
+  webhook_registered: boolean;
+  default_metric_definition_ids: UUID[];
+};
+
+export type PerformanceWearableSyncRunRead = {
+  id: UUID;
+  organization_id: UUID;
+  connection_id: UUID;
+  athlete_profile_id: UUID;
+  provider: string;
+  external_event_id: string | null;
+  status: string;
+  sync_mode: string;
+  started_at: string;
+  completed_at: string | null;
+  observation_count: number;
+  skipped_metric_count: number;
+  replayed: boolean;
+  message: string | null;
+};
+
 export type AthleteAssessmentRead = {
   id: UUID;
   organization_id: UUID;
