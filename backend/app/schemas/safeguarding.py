@@ -90,6 +90,7 @@ class GuardianPortalInviteCreate(BaseModel):
     portal_url: str = Field(default="https://afrolete.lindela.io/family", max_length=500)
     subject: str | None = Field(default=None, min_length=2, max_length=240)
     body: str | None = Field(default=None, min_length=2, max_length=8000)
+    dispatch_now: bool = True
 
 
 class GuardianPortalInviteRead(BaseModel):
@@ -106,6 +107,12 @@ class GuardianPortalInviteRead(BaseModel):
     message_id: UUID
     recipient_id: UUID | None
     delivery_status: str | None
+    dispatch_attempted: int = 0
+    dispatch_sent: int = 0
+    dispatch_delivered: int = 0
+    dispatch_failed: int = 0
+    dispatch_suppressed: int = 0
+    dispatch_queued: int = 0
     recommended_action: str
 
 

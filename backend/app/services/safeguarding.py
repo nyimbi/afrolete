@@ -129,7 +129,7 @@ from app.schemas.safeguarding import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
-from app.services.communications import create_message_for_recipients, destination_for_channel
+from app.services.communications import create_message_for_recipients, destination_for_channel, dispatch_message
 from app.services.secrets import resolve_secret, resolve_secret_sync
 from app.services.storage.objects import get_object, put_object
 
@@ -5184,6 +5184,9 @@ async def create_guardian_portal_invite(
         urgent=False,
         created_by_person_id=identity.person_id,
     )
+    dispatch_summary = None
+    if payload.dispatch_now:
+        dispatch_summary = await dispatch_message(db, identity, message.id, authz)
     recipient = await db.scalar(
         select(MessageRecipient).where(
             MessageRecipient.message_id == message.id,
@@ -5204,6 +5207,12 @@ async def create_guardian_portal_invite(
         message_id=message.id,
         recipient_id=recipient.id if recipient else None,
         delivery_status=recipient.delivery_status.value if recipient else None,
+        dispatch_attempted=dispatch_summary.attempted if dispatch_summary else 0,
+        dispatch_sent=dispatch_summary.sent if dispatch_summary else 0,
+        dispatch_delivered=dispatch_summary.delivered if dispatch_summary else 0,
+        dispatch_failed=dispatch_summary.failed if dispatch_summary else 0,
+        dispatch_suppressed=dispatch_summary.suppressed if dispatch_summary else 0,
+        dispatch_queued=dispatch_summary.queued if dispatch_summary else 0,
         recommended_action=action,
     )
 

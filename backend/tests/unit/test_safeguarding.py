@@ -231,6 +231,7 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
             "organization_id": organization["id"],
             "channel": "email",
             "portal_url": "http://localhost:3000/family",
+            "dispatch_now": True,
         },
     )
 
@@ -241,6 +242,9 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
     assert invite["destination"] == "invite-ready-parent@example.com"
     assert invite["portal_url"] == "http://localhost:3000/family"
     assert invite["delivery_status"] == "queued"
+    assert invite["dispatch_attempted"] == 1
+    assert invite["dispatch_queued"] == 1
+    assert invite["dispatch_delivered"] == 0
     message = await db_session.get(CommunicationMessage, invite["message_id"])
     assert message is not None
     assert message.subject == "Guardian Account Club family portal invitation"

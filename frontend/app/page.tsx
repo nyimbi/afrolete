@@ -5665,7 +5665,8 @@ export default function HomePage() {
             body: {
               organization_id: selectedOrganizationId,
               channel: item.guardian_email ? "email" : "in_app",
-              portal_url: portalUrl
+              portal_url: portalUrl,
+              dispatch_now: true
             }
           }
         ),
@@ -17116,6 +17117,9 @@ export default function HomePage() {
               <strong>{guardianPortalInvite.guardian_name}</strong>
               <p>
                 {guardianPortalInvite.channel} · {guardianPortalInvite.destination ?? "in-app"} · {guardianPortalInvite.delivery_status ?? "created"}
+              </p>
+              <p>
+                {guardianPortalInvite.dispatch_attempted} attempted · {guardianPortalInvite.dispatch_delivered} delivered · {guardianPortalInvite.dispatch_queued} queued · {guardianPortalInvite.dispatch_failed} failed
               </p>
               <small>{guardianPortalInvite.portal_url}</small>
             </div>

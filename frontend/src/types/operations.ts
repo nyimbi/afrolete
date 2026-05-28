@@ -1384,6 +1384,12 @@ export type GuardianPortalInviteRead = {
   message_id: UUID;
   recipient_id: UUID | null;
   delivery_status: string | null;
+  dispatch_attempted: number;
+  dispatch_sent: number;
+  dispatch_delivered: number;
+  dispatch_failed: number;
+  dispatch_suppressed: number;
+  dispatch_queued: number;
   recommended_action: string;
 };
 
