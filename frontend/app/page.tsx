@@ -180,6 +180,7 @@ import type {
   BackgroundCheckProviderSubmissionRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
+  SafeguardingIncidentEvidenceApprovalPolicyRead,
   SafeguardingIncidentEvidenceReviewActionRead,
   SafeguardingIncidentEvidenceReviewItemRead,
   SafeguardingIncidentEvidenceLinkRead,
@@ -1582,6 +1583,8 @@ export default function HomePage() {
     useState<SafeguardingIncidentEvidenceReviewItemRead[]>([]);
   const [incidentEvidenceReviewAction, setIncidentEvidenceReviewAction] =
     useState<SafeguardingIncidentEvidenceReviewActionRead | null>(null);
+  const [incidentEvidenceApprovalPolicy, setIncidentEvidenceApprovalPolicy] =
+    useState<SafeguardingIncidentEvidenceApprovalPolicyRead | null>(null);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
   const [backgroundCheckProviderSubmission, setBackgroundCheckProviderSubmission] =
     useState<BackgroundCheckProviderSubmissionRead | null>(null);
@@ -3178,6 +3181,7 @@ export default function HomePage() {
       setIncidentEvidenceLink(null);
       setIncidentEvidenceReviewQueue([]);
       setIncidentEvidenceReviewAction(null);
+      setIncidentEvidenceApprovalPolicy(null);
       setBackgroundChecks([]);
       setBackgroundCheckProviderSubmission(null);
       setBackgroundCheckProviderResult(null);
@@ -5972,6 +5976,21 @@ export default function HomePage() {
       (link) => {
         setIncidentEvidenceLink(link);
         addLog(`${link.filename} evidence link expires ${new Date(link.expires_at).toLocaleString()}`, "good");
+      }
+    );
+  };
+
+  const loadIncidentEvidenceApprovalPolicy = (item: SafeguardingIncidentEvidenceReviewItemRead) => {
+    runAction(
+      `incident-evidence-policy-${item.incident_id}`,
+      () =>
+        apiRequest<SafeguardingIncidentEvidenceApprovalPolicyRead>(
+          `/safeguarding/incidents/${item.incident_id}/evidence-approval-policy?storage_key=${encodeURIComponent(item.storage_key)}`,
+          { identity }
+        ),
+      (policy) => {
+        setIncidentEvidenceApprovalPolicy(policy);
+        addLog(`${policy.filename} policy: ${policy.approval_status}`, policy.acceptance_blocked_by_policy ? "neutral" : "good");
       }
     );
   };
@@ -16509,12 +16528,19 @@ export default function HomePage() {
                   <span>{item.incident_title} · {item.evidence_type} · {item.review_status}</span>
                   <span>{item.incident_severity} · {item.incident_status} · {item.size_bytes} bytes</span>
                   <span>{item.checksum.slice(0, 16)} · {item.content_type}</span>
+                  {item.approval_policy ? (
+                    <span>
+                      {item.approval_policy.policy_risk_level} policy · {item.approval_policy.approval_status}
+                      {item.approval_policy.missing_approval_levels.length > 0 ? ` · needs ${item.approval_policy.missing_approval_levels.join(", ")}` : ""}
+                    </span>
+                  ) : null}
                   {item.latest_review_notes ? <span>{item.latest_review_notes}</span> : null}
                 </div>
                 <div className="event-toolbar">
                   <button type="button" onClick={() => reviewIncidentEvidence(item, "accepted")}>Accept</button>
                   <button type="button" onClick={() => reviewIncidentEvidence(item, "rejected")}>Reject</button>
                   <button type="button" onClick={() => reviewIncidentEvidence(item, "escalated")}>Escalate</button>
+                  <button type="button" onClick={() => loadIncidentEvidenceApprovalPolicy(item)}>Policy</button>
                   <button type="button" onClick={() => shareIncidentEvidenceReviewItem(item)}>Link</button>
                 </div>
               </article>
@@ -16526,6 +16552,20 @@ export default function HomePage() {
                   <span>{incidentEvidenceReviewAction.review_status} · {incidentEvidenceReviewAction.incident_status} · {incidentEvidenceReviewAction.incident_severity}</span>
                   <span>{incidentEvidenceReviewAction.regulatory_report_required ? "Regulatory reporting required" : "No regulatory report flag"} · {incidentEvidenceReviewAction.size_bytes} bytes</span>
                   <span>{incidentEvidenceReviewAction.action_summary}</span>
+                  {incidentEvidenceReviewAction.approval_policy ? <span>{incidentEvidenceReviewAction.approval_policy.policy_summary}</span> : null}
+                </div>
+              </article>
+            ) : null}
+            {incidentEvidenceApprovalPolicy ? (
+              <article className="task-card">
+                <div>
+                  <strong>{incidentEvidenceApprovalPolicy.filename} policy</strong>
+                  <span>
+                    {incidentEvidenceApprovalPolicy.policy_risk_level} · {incidentEvidenceApprovalPolicy.approval_status} · recommends {incidentEvidenceApprovalPolicy.recommended_review_status}
+                  </span>
+                  <span>{incidentEvidenceApprovalPolicy.policy_summary}</span>
+                  <span>{incidentEvidenceApprovalPolicy.required_approval_levels.join(", ")}</span>
+                  <span>{incidentEvidenceApprovalPolicy.rationale[0] ?? "No additional policy rationale"}</span>
                 </div>
               </article>
             ) : null}

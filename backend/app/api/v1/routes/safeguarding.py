@@ -38,6 +38,7 @@ from app.schemas.safeguarding import (
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
     GuardianRelationshipRead,
+    SafeguardingIncidentEvidenceApprovalPolicyRead,
     SafeguardingIncidentEvidenceReviewActionCreate,
     SafeguardingIncidentEvidenceReviewActionRead,
     SafeguardingIncidentEvidenceReviewItemRead,
@@ -90,6 +91,7 @@ from app.services.safeguarding import (
     ensure_org_manage,
     compliance_summary,
     get_incident_report_package_artifact,
+    get_safeguarding_incident_evidence_approval_policy,
     ingest_background_check_provider_result,
     list_background_checks,
     list_compliance_credentials,
@@ -465,6 +467,23 @@ async def create_safeguarding_incident_evidence_link_route(
         identity,
         incident_id,
         payload,
+        authz,
+    )
+
+
+@router.get("/incidents/{incident_id}/evidence-approval-policy", response_model=SafeguardingIncidentEvidenceApprovalPolicyRead)
+async def get_safeguarding_incident_evidence_approval_policy_route(
+    incident_id: UUID,
+    storage_key: str = Query(min_length=1, max_length=800),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SafeguardingIncidentEvidenceApprovalPolicyRead:
+    return await get_safeguarding_incident_evidence_approval_policy(
+        db,
+        identity,
+        incident_id,
+        storage_key,
         authz,
     )
 

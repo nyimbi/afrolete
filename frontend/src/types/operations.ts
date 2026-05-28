@@ -2824,6 +2824,27 @@ export type SafeguardingIncidentEvidenceLinkRead = {
   storage_key: string;
 };
 
+export type SafeguardingIncidentEvidenceApprovalPolicyRead = {
+  incident_id: UUID;
+  organization_id: UUID;
+  incident_title: string;
+  incident_status: SafeguardingIncidentStatus;
+  incident_severity: SafeguardingIncidentSeverity;
+  filename: string;
+  content_type: string;
+  evidence_type: string;
+  review_status: string;
+  policy_risk_level: string;
+  approval_required: boolean;
+  approval_status: string;
+  required_approval_levels: string[];
+  missing_approval_levels: string[];
+  recommended_review_status: string;
+  acceptance_blocked_by_policy: boolean;
+  policy_summary: string;
+  rationale: string[];
+};
+
 export type SafeguardingIncidentEvidenceReviewItemRead = {
   incident_id: UUID;
   organization_id: UUID;
@@ -2841,6 +2862,7 @@ export type SafeguardingIncidentEvidenceReviewItemRead = {
   uploaded_at: string;
   latest_reviewed_at: string | null;
   latest_review_notes: string | null;
+  approval_policy: SafeguardingIncidentEvidenceApprovalPolicyRead | null;
 };
 
 export type SafeguardingIncidentEvidenceReviewActionRead = {
@@ -2858,6 +2880,7 @@ export type SafeguardingIncidentEvidenceReviewActionRead = {
   regulatory_report_required: boolean;
   action_summary: string;
   resolution_notes: string | null;
+  approval_policy: SafeguardingIncidentEvidenceApprovalPolicyRead | null;
 };
 
 export type BackgroundCheckRead = {

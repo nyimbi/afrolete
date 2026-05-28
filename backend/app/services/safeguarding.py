@@ -73,6 +73,7 @@ from app.schemas.safeguarding import (
     FamilyPerformanceGoalRead,
     FamilyPerformanceSummaryRead,
     GuardianRelationshipCreate,
+    SafeguardingIncidentEvidenceApprovalPolicyRead,
     SafeguardingIncidentEvidenceReviewActionCreate,
     SafeguardingIncidentEvidenceReviewActionRead,
     SafeguardingIncidentEvidenceReviewItemRead,
@@ -683,6 +684,31 @@ async def list_safeguarding_incident_evidence_review_queue(
     )
 
 
+async def get_safeguarding_incident_evidence_approval_policy(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    incident_id: UUID,
+    storage_key: str,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> SafeguardingIncidentEvidenceApprovalPolicyRead:
+    incident = await db.get(SafeguardingIncident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    await ensure_org_manage(authz, incident.organization_id, identity)
+    selected_settings = settings or get_settings()
+    validate_safeguarding_incident_evidence_storage_key(
+        storage_key,
+        incident.organization_id,
+        incident.id,
+    )
+    items = safeguarding_incident_evidence_review_items(incident, selected_settings)
+    item = next((candidate for candidate in items if candidate.storage_key == storage_key), None)
+    if item is None or item.approval_policy is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence upload not found in case notes")
+    return item.approval_policy
+
+
 async def review_safeguarding_incident_evidence(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -702,7 +728,8 @@ async def review_safeguarding_incident_evidence(
         incident.id,
     )
     existing_items = safeguarding_incident_evidence_review_items(incident, selected_settings)
-    if not any(item.storage_key == payload.storage_key for item in existing_items):
+    current_item = next((item for item in existing_items if item.storage_key == payload.storage_key), None)
+    if current_item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence upload not found in case notes")
     content = get_object(
         selected_settings,
@@ -715,6 +742,15 @@ async def review_safeguarding_incident_evidence(
 
     reviewed_at = utc_now()
     normalized_status = payload.review_status.strip().lower()
+    if (
+        normalized_status == "accepted"
+        and current_item.approval_policy is not None
+        and current_item.approval_policy.acceptance_blocked_by_policy
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Evidence approval policy requires escalation before acceptance",
+        )
     if normalized_status in {"accepted", "needs_review"} and incident.status == SafeguardingIncidentStatus.OPEN:
         incident.status = SafeguardingIncidentStatus.INVESTIGATING
     if normalized_status == "escalated" or payload.escalate_incident:
@@ -743,6 +779,8 @@ async def review_safeguarding_incident_evidence(
 
     await db.commit()
     await db.refresh(incident)
+    updated_items = safeguarding_incident_evidence_review_items(incident, selected_settings)
+    updated_item = next((item for item in updated_items if item.storage_key == payload.storage_key), None)
     return SafeguardingIncidentEvidenceReviewActionRead(
         incident_id=incident.id,
         organization_id=incident.organization_id,
@@ -758,6 +796,7 @@ async def review_safeguarding_incident_evidence(
         regulatory_report_required=incident.regulatory_report_required,
         action_summary=action_summary,
         resolution_notes=incident.resolution_notes,
+        approval_policy=updated_item.approval_policy if updated_item is not None else None,
     )
 
 
@@ -915,8 +954,162 @@ def safeguarding_incident_evidence_review_items(
             item.review_status = review["review_status"]
             item.latest_reviewed_at = review["reviewed_at"]
             item.latest_review_notes = review["notes"]
+        item.approval_policy = safeguarding_incident_evidence_approval_policy(incident, item)
         items.append(item)
     return items
+
+
+def safeguarding_incident_evidence_approval_policy(
+    incident: SafeguardingIncident,
+    item: SafeguardingIncidentEvidenceReviewItemRead,
+) -> SafeguardingIncidentEvidenceApprovalPolicyRead:
+    required_levels: list[str] = []
+    rationale: list[str] = []
+
+    add_approval_level(
+        required_levels,
+        rationale,
+        "safeguarding_lead",
+        "Every safeguarding evidence item requires safeguarding lead review before acceptance.",
+    )
+    if incident.incident_type in {SafeguardingIncidentType.SAFEGUARDING, SafeguardingIncidentType.MISCONDUCT}:
+        add_approval_level(
+            required_levels,
+            rationale,
+            "safeguarding_committee",
+            "Safeguarding or misconduct evidence requires committee visibility.",
+        )
+    if incident.severity in {SafeguardingIncidentSeverity.HIGH, SafeguardingIncidentSeverity.CRITICAL}:
+        add_approval_level(
+            required_levels,
+            rationale,
+            "senior_operator",
+            "High or critical incident severity requires senior operator escalation.",
+        )
+    if (
+        incident.incident_type in MEDICAL_INCIDENT_TYPES
+        or incident.medical_follow_up_required in BLOCKING_MEDICAL_FOLLOW_UP_VALUES
+        or contains_any(item.evidence_type, {"medical", "injury", "clearance", "concussion"})
+    ):
+        add_approval_level(
+            required_levels,
+            rationale,
+            "medical",
+            "Medical or injury-linked evidence requires medical review before operational closure.",
+        )
+    if incident.regulatory_report_required or incident.severity == SafeguardingIncidentSeverity.CRITICAL:
+        add_approval_level(
+            required_levels,
+            rationale,
+            "regulatory",
+            "Regulatory or critical cases require reporting-policy review.",
+        )
+    if incident.athlete_person_id is not None and (
+        incident.severity in {SafeguardingIncidentSeverity.HIGH, SafeguardingIncidentSeverity.CRITICAL}
+        or incident.incident_type in {SafeguardingIncidentType.SAFEGUARDING, SafeguardingIncidentType.MISCONDUCT}
+    ):
+        add_approval_level(
+            required_levels,
+            rationale,
+            "guardian_communications",
+            "Athlete-linked high-risk evidence requires guardian communication review.",
+        )
+
+    policy_risk_level = safeguarding_evidence_policy_risk_level(incident, required_levels)
+    approval_required = policy_risk_level in {"high", "critical"}
+    if item.review_status == "accepted":
+        approval_status = "approved"
+        missing_levels: list[str] = []
+    elif item.review_status == "rejected":
+        approval_status = "rejected"
+        missing_levels = []
+    elif item.review_status == "escalated":
+        approval_status = "escalated"
+        missing_levels = []
+    elif approval_required:
+        approval_status = "escalation_required"
+        missing_levels = required_levels
+    else:
+        approval_status = "lead_review_pending"
+        missing_levels = required_levels[:1]
+    recommended_status = "escalated" if approval_required and item.review_status == "needs_review" else item.review_status
+    acceptance_blocked = approval_required and item.review_status == "needs_review"
+    policy_summary = safeguarding_evidence_policy_summary(
+        policy_risk_level,
+        approval_status,
+        required_levels,
+        missing_levels,
+    )
+    return SafeguardingIncidentEvidenceApprovalPolicyRead(
+        incident_id=item.incident_id,
+        organization_id=item.organization_id,
+        incident_title=item.incident_title,
+        incident_status=item.incident_status,
+        incident_severity=item.incident_severity,
+        filename=item.filename,
+        content_type=item.content_type,
+        evidence_type=item.evidence_type,
+        review_status=item.review_status,
+        policy_risk_level=policy_risk_level,
+        approval_required=approval_required,
+        approval_status=approval_status,
+        required_approval_levels=required_levels,
+        missing_approval_levels=missing_levels,
+        recommended_review_status=recommended_status,
+        acceptance_blocked_by_policy=acceptance_blocked,
+        policy_summary=policy_summary,
+        rationale=rationale,
+    )
+
+
+def add_approval_level(
+    levels: list[str],
+    rationale: list[str],
+    level: str,
+    reason: str,
+) -> None:
+    if level not in levels:
+        levels.append(level)
+        rationale.append(reason)
+
+
+def safeguarding_evidence_policy_risk_level(
+    incident: SafeguardingIncident,
+    required_levels: list[str],
+) -> str:
+    if incident.severity == SafeguardingIncidentSeverity.CRITICAL:
+        return "critical"
+    if (
+        incident.severity == SafeguardingIncidentSeverity.HIGH
+        or len(required_levels) >= 3
+        or incident.incident_type in {SafeguardingIncidentType.SAFEGUARDING, SafeguardingIncidentType.MISCONDUCT}
+    ):
+        return "high"
+    if incident.severity == SafeguardingIncidentSeverity.MEDIUM or len(required_levels) == 2:
+        return "medium"
+    return "low"
+
+
+def contains_any(value: str, needles: set[str]) -> bool:
+    lowered = value.lower()
+    return any(needle in lowered for needle in needles)
+
+
+def safeguarding_evidence_policy_summary(
+    risk_level: str,
+    approval_status: str,
+    required_levels: list[str],
+    missing_levels: list[str],
+) -> str:
+    if approval_status == "approved":
+        return f"{risk_level.title()}-risk evidence is approved under {', '.join(required_levels)} policy."
+    if approval_status == "escalated":
+        return f"{risk_level.title()}-risk evidence has been escalated for required policy review."
+    if approval_status == "rejected":
+        return f"{risk_level.title()}-risk evidence was rejected; policy review is closed."
+    if missing_levels:
+        return f"{risk_level.title()}-risk evidence still needs {', '.join(missing_levels)} approval."
+    return f"{risk_level.title()}-risk evidence is waiting for safeguarding lead review."
 
 
 def parse_safeguarding_incident_evidence_upload_note(

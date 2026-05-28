@@ -460,6 +460,33 @@ def test_incident_evidence_review_queue_and_actions(client, identity_headers) ->
     assert queue[0]["review_status"] == "needs_review"
     assert queue[0]["storage_key"] == upload["storage_key"]
     assert queue[0]["checksum"] == upload["checksum"]
+    assert queue[0]["approval_policy"]["policy_risk_level"] == "high"
+    assert queue[0]["approval_policy"]["recommended_review_status"] == "escalated"
+    assert queue[0]["approval_policy"]["acceptance_blocked_by_policy"] is True
+    assert "safeguarding_committee" in queue[0]["approval_policy"]["required_approval_levels"]
+
+    policy_response = client.get(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-approval-policy?storage_key={upload['storage_key']}",
+        headers=identity_headers,
+    )
+    assert policy_response.status_code == 200
+    policy = policy_response.json()
+    assert policy["approval_status"] == "escalation_required"
+    assert policy["approval_required"] is True
+
+    direct_accept_response = client.post(
+        f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-review",
+        headers=identity_headers,
+        json={
+            "storage_key": upload["storage_key"],
+            "filename": upload["filename"],
+            "checksum": upload["checksum"],
+            "review_status": "accepted",
+            "review_notes": "Trying to bypass escalation.",
+        },
+    )
+    assert direct_accept_response.status_code == 409
+    assert direct_accept_response.json()["detail"] == "Evidence approval policy requires escalation before acceptance"
 
     review_response = client.post(
         f"/api/v1/safeguarding/incidents/{incident['id']}/evidence-review",
@@ -479,6 +506,8 @@ def test_incident_evidence_review_queue_and_actions(client, identity_headers) ->
     assert review["incident_status"] == "investigating"
     assert review["incident_severity"] == "high"
     assert review["regulatory_report_required"] is True
+    assert review["approval_policy"]["approval_status"] == "escalated"
+    assert review["approval_policy"]["acceptance_blocked_by_policy"] is False
     assert "Evidence review" in review["resolution_notes"]
 
     escalated_queue_response = client.get(

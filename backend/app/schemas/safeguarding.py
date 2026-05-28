@@ -383,6 +383,27 @@ class SafeguardingIncidentEvidenceLinkRead(BaseModel):
     storage_key: str
 
 
+class SafeguardingIncidentEvidenceApprovalPolicyRead(BaseModel):
+    incident_id: UUID
+    organization_id: UUID
+    incident_title: str
+    incident_status: SafeguardingIncidentStatus
+    incident_severity: SafeguardingIncidentSeverity
+    filename: str
+    content_type: str
+    evidence_type: str
+    review_status: str
+    policy_risk_level: str
+    approval_required: bool
+    approval_status: str
+    required_approval_levels: list[str]
+    missing_approval_levels: list[str]
+    recommended_review_status: str
+    acceptance_blocked_by_policy: bool
+    policy_summary: str
+    rationale: list[str]
+
+
 class SafeguardingIncidentEvidenceReviewItemRead(BaseModel):
     incident_id: UUID
     organization_id: UUID
@@ -400,6 +421,7 @@ class SafeguardingIncidentEvidenceReviewItemRead(BaseModel):
     uploaded_at: datetime
     latest_reviewed_at: datetime | None = None
     latest_review_notes: str | None = None
+    approval_policy: SafeguardingIncidentEvidenceApprovalPolicyRead | None = None
 
 
 class SafeguardingIncidentEvidenceReviewActionCreate(BaseModel):
@@ -427,6 +449,7 @@ class SafeguardingIncidentEvidenceReviewActionRead(BaseModel):
     regulatory_report_required: bool
     action_summary: str
     resolution_notes: str | None
+    approval_policy: SafeguardingIncidentEvidenceApprovalPolicyRead | None = None
 
 
 class SafeguardingIncidentRead(BaseModel):
