@@ -3158,6 +3158,7 @@ export type PerformanceObservationRead = {
 export type PerformanceIngestionRead = {
   observation: PerformanceObservationRead;
   evidence_ref: string;
+  source_provider: string | null;
   extractor: string;
   confidence: number;
   review_required: boolean;

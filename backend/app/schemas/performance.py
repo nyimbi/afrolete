@@ -77,6 +77,7 @@ class PerformanceIngestionCreate(BaseModel):
     metric_definition_id: UUID
     event_id: UUID | None = None
     source: MetricSource
+    source_provider: str | None = Field(default=None, max_length=80)
     evidence_ref: str = Field(min_length=2, max_length=500)
     evidence_text: str | None = Field(default=None, max_length=8000)
     extracted_value: float | None = None
@@ -87,6 +88,7 @@ class PerformanceIngestionCreate(BaseModel):
 class PerformanceIngestionRead(BaseModel):
     observation: PerformanceObservationRead
     evidence_ref: str
+    source_provider: str | None
     extractor: str
     confidence: float
     review_required: bool

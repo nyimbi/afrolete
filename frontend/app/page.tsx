@@ -1684,6 +1684,7 @@ export default function HomePage() {
     value: 8,
     raw_value: "8/10",
     source: "coach_evaluation" as MetricSource,
+    source_provider: "",
     evidence_ref: "video://matchday/clip-001",
     evidence_text: "Clip analysis: first touch quality 8.4, pressure scan before receiving.",
     confidence: 0.9,
@@ -6352,6 +6353,7 @@ export default function HomePage() {
             metric_definition_id: metric.id,
             event_id: selectedEventId || null,
             source: observationForm.source,
+            source_provider: observationForm.source_provider || undefined,
             evidence_ref: observationForm.evidence_ref,
             evidence_text: observationForm.evidence_text,
             extracted_value:
@@ -13496,6 +13498,18 @@ export default function HomePage() {
                 Evidence ref
                 <input value={observationForm.evidence_ref} onChange={(event) => setObservationForm({ ...observationForm, evidence_ref: event.target.value })} />
               </label>
+              <label>
+                Provider
+                <select value={observationForm.source_provider} onChange={(event) => setObservationForm({ ...observationForm, source_provider: event.target.value })}>
+                  <option value="">Infer</option>
+                  <option value="whoop">WHOOP</option>
+                  <option value="garmin">Garmin</option>
+                  <option value="apple_health">Apple Health</option>
+                  <option value="fitbit">Fitbit</option>
+                  <option value="statsbomb">StatsBomb</option>
+                  <option value="wyscout">Wyscout</option>
+                </select>
+              </label>
               <label className="wide-field">
                 Evidence text
                 <input value={observationForm.evidence_text} onChange={(event) => setObservationForm({ ...observationForm, evidence_text: event.target.value })} />
@@ -13752,6 +13766,7 @@ export default function HomePage() {
                     <strong>{performanceIngestion.extractor}</strong>
                     <span>{performanceIngestion.summary} · confidence {Math.round(performanceIngestion.confidence * 100)}%</span>
                     <small>
+                      {(performanceIngestion.source_provider ?? "provider-neutral").replaceAll("_", " ")} ·{" "}
                       {performanceIngestion.parser_method.replaceAll("_", " ")} · {performanceIngestion.parser_confidence_reason}
                     </small>
                     {performanceIngestion.parser_warnings.length ? (

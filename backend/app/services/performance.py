@@ -241,6 +241,7 @@ async def ingest_performance_evidence(
     return {
         "observation": observation,
         "evidence_ref": payload.evidence_ref,
+        "source_provider": parsed["source_provider"],
         "extractor": extractor_name(payload.source),
         "confidence": confidence,
         "review_required": True,
@@ -3275,25 +3276,43 @@ def parse_performance_evidence(
 ) -> dict[str, object]:
     warnings: list[str] = []
     base_confidence = source_confidence(payload.source)
+    structured_payload = decode_structured_evidence(payload.evidence_text)
+    source_provider = performance_source_provider(payload, structured_payload)
     if payload.extracted_value is not None:
         value = float(payload.extracted_value)
         method = "operator_supplied_value"
         fields = {"value": f"{value:g}", "source": payload.source.value}
+        if source_provider is not None:
+            fields["source_provider"] = source_provider
         confidence = payload.confidence if payload.confidence is not None else base_confidence
         reason = "Operator supplied an extracted value; source baseline confidence applied."
         observed_at = None
     else:
-        structured_payload = decode_structured_evidence(payload.evidence_text)
-        structured_match = (
+        provider_match = (
+            provider_specific_metric_match(structured_payload, metric, source_provider)
+            if structured_payload is not None and source_provider is not None
+            else None
+        )
+        structured_match = provider_match or (
             structured_metric_match(structured_payload, metric) if structured_payload is not None else None
         )
         if structured_match is not None:
             value = float(structured_match["value"])
-            method = "structured_provider_payload"
+            method = (
+                f"{source_provider}_provider_schema"
+                if provider_match is not None and source_provider is not None
+                else "structured_provider_payload"
+            )
             fields = primitive_parser_fields(structured_match)
+            if source_provider is not None:
+                fields["source_provider"] = source_provider
             match_confidence = structured_float(structured_match.get("confidence"))
-            confidence = payload.confidence if payload.confidence is not None else (match_confidence or min(base_confidence + 0.05, 0.96))
-            reason = "Matched a structured provider metric by code, name, or single-metric payload."
+            confidence = payload.confidence if payload.confidence is not None else (match_confidence or min(base_confidence + 0.08, 0.97))
+            reason = (
+                f"Normalized a {source_provider} provider schema into the selected metric."
+                if provider_match is not None and source_provider is not None
+                else "Matched a structured provider metric by code, name, or single-metric payload."
+            )
             observed_at = parsed_provider_observed_at(structured_match)
         else:
             metric_value = extract_metric_specific_text_value(payload.evidence_text, metric)
@@ -3335,6 +3354,7 @@ def parse_performance_evidence(
         "warnings": warnings,
         "fields": fields,
         "observed_at": observed_at,
+        "source_provider": source_provider,
     }
 
 
@@ -3348,6 +3368,329 @@ def decode_structured_evidence(text: str | None) -> object | None:
         return json.loads(stripped)
     except json.JSONDecodeError:
         return None
+
+
+PROVIDER_METRIC_ALIASES: dict[str, set[str]] = {
+    "hrv": {
+        "hrv",
+        "hrv_rmssd",
+        "hrv_rmssd_milli",
+        "heart_rate_variability",
+        "heart_rate_variability_sdnn",
+        "heartratevariability",
+        "HKQuantityTypeIdentifierHeartRateVariabilitySDNN",
+    },
+    "resting_heart_rate": {
+        "resting_heart_rate",
+        "resting_hr",
+        "restingHeartRate",
+        "resting_pulse",
+        "HKQuantityTypeIdentifierRestingHeartRate",
+    },
+    "recovery_score": {"recovery", "recovery_score", "readiness", "readiness_score"},
+    "hydration_score": {"hydration", "hydration_score"},
+    "sleep_minutes": {
+        "sleep_minutes",
+        "sleep_duration_minutes",
+        "sleepDurationInSeconds",
+        "totalMinutesAsleep",
+    },
+    "sleep_hours": {"sleep_hours", "sleep_duration_hours"},
+    "sleep_quality": {"sleep_quality", "sleep_score", "sleep_performance_percentage", "efficiency"},
+    "strain": {"strain", "strain_score", "day_strain"},
+    "stress": {"stress", "stress_score", "averageStressLevel", "stressLevel"},
+    "temperature": {
+        "temperature",
+        "body_temperature",
+        "body_temp",
+        "HKQuantityTypeIdentifierBodyTemperature",
+    },
+    "body_battery": {"body_battery", "bodyBatteryMostRecentValue", "bodyBattery"},
+}
+
+
+def performance_source_provider(
+    payload: PerformanceIngestionCreate,
+    structured_payload: object | None,
+) -> str | None:
+    explicit = normalized_provider_name(payload.source_provider)
+    if explicit:
+        return explicit
+    ref_provider = normalized_provider_name(payload.evidence_ref.partition("://")[0])
+    if ref_provider and ref_provider not in {"video", "audio", "text", "manual", "stats", "file"}:
+        return ref_provider
+    return provider_from_structured_payload(structured_payload)
+
+
+def normalized_provider_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    return normalized or None
+
+
+def provider_from_structured_payload(data: object | None) -> str | None:
+    if isinstance(data, list):
+        for item in data:
+            detected = provider_from_structured_payload(item)
+            if detected is not None:
+                return detected
+        return None
+    if not isinstance(data, dict):
+        return None
+    for key in ("provider", "source_provider", "vendor", "source", "application"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            value = value.get("name") or value.get("provider")
+        provider = normalized_provider_name(str(value)) if value is not None else None
+        if provider:
+            return provider
+    keys = {str(key) for key in data}
+    if {"recovery", "strain"} & keys:
+        return "whoop"
+    if {"summaryType", "calendarDate", "bodyBatteryMostRecentValue"} & keys:
+        return "garmin"
+    if "HKQuantityTypeIdentifier" in json.dumps(list(keys)):
+        return "apple_health"
+    if {"activities", "sleep", "summary"} & keys and "fitbit" in json.dumps(data).lower():
+        return "fitbit"
+    return None
+
+
+def provider_specific_metric_match(
+    data: object,
+    metric: PerformanceMetricDefinition,
+    provider: str,
+) -> dict[str, object] | None:
+    candidates = provider_specific_metric_candidates(data, provider)
+    if not candidates:
+        return None
+    return structured_metric_match(candidates, metric)
+
+
+def provider_specific_metric_candidates(data: object, provider: str) -> list[dict[str, object]]:
+    if provider == "whoop":
+        return whoop_metric_candidates(data)
+    if provider == "garmin":
+        return garmin_metric_candidates(data)
+    if provider in {"apple", "apple_health", "healthkit"}:
+        return apple_health_metric_candidates(data)
+    if provider == "fitbit":
+        return fitbit_metric_candidates(data)
+    return []
+
+
+def whoop_metric_candidates(data: object) -> list[dict[str, object]]:
+    if not isinstance(data, dict):
+        return []
+    observed_at = first_string_value(data, "observed_at", "timestamp", "created_at", "updated_at", "start_time")
+    recovery = dict_value(data, "recovery", "recovery_score")
+    sleep = dict_value(data, "sleep", "sleep_score")
+    strain = dict_value(data, "strain", "day_strain")
+    candidates: list[dict[str, object]] = []
+    add_provider_candidate(candidates, "recovery_score", nested_number(recovery, "score", "recovery_score"), "whoop", observed_at, "recovery.score")
+    add_provider_candidate(candidates, "hrv", nested_number(recovery, "hrv_rmssd_milli", "hrv_rmssd", "hrv"), "whoop", observed_at, "recovery.hrv")
+    add_provider_candidate(
+        candidates,
+        "resting_heart_rate",
+        nested_number(recovery, "resting_heart_rate", "resting_hr"),
+        "whoop",
+        observed_at,
+        "recovery.resting_heart_rate",
+    )
+    add_provider_candidate(
+        candidates,
+        "sleep_quality",
+        nested_number(sleep, "score", "sleep_score", "sleep_performance_percentage"),
+        "whoop",
+        observed_at,
+        "sleep.score",
+    )
+    add_provider_candidate(candidates, "strain", nested_number(strain, "score", "strain", "day_strain"), "whoop", observed_at, "strain.score")
+    return candidates
+
+
+def garmin_metric_candidates(data: object) -> list[dict[str, object]]:
+    payload = first_dict_payload(data)
+    if payload is None:
+        return []
+    observed_at = first_string_value(payload, "observed_at", "timestamp", "calendarDate", "startTimeInSeconds")
+    candidates: list[dict[str, object]] = []
+    for code, keys in {
+        "resting_heart_rate": ("restingHeartRate", "resting_heart_rate"),
+        "stress": ("averageStressLevel", "stressLevel", "stress_score"),
+        "body_battery": ("bodyBatteryMostRecentValue", "bodyBattery"),
+        "sleep_minutes": ("sleepDurationInSeconds", "durationInSeconds"),
+        "sleep_quality": ("sleepScore", "sleep_score"),
+        "hrv": ("lastNightAvg", "weeklyAvg", "hrv"),
+    }.items():
+        value = deep_number(payload, *keys)
+        if value is not None and code == "sleep_minutes" and value > 1440:
+            value = round(value / 60, 2)
+        add_provider_candidate(candidates, code, value, "garmin", observed_at, ".".join(keys))
+    return candidates
+
+
+def apple_health_metric_candidates(data: object) -> list[dict[str, object]]:
+    rows = data if isinstance(data, list) else data.get("data", data.get("samples", [])) if isinstance(data, dict) else []
+    if isinstance(rows, dict):
+        rows = [rows]
+    candidates: list[dict[str, object]] = []
+    if not isinstance(rows, list):
+        return candidates
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        metric_type = str(row.get("type") or row.get("identifier") or row.get("name") or "")
+        code = apple_health_metric_code(metric_type)
+        if code is None:
+            continue
+        value = provider_numeric_value(row) or structured_float(row.get("duration_minutes"))
+        if value is None:
+            continue
+        add_provider_candidate(
+            candidates,
+            code,
+            value,
+            "apple_health",
+            first_string_value(row, "observed_at", "date", "startDate", "endDate"),
+            metric_type,
+            unit=str(row.get("unit") or ""),
+        )
+    return candidates
+
+
+def fitbit_metric_candidates(data: object) -> list[dict[str, object]]:
+    payload = first_dict_payload(data)
+    if payload is None:
+        return []
+    observed_at = first_string_value(payload, "observed_at", "dateOfSleep", "dateTime")
+    sleep_summary = dict_value(dict_value(payload, "sleep"), "summary")
+    summary = dict_value(payload, "summary")
+    candidates: list[dict[str, object]] = []
+    add_provider_candidate(
+        candidates,
+        "resting_heart_rate",
+        deep_number(payload, "restingHeartRate", "resting_heart_rate"),
+        "fitbit",
+        observed_at,
+        "summary.restingHeartRate",
+    )
+    add_provider_candidate(
+        candidates,
+        "sleep_minutes",
+        nested_number(sleep_summary, "totalMinutesAsleep", "minutesAsleep"),
+        "fitbit",
+        observed_at,
+        "sleep.summary.totalMinutesAsleep",
+    )
+    add_provider_candidate(
+        candidates,
+        "sleep_quality",
+        nested_number(sleep_summary, "efficiency", "sleepScore") or nested_number(summary, "sleepScore"),
+        "fitbit",
+        observed_at,
+        "sleep.summary.efficiency",
+    )
+    return candidates
+
+
+def add_provider_candidate(
+    candidates: list[dict[str, object]],
+    code: str,
+    value: float | None,
+    provider: str,
+    observed_at: str | None,
+    source_path: str,
+    unit: str = "",
+) -> None:
+    if value is None:
+        return
+    candidates.append(
+        {
+            "code": code,
+            "metric": code,
+            "metric_name": code.replace("_", " "),
+            "value": value,
+            "provider": provider,
+            "source_path": source_path,
+            "unit": unit,
+            "observed_at": observed_at,
+        }
+    )
+
+
+def dict_value(data: object, *keys: str) -> dict[str, object]:
+    if not isinstance(data, dict):
+        return {}
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def first_dict_payload(data: object) -> dict[str, object] | None:
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                return item
+    return None
+
+
+def first_string_value(data: object, *keys: str) -> str | None:
+    if not isinstance(data, dict):
+        return None
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, str):
+            return value
+        if isinstance(value, int | float):
+            return str(value)
+    return None
+
+
+def nested_number(data: object, *keys: str) -> float | None:
+    if not isinstance(data, dict):
+        return None
+    for key in keys:
+        value = structured_float(data.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def deep_number(data: object, *keys: str) -> float | None:
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key in keys:
+                parsed = structured_float(value)
+                if parsed is not None:
+                    return parsed
+            nested = deep_number(value, *keys)
+            if nested is not None:
+                return nested
+    elif isinstance(data, list):
+        for item in data:
+            nested = deep_number(item, *keys)
+            if nested is not None:
+                return nested
+    return None
+
+
+def apple_health_metric_code(metric_type: str) -> str | None:
+    normalized = normalized_text(metric_type)
+    if "heartratevariability" in normalized:
+        return "hrv"
+    if "restingheartrate" in normalized:
+        return "resting_heart_rate"
+    if "bodytemperature" in normalized:
+        return "temperature"
+    if "sleepanalysis" in normalized:
+        return "sleep_minutes"
+    return None
 
 
 def structured_metric_match(
@@ -3430,7 +3773,7 @@ def structured_float(value: object) -> float | None:
 
 
 def normalized_metric_tokens(metric: PerformanceMetricDefinition) -> set[str]:
-    return {
+    tokens = {
         token
         for token in {
             normalized_text(metric.code),
@@ -3439,6 +3782,7 @@ def normalized_metric_tokens(metric: PerformanceMetricDefinition) -> set[str]:
         }
         if token
     }
+    return expand_metric_alias_tokens(tokens)
 
 
 def normalized_candidate_tokens(candidate: dict[str, object]) -> set[str]:
@@ -3457,7 +3801,18 @@ def normalized_candidate_tokens(candidate: dict[str, object]) -> set[str]:
         value = candidate.get(key)
         if value is not None:
             labels.append(normalized_text(str(value)))
-    return {label for label in labels if label}
+    return expand_metric_alias_tokens({label for label in labels if label})
+
+
+def expand_metric_alias_tokens(tokens: set[str]) -> set[str]:
+    expanded = set(tokens)
+    for canonical, aliases in PROVIDER_METRIC_ALIASES.items():
+        alias_tokens = {normalized_text(alias) for alias in aliases}
+        canonical_token = normalized_text(canonical)
+        if canonical_token in tokens or alias_tokens & tokens:
+            expanded.add(canonical_token)
+            expanded.update(alias_tokens)
+    return expanded
 
 
 def normalized_text(value: str) -> str:

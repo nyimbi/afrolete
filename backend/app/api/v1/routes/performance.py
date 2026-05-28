@@ -331,6 +331,7 @@ async def ingest_performance_evidence_route(
     return PerformanceIngestionRead(
         observation=to_observation_read(result["observation"]),
         evidence_ref=result["evidence_ref"],
+        source_provider=result["source_provider"],
         extractor=result["extractor"],
         confidence=result["confidence"],
         review_required=result["review_required"],

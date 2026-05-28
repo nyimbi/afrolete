@@ -1131,6 +1131,104 @@ def test_performance_ingestion_parses_structured_wearable_payload(client, identi
     assert ingestion["parser_warnings"] == []
 
 
+def test_performance_ingestion_normalizes_whoop_recovery_schema(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "hrv",
+            "name": "Heart Rate Variability",
+            "category": "wellness",
+            "unit": "ms",
+            "min_value": 0,
+            "max_value": 200,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/performance/ingest",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "metric_definition_id": metric["id"],
+            "source": "wearable",
+            "evidence_ref": "wearable://cycle/2026-06-04",
+            "source_provider": "whoop",
+            "evidence_text": json.dumps(
+                {
+                    "recovery": {
+                        "score": 41,
+                        "hrv_rmssd_milli": 32,
+                        "resting_heart_rate": 101,
+                    },
+                    "strain": {"score": 17.4},
+                    "created_at": "2026-06-04T06:30:00Z",
+                }
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    ingestion = response.json()
+    assert ingestion["source_provider"] == "whoop"
+    assert ingestion["observation"]["value"] == 32
+    assert ingestion["parser_method"] == "whoop_provider_schema"
+    assert ingestion["parsed_fields"]["source_path"] == "recovery.hrv"
+    assert ingestion["observation"]["observed_at"].startswith("2026-06-04T06:30:00")
+
+
+def test_performance_ingestion_normalizes_garmin_wellness_schema(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "stress",
+            "name": "Stress Score",
+            "category": "wellness",
+            "unit": "score",
+            "min_value": 0,
+            "max_value": 100,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/performance/ingest",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "metric_definition_id": metric["id"],
+            "source": "wearable",
+            "evidence_ref": "garmin://wellness/daily/2026-06-04",
+            "evidence_text": json.dumps(
+                {
+                    "summaryType": "daily",
+                    "calendarDate": "2026-06-04",
+                    "wellnessData": {
+                        "restingHeartRate": 92,
+                        "averageStressLevel": 76,
+                        "bodyBatteryMostRecentValue": 39,
+                    },
+                }
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    ingestion = response.json()
+    assert ingestion["source_provider"] == "garmin"
+    assert ingestion["observation"]["value"] == 76
+    assert ingestion["parser_method"] == "garmin_provider_schema"
+    assert ingestion["parser_confidence_reason"].startswith("Normalized a garmin")
+
+
 def test_performance_ingestion_uses_metric_specific_video_text(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(
