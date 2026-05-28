@@ -2820,6 +2820,19 @@ export type ComplianceCredentialRead = {
   created_at: string;
 };
 
+export type BackgroundCheckProviderResultRead = {
+  accepted: boolean;
+  signature_required: boolean;
+  signature_validated: boolean;
+  organization_id: UUID;
+  background_check_id: UUID;
+  provider: string;
+  external_reference: string | null;
+  status: BackgroundCheckStatus;
+  risk_level: string;
+  message: string;
+};
+
 export type ComplianceQueueItemRead = {
   source: string;
   id: UUID;

@@ -1,8 +1,13 @@
 import base64
+import hmac
+import json
+import time
 from datetime import UTC, datetime
+from hashlib import sha256
 
 import pytest
 
+from app.core.config import get_settings
 from app.models.enums import (
     ConsentCaptureChannel,
     ConsentScopeType,
@@ -13,6 +18,7 @@ from app.models.enums import (
 )
 from app.models.event import ActivityConsent, Event
 from app.models.identity import Person
+from app.services import safeguarding as safeguarding_service
 from app.services.safeguarding import clearance_for_event
 
 
@@ -196,6 +202,123 @@ def test_incident_report_package_exports_markdown_and_pdf(client, identity_heade
     assert pdf_bytes.startswith(b"%PDF-1.4")
     assert pdf["size_bytes"] == len(pdf_bytes)
     assert len(pdf["checksum"]) == 64
+
+
+def test_signed_screening_provider_result_updates_background_check(
+    client,
+    identity_headers,
+    athlete_person,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AFROLETE_SAFEGUARDING_SCREENING_WEBHOOK_SIGNING_KEY", "screening-secret")
+    get_settings.cache_clear()
+    safeguarding_service.get_settings.cache_clear()
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Screening Provider Club", "organization_type": "club"},
+    ).json()
+    check = client.post(
+        "/api/v1/safeguarding/background-checks",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "person_id": str(athlete_person.id),
+            "provider": "SafeScreen",
+            "check_type": "Safeguarding background",
+            "requested_at": "2026-05-28T09:00:00Z",
+            "external_reference": "safe-ref-001",
+        },
+    ).json()
+    payload = {
+        "organization_id": organization["id"],
+        "background_check_id": check["id"],
+        "provider": "SafeScreen",
+        "external_reference": "safe-ref-001",
+        "provider_result_id": "safe-result-001",
+        "provider_status": "consider",
+        "risk_level": "high",
+        "completed_at": "2026-05-28T11:00:00Z",
+        "expires_at": "2027-05-28",
+        "result_summary": "Provider found a safeguarding record that requires review.",
+        "notes": "Manual adjudication required.",
+        "raw_payload": {"score": 87, "risk_band": "high"},
+    }
+    raw_body = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    timestamp = str(int(time.time()))
+    signature = hmac.new(
+        b"screening-secret",
+        timestamp.encode() + b"." + raw_body.encode(),
+        sha256,
+    ).hexdigest()
+
+    response = client.post(
+        "/api/v1/safeguarding/background-check-provider-results",
+        content=raw_body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Afrolete-Safeguarding-Timestamp": timestamp,
+            "X-Afrolete-Safeguarding-Signature": f"sha256={signature}",
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["accepted"] is True
+    assert result["signature_required"] is True
+    assert result["signature_validated"] is True
+    assert result["status"] == "review_required"
+    assert result["risk_level"] == "high"
+
+    checks = client.get(
+        f"/api/v1/safeguarding/background-checks?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    updated = next(item for item in checks if item["id"] == check["id"])
+    assert updated["status"] == "review_required"
+    assert updated["risk_level"] == "high"
+    assert updated["completed_at"].startswith("2026-05-28T11:00:00")
+    assert updated["expires_at"] == "2027-05-28"
+    assert "safe-result-001" in updated["notes"]
+    get_settings.cache_clear()
+    safeguarding_service.get_settings.cache_clear()
+
+
+def test_screening_provider_result_rejects_bad_signature(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AFROLETE_SAFEGUARDING_SCREENING_WEBHOOK_SIGNING_KEY", "screening-secret")
+    get_settings.cache_clear()
+    safeguarding_service.get_settings.cache_clear()
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Bad Screening Signature Club", "organization_type": "club"},
+    ).json()
+    payload = {
+        "organization_id": organization["id"],
+        "provider": "SafeScreen",
+        "external_reference": "missing-ref",
+        "provider_status": "clear",
+        "risk_level": "low",
+    }
+    raw_body = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+    response = client.post(
+        "/api/v1/safeguarding/background-check-provider-results",
+        content=raw_body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Afrolete-Safeguarding-Timestamp": str(int(time.time())),
+            "X-Afrolete-Safeguarding-Signature": "sha256=bad",
+        },
+    )
+
+    assert response.status_code == 401
+    get_settings.cache_clear()
+    safeguarding_service.get_settings.cache_clear()
 
 
 @pytest.mark.asyncio

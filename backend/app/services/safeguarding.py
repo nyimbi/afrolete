@@ -1,5 +1,7 @@
 import base64
+import hmac
 import io
+import time
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
@@ -9,6 +11,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.models.enums import (
     AttendanceStatus,
     BackgroundCheckStatus,
@@ -43,6 +46,8 @@ from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRost
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
     BackgroundCheckCreate,
+    BackgroundCheckProviderResultCreate,
+    BackgroundCheckProviderResultRead,
     BackgroundCheckUpdate,
     ComplianceQueueItemRead,
     ComplianceReconciliationRead,
@@ -73,6 +78,7 @@ from app.schemas.safeguarding import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
+from app.services.secrets import resolve_secret
 
 
 def hash_token(token: str) -> str:
@@ -903,6 +909,155 @@ async def update_background_check(
     await db.commit()
     await db.refresh(check)
     return check
+
+
+async def resolve_safeguarding_screening_webhook_key(settings: Settings) -> str:
+    return await resolve_secret(
+        settings,
+        env_value=settings.safeguarding_screening_webhook_signing_key,
+        path=settings.safeguarding_screening_webhook_signing_key_secret_path,
+        field_name=settings.safeguarding_screening_webhook_signing_key_secret_field,
+        label="safeguarding screening webhook signing key",
+    )
+
+
+async def validate_safeguarding_screening_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> dict[str, bool]:
+    settings = settings or get_settings()
+    signing_key = await resolve_safeguarding_screening_webhook_key(settings)
+    if not signing_key:
+        return {"signature_required": False, "signature_validated": False}
+    if not timestamp_header or not signature_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing screening provider signature")
+    try:
+        timestamp_value = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid screening provider timestamp") from exc
+    if abs(int(time.time()) - timestamp_value) > settings.safeguarding_screening_webhook_tolerance_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Stale screening provider signature")
+    expected = hmac.new(
+        signing_key.encode("utf-8"),
+        timestamp_header.encode("utf-8") + b"." + raw_body,
+        sha256,
+    ).hexdigest()
+    provided = signature_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, provided):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid screening provider signature")
+    return {"signature_required": True, "signature_validated": True}
+
+
+def background_check_status_from_provider(
+    payload: BackgroundCheckProviderResultCreate,
+) -> BackgroundCheckStatus:
+    if payload.status is not None:
+        return payload.status
+    normalized_status = (payload.provider_status or "").strip().lower().replace("-", "_").replace(" ", "_")
+    status_map = {
+        "clear": BackgroundCheckStatus.CLEAR,
+        "cleared": BackgroundCheckStatus.CLEAR,
+        "passed": BackgroundCheckStatus.CLEAR,
+        "complete": BackgroundCheckStatus.CLEAR,
+        "completed": BackgroundCheckStatus.CLEAR,
+        "review": BackgroundCheckStatus.REVIEW_REQUIRED,
+        "review_required": BackgroundCheckStatus.REVIEW_REQUIRED,
+        "needs_review": BackgroundCheckStatus.REVIEW_REQUIRED,
+        "consider": BackgroundCheckStatus.REVIEW_REQUIRED,
+        "adverse": BackgroundCheckStatus.FAILED,
+        "failed": BackgroundCheckStatus.FAILED,
+        "blocked": BackgroundCheckStatus.FAILED,
+        "denied": BackgroundCheckStatus.FAILED,
+        "processing": BackgroundCheckStatus.IN_PROGRESS,
+        "in_progress": BackgroundCheckStatus.IN_PROGRESS,
+        "pending": BackgroundCheckStatus.REQUESTED,
+        "requested": BackgroundCheckStatus.REQUESTED,
+        "expired": BackgroundCheckStatus.EXPIRED,
+    }
+    if normalized_status in status_map:
+        return status_map[normalized_status]
+    normalized_risk = (payload.risk_level or "").strip().lower()
+    if normalized_risk in {"critical", "high", "elevated", "medium"}:
+        return BackgroundCheckStatus.REVIEW_REQUIRED
+    if normalized_risk in {"low", "clear", "none"}:
+        return BackgroundCheckStatus.CLEAR
+    return BackgroundCheckStatus.IN_PROGRESS
+
+
+async def ingest_background_check_provider_result(
+    db: AsyncSession,
+    payload: BackgroundCheckProviderResultCreate,
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> BackgroundCheckProviderResultRead:
+    signature_result = await validate_safeguarding_screening_signature(
+        raw_body,
+        timestamp_header,
+        signature_header,
+        settings,
+    )
+    check: BackgroundCheck | None = None
+    if payload.background_check_id is not None:
+        check = await db.get(BackgroundCheck, payload.background_check_id)
+        if check is not None and payload.organization_id is not None and check.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Background check not found")
+    else:
+        statement = select(BackgroundCheck).where(
+            BackgroundCheck.provider == payload.provider,
+            BackgroundCheck.external_reference == payload.external_reference,
+        )
+        if payload.organization_id is not None:
+            statement = statement.where(BackgroundCheck.organization_id == payload.organization_id)
+        check = await db.scalar(statement.order_by(BackgroundCheck.requested_at.desc()))
+    if check is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Background check not found")
+
+    provider_status = background_check_status_from_provider(payload)
+    check.status = provider_status
+    check.provider = payload.provider
+    if payload.external_reference is not None:
+        check.external_reference = payload.external_reference
+    check.risk_level = (payload.risk_level or check.risk_level or "unknown").lower()
+    if payload.completed_at is not None:
+        check.completed_at = payload.completed_at
+    elif provider_status in {
+        BackgroundCheckStatus.CLEAR,
+        BackgroundCheckStatus.REVIEW_REQUIRED,
+        BackgroundCheckStatus.FAILED,
+    }:
+        check.completed_at = check.completed_at or utc_now()
+    if payload.expires_at is not None:
+        check.expires_at = payload.expires_at
+    if payload.result_summary is not None:
+        check.result_summary = payload.result_summary
+    provider_note_parts = [
+        f"Provider result accepted from {payload.provider}.",
+        f"Provider status: {payload.provider_status or provider_status.value}.",
+    ]
+    if payload.provider_result_id:
+        provider_note_parts.append(f"Provider result ID: {payload.provider_result_id}.")
+    if payload.notes:
+        provider_note_parts.append(payload.notes)
+    check.notes = "\n".join(part for part in [check.notes, " ".join(provider_note_parts)] if part)
+
+    await db.commit()
+    await db.refresh(check)
+    return BackgroundCheckProviderResultRead(
+        accepted=True,
+        signature_required=signature_result["signature_required"],
+        signature_validated=signature_result["signature_validated"],
+        organization_id=check.organization_id,
+        background_check_id=check.id,
+        provider=check.provider,
+        external_reference=check.external_reference,
+        status=check.status,
+        risk_level=check.risk_level,
+        message=f"Background check updated from {payload.provider} provider result.",
+    )
 
 
 async def create_compliance_credential(

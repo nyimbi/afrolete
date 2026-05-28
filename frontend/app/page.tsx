@@ -176,6 +176,7 @@ import type {
   GeneratedTrainingPlanRead,
   GeneratedReportRead,
   BackgroundCheckRead,
+  BackgroundCheckProviderResultRead,
   BackgroundCheckStatus,
   GuardianRelationshipRead,
   IncidentReportPackageArtifactRead,
@@ -1561,6 +1562,7 @@ export default function HomePage() {
   const [clearance, setClearance] = useState<ParticipationClearanceRead | null>(null);
   const [safeguardingIncidents, setSafeguardingIncidents] = useState<SafeguardingIncidentRead[]>([]);
   const [backgroundChecks, setBackgroundChecks] = useState<BackgroundCheckRead[]>([]);
+  const [backgroundCheckProviderResult, setBackgroundCheckProviderResult] = useState<BackgroundCheckProviderResultRead | null>(null);
   const [complianceCredentials, setComplianceCredentials] = useState<ComplianceCredentialRead[]>([]);
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummaryRead | null>(null);
   const [incidentReportPackages, setIncidentReportPackages] = useState<IncidentReportPackageRead[]>([]);
@@ -3136,6 +3138,7 @@ export default function HomePage() {
       setRegistrationInquiries([]);
       setSafeguardingIncidents([]);
       setBackgroundChecks([]);
+      setBackgroundCheckProviderResult(null);
       setComplianceCredentials([]);
       setComplianceSummary(null);
       setIncidentReportPackages([]);
@@ -5604,6 +5607,50 @@ export default function HomePage() {
         ]);
         addLog(`${updated.check_type} moved to ${updated.status}`, "good");
         refreshSafeguardingCompliance();
+      }
+    );
+  };
+
+  const simulateBackgroundCheckProviderResult = (
+    check: BackgroundCheckRead,
+    statusValue: BackgroundCheckStatus,
+    riskLevel: string
+  ) => {
+    runAction(
+      `background-check-provider-${check.id}-${statusValue}`,
+      () =>
+        apiRequest<BackgroundCheckProviderResultRead>("/safeguarding/background-check-provider-results", {
+          method: "POST",
+          body: {
+            organization_id: check.organization_id,
+            background_check_id: check.id,
+            provider: check.provider,
+            external_reference: (check.external_reference ?? backgroundCheckForm.external_reference) || `provider-${check.id.slice(0, 8)}`,
+            provider_result_id: `screening-${Date.now()}`,
+            provider_status: statusValue,
+            risk_level: riskLevel,
+            completed_at: statusValue === "in_progress" || statusValue === "requested"
+              ? null
+              : new Date().toISOString(),
+            expires_at: check.expires_at,
+            result_summary: `Provider screening result: ${statusValue} with ${riskLevel} risk.`,
+            notes: "Simulated provider replay from the operations console.",
+            raw_payload: {
+              demo: true,
+              source: "operations_console",
+              provider_status: statusValue,
+              risk_level: riskLevel
+            }
+          }
+        }),
+      (result) => {
+        setBackgroundCheckProviderResult(result);
+        void loadBackgroundChecks(result.organization_id);
+        void loadComplianceSummary(result.organization_id);
+        addLog(
+          `Provider result accepted: ${result.status} risk ${result.risk_level}`,
+          result.status === "failed" || result.status === "review_required" ? "neutral" : "good"
+        );
       }
     );
   };
@@ -16170,9 +16217,21 @@ export default function HomePage() {
                   <button type="button" onClick={() => updateBackgroundCheck(check, "in_progress")}>Start</button>
                   <button type="button" onClick={() => updateBackgroundCheck(check, "clear")}>Clear</button>
                   <button type="button" onClick={() => updateBackgroundCheck(check, "review_required")}>Review</button>
+                  <button type="button" onClick={() => simulateBackgroundCheckProviderResult(check, "clear", "low")}>Provider clear</button>
+                  <button type="button" onClick={() => simulateBackgroundCheckProviderResult(check, "review_required", "high")}>Provider risk</button>
                 </div>
               </article>
             ))}
+            {backgroundCheckProviderResult ? (
+              <article className="task-card">
+                <div>
+                  <strong>Screening provider result</strong>
+                  <span>{backgroundCheckProviderResult.provider} · {backgroundCheckProviderResult.status} · risk {backgroundCheckProviderResult.risk_level}</span>
+                  <span>{backgroundCheckProviderResult.signature_required ? "Signature verified" : "Unsigned local replay"} · {backgroundCheckProviderResult.external_reference ?? "no reference"}</span>
+                  <span>{backgroundCheckProviderResult.message}</span>
+                </div>
+              </article>
+            ) : null}
             {complianceCredentials.slice(0, 4).map((credential) => (
               <article key={credential.id} className="task-card">
                 <div>

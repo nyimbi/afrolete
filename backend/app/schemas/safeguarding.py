@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -372,6 +373,41 @@ class BackgroundCheckRead(BaseModel):
     result_summary: str | None
     notes: str | None
     created_at: datetime
+
+
+class BackgroundCheckProviderResultCreate(BaseModel):
+    organization_id: UUID | None = None
+    background_check_id: UUID | None = None
+    provider: str = Field(min_length=2, max_length=120)
+    external_reference: str | None = Field(default=None, max_length=240)
+    provider_result_id: str | None = Field(default=None, max_length=240)
+    status: BackgroundCheckStatus | None = None
+    provider_status: str | None = Field(default=None, max_length=80)
+    risk_level: str | None = Field(default=None, max_length=40)
+    completed_at: datetime | None = None
+    expires_at: date | None = None
+    result_summary: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=2000)
+    raw_payload: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def has_locator(self) -> "BackgroundCheckProviderResultCreate":
+        if self.background_check_id is None and self.external_reference is None:
+            raise ValueError("background_check_id or external_reference is required")
+        return self
+
+
+class BackgroundCheckProviderResultRead(BaseModel):
+    accepted: bool
+    signature_required: bool
+    signature_validated: bool
+    organization_id: UUID
+    background_check_id: UUID
+    provider: str
+    external_reference: str | None
+    status: BackgroundCheckStatus
+    risk_level: str
+    message: str
 
 
 class ComplianceCredentialCreate(BaseModel):

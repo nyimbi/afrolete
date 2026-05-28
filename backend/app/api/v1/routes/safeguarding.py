@@ -1,6 +1,8 @@
+import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -16,6 +18,8 @@ from app.schemas.safeguarding import (
     ActivityConsentCreate,
     ActivityConsentRead,
     BackgroundCheckCreate,
+    BackgroundCheckProviderResultCreate,
+    BackgroundCheckProviderResultRead,
     BackgroundCheckRead,
     BackgroundCheckUpdate,
     ComplianceCredentialCreate,
@@ -69,6 +73,7 @@ from app.services.safeguarding import (
     ensure_org_manage,
     compliance_summary,
     get_incident_report_package_artifact,
+    ingest_background_check_provider_result,
     list_background_checks,
     list_compliance_credentials,
     list_guardians_for_athlete,
@@ -559,6 +564,31 @@ async def update_background_check_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> BackgroundCheckRead:
     return to_background_check_read(await update_background_check(db, identity, check_id, payload, authz))
+
+
+@router.post(
+    "/background-check-provider-results",
+    response_model=BackgroundCheckProviderResultRead,
+)
+async def ingest_background_check_provider_result_route(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> BackgroundCheckProviderResultRead:
+    raw_body = await request.body()
+    try:
+        payload = BackgroundCheckProviderResultCreate.model_validate_json(raw_body)
+    except (ValidationError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid screening provider payload",
+        ) from exc
+    return await ingest_background_check_provider_result(
+        db,
+        payload,
+        raw_body,
+        request.headers.get("X-Afrolete-Safeguarding-Timestamp"),
+        request.headers.get("X-Afrolete-Safeguarding-Signature"),
+    )
 
 
 @router.post("/credentials", response_model=ComplianceCredentialRead, status_code=201)
