@@ -3576,6 +3576,20 @@ export type PerformanceForecastValidationRunRead = {
   created_at: string;
 };
 
+export type PerformanceForecastValidationAlertRead = {
+  organization_id: UUID;
+  validation_run_id: UUID;
+  drift_level: string;
+  sent: boolean;
+  dry_run: boolean;
+  channels: CommunicationChannel[];
+  channel_count: number;
+  recipient_count: number;
+  message_ids: UUID[];
+  skipped_reason: string | null;
+  validation_run: PerformanceForecastValidationRunRead;
+};
+
 export type PerformanceInjuryRiskRead = {
   athlete_profile_id: UUID;
   generated_at: string;

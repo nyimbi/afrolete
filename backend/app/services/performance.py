@@ -492,6 +492,60 @@ async def list_performance_forecast_validation_runs(
     return [forecast_validation_run_read(row) for row in rows]
 
 
+async def send_performance_forecast_validation_alert(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    validation_run_id: UUID,
+    authz: AuthorizationService,
+    dry_run: bool = False,
+    repeat_after_hours: int = 24,
+    channels: list[CommunicationChannel] | None = None,
+) -> dict[str, object]:
+    run = await db.get(PerformanceForecastValidationRun, validation_run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Forecast validation run not found")
+    await ensure_manage_performance(authz, identity, run.organization_id)
+    alert_channels = normalized_performance_alert_channels(channels)
+    recipient_ids = await performance_manager_recipient_ids(db, run.organization_id)
+    sent = False
+    message_ids: list[UUID] = []
+    skipped_reason = None
+    if run.drift_level not in {"watch", "high"}:
+        skipped_reason = f"Forecast validation drift level {run.drift_level} does not require an alert."
+    elif not recipient_ids:
+        skipped_reason = "No eligible forecast-drift alert recipients found."
+    elif repeat_after_hours > 0 and await recent_forecast_validation_alert_exists(
+        db, run.organization_id, repeat_after_hours
+    ):
+        skipped_reason = f"A forecast drift alert was already sent within the last {repeat_after_hours} hour(s)."
+    elif dry_run:
+        sent = False
+    else:
+        messages = await create_forecast_validation_alert_messages(
+            db,
+            run,
+            recipient_ids,
+            alert_channels,
+        )
+        await db.commit()
+        message_ids = [message.id for message in messages]
+        sent = True
+
+    return {
+        "organization_id": run.organization_id,
+        "validation_run_id": run.id,
+        "drift_level": run.drift_level,
+        "sent": sent,
+        "dry_run": dry_run,
+        "channels": alert_channels,
+        "channel_count": len(alert_channels),
+        "recipient_count": len(recipient_ids) * len(alert_channels),
+        "message_ids": message_ids,
+        "skipped_reason": skipped_reason,
+        "validation_run": forecast_validation_run_read(run),
+    }
+
+
 async def run_performance_forecast_validation_worker(
     db: AsyncSession,
     organization_id: UUID | None = None,
@@ -5942,6 +5996,139 @@ def forecast_validation_run_read(run: PerformanceForecastValidationRun) -> dict[
         "details": details,
         "created_at": run.created_at,
     }
+
+
+def normalized_performance_alert_channels(
+    channels: list[CommunicationChannel] | None,
+) -> list[CommunicationChannel]:
+    selected = channels or [CommunicationChannel.IN_APP]
+    normalized: list[CommunicationChannel] = []
+    for channel in selected:
+        if channel not in normalized:
+            normalized.append(channel)
+    return normalized or [CommunicationChannel.IN_APP]
+
+
+async def performance_manager_recipient_ids(db: AsyncSession, organization_id: UUID) -> set[UUID]:
+    rows = (
+        await db.execute(
+            select(Membership.subject_id)
+            .where(Membership.organization_id == organization_id)
+            .where(Membership.subject_type == MemberSubjectType.PERSON)
+            .where(
+                Membership.role.in_(
+                    [
+                        MembershipRole.OWNER,
+                        MembershipRole.ADMIN,
+                        MembershipRole.STAFF,
+                        MembershipRole.COACH,
+                    ]
+                )
+            )
+            .where(Membership.status == "active")
+        )
+    ).all()
+    return {person_id for (person_id,) in rows}
+
+
+async def recent_forecast_validation_alert_exists(
+    db: AsyncSession,
+    organization_id: UUID,
+    repeat_after_hours: int,
+) -> bool:
+    sent_after = datetime.now(UTC) - timedelta(hours=repeat_after_hours)
+    existing = await db.scalar(
+        select(CommunicationMessage.id)
+        .where(CommunicationMessage.organization_id == organization_id)
+        .where(CommunicationMessage.scope_type == CommunicationScopeType.ORGANIZATION)
+        .where(CommunicationMessage.scope_id == organization_id)
+        .where(CommunicationMessage.message_type == CommunicationMessageType.ALERT)
+        .where(CommunicationMessage.subject.ilike("%forecast drift%"))
+        .where(CommunicationMessage.sent_at.is_not(None))
+        .where(CommunicationMessage.sent_at >= sent_after)
+        .limit(1)
+    )
+    return existing is not None
+
+
+async def create_forecast_validation_alert_messages(
+    db: AsyncSession,
+    run: PerformanceForecastValidationRun,
+    recipient_ids: set[UUID],
+    channels: list[CommunicationChannel],
+) -> list[CommunicationMessage]:
+    messages: list[CommunicationMessage] = []
+    for channel in channels:
+        messages.append(
+            await create_forecast_validation_alert_message_for_channel(
+                db,
+                run,
+                recipient_ids,
+                channel,
+            )
+        )
+    return messages
+
+
+async def create_forecast_validation_alert_message_for_channel(
+    db: AsyncSession,
+    run: PerformanceForecastValidationRun,
+    recipient_ids: set[UUID],
+    channel: CommunicationChannel,
+) -> CommunicationMessage:
+    now = datetime.now(UTC)
+    message = CommunicationMessage(
+        organization_id=run.organization_id,
+        template_id=None,
+        created_by_person_id=None,
+        message_type=CommunicationMessageType.ALERT,
+        channel=channel,
+        scope_type=CommunicationScopeType.ORGANIZATION,
+        scope_id=run.organization_id,
+        subject=forecast_validation_alert_subject(run),
+        body=forecast_validation_alert_body(run),
+        urgent=run.drift_level == "high",
+        quiet_hours_override=run.drift_level == "high",
+        scheduled_for=None,
+        sent_at=now,
+        status="sent",
+    )
+    db.add(message)
+    await db.flush()
+    for person_id in sorted(recipient_ids, key=str):
+        person = await db.get(Person, person_id)
+        if person is None:
+            continue
+        db.add(
+            MessageRecipient(
+                message_id=message.id,
+                person_id=person.id,
+                destination=destination_for_channel(person, channel),
+                delivery_status=initial_delivery_status(person, channel),
+            )
+        )
+    return message
+
+
+def forecast_validation_alert_subject(run: PerformanceForecastValidationRun) -> str:
+    return f"Performance forecast drift {run.drift_level}: {run.drift_count} metric(s)"
+
+
+def forecast_validation_alert_body(run: PerformanceForecastValidationRun) -> str:
+    details = forecast_validation_run_read(run)["details"]
+    drifted = [detail for detail in details if detail.get("drifted")]
+    metric_summary = "; ".join(
+        f"{detail['metric_name']} predicted {detail.get('predicted_value')} vs actual {detail.get('actual_value')}"
+        for detail in drifted[:5]
+    )
+    if not metric_summary:
+        metric_summary = "No individual metric crossed the drift threshold, but aggregate error needs review."
+    return (
+        f"Forecast validation run {run.id} is {run.drift_level}. "
+        f"{run.passed_count}/{run.evaluated_count} backtests passed, "
+        f"{run.drift_count} metric(s) drifted, mean relative error is {round(run.mean_relative_error * 100, 1)}%. "
+        f"{run.recommendation} Metrics: {metric_summary}."
+    )
 
 
 async def evaluate_model_extraction_benchmark_case(

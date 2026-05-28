@@ -20,6 +20,7 @@ from app.schemas.performance import (
     PerformanceAchievementAwardRead,
     PerformanceAchievementRunRead,
     PerformanceAssessmentReviewEscalationRunRead,
+    PerformanceForecastValidationAlertRead,
     PerformanceForecastValidationRunCreate,
     PerformanceForecastValidationRunRead,
     PerformanceGoalCreate,
@@ -96,6 +97,7 @@ from app.services.performance import (
     performance_metric_trends,
     performance_summary,
     run_performance_forecast_validation,
+    send_performance_forecast_validation_alert,
     run_assessment_review_escalations,
     run_performance_injury_risk_alert_scan,
     run_wearable_provider_sync,
@@ -565,6 +567,36 @@ async def list_performance_forecast_validation_runs_route(
             limit=limit,
         )
     ]
+
+
+@router.post(
+    "/forecast-validation-runs/{validation_run_id}/alerts",
+    response_model=PerformanceForecastValidationAlertRead,
+)
+async def send_performance_forecast_validation_alert_route(
+    validation_run_id: UUID,
+    repeat_after_hours: int = Query(default=24, ge=0, le=720),
+    channels: list[CommunicationChannel] | None = Query(default=None),
+    dry_run: bool = Query(default=False),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceForecastValidationAlertRead:
+    result = await send_performance_forecast_validation_alert(
+        db,
+        identity,
+        validation_run_id,
+        authz,
+        dry_run=dry_run,
+        repeat_after_hours=repeat_after_hours,
+        channels=channels,
+    )
+    return PerformanceForecastValidationAlertRead(
+        **{
+            **result,
+            "validation_run": PerformanceForecastValidationRunRead(**result["validation_run"]),
+        }
+    )
 
 
 @router.post(

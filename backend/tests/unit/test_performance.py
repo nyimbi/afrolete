@@ -942,6 +942,83 @@ def test_performance_forecast_validation_persists_drift_run(client, identity_hea
     assert list_response.json()[0]["id"] == run["id"]
 
 
+def test_performance_forecast_validation_alerts_managers_on_drift(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "power_score",
+            "name": "Power Score",
+            "category": "physical",
+            "unit": "score",
+            "higher_is_better": True,
+        },
+    ).json()
+    for value, observed_at in [
+        (10.0, "2026-01-01T10:00:00Z"),
+        (10.0, "2026-01-08T10:00:00Z"),
+        (10.0, "2026-01-15T10:00:00Z"),
+        (30.0, "2026-01-22T10:00:00Z"),
+    ]:
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": metric["id"],
+                "value": value,
+                "observed_at": observed_at,
+            },
+        )
+        assert response.status_code == 201
+
+    run_response = client.post(
+        "/api/v1/performance/forecast-validation-runs",
+        headers=identity_headers,
+        json={"organization_id": organization["id"]},
+    )
+    assert run_response.status_code == 201
+    run = run_response.json()
+    assert run["drift_level"] == "high"
+    assert run["drift_count"] == 1
+
+    alert_response = client.post(
+        f"/api/v1/performance/forecast-validation-runs/{run['id']}/alerts"
+        "?channels=in_app&channels=sms",
+        headers=identity_headers,
+    )
+
+    assert alert_response.status_code == 200
+    alert = alert_response.json()
+    assert alert["sent"] is True
+    assert alert["drift_level"] == "high"
+    assert alert["channel_count"] == 2
+    assert len(alert["message_ids"]) == 2
+    assert alert["validation_run"]["id"] == run["id"]
+    messages = client.get(
+        f"/api/v1/communications/messages?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    message = next(message for message in messages if message["id"] == alert["message_ids"][0])
+    assert message["urgent"] is True
+    assert "forecast drift high" in message["subject"]
+    recipients = client.get(
+        f"/api/v1/communications/messages/{alert['message_ids'][0]}/recipients",
+        headers=identity_headers,
+    ).json()
+    assert recipients
+
+    duplicate = client.post(
+        f"/api/v1/performance/forecast-validation-runs/{run['id']}/alerts",
+        headers=identity_headers,
+    ).json()
+    assert duplicate["sent"] is False
+    assert "already sent" in duplicate["skipped_reason"]
+
+
 def test_performance_what_if_forecast_adjusts_training_runway(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(

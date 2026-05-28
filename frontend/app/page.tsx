@@ -204,6 +204,7 @@ import type {
   PerformanceAssessmentReviewEscalationRunRead,
   PerformanceCohortComparisonRead,
   PerformanceForecastScenarioRead,
+  PerformanceForecastValidationAlertRead,
   PerformanceForecastValidationRunRead,
   PerformanceForecastWhatIfRead,
   PerformanceGoalRead,
@@ -1404,6 +1405,8 @@ export default function HomePage() {
     useState<PerformanceForecastValidationRunRead | null>(null);
   const [performanceForecastValidationRuns, setPerformanceForecastValidationRuns] =
     useState<PerformanceForecastValidationRunRead[]>([]);
+  const [performanceForecastValidationAlert, setPerformanceForecastValidationAlert] =
+    useState<PerformanceForecastValidationAlertRead | null>(null);
   const [performanceWhatIfAdjustment, setPerformanceWhatIfAdjustment] = useState(15);
   const [performanceWhatIfReadiness, setPerformanceWhatIfReadiness] = useState(70);
   const [performanceRiskAlertChannels, setPerformanceRiskAlertChannels] =
@@ -3052,6 +3055,7 @@ export default function HomePage() {
       setPerformanceModelBenchmarkDatasets([]);
       setPerformanceForecastValidationRun(null);
       setPerformanceForecastValidationRuns([]);
+      setPerformanceForecastValidationAlert(null);
       setPerformanceWebhookIngest(null);
       setWearableConnections([]);
       setWearableSyncRun(null);
@@ -3362,6 +3366,7 @@ export default function HomePage() {
       setPerformanceWhatIfScenarios([]);
       setPerformanceForecastValidationRun(null);
       setPerformanceForecastValidationRuns([]);
+      setPerformanceForecastValidationAlert(null);
       setPerformanceInjuryRisk(null);
       setPerformanceInjuryRiskAlert(null);
       setPerformanceInjuryRiskAlertRun(null);
@@ -6640,6 +6645,35 @@ export default function HomePage() {
         void loadPerformanceForecastValidationRuns(
           selectedOrganizationId,
           selectedAthlete?.athleteProfileId
+        );
+      }
+    );
+  };
+
+  const sendPerformanceForecastValidationAlert = () => {
+    if (!performanceForecastValidationRun) {
+      addLog("Run Forecast QA before sending a drift alert", "bad");
+      return;
+    }
+    const channelQuery = riskAlertChannelQuery();
+    runAction(
+      "performance-forecast-validation-alert",
+      () =>
+        apiRequest<PerformanceForecastValidationAlertRead>(
+          `/performance/forecast-validation-runs/${performanceForecastValidationRun.id}/alerts?${channelQuery}`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (alert) => {
+        setPerformanceForecastValidationAlert(alert);
+        setPerformanceForecastValidationRun(alert.validation_run);
+        addLog(
+          alert.sent
+            ? `Forecast drift alert sent across ${alert.channel_count} channel(s)`
+            : alert.skipped_reason ?? "Forecast drift alert was not sent",
+          alert.sent ? "good" : "neutral"
         );
       }
     );
@@ -14064,6 +14098,7 @@ export default function HomePage() {
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
                 <button type="button" onClick={runPerformanceForecastValidation} disabled={busyAction !== null}>Forecast QA</button>
+                <button type="button" onClick={sendPerformanceForecastValidationAlert} disabled={busyAction !== null}>Drift alert</button>
                 <button type="button" onClick={ingestPerformanceWearableWebhook} disabled={busyAction !== null}>Webhook</button>
                 <button type="button" onClick={createWearableConnection} disabled={busyAction !== null}>Connect</button>
                 <button type="button" onClick={runWearableConnectionSync} disabled={busyAction !== null}>Sync</button>
@@ -14495,6 +14530,28 @@ export default function HomePage() {
                         ).join(" · ")}
                       </small>
                     ) : null}
+                  </div>
+                  <span>
+                    <button type="button" onClick={sendPerformanceForecastValidationAlert} disabled={busyAction !== null}>Alert</button>
+                  </span>
+                </article>
+              ) : null}
+              {performanceForecastValidationAlert ? (
+                <article className="task-card">
+                  <div>
+                    <strong>
+                      Forecast drift alert · {performanceForecastValidationAlert.sent ? "sent" : "not sent"}
+                    </strong>
+                    <span>
+                      {performanceForecastValidationAlert.drift_level.replaceAll("_", " ")} ·{" "}
+                      {performanceForecastValidationAlert.channel_count} channel(s) ·{" "}
+                      {performanceForecastValidationAlert.recipient_count} recipient destination(s)
+                    </span>
+                    <small>
+                      {performanceForecastValidationAlert.sent
+                        ? `${performanceForecastValidationAlert.message_ids.length} alert message(s) created.`
+                        : performanceForecastValidationAlert.skipped_reason ?? "No alert created."}
+                    </small>
                   </div>
                 </article>
               ) : null}

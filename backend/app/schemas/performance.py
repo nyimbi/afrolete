@@ -233,6 +233,20 @@ class PerformanceForecastValidationRunRead(BaseModel):
     created_at: datetime
 
 
+class PerformanceForecastValidationAlertRead(BaseModel):
+    organization_id: UUID
+    validation_run_id: UUID
+    drift_level: str
+    sent: bool
+    dry_run: bool = False
+    channels: list[CommunicationChannel]
+    channel_count: int
+    recipient_count: int
+    message_ids: list[UUID]
+    skipped_reason: str | None
+    validation_run: PerformanceForecastValidationRunRead
+
+
 class PerformanceWearableWebhookCreate(BaseModel):
     organization_id: UUID
     athlete_profile_id: UUID
