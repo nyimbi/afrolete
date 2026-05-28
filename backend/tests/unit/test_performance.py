@@ -356,6 +356,171 @@ def test_performance_benchmarks_can_scope_to_region_cohort(client, identity_head
     assert region["benchmarks"][0]["cohort_label"] == "KE"
 
 
+def test_performance_benchmarks_can_scope_to_association_region_cohorts(
+    client, identity_headers
+) -> None:
+    organization, target_team, _, target_roster = create_rostered_athlete(client, identity_headers)
+    local_association = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Nairobi Central Youth League",
+            "organization_type": "association",
+            "association_level": "local",
+            "country_code": "KE",
+        },
+    ).json()
+    regional_association = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Greater Nairobi Football Region",
+            "organization_type": "association",
+            "association_level": "regional",
+            "country_code": "KE",
+        },
+    ).json()
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "sprint_speed",
+            "name": "Sprint Speed",
+            "category": "physical",
+            "unit": "km/h",
+            "higher_is_better": True,
+        },
+    ).json()
+
+    def create_peer(team_name: str, display_name: str, email: str, value: float):
+        team = client.post(
+            "/api/v1/teams",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "name": team_name,
+                "sport": "football",
+                "sport_format": "team",
+            },
+        ).json()
+        member = client.post(
+            f"/api/v1/organizations/{organization['id']}/members",
+            headers=identity_headers,
+            json={
+                "email": email,
+                "display_name": display_name,
+                "role": "athlete",
+            },
+        ).json()
+        roster = client.post(
+            f"/api/v1/teams/{team['id']}/members",
+            headers=identity_headers,
+            json={
+                "person_id": member["subject_id"],
+                "role": "player",
+                "status": "active",
+            },
+        ).json()
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": metric["id"],
+                "value": value,
+            },
+        )
+        assert response.status_code == 201
+        return team, roster
+
+    local_peer_team, _ = create_peer(
+        "Central Peer U15",
+        "Central Peer",
+        "central-peer@example.com",
+        61,
+    )
+    regional_peer_team, _ = create_peer(
+        "Regional Peer U15",
+        "Regional Peer",
+        "regional-peer@example.com",
+        80,
+    )
+    create_peer("Outside Peer U15", "Outside Peer", "outside-peer@example.com", 90)
+    target_observation = client.post(
+        f"/api/v1/performance/athletes/{target_roster['athlete_profile_id']}/observations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "metric_definition_id": metric["id"],
+            "value": 65,
+        },
+    )
+    assert target_observation.status_code == 201
+
+    for association, team in [
+        (local_association, target_team),
+        (local_association, local_peer_team),
+        (regional_association, target_team),
+        (regional_association, local_peer_team),
+        (regional_association, regional_peer_team),
+    ]:
+        add_response = client.post(
+            f"/api/v1/organizations/{association['id']}/members",
+            headers=identity_headers,
+            json={
+                "subject_type": "team",
+                "subject_id": team["id"],
+                "role": "viewer",
+                "title": "Registered cohort team",
+            },
+        )
+        assert add_response.status_code == 201
+
+    local_response = client.get(
+        f"/api/v1/performance/athletes/{target_roster['athlete_profile_id']}/benchmarks"
+        f"?organization_id={organization['id']}&cohort_scope=local_association",
+        headers=identity_headers,
+    )
+    regional_response = client.get(
+        f"/api/v1/performance/athletes/{target_roster['athlete_profile_id']}/benchmarks"
+        f"?organization_id={organization['id']}&cohort_scope=regional_association",
+        headers=identity_headers,
+    )
+    comparisons_response = client.get(
+        f"/api/v1/performance/athletes/{target_roster['athlete_profile_id']}/cohort-comparisons"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert local_response.status_code == 200
+    local = local_response.json()[0]
+    assert local["cohort_scope"] == "local_association"
+    assert local["cohort_label"] == "Nairobi Central Youth League"
+    assert local["sample_size"] == 2
+    assert local["cohort_average"] == 63.0
+    assert local["cohort_max"] == 65.0
+
+    assert regional_response.status_code == 200
+    regional = regional_response.json()[0]
+    assert regional["cohort_scope"] == "regional_association"
+    assert regional["cohort_label"] == "Greater Nairobi Football Region"
+    assert regional["sample_size"] == 3
+    assert regional["cohort_average"] == 68.67
+    assert regional["cohort_max"] == 80.0
+
+    assert comparisons_response.status_code == 200
+    assert [comparison["cohort_scope"] for comparison in comparisons_response.json()] == [
+        "tenant",
+        "age_group",
+        "position",
+        "region",
+        "local_association",
+        "regional_association",
+    ]
+
+
 def test_performance_trend_series_returns_ordered_points(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(

@@ -550,7 +550,13 @@ type AssessmentReviewQueueFilters = {
 };
 
 const chartColors = ["var(--teal)", "var(--blue)", "var(--amber)", "var(--red)", "var(--violet)"];
-type BenchmarkCohortScope = "tenant" | "age_group" | "position" | "region";
+type BenchmarkCohortScope =
+  | "tenant"
+  | "age_group"
+  | "position"
+  | "region"
+  | "local_association"
+  | "regional_association";
 
 function infrastructureTone(component: InfrastructureComponent) {
   if (component.configured || component.status === "local") {
@@ -14047,6 +14053,8 @@ export default function HomePage() {
                   <option value="age_group">Age group</option>
                   <option value="position">Position</option>
                   <option value="region">Country/region</option>
+                  <option value="local_association">Local association</option>
+                  <option value="regional_association">Regional association</option>
                 </select>
               </label>
               <label>

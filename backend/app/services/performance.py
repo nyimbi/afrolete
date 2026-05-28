@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,7 @@ from app.models.enums import (
     CommunicationChannel,
     CommunicationMessageType,
     CommunicationScopeType,
+    AssociationLevel,
     MemberSubjectType,
     MembershipRole,
     MetricCategory,
@@ -2047,7 +2048,14 @@ async def performance_cohort_comparisons(
     organization_id: UUID,
     athlete_profile_id: UUID,
     sport: str | None = None,
-    cohort_scopes: tuple[str, ...] = ("tenant", "age_group", "position", "region"),
+    cohort_scopes: tuple[str, ...] = (
+        "tenant",
+        "age_group",
+        "position",
+        "region",
+        "local_association",
+        "regional_association",
+    ),
 ) -> list[dict[str, object]]:
     comparisons: list[dict[str, object]] = []
     for scope in cohort_scopes:
@@ -2058,6 +2066,10 @@ async def performance_cohort_comparisons(
             sport=sport,
             cohort_scope=scope,
         )
+        if scope in {"local_association", "regional_association"} and not any(
+            benchmark["sample_size"] for benchmark in benchmarks
+        ):
+            continue
         percentiles = [
             benchmark["percentile_rank"]
             for benchmark in benchmarks
@@ -3173,11 +3185,21 @@ def benchmark_band(
 
 def normalize_benchmark_scope(cohort_scope: str) -> str:
     normalized = cohort_scope.strip().lower()
-    if normalized in {"tenant", "age_group", "position", "region"}:
+    if normalized in {
+        "tenant",
+        "age_group",
+        "position",
+        "region",
+        "local_association",
+        "regional_association",
+    }:
         return normalized
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        detail="cohort_scope must be one of tenant, age_group, position, or region",
+        detail=(
+            "cohort_scope must be one of tenant, age_group, position, region, "
+            "local_association, or regional_association"
+        ),
     )
 
 
@@ -3192,8 +3214,10 @@ async def athlete_benchmark_contexts(
         await db.execute(
             select(
                 AthleteProfile.id,
+                AthleteProfile.organization_id,
                 Person.date_of_birth,
                 Person.country_code,
+                Team.id,
                 TeamRosterEntry.primary_position,
                 Team.age_group,
             )
@@ -3208,18 +3232,114 @@ async def athlete_benchmark_contexts(
         )
     ).all()
     contexts: dict[UUID, dict[str, str | None]] = {}
-    for athlete_profile_id, date_of_birth, country_code, primary_position, team_age_group in rows:
+    organization_ids_by_athlete: dict[UUID, set[UUID]] = {}
+    team_ids_by_athlete: dict[UUID, set[UUID]] = {}
+    for (
+        athlete_profile_id,
+        athlete_organization_id,
+        date_of_birth,
+        country_code,
+        team_id,
+        primary_position,
+        team_age_group,
+    ) in rows:
         context = contexts.setdefault(
             athlete_profile_id,
-            {"age_group": None, "position": None, "region": None},
+            {
+                "age_group": None,
+                "position": None,
+                "region": None,
+                "local_association": None,
+                "regional_association": None,
+            },
         )
+        organization_ids_by_athlete.setdefault(athlete_profile_id, set()).add(athlete_organization_id)
+        if team_id is not None:
+            team_ids_by_athlete.setdefault(athlete_profile_id, set()).add(team_id)
         if context["age_group"] is None:
             context["age_group"] = team_age_group or age_group_from_birthdate(date_of_birth)
         if context["position"] is None and primary_position:
             context["position"] = primary_position
         if context["region"] is None and country_code:
             context["region"] = country_code.upper()
+    await add_association_benchmark_contexts(
+        db,
+        contexts,
+        organization_ids_by_athlete,
+        team_ids_by_athlete,
+    )
     return contexts
+
+
+async def add_association_benchmark_contexts(
+    db: AsyncSession,
+    contexts: dict[UUID, dict[str, str | None]],
+    organization_ids_by_athlete: dict[UUID, set[UUID]],
+    team_ids_by_athlete: dict[UUID, set[UUID]],
+) -> None:
+    organization_athlete_ids: dict[UUID, set[UUID]] = {}
+    team_athlete_ids: dict[UUID, set[UUID]] = {}
+    for athlete_id, organization_ids in organization_ids_by_athlete.items():
+        for organization_id in organization_ids:
+            organization_athlete_ids.setdefault(organization_id, set()).add(athlete_id)
+    for athlete_id, team_ids in team_ids_by_athlete.items():
+        for team_id in team_ids:
+            team_athlete_ids.setdefault(team_id, set()).add(athlete_id)
+    if not organization_athlete_ids and not team_athlete_ids:
+        return
+
+    conditions = []
+    if organization_athlete_ids:
+        conditions.append(
+            and_(
+                Membership.subject_type == MemberSubjectType.ORGANIZATION,
+                Membership.subject_id.in_(list(organization_athlete_ids)),
+            )
+        )
+    if team_athlete_ids:
+        conditions.append(
+            and_(
+                Membership.subject_type == MemberSubjectType.TEAM,
+                Membership.subject_id.in_(list(team_athlete_ids)),
+            )
+        )
+    subject_filter = (
+        conditions[0] if len(conditions) == 1 else or_(*conditions)
+    )
+    rows = (
+        await db.execute(
+            select(
+                Membership.subject_type,
+                Membership.subject_id,
+                Organization.name,
+                Organization.association_level,
+            )
+            .join(Organization, Organization.id == Membership.organization_id)
+            .where(Membership.status == "active")
+            .where(subject_filter)
+            .where(
+                Organization.association_level.in_(
+                    [AssociationLevel.LOCAL, AssociationLevel.REGIONAL]
+                )
+            )
+            .order_by(Organization.name.asc())
+        )
+    ).all()
+    for subject_type, subject_id, association_name, association_level in rows:
+        athlete_ids = (
+            organization_athlete_ids.get(subject_id, set())
+            if subject_type == MemberSubjectType.ORGANIZATION
+            else team_athlete_ids.get(subject_id, set())
+        )
+        key = (
+            "local_association"
+            if association_level == AssociationLevel.LOCAL
+            else "regional_association"
+        )
+        for athlete_id in athlete_ids:
+            context = contexts.get(athlete_id)
+            if context is not None and context[key] is None:
+                context[key] = association_name
 
 
 def age_group_from_birthdate(date_of_birth: date | None) -> str | None:
