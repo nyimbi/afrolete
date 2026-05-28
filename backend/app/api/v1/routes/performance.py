@@ -11,6 +11,7 @@ from app.schemas.performance import (
     MetricDefinitionCreate,
     MetricDefinitionRead,
     PerformanceMetricBenchmarkRead,
+    PerformanceMetricTrendRead,
     PerformanceIngestionCreate,
     PerformanceIngestionRead,
     PerformanceObservationCreate,
@@ -29,6 +30,7 @@ from app.services.performance import (
     list_metric_definitions,
     list_observations,
     performance_metric_benchmarks,
+    performance_metric_trends,
     performance_summary,
     review_observation,
 )
@@ -271,6 +273,27 @@ async def athlete_performance_benchmarks_route(
             db,
             organization_id,
             athlete_profile_id=athlete_profile_id,
+            sport=sport,
+        )
+    ]
+
+
+@router.get(
+    "/athletes/{athlete_profile_id}/trends",
+    response_model=list[PerformanceMetricTrendRead],
+)
+async def athlete_performance_trends_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    sport: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceMetricTrendRead]:
+    return [
+        PerformanceMetricTrendRead(**trend)
+        for trend in await performance_metric_trends(
+            db,
+            organization_id,
+            athlete_profile_id,
             sport=sport,
         )
     ]

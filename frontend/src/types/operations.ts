@@ -3176,6 +3176,28 @@ export type PerformanceMetricBenchmarkRead = {
   recommendation: string;
 };
 
+export type PerformanceMetricTrendRead = {
+  metric_definition_id: UUID;
+  metric_code: string;
+  metric_name: string;
+  sport: string | null;
+  category: MetricCategory;
+  unit: string | null;
+  higher_is_better: boolean;
+  sample_size: number;
+  first_value: number | null;
+  previous_value: number | null;
+  latest_value: number | null;
+  best_value: number | null;
+  average_value: number | null;
+  change_from_previous: number | null;
+  change_from_first: number | null;
+  consistency_index: number | null;
+  forecast_next_value: number | null;
+  trend_direction: string;
+  recommendation: string;
+};
+
 export type TrainingDrillRead = {
   id: UUID;
   organization_id: UUID;

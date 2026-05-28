@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 import re
+from statistics import pstdev
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -401,6 +402,60 @@ async def performance_metric_benchmarks(
     return benchmarks
 
 
+async def performance_metric_trends(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    sport: str | None = None,
+) -> list[dict[str, object]]:
+    await get_athlete_profile(db, athlete_profile_id, organization_id)
+    metrics = await list_metric_definitions(db, organization_id, sport=sport)
+    metric_by_id = {metric.id: metric for metric in metrics}
+    if not metric_by_id:
+        return []
+
+    observations = list(
+        (
+            await db.scalars(
+                select(AthletePerformanceObservation)
+                .where(AthletePerformanceObservation.organization_id == organization_id)
+                .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+                .where(AthletePerformanceObservation.metric_definition_id.in_(list(metric_by_id)))
+                .where(
+                    AthletePerformanceObservation.verification_status
+                    != MetricVerificationStatus.REJECTED
+                )
+                .order_by(
+                    AthletePerformanceObservation.metric_definition_id,
+                    AthletePerformanceObservation.observed_at,
+                )
+            )
+        ).all()
+    )
+    observations_by_metric: dict[UUID, list[AthletePerformanceObservation]] = {}
+    for observation in observations:
+        observations_by_metric.setdefault(observation.metric_definition_id, []).append(observation)
+
+    trends: list[dict[str, object]] = []
+    for metric in metrics:
+        metric_observations = observations_by_metric.get(metric.id, [])
+        values = [observation.value for observation in metric_observations]
+        trend = metric_trend_summary(values, metric.higher_is_better, metric.name, metric.unit)
+        trends.append(
+            {
+                "metric_definition_id": metric.id,
+                "metric_code": metric.code,
+                "metric_name": metric.name,
+                "sport": metric.sport,
+                "category": metric.category,
+                "unit": metric.unit,
+                "higher_is_better": metric.higher_is_better,
+                **trend,
+            }
+        )
+    return trends
+
+
 async def get_athlete_profile(
     db: AsyncSession,
     athlete_profile_id: UUID,
@@ -495,6 +550,133 @@ def performance_benchmark_recommendation(
         f"Prioritize targeted work on {metric_name}; athlete value {athlete_value:g}{suffix} "
         f"is behind the cohort average {average:g}{suffix}."
     )
+
+
+def metric_trend_summary(
+    values: list[float],
+    higher_is_better: bool,
+    metric_name: str,
+    unit: str | None,
+) -> dict[str, object]:
+    if not values:
+        return {
+            "sample_size": 0,
+            "first_value": None,
+            "previous_value": None,
+            "latest_value": None,
+            "best_value": None,
+            "average_value": None,
+            "change_from_previous": None,
+            "change_from_first": None,
+            "consistency_index": None,
+            "forecast_next_value": None,
+            "trend_direction": "no_data",
+            "recommendation": f"Record {metric_name} observations to start trend analysis.",
+        }
+
+    first = values[0]
+    latest = values[-1]
+    previous = values[-2] if len(values) >= 2 else None
+    best = max(values) if higher_is_better else min(values)
+    average = sum(values) / len(values)
+    change_previous = directional_change(latest, previous, higher_is_better)
+    change_first = directional_change(latest, first, higher_is_better) if len(values) >= 2 else None
+    forecast = forecast_next_value(values)
+    direction = trend_direction(change_first, values)
+    return {
+        "sample_size": len(values),
+        "first_value": round(first, 2),
+        "previous_value": round(previous, 2) if previous is not None else None,
+        "latest_value": round(latest, 2),
+        "best_value": round(best, 2),
+        "average_value": round(average, 2),
+        "change_from_previous": round(change_previous, 2)
+        if change_previous is not None
+        else None,
+        "change_from_first": round(change_first, 2) if change_first is not None else None,
+        "consistency_index": consistency_index(values),
+        "forecast_next_value": round(forecast, 2) if forecast is not None else None,
+        "trend_direction": direction,
+        "recommendation": trend_recommendation(
+            direction,
+            metric_name,
+            unit,
+            latest,
+            average,
+            change_first,
+        ),
+    }
+
+
+def directional_change(
+    latest: float,
+    earlier: float | None,
+    higher_is_better: bool,
+) -> float | None:
+    if earlier is None:
+        return None
+    raw_change = latest - earlier
+    return raw_change if higher_is_better else -raw_change
+
+
+def consistency_index(values: list[float]) -> float:
+    if len(values) < 2:
+        return 100.0
+    average_magnitude = abs(sum(values) / len(values))
+    if average_magnitude == 0:
+        return 100.0 if all(value == 0 for value in values) else 0.0
+    variation = pstdev(values) / average_magnitude
+    return round(max(0.0, min(100.0, 100.0 - variation * 100.0)), 1)
+
+
+def forecast_next_value(values: list[float]) -> float | None:
+    if len(values) < 2:
+        return values[-1] if values else None
+    deltas = [current - previous for previous, current in zip(values[:-1], values[1:], strict=True)]
+    return values[-1] + sum(deltas) / len(deltas)
+
+
+def trend_direction(change_from_first: float | None, values: list[float]) -> str:
+    if len(values) < 2 or change_from_first is None:
+        return "insufficient_data"
+    average_magnitude = abs(sum(values) / len(values)) or 1.0
+    threshold = max(0.01, average_magnitude * 0.03)
+    if change_from_first > threshold:
+        return "improving"
+    if change_from_first < -threshold:
+        return "declining"
+    return "stable"
+
+
+def trend_recommendation(
+    direction: str,
+    metric_name: str,
+    unit: str | None,
+    latest: float,
+    average: float,
+    change_from_first: float | None,
+) -> str:
+    suffix = f" {unit}" if unit else ""
+    latest_text = f"{latest:g}{suffix}"
+    average_text = f"{average:g}{suffix}"
+    if direction == "improving":
+        return (
+            f"Trend is improving for {metric_name}; keep the current plan and raise the "
+            f"target from latest {latest_text}."
+        )
+    if direction == "declining":
+        return (
+            f"Trend is declining for {metric_name}; review load, recovery, and technique "
+            f"before the next block."
+        )
+    if direction == "stable":
+        return (
+            f"{metric_name} is stable around {average_text}; add a focused stimulus if "
+            f"the athlete needs another jump."
+        )
+    if change_from_first is None:
+        return f"Capture another {metric_name} result to calculate trend direction."
+    return f"Continue collecting {metric_name}; latest value is {latest_text}."
 
 
 def extract_numeric_value(text: str | None) -> float | None:

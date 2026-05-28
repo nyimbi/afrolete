@@ -157,3 +157,25 @@ class PerformanceMetricBenchmarkRead(BaseModel):
     cohort_rank: int | None
     benchmark_band: str
     recommendation: str
+
+
+class PerformanceMetricTrendRead(BaseModel):
+    metric_definition_id: UUID
+    metric_code: str
+    metric_name: str
+    sport: str | None
+    category: MetricCategory
+    unit: str | None
+    higher_is_better: bool
+    sample_size: int
+    first_value: float | None
+    previous_value: float | None
+    latest_value: float | None
+    best_value: float | None
+    average_value: float | None
+    change_from_previous: float | None
+    change_from_first: float | None
+    consistency_index: float | None
+    forecast_next_value: float | None
+    trend_direction: str
+    recommendation: str

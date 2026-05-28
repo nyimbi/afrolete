@@ -198,6 +198,7 @@ import type {
   PaymentSettlementRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
+  PerformanceMetricTrendRead,
   PerformanceObservationRead,
   NotificationFrequency,
   NotificationPreferenceRead,
@@ -733,6 +734,7 @@ export default function HomePage() {
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
   const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
+  const [performanceTrends, setPerformanceTrends] = useState<PerformanceMetricTrendRead[]>([]);
   const [assessments, setAssessments] = useState<AthleteAssessmentRead[]>([]);
   const [performanceSummary, setPerformanceSummary] =
     useState<AthletePerformanceSummaryRead | null>(null);
@@ -1715,7 +1717,7 @@ export default function HomePage() {
 
   const loadAthletePerformance = useCallback(
     async (organizationId: string, athleteProfileId: string) => {
-      const [observationData, assessmentData, summaryData, benchmarkData] = await Promise.all([
+      const [observationData, assessmentData, summaryData, benchmarkData, trendData] = await Promise.all([
         apiRequest<PerformanceObservationRead[]>(
           `/performance/athletes/${athleteProfileId}/observations?organization_id=${organizationId}`
         ),
@@ -1727,12 +1729,16 @@ export default function HomePage() {
         ),
         apiRequest<PerformanceMetricBenchmarkRead[]>(
           `/performance/athletes/${athleteProfileId}/benchmarks?organization_id=${organizationId}`
+        ),
+        apiRequest<PerformanceMetricTrendRead[]>(
+          `/performance/athletes/${athleteProfileId}/trends?organization_id=${organizationId}`
         )
       ]);
       setObservations(observationData);
       setAssessments(assessmentData);
       setPerformanceSummary(summaryData);
       setPerformanceBenchmarks(benchmarkData);
+      setPerformanceTrends(trendData);
       setSelectedObservationId((current) =>
         observationData.some((observation) => observation.id === current)
           ? current
@@ -2481,6 +2487,7 @@ export default function HomePage() {
       setObservations([]);
       setAssessments([]);
       setPerformanceBenchmarks([]);
+      setPerformanceTrends([]);
       setPerformanceSummary(null);
       return;
     }
@@ -12582,6 +12589,21 @@ export default function HomePage() {
                       cohort avg {benchmark.cohort_average ?? "—"}{benchmark.unit ? ` ${benchmark.unit}` : ""}
                     </span>
                     <small>{benchmark.recommendation}</small>
+                  </div>
+                </article>
+              ))}
+              {performanceTrends.slice(0, 3).map((trend) => (
+                <article key={`${trend.metric_definition_id}-trend`} className="task-card">
+                  <div>
+                    <strong>{trend.metric_name} · {trend.trend_direction.replaceAll("_", " ")}</strong>
+                    <span>
+                      latest {trend.latest_value ?? "—"}{trend.unit ? ` ${trend.unit}` : ""}
+                      {" · "}
+                      forecast {trend.forecast_next_value ?? "—"}{trend.unit ? ` ${trend.unit}` : ""}
+                    </span>
+                    <small>
+                      consistency {trend.consistency_index ?? "—"} · {trend.recommendation}
+                    </small>
                   </div>
                 </article>
               ))}
