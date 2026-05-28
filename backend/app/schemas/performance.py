@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -179,3 +179,57 @@ class PerformanceMetricTrendRead(BaseModel):
     forecast_next_value: float | None
     trend_direction: str
     recommendation: str
+
+
+class PerformanceGoalCreate(BaseModel):
+    organization_id: UUID
+    metric_definition_id: UUID
+    title: str = Field(min_length=2, max_length=220)
+    target_value: float
+    baseline_value: float | None = None
+    direction: str | None = Field(default=None, max_length=40)
+    starts_at: date
+    due_at: date | None = None
+    reward_badge: str | None = Field(default=None, max_length=120)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class PerformanceGoalRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    athlete_profile_id: UUID
+    metric_definition_id: UUID
+    title: str
+    target_value: float
+    baseline_value: float | None
+    current_value: float | None
+    direction: str
+    starts_at: date
+    due_at: date | None
+    status: str
+    reward_badge: str | None
+    notes: str | None
+
+
+class PerformanceAchievementAwardRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    athlete_profile_id: UUID
+    goal_id: UUID | None
+    metric_definition_id: UUID | None
+    title: str
+    badge_code: str
+    achievement_type: str
+    achieved_value: float | None
+    threshold_value: float | None
+    awarded_at: datetime
+    source_summary: str | None
+
+
+class PerformanceAchievementRunRead(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID
+    evaluated_goals: int
+    awarded_count: int
+    updated_goals: int
+    awards: list[PerformanceAchievementAwardRead]

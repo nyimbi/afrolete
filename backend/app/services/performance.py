@@ -12,6 +12,8 @@ from app.models.organization import Organization
 from app.models.performance import (
     AthleteAssessment,
     AthletePerformanceObservation,
+    PerformanceAchievementAward,
+    PerformanceGoal,
     PerformanceMetricDefinition,
 )
 from app.models.enums import MetricSource, MetricVerificationStatus
@@ -19,6 +21,7 @@ from app.models.team import AthleteProfile
 from app.schemas.performance import (
     AthleteAssessmentCreate,
     MetricDefinitionCreate,
+    PerformanceGoalCreate,
     PerformanceIngestionCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
@@ -456,6 +459,127 @@ async def performance_metric_trends(
     return trends
 
 
+async def create_performance_goal(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    athlete_profile_id: UUID,
+    payload: PerformanceGoalCreate,
+    authz: AuthorizationService,
+) -> PerformanceGoal:
+    await get_athlete_profile(db, athlete_profile_id, payload.organization_id)
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    metric = await db.get(PerformanceMetricDefinition, payload.metric_definition_id)
+    if metric is None or metric.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metric not found")
+    current_value = await latest_metric_value(
+        db,
+        payload.organization_id,
+        athlete_profile_id,
+        payload.metric_definition_id,
+    )
+    baseline_value = payload.baseline_value if payload.baseline_value is not None else current_value
+    direction = payload.direction or ("increase" if metric.higher_is_better else "decrease")
+    goal = PerformanceGoal(
+        athlete_profile_id=athlete_profile_id,
+        baseline_value=baseline_value,
+        current_value=current_value,
+        direction=direction,
+        status=goal_status(current_value, payload.target_value, direction),
+        reward_badge=payload.reward_badge or badge_code(payload.title),
+        **payload.model_dump(exclude={"baseline_value", "direction", "reward_badge"}),
+    )
+    db.add(goal)
+    await db.commit()
+    await db.refresh(goal)
+    return goal
+
+
+async def list_performance_goals(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+) -> list[PerformanceGoal]:
+    await get_athlete_profile(db, athlete_profile_id, organization_id)
+    return list(
+        (
+            await db.scalars(
+                select(PerformanceGoal)
+                .where(PerformanceGoal.organization_id == organization_id)
+                .where(PerformanceGoal.athlete_profile_id == athlete_profile_id)
+                .order_by(PerformanceGoal.status, PerformanceGoal.due_at, PerformanceGoal.created_at.desc())
+            )
+        ).all()
+    )
+
+
+async def list_performance_awards(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+) -> list[PerformanceAchievementAward]:
+    await get_athlete_profile(db, athlete_profile_id, organization_id)
+    return list(
+        (
+            await db.scalars(
+                select(PerformanceAchievementAward)
+                .where(PerformanceAchievementAward.organization_id == organization_id)
+                .where(PerformanceAchievementAward.athlete_profile_id == athlete_profile_id)
+                .order_by(PerformanceAchievementAward.awarded_at.desc())
+            )
+        ).all()
+    )
+
+
+async def evaluate_performance_achievements(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await get_athlete_profile(db, athlete_profile_id, organization_id)
+    await ensure_manage_performance(authz, identity, organization_id)
+    goals = await list_performance_goals(db, organization_id, athlete_profile_id)
+    updated_goals = 0
+    awards: list[PerformanceAchievementAward] = []
+    for goal in goals:
+        current_value = await latest_metric_value(db, organization_id, athlete_profile_id, goal.metric_definition_id)
+        if current_value != goal.current_value:
+            goal.current_value = current_value
+            updated_goals += 1
+        if goal.status == "active" and goal_met(current_value, goal.target_value, goal.direction):
+            goal.status = "achieved"
+            updated_goals += 1
+            award = await create_award_once(
+                db,
+                organization_id=organization_id,
+                athlete_profile_id=athlete_profile_id,
+                goal_id=goal.id,
+                metric_definition_id=goal.metric_definition_id,
+                title=f"Goal achieved: {goal.title}",
+                badge_code=f"goal_{goal.id}",
+                achievement_type="goal_achieved",
+                achieved_value=current_value,
+                threshold_value=goal.target_value,
+                source_summary=f"Target {goal.target_value:g} reached with {current_value:g}.",
+            )
+            if award is not None:
+                awards.append(award)
+    personal_best_awards = await award_personal_bests(db, organization_id, athlete_profile_id)
+    awards.extend(personal_best_awards)
+    await db.commit()
+    for award in awards:
+        await db.refresh(award)
+    return {
+        "organization_id": organization_id,
+        "athlete_profile_id": athlete_profile_id,
+        "evaluated_goals": len(goals),
+        "awarded_count": len(awards),
+        "updated_goals": updated_goals,
+        "awards": awards,
+    }
+
+
 async def get_athlete_profile(
     db: AsyncSession,
     athlete_profile_id: UUID,
@@ -677,6 +801,129 @@ def trend_recommendation(
     if change_from_first is None:
         return f"Capture another {metric_name} result to calculate trend direction."
     return f"Continue collecting {metric_name}; latest value is {latest_text}."
+
+
+async def latest_metric_value(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    metric_definition_id: UUID,
+) -> float | None:
+    observation = await db.scalar(
+        select(AthletePerformanceObservation)
+        .where(AthletePerformanceObservation.organization_id == organization_id)
+        .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+        .where(AthletePerformanceObservation.metric_definition_id == metric_definition_id)
+        .where(AthletePerformanceObservation.verification_status != MetricVerificationStatus.REJECTED)
+        .order_by(AthletePerformanceObservation.observed_at.desc())
+        .limit(1)
+    )
+    return observation.value if observation is not None else None
+
+
+def goal_status(current_value: float | None, target_value: float, direction: str) -> str:
+    return "achieved" if goal_met(current_value, target_value, direction) else "active"
+
+
+def goal_met(current_value: float | None, target_value: float, direction: str) -> bool:
+    if current_value is None:
+        return False
+    if direction == "decrease":
+        return current_value <= target_value
+    return current_value >= target_value
+
+
+def badge_code(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    return normalized[:100] or "performance_goal"
+
+
+async def create_award_once(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+    goal_id: UUID | None,
+    metric_definition_id: UUID | None,
+    title: str,
+    badge_code: str,
+    achievement_type: str,
+    achieved_value: float | None,
+    threshold_value: float | None,
+    source_summary: str,
+) -> PerformanceAchievementAward | None:
+    existing = await db.scalar(
+        select(PerformanceAchievementAward).where(
+            PerformanceAchievementAward.organization_id == organization_id,
+            PerformanceAchievementAward.athlete_profile_id == athlete_profile_id,
+            PerformanceAchievementAward.badge_code == badge_code,
+        )
+    )
+    if existing is not None:
+        return None
+    award = PerformanceAchievementAward(
+        organization_id=organization_id,
+        athlete_profile_id=athlete_profile_id,
+        goal_id=goal_id,
+        metric_definition_id=metric_definition_id,
+        title=title,
+        badge_code=badge_code,
+        achievement_type=achievement_type,
+        achieved_value=achieved_value,
+        threshold_value=threshold_value,
+        awarded_at=datetime.now(UTC),
+        source_summary=source_summary,
+    )
+    db.add(award)
+    return award
+
+
+async def award_personal_bests(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+) -> list[PerformanceAchievementAward]:
+    metrics = await list_metric_definitions(db, organization_id)
+    awards: list[PerformanceAchievementAward] = []
+    for metric in metrics:
+        observations = list(
+            (
+                await db.scalars(
+                    select(AthletePerformanceObservation)
+                    .where(AthletePerformanceObservation.organization_id == organization_id)
+                    .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+                    .where(AthletePerformanceObservation.metric_definition_id == metric.id)
+                    .where(
+                        AthletePerformanceObservation.verification_status
+                        != MetricVerificationStatus.REJECTED
+                    )
+                    .order_by(AthletePerformanceObservation.observed_at)
+                )
+            ).all()
+        )
+        if len(observations) < 2:
+            continue
+        values = [observation.value for observation in observations]
+        latest = values[-1]
+        best = max(values) if metric.higher_is_better else min(values)
+        if latest != best:
+            continue
+        award = await create_award_once(
+            db,
+            organization_id=organization_id,
+            athlete_profile_id=athlete_profile_id,
+            goal_id=None,
+            metric_definition_id=metric.id,
+            title=f"Personal best: {metric.name}",
+            badge_code=f"personal_best_{metric.id}_{latest:g}",
+            achievement_type="personal_best",
+            achieved_value=latest,
+            threshold_value=best,
+            source_summary=f"Latest {metric.name} value matched the athlete personal best.",
+        )
+        if award is not None:
+            awards.append(award)
+    return awards
 
 
 def extract_numeric_value(text: str | None) -> float | None:

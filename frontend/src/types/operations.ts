@@ -3198,6 +3198,47 @@ export type PerformanceMetricTrendRead = {
   recommendation: string;
 };
 
+export type PerformanceGoalRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  metric_definition_id: UUID;
+  title: string;
+  target_value: number;
+  baseline_value: number | null;
+  current_value: number | null;
+  direction: string;
+  starts_at: string;
+  due_at: string | null;
+  status: string;
+  reward_badge: string | null;
+  notes: string | null;
+};
+
+export type PerformanceAchievementAwardRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  goal_id: UUID | null;
+  metric_definition_id: UUID | null;
+  title: string;
+  badge_code: string;
+  achievement_type: string;
+  achieved_value: number | null;
+  threshold_value: number | null;
+  awarded_at: string;
+  source_summary: string | null;
+};
+
+export type PerformanceAchievementRunRead = {
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  evaluated_goals: number;
+  awarded_count: number;
+  updated_goals: number;
+  awards: PerformanceAchievementAwardRead[];
+};
+
 export type TrainingDrillRead = {
   id: UUID;
   organization_id: UUID;

@@ -10,6 +10,10 @@ from app.schemas.performance import (
     AthletePerformanceSummaryRead,
     MetricDefinitionCreate,
     MetricDefinitionRead,
+    PerformanceAchievementAwardRead,
+    PerformanceAchievementRunRead,
+    PerformanceGoalCreate,
+    PerformanceGoalRead,
     PerformanceMetricBenchmarkRead,
     PerformanceMetricTrendRead,
     PerformanceIngestionCreate,
@@ -23,9 +27,13 @@ from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.performance import (
     create_assessment,
+    create_performance_goal,
     create_metric_definition,
     create_observation,
+    evaluate_performance_achievements,
     ingest_performance_evidence,
+    list_performance_awards,
+    list_performance_goals,
     list_assessments,
     list_metric_definitions,
     list_observations,
@@ -90,6 +98,42 @@ def to_assessment_read(assessment) -> AthleteAssessmentRead:
         summary=assessment.summary,
         recommendations=assessment.recommendations,
         verification_status=assessment.verification_status,
+    )
+
+
+def to_goal_read(goal) -> PerformanceGoalRead:
+    return PerformanceGoalRead(
+        id=goal.id,
+        organization_id=goal.organization_id,
+        athlete_profile_id=goal.athlete_profile_id,
+        metric_definition_id=goal.metric_definition_id,
+        title=goal.title,
+        target_value=goal.target_value,
+        baseline_value=goal.baseline_value,
+        current_value=goal.current_value,
+        direction=goal.direction,
+        starts_at=goal.starts_at,
+        due_at=goal.due_at,
+        status=goal.status,
+        reward_badge=goal.reward_badge,
+        notes=goal.notes,
+    )
+
+
+def to_award_read(award) -> PerformanceAchievementAwardRead:
+    return PerformanceAchievementAwardRead(
+        id=award.id,
+        organization_id=award.organization_id,
+        athlete_profile_id=award.athlete_profile_id,
+        goal_id=award.goal_id,
+        metric_definition_id=award.metric_definition_id,
+        title=award.title,
+        badge_code=award.badge_code,
+        achievement_type=award.achievement_type,
+        achieved_value=award.achieved_value,
+        threshold_value=award.threshold_value,
+        awarded_at=award.awarded_at,
+        source_summary=award.source_summary,
     )
 
 
@@ -297,3 +341,76 @@ async def athlete_performance_trends_route(
             sport=sport,
         )
     ]
+
+
+@router.post(
+    "/athletes/{athlete_profile_id}/goals",
+    response_model=PerformanceGoalRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_performance_goal_route(
+    athlete_profile_id: UUID,
+    payload: PerformanceGoalCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceGoalRead:
+    return to_goal_read(await create_performance_goal(db, identity, athlete_profile_id, payload, authz))
+
+
+@router.get(
+    "/athletes/{athlete_profile_id}/goals",
+    response_model=list[PerformanceGoalRead],
+)
+async def list_performance_goals_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceGoalRead]:
+    return [
+        to_goal_read(goal)
+        for goal in await list_performance_goals(db, organization_id, athlete_profile_id)
+    ]
+
+
+@router.get(
+    "/athletes/{athlete_profile_id}/awards",
+    response_model=list[PerformanceAchievementAwardRead],
+)
+async def list_performance_awards_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceAchievementAwardRead]:
+    return [
+        to_award_read(award)
+        for award in await list_performance_awards(db, organization_id, athlete_profile_id)
+    ]
+
+
+@router.post(
+    "/athletes/{athlete_profile_id}/achievements/evaluate",
+    response_model=PerformanceAchievementRunRead,
+)
+async def evaluate_performance_achievements_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceAchievementRunRead:
+    result = await evaluate_performance_achievements(
+        db,
+        identity,
+        organization_id,
+        athlete_profile_id,
+        authz,
+    )
+    return PerformanceAchievementRunRead(
+        organization_id=result["organization_id"],
+        athlete_profile_id=result["athlete_profile_id"],
+        evaluated_goals=result["evaluated_goals"],
+        awarded_count=result["awarded_count"],
+        updated_goals=result["updated_goals"],
+        awards=[to_award_read(award) for award in result["awards"]],
+    )

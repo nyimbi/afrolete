@@ -196,6 +196,9 @@ import type {
   OrganizationType,
   ParticipationClearanceRead,
   PaymentSettlementRead,
+  PerformanceAchievementAwardRead,
+  PerformanceAchievementRunRead,
+  PerformanceGoalRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
   PerformanceMetricTrendRead,
@@ -735,6 +738,10 @@ export default function HomePage() {
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
   const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
   const [performanceTrends, setPerformanceTrends] = useState<PerformanceMetricTrendRead[]>([]);
+  const [performanceGoals, setPerformanceGoals] = useState<PerformanceGoalRead[]>([]);
+  const [performanceAwards, setPerformanceAwards] = useState<PerformanceAchievementAwardRead[]>([]);
+  const [performanceAchievementRun, setPerformanceAchievementRun] =
+    useState<PerformanceAchievementRunRead | null>(null);
   const [assessments, setAssessments] = useState<AthleteAssessmentRead[]>([]);
   const [performanceSummary, setPerformanceSummary] =
     useState<AthletePerformanceSummaryRead | null>(null);
@@ -1131,6 +1138,14 @@ export default function HomePage() {
     evidence_text: "Clip analysis: first touch quality 8.4, pressure scan before receiving.",
     confidence: 0.9,
     notes: "Improved under pressure."
+  });
+  const [performanceGoalForm, setPerformanceGoalForm] = useState({
+    title: "Reach first-touch score 9",
+    target_value: 9,
+    starts_at: "2026-05-28",
+    due_at: "2026-06-28",
+    reward_badge: "First Touch Builder",
+    notes: "Goal set from performance trend review."
   });
   const [assessmentForm, setAssessmentForm] = useState({
     physical_score: 70,
@@ -1717,7 +1732,15 @@ export default function HomePage() {
 
   const loadAthletePerformance = useCallback(
     async (organizationId: string, athleteProfileId: string) => {
-      const [observationData, assessmentData, summaryData, benchmarkData, trendData] = await Promise.all([
+      const [
+        observationData,
+        assessmentData,
+        summaryData,
+        benchmarkData,
+        trendData,
+        goalData,
+        awardData
+      ] = await Promise.all([
         apiRequest<PerformanceObservationRead[]>(
           `/performance/athletes/${athleteProfileId}/observations?organization_id=${organizationId}`
         ),
@@ -1732,6 +1755,12 @@ export default function HomePage() {
         ),
         apiRequest<PerformanceMetricTrendRead[]>(
           `/performance/athletes/${athleteProfileId}/trends?organization_id=${organizationId}`
+        ),
+        apiRequest<PerformanceGoalRead[]>(
+          `/performance/athletes/${athleteProfileId}/goals?organization_id=${organizationId}`
+        ),
+        apiRequest<PerformanceAchievementAwardRead[]>(
+          `/performance/athletes/${athleteProfileId}/awards?organization_id=${organizationId}`
         )
       ]);
       setObservations(observationData);
@@ -1739,6 +1768,8 @@ export default function HomePage() {
       setPerformanceSummary(summaryData);
       setPerformanceBenchmarks(benchmarkData);
       setPerformanceTrends(trendData);
+      setPerformanceGoals(goalData);
+      setPerformanceAwards(awardData);
       setSelectedObservationId((current) =>
         observationData.some((observation) => observation.id === current)
           ? current
@@ -2488,6 +2519,9 @@ export default function HomePage() {
       setAssessments([]);
       setPerformanceBenchmarks([]);
       setPerformanceTrends([]);
+      setPerformanceGoals([]);
+      setPerformanceAwards([]);
+      setPerformanceAchievementRun(null);
       setPerformanceSummary(null);
       return;
     }
@@ -5722,6 +5756,63 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== observation.id)
         ]);
         addLog(`Observation verified: ${observation.value}`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const createPerformanceGoal = () => {
+    const metric = metricDefinitions[0];
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || !metric) {
+      addLog("Select an athlete and metric first", "bad");
+      return;
+    }
+    runAction(
+      "create-performance-goal",
+      () =>
+        apiRequest<PerformanceGoalRead>(
+          `/performance/athletes/${selectedAthlete.athleteProfileId}/goals`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              metric_definition_id: metric.id,
+              ...performanceGoalForm,
+              direction: metric.higher_is_better ? "increase" : "decrease"
+            }
+          }
+        ),
+      (goal) => {
+        setPerformanceGoals((current) => [goal, ...current.filter((item) => item.id !== goal.id)]);
+        addLog(`Goal created: ${goal.title}`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const evaluatePerformanceAchievements = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete first", "bad");
+      return;
+    }
+    runAction(
+      "evaluate-performance-achievements",
+      () =>
+        apiRequest<PerformanceAchievementRunRead>(
+          `/performance/athletes/${selectedAthlete.athleteProfileId}/achievements/evaluate?organization_id=${selectedOrganizationId}`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (run) => {
+        setPerformanceAchievementRun(run);
+        setPerformanceAwards((current) => [
+          ...run.awards,
+          ...current.filter((award) => !run.awards.some((item) => item.id === award.id))
+        ]);
+        addLog(`Achievement scan awarded ${run.awarded_count} badge(s)`, run.awarded_count ? "good" : "neutral");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
       }
     );
@@ -12518,6 +12609,8 @@ export default function HomePage() {
                 <button type="button" onClick={recordObservation} disabled={busyAction !== null}>Observe</button>
                 <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
                 <button type="button" onClick={reviewSelectedObservation} disabled={busyAction !== null}>Review</button>
+                <button type="button" onClick={createPerformanceGoal} disabled={busyAction !== null}>Goal</button>
+                <button type="button" onClick={evaluatePerformanceAchievements} disabled={busyAction !== null}>Award</button>
               </div>
             </div>
             <div className="form-grid">
@@ -12569,8 +12662,49 @@ export default function HomePage() {
                 Evidence text
                 <input value={observationForm.evidence_text} onChange={(event) => setObservationForm({ ...observationForm, evidence_text: event.target.value })} />
               </label>
+              <label>
+                Goal
+                <input value={performanceGoalForm.title} onChange={(event) => setPerformanceGoalForm({ ...performanceGoalForm, title: event.target.value })} />
+              </label>
+              <label>
+                Target
+                <input type="number" value={performanceGoalForm.target_value} onChange={(event) => setPerformanceGoalForm({ ...performanceGoalForm, target_value: Number(event.target.value) })} />
+              </label>
+              <label>
+                Due
+                <input type="date" value={performanceGoalForm.due_at} onChange={(event) => setPerformanceGoalForm({ ...performanceGoalForm, due_at: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
+              {performanceAchievementRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Achievement scan · {performanceAchievementRun.awarded_count} awarded</strong>
+                    <span>{performanceAchievementRun.evaluated_goals} goals evaluated · {performanceAchievementRun.updated_goals} updated</span>
+                  </div>
+                </article>
+              ) : null}
+              {performanceAwards.slice(0, 3).map((award) => (
+                <article key={award.id} className="task-card">
+                  <div>
+                    <strong>{award.title}</strong>
+                    <span>{award.achievement_type.replaceAll("_", " ")} · {award.badge_code}</span>
+                    <small>{award.source_summary ?? "Awarded from performance history."}</small>
+                  </div>
+                </article>
+              ))}
+              {performanceGoals.slice(0, 3).map((goal) => (
+                <article key={goal.id} className="task-card">
+                  <div>
+                    <strong>{goal.title} · {goal.status}</strong>
+                    <span>
+                      current {goal.current_value ?? "—"} / target {goal.target_value}
+                      {goal.due_at ? ` · due ${goal.due_at}` : ""}
+                    </span>
+                    <small>{goal.reward_badge ?? "Performance goal"} · {goal.notes ?? "No notes"}</small>
+                  </div>
+                </article>
+              ))}
               {performanceIngestion ? (
                 <article className="task-card">
                   <div>

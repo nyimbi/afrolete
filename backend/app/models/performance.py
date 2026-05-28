@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -90,3 +90,57 @@ class AthleteAssessment(IdMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+
+
+class PerformanceGoal(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_goals"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), index=True
+    )
+    metric_definition_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_metric_definitions.id"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    target_value: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline_value: Mapped[float | None] = mapped_column(Float)
+    current_value: Mapped[float | None] = mapped_column(Float)
+    direction: Mapped[str] = mapped_column(String(40), default="increase", nullable=False)
+    starts_at: Mapped[date] = mapped_column(nullable=False, index=True)
+    due_at: Mapped[date | None] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    reward_badge: Mapped[str | None] = mapped_column(String(120))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class PerformanceAchievementAward(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_achievement_awards"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "athlete_profile_id",
+            "badge_code",
+            name="uq_performance_achievement_awards_badge",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), index=True
+    )
+    goal_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("performance_goals.id"), index=True)
+    metric_definition_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("performance_metric_definitions.id"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    badge_code: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    achievement_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    achieved_value: Mapped[float | None] = mapped_column(Float)
+    threshold_value: Mapped[float | None] = mapped_column(Float)
+    awarded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    source_summary: Mapped[str | None] = mapped_column(Text)
