@@ -1,0 +1,16 @@
+[Unit]
+Description=AfroLete due background worker
+Documentation=/opt/afrolete/backend/README.md
+After=network-online.target afrolete-backend.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=afrolete
+WorkingDirectory=/opt/afrolete/backend
+EnvironmentFile=/run/pjs/afrolete-backend.env
+Environment=AFROLETE_DUE_WORKER_LIMIT=25
+Environment=AFROLETE_DUE_WORKER_WEBHOOK_MAX_ATTEMPTS=5
+ExecStart=/opt/afrolete/backend/.venv/bin/python -m app.workers.due --limit ${AFROLETE_DUE_WORKER_LIMIT} --webhook-max-attempts ${AFROLETE_DUE_WORKER_WEBHOOK_MAX_ATTEMPTS}
+NoNewPrivileges=true
+PrivateTmp=true
