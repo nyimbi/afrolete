@@ -308,6 +308,99 @@ async def performance_summary(
     )
 
 
+async def performance_metric_benchmarks(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID | None = None,
+    sport: str | None = None,
+) -> list[dict[str, object]]:
+    athlete_profile = None
+    if athlete_profile_id is not None:
+        athlete_profile = await get_athlete_profile(db, athlete_profile_id, organization_id)
+    metrics = await list_metric_definitions(db, organization_id, sport=sport)
+    metric_by_id = {metric.id: metric for metric in metrics}
+    if not metric_by_id:
+        return []
+
+    observations = list(
+        (
+            await db.scalars(
+                select(AthletePerformanceObservation)
+                .where(AthletePerformanceObservation.organization_id == organization_id)
+                .where(AthletePerformanceObservation.metric_definition_id.in_(list(metric_by_id)))
+                .where(
+                    AthletePerformanceObservation.verification_status
+                    != MetricVerificationStatus.REJECTED
+                )
+                .order_by(AthletePerformanceObservation.observed_at.desc())
+            )
+        ).all()
+    )
+    latest_by_metric_athlete: dict[
+        tuple[UUID, UUID],
+        AthletePerformanceObservation,
+    ] = {}
+    for observation in observations:
+        key = (observation.metric_definition_id, observation.athlete_profile_id)
+        latest_by_metric_athlete.setdefault(key, observation)
+
+    benchmarks: list[dict[str, object]] = []
+    for metric in metrics:
+        cohort_observations = [
+            observation
+            for (metric_id, _), observation in latest_by_metric_athlete.items()
+            if metric_id == metric.id
+        ]
+        values = [observation.value for observation in cohort_observations]
+        athlete_observation = (
+            latest_by_metric_athlete.get((metric.id, athlete_profile.id))
+            if athlete_profile is not None
+            else None
+        )
+        athlete_value = athlete_observation.value if athlete_observation is not None else None
+        average = sum(values) / len(values) if values else None
+        percentile_rank, cohort_rank = athlete_percentile_and_rank(
+            values,
+            athlete_value,
+            metric.higher_is_better,
+        )
+        delta_to_average = None
+        if average is not None and athlete_value is not None:
+            raw_delta = athlete_value - average
+            delta_to_average = raw_delta if metric.higher_is_better else -raw_delta
+        band = benchmark_band(percentile_rank, sample_size=len(values), athlete_value=athlete_value)
+        benchmarks.append(
+            {
+                "metric_definition_id": metric.id,
+                "metric_code": metric.code,
+                "metric_name": metric.name,
+                "sport": metric.sport,
+                "category": metric.category,
+                "unit": metric.unit,
+                "higher_is_better": metric.higher_is_better,
+                "sample_size": len(values),
+                "athlete_value": athlete_value,
+                "cohort_average": round(average, 2) if average is not None else None,
+                "cohort_min": round(min(values), 2) if values else None,
+                "cohort_max": round(max(values), 2) if values else None,
+                "delta_to_average": round(delta_to_average, 2)
+                if delta_to_average is not None
+                else None,
+                "percentile_rank": percentile_rank,
+                "cohort_rank": cohort_rank,
+                "benchmark_band": band,
+                "recommendation": performance_benchmark_recommendation(
+                    band,
+                    metric.name,
+                    metric.unit,
+                    athlete_value,
+                    average,
+                ),
+            }
+        )
+    return benchmarks
+
+
 async def get_athlete_profile(
     db: AsyncSession,
     athlete_profile_id: UUID,
@@ -333,6 +426,75 @@ def rating_for_score(score: float | None) -> str | None:
     if score >= 50:
         return "emerging"
     return "foundation"
+
+
+def athlete_percentile_and_rank(
+    values: list[float],
+    athlete_value: float | None,
+    higher_is_better: bool,
+) -> tuple[float | None, int | None]:
+    if athlete_value is None or not values:
+        return None, None
+    if higher_is_better:
+        better_or_equal = sum(1 for value in values if value <= athlete_value)
+        better = sum(1 for value in values if value > athlete_value)
+    else:
+        better_or_equal = sum(1 for value in values if value >= athlete_value)
+        better = sum(1 for value in values if value < athlete_value)
+    return round(better_or_equal / len(values) * 100, 1), better + 1
+
+
+def benchmark_band(
+    percentile_rank: float | None,
+    sample_size: int,
+    athlete_value: float | None,
+) -> str:
+    if sample_size == 0:
+        return "no_data"
+    if athlete_value is None or percentile_rank is None:
+        return "cohort_ready"
+    if percentile_rank >= 75:
+        return "top_quartile"
+    if percentile_rank >= 55:
+        return "above_cohort"
+    if percentile_rank >= 40:
+        return "on_track"
+    return "watch"
+
+
+def performance_benchmark_recommendation(
+    band: str,
+    metric_name: str,
+    unit: str | None,
+    athlete_value: float | None,
+    average: float | None,
+) -> str:
+    suffix = f" {unit}" if unit else ""
+    if band == "no_data":
+        return f"Record at least one {metric_name} observation to establish the cohort baseline."
+    if band == "cohort_ready":
+        return f"Cohort baseline is ready; select an athlete to compare {metric_name}."
+    if athlete_value is None or average is None:
+        return f"Continue collecting {metric_name} observations before making coaching decisions."
+    if band == "top_quartile":
+        return (
+            f"Protect the strength: athlete value {athlete_value:g}{suffix} is ahead of "
+            f"the cohort average {average:g}{suffix}."
+        )
+    if band == "above_cohort":
+        return (
+            f"Maintain progression: athlete value {athlete_value:g}{suffix} is trending above "
+            f"the cohort average {average:g}{suffix}."
+        )
+    if band == "on_track":
+        return (
+            f"Keep the current plan and reassess soon; athlete value {athlete_value:g}{suffix} "
+            f"is near the cohort average {average:g}{suffix}."
+        )
+    return (
+        f"Prioritize targeted work on {metric_name}; athlete value {athlete_value:g}{suffix} "
+        f"is behind the cohort average {average:g}{suffix}."
+    )
 
 
 def extract_numeric_value(text: str | None) -> float | None:

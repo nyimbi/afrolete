@@ -197,6 +197,7 @@ import type {
   ParticipationClearanceRead,
   PaymentSettlementRead,
   PerformanceIngestionRead,
+  PerformanceMetricBenchmarkRead,
   PerformanceObservationRead,
   NotificationFrequency,
   NotificationPreferenceRead,
@@ -731,6 +732,7 @@ export default function HomePage() {
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
+  const [performanceBenchmarks, setPerformanceBenchmarks] = useState<PerformanceMetricBenchmarkRead[]>([]);
   const [assessments, setAssessments] = useState<AthleteAssessmentRead[]>([]);
   const [performanceSummary, setPerformanceSummary] =
     useState<AthletePerformanceSummaryRead | null>(null);
@@ -1713,7 +1715,7 @@ export default function HomePage() {
 
   const loadAthletePerformance = useCallback(
     async (organizationId: string, athleteProfileId: string) => {
-      const [observationData, assessmentData, summaryData] = await Promise.all([
+      const [observationData, assessmentData, summaryData, benchmarkData] = await Promise.all([
         apiRequest<PerformanceObservationRead[]>(
           `/performance/athletes/${athleteProfileId}/observations?organization_id=${organizationId}`
         ),
@@ -1722,11 +1724,15 @@ export default function HomePage() {
         ),
         apiRequest<AthletePerformanceSummaryRead>(
           `/performance/athletes/${athleteProfileId}/summary?organization_id=${organizationId}`
+        ),
+        apiRequest<PerformanceMetricBenchmarkRead[]>(
+          `/performance/athletes/${athleteProfileId}/benchmarks?organization_id=${organizationId}`
         )
       ]);
       setObservations(observationData);
       setAssessments(assessmentData);
       setPerformanceSummary(summaryData);
+      setPerformanceBenchmarks(benchmarkData);
       setSelectedObservationId((current) =>
         observationData.some((observation) => observation.id === current)
           ? current
@@ -2474,6 +2480,7 @@ export default function HomePage() {
     if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
       setObservations([]);
       setAssessments([]);
+      setPerformanceBenchmarks([]);
       setPerformanceSummary(null);
       return;
     }
@@ -12565,6 +12572,19 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {performanceBenchmarks.slice(0, 3).map((benchmark) => (
+                <article key={benchmark.metric_definition_id} className="task-card">
+                  <div>
+                    <strong>{benchmark.metric_name} · {benchmark.benchmark_band.replaceAll("_", " ")}</strong>
+                    <span>
+                      {benchmark.percentile_rank === null ? "No athlete percentile" : `${benchmark.percentile_rank}th percentile`}
+                      {" · "}
+                      cohort avg {benchmark.cohort_average ?? "—"}{benchmark.unit ? ` ${benchmark.unit}` : ""}
+                    </span>
+                    <small>{benchmark.recommendation}</small>
+                  </div>
+                </article>
+              ))}
               {observations.slice(0, 4).map((observation) => (
                 <button
                   type="button"

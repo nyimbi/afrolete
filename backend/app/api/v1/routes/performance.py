@@ -10,6 +10,7 @@ from app.schemas.performance import (
     AthletePerformanceSummaryRead,
     MetricDefinitionCreate,
     MetricDefinitionRead,
+    PerformanceMetricBenchmarkRead,
     PerformanceIngestionCreate,
     PerformanceIngestionRead,
     PerformanceObservationCreate,
@@ -27,6 +28,7 @@ from app.services.performance import (
     list_assessments,
     list_metric_definitions,
     list_observations,
+    performance_metric_benchmarks,
     performance_summary,
     review_observation,
 )
@@ -233,3 +235,42 @@ async def performance_summary_route(
         latest_assessment_id=latest_assessment_id,
         rating=rating,
     )
+
+
+@router.get("/benchmarks", response_model=list[PerformanceMetricBenchmarkRead])
+async def performance_benchmarks_route(
+    organization_id: UUID = Query(),
+    athlete_profile_id: UUID | None = Query(default=None),
+    sport: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceMetricBenchmarkRead]:
+    return [
+        PerformanceMetricBenchmarkRead(**benchmark)
+        for benchmark in await performance_metric_benchmarks(
+            db,
+            organization_id,
+            athlete_profile_id=athlete_profile_id,
+            sport=sport,
+        )
+    ]
+
+
+@router.get(
+    "/athletes/{athlete_profile_id}/benchmarks",
+    response_model=list[PerformanceMetricBenchmarkRead],
+)
+async def athlete_performance_benchmarks_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    sport: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceMetricBenchmarkRead]:
+    return [
+        PerformanceMetricBenchmarkRead(**benchmark)
+        for benchmark in await performance_metric_benchmarks(
+            db,
+            organization_id,
+            athlete_profile_id=athlete_profile_id,
+            sport=sport,
+        )
+    ]

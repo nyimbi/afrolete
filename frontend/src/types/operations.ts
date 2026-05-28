@@ -3156,6 +3156,26 @@ export type AthletePerformanceSummaryRead = {
   rating: string | null;
 };
 
+export type PerformanceMetricBenchmarkRead = {
+  metric_definition_id: UUID;
+  metric_code: string;
+  metric_name: string;
+  sport: string | null;
+  category: MetricCategory;
+  unit: string | null;
+  higher_is_better: boolean;
+  sample_size: number;
+  athlete_value: number | null;
+  cohort_average: number | null;
+  cohort_min: number | null;
+  cohort_max: number | null;
+  delta_to_average: number | null;
+  percentile_rank: number | null;
+  cohort_rank: number | null;
+  benchmark_band: string;
+  recommendation: string;
+};
+
 export type TrainingDrillRead = {
   id: UUID;
   organization_id: UUID;

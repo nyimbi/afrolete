@@ -137,3 +137,23 @@ class AthletePerformanceSummaryRead(BaseModel):
     assessment_count: int
     latest_assessment_id: UUID | None
     rating: str | None
+
+
+class PerformanceMetricBenchmarkRead(BaseModel):
+    metric_definition_id: UUID
+    metric_code: str
+    metric_name: str
+    sport: str | None
+    category: MetricCategory
+    unit: str | None
+    higher_is_better: bool
+    sample_size: int
+    athlete_value: float | None
+    cohort_average: float | None
+    cohort_min: float | None
+    cohort_max: float | None
+    delta_to_average: float | None
+    percentile_rank: float | None
+    cohort_rank: int | None
+    benchmark_band: str
+    recommendation: str
