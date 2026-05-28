@@ -165,6 +165,11 @@ def to_wearable_connection_read(connection) -> PerformanceWearableConnectionRead
         oauth_state_pending=bool(connection.oauth_state_hash),
         oauth_state_expires_at=connection.oauth_state_expires_at,
         oauth_authorized_at=connection.oauth_authorized_at,
+        provider_pull_url=connection.provider_pull_url,
+        provider_pull_cursor_param=connection.provider_pull_cursor_param,
+        provider_pull_since_param=connection.provider_pull_since_param,
+        provider_pull_until_param=connection.provider_pull_until_param,
+        provider_pull_configured=bool(connection.provider_pull_url),
         sync_cursor=connection.sync_cursor,
         last_sync_at=connection.last_sync_at,
         webhook_registered=connection.webhook_registered,
@@ -187,6 +192,8 @@ def to_wearable_sync_run_read(run) -> PerformanceWearableSyncRunRead:
         observation_count=run.observation_count,
         skipped_metric_count=run.skipped_metric_count,
         replayed=run.replayed,
+        provider_status_code=run.provider_status_code,
+        provider_response_hash=run.provider_response_hash,
         message=run.message,
     )
 

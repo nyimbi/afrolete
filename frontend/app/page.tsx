@@ -6510,6 +6510,7 @@ export default function HomePage() {
             scopes: ["read:profile", "read:recovery", "read:metrics"],
             access_token_secret_path: `secret/data/afrolete/wearables/${selectedOrganizationId}/${selectedAthlete.athleteProfileId}/${provider}`,
             webhook_secret_path: `secret/data/afrolete/wearables/${selectedOrganizationId}/${selectedAthlete.athleteProfileId}/${provider}-webhook`,
+            provider_pull_url: `https://${provider}.connect.example/api/wearables/pull`,
             webhook_registered: true,
             default_metric_definition_ids: wearableMetricIds
           }
@@ -6545,6 +6546,32 @@ export default function HomePage() {
       (syncRun) => {
         setWearableSyncRun(syncRun);
         addLog(`${syncRun.provider} sync ${syncRun.status}: ${syncRun.observation_count} observation(s)`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const runWearableConnectionPull = () => {
+    const connection = wearableConnections[0];
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || !connection) {
+      addLog("Create a wearable connection before pulling provider data", "bad");
+      return;
+    }
+    runAction(
+      "pull-wearable-connection",
+      () =>
+        apiRequest<PerformanceWearableSyncRunRead>(`/performance/wearable-connections/${connection.id}/sync-runs`, {
+          method: "POST",
+          identity,
+          body: {
+            metric_definition_ids: connection.default_metric_definition_ids,
+            since: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+            until: new Date().toISOString()
+          }
+        }),
+      (syncRun) => {
+        setWearableSyncRun(syncRun);
+        addLog(`${syncRun.provider} provider pull ${syncRun.status}`, syncRun.status === "completed" ? "good" : "neutral");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
       }
     );
@@ -13720,6 +13747,7 @@ export default function HomePage() {
                 <button type="button" onClick={ingestPerformanceWearableWebhook} disabled={busyAction !== null}>Webhook</button>
                 <button type="button" onClick={createWearableConnection} disabled={busyAction !== null}>Connect</button>
                 <button type="button" onClick={runWearableConnectionSync} disabled={busyAction !== null}>Sync</button>
+                <button type="button" onClick={runWearableConnectionPull} disabled={busyAction !== null}>Pull</button>
                 <button type="button" onClick={startWearableOAuth} disabled={busyAction !== null}>OAuth</button>
                 <button type="button" onClick={completeWearableOAuth} disabled={busyAction !== null}>Callback</button>
                 <button type="button" onClick={refreshWearableToken} disabled={busyAction !== null}>Refresh</button>
@@ -14076,9 +14104,12 @@ export default function HomePage() {
                     <strong>{wearableSyncRun.provider} sync · {wearableSyncRun.status}</strong>
                     <span>
                       {wearableSyncRun.observation_count} observation(s) · {wearableSyncRun.skipped_metric_count} skipped ·{" "}
-                      {wearableSyncRun.replayed ? "replayed" : wearableSyncRun.sync_mode}
+                      {wearableSyncRun.replayed ? "replayed" : wearableSyncRun.provider_status_code ? `HTTP ${wearableSyncRun.provider_status_code}` : wearableSyncRun.sync_mode}
                     </span>
-                    <small>{wearableSyncRun.message ?? wearableSyncRun.external_event_id ?? "Provider sync run recorded."}</small>
+                    <small>
+                      {wearableSyncRun.message ?? wearableSyncRun.external_event_id ?? "Provider sync run recorded."}
+                      {wearableSyncRun.provider_response_hash ? ` · ${wearableSyncRun.provider_response_hash.slice(0, 12)}` : ""}
+                    </small>
                   </div>
                 </article>
               ) : null}
@@ -14118,7 +14149,8 @@ export default function HomePage() {
                     <strong>{connection.display_name} · {connection.status}</strong>
                     <span>
                       {connection.provider} · {connection.external_athlete_ref} ·{" "}
-                      {connection.access_token_recorded ? "token fingerprint recorded" : connection.access_token_configured ? "token path configured" : "token missing"}
+                      {connection.access_token_recorded ? "token fingerprint recorded" : connection.access_token_configured ? "token path configured" : "token missing"} ·{" "}
+                      {connection.provider_pull_configured ? "pull configured" : "pull not configured"}
                     </span>
                     <small>
                       {connection.webhook_registered ? "webhook registered" : "webhook not registered"} ·{" "}

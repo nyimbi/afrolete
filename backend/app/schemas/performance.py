@@ -139,6 +139,10 @@ class PerformanceWearableConnectionCreate(BaseModel):
     refresh_token_secret_path: str | None = Field(default=None, max_length=500)
     webhook_secret_path: str | None = Field(default=None, max_length=500)
     token_expires_at: datetime | None = None
+    provider_pull_url: str | None = Field(default=None, max_length=800)
+    provider_pull_cursor_param: str | None = Field(default="cursor", max_length=80)
+    provider_pull_since_param: str | None = Field(default="since", max_length=80)
+    provider_pull_until_param: str | None = Field(default="until", max_length=80)
     sync_cursor: str | None = Field(default=None, max_length=240)
     webhook_registered: bool = False
     default_metric_definition_ids: list[UUID] = Field(default_factory=list)
@@ -173,6 +177,11 @@ class PerformanceWearableConnectionRead(BaseModel):
     oauth_state_pending: bool
     oauth_state_expires_at: datetime | None
     oauth_authorized_at: datetime | None
+    provider_pull_url: str | None
+    provider_pull_cursor_param: str | None
+    provider_pull_since_param: str | None
+    provider_pull_until_param: str | None
+    provider_pull_configured: bool
     sync_cursor: str | None
     last_sync_at: datetime | None
     webhook_registered: bool
@@ -184,6 +193,8 @@ class PerformanceWearableSyncRunCreate(BaseModel):
     payload: dict[str, Any] | None = None
     metric_definition_ids: list[UUID] | None = None
     sync_mode: str = Field(default="pull", max_length=40)
+    since: datetime | None = None
+    until: datetime | None = None
 
 
 class PerformanceWearableSyncRunRead(BaseModel):
@@ -200,6 +211,8 @@ class PerformanceWearableSyncRunRead(BaseModel):
     observation_count: int
     skipped_metric_count: int
     replayed: bool
+    provider_status_code: int | None
+    provider_response_hash: str | None
     message: str | None
 
 

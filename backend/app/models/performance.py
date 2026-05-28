@@ -137,6 +137,10 @@ class PerformanceWearableProviderConnection(IdMixin, TimestampMixin, Base):
     oauth_state_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
     oauth_state_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     oauth_authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    provider_pull_url: Mapped[str | None] = mapped_column(String(800))
+    provider_pull_cursor_param: Mapped[str | None] = mapped_column(String(80))
+    provider_pull_since_param: Mapped[str | None] = mapped_column(String(80))
+    provider_pull_until_param: Mapped[str | None] = mapped_column(String(80))
     sync_cursor: Mapped[str | None] = mapped_column(String(240))
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     webhook_registered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -164,6 +168,8 @@ class PerformanceWearableProviderSyncRun(IdMixin, TimestampMixin, Base):
     observation_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     skipped_metric_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     replayed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    provider_status_code: Mapped[int | None] = mapped_column(Integer)
+    provider_response_hash: Mapped[str | None] = mapped_column(String(64))
     message: Mapped[str | None] = mapped_column(Text)
 
 

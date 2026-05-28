@@ -3214,6 +3214,11 @@ export type PerformanceWearableConnectionRead = {
   oauth_state_pending: boolean;
   oauth_state_expires_at: string | null;
   oauth_authorized_at: string | null;
+  provider_pull_url: string | null;
+  provider_pull_cursor_param: string | null;
+  provider_pull_since_param: string | null;
+  provider_pull_until_param: string | null;
+  provider_pull_configured: boolean;
   sync_cursor: string | null;
   last_sync_at: string | null;
   webhook_registered: boolean;
@@ -3234,6 +3239,8 @@ export type PerformanceWearableSyncRunRead = {
   observation_count: number;
   skipped_metric_count: number;
   replayed: boolean;
+  provider_status_code: number | null;
+  provider_response_hash: string | null;
   message: string | null;
 };
 

@@ -388,6 +388,10 @@ async def create_wearable_provider_connection(
         refresh_token_secret_path=payload.refresh_token_secret_path,
         webhook_secret_path=payload.webhook_secret_path,
         token_expires_at=payload.token_expires_at,
+        provider_pull_url=payload.provider_pull_url,
+        provider_pull_cursor_param=payload.provider_pull_cursor_param,
+        provider_pull_since_param=payload.provider_pull_since_param,
+        provider_pull_until_param=payload.provider_pull_until_param,
         sync_cursor=payload.sync_cursor,
         webhook_registered=payload.webhook_registered,
         default_metric_definition_ids=encode_uuid_list(payload.default_metric_definition_ids),
@@ -441,23 +445,17 @@ async def run_wearable_provider_sync(
     skipped_metric_count = 0
     replayed = False
     external_event_id = payload.external_event_id
+    provider_status_code: int | None = None
+    provider_response_hash: str | None = None
 
     if payload.payload is not None:
         external_event_id = external_event_id or f"sync-{connection.provider}-{started_at.isoformat()}"
-        metric_ids = payload.metric_definition_ids or decode_uuid_list(connection.default_metric_definition_ids)
-        webhook_payload = PerformanceWearableWebhookCreate(
-            organization_id=connection.organization_id,
-            athlete_profile_id=connection.athlete_profile_id,
-            source_provider=connection.provider,
-            external_event_id=external_event_id,
-            payload=payload.payload,
-            metric_definition_ids=metric_ids or None,
-        )
-        ingest = await ingest_performance_wearable_webhook(
+        ingest = await ingest_wearable_sync_payload(
             db,
-            webhook_payload,
-            signature_required=False,
-            signature_validated=False,
+            connection,
+            payload.payload,
+            external_event_id=external_event_id,
+            metric_definition_ids=payload.metric_definition_ids,
         )
         observation_count = int(ingest["observation_count"])
         skipped_metric_count = int(ingest["skipped_metric_count"])
@@ -471,11 +469,36 @@ async def run_wearable_provider_sync(
         connection.last_sync_at = started_at
         connection.sync_cursor = external_event_id
         connection.status = "active"
+    elif connection.access_token_secret_path and connection.provider_pull_url:
+        pulled = await pull_wearable_provider_payload(connection, payload)
+        provider_status_code = pulled["provider_status_code"]
+        provider_response_hash = pulled["provider_response_hash"]
+        external_event_id = external_event_id or str(pulled["external_event_id"])
+        ingest = await ingest_wearable_sync_payload(
+            db,
+            connection,
+            pulled["payload"],
+            external_event_id=external_event_id,
+            metric_definition_ids=payload.metric_definition_ids,
+        )
+        observation_count = int(ingest["observation_count"])
+        skipped_metric_count = int(ingest["skipped_metric_count"])
+        replayed = bool(ingest["replayed"])
+        status_value = "replayed" if replayed else "completed"
+        message = (
+            f"Pulled {observation_count} observation(s) from {connection.provider} provider API "
+            f"with HTTP {provider_status_code}."
+            if not replayed
+            else f"Skipped duplicate {connection.provider} provider pull event {external_event_id}."
+        )
+        connection.last_sync_at = started_at
+        connection.sync_cursor = str(pulled["next_cursor"] or external_event_id)
+        connection.status = "active"
     elif connection.access_token_secret_path:
-        status_value = "ready_for_live_adapter"
+        status_value = "pull_not_configured"
         message = (
             f"{connection.provider} credentials are configured in OpenBao/env path; "
-            "live provider pull adapter is not enabled in this environment."
+            "provider pull URL is not configured for this connection."
         )
     run = PerformanceWearableProviderSyncRun(
         organization_id=connection.organization_id,
@@ -490,6 +513,8 @@ async def run_wearable_provider_sync(
         observation_count=observation_count,
         skipped_metric_count=skipped_metric_count,
         replayed=replayed,
+        provider_status_code=provider_status_code,
+        provider_response_hash=provider_response_hash,
         message=message,
     )
     db.add(run)
@@ -517,6 +542,106 @@ async def list_wearable_provider_sync_runs(
             )
         ).all()
     )
+
+
+async def ingest_wearable_sync_payload(
+    db: AsyncSession,
+    connection: PerformanceWearableProviderConnection,
+    provider_payload: dict[str, object],
+    *,
+    external_event_id: str,
+    metric_definition_ids: list[UUID] | None,
+) -> dict[str, object]:
+    metric_ids = metric_definition_ids or decode_uuid_list(connection.default_metric_definition_ids)
+    webhook_payload = PerformanceWearableWebhookCreate(
+        organization_id=connection.organization_id,
+        athlete_profile_id=connection.athlete_profile_id,
+        source_provider=connection.provider,
+        external_event_id=external_event_id,
+        payload=provider_payload,
+        metric_definition_ids=metric_ids or None,
+    )
+    return await ingest_performance_wearable_webhook(
+        db,
+        webhook_payload,
+        signature_required=False,
+        signature_validated=False,
+    )
+
+
+async def pull_wearable_provider_payload(
+    connection: PerformanceWearableProviderConnection,
+    payload: PerformanceWearableSyncRunCreate,
+) -> dict[str, object]:
+    if not connection.provider_pull_url:
+        raise HTTPException(status_code=422, detail="Wearable provider pull URL is not configured")
+    access_token = await resolve_wearable_token_secret(connection.access_token_secret_path or "", "access_token")
+    query = wearable_provider_pull_params(connection, payload)
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            response = await client.get(
+                connection.provider_pull_url,
+                params=query,
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {access_token}",
+                    "X-AfroLete-Provider": connection.provider,
+                    "X-AfroLete-Athlete-Ref": connection.external_athlete_ref,
+                },
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Wearable provider pull failed with HTTP {exc.response.status_code}",
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Wearable provider pull failed: {exc}") from exc
+    provider_payload = response.json()
+    if not isinstance(provider_payload, dict):
+        raise HTTPException(status_code=502, detail="Wearable provider pull returned a non-object payload")
+    payload_hash = stable_payload_hash(provider_payload)
+    return {
+        "payload": provider_payload,
+        "external_event_id": provider_external_event_id(connection, provider_payload, payload_hash),
+        "next_cursor": provider_next_cursor(provider_payload),
+        "provider_status_code": response.status_code,
+        "provider_response_hash": payload_hash,
+    }
+
+
+def wearable_provider_pull_params(
+    connection: PerformanceWearableProviderConnection,
+    payload: PerformanceWearableSyncRunCreate,
+) -> dict[str, str]:
+    params = {"athlete_ref": connection.external_athlete_ref}
+    if connection.sync_cursor and connection.provider_pull_cursor_param:
+        params[connection.provider_pull_cursor_param] = connection.sync_cursor
+    if payload.since and connection.provider_pull_since_param:
+        params[connection.provider_pull_since_param] = payload.since.isoformat()
+    if payload.until and connection.provider_pull_until_param:
+        params[connection.provider_pull_until_param] = payload.until.isoformat()
+    return params
+
+
+def provider_external_event_id(
+    connection: PerformanceWearableProviderConnection,
+    provider_payload: dict[str, object],
+    payload_hash: str,
+) -> str:
+    for key in ("external_event_id", "event_id", "id", "activity_id", "cycle_id"):
+        value = provider_payload.get(key)
+        if value:
+            return str(value)[:180]
+    return f"pull-{connection.provider}-{payload_hash[:16]}"
+
+
+def provider_next_cursor(provider_payload: dict[str, object]) -> str | None:
+    for key in ("next_cursor", "cursor", "sync_cursor", "nextPageToken"):
+        value = provider_payload.get(key)
+        if value:
+            return str(value)[:240]
+    return None
 
 
 async def start_wearable_provider_oauth(
