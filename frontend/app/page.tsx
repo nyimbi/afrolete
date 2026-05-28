@@ -43,6 +43,7 @@ import type {
   AssetSummaryRead,
   AssetUtilizationRecommendationRead,
   AthleteAssessmentRead,
+  AthleteAssessmentReviewQueueItemRead,
   AthletePerformanceSummaryRead,
   AttendanceRecordRead,
   AttendanceSeedRead,
@@ -744,6 +745,7 @@ export default function HomePage() {
   const [performanceAchievementRun, setPerformanceAchievementRun] =
     useState<PerformanceAchievementRunRead | null>(null);
   const [assessments, setAssessments] = useState<AthleteAssessmentRead[]>([]);
+  const [assessmentReviewQueue, setAssessmentReviewQueue] = useState<AthleteAssessmentReviewQueueItemRead[]>([]);
   const [performanceSummary, setPerformanceSummary] =
     useState<AthletePerformanceSummaryRead | null>(null);
   const [trainingDrills, setTrainingDrills] = useState<TrainingDrillRead[]>([]);
@@ -1731,6 +1733,14 @@ export default function HomePage() {
     setMetricDefinitions(data);
   }, []);
 
+  const loadAssessmentReviewQueue = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<AthleteAssessmentReviewQueueItemRead[]>(
+      `/performance/assessments/review-queue?organization_id=${organizationId}`,
+      { identity }
+    );
+    setAssessmentReviewQueue(data);
+  }, [identity]);
+
   const loadAthletePerformance = useCallback(
     async (organizationId: string, athleteProfileId: string) => {
       const [
@@ -2249,6 +2259,7 @@ export default function HomePage() {
       setObservations([]);
       setPerformanceIngestion(null);
       setAssessments([]);
+      setAssessmentReviewQueue([]);
       setPerformanceSummary(null);
       setTrainingDrills([]);
       setTrainingPlans([]);
@@ -2378,6 +2389,7 @@ export default function HomePage() {
       await loadAgents(selectedOrganizationId);
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
+      await loadAssessmentReviewQueue(selectedOrganizationId);
       await loadTraining(selectedOrganizationId);
       await loadCompetitions(selectedOrganizationId);
       await loadCommunications(selectedOrganizationId);
@@ -2402,6 +2414,7 @@ export default function HomePage() {
     loadAgents,
     loadAgentTasks,
     loadMetricDefinitions,
+    loadAssessmentReviewQueue,
     loadTraining,
     loadCompetitions,
     loadCommunications,
@@ -5851,8 +5864,8 @@ export default function HomePage() {
   };
 
   const reviewAssessment = (assessment: AthleteAssessmentRead, verificationStatus: MetricVerificationStatus) => {
-    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
-      addLog("Select an athlete first", "bad");
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
       return;
     }
     runAction(
@@ -5877,8 +5890,18 @@ export default function HomePage() {
           reviewed,
           ...current.filter((item) => item.id !== reviewed.id)
         ]);
+        setAssessmentReviewQueue((current) =>
+          reviewed.verification_status === "pending_review"
+            ? current.map((item) =>
+                item.assessment.id === reviewed.id ? { ...item, assessment: reviewed } : item
+              )
+            : current.filter((item) => item.assessment.id !== reviewed.id)
+        );
         addLog(`Assessment ${verificationStatus}: ALS ${reviewed.overall_score}`, verificationStatus === "verified" ? "good" : "neutral");
-        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+        void loadAssessmentReviewQueue(selectedOrganizationId);
+        if (selectedAthlete?.athleteProfileId === reviewed.athlete_profile_id) {
+          void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+        }
       }
     );
   };
@@ -12710,6 +12733,21 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {assessmentReviewQueue.slice(0, 4).map((item) => (
+                <article key={`review-${item.assessment.id}`} className="task-card">
+                  <div>
+                    <strong>{item.athlete_name} · ALS {item.assessment.overall_score}</strong>
+                    <span>
+                      pending assessment · RPE {item.assessment.perceived_exertion ?? "n/a"} · effort {item.assessment.effort_rating ?? "n/a"}
+                    </span>
+                    <small>{item.assessment.summary ?? "Player self-assessment awaiting review."}</small>
+                  </div>
+                  <span>
+                    <button type="button" onClick={() => reviewAssessment(item.assessment, "verified")} disabled={busyAction !== null}>Verify</button>
+                    <button type="button" onClick={() => reviewAssessment(item.assessment, "rejected")} disabled={busyAction !== null}>Reject</button>
+                  </span>
+                </article>
+              ))}
               {performanceAchievementRun ? (
                 <article className="task-card">
                   <div>

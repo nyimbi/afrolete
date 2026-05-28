@@ -3183,6 +3183,12 @@ export type AthleteAssessmentRead = {
   verification_status: MetricVerificationStatus;
 };
 
+export type AthleteAssessmentReviewQueueItemRead = {
+  assessment: AthleteAssessmentRead;
+  athlete_person_id: UUID;
+  athlete_name: string;
+};
+
 export type AthletePerformanceSummaryRead = {
   athlete_profile_id: UUID;
   latest_overall_score: number | null;

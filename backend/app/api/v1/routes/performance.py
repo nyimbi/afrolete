@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.schemas.performance import (
     AthleteAssessmentCreate,
     AthleteAssessmentRead,
+    AthleteAssessmentReviewQueueItemRead,
     AthleteAssessmentReviewCreate,
     AthletePerformanceSummaryRead,
     MetricDefinitionCreate,
@@ -36,6 +37,7 @@ from app.services.performance import (
     create_player_self_assessment,
     evaluate_performance_achievements,
     ingest_performance_evidence,
+    list_assessment_review_queue,
     list_assessments,
     list_performance_awards,
     list_performance_goals,
@@ -293,6 +295,28 @@ async def review_assessment_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> AthleteAssessmentRead:
     return to_assessment_read(await review_assessment(db, identity, assessment_id, payload, authz))
+
+
+@router.get(
+    "/assessments/review-queue",
+    response_model=list[AthleteAssessmentReviewQueueItemRead],
+)
+async def list_assessment_review_queue_route(
+    organization_id: UUID = Query(),
+    limit: int = Query(default=25, ge=1, le=100),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[AthleteAssessmentReviewQueueItemRead]:
+    rows = await list_assessment_review_queue(db, identity, organization_id, authz, limit=limit)
+    return [
+        AthleteAssessmentReviewQueueItemRead(
+            assessment=to_assessment_read(assessment),
+            athlete_person_id=athlete_profile.person_id,
+            athlete_name=person.display_name,
+        )
+        for assessment, athlete_profile, person in rows
+    ]
 
 
 @router.get(

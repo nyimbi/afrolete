@@ -221,6 +221,16 @@ def test_coach_can_review_player_self_assessment(client, identity_headers) -> No
         },
     ).json()
 
+    queue_response = client.get(
+        f"/api/v1/performance/assessments/review-queue?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert queue_response.status_code == 200
+    queue = queue_response.json()
+    assert len(queue) == 1
+    assert queue[0]["athlete_name"] == "Performance Athlete"
+    assert queue[0]["assessment"]["id"] == pending["id"]
+
     response = client.patch(
         f"/api/v1/performance/assessments/{pending['id']}/review",
         headers=identity_headers,
@@ -243,6 +253,12 @@ def test_coach_can_review_player_self_assessment(client, identity_headers) -> No
         f"?organization_id={organization['id']}",
     ).json()
     assert summary["latest_overall_score"] == 73.9
+
+    queue_after_review = client.get(
+        f"/api/v1/performance/assessments/review-queue?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert queue_after_review == []
 
 
 def test_player_cannot_submit_self_assessment_for_another_athlete(

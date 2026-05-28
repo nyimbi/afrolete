@@ -159,6 +159,12 @@ class AthleteAssessmentRead(BaseModel):
     verification_status: MetricVerificationStatus
 
 
+class AthleteAssessmentReviewQueueItemRead(BaseModel):
+    assessment: AthleteAssessmentRead
+    athlete_person_id: UUID
+    athlete_name: str
+
+
 class AthletePerformanceSummaryRead(BaseModel):
     athlete_profile_id: UUID
     latest_overall_score: float | None

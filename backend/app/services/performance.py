@@ -364,6 +364,29 @@ async def review_assessment(
     return assessment
 
 
+async def list_assessment_review_queue(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    limit: int = 25,
+) -> list[tuple[AthleteAssessment, AthleteProfile, Person]]:
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    await ensure_manage_performance(authz, identity, organization_id)
+    rows = await db.execute(
+        select(AthleteAssessment, AthleteProfile, Person)
+        .join(AthleteProfile, AthleteProfile.id == AthleteAssessment.athlete_profile_id)
+        .join(Person, Person.id == AthleteProfile.person_id)
+        .where(AthleteAssessment.organization_id == organization_id)
+        .where(AthleteAssessment.verification_status == MetricVerificationStatus.PENDING_REVIEW)
+        .order_by(AthleteAssessment.assessed_at.desc(), AthleteAssessment.created_at.desc())
+        .limit(limit)
+    )
+    return list(rows.all())
+
+
 async def list_assessments(
     db: AsyncSession,
     organization_id: UUID,
