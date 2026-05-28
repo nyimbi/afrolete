@@ -28,6 +28,7 @@ from app.schemas.agent import (
     AgentGovernancePolicyRuleUpdate,
     AgentGovernanceSummaryRead,
     AgentModelRegistryCreate,
+    AgentModelGovernanceEvidenceArtifactRead,
     AgentModelRegistryRead,
     AgentModelRegistryUpdate,
     AgentModelTransparencyReportRead,
@@ -86,6 +87,7 @@ from app.services.agents import (
     execute_agent_task,
     export_agent_governance_policy_history,
     get_agent_scorecard_publication_artifact,
+    get_agent_model_governance_evidence_artifact,
     get_my_agent_decision_appeal_form,
     list_scorecard_artifact_accesses,
     list_agent_assignments,
@@ -770,6 +772,25 @@ async def run_agent_bias_audit_route(
 ) -> AgentBiasAuditRead:
     return to_bias_audit_read(
         await run_agent_bias_audit(db, identity, registry_id, payload, authz)
+    )
+
+
+@router.get("/model-registry/{registry_id}/evidence-artifact", response_model=AgentModelGovernanceEvidenceArtifactRead)
+async def get_agent_model_governance_evidence_artifact_route(
+    registry_id: UUID,
+    artifact_format: str = Query(default="markdown", pattern="^(markdown|csv)$"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentModelGovernanceEvidenceArtifactRead:
+    return AgentModelGovernanceEvidenceArtifactRead(
+        **await get_agent_model_governance_evidence_artifact(
+            db,
+            identity,
+            registry_id,
+            authz,
+            artifact_format=artifact_format,
+        )
     )
 
 

@@ -929,6 +929,68 @@ async def update_agent_model_registry(
     return registry
 
 
+async def get_agent_model_governance_evidence_artifact(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    registry_id: UUID,
+    authz: AuthorizationService,
+    artifact_format: str = "markdown",
+) -> dict[str, object]:
+    registry = await db.get(AgentModelRegistry, registry_id)
+    if registry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model registry record not found")
+    await ensure_manage_organization(authz, identity, registry.organization_id)
+    records = list(
+        (
+            await db.scalars(
+                select(AgentRunRecord)
+                .where(AgentRunRecord.organization_id == registry.organization_id)
+                .where(AgentRunRecord.model_policy == registry.model_policy)
+                .order_by(AgentRunRecord.created_at.desc())
+            )
+        ).all()
+    )
+    audits = await list_agent_bias_audits(db, registry.organization_id, model_registry_id=registry.id)
+    appeals = list(
+        (
+            await db.scalars(
+                select(AgentDecisionAppeal)
+                .where(AgentDecisionAppeal.organization_id == registry.organization_id)
+                .where(AgentDecisionAppeal.model_policy == registry.model_policy)
+                .order_by(AgentDecisionAppeal.created_at.desc())
+            )
+        ).all()
+    )
+    generated_at = datetime.now(UTC)
+    normalized_format = artifact_format.lower().strip()
+    context = model_governance_evidence_context(registry, records, audits, appeals, generated_at)
+    if normalized_format == "markdown":
+        content = render_model_governance_evidence_markdown(context)
+        content_type = "text/markdown; charset=utf-8"
+        extension = "md"
+    elif normalized_format == "csv":
+        content = render_model_governance_evidence_csv(context)
+        content_type = "text/csv; charset=utf-8"
+        extension = "csv"
+    else:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported model evidence format")
+    content_bytes = content.encode()
+    filename_slug = slug_for_filename(registry.model_policy)
+    return {
+        **context["metrics"],
+        "registry_id": registry.id,
+        "organization_id": registry.organization_id,
+        "model_policy": registry.model_policy,
+        "generated_at": generated_at,
+        "artifact_format": normalized_format,
+        "content_type": content_type,
+        "download_filename": f"agent-model-governance-{filename_slug}-{str(registry.id)[:8]}.{extension}",
+        "content": content,
+        "checksum": hashlib.sha256(content_bytes).hexdigest(),
+        "size_bytes": len(content_bytes),
+    }
+
+
 async def get_agent_for_organization(
     db: AsyncSession,
     agent_id: UUID,
@@ -3633,6 +3695,159 @@ def render_agent_governance_policy_history_markdown(history: dict[str, object]) 
             f"{policy['approval_required_count']} | {policy['completed_count']} | "
             f"{policy['waiting_for_review_count']} | {policy['latest_task_title'] or ''} |"
         )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def model_governance_evidence_context(
+    registry: AgentModelRegistry,
+    records: list[AgentRunRecord],
+    audits: list[AgentBiasAudit],
+    appeals: list[AgentDecisionAppeal],
+    generated_at: datetime,
+) -> dict[str, object]:
+    review_required_runs = sum(1 for record in records if record.status == AgentTaskStatus.WAITING_FOR_REVIEW)
+    failed_runs = sum(1 for record in records if record.status == AgentTaskStatus.FAILED)
+    failing_bias_audits = sum(1 for audit in audits if audit.status == "fail")
+    open_mitigations = sum(1 for audit in audits if audit.mitigation_status in {"open", "in_progress"})
+    pending_appeals = sum(1 for appeal in appeals if appeal.status in {"pending", "under_review"})
+    latest_record = records[0] if records else None
+    return {
+        "registry": registry,
+        "records": records,
+        "audits": audits,
+        "appeals": appeals,
+        "generated_at": generated_at,
+        "metrics": {
+            "total_runs": len(records),
+            "review_required_runs": review_required_runs,
+            "failed_runs": failed_runs,
+            "bias_audit_count": len(audits),
+            "failing_bias_audit_count": failing_bias_audits,
+            "open_mitigation_count": open_mitigations,
+            "appeal_count": len(appeals),
+            "pending_appeal_count": pending_appeals,
+        },
+        "latest_record_hash": latest_record.record_hash if latest_record else None,
+        "latest_run_at": (latest_record.finished_at or latest_record.started_at) if latest_record else None,
+    }
+
+
+def render_model_governance_evidence_csv(context: dict[str, object]) -> str:
+    registry = context["registry"]
+    metrics = dict(context["metrics"])
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["section", "field", "value"])
+    for field in [
+        "model_policy",
+        "provider",
+        "model_family",
+        "version",
+        "risk_tier",
+        "review_status",
+        "documentation_url",
+        "data_residency",
+        "approved_at",
+    ]:
+        writer.writerow(["registry", field, getattr(registry, field)])
+    for field, value in metrics.items():
+        writer.writerow(["metrics", field, value])
+    writer.writerow(["ledger", "latest_record_hash", context["latest_record_hash"] or ""])
+    writer.writerow(["ledger", "latest_run_at", context["latest_run_at"] or ""])
+    writer.writerow([])
+    writer.writerow(["bias_audit_id", "status", "severity", "sample_size", "disparity_score", "mitigation_status", "mitigation_evidence_ref"])
+    for audit in list(context["audits"]):
+        writer.writerow(
+            [
+                audit.id,
+                audit.status,
+                audit.severity,
+                audit.sample_size,
+                audit.disparity_score,
+                audit.mitigation_status,
+                audit.mitigation_evidence_ref or "",
+            ]
+        )
+    writer.writerow([])
+    writer.writerow(["appeal_id", "status", "reason", "question", "supporting_evidence_ref", "resolved_at"])
+    for appeal in list(context["appeals"]):
+        writer.writerow(
+            [
+                appeal.id,
+                appeal.status,
+                appeal.reason,
+                appeal.question,
+                appeal.supporting_evidence_ref or "",
+                appeal.resolved_at or "",
+            ]
+        )
+    return buffer.getvalue()
+
+
+def render_model_governance_evidence_markdown(context: dict[str, object]) -> str:
+    registry = context["registry"]
+    metrics = dict(context["metrics"])
+    lines = [
+        "# AfroLete AI Model Governance Evidence",
+        "",
+        f"Generated: {context['generated_at']}",
+        f"Model policy: {registry.model_policy}",
+        f"Provider: {registry.provider}",
+        f"Family/version: {registry.model_family or 'unspecified'} / {registry.version or 'unspecified'}",
+        f"Risk tier: {registry.risk_tier}",
+        f"Review status: {registry.review_status}",
+        f"Documentation: {registry.documentation_url or 'not provided'}",
+        f"Data residency: {registry.data_residency or 'unspecified'}",
+        f"Latest record hash: {context['latest_record_hash'] or 'none'}",
+        "",
+        "## Evidence Summary",
+        "",
+    ]
+    for field, value in metrics.items():
+        lines.append(f"- {field.replace('_', ' ').title()}: {value}")
+    lines.extend(
+        [
+            "",
+            "## Use Case",
+            "",
+            registry.use_case,
+            "",
+            "## Evaluation And Limits",
+            "",
+            f"Evaluation summary: {registry.evaluation_summary or 'not provided'}",
+            f"Limitations: {registry.limitations or 'not provided'}",
+            f"Bias notes: {registry.bias_notes or 'not provided'}",
+            "",
+            "## Bias Audits",
+            "",
+            "| Status | Severity | Sample | Disparity | Mitigation | Evidence |",
+            "| --- | --- | ---: | ---: | --- | --- |",
+        ]
+    )
+    for audit in list(context["audits"]):
+        lines.append(
+            f"| {audit.status} | {audit.severity} | {audit.sample_size} | {audit.disparity_score:.3f} | "
+            f"{audit.mitigation_status} | {audit.mitigation_evidence_ref or ''} |"
+        )
+    if not list(context["audits"]):
+        lines.append("| none | none | 0 | 0.000 | none | |")
+    lines.extend(
+        [
+            "",
+            "## Decision Appeals",
+            "",
+            "| Status | Reason | Question | Evidence | Resolved |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
+    for appeal in list(context["appeals"]):
+        lines.append(
+            f"| {appeal.status} | {appeal.reason} | {appeal.question} | "
+            f"{appeal.supporting_evidence_ref or ''} | {appeal.resolved_at or ''} |"
+        )
+    if not list(context["appeals"]):
+        lines.append("| none | none | none | | |")
     lines.append("")
     return "\n".join(lines)
 

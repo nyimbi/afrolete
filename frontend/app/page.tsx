@@ -24,6 +24,7 @@ import type {
   AgentGovernancePolicySimulationRead,
   AgentGovernanceSummaryRead,
   AgentKind,
+  AgentModelGovernanceEvidenceArtifactRead,
   AgentModelRegistryRead,
   AgentModelTransparencyReportRead,
   AgentRead,
@@ -6959,6 +6960,27 @@ export default function HomePage() {
         if (selectedOrganizationId) {
           void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
         }
+      }
+    );
+  };
+
+  const downloadAgentModelGovernanceEvidence = (
+    registry: AgentModelRegistryRead,
+    artifactFormat: "markdown" | "csv"
+  ) => {
+    runAction(
+      `agent-model-governance-evidence-${registry.id}-${artifactFormat}`,
+      () =>
+        apiRequest<AgentModelGovernanceEvidenceArtifactRead>(
+          `/agents/model-registry/${registry.id}/evidence-artifact?artifact_format=${artifactFormat}`,
+          { identity }
+        ),
+      (artifact) => {
+        downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
+        addLog(
+          `Downloaded ${artifact.model_policy} evidence (${artifact.size_bytes} bytes)`,
+          "good"
+        );
       }
     );
   };
@@ -16779,6 +16801,8 @@ export default function HomePage() {
                   </div>
                   <div className="event-toolbar">
                     <button type="button" onClick={() => runAgentBiasAudit(registry)}>Bias audit</button>
+                    <button type="button" onClick={() => downloadAgentModelGovernanceEvidence(registry, "markdown")}>Evidence MD</button>
+                    <button type="button" onClick={() => downloadAgentModelGovernanceEvidence(registry, "csv")}>Evidence CSV</button>
                     <button type="button" onClick={() => updateAgentModelRegistryStatus(registry, "approved")}>Approve</button>
                     <button type="button" onClick={() => updateAgentModelRegistryStatus(registry, "blocked")}>Block</button>
                     <button type="button" onClick={() => updateAgentModelRegistryStatus(registry, "retired")}>Retire</button>

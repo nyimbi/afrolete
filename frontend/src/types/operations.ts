@@ -3479,6 +3479,27 @@ export type AgentModelRegistryRead = {
   approved_at: string | null;
 };
 
+export type AgentModelGovernanceEvidenceArtifactRead = {
+  registry_id: UUID;
+  organization_id: UUID;
+  model_policy: string;
+  generated_at: string;
+  artifact_format: string;
+  content_type: string;
+  download_filename: string;
+  content: string;
+  checksum: string;
+  size_bytes: number;
+  total_runs: number;
+  review_required_runs: number;
+  failed_runs: number;
+  bias_audit_count: number;
+  failing_bias_audit_count: number;
+  open_mitigation_count: number;
+  appeal_count: number;
+  pending_appeal_count: number;
+};
+
 export type AgentBiasAuditRead = {
   id: UUID;
   organization_id: UUID;

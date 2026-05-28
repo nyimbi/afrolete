@@ -763,3 +763,25 @@ def test_agent_bias_audit_mitigation_lifecycle_updates_scorecard(client, identit
         headers=identity_headers,
     ).json()[0]
     assert registry_after_mitigation["review_status"] == "in_review"
+
+    evidence_markdown = client.get(
+        f"/api/v1/agents/model-registry/{registry['id']}/evidence-artifact?artifact_format=markdown",
+        headers=identity_headers,
+    ).json()
+    assert evidence_markdown["artifact_format"] == "markdown"
+    assert evidence_markdown["download_filename"].endswith(".md")
+    assert evidence_markdown["model_policy"] == "selection-recommendation-bias-v1"
+    assert evidence_markdown["bias_audit_count"] == 1
+    assert evidence_markdown["open_mitigation_count"] == 0
+    assert "AfroLete AI Model Governance Evidence" in evidence_markdown["content"]
+    assert "selection-recommendation-bias-v1" in evidence_markdown["content"]
+    assert evidence_markdown["checksum"]
+
+    evidence_csv = client.get(
+        f"/api/v1/agents/model-registry/{registry['id']}/evidence-artifact?artifact_format=csv",
+        headers=identity_headers,
+    ).json()
+    assert evidence_csv["artifact_format"] == "csv"
+    assert evidence_csv["download_filename"].endswith(".csv")
+    assert "metrics,bias_audit_count,1" in evidence_csv["content"]
+    assert "registry,review_status,in_review" in evidence_csv["content"]

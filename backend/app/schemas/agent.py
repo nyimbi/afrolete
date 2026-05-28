@@ -374,6 +374,27 @@ class AgentModelRegistryRead(BaseModel):
     approved_at: datetime | None
 
 
+class AgentModelGovernanceEvidenceArtifactRead(BaseModel):
+    registry_id: UUID
+    organization_id: UUID
+    model_policy: str
+    generated_at: datetime
+    artifact_format: str
+    content_type: str
+    download_filename: str
+    content: str
+    checksum: str
+    size_bytes: int
+    total_runs: int
+    review_required_runs: int
+    failed_runs: int
+    bias_audit_count: int
+    failing_bias_audit_count: int
+    open_mitigation_count: int
+    appeal_count: int
+    pending_appeal_count: int
+
+
 class AgentBiasAuditCreate(BaseModel):
     audit_dimension: str = Field(default="age_gender_region_club_school", min_length=2, max_length=120)
     population_slice: str = Field(default="all-participants", min_length=2, max_length=160)
