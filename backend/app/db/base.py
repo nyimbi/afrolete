@@ -52,6 +52,7 @@ from app.models.developer import (  # noqa: F401,E402
     DeveloperApiKey,
     DeveloperApplication,
     DeveloperMarketplaceListing,
+    DeveloperOAuthAuthorization,
     DeveloperWebhookDelivery,
     DeveloperWebhookSubscription,
 )

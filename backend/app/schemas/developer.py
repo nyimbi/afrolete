@@ -72,6 +72,48 @@ class DeveloperApiKeyProvisionedRead(BaseModel):
     secret_hint: str
 
 
+class DeveloperOAuthAuthorizationCreate(BaseModel):
+    organization_id: UUID
+    client_id: str = Field(min_length=8, max_length=160)
+    redirect_uri: str = Field(min_length=8, max_length=500)
+    scopes: list[str] = Field(min_length=1, max_length=40)
+    state: str | None = Field(default=None, max_length=500)
+
+
+class DeveloperOAuthAuthorizationRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    application_id: UUID
+    client_id: str
+    application_name: str
+    redirect_uri: str
+    requested_scopes: list[str]
+    granted_scopes: list[str]
+    state: str | None
+    status: str
+    expires_at: datetime
+    consented_at: datetime | None
+    redeemed_at: datetime | None
+    authorization_code: str | None = None
+    redirect_url: str | None = None
+
+
+class DeveloperOAuthTokenExchange(BaseModel):
+    client_id: str = Field(min_length=8, max_length=160)
+    client_secret: str = Field(min_length=8, max_length=500)
+    code: str = Field(min_length=16, max_length=500)
+    redirect_uri: str = Field(min_length=8, max_length=500)
+
+
+class DeveloperOAuthTokenRead(BaseModel):
+    access_token: str
+    token_type: str
+    auth_header: str
+    api_key: DeveloperApiKeyRead
+    scopes: list[str]
+    expires_in: int | None = None
+
+
 class DeveloperApiKeyInspectionRead(BaseModel):
     valid: bool
     organization_id: UUID

@@ -21,7 +21,7 @@ def test_public_developer_docs(client) -> None:
     assert docs["api_base_path"] == "/api/v1/sdk"
     assert docs["auth_header"] == "X-Afrolete-API-Key"
     assert docs["webhook_signature_header"] == "X-Afrolete-Webhook-Signature"
-    assert len(docs["quickstarts"]) >= 3
+    assert len(docs["quickstarts"]) >= 4
     assert "read:organization" in {scope["scope"] for scope in docs["scopes"]}
     assert any(event["event_type"] == "training.drill.created" for event in docs["webhook_events"])
     assert any(sdk["language"] == "Raw HTTP" and sdk["status"] == "active" for sdk in docs["sdks"])
@@ -109,6 +109,59 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     listed_api_key = api_key_list_response.json()[0]
     assert listed_api_key["usage_count"] == 1
     assert "key_hash" not in listed_api_key
+
+    oauth_authorization_response = client.post(
+        "/api/v1/developers/oauth/authorizations",
+        json={
+            "organization_id": organization["id"],
+            "client_id": application["client_id"],
+            "redirect_uri": "https://sync.example/callback",
+            "scopes": ["read:organization", "write:training"],
+            "state": "tenant-console-test",
+        },
+        headers=identity_headers,
+    )
+    assert oauth_authorization_response.status_code == 201
+    oauth_authorization = oauth_authorization_response.json()
+    authorization_code = oauth_authorization["authorization_code"]
+    assert authorization_code
+    assert oauth_authorization["status"] == "granted"
+    assert oauth_authorization["granted_scopes"] == ["read:organization", "write:training"]
+    assert "tenant-console-test" in oauth_authorization["redirect_url"]
+
+    oauth_list_response = client.get(
+        f"/api/v1/developers/oauth/authorizations?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert oauth_list_response.status_code == 200
+    assert oauth_list_response.json()[0]["authorization_code"] is None
+
+    oauth_token_response = client.post(
+        "/api/v1/developers/oauth/token",
+        json={
+            "client_id": application["client_id"],
+            "client_secret": rotated_secret,
+            "code": authorization_code,
+            "redirect_uri": "https://sync.example/callback",
+        },
+    )
+    assert oauth_token_response.status_code == 200
+    oauth_token = oauth_token_response.json()
+    assert oauth_token["token_type"] == "AfroleteApiKey"
+    assert oauth_token["auth_header"] == "X-Afrolete-API-Key"
+    assert oauth_token["api_key"]["environment"] == "oauth"
+    assert oauth_token["scopes"] == ["read:organization", "write:training"]
+
+    reused_oauth_token_response = client.post(
+        "/api/v1/developers/oauth/token",
+        json={
+            "client_id": application["client_id"],
+            "client_secret": rotated_secret,
+            "code": authorization_code,
+            "redirect_uri": "https://sync.example/callback",
+        },
+    )
+    assert reused_oauth_token_response.status_code == 422
 
     sdk_me_response = client.get(
         "/api/v1/sdk/me",
@@ -345,8 +398,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert summary_response.status_code == 200
     summary = summary_response.json()
     assert summary["application_count"] == 1
-    assert summary["api_key_count"] == 3
-    assert summary["active_api_key_count"] == 3
+    assert summary["api_key_count"] == 4
+    assert summary["active_api_key_count"] == 4
     assert summary["webhook_subscription_count"] == 2
     assert summary["marketplace_listing_count"] == 1
     assert summary["approved_marketplace_listing_count"] == 1

@@ -92,6 +92,7 @@ import type {
   DonationRead,
   DeveloperApiKeyProvisionedRead,
   DeveloperApiKeyRead,
+  DeveloperOAuthAuthorizationRead,
   DeveloperApplicationProvisionedRead,
   DeveloperApplicationRead,
   DeveloperIntegrationCatalogRead,
@@ -830,6 +831,8 @@ export default function HomePage() {
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
   const [developerApplications, setDeveloperApplications] = useState<DeveloperApplicationRead[]>([]);
   const [developerApiKeys, setDeveloperApiKeys] = useState<DeveloperApiKeyRead[]>([]);
+  const [developerOAuthAuthorizations, setDeveloperOAuthAuthorizations] = useState<DeveloperOAuthAuthorizationRead[]>([]);
+  const [developerOAuthGrant, setDeveloperOAuthGrant] = useState<DeveloperOAuthAuthorizationRead | null>(null);
   const [developerWebhooks, setDeveloperWebhooks] = useState<DeveloperWebhookSubscriptionRead[]>([]);
   const [developerWebhookDeliveries, setDeveloperWebhookDeliveries] = useState<DeveloperWebhookDeliveryRead[]>([]);
   const [developerWebhookRetryRun, setDeveloperWebhookRetryRun] = useState<DeveloperWebhookRetryRunRead | null>(null);
@@ -2026,9 +2029,10 @@ export default function HomePage() {
   }, []);
 
   const loadDevelopers = useCallback(async (organizationId: string) => {
-    const [applications, apiKeys, webhooks, deliveries, listings, catalog, summary] = await Promise.all([
+    const [applications, apiKeys, oauthAuthorizations, webhooks, deliveries, listings, catalog, summary] = await Promise.all([
       apiRequest<DeveloperApplicationRead[]>(`/developers/applications?organization_id=${organizationId}`),
       apiRequest<DeveloperApiKeyRead[]>(`/developers/api-keys?organization_id=${organizationId}`),
+      apiRequest<DeveloperOAuthAuthorizationRead[]>(`/developers/oauth/authorizations?organization_id=${organizationId}`),
       apiRequest<DeveloperWebhookSubscriptionRead[]>(
         `/developers/webhook-subscriptions?organization_id=${organizationId}`
       ),
@@ -2043,6 +2047,7 @@ export default function HomePage() {
     ]);
     setDeveloperApplications(applications);
     setDeveloperApiKeys(apiKeys);
+    setDeveloperOAuthAuthorizations(oauthAuthorizations);
     setDeveloperWebhooks(webhooks);
     setDeveloperWebhookDeliveries(deliveries);
     setDeveloperListings(listings);
@@ -2300,6 +2305,8 @@ export default function HomePage() {
       setBillingSummary(null);
       setDeveloperApplications([]);
       setDeveloperApiKeys([]);
+      setDeveloperOAuthAuthorizations([]);
+      setDeveloperOAuthGrant(null);
       setDeveloperWebhooks([]);
       setDeveloperWebhookDeliveries([]);
       setDeveloperWebhookRetryRun(null);
@@ -8601,6 +8608,43 @@ export default function HomePage() {
     );
   };
 
+  const createDeveloperOAuthAuthorization = () => {
+    const application = developerApplications[0];
+    if (!selectedOrganizationId || !application) {
+      addLog("Create a developer application first", "bad");
+      return;
+    }
+    const redirectUri = application.redirect_uris[0] ?? parseCommaList(developerForm.redirect_uris)[0];
+    if (!redirectUri) {
+      addLog("Register a redirect URI before OAuth consent", "bad");
+      return;
+    }
+    runAction(
+      "create-developer-oauth-authorization",
+      () =>
+        apiRequest<DeveloperOAuthAuthorizationRead>("/developers/oauth/authorizations", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            client_id: application.client_id,
+            redirect_uri: redirectUri,
+            scopes: parseCommaList(developerForm.app_scopes),
+            state: `console-${Date.now()}`
+          }
+        }),
+      (authorization) => {
+        setDeveloperOAuthGrant(authorization);
+        setDeveloperOAuthAuthorizations((current) => [
+          authorization,
+          ...current.filter((item) => item.id !== authorization.id)
+        ]);
+        addLog(`${authorization.application_name} OAuth consent granted`, "good");
+        void loadDevelopers(selectedOrganizationId);
+      }
+    );
+  };
+
   const createDeveloperWebhook = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -11631,6 +11675,7 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createDeveloperApplication} disabled={busyAction !== null}>App</button>
                 <button type="button" onClick={createDeveloperApiKey} disabled={busyAction !== null}>Key</button>
+                <button type="button" onClick={createDeveloperOAuthAuthorization} disabled={busyAction !== null}>OAuth</button>
                 <button type="button" onClick={createDeveloperWebhook} disabled={busyAction !== null}>Webhook</button>
                 <button type="button" onClick={() => window.open("/developers", "_blank", "noopener,noreferrer")}>Docs</button>
               </div>
@@ -11727,6 +11772,14 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {developerOAuthGrant ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{developerOAuthGrant.application_name} OAuth code</strong>
+                    <span>{developerOAuthGrant.authorization_code} · {developerOAuthGrant.redirect_url}</span>
+                  </div>
+                </article>
+              ) : null}
               {developerCatalog ? (
                 <article className="task-card">
                   <div>
@@ -11771,6 +11824,14 @@ export default function HomePage() {
                     </span>
                   </div>
                   <button type="button" onClick={() => revokeDeveloperApiKey(apiKey.id)} disabled={busyAction !== null || apiKey.status === "revoked"}>Revoke</button>
+                </article>
+              ))}
+              {developerOAuthAuthorizations.slice(0, 3).map((authorization) => (
+                <article key={authorization.id} className="task-card">
+                  <div>
+                    <strong>{authorization.application_name} OAuth · {authorization.status}</strong>
+                    <span>{authorization.granted_scopes.join(", ")} · expires {new Date(authorization.expires_at).toLocaleString()}</span>
+                  </div>
                 </article>
               ))}
               {developerWebhooks.slice(0, 3).map((webhook) => (

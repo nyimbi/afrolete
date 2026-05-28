@@ -48,6 +48,23 @@ class DeveloperApiKey(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class DeveloperOAuthAuthorization(IdMixin, TimestampMixin, Base):
+    __tablename__ = "developer_oauth_authorizations"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    application_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("developer_applications.id"), index=True)
+    user_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    redirect_uri: Mapped[str] = mapped_column(String(500), nullable=False)
+    requested_scopes: Mapped[str] = mapped_column(Text, nullable=False)
+    granted_scopes: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str | None] = mapped_column(String(500))
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(String(40), default="granted", nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    redeemed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class DeveloperWebhookSubscription(IdMixin, TimestampMixin, Base):
     __tablename__ = "developer_webhook_subscriptions"
     __table_args__ = (UniqueConstraint("organization_id", "name"),)

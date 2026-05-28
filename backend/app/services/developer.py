@@ -1,9 +1,10 @@
 import hmac
 import json
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
+from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
@@ -15,6 +16,7 @@ from app.models.developer import (
     DeveloperApiKey,
     DeveloperApplication,
     DeveloperMarketplaceListing,
+    DeveloperOAuthAuthorization,
     DeveloperWebhookDelivery,
     DeveloperWebhookSubscription,
 )
@@ -22,6 +24,11 @@ from app.models.organization import Organization
 from app.schemas.developer import (
     DeveloperApiKeyCreate,
     DeveloperApiKeyInspectionRead,
+    DeveloperApiKeyRead,
+    DeveloperOAuthAuthorizationCreate,
+    DeveloperOAuthAuthorizationRead,
+    DeveloperOAuthTokenExchange,
+    DeveloperOAuthTokenRead,
     DeveloperApplicationCreate,
     DeveloperApiScopeCatalogRead,
     DeveloperIntegrationCatalogRead,
@@ -204,6 +211,134 @@ async def inspect_developer_api_key(
         usage_count=api_key.usage_count,
         window_started_at=api_key.window_started_at,
         window_request_count=api_key.window_request_count,
+    )
+
+
+async def create_developer_oauth_authorization(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: DeveloperOAuthAuthorizationCreate,
+    authz: AuthorizationService,
+) -> DeveloperOAuthAuthorizationRead:
+    application = await get_developer_application_by_client_id(db, payload.client_id)
+    if application.status != "active":
+        raise HTTPException(status_code=422, detail="Developer application is not active")
+    if application.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Application belongs to another organization")
+    await ensure_manage_developer_platform(authz, identity, payload.organization_id)
+    allowed_redirects = set(unpack_list(application.redirect_uris))
+    if payload.redirect_uri not in allowed_redirects:
+        raise HTTPException(status_code=422, detail="Redirect URI is not registered for this application")
+    application_scopes = set(unpack_list(application.scopes))
+    requested_scopes = [scope for scope in payload.scopes if scope in application_scopes]
+    if len(requested_scopes) != len(payload.scopes):
+        raise HTTPException(status_code=422, detail="Requested scope is not allowed for this application")
+    authorization_code = token_urlsafe(32)
+    now = datetime.now(UTC)
+    authorization = DeveloperOAuthAuthorization(
+        organization_id=payload.organization_id,
+        application_id=application.id,
+        user_person_id=identity.person_id,
+        redirect_uri=payload.redirect_uri,
+        requested_scopes=pack_list(payload.scopes),
+        granted_scopes=pack_list(requested_scopes),
+        state=payload.state,
+        code_hash=hash_secret(authorization_code),
+        status="granted",
+        expires_at=now + timedelta(minutes=10),
+        consented_at=now,
+    )
+    db.add(authorization)
+    await db.commit()
+    await db.refresh(authorization)
+    return oauth_authorization_read(application, authorization, authorization_code=authorization_code)
+
+
+async def list_developer_oauth_authorizations(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> list[DeveloperOAuthAuthorizationRead]:
+    await ensure_manage_developer_platform(authz, identity, organization_id)
+    authorizations = list(
+        (
+            await db.scalars(
+                select(DeveloperOAuthAuthorization)
+                .where(DeveloperOAuthAuthorization.organization_id == organization_id)
+                .order_by(DeveloperOAuthAuthorization.created_at.desc())
+                .limit(100)
+            )
+        ).all()
+    )
+    if not authorizations:
+        return []
+    applications = {
+        application.id: application
+        for application in (
+            await db.scalars(
+                select(DeveloperApplication).where(
+                    DeveloperApplication.id.in_({authorization.application_id for authorization in authorizations})
+                )
+            )
+        ).all()
+    }
+    return [
+        oauth_authorization_read(applications[authorization.application_id], authorization)
+        for authorization in authorizations
+        if authorization.application_id in applications
+    ]
+
+
+async def exchange_developer_oauth_token(
+    db: AsyncSession,
+    payload: DeveloperOAuthTokenExchange,
+) -> DeveloperOAuthTokenRead:
+    application = await get_developer_application_by_client_id(db, payload.client_id)
+    if application.status != "active" or application.client_secret_hash != hash_secret(payload.client_secret):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OAuth client credentials")
+    authorization = await db.scalar(
+        select(DeveloperOAuthAuthorization).where(
+            DeveloperOAuthAuthorization.application_id == application.id,
+            DeveloperOAuthAuthorization.code_hash == hash_secret(payload.code),
+        )
+    )
+    if authorization is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OAuth authorization code")
+    now = datetime.now(UTC)
+    if authorization.status != "granted":
+        raise HTTPException(status_code=422, detail="OAuth authorization code has already been used")
+    if authorization.redirect_uri != payload.redirect_uri:
+        raise HTTPException(status_code=422, detail="Redirect URI does not match authorization")
+    if as_utc(authorization.expires_at) <= now:
+        authorization.status = "expired"
+        await db.commit()
+        raise HTTPException(status_code=422, detail="OAuth authorization code has expired")
+    raw_key = build_api_key("oauth", "oauth")
+    api_key = DeveloperApiKey(
+        organization_id=authorization.organization_id,
+        application_id=application.id,
+        name=f"OAuth token {str(authorization.id)[:8]}",
+        key_prefix=raw_key.split(".", 1)[0],
+        key_hash=hash_secret(raw_key),
+        scopes=authorization.granted_scopes,
+        environment="oauth",
+        rate_limit_per_minute=600,
+        expires_at=now + timedelta(days=30),
+        notes=f"OAuth token minted from authorization {authorization.id}",
+    )
+    authorization.status = "redeemed"
+    authorization.redeemed_at = now
+    db.add(api_key)
+    await db.commit()
+    await db.refresh(api_key)
+    return DeveloperOAuthTokenRead(
+        access_token=raw_key,
+        token_type="AfroleteApiKey",
+        auth_header="X-Afrolete-API-Key",
+        api_key=developer_api_key_read(api_key),
+        scopes=unpack_list(api_key.scopes),
+        expires_in=30 * 24 * 60 * 60,
     )
 
 
@@ -717,6 +852,60 @@ async def count_where(
     return int(await db.scalar(query) or 0)
 
 
+def developer_api_key_read(api_key: DeveloperApiKey) -> DeveloperApiKeyRead:
+    return DeveloperApiKeyRead(
+        id=api_key.id,
+        organization_id=api_key.organization_id,
+        application_id=api_key.application_id,
+        name=api_key.name,
+        key_prefix=api_key.key_prefix,
+        scopes=unpack_list(api_key.scopes),
+        environment=api_key.environment,
+        status=api_key.status,
+        expires_at=api_key.expires_at,
+        last_used_at=api_key.last_used_at,
+        last_used_ip=api_key.last_used_ip,
+        usage_count=api_key.usage_count,
+        rate_limit_per_minute=api_key.rate_limit_per_minute,
+        window_started_at=api_key.window_started_at,
+        window_request_count=api_key.window_request_count,
+        last_rate_limited_at=api_key.last_rate_limited_at,
+        notes=api_key.notes,
+    )
+
+
+def oauth_authorization_read(
+    application: DeveloperApplication,
+    authorization: DeveloperOAuthAuthorization,
+    *,
+    authorization_code: str | None = None,
+) -> DeveloperOAuthAuthorizationRead:
+    redirect_url = None
+    if authorization_code is not None:
+        separator = "&" if "?" in authorization.redirect_uri else "?"
+        parameters = {"code": authorization_code}
+        if authorization.state:
+            parameters["state"] = authorization.state
+        redirect_url = f"{authorization.redirect_uri}{separator}{urlencode(parameters)}"
+    return DeveloperOAuthAuthorizationRead(
+        id=authorization.id,
+        organization_id=authorization.organization_id,
+        application_id=authorization.application_id,
+        client_id=application.client_id,
+        application_name=application.name,
+        redirect_uri=authorization.redirect_uri,
+        requested_scopes=unpack_list(authorization.requested_scopes),
+        granted_scopes=unpack_list(authorization.granted_scopes),
+        state=authorization.state,
+        status=authorization.status,
+        expires_at=authorization.expires_at,
+        consented_at=authorization.consented_at,
+        redeemed_at=authorization.redeemed_at,
+        authorization_code=authorization_code,
+        redirect_url=redirect_url,
+    )
+
+
 async def get_organization(db: AsyncSession, organization_id: UUID) -> Organization:
     organization = await db.get(Organization, organization_id)
     if organization is None:
@@ -726,6 +915,13 @@ async def get_organization(db: AsyncSession, organization_id: UUID) -> Organizat
 
 async def get_developer_application(db: AsyncSession, application_id: UUID) -> DeveloperApplication:
     application = await db.get(DeveloperApplication, application_id)
+    if application is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Developer application not found")
+    return application
+
+
+async def get_developer_application_by_client_id(db: AsyncSession, client_id: str) -> DeveloperApplication:
+    application = await db.scalar(select(DeveloperApplication).where(DeveloperApplication.client_id == client_id))
     if application is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Developer application not found")
     return application
@@ -1017,6 +1213,22 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
                 "  -d '{\"organization_id\":\"'$ORG_ID'\",\"sport\":\"football\","
                 "\"name\":\"Advanced Passing Circuit\",\"focus_area\":\"Passing\","
                 "\"category\":\"technical\",\"description\":\"One-touch passing square.\"}'"
+            ),
+        ),
+        DeveloperQuickstartRead(
+            title="Exchange an OAuth code",
+            language="HTTP",
+            description="Redeem a tenant-approved authorization code for an expiring AfroLete API token.",
+            steps=[
+                "Register a developer application with a redirect URI and allowed scopes.",
+                "Ask a tenant manager to grant OAuth consent for the requested scopes.",
+                "POST the authorization code, client secret, and redirect URI to /api/v1/developers/oauth/token.",
+            ],
+            code_sample=(
+                "curl -s \"$AFROLETE_API/api/v1/developers/oauth/token\" \\\n"
+                "  -H \"Content-Type: application/json\" \\\n"
+                "  -d '{\"client_id\":\"'$CLIENT_ID'\",\"client_secret\":\"'$CLIENT_SECRET'\","
+                "\"code\":\"'$AUTH_CODE'\",\"redirect_uri\":\"https://sync.example/callback\"}'"
             ),
         ),
         DeveloperQuickstartRead(

@@ -9,6 +9,10 @@ from app.schemas.developer import (
     DeveloperApiKeyInspectionRead,
     DeveloperApiKeyProvisionedRead,
     DeveloperApiKeyRead,
+    DeveloperOAuthAuthorizationCreate,
+    DeveloperOAuthAuthorizationRead,
+    DeveloperOAuthTokenExchange,
+    DeveloperOAuthTokenRead,
     DeveloperApplicationCreate,
     DeveloperApplicationProvisionedRead,
     DeveloperApplicationRead,
@@ -32,14 +36,17 @@ from app.services.developer import (
     create_developer_api_key,
     create_developer_application,
     create_developer_marketplace_listing,
+    create_developer_oauth_authorization,
     create_developer_webhook_subscription,
     developer_integration_catalog,
     developer_portal_summary,
     developer_public_docs,
+    exchange_developer_oauth_token,
     inspect_developer_api_key,
     list_developer_api_keys,
     list_developer_applications,
     list_developer_marketplace_listings,
+    list_developer_oauth_authorizations,
     list_developer_webhook_deliveries,
     list_developer_webhook_subscriptions,
     record_developer_marketplace_install,
@@ -197,6 +204,34 @@ async def inspect_developer_api_key_route(
     db: AsyncSession = Depends(get_db),
 ) -> DeveloperApiKeyInspectionRead:
     return await inspect_developer_api_key(db, x_afrolete_api_key, request.client.host if request.client else None)
+
+
+@router.post("/oauth/authorizations", response_model=DeveloperOAuthAuthorizationRead, status_code=status.HTTP_201_CREATED)
+async def create_developer_oauth_authorization_route(
+    payload: DeveloperOAuthAuthorizationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperOAuthAuthorizationRead:
+    return await create_developer_oauth_authorization(db, identity, payload, authz)
+
+
+@router.get("/oauth/authorizations", response_model=list[DeveloperOAuthAuthorizationRead])
+async def list_developer_oauth_authorizations_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[DeveloperOAuthAuthorizationRead]:
+    return await list_developer_oauth_authorizations(db, identity, organization_id, authz)
+
+
+@router.post("/oauth/token", response_model=DeveloperOAuthTokenRead)
+async def exchange_developer_oauth_token_route(
+    payload: DeveloperOAuthTokenExchange,
+    db: AsyncSession = Depends(get_db),
+) -> DeveloperOAuthTokenRead:
+    return await exchange_developer_oauth_token(db, payload)
 
 
 @router.post("/applications", response_model=DeveloperApplicationProvisionedRead, status_code=status.HTTP_201_CREATED)

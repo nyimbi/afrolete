@@ -2263,6 +2263,33 @@ export type DeveloperApiKeyProvisionedRead = {
   secret_hint: string;
 };
 
+export type DeveloperOAuthAuthorizationRead = {
+  id: UUID;
+  organization_id: UUID;
+  application_id: UUID;
+  client_id: string;
+  application_name: string;
+  redirect_uri: string;
+  requested_scopes: string[];
+  granted_scopes: string[];
+  state: string | null;
+  status: string;
+  expires_at: string;
+  consented_at: string | null;
+  redeemed_at: string | null;
+  authorization_code: string | null;
+  redirect_url: string | null;
+};
+
+export type DeveloperOAuthTokenRead = {
+  access_token: string;
+  token_type: string;
+  auth_header: string;
+  api_key: DeveloperApiKeyRead;
+  scopes: string[];
+  expires_in: number | null;
+};
+
 export type DeveloperWebhookSubscriptionRead = {
   id: UUID;
   organization_id: UUID;
