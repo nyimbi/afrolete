@@ -25,7 +25,7 @@ def test_public_developer_docs(client) -> None:
     assert docs["api_base_path"] == "/api/v1/sdk"
     assert docs["auth_header"] == "X-Afrolete-API-Key"
     assert docs["webhook_signature_header"] == "X-Afrolete-Webhook-Signature"
-    assert len(docs["quickstarts"]) >= 4
+    assert len(docs["quickstarts"]) >= 5
     assert "read:organization" in {scope["scope"] for scope in docs["scopes"]}
     assert any(event["event_type"] == "training.drill.created" for event in docs["webhook_events"])
     assert any(sdk["language"] == "Raw HTTP" and sdk["status"] == "active" for sdk in docs["sdks"])
@@ -155,6 +155,42 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert oauth_token["auth_header"] == "X-Afrolete-API-Key"
     assert oauth_token["api_key"]["environment"] == "oauth"
     assert oauth_token["scopes"] == ["read:organization", "write:training"]
+    assert oauth_token["refresh_token"]
+    assert oauth_token["refresh_expires_in"] == 90 * 24 * 60 * 60
+
+    refreshed_oauth_response = client.post(
+        "/api/v1/developers/oauth/refresh",
+        json={
+            "client_id": application["client_id"],
+            "refresh_token": oauth_token["refresh_token"],
+        },
+    )
+    assert refreshed_oauth_response.status_code == 200
+    refreshed_oauth = refreshed_oauth_response.json()
+    assert refreshed_oauth["access_token"] != oauth_token["access_token"]
+    assert refreshed_oauth["refresh_token"] != oauth_token["refresh_token"]
+    assert refreshed_oauth["scopes"] == ["read:organization", "write:training"]
+
+    old_oauth_inspect_response = client.get(
+        "/api/v1/developers/auth/inspect",
+        headers={"X-Afrolete-API-Key": oauth_token["access_token"]},
+    )
+    assert old_oauth_inspect_response.status_code == 401
+
+    new_oauth_inspect_response = client.get(
+        "/api/v1/developers/auth/inspect",
+        headers={"X-Afrolete-API-Key": refreshed_oauth["access_token"]},
+    )
+    assert new_oauth_inspect_response.status_code == 200
+
+    reused_refresh_response = client.post(
+        "/api/v1/developers/oauth/refresh",
+        json={
+            "client_id": application["client_id"],
+            "refresh_token": oauth_token["refresh_token"],
+        },
+    )
+    assert reused_refresh_response.status_code == 401
 
     reused_oauth_token_response = client.post(
         "/api/v1/developers/oauth/token",
@@ -209,6 +245,7 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert pkce_token_response.status_code == 200
     assert pkce_token_response.json()["api_key"]["environment"] == "oauth"
     assert pkce_token_response.json()["scopes"] == ["read:organization"]
+    assert pkce_token_response.json()["refresh_token"]
 
     sdk_me_response = client.get(
         "/api/v1/sdk/me",
@@ -445,7 +482,7 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert summary_response.status_code == 200
     summary = summary_response.json()
     assert summary["application_count"] == 1
-    assert summary["api_key_count"] == 5
+    assert summary["api_key_count"] == 6
     assert summary["active_api_key_count"] == 5
     assert summary["webhook_subscription_count"] == 2
     assert summary["marketplace_listing_count"] == 1

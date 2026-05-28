@@ -11,6 +11,7 @@ from app.schemas.developer import (
     DeveloperApiKeyRead,
     DeveloperOAuthAuthorizationCreate,
     DeveloperOAuthAuthorizationRead,
+    DeveloperOAuthRefreshTokenExchange,
     DeveloperOAuthTokenExchange,
     DeveloperOAuthTokenRead,
     DeveloperApplicationCreate,
@@ -50,6 +51,7 @@ from app.services.developer import (
     list_developer_webhook_deliveries,
     list_developer_webhook_subscriptions,
     record_developer_marketplace_install,
+    refresh_developer_oauth_token,
     replay_developer_webhook_delivery,
     revoke_developer_api_key,
     review_developer_marketplace_listing,
@@ -97,6 +99,8 @@ def api_key_read(api_key) -> DeveloperApiKeyRead:
         window_started_at=api_key.window_started_at,
         window_request_count=api_key.window_request_count,
         last_rate_limited_at=api_key.last_rate_limited_at,
+        refresh_expires_at=api_key.refresh_expires_at,
+        refresh_rotated_at=api_key.refresh_rotated_at,
         notes=api_key.notes,
     )
 
@@ -232,6 +236,14 @@ async def exchange_developer_oauth_token_route(
     db: AsyncSession = Depends(get_db),
 ) -> DeveloperOAuthTokenRead:
     return await exchange_developer_oauth_token(db, payload)
+
+
+@router.post("/oauth/refresh", response_model=DeveloperOAuthTokenRead)
+async def refresh_developer_oauth_token_route(
+    payload: DeveloperOAuthRefreshTokenExchange,
+    db: AsyncSession = Depends(get_db),
+) -> DeveloperOAuthTokenRead:
+    return await refresh_developer_oauth_token(db, payload)
 
 
 @router.post("/applications", response_model=DeveloperApplicationProvisionedRead, status_code=status.HTTP_201_CREATED)

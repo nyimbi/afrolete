@@ -63,6 +63,8 @@ class DeveloperApiKeyRead(BaseModel):
     window_started_at: datetime | None
     window_request_count: int
     last_rate_limited_at: datetime | None
+    refresh_expires_at: datetime | None
+    refresh_rotated_at: datetime | None
     notes: str | None
 
 
@@ -110,13 +112,20 @@ class DeveloperOAuthTokenExchange(BaseModel):
     code_verifier: str | None = Field(default=None, min_length=8, max_length=256)
 
 
+class DeveloperOAuthRefreshTokenExchange(BaseModel):
+    client_id: str = Field(min_length=8, max_length=160)
+    refresh_token: str = Field(min_length=16, max_length=500)
+
+
 class DeveloperOAuthTokenRead(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str
     auth_header: str
     api_key: DeveloperApiKeyRead
     scopes: list[str]
     expires_in: int | None = None
+    refresh_expires_in: int | None = None
 
 
 class DeveloperApiKeyInspectionRead(BaseModel):

@@ -2254,6 +2254,8 @@ export type DeveloperApiKeyRead = {
   window_started_at: string | null;
   window_request_count: number;
   last_rate_limited_at: string | null;
+  refresh_expires_at: string | null;
+  refresh_rotated_at: string | null;
   notes: string | null;
 };
 
@@ -2285,11 +2287,13 @@ export type DeveloperOAuthAuthorizationRead = {
 
 export type DeveloperOAuthTokenRead = {
   access_token: string;
+  refresh_token: string | null;
   token_type: string;
   auth_header: string;
   api_key: DeveloperApiKeyRead;
   scopes: string[];
   expires_in: number | null;
+  refresh_expires_in: number | null;
 };
 
 export type DeveloperWebhookSubscriptionRead = {

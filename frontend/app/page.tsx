@@ -11838,6 +11838,7 @@ export default function HomePage() {
                     <strong>{apiKey.name}</strong>
                     <span>
                       {apiKey.key_prefix} · {apiKey.environment} · {apiKey.status} · {apiKey.window_request_count}/{apiKey.rate_limit_per_minute}/min · {apiKey.usage_count} calls
+                      {apiKey.refresh_expires_at ? ` · refresh ${new Date(apiKey.refresh_expires_at).toLocaleDateString()}` : ""}
                     </span>
                   </div>
                   <button type="button" onClick={() => revokeDeveloperApiKey(apiKey.id)} disabled={busyAction !== null || apiKey.status === "revoked"}>Revoke</button>

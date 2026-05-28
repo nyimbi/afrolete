@@ -28,6 +28,7 @@ from app.schemas.developer import (
     DeveloperApiKeyRead,
     DeveloperOAuthAuthorizationCreate,
     DeveloperOAuthAuthorizationRead,
+    DeveloperOAuthRefreshTokenExchange,
     DeveloperOAuthTokenExchange,
     DeveloperOAuthTokenRead,
     DeveloperApplicationCreate,
@@ -322,17 +323,12 @@ async def exchange_developer_oauth_token(
         verify_pkce_challenge(authorization, payload.code_verifier)
     elif payload.client_secret is None or application.client_secret_hash != hash_secret(payload.client_secret):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OAuth client credentials")
-    raw_key = build_api_key("oauth", "oauth")
-    api_key = DeveloperApiKey(
-        organization_id=authorization.organization_id,
-        application_id=application.id,
-        name=f"OAuth token {str(authorization.id)[:8]}",
-        key_prefix=raw_key.split(".", 1)[0],
-        key_hash=hash_secret(raw_key),
-        scopes=authorization.granted_scopes,
-        environment="oauth",
-        rate_limit_per_minute=600,
-        expires_at=now + timedelta(days=30),
+    raw_key, refresh_token, api_key = build_oauth_api_key(
+        authorization.organization_id,
+        application.id,
+        authorization.granted_scopes,
+        now=now,
+        token_label=str(authorization.id)[:8],
         notes=f"OAuth token minted from authorization {authorization.id}",
     )
     authorization.status = "redeemed"
@@ -342,11 +338,60 @@ async def exchange_developer_oauth_token(
     await db.refresh(api_key)
     return DeveloperOAuthTokenRead(
         access_token=raw_key,
+        refresh_token=refresh_token,
         token_type="AfroleteApiKey",
         auth_header="X-Afrolete-API-Key",
         api_key=developer_api_key_read(api_key),
         scopes=unpack_list(api_key.scopes),
         expires_in=30 * 24 * 60 * 60,
+        refresh_expires_in=90 * 24 * 60 * 60,
+    )
+
+
+async def refresh_developer_oauth_token(
+    db: AsyncSession,
+    payload: DeveloperOAuthRefreshTokenExchange,
+) -> DeveloperOAuthTokenRead:
+    application = await get_developer_application_by_client_id(db, payload.client_id)
+    if application.status != "active":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OAuth refresh client")
+    current_key = await db.scalar(
+        select(DeveloperApiKey).where(
+            DeveloperApiKey.application_id == application.id,
+            DeveloperApiKey.refresh_token_hash == hash_secret(payload.refresh_token),
+        )
+    )
+    now = datetime.now(UTC)
+    if current_key is None or current_key.environment != "oauth" or current_key.status != "active":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OAuth refresh token")
+    if current_key.refresh_expires_at is None or as_utc(current_key.refresh_expires_at) <= now:
+        current_key.status = "expired"
+        current_key.refresh_token_hash = None
+        await db.commit()
+        raise HTTPException(status_code=422, detail="OAuth refresh token has expired")
+    raw_key, refresh_token, new_key = build_oauth_api_key(
+        current_key.organization_id,
+        current_key.application_id,
+        current_key.scopes,
+        now=now,
+        token_label=f"refresh {str(current_key.id)[:8]}",
+        notes=f"OAuth token rotated from {current_key.id}",
+    )
+    current_key.status = "revoked"
+    current_key.refresh_token_hash = None
+    current_key.refresh_rotated_at = now
+    db.add(new_key)
+    await db.commit()
+    await db.refresh(new_key)
+    return DeveloperOAuthTokenRead(
+        access_token=raw_key,
+        refresh_token=refresh_token,
+        token_type="AfroleteApiKey",
+        auth_header="X-Afrolete-API-Key",
+        api_key=developer_api_key_read(new_key),
+        scopes=unpack_list(new_key.scopes),
+        expires_in=30 * 24 * 60 * 60,
+        refresh_expires_in=90 * 24 * 60 * 60,
     )
 
 
@@ -373,7 +418,8 @@ async def authenticate_developer_api_key(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid developer API key")
     if api_key.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Developer API key is not active")
-    if api_key.expires_at is not None and api_key.expires_at <= datetime.now(UTC):
+    expires_at = as_utc(api_key.expires_at)
+    if expires_at is not None and expires_at <= datetime.now(UTC):
         api_key.status = "expired"
         await db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Developer API key has expired")
@@ -878,8 +924,38 @@ def developer_api_key_read(api_key: DeveloperApiKey) -> DeveloperApiKeyRead:
         window_started_at=api_key.window_started_at,
         window_request_count=api_key.window_request_count,
         last_rate_limited_at=api_key.last_rate_limited_at,
+        refresh_expires_at=api_key.refresh_expires_at,
+        refresh_rotated_at=api_key.refresh_rotated_at,
         notes=api_key.notes,
     )
+
+
+def build_oauth_api_key(
+    organization_id: UUID,
+    application_id: UUID,
+    scopes: str,
+    *,
+    now: datetime,
+    token_label: str,
+    notes: str,
+) -> tuple[str, str, DeveloperApiKey]:
+    raw_key = build_api_key("oauth", "oauth")
+    refresh_token = token_urlsafe(40)
+    api_key = DeveloperApiKey(
+        organization_id=organization_id,
+        application_id=application_id,
+        name=f"OAuth token {token_label}",
+        key_prefix=raw_key.split(".", 1)[0],
+        key_hash=hash_secret(raw_key),
+        scopes=scopes,
+        environment="oauth",
+        rate_limit_per_minute=600,
+        expires_at=now + timedelta(days=30),
+        refresh_token_hash=hash_secret(refresh_token),
+        refresh_expires_at=now + timedelta(days=90),
+        notes=notes,
+    )
+    return raw_key, refresh_token, api_key
 
 
 def oauth_authorization_read(
@@ -1262,6 +1338,21 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
                 "  -H \"Content-Type: application/json\" \\\n"
                 "  -d '{\"client_id\":\"'$CLIENT_ID'\",\"client_secret\":\"'$CLIENT_SECRET'\","
                 "\"code\":\"'$AUTH_CODE'\",\"redirect_uri\":\"https://sync.example/callback\"}'"
+            ),
+        ),
+        DeveloperQuickstartRead(
+            title="Rotate a refresh token",
+            language="HTTP",
+            description="Exchange a valid refresh token for a new access token and replacement refresh token.",
+            steps=[
+                "Store refresh tokens outside source control and browser-visible logs.",
+                "POST client_id and refresh_token to /api/v1/developers/oauth/refresh.",
+                "Replace both stored tokens; the previous access token and refresh token are revoked.",
+            ],
+            code_sample=(
+                "curl -s \"$AFROLETE_API/api/v1/developers/oauth/refresh\" \\\n"
+                "  -H \"Content-Type: application/json\" \\\n"
+                "  -d '{\"client_id\":\"'$CLIENT_ID'\",\"refresh_token\":\"'$REFRESH_TOKEN'\"}'"
             ),
         ),
         DeveloperQuickstartRead(
