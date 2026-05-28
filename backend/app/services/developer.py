@@ -1437,8 +1437,9 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
             language="TypeScript",
             package_name="@afrolete/sdk",
             install_command="pnpm add @afrolete/sdk",
-            status="planned_public_package",
+            status="repository_package",
             entry_points=[
+                "client.me",
                 "client.organization.get",
                 "client.events.list",
                 "client.events.create",
@@ -1525,6 +1526,24 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
                 "  -H \"X-Afrolete-API-Key: $AFROLETE_API_KEY\" \\\n"
                 "  -d '{\"organization_id\":\"'$ORG_ID'\",\"event_type\":\"match\","
                 "\"title\":\"U17 League Match\",\"starts_at\":\"2026-06-01T15:00:00Z\"}'"
+            ),
+        ),
+        DeveloperQuickstartRead(
+            title="Use the TypeScript SDK",
+            language="TypeScript",
+            description="Call tenant SDK routes from a typed client using the same X-Afrolete-API-Key boundary.",
+            steps=[
+                "Install @afrolete/sdk from the repository package or future registry package.",
+                "Create an AfroLeteClient with baseUrl and a tenant-issued API key.",
+                "Call organization, event, or training drill helpers instead of hand-building SDK URLs.",
+            ],
+            code_sample=(
+                "import { AfroLeteClient } from \"@afrolete/sdk\";\n\n"
+                "const client = new AfroLeteClient({\n"
+                "  baseUrl: process.env.AFROLETE_API!,\n"
+                "  apiKey: process.env.AFROLETE_API_KEY!,\n"
+                "});\n\n"
+                "const events = await client.events.list({ organizationId: process.env.AFROLETE_ORG_ID! });"
             ),
         ),
         DeveloperQuickstartRead(
