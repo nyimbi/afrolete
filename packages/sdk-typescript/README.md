@@ -22,6 +22,13 @@ const teams = await client.teams.list({
   organizationId: organization.id,
 });
 
+const athlete = await client.people.create({
+  organization_id: organization.id,
+  display_name: "Amina Otieno",
+  primary_email: "amina@example.org",
+  membership_role: "athlete",
+});
+
 const team = await client.teams.create({
   organization_id: organization.id,
   name: "U17 Girls",
@@ -29,7 +36,7 @@ const team = await client.teams.create({
 });
 
 await client.teams.addMember(team.id, {
-  person_id: "person-uuid",
+  person_id: athlete.id,
   role: "player",
 });
 ```

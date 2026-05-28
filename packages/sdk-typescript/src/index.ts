@@ -62,6 +62,36 @@ export interface Organization {
   my_roles: string[];
 }
 
+export interface PersonCreate {
+  organization_id: UUID;
+  display_name: string;
+  given_name?: string | null;
+  family_name?: string | null;
+  date_of_birth?: string | null;
+  primary_email?: string | null;
+  primary_phone?: string | null;
+  country_code?: string | null;
+  notes?: string | null;
+  membership_role?: string;
+  membership_title?: string | null;
+}
+
+export interface Person {
+  id: UUID;
+  organization_id: UUID;
+  membership_id: UUID | null;
+  display_name: string;
+  given_name: string | null;
+  family_name: string | null;
+  date_of_birth: string | null;
+  primary_email: string | null;
+  primary_phone: string | null;
+  country_code: string | null;
+  notes: string | null;
+  membership_role: string | null;
+  membership_title: string | null;
+}
+
 export interface Event {
   id: UUID;
   organization_id: UUID;
@@ -176,6 +206,14 @@ export class AfroLeteClient {
     get: (params: { organizationId: UUID }): Promise<Organization> =>
       this.request<Organization>("/organization", {
         query: { organization_id: params.organizationId },
+      }),
+  };
+
+  readonly people = {
+    create: (payload: PersonCreate): Promise<Person> =>
+      this.request<Person>("/people", {
+        method: "POST",
+        body: payload,
       }),
   };
 

@@ -1287,6 +1287,12 @@ def developer_scope_catalog() -> list[DeveloperApiScopeCatalogRead]:
             recommended_for=["club management imports", "school SIS sync", "roster automation"],
         ),
         DeveloperApiScopeCatalogRead(
+            scope="write:people",
+            category="people",
+            description="Create or reuse tenant person records and attach organization membership.",
+            recommended_for=["registration imports", "school SIS sync", "club member onboarding"],
+        ),
+        DeveloperApiScopeCatalogRead(
             scope="read:training",
             category="training",
             description="Read training drill library records through SDK routes.",
@@ -1465,6 +1471,7 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
             entry_points=[
                 "client.me",
                 "client.organization.get",
+                "client.people.create",
                 "client.teams.list",
                 "client.teams.create",
                 "client.teams.addMember",
@@ -1482,6 +1489,7 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
             entry_points=[
                 "client.me",
                 "client.organization.get",
+                "client.people.create",
                 "client.teams.list",
                 "client.teams.create",
                 "client.teams.add_member",
@@ -1499,6 +1507,7 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
             entry_points=[
                 "GET /sdk/me",
                 "GET /sdk/organization",
+                "POST /sdk/people",
                 "GET /sdk/teams",
                 "POST /sdk/teams",
                 "POST /sdk/teams/{team_id}/members",

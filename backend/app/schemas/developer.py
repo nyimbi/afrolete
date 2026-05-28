@@ -1,7 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from app.models.enums import MembershipRole
 
 
 class DeveloperApplicationCreate(BaseModel):
@@ -144,6 +146,36 @@ class DeveloperApiKeyInspectionRead(BaseModel):
     usage_count: int
     window_started_at: datetime | None
     window_request_count: int
+
+
+class DeveloperPersonCreate(BaseModel):
+    organization_id: UUID
+    display_name: str = Field(min_length=2, max_length=240)
+    given_name: str | None = Field(default=None, max_length=120)
+    family_name: str | None = Field(default=None, max_length=120)
+    date_of_birth: date | None = None
+    primary_email: str | None = Field(default=None, max_length=320)
+    primary_phone: str | None = Field(default=None, max_length=64)
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
+    notes: str | None = Field(default=None, max_length=4000)
+    membership_role: MembershipRole = MembershipRole.ATHLETE
+    membership_title: str | None = Field(default=None, max_length=160)
+
+
+class DeveloperPersonRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    membership_id: UUID | None
+    display_name: str
+    given_name: str | None
+    family_name: str | None
+    date_of_birth: date | None
+    primary_email: str | None
+    primary_phone: str | None
+    country_code: str | None
+    notes: str | None
+    membership_role: MembershipRole | None
+    membership_title: str | None
 
 
 class DeveloperWebhookSubscriptionCreate(BaseModel):

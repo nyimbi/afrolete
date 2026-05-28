@@ -5,12 +5,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.enums import MemberSubjectType
 from app.models.event import Event
 from app.models.identity import Person
-from app.models.organization import Organization
+from app.models.organization import Membership, Organization
 from app.models.team import AthleteProfile, Team, TeamRosterEntry
 from app.models.training import TrainingDrill
-from app.schemas.developer import DeveloperApiKeyInspectionRead
+from app.schemas.developer import (
+    DeveloperApiKeyInspectionRead,
+    DeveloperPersonCreate,
+    DeveloperPersonRead,
+)
 from app.schemas.event import EventCreate, EventRead
 from app.schemas.organization import OrganizationRead
 from app.schemas.team import TeamCreate, TeamMemberAdd, TeamRead, TeamRosterEntryRead
@@ -26,6 +31,7 @@ from app.services.developer import (
     inspect_developer_api_key,
 )
 from app.services.events import list_events
+from app.services.organizations import organization_member_relation
 from app.services.teams import list_teams_for_organization, team_member_relation
 from app.services.training import list_training_drills
 
@@ -109,6 +115,28 @@ def to_team_read(team: Team) -> TeamRead:
     )
 
 
+def to_developer_person_read(
+    person: Person,
+    organization_id: UUID,
+    membership: Membership | None,
+) -> DeveloperPersonRead:
+    return DeveloperPersonRead(
+        id=person.id,
+        organization_id=organization_id,
+        membership_id=membership.id if membership is not None else None,
+        display_name=person.display_name,
+        given_name=person.given_name,
+        family_name=person.family_name,
+        date_of_birth=person.date_of_birth,
+        primary_email=person.primary_email,
+        primary_phone=person.primary_phone,
+        country_code=person.country_code,
+        notes=person.notes,
+        membership_role=membership.role if membership is not None else None,
+        membership_title=membership.title if membership is not None else None,
+    )
+
+
 @router.get("/me", response_model=DeveloperApiKeyInspectionRead)
 async def sdk_me(
     credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
@@ -148,6 +176,78 @@ async def sdk_list_teams(
 ) -> list[TeamRead]:
     ensure_developer_api_scope(credential, organization_id, {"read:organization", "read:teams"})
     return [to_team_read(team) for team in await list_teams_for_organization(db, organization_id)]
+
+
+@router.post("/people", response_model=DeveloperPersonRead, status_code=status.HTTP_201_CREATED)
+async def sdk_create_person(
+    payload: DeveloperPersonCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DeveloperPersonRead:
+    ensure_developer_api_scope(credential, payload.organization_id, {"write:people", "write:roster"})
+    organization = await db.get(Organization, payload.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    person = None
+    if payload.primary_email is not None:
+        person = await db.scalar(select(Person).where(Person.primary_email == payload.primary_email))
+    if person is None:
+        person = Person(
+            display_name=payload.display_name,
+            given_name=payload.given_name,
+            family_name=payload.family_name,
+            date_of_birth=payload.date_of_birth,
+            primary_email=payload.primary_email,
+            primary_phone=payload.primary_phone,
+            country_code=payload.country_code,
+            notes=payload.notes,
+        )
+        db.add(person)
+        await db.flush()
+    else:
+        person.display_name = person.display_name or payload.display_name
+        person.given_name = person.given_name or payload.given_name
+        person.family_name = person.family_name or payload.family_name
+        person.date_of_birth = person.date_of_birth or payload.date_of_birth
+        person.primary_phone = person.primary_phone or payload.primary_phone
+        person.country_code = person.country_code or payload.country_code
+        person.notes = person.notes or payload.notes
+
+    membership = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == payload.organization_id,
+            Membership.subject_type == MemberSubjectType.PERSON,
+            Membership.subject_id == person.id,
+            Membership.role == payload.membership_role,
+        )
+    )
+    if membership is None:
+        membership = Membership(
+            organization_id=payload.organization_id,
+            subject_type=MemberSubjectType.PERSON,
+            subject_id=person.id,
+            role=payload.membership_role,
+            title=payload.membership_title,
+        )
+        db.add(membership)
+        await authz.touch(
+            Relationship(
+                resource_type="organization",
+                resource_id=str(payload.organization_id),
+                relation=organization_member_relation(
+                    MemberSubjectType.PERSON,
+                    payload.membership_role,
+                ),
+                subject_type="person",
+                subject_id=str(person.id),
+            )
+        )
+    await db.commit()
+    await db.refresh(person)
+    if membership is not None:
+        await db.refresh(membership)
+    return to_developer_person_read(person, payload.organization_id, membership)
 
 
 @router.post("/teams", response_model=TeamRead, status_code=status.HTTP_201_CREATED)

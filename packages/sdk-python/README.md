@@ -12,6 +12,14 @@ client = AfroLeteClient(
 
 organization = client.organization.get(organization_id="tenant-uuid")
 teams = client.teams.list(organization_id=organization["id"])
+athlete = client.people.create(
+    {
+        "organization_id": organization["id"],
+        "display_name": "Amina Otieno",
+        "primary_email": "amina@example.org",
+        "membership_role": "athlete",
+    }
+)
 team = client.teams.create(
     {
         "organization_id": organization["id"],
@@ -22,7 +30,7 @@ team = client.teams.create(
 client.teams.add_member(
     team["id"],
     {
-        "person_id": "person-uuid",
+        "person_id": athlete["id"],
         "role": "player",
     },
 )

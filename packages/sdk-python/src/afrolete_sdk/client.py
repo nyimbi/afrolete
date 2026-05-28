@@ -28,6 +28,14 @@ class _OrganizationResource:
 
 
 @dataclass(frozen=True)
+class _PeopleResource:
+    client: AfroLeteClient
+
+    def create(self, payload: JsonObject) -> JsonObject:
+        return self.client.request("POST", "/people", body=payload)
+
+
+@dataclass(frozen=True)
 class _TeamsResource:
     client: AfroLeteClient
 
@@ -82,6 +90,7 @@ class AfroLeteClient:
         self.api_key = api_key
         self.timeout = timeout
         self.organization = _OrganizationResource(self)
+        self.people = _PeopleResource(self)
         self.teams = _TeamsResource(self)
         self.events = _EventsResource(self)
         self.training = _TrainingResource(drills=_TrainingDrillsResource(self))
