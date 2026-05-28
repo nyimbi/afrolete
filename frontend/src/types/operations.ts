@@ -1367,6 +1367,12 @@ export type GuardianAccountReadinessRead = {
   keycloak_sub: string | null;
   email_matches_app_user: boolean;
   can_receive_invite: boolean;
+  last_invite_message_id: UUID | null;
+  last_invite_channel: CommunicationChannel | null;
+  last_invite_destination: string | null;
+  last_invite_delivery_status: string | null;
+  last_invite_created_at: string | null;
+  last_invite_sent_at: string | null;
   recommended_action: string;
 };
 

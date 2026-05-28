@@ -17091,6 +17091,11 @@ export default function HomePage() {
                 <small>
                   {item.guardian_email ?? item.guardian_phone ?? "No contact"} · {item.recommended_action}
                 </small>
+                {item.last_invite_message_id ? (
+                  <small>
+                    Last invite {item.last_invite_delivery_status ?? "created"} via {item.last_invite_channel ?? "channel"} · {item.last_invite_destination ?? "in-app"}
+                  </small>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => sendGuardianPortalInvite(item)}
@@ -17099,7 +17104,7 @@ export default function HomePage() {
                     (!item.can_receive_invite && item.account_status !== "linked")
                   }
                 >
-                  Invite
+                  {item.last_invite_message_id ? "Invite again" : "Invite"}
                 </button>
               </article>
             ))}

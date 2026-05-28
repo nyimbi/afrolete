@@ -219,6 +219,7 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
     readiness = {item["guardian_person_id"]: item for item in response.json()}
     assert readiness[invite_ready["guardian_person_id"]]["account_status"] == "invite_ready"
     assert readiness[invite_ready["guardian_person_id"]]["can_receive_invite"] is True
+    assert readiness[invite_ready["guardian_person_id"]]["last_invite_message_id"] is None
     assert "identity bridge" in readiness[invite_ready["guardian_person_id"]]["recommended_action"]
     assert readiness[linked["guardian_person_id"]]["account_status"] == "linked"
     assert readiness[linked["guardian_person_id"]]["linked_app_user_id"]
@@ -253,6 +254,19 @@ async def test_guardian_account_readiness_maps_portal_onboarding_status(
     recipient = await db_session.get(MessageRecipient, invite["recipient_id"])
     assert recipient is not None
     assert str(recipient.person_id) == invite_ready["guardian_person_id"]
+    readiness_response = client.get(
+        f"/api/v1/safeguarding/guardian-account-readiness?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    readiness_after_invite = {
+        item["guardian_person_id"]: item for item in readiness_response.json()
+    }
+    invite_ready_after = readiness_after_invite[invite_ready["guardian_person_id"]]
+    assert invite_ready_after["last_invite_message_id"] == invite["message_id"]
+    assert invite_ready_after["last_invite_channel"] == "email"
+    assert invite_ready_after["last_invite_destination"] == "invite-ready-parent@example.com"
+    assert invite_ready_after["last_invite_delivery_status"] == "queued"
+    assert invite_ready_after["last_invite_sent_at"]
 
 
 async def test_family_dashboard_summarizes_parent_actions(client, identity_headers, db_session) -> None:

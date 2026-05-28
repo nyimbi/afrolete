@@ -81,6 +81,12 @@ class GuardianAccountReadinessRead(BaseModel):
     keycloak_sub: str | None
     email_matches_app_user: bool
     can_receive_invite: bool
+    last_invite_message_id: UUID | None
+    last_invite_channel: CommunicationChannel | None
+    last_invite_destination: str | None
+    last_invite_delivery_status: str | None
+    last_invite_created_at: datetime | None
+    last_invite_sent_at: datetime | None
     recommended_action: str
 
 

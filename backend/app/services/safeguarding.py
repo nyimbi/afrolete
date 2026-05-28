@@ -5095,8 +5095,10 @@ async def list_guardian_account_readiness(
                 .where(func.lower(AppUser.email) == guardian.primary_email.lower())
                 .order_by(AppUser.created_at.desc())
                 .limit(1)
-            )
+        )
         status_value, action = guardian_account_status(guardian, linked_user, email_user)
+        latest_invite = await latest_guardian_portal_invite(db, organization_id, guardian.id)
+        latest_message, latest_recipient = latest_invite if latest_invite else (None, None)
         readiness.append(
             GuardianAccountReadinessRead(
                 relationship_id=relationship.id,
@@ -5111,10 +5113,43 @@ async def list_guardian_account_readiness(
                 keycloak_sub=linked_user.keycloak_sub if linked_user else None,
                 email_matches_app_user=email_user is not None,
                 can_receive_invite=bool(guardian.primary_email),
+                last_invite_message_id=latest_message.id if latest_message else None,
+                last_invite_channel=latest_message.channel if latest_message else None,
+                last_invite_destination=latest_recipient.destination if latest_recipient else None,
+                last_invite_delivery_status=latest_recipient.delivery_status.value if latest_recipient else None,
+                last_invite_created_at=latest_message.created_at if latest_message else None,
+                last_invite_sent_at=latest_message.sent_at if latest_message else None,
                 recommended_action=action,
             )
-    )
+        )
     return readiness
+
+
+async def latest_guardian_portal_invite(
+    db: AsyncSession,
+    organization_id: UUID,
+    guardian_person_id: UUID,
+) -> tuple[CommunicationMessage, MessageRecipient] | None:
+    row = (
+        await db.execute(
+            select(CommunicationMessage, MessageRecipient)
+            .join(MessageRecipient, MessageRecipient.message_id == CommunicationMessage.id)
+            .where(CommunicationMessage.organization_id == organization_id)
+            .where(CommunicationMessage.message_type == CommunicationMessageType.REQUEST)
+            .where(CommunicationMessage.scope_type == CommunicationScopeType.PERSON)
+            .where(CommunicationMessage.scope_id == guardian_person_id)
+            .where(MessageRecipient.person_id == guardian_person_id)
+            .where(
+                or_(
+                    CommunicationMessage.subject.ilike("%family portal%"),
+                    CommunicationMessage.body.ilike("%family portal%"),
+                )
+            )
+            .order_by(CommunicationMessage.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+    return (row[0], row[1]) if row is not None else None
 
 
 async def create_guardian_portal_invite(
@@ -5171,6 +5206,8 @@ async def create_guardian_portal_invite(
         portal_url=payload.portal_url,
         account_status=status_value,
     )
+    if "family portal" not in body.lower():
+        body = f"{body}\n\nFamily portal: {payload.portal_url}"
     message = await create_message_for_recipients(
         db,
         organization_id=payload.organization_id,
