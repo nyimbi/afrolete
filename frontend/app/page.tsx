@@ -1086,6 +1086,32 @@ function PerformanceInjuryRiskCard({
           </div>
           <strong>{risk?.hazardous_surface_count ?? "n/a"}</strong>
         </div>
+        <div className="chart-bar-row">
+          <span>Biomarkers</span>
+          <div className="chart-track">
+            <div
+              className="chart-fill"
+              style={{
+                width: `${Math.max(4, Math.min(100, (risk?.biomarker_risk_count ?? 0) * 25))}%`,
+                backgroundColor: "var(--red)"
+              }}
+            />
+          </div>
+          <strong>{risk?.biomarker_risk_count ?? "n/a"}</strong>
+        </div>
+        <div className="chart-bar-row">
+          <span>Recovery</span>
+          <div className="chart-track">
+            <div
+              className="chart-fill"
+              style={{
+                width: `${Math.max(4, Math.min(100, risk?.latest_recovery_score ?? risk?.latest_hydration_score ?? 0))}%`,
+                backgroundColor: "var(--green)"
+              }}
+            />
+          </div>
+          <strong>{risk?.latest_recovery_score ?? risk?.latest_hydration_score ?? "n/a"}</strong>
+        </div>
       </div>
       <small>{risk?.drivers[0] ?? "Record athlete-specific readiness and session feedback to generate risk drivers."}</small>
       <small>{risk?.recommendation ?? "No risk recommendation is available yet."}</small>

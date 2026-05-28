@@ -1142,12 +1142,14 @@ async def performance_injury_risk(
     trends = await performance_metric_trends(db, organization_id, athlete_profile_id)
     declining_metric_count = sum(1 for trend in trends if trend["trend_direction"] == "declining")
     environmental_context = await injury_risk_environment_context(db, organization_id, feedback_rows)
+    biomarker_context = await injury_risk_biomarker_context(db, organization_id, athlete_profile_id)
     return injury_risk_summary(
         athlete_profile_id,
         feedback_rows,
         len(open_incidents),
         declining_metric_count,
         environmental_context,
+        biomarker_context,
     )
 
 
@@ -2362,8 +2364,10 @@ def injury_risk_summary(
     open_incident_count: int,
     declining_metric_count: int,
     environmental_context: dict[str, object] | None = None,
+    biomarker_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     environmental_context = environmental_context or default_injury_risk_environment_context()
+    biomarker_context = biomarker_context or default_injury_risk_biomarker_context()
     feedbacks = [feedback for feedback, _ in feedback_rows]
     loads = [training_feedback_load(feedback, session_plan) for feedback, session_plan in feedback_rows]
     now = datetime.now(UTC)
@@ -2443,6 +2447,11 @@ def injury_risk_summary(
         score += min(12, hazardous_surface_count * 6)
         labels = ", ".join(str(label) for label in environmental_context["surface_risk_labels"])
         drivers.append(f"{hazardous_surface_count} recent session venue surface risk marker(s): {labels}.")
+    biomarker_risk_count = int(biomarker_context["biomarker_risk_count"])
+    if biomarker_risk_count:
+        score += int(biomarker_context["biomarker_score_penalty"])
+        labels = ", ".join(str(label) for label in biomarker_context["wearable_risk_labels"])
+        drivers.append(f"{biomarker_risk_count} wearable biomarker risk marker(s): {labels}.")
 
     rounded_score = int(round(max(0, min(100, score))))
     band = injury_risk_band(rounded_score)
@@ -2451,7 +2460,7 @@ def injury_risk_summary(
     return {
         "athlete_profile_id": athlete_profile_id,
         "generated_at": now,
-        "model_policy": "deterministic_injury_risk_v2_environmental",
+        "model_policy": "deterministic_injury_risk_v3_biomarker_environmental",
         "score": rounded_score,
         "risk_band": band,
         "confidence": injury_risk_confidence(
@@ -2459,6 +2468,7 @@ def injury_risk_summary(
             open_incident_count,
             declining_metric_count,
             environmental_risk_count,
+            biomarker_risk_count,
         ),
         "latest_readiness_score": latest_feedback.readiness_score if latest_feedback is not None else None,
         "average_readiness_score": round(average_readiness, 1) if average_readiness is not None else None,
@@ -2478,6 +2488,13 @@ def injury_risk_summary(
         "hazardous_surface_count": hazardous_surface_count,
         "environmental_risk_count": environmental_risk_count,
         "surface_risk_labels": environmental_context["surface_risk_labels"],
+        "wearable_observation_count": biomarker_context["wearable_observation_count"],
+        "biomarker_risk_count": biomarker_risk_count,
+        "latest_hrv": biomarker_context["latest_hrv"],
+        "latest_resting_heart_rate": biomarker_context["latest_resting_heart_rate"],
+        "latest_recovery_score": biomarker_context["latest_recovery_score"],
+        "latest_hydration_score": biomarker_context["latest_hydration_score"],
+        "wearable_risk_labels": biomarker_context["wearable_risk_labels"],
         "drivers": drivers,
         "recommendation": injury_risk_recommendation(band),
     }
@@ -2628,17 +2645,134 @@ def hazardous_surface_label(surface: str | None) -> str | None:
     return None
 
 
+async def injury_risk_biomarker_context(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+) -> dict[str, object]:
+    rows = list(
+        (
+            await db.execute(
+                select(AthletePerformanceObservation, PerformanceMetricDefinition)
+                .join(
+                    PerformanceMetricDefinition,
+                    PerformanceMetricDefinition.id == AthletePerformanceObservation.metric_definition_id,
+                )
+                .where(AthletePerformanceObservation.organization_id == organization_id)
+                .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+                .where(AthletePerformanceObservation.source == MetricSource.WEARABLE)
+                .where(AthletePerformanceObservation.verification_status != MetricVerificationStatus.REJECTED)
+                .order_by(AthletePerformanceObservation.observed_at.desc())
+                .limit(80)
+            )
+        ).all()
+    )
+    latest_by_family: dict[str, float] = {}
+    risk_labels: list[str] = []
+    score_penalty = 0
+    for observation, metric in rows:
+        family = wearable_metric_family(metric)
+        if family is None:
+            continue
+        latest_by_family.setdefault(family, float(observation.value))
+        marker = wearable_biomarker_risk_marker(family, float(observation.value))
+        if marker is None:
+            continue
+        label, penalty = marker
+        if label not in risk_labels:
+            risk_labels.append(label)
+            score_penalty += penalty
+    return {
+        "wearable_observation_count": len(rows),
+        "biomarker_risk_count": len(risk_labels),
+        "biomarker_score_penalty": min(24, score_penalty),
+        "latest_hrv": rounded_latest_biomarker(latest_by_family.get("hrv")),
+        "latest_resting_heart_rate": rounded_latest_biomarker(latest_by_family.get("resting_heart_rate")),
+        "latest_recovery_score": rounded_latest_biomarker(latest_by_family.get("recovery")),
+        "latest_hydration_score": rounded_latest_biomarker(latest_by_family.get("hydration")),
+        "wearable_risk_labels": risk_labels,
+    }
+
+
+def default_injury_risk_biomarker_context() -> dict[str, object]:
+    return {
+        "wearable_observation_count": 0,
+        "biomarker_risk_count": 0,
+        "biomarker_score_penalty": 0,
+        "latest_hrv": None,
+        "latest_resting_heart_rate": None,
+        "latest_recovery_score": None,
+        "latest_hydration_score": None,
+        "wearable_risk_labels": [],
+    }
+
+
+def wearable_metric_family(metric: PerformanceMetricDefinition) -> str | None:
+    label = f"{metric.code} {metric.name} {metric.description or ''}".lower()
+    normalized = re.sub(r"[^a-z0-9]+", "_", label)
+    if "hrv" in normalized or "heart_rate_variability" in normalized:
+        return "hrv"
+    if "resting_heart_rate" in normalized or "resting_hr" in normalized or "resting_pulse" in normalized:
+        return "resting_heart_rate"
+    if "sleep_hours" in normalized or "sleep_duration" in normalized or "sleep_minutes" in normalized:
+        return "sleep_hours"
+    if "sleep_quality" in normalized:
+        return "sleep_quality"
+    if "recovery" in normalized or "readiness" in normalized:
+        return "recovery"
+    if "hydration" in normalized or "dehydration" in normalized:
+        return "hydration"
+    if "strain" in normalized or "training_strain" in normalized:
+        return "strain"
+    if "stress" in normalized:
+        return "stress"
+    if "temperature" in normalized or "body_temp" in normalized:
+        return "temperature"
+    return None
+
+
+def wearable_biomarker_risk_marker(family: str, value: float) -> tuple[str, int] | None:
+    if family == "hrv" and value < 45:
+        return f"low HRV {value:g}", 8 if value < 35 else 5
+    if family == "resting_heart_rate" and value > 90:
+        return f"high resting heart rate {value:g}", 8 if value > 100 else 5
+    if family == "sleep_hours" and value < 6:
+        return f"short sleep {value:g}h", 8 if value < 5 else 5
+    if family == "sleep_quality" and value < 60:
+        return f"low wearable sleep quality {value:g}", 6
+    if family == "recovery" and value < 60:
+        return f"low recovery score {value:g}", 8 if value < 45 else 5
+    if family == "hydration" and value < 70:
+        return f"low hydration score {value:g}", 6
+    if family == "strain" and value > 16:
+        return f"high strain {value:g}", 8 if value > 19 else 5
+    if family == "stress" and value > 70:
+        return f"high stress {value:g}", 6
+    if family == "temperature" and value >= 37.8:
+        return f"elevated body temperature {value:g}C", 10
+    return None
+
+
+def rounded_latest_biomarker(value: float | None) -> float | None:
+    return round(value, 1) if value is not None else None
+
+
 def injury_risk_confidence(
     feedback_count: int,
     open_incident_count: int,
     declining_metric_count: int,
     environmental_risk_count: int = 0,
+    biomarker_risk_count: int = 0,
 ) -> float:
     evidence_bonus = min(0.45, feedback_count * 0.06)
     incident_bonus = 0.12 if open_incident_count else 0.0
     trend_bonus = min(0.15, declining_metric_count * 0.04)
     environment_bonus = min(0.1, environmental_risk_count * 0.03)
-    return round(min(0.95, 0.35 + evidence_bonus + incident_bonus + trend_bonus + environment_bonus), 2)
+    biomarker_bonus = min(0.12, biomarker_risk_count * 0.04)
+    return round(
+        min(0.95, 0.35 + evidence_bonus + incident_bonus + trend_bonus + environment_bonus + biomarker_bonus),
+        2,
+    )
 
 
 def injury_risk_recommendation(band: str) -> str:

@@ -543,6 +543,38 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
         )
         assert response.status_code == 201
 
+    for code, name, unit, value in [
+        ("hrv", "Heart Rate Variability", "ms", 32),
+        ("resting_heart_rate", "Resting Heart Rate", "bpm", 102),
+        ("recovery_score", "Wearable Recovery Score", "score", 42),
+        ("hydration_score", "Hydration Score", "score", 64),
+    ]:
+        biomarker_metric = client.post(
+            "/api/v1/performance/metrics",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "sport": "football",
+                "code": code,
+                "name": name,
+                "category": "wellness",
+                "unit": unit,
+                "higher_is_better": code != "resting_heart_rate",
+            },
+        ).json()
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": biomarker_metric["id"],
+                "value": value,
+                "source": "wearable",
+                "observed_at": "2026-06-03T09:00:00Z",
+            },
+        )
+        assert response.status_code == 201
+
     facility = client.post(
         "/api/v1/assets/facilities",
         headers=identity_headers,
@@ -638,7 +670,7 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
 
     assert response.status_code == 200
     risk = response.json()
-    assert risk["model_policy"] == "deterministic_injury_risk_v2_environmental"
+    assert risk["model_policy"] == "deterministic_injury_risk_v3_biomarker_environmental"
     assert risk["score"] == 100
     assert risk["risk_band"] == "critical"
     assert risk["latest_readiness_score"] == 42
@@ -652,9 +684,17 @@ def test_performance_injury_risk_combines_workload_readiness_and_incidents(
     assert risk["hazardous_surface_count"] == 1
     assert risk["environmental_risk_count"] == 2
     assert risk["surface_risk_labels"] == ["uneven surface"]
+    assert risk["wearable_observation_count"] == 4
+    assert risk["biomarker_risk_count"] == 4
+    assert risk["latest_hrv"] == 32.0
+    assert risk["latest_resting_heart_rate"] == 102.0
+    assert risk["latest_recovery_score"] == 42.0
+    assert risk["latest_hydration_score"] == 64.0
+    assert any("low HRV" in label for label in risk["wearable_risk_labels"])
     assert any("open injury" in driver for driver in risk["drivers"])
     assert any("weather risk" in driver for driver in risk["drivers"])
     assert any("surface risk" in driver for driver in risk["drivers"])
+    assert any("wearable biomarker" in driver for driver in risk["drivers"])
     assert "medical or safeguarding review" in risk["recommendation"]
 
     scan_response = client.post(

@@ -3373,6 +3373,13 @@ export type PerformanceInjuryRiskRead = {
   hazardous_surface_count: number;
   environmental_risk_count: number;
   surface_risk_labels: string[];
+  wearable_observation_count: number;
+  biomarker_risk_count: number;
+  latest_hrv: number | null;
+  latest_resting_heart_rate: number | null;
+  latest_recovery_score: number | null;
+  latest_hydration_score: number | null;
+  wearable_risk_labels: string[];
   drivers: string[];
   recommendation: string;
 };

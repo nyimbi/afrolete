@@ -358,6 +358,13 @@ class PerformanceInjuryRiskRead(BaseModel):
     hazardous_surface_count: int
     environmental_risk_count: int
     surface_risk_labels: list[str]
+    wearable_observation_count: int
+    biomarker_risk_count: int
+    latest_hrv: float | None
+    latest_resting_heart_rate: float | None
+    latest_recovery_score: float | None
+    latest_hydration_score: float | None
+    wearable_risk_labels: list[str]
     drivers: list[str]
     recommendation: str
 
