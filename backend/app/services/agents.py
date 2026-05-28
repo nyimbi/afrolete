@@ -21,6 +21,7 @@ from app.models.agent import (
     AgentAssignment,
     AgentBiasAudit,
     AgentDecisionAppeal,
+    AgentGovernancePolicyHistorySnapshot,
     AgentGovernancePolicyRule,
     AgentModelRegistry,
     AgentRunRecord,
@@ -50,6 +51,7 @@ from app.schemas.agent import (
     AgentDecisionAppealUpdate,
     AgentMyDecisionAppealCreate,
     AgentGovernancePolicyRuleCreate,
+    AgentGovernancePolicyHistorySnapshotCreate,
     AgentGovernancePolicySimulationCreate,
     AgentGovernancePolicyRuleUpdate,
     AgentModelRegistryCreate,
@@ -336,6 +338,78 @@ async def export_agent_governance_policy_history(
         "governed_task_count": history["governed_task_count"],
         "policy_count": history["policy_count"],
     }
+
+
+async def create_agent_governance_policy_history_snapshot(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AgentGovernancePolicyHistorySnapshotCreate,
+    authz: AuthorizationService,
+) -> AgentGovernancePolicyHistorySnapshot:
+    export = await export_agent_governance_policy_history(
+        db,
+        identity,
+        payload.organization_id,
+        authz,
+        artifact_format=payload.artifact_format,
+        limit=payload.limit,
+    )
+    history = await agent_governance_policy_history(
+        db,
+        identity,
+        payload.organization_id,
+        authz,
+        limit=payload.limit,
+    )
+    generated_at = datetime.now(UTC)
+    snapshot = AgentGovernancePolicyHistorySnapshot(
+        organization_id=payload.organization_id,
+        snapshot_label=payload.snapshot_label or f"AI policy history {generated_at:%Y-%m-%d %H:%M UTC}",
+        artifact_format=str(export["artifact_format"]),
+        content_type=str(export["content_type"]),
+        download_filename=str(export["download_filename"]),
+        content=str(export["content"]),
+        checksum=str(export["checksum"]),
+        size_bytes=int(export["size_bytes"]),
+        governed_task_count=int(history["governed_task_count"]),
+        approval_required_count=int(history["approval_required_count"]),
+        completed_count=int(history["completed_count"]),
+        waiting_for_review_count=int(history["waiting_for_review_count"]),
+        failed_count=int(history["failed_count"]),
+        policy_count=int(history["policy_count"]),
+        latest_policy_code=history["latest_policy_code"],
+        recommendation=str(history["recommendation"]),
+        generated_by_person_id=identity.person_id,
+        generated_at=generated_at,
+    )
+    db.add(snapshot)
+    await db.commit()
+    await db.refresh(snapshot)
+    return snapshot
+
+
+async def list_agent_governance_policy_history_snapshots(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    limit: int = 20,
+) -> list[AgentGovernancePolicyHistorySnapshot]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    bounded_limit = min(max(limit, 1), 100)
+    return list(
+        (
+            await db.scalars(
+                select(AgentGovernancePolicyHistorySnapshot)
+                .where(AgentGovernancePolicyHistorySnapshot.organization_id == organization_id)
+                .order_by(
+                    AgentGovernancePolicyHistorySnapshot.generated_at.desc(),
+                    AgentGovernancePolicyHistorySnapshot.created_at.desc(),
+                )
+                .limit(bounded_limit)
+            )
+        ).all()
+    )
 
 
 async def simulate_agent_governance_policy(

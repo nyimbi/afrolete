@@ -3410,6 +3410,30 @@ export type AgentGovernancePolicyHistoryExportRead = {
   policy_count: number;
 };
 
+export type AgentGovernancePolicyHistorySnapshotRead = {
+  id: UUID;
+  organization_id: UUID;
+  snapshot_label: string;
+  artifact_format: string;
+  content_type: string;
+  download_filename: string;
+  content: string;
+  checksum: string;
+  size_bytes: number;
+  governed_task_count: number;
+  approval_required_count: number;
+  completed_count: number;
+  waiting_for_review_count: number;
+  failed_count: number;
+  policy_count: number;
+  latest_policy_code: string | null;
+  recommendation: string;
+  generated_by_person_id: UUID | null;
+  generated_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AgentTaskApprovalRead = {
   id: UUID;
   organization_id: UUID;

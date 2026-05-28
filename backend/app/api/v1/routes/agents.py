@@ -18,6 +18,8 @@ from app.schemas.agent import (
     AgentFamilyTaskRead,
     AgentGovernancePolicyHistoryExportRead,
     AgentGovernancePolicyHistoryRead,
+    AgentGovernancePolicyHistorySnapshotCreate,
+    AgentGovernancePolicyHistorySnapshotRead,
     AgentGovernancePolicyRuleCreate,
     AgentGovernancePolicyReportRead,
     AgentGovernancePolicyRuleRead,
@@ -75,6 +77,7 @@ from app.services.agents import (
     agent_run_records,
     assign_agent,
     create_agent,
+    create_agent_governance_policy_history_snapshot,
     create_agent_governance_policy_rule,
     create_agent_model_registry,
     create_agent_scorecard_comment,
@@ -88,6 +91,7 @@ from app.services.agents import (
     list_agent_assignments,
     list_agent_bias_audits,
     list_agent_decision_appeals,
+    list_agent_governance_policy_history_snapshots,
     list_agent_governance_policy_rules,
     list_agent_model_registry,
     list_agent_task_approvals,
@@ -338,6 +342,32 @@ def to_scorecard_publication_read(publication) -> AgentScorecardPublicationRead:
         snapshot_hash=publication.snapshot_hash,
         published_by_person_id=publication.published_by_person_id,
         published_at=publication.published_at,
+    )
+
+
+def to_policy_history_snapshot_read(snapshot) -> AgentGovernancePolicyHistorySnapshotRead:
+    return AgentGovernancePolicyHistorySnapshotRead(
+        id=snapshot.id,
+        organization_id=snapshot.organization_id,
+        snapshot_label=snapshot.snapshot_label,
+        artifact_format=snapshot.artifact_format,
+        content_type=snapshot.content_type,
+        download_filename=snapshot.download_filename,
+        content=snapshot.content,
+        checksum=snapshot.checksum,
+        size_bytes=snapshot.size_bytes,
+        governed_task_count=snapshot.governed_task_count,
+        approval_required_count=snapshot.approval_required_count,
+        completed_count=snapshot.completed_count,
+        waiting_for_review_count=snapshot.waiting_for_review_count,
+        failed_count=snapshot.failed_count,
+        policy_count=snapshot.policy_count,
+        latest_policy_code=snapshot.latest_policy_code,
+        recommendation=snapshot.recommendation,
+        generated_by_person_id=snapshot.generated_by_person_id,
+        generated_at=snapshot.generated_at,
+        created_at=snapshot.created_at,
+        updated_at=snapshot.updated_at,
     )
 
 
@@ -865,6 +895,45 @@ async def export_agent_governance_policy_history_route(
             limit=limit,
         )
     )
+
+
+@router.post(
+    "/governance-policy-rules/history/snapshots",
+    response_model=AgentGovernancePolicyHistorySnapshotRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_agent_governance_policy_history_snapshot_route(
+    payload: AgentGovernancePolicyHistorySnapshotCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentGovernancePolicyHistorySnapshotRead:
+    return to_policy_history_snapshot_read(
+        await create_agent_governance_policy_history_snapshot(db, identity, payload, authz)
+    )
+
+
+@router.get(
+    "/governance-policy-rules/history/snapshots",
+    response_model=list[AgentGovernancePolicyHistorySnapshotRead],
+)
+async def list_agent_governance_policy_history_snapshots_route(
+    organization_id: UUID = Query(),
+    limit: int = Query(default=20, ge=1, le=100),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[AgentGovernancePolicyHistorySnapshotRead]:
+    return [
+        to_policy_history_snapshot_read(snapshot)
+        for snapshot in await list_agent_governance_policy_history_snapshots(
+            db,
+            identity,
+            organization_id,
+            authz,
+            limit=limit,
+        )
+    ]
 
 
 @router.post("/governance-policy-rules/simulate", response_model=AgentGovernancePolicySimulationRead)

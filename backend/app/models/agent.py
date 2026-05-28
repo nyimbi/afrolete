@@ -86,6 +86,29 @@ class AgentGovernancePolicyRule(IdMixin, TimestampMixin, Base):
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class AgentGovernancePolicyHistorySnapshot(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_governance_policy_history_snapshots"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    snapshot_label: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    artifact_format: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    download_filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    checksum: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    governed_task_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    approval_required_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    completed_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    waiting_for_review_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    policy_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    latest_policy_code: Mapped[str | None] = mapped_column(String(120), index=True)
+    recommendation: Mapped[str] = mapped_column(Text, nullable=False)
+    generated_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class AgentTaskApproval(IdMixin, TimestampMixin, Base):
     __tablename__ = "agent_task_approvals"
 

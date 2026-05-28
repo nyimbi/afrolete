@@ -18,6 +18,7 @@ import type {
   AgentEthicalScorecardRead,
   AgentGovernancePolicyHistoryExportRead,
   AgentGovernancePolicyHistoryRead,
+  AgentGovernancePolicyHistorySnapshotRead,
   AgentGovernancePolicyRuleRead,
   AgentGovernancePolicyReportRead,
   AgentGovernancePolicySimulationRead,
@@ -1391,6 +1392,8 @@ export default function HomePage() {
     useState<AgentGovernancePolicyReportRead | null>(null);
   const [agentGovernancePolicyHistory, setAgentGovernancePolicyHistory] =
     useState<AgentGovernancePolicyHistoryRead | null>(null);
+  const [agentGovernancePolicyHistorySnapshots, setAgentGovernancePolicyHistorySnapshots] =
+    useState<AgentGovernancePolicyHistorySnapshotRead[]>([]);
   const [agentGovernancePolicySimulation, setAgentGovernancePolicySimulation] =
     useState<AgentGovernancePolicySimulationRead | null>(null);
   const [agentTransparency, setAgentTransparency] = useState<AgentModelTransparencyReportRead | null>(null);
@@ -2485,13 +2488,17 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, policyRules, policyReport, policyHistory, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
+    const [tasks, runs, governance, policyRules, policyReport, policyHistory, policyHistorySnapshots, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
       apiRequest<AgentGovernancePolicyRuleRead[]>(`/agents/governance-policy-rules?organization_id=${organizationId}`),
       apiRequest<AgentGovernancePolicyReportRead>(`/agents/governance-policy-rules/report?organization_id=${organizationId}`),
       apiRequest<AgentGovernancePolicyHistoryRead>(`/agents/governance-policy-rules/history?organization_id=${organizationId}`),
+      apiRequest<AgentGovernancePolicyHistorySnapshotRead[]>(
+        `/agents/governance-policy-rules/history/snapshots?organization_id=${organizationId}`,
+        { identity }
+      ),
       apiRequest<AgentRunLedgerVerificationRead>(`/agents/runs/verify?organization_id=${organizationId}`),
       apiRequest<AgentModelTransparencyReportRead>(`/agents/model-transparency?organization_id=${organizationId}`),
       apiRequest<AgentModelRegistryRead[]>(`/agents/model-registry?organization_id=${organizationId}`),
@@ -2529,6 +2536,7 @@ export default function HomePage() {
     setAgentGovernancePolicyRules(policyRules);
     setAgentGovernancePolicyReport(policyReport);
     setAgentGovernancePolicyHistory(policyHistory);
+    setAgentGovernancePolicyHistorySnapshots(policyHistorySnapshots);
     setAgentLedgerVerification(ledgerVerification);
     setAgentTransparency(transparency);
     setAgentModelRegistry(registry);
@@ -3180,6 +3188,7 @@ export default function HomePage() {
       setAgentGovernancePolicyRules([]);
       setAgentGovernancePolicyReport(null);
       setAgentGovernancePolicyHistory(null);
+      setAgentGovernancePolicyHistorySnapshots([]);
       setAgentGovernancePolicySimulation(null);
       setAgentTransparency(null);
       setAgentModelRegistry([]);
@@ -6884,6 +6893,39 @@ export default function HomePage() {
         downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
         addLog(
           `Downloaded ${artifact.artifact_format} policy history (${artifact.size_bytes} bytes)`,
+          "good"
+        );
+      }
+    );
+  };
+
+  const snapshotAgentGovernancePolicyHistory = (artifactFormat: "csv" | "markdown") => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      `agent-governance-policy-history-snapshot-${artifactFormat}`,
+      () =>
+        apiRequest<AgentGovernancePolicyHistorySnapshotRead>(
+          "/agents/governance-policy-rules/history/snapshots",
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              artifact_format: artifactFormat,
+              snapshot_label: `AI policy history ${new Date().toLocaleDateString()}`
+            }
+          }
+        ),
+      (snapshot) => {
+        setAgentGovernancePolicyHistorySnapshots((current) => [
+          snapshot,
+          ...current.filter((item) => item.id !== snapshot.id)
+        ]);
+        addLog(
+          `Saved ${snapshot.artifact_format} policy snapshot (${snapshot.governed_task_count} tasks)`,
           "good"
         );
       }
@@ -16410,9 +16452,37 @@ export default function HomePage() {
                   <div className="event-toolbar">
                     <button type="button" onClick={() => exportAgentGovernancePolicyHistory("csv")}>CSV</button>
                     <button type="button" onClick={() => exportAgentGovernancePolicyHistory("markdown")}>Markdown</button>
+                    <button type="button" onClick={() => snapshotAgentGovernancePolicyHistory("csv")}>Save CSV</button>
+                    <button type="button" onClick={() => snapshotAgentGovernancePolicyHistory("markdown")}>Save MD</button>
                   </div>
                 </article>
               ) : null}
+              {agentGovernancePolicyHistorySnapshots.slice(0, 3).map((snapshot) => (
+                <article key={snapshot.id} className="task-card">
+                  <div>
+                    <strong>{snapshot.snapshot_label} · {snapshot.artifact_format}</strong>
+                    <span>
+                      {snapshot.governed_task_count} governed · {snapshot.policy_count} policies · {snapshot.size_bytes} bytes
+                    </span>
+                    <span>
+                      {snapshot.latest_policy_code ?? "no policy"} · {snapshot.checksum.slice(0, 16)}
+                    </span>
+                    <span>{snapshot.recommendation}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button
+                      type="button"
+                      onClick={() => downloadTextArtifact(
+                        snapshot.content,
+                        snapshot.content_type,
+                        snapshot.download_filename
+                      )}
+                    >
+                      Download
+                    </button>
+                  </div>
+                </article>
+              ))}
               {agentGovernancePolicyHistory?.timeline.slice(0, 4).map((bucket) => (
                 <article key={bucket.label} className="task-card">
                   <div>

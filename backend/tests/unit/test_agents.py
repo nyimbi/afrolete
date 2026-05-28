@@ -415,6 +415,33 @@ def test_agent_governance_policy_requires_approvals_and_blocks_tasks(client, ide
     assert "AfroLete AI Governance Policy History" in markdown_export["content"]
     assert "Recommend tournament squad" in markdown_export["content"]
 
+    snapshot_response = client.post(
+        "/api/v1/agents/governance-policy-rules/history/snapshots",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "artifact_format": "markdown",
+            "snapshot_label": "Board review policy history",
+            "limit": 120,
+        },
+    )
+    assert snapshot_response.status_code == 201
+    snapshot = snapshot_response.json()
+    assert snapshot["snapshot_label"] == "Board review policy history"
+    assert snapshot["artifact_format"] == "markdown"
+    assert snapshot["governed_task_count"] == 1
+    assert snapshot["policy_count"] == 1
+    assert snapshot["latest_policy_code"] == "safeguarding.selection.review"
+    assert snapshot["generated_by_person_id"] is not None
+    assert snapshot["checksum"]
+
+    snapshots = client.get(
+        f"/api/v1/agents/governance-policy-rules/history/snapshots?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert [item["id"] for item in snapshots] == [snapshot["id"]]
+    assert "Recommend tournament squad" in snapshots[0]["content"]
+
 
 async def test_agent_task_worker_executes_queued_tasks(db_session) -> None:
     organization = Organization(

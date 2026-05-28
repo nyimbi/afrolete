@@ -216,6 +216,37 @@ class AgentGovernancePolicyHistoryExportRead(BaseModel):
     policy_count: int
 
 
+class AgentGovernancePolicyHistorySnapshotCreate(BaseModel):
+    organization_id: UUID
+    artifact_format: str = Field(default="csv", pattern="^(csv|markdown)$")
+    snapshot_label: str | None = Field(default=None, max_length=120)
+    limit: int = Field(default=120, ge=10, le=500)
+
+
+class AgentGovernancePolicyHistorySnapshotRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    snapshot_label: str
+    artifact_format: str
+    content_type: str
+    download_filename: str
+    content: str
+    checksum: str
+    size_bytes: int
+    governed_task_count: int
+    approval_required_count: int
+    completed_count: int
+    waiting_for_review_count: int
+    failed_count: int
+    policy_count: int
+    latest_policy_code: str | None
+    recommendation: str
+    generated_by_person_id: UUID | None
+    generated_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
 class AgentTaskApprovalRequestCreate(BaseModel):
     required_count: int = Field(default=2, ge=1, le=10)
     reviewer_person_ids: list[UUID] = Field(default_factory=list, max_length=10)
