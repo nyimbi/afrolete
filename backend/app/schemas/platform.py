@@ -69,3 +69,24 @@ class AuthReadiness(BaseModel):
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
+
+
+class AuthorizationResourceRead(BaseModel):
+    resource_type: str
+    relations: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class AuthorizationReadiness(BaseModel):
+    mode: str
+    provider: str
+    status: str
+    endpoint: str | None = None
+    insecure_transport: bool
+    resources: list[AuthorizationResourceRead] = Field(default_factory=list)
+    relationship_count: int
+    permission_count: int
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)

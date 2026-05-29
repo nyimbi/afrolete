@@ -1,5 +1,7 @@
 from app.api.v1.routes.platform import (
     _auth_readiness,
+    _authorization_readiness,
+    _authorization_resources,
     _keycloak_discovery_details,
     _keycloak_expected_endpoints,
     _openbao_component,
@@ -48,6 +50,42 @@ def test_auth_readiness_route_is_secret_safe(client) -> None:
     assert payload["provider"] in {"local", "keycloak"}
     assert "openbao_token" not in response.text.lower()
     assert "spicedb_key" not in response.text.lower()
+
+
+def test_authorization_readiness_route_is_secret_safe(client) -> None:
+    response = client.get("/api/v1/infrastructure/authorization-readiness")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] in {"memory", "spicedb"}
+    assert payload["relationship_count"] > 0
+    assert "spicedb_key" not in response.text.lower()
+    assert payload["next_actions"]
+
+
+def test_authorization_readiness_reports_spicedb_blockers_without_key() -> None:
+    readiness = _authorization_readiness(Settings(authz_mode="spicedb", spicedb_key=""))
+
+    assert readiness.provider == "spicedb"
+    assert readiness.status == "blocked"
+    assert "API key" in readiness.blockers[0]
+    assert readiness.relationship_count > readiness.permission_count
+
+
+def test_authorization_readiness_reports_memory_standby() -> None:
+    readiness = _authorization_readiness(Settings(authz_mode="memory"))
+
+    assert readiness.provider == "memory"
+    assert readiness.status == "standby"
+    assert readiness.resources[0].resource_type == "organization"
+
+
+def test_authorization_resources_cover_agent_and_incident_scopes() -> None:
+    resources = {resource.resource_type: resource for resource in _authorization_resources()}
+
+    assert "analyze" in resources["agent"].permissions
+    assert "review_evidence" in resources["safeguarding_incident"].permissions
+    assert "guardian" in resources["athlete_profile"].relations
 
 
 def test_auth_readiness_exposes_keycloak_account_creation_endpoint() -> None:

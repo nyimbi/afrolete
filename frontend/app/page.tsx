@@ -23,6 +23,7 @@ import {
 } from "@/lib/offline";
 import type {
   AuthReadiness,
+  AuthorizationReadiness,
   InfrastructureComponent,
   InfrastructureProbeSummary,
   InfrastructureStatus
@@ -1860,6 +1861,7 @@ export default function HomePage() {
   const [infrastructureStatus, setInfrastructureStatus] = useState<InfrastructureStatus | null>(null);
   const [infrastructureProbes, setInfrastructureProbes] = useState<InfrastructureProbeSummary | null>(null);
   const [authReadiness, setAuthReadiness] = useState<AuthReadiness | null>(null);
+  const [authorizationReadiness, setAuthorizationReadiness] = useState<AuthorizationReadiness | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [offlineQueue, setOfflineQueue] = useState<OfflineQueueSnapshot>(initialOfflineQueueSnapshot);
@@ -3556,15 +3558,17 @@ export default function HomePage() {
   }, [identity]);
 
   const loadInfrastructure = useCallback(async () => {
-    const [status, probes, auth] = await Promise.all([
+    const [status, probes, auth, authorization] = await Promise.all([
       apiRequest<InfrastructureStatus>("/infrastructure"),
       apiRequest<InfrastructureProbeSummary>("/infrastructure/probes"),
-      apiRequest<AuthReadiness>("/infrastructure/auth-readiness")
+      apiRequest<AuthReadiness>("/infrastructure/auth-readiness"),
+      apiRequest<AuthorizationReadiness>("/infrastructure/authorization-readiness")
     ]);
     setInfrastructureStatus(status);
     setInfrastructureProbes(probes);
     setAuthReadiness(auth);
-    return { status, probes, auth };
+    setAuthorizationReadiness(authorization);
+    return { status, probes, auth, authorization };
   }, []);
 
   useEffect(() => {
@@ -13743,6 +13747,27 @@ export default function HomePage() {
               </div>
               {authReadiness?.blockers[0] || authReadiness?.warnings[0] ? (
                 <small>{authReadiness.blockers[0] ?? authReadiness.warnings[0]}</small>
+              ) : null}
+            </div>
+            <div className="auth-readiness-card">
+              <div>
+                <span>Authorization readiness</span>
+                <strong>{authorizationReadiness?.status.replaceAll("_", " ") ?? "checking"}</strong>
+                <small>{authorizationReadiness?.endpoint ?? "local memory mode"}</small>
+              </div>
+              <div className="auth-endpoint-list">
+                <span>
+                  {authorizationReadiness?.provider ?? "authz"} · {authorizationReadiness?.relationship_count ?? 0} relations ·{" "}
+                  {authorizationReadiness?.permission_count ?? 0} permissions
+                </span>
+                {(authorizationReadiness?.resources ?? []).slice(0, 3).map((resource) => (
+                  <span key={resource.resource_type}>
+                    {resource.resource_type} · {resource.permissions.join(", ")}
+                  </span>
+                ))}
+              </div>
+              {authorizationReadiness?.blockers[0] || authorizationReadiness?.warnings[0] ? (
+                <small>{authorizationReadiness.blockers[0] ?? authorizationReadiness.warnings[0]}</small>
               ) : null}
             </div>
             <label>

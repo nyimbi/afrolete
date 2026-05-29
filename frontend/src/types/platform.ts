@@ -57,3 +57,24 @@ export type AuthReadiness = {
   warnings: string[];
   next_actions: string[];
 };
+
+export type AuthorizationResourceRead = {
+  resource_type: string;
+  relations: string[];
+  permissions: string[];
+  notes: string[];
+};
+
+export type AuthorizationReadiness = {
+  mode: string;
+  provider: string;
+  status: string;
+  endpoint: string | null;
+  insecure_transport: boolean;
+  resources: AuthorizationResourceRead[];
+  relationship_count: number;
+  permission_count: number;
+  blockers: string[];
+  warnings: string[];
+  next_actions: string[];
+};

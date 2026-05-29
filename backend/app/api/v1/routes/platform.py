@@ -14,6 +14,8 @@ from app.db.session import get_db
 from app.schemas.platform import (
     AuthEndpointRead,
     AuthReadiness,
+    AuthorizationReadiness,
+    AuthorizationResourceRead,
     Capability,
     HealthResponse,
     InfrastructureComponent,
@@ -62,6 +64,11 @@ async def platform_summary() -> PlatformSummary:
 @router.get("/infrastructure/auth-readiness", response_model=AuthReadiness)
 async def auth_readiness(settings: Settings = Depends(get_settings)) -> AuthReadiness:
     return _auth_readiness(settings)
+
+
+@router.get("/infrastructure/authorization-readiness", response_model=AuthorizationReadiness)
+async def authorization_readiness(settings: Settings = Depends(get_settings)) -> AuthorizationReadiness:
+    return _authorization_readiness(settings)
 
 
 @router.get("/infrastructure", response_model=InfrastructureStatus)
@@ -125,6 +132,134 @@ def _keycloak_component(settings: Settings) -> InfrastructureComponent:
         endpoint=str(settings.keycloak_issuer),
         details=[f"audience={settings.keycloak_audience}"],
     )
+
+
+def _authorization_readiness(settings: Settings) -> AuthorizationReadiness:
+    resources = _authorization_resources()
+    relationship_count = sum(len(resource.relations) for resource in resources)
+    permission_count = sum(len(resource.permissions) for resource in resources)
+    if settings.authz_mode != "spicedb":
+        return AuthorizationReadiness(
+            mode=settings.authz_mode,
+            provider="memory",
+            status="standby",
+            endpoint=None,
+            insecure_transport=False,
+            resources=resources,
+            relationship_count=relationship_count,
+            permission_count=permission_count,
+            warnings=["Production SaaS mode should use SpiceDB authorization instead of local memory relationships."],
+            next_actions=["Set AFROLETE_AUTHZ_MODE=spicedb and provide the OpenBao-managed SpiceDB key."],
+        )
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+    next_actions = [
+        "Apply the AfroLete authorization schema to SpiceDB before enabling tenant traffic.",
+        "Run a live relationship write/check/delete smoke test with a disposable tenant object.",
+        "Verify OpenBao key resolution and key rotation procedure before production rollout.",
+    ]
+    if not settings.spicedb_endpoint:
+        blockers.append("SpiceDB endpoint is not configured.")
+    if not settings.spicedb_key:
+        blockers.append("SpiceDB API key is not configured.")
+    if settings.spicedb_insecure and settings.env not in {"local", "demo", "test"}:
+        warnings.append("SpiceDB is configured for insecure transport outside local/demo/test mode.")
+    return AuthorizationReadiness(
+        mode=settings.authz_mode,
+        provider="spicedb",
+        status="blocked" if blockers else "ready_with_warnings" if warnings else "ready",
+        endpoint=settings.spicedb_endpoint,
+        insecure_transport=settings.spicedb_insecure,
+        resources=resources,
+        relationship_count=relationship_count,
+        permission_count=permission_count,
+        blockers=blockers,
+        warnings=warnings,
+        next_actions=next_actions,
+    )
+
+
+def _authorization_resources() -> list[AuthorizationResourceRead]:
+    return [
+        AuthorizationResourceRead(
+            resource_type="organization",
+            relations=[
+                "owner",
+                "admin",
+                "coach",
+                "assistant_coach",
+                "staff",
+                "manager",
+                "captain",
+                "guardian",
+                "athlete",
+                "member_team",
+                "assigned_agent",
+            ],
+            permissions=["manage", "manage_roster", "view", "analyze"],
+            notes=["Tenant root for clubs, schools, academies, associations, and federations."],
+        ),
+        AuthorizationResourceRead(
+            resource_type="team",
+            relations=[
+                "parent_org",
+                "owner",
+                "coach",
+                "assistant_coach",
+                "captain",
+                "vice_captain",
+                "player",
+                "guardian",
+                "assigned_agent",
+            ],
+            permissions=["manage", "manage_roster", "view", "analyze"],
+            notes=["Roster, guardian, player, and staff access rolls up to tenant organizations."],
+        ),
+        AuthorizationResourceRead(
+            resource_type="event",
+            relations=["parent_org", "team", "organizer", "participant", "guardian", "assigned_agent"],
+            permissions=["manage", "manage_roster", "view", "analyze"],
+            notes=["Scheduling, attendance, travel, and consent checks depend on event scope relations."],
+        ),
+        AuthorizationResourceRead(
+            resource_type="athlete_profile",
+            relations=["parent_org", "team", "athlete", "guardian", "coach", "medical_viewer", "assigned_agent"],
+            permissions=["manage", "manage_roster", "view", "view_medical", "analyze"],
+            notes=["Performance, medical visibility, guardian access, and AI coaching use profile scope."],
+        ),
+        AuthorizationResourceRead(
+            resource_type="safeguarding_incident",
+            relations=[
+                "parent_org",
+                "event",
+                "team",
+                "reporter",
+                "case_manager",
+                "assigned_to",
+                "athlete",
+                "guardian",
+                "medical_viewer",
+                "evidence_reviewer",
+                "regulator",
+                "assigned_agent",
+            ],
+            permissions=["manage", "view", "view_medical", "review_evidence", "analyze"],
+            notes=["Incident access grants and evidence review use this dedicated case resource."],
+        ),
+        AuthorizationResourceRead(
+            resource_type="agent",
+            relations=["owner", "assigned_to", "reviewer"],
+            permissions=["manage", "view", "analyze"],
+            notes=["AI agents are first-class subjects and resources with human review boundaries."],
+        ),
+        AuthorizationResourceRead(
+            resource_type="developer_application",
+            relations=["owner", "operator", "reviewer"],
+            permissions=["manage", "view"],
+            notes=["Developer platform ownership and OAuth consent administration."],
+        ),
+    ]
 
 
 def _auth_readiness(settings: Settings) -> AuthReadiness:
