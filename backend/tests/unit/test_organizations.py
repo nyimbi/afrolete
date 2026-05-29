@@ -162,6 +162,21 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert "Onboarding Concierge Agent prepared a deterministic launch readiness draft" in concierge_run["review_notes"]
     assert "Open registration for term two athletics" in concierge_run["review_notes"]
     assert "Publish the player/family registration link" in concierge_run["review_notes"]
+    concierge_accept_response = client.patch(
+        f"/api/v1/agents/tasks/{onboarding['concierge_task']['id']}",
+        headers=identity_headers,
+        json={
+            "status": "completed",
+            "review_notes": (
+                f"{concierge_run['review_notes']}\n\n"
+                "Owner accepted the onboarding concierge launch plan from registration."
+            ),
+        },
+    )
+    assert concierge_accept_response.status_code == 200
+    concierge_accept = concierge_accept_response.json()
+    assert concierge_accept["status"] == "completed"
+    assert "Owner accepted the onboarding concierge launch plan" in concierge_accept["review_notes"]
     assert onboarding["organization"]["registration_fee_amount"] == "1000.00"
     assert onboarding["organization"]["registration_fee_currency"] == "KES"
     assert onboarding["organization"]["registration_required_documents"] == [

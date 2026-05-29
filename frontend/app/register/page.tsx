@@ -789,6 +789,37 @@ export default function RegistrationPage() {
     }
   };
 
+  const acceptOnboardingConcierge = async () => {
+    const task = onboarding?.concierge_task;
+    if (!task) {
+      setError("Create the workspace before accepting the onboarding concierge draft.");
+      return;
+    }
+    setBusy("accept-onboarding-concierge");
+    setError("");
+    try {
+      const updated = await apiRequest<OrganizationOnboardingRead["concierge_task"]>(
+        `/agents/tasks/${task.id}`,
+        {
+          method: "PATCH",
+          identity: requestIdentity,
+          body: {
+            status: "completed",
+            review_notes: appendUniqueNote(
+              task.review_notes ?? "",
+              "Owner accepted the onboarding concierge launch plan from registration."
+            )
+          }
+        }
+      );
+      setOnboarding((current) => current ? { ...current, concierge_task: updated } : current);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Onboarding concierge draft could not be accepted");
+    } finally {
+      setBusy("");
+    }
+  };
+
   return (
     <main className="register-page">
       <section className="register-hero">
@@ -1068,13 +1099,26 @@ export default function RegistrationPage() {
                       </small>
                       {onboarding.concierge_task.review_notes ? <small>{onboarding.concierge_task.review_notes}</small> : null}
                       {onboarding.concierge_task.output_ref ? <small>{onboarding.concierge_task.output_ref}</small> : null}
-                      <button
-                        type="button"
-                        onClick={runOnboardingConcierge}
-                        disabled={busy !== "" || !canRunOnboardingConcierge(onboarding.concierge_task)}
-                      >
-                        {busy === "onboarding-concierge" ? "Running concierge" : "Run concierge"}
-                      </button>
+                      <div className="register-agent-actions">
+                        {canRunOnboardingConcierge(onboarding.concierge_task) ? (
+                          <button
+                            type="button"
+                            onClick={runOnboardingConcierge}
+                            disabled={busy !== ""}
+                          >
+                            {busy === "onboarding-concierge" ? "Running concierge" : "Run concierge"}
+                          </button>
+                        ) : null}
+                        {canAcceptOnboardingConcierge(onboarding.concierge_task) ? (
+                          <button
+                            type="button"
+                            onClick={acceptOnboardingConcierge}
+                            disabled={busy !== ""}
+                          >
+                            {busy === "accept-onboarding-concierge" ? "Accepting plan" : "Accept plan"}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
                   <ol>
@@ -1529,6 +1573,22 @@ function documentFilename(packet: RegistrationPacketRead, documentType: string):
 
 function canRunOnboardingConcierge(task: OrganizationOnboardingRead["concierge_task"]): boolean {
   return task !== null && ["queued", "failed"].includes(task.status);
+}
+
+function canAcceptOnboardingConcierge(task: OrganizationOnboardingRead["concierge_task"]): boolean {
+  return task !== null && task.status === "waiting_for_review" && task.approval_pending_count === 0;
+}
+
+function appendUniqueNote(existing: string, note: string): string {
+  const trimmedExisting = existing.trim();
+  const trimmedNote = note.trim();
+  if (!trimmedExisting) {
+    return trimmedNote;
+  }
+  if (trimmedExisting.includes(trimmedNote)) {
+    return trimmedExisting;
+  }
+  return `${trimmedExisting}\n\n${trimmedNote}`;
 }
 
 function isSessionForInquiry(session: AuthSession | null, inquiry: RegistrationInquiryRead): boolean {
