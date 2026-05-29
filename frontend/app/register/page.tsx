@@ -149,9 +149,13 @@ export default function RegistrationPage() {
       return;
     }
 
+    const hadCallback = new URLSearchParams(window.location.search).has("code");
     completeKeycloakCallbackFromUrl()
       .then((session) => {
         setAuthSession(session ?? getStoredAuthSession());
+        if (hadCallback) {
+          void restoreRegistrationContext();
+        }
       })
       .catch((caught) => {
         setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
@@ -165,25 +169,14 @@ export default function RegistrationPage() {
   }, [identity, keycloakEnabled]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const requestedMode = params.get("mode");
-    const requestedSite = params.get("site");
-    if (requestedMode === "player" || requestedSite) {
-      setMode("player");
-    }
-    if (requestedSite) {
-      void loadPublicSite(requestedSite);
-      void searchDirectory(requestedSite);
-      return;
-    }
-    void searchDirectory();
+    void restoreRegistrationContext();
     // Directory search and optional launch deeplink are intentionally loaded once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const beginKeycloakLogin = () => {
     setBusy("keycloak");
-    void startKeycloakLogin().catch((caught) => {
+    void startKeycloakLogin({ returnTo: currentRegistrationReturnTo(mode, selectedSite, submittedInquiry) }).catch((caught) => {
       setBusy("");
       setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
     });
@@ -191,31 +184,39 @@ export default function RegistrationPage() {
 
   const beginKeycloakRegistration = () => {
     setBusy("keycloak");
-    void startKeycloakRegistration({ loginHint: organizationForm.contact_email || identity.email || undefined }).catch(
-      (caught) => {
-        setBusy("");
-        setError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
-      }
-    );
+    void startKeycloakRegistration({
+      loginHint: organizationForm.contact_email || identity.email || undefined,
+      returnTo: "/register?mode=organization"
+    }).catch((caught) => {
+      setBusy("");
+      setError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
+    });
   };
 
   const beginFamilyKeycloakRegistration = () => {
-    if (!submittedInquiry) {
+    if (!selectedSite || !submittedInquiry) {
       return;
     }
     setBusy("family-keycloak");
-    void startKeycloakRegistration({ loginHint: submittedInquiry.email }).catch((caught) => {
+    void startKeycloakRegistration({
+      loginHint: submittedInquiry.email,
+      returnTo: registrationReturnTo(selectedSite.slug, submittedInquiry)
+    }).catch((caught) => {
       setBusy("");
       setError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
     });
   };
 
   const beginFamilyKeycloakLogin = () => {
-    if (!submittedInquiry) {
+    if (!selectedSite || !submittedInquiry) {
       return;
     }
     setBusy("family-keycloak");
-    void startKeycloakLogin({ loginHint: submittedInquiry.email, prompt: "login" }).catch((caught) => {
+    void startKeycloakLogin({
+      loginHint: submittedInquiry.email,
+      prompt: "login",
+      returnTo: registrationReturnTo(selectedSite.slug, submittedInquiry)
+    }).catch((caught) => {
       setBusy("");
       setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
     });
@@ -370,6 +371,68 @@ export default function RegistrationPage() {
       setAccountReadiness(readiness);
     } catch {
       setAccountReadiness(null);
+    }
+  };
+
+  const restoreRegistrationContext = async () => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedMode = params.get("mode");
+    const requestedSite = params.get("site");
+    const inquiryId = params.get("inquiry_id");
+    const email = params.get("email");
+
+    if (requestedMode === "player" || requestedSite) {
+      setMode("player");
+    } else if (requestedMode === "organization") {
+      setMode("organization");
+    }
+
+    if (!requestedSite) {
+      await searchDirectory();
+      return;
+    }
+
+    await loadPublicSite(requestedSite);
+    await searchDirectory(requestedSite);
+    if (inquiryId && email) {
+      await restoreRegistrationPacket(requestedSite, inquiryId, email);
+    }
+  };
+
+  const restoreRegistrationPacket = async (siteSlug: string, inquiryId: string, email: string) => {
+    setBusy("restore-packet");
+    setError("");
+    try {
+      const params = new URLSearchParams({ email });
+      const packet = await apiRequest<RegistrationPacketRead>(
+        `/organizations/public/${encodeURIComponent(siteSlug)}/registration-inquiries/${inquiryId}/packet?${params.toString()}`
+      );
+      setRegistrationPacket(packet);
+      setSubmittedInquiry(packet.inquiry);
+      setPacketForm((current) => ({
+        ...current,
+        date_of_birth: packet.inquiry.date_of_birth ?? current.date_of_birth,
+        emergency_contact_name: packet.inquiry.emergency_contact_name ?? packet.inquiry.guardian_name ?? current.emergency_contact_name,
+        emergency_contact_phone: packet.inquiry.emergency_contact_phone ?? packet.inquiry.phone ?? current.emergency_contact_phone,
+        medical_notes: packet.inquiry.medical_notes ?? current.medical_notes,
+        consent_signer_name: packet.inquiry.consent_signer_name ?? packet.inquiry.guardian_name ?? current.consent_signer_name,
+        guardian_consent_acknowledged: packet.consent_complete,
+        privacy_acknowledged: packet.inquiry.privacy_acknowledged_at !== null,
+        proof_of_age_filename: documentFilename(packet, "proof_of_age") ?? current.proof_of_age_filename,
+        medical_information_filename: documentFilename(packet, "medical_information") ?? current.medical_information_filename,
+        guardian_consent_filename: documentFilename(packet, "guardian_consent") ?? current.guardian_consent_filename,
+        photo_release_filename: documentFilename(packet, "photo_release") ?? current.photo_release_filename,
+        payment_amount: packet.inquiry.payment_amount ?? current.payment_amount,
+        payment_currency: packet.inquiry.payment_currency ?? current.payment_currency,
+        payment_method: packet.inquiry.payment_method ?? current.payment_method,
+        payment_reference: packet.inquiry.payment_reference ?? current.payment_reference,
+        payment_status: packet.inquiry.payment_status ?? current.payment_status
+      }));
+      await loadAccountReadiness(siteSlug, packet.inquiry);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Registration packet could not be restored");
+    } finally {
+      setBusy("");
     }
   };
 
@@ -1134,6 +1197,33 @@ function subdomainSuggestionFromError(caught: unknown): string | null {
   }
   const suggestions = (inner as { subdomain_suggestions: unknown }).subdomain_suggestions;
   return Array.isArray(suggestions) && typeof suggestions[0] === "string" ? suggestions[0] : null;
+}
+
+function currentRegistrationReturnTo(
+  mode: RegistrationMode,
+  site: OrganizationPublicSiteRead | null,
+  inquiry: RegistrationInquiryRead | null
+): string {
+  if (mode === "player" && site) {
+    return registrationReturnTo(site.slug, inquiry);
+  }
+  return "/register?mode=organization";
+}
+
+function registrationReturnTo(siteSlug: string, inquiry: RegistrationInquiryRead | null): string {
+  const params = new URLSearchParams({
+    mode: "player",
+    site: siteSlug
+  });
+  if (inquiry) {
+    params.set("inquiry_id", inquiry.id);
+    params.set("email", inquiry.email);
+  }
+  return `/register?${params.toString()}`;
+}
+
+function documentFilename(packet: RegistrationPacketRead, documentType: string): string | null {
+  return packet.submitted_documents.find((document) => document.document_type === documentType)?.filename ?? null;
 }
 
 function familyPortalHref(organizationId: string, inquiry: RegistrationInquiryRead): string {

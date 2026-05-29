@@ -458,22 +458,29 @@ export default function PublicOrganizationSitePage() {
   };
 
   const beginFamilyKeycloakRegistration = () => {
-    if (!submittedInquiry) {
+    if (!submittedInquiry || !site) {
       return;
     }
     setAccountBusy("registration");
-    void startKeycloakRegistration({ loginHint: submittedInquiry.email }).catch((caught) => {
+    void startKeycloakRegistration({
+      loginHint: submittedInquiry.email,
+      returnTo: registrationReturnTo(site.slug, submittedInquiry)
+    }).catch((caught) => {
       setAccountBusy("");
       setPacketError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
     });
   };
 
   const beginFamilyKeycloakLogin = () => {
-    if (!submittedInquiry) {
+    if (!submittedInquiry || !site) {
       return;
     }
     setAccountBusy("login");
-    void startKeycloakLogin({ loginHint: submittedInquiry.email, prompt: "login" }).catch((caught) => {
+    void startKeycloakLogin({
+      loginHint: submittedInquiry.email,
+      prompt: "login",
+      returnTo: registrationReturnTo(site.slug, submittedInquiry)
+    }).catch((caught) => {
       setAccountBusy("");
       setPacketError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
     });
@@ -1285,6 +1292,16 @@ function familyPortalHref(organizationId: string, inquiry: RegistrationInquiryRe
     athlete_name: inquiry.athlete_name
   });
   return `/family?${params.toString()}`;
+}
+
+function registrationReturnTo(siteSlug: string, inquiry: RegistrationInquiryRead): string {
+  const params = new URLSearchParams({
+    mode: "player",
+    site: siteSlug,
+    inquiry_id: inquiry.id,
+    email: inquiry.email
+  });
+  return `/register?${params.toString()}`;
 }
 
 function RegistrationDocumentInput({
