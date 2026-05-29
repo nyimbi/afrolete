@@ -26,6 +26,8 @@ from app.schemas.platform import (
     InfrastructureProbeSummary,
     InfrastructureStatus,
     PlatformSummary,
+    SecretReadiness,
+    SecretReadinessItem,
 )
 
 router = APIRouter()
@@ -79,6 +81,11 @@ async def authorization_readiness(settings: Settings = Depends(get_settings)) ->
 @router.get("/infrastructure/authorization-schema", response_model=AuthorizationSchemaRead)
 async def authorization_schema() -> AuthorizationSchemaRead:
     return _authorization_schema()
+
+
+@router.get("/infrastructure/secrets-readiness", response_model=SecretReadiness)
+async def secrets_readiness(settings: Settings = Depends(get_settings)) -> SecretReadiness:
+    return _secrets_readiness(settings)
 
 
 @router.get("/infrastructure", response_model=InfrastructureStatus)
@@ -290,6 +297,451 @@ def _authorization_resources() -> list[AuthorizationResourceRead]:
             notes=["Developer platform ownership and OAuth consent administration."],
         ),
     ]
+
+
+def _secrets_readiness(settings: Settings) -> SecretReadiness:
+    specs = _secret_specs(settings)
+    any_vault_path = any(_setting(settings, spec.get("path_attr")) for spec in specs)
+    items = [_secret_item(settings, spec, any_vault_path) for spec in specs]
+    configured_count = sum(1 for item in items if item.status in {"vault_path", "inline", "local_default", "runtime_token"})
+    vault_path_count = sum(1 for item in items if item.status == "vault_path")
+    inline_count = sum(1 for item in items if item.status in {"inline", "runtime_token"})
+    local_default_count = sum(1 for item in items if item.status == "local_default")
+    missing_required = [item for item in items if item.status == "missing" and item.required]
+    production_like = settings.env not in {"local", "demo", "test"}
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if missing_required:
+        blockers.append(f"{len(missing_required)} required secret class(es) are missing.")
+    if any_vault_path and not settings.openbao_token:
+        blockers.append("OpenBao token is required to resolve configured secret paths.")
+    if production_like and not settings.openbao_token:
+        blockers.append("OpenBao token is not configured for production secret custody.")
+    if production_like and local_default_count:
+        blockers.append(f"{local_default_count} local development signing key(s) remain in production-like mode.")
+    if inline_count:
+        warnings.append(f"{inline_count} secret class(es) are configured inline; prefer OpenBao secret paths.")
+    if settings.env in {"local", "demo", "test"} and local_default_count:
+        warnings.append(f"{local_default_count} local default signing key(s) are acceptable only for local/demo/test.")
+    if not vault_path_count:
+        warnings.append("No secret classes are configured through OpenBao paths yet.")
+
+    next_actions = [
+        "Move integration, signing, and storage credentials to OpenBao KV paths.",
+        "Inject only the OpenBao runtime token through the deployment secret mechanism.",
+        "Run a live OpenBao resolution smoke test before enabling production traffic.",
+    ]
+    return SecretReadiness(
+        environment=settings.env,
+        provider="openbao" if settings.openbao_addr else "environment",
+        status="blocked" if blockers else "ready_with_warnings" if warnings else "ready",
+        configured_count=configured_count,
+        vault_path_count=vault_path_count,
+        inline_count=inline_count,
+        missing_required_count=len(missing_required),
+        local_default_count=local_default_count,
+        items=items,
+        blockers=blockers,
+        warnings=warnings,
+        next_actions=next_actions,
+    )
+
+
+def _secret_item(settings: Settings, spec: dict[str, object], any_vault_path: bool) -> SecretReadinessItem:
+    path_attr = str(spec.get("path_attr") or "")
+    inline_attr = str(spec.get("inline_attr") or "")
+    secret_path_configured = bool(_setting(settings, path_attr))
+    inline_value = _setting(settings, inline_attr)
+    inline_configured = bool(inline_value)
+    required = bool(spec.get("required"))
+    local_defaults = {str(value) for value in spec.get("local_defaults", ())}
+    details = [str(detail) for detail in spec.get("details", ())]
+
+    if spec["key"] == "openbao-runtime-token":
+        required = required or any_vault_path or settings.env not in {"local", "demo", "test"}
+        if inline_configured:
+            status = "runtime_token"
+            details.append("runtime vault token configured")
+        elif required:
+            status = "missing"
+            details.append("required to resolve configured vault paths")
+        else:
+            status = "not_required"
+            details.append("not required in local/demo/test without vault paths")
+    elif secret_path_configured:
+        status = "vault_path"
+        details.append("OpenBao path configured")
+    elif inline_configured and inline_value in local_defaults:
+        status = "local_default"
+        details.append("local development default configured")
+    elif inline_configured:
+        status = "inline"
+        details.append("inline value configured")
+    elif required:
+        status = "missing"
+        details.append("required by active runtime mode")
+    else:
+        status = "not_required"
+        details.append("not required by current runtime mode")
+
+    return SecretReadinessItem(
+        key=str(spec["key"]),
+        name=str(spec["name"]),
+        domain=str(spec["domain"]),
+        status=status,
+        required=required,
+        secret_path_configured=secret_path_configured,
+        inline_configured=inline_configured,
+        details=details,
+    )
+
+
+def _secret_specs(settings: Settings) -> list[dict[str, object]]:
+    webhook = "required for webhook mode"
+    signing = "required for signed artifact URLs or callback verification"
+    return [
+        {
+            "key": "openbao-runtime-token",
+            "name": "OpenBao runtime token",
+            "domain": "secret-vault",
+            "inline_attr": "openbao_token",
+            "required": settings.env not in {"local", "demo", "test"},
+            "details": ["deployment-scoped vault access token"],
+        },
+        {
+            "key": "spicedb-api-key",
+            "name": "SpiceDB API key",
+            "domain": "authorization",
+            "inline_attr": "spicedb_key",
+            "required": settings.authz_mode == "spicedb",
+            "details": ["required when SpiceDB authorization mode is active"],
+        },
+        {
+            "key": "communication-delivery",
+            "name": "Communication delivery webhook key",
+            "domain": "communications",
+            "inline_attr": "communication_webhook_key",
+            "path_attr": "communication_webhook_key_secret_path",
+            "required": settings.communication_delivery_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "agent-execution",
+            "name": "AI agent execution webhook key",
+            "domain": "ai-agents",
+            "inline_attr": "agent_webhook_key",
+            "path_attr": "agent_webhook_key_secret_path",
+            "required": settings.agent_execution_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "training-plan-generation",
+            "name": "Training plan generation webhook key",
+            "domain": "training",
+            "inline_attr": "training_plan_generation_webhook_key",
+            "path_attr": "training_plan_generation_webhook_key_secret_path",
+            "required": settings.training_plan_generation_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "report-artifact-signing",
+            "name": "Report artifact signing key",
+            "domain": "reporting",
+            "inline_attr": "report_artifact_signing_key",
+            "path_attr": "report_artifact_signing_key_secret_path",
+            "required": True,
+            "local_defaults": ("local-report-artifact-key",),
+            "details": [signing],
+        },
+        {
+            "key": "reporting-insight-generation",
+            "name": "Reporting insight generation webhook key",
+            "domain": "reporting",
+            "inline_attr": "reporting_insight_generation_webhook_key",
+            "path_attr": "reporting_insight_generation_webhook_key_secret_path",
+            "required": settings.reporting_insight_generation_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "billing-payment-webhook-signing",
+            "name": "Billing payment webhook signing key",
+            "domain": "billing",
+            "inline_attr": "billing_payment_webhook_signing_key",
+            "path_attr": "billing_payment_webhook_signing_key_secret_path",
+            "required": False,
+            "details": ["required when billing payment callbacks are enabled"],
+        },
+        {
+            "key": "billing-payment-retry",
+            "name": "Billing payment retry webhook key",
+            "domain": "billing",
+            "inline_attr": "billing_payment_retry_webhook_key",
+            "path_attr": "billing_payment_retry_webhook_key_secret_path",
+            "required": settings.billing_payment_retry_delivery_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "billing-dunning",
+            "name": "Billing dunning webhook key",
+            "domain": "billing",
+            "inline_attr": "billing_dunning_webhook_key",
+            "path_attr": "billing_dunning_webhook_key_secret_path",
+            "required": settings.billing_dunning_delivery_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "billing-tax-filing",
+            "name": "Billing tax filing webhook key",
+            "domain": "billing",
+            "inline_attr": "billing_tax_filing_webhook_key",
+            "path_attr": "billing_tax_filing_webhook_key_secret_path",
+            "required": settings.billing_tax_filing_delivery_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "commercial-payment-webhook-signing",
+            "name": "Commercial payment webhook signing key",
+            "domain": "commerce",
+            "inline_attr": "commercial_payment_webhook_signing_key",
+            "path_attr": "commercial_payment_webhook_signing_key_secret_path",
+            "required": False,
+            "details": ["required when commercial payment callbacks are enabled"],
+        },
+        {
+            "key": "commercial-payment-session",
+            "name": "Commercial payment session webhook key",
+            "domain": "commerce",
+            "inline_attr": "commercial_payment_session_webhook_key",
+            "path_attr": "commercial_payment_session_webhook_key_secret_path",
+            "required": settings.commercial_payment_session_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "commercial-accounting",
+            "name": "Commercial accounting webhook key",
+            "domain": "commerce",
+            "inline_attr": "commercial_accounting_webhook_key",
+            "path_attr": "commercial_accounting_webhook_key_secret_path",
+            "required": settings.commercial_accounting_sync_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "commercial-tax-filing",
+            "name": "Commercial tax filing webhook key",
+            "domain": "commerce",
+            "inline_attr": "commercial_tax_filing_webhook_key",
+            "path_attr": "commercial_tax_filing_webhook_key_secret_path",
+            "required": settings.commercial_tax_filing_delivery_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "commercial-payout",
+            "name": "Commercial payout webhook key",
+            "domain": "commerce",
+            "inline_attr": "commercial_payout_webhook_key",
+            "path_attr": "commercial_payout_webhook_key_secret_path",
+            "required": settings.commercial_payout_delivery_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "commercial-payout-callback-signing",
+            "name": "Commercial payout callback signing key",
+            "domain": "commerce",
+            "inline_attr": "commercial_payout_callback_signing_key",
+            "path_attr": "commercial_payout_callback_signing_key_secret_path",
+            "required": False,
+            "details": ["required when payout callbacks are enabled"],
+        },
+        {
+            "key": "travel-manifest-signing",
+            "name": "Travel manifest signing key",
+            "domain": "travel",
+            "inline_attr": "travel_manifest_signing_key",
+            "path_attr": "travel_manifest_signing_key_secret_path",
+            "required": True,
+            "local_defaults": ("local-travel-manifest-key",),
+            "details": [signing],
+        },
+        {
+            "key": "travel-fee-payment-webhook-signing",
+            "name": "Travel fee payment webhook signing key",
+            "domain": "travel",
+            "inline_attr": "travel_fee_payment_webhook_signing_key",
+            "path_attr": "travel_fee_payment_webhook_signing_key_secret_path",
+            "required": False,
+            "details": ["required when travel fee callbacks are enabled"],
+        },
+        {
+            "key": "travel-expense-payout-callback-signing",
+            "name": "Travel expense payout callback signing key",
+            "domain": "travel",
+            "inline_attr": "travel_expense_payout_callback_signing_key",
+            "path_attr": "travel_expense_payout_callback_signing_key_secret_path",
+            "required": False,
+            "details": ["required when travel payout callbacks are enabled"],
+        },
+        {
+            "key": "travel-device-ingest",
+            "name": "Travel device ingest key",
+            "domain": "travel",
+            "inline_attr": "travel_device_ingest_key",
+            "path_attr": "travel_device_ingest_key_secret_path",
+            "required": False,
+            "details": ["required when travel device ingest is exposed"],
+        },
+        {
+            "key": "safeguarding-screening-webhook-signing",
+            "name": "Safeguarding screening webhook signing key",
+            "domain": "safeguarding",
+            "inline_attr": "safeguarding_screening_webhook_signing_key",
+            "path_attr": "safeguarding_screening_webhook_signing_key_secret_path",
+            "required": False,
+            "details": ["required when background-screening callbacks are enabled"],
+        },
+        {
+            "key": "safeguarding-screening-submission",
+            "name": "Safeguarding screening submission webhook key",
+            "domain": "safeguarding",
+            "inline_attr": "safeguarding_screening_submission_webhook_key",
+            "path_attr": "safeguarding_screening_submission_webhook_key_secret_path",
+            "required": settings.safeguarding_screening_submission_delivery_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "safeguarding-incident-evidence-signing",
+            "name": "Safeguarding incident evidence signing key",
+            "domain": "safeguarding",
+            "inline_attr": "safeguarding_incident_evidence_signing_key",
+            "path_attr": "safeguarding_incident_evidence_signing_key_secret_path",
+            "required": True,
+            "local_defaults": ("local-safeguarding-evidence-key",),
+            "details": [signing],
+        },
+        {
+            "key": "safeguarding-regulatory-report",
+            "name": "Safeguarding regulatory report webhook key",
+            "domain": "safeguarding",
+            "inline_attr": "safeguarding_regulatory_report_webhook_key",
+            "path_attr": "safeguarding_regulatory_report_webhook_key_secret_path",
+            "required": settings.safeguarding_regulatory_report_delivery_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "safeguarding-insurance-claim",
+            "name": "Safeguarding insurance claim webhook key",
+            "domain": "safeguarding",
+            "inline_attr": "safeguarding_insurance_claim_webhook_key",
+            "path_attr": "safeguarding_insurance_claim_webhook_key_secret_path",
+            "required": settings.safeguarding_insurance_claim_delivery_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "safeguarding-medical-clearance",
+            "name": "Safeguarding medical clearance webhook key",
+            "domain": "safeguarding",
+            "inline_attr": "safeguarding_medical_clearance_webhook_key",
+            "path_attr": "safeguarding_medical_clearance_webhook_key_secret_path",
+            "required": settings.safeguarding_medical_clearance_delivery_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "safeguarding-incident-artifact-signing",
+            "name": "Safeguarding incident artifact signing key",
+            "domain": "safeguarding",
+            "inline_attr": "safeguarding_incident_artifact_signing_key",
+            "path_attr": "safeguarding_incident_artifact_signing_key_secret_path",
+            "required": True,
+            "local_defaults": ("local-safeguarding-artifact-key",),
+            "details": [signing],
+        },
+        {
+            "key": "performance-wearable-webhook-signing",
+            "name": "Performance wearable webhook signing key",
+            "domain": "performance",
+            "inline_attr": "performance_wearable_webhook_signing_key",
+            "path_attr": "performance_wearable_webhook_signing_key_secret_path",
+            "required": False,
+            "details": ["required when wearable webhook ingestion is exposed"],
+        },
+        {
+            "key": "performance-model-extraction",
+            "name": "Performance model extraction webhook key",
+            "domain": "performance",
+            "inline_attr": "performance_model_extraction_webhook_key",
+            "path_attr": "performance_model_extraction_webhook_key_secret_path",
+            "required": settings.performance_model_extraction_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "performance-forecast",
+            "name": "Performance forecast webhook key",
+            "domain": "performance",
+            "inline_attr": "performance_forecast_webhook_key",
+            "path_attr": "performance_forecast_webhook_key_secret_path",
+            "required": settings.performance_forecast_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "performance-pose-worker-bearer",
+            "name": "Performance pose worker bearer token",
+            "domain": "performance",
+            "inline_attr": "performance_pose_worker_bearer_token",
+            "required": bool(settings.performance_pose_worker_api_base_url and settings.auth_mode == "keycloak"),
+            "details": ["required when the pose worker posts to a Keycloak-protected API"],
+        },
+        {
+            "key": "object-storage-access-key",
+            "name": "Object storage access credential",
+            "domain": "object-storage",
+            "inline_attr": "object_storage_access_key",
+            "path_attr": "object_storage_access_key_secret_path",
+            "required": settings.object_storage_mode == "s3",
+            "details": ["required when object storage mode is s3"],
+        },
+        {
+            "key": "object-storage-secret-key",
+            "name": "Object storage secret credential",
+            "domain": "object-storage",
+            "inline_attr": "object_storage_secret_key",
+            "path_attr": "object_storage_secret_key_secret_path",
+            "required": settings.object_storage_mode == "s3",
+            "details": ["required when object storage mode is s3"],
+        },
+        {
+            "key": "supplier-order-submission",
+            "name": "Supplier order submission webhook key",
+            "domain": "assets",
+            "inline_attr": "supplier_order_webhook_key",
+            "path_attr": "supplier_order_webhook_key_secret_path",
+            "required": settings.supplier_order_submission_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "supplier-invoice-sync",
+            "name": "Supplier invoice sync webhook key",
+            "domain": "assets",
+            "inline_attr": "supplier_invoice_webhook_key",
+            "path_attr": "supplier_invoice_webhook_key_secret_path",
+            "required": settings.supplier_invoice_sync_mode == "webhook",
+            "details": [webhook],
+        },
+        {
+            "key": "asset-accounting-sync",
+            "name": "Asset accounting sync webhook key",
+            "domain": "assets",
+            "inline_attr": "asset_accounting_webhook_key",
+            "path_attr": "asset_accounting_webhook_key_secret_path",
+            "required": settings.asset_accounting_sync_mode == "webhook",
+            "details": [webhook],
+        },
+    ]
+
+
+def _setting(settings: Settings, attr: object) -> str:
+    if not attr:
+        return ""
+    return str(getattr(settings, str(attr), "") or "")
 
 
 def _auth_readiness(settings: Settings) -> AuthReadiness:

@@ -58,6 +58,32 @@ export type AuthReadiness = {
   next_actions: string[];
 };
 
+export type SecretReadinessItem = {
+  key: string;
+  name: string;
+  domain: string;
+  status: string;
+  required: boolean;
+  secret_path_configured: boolean;
+  inline_configured: boolean;
+  details: string[];
+};
+
+export type SecretReadiness = {
+  environment: string;
+  provider: string;
+  status: string;
+  configured_count: number;
+  vault_path_count: number;
+  inline_count: number;
+  missing_required_count: number;
+  local_default_count: number;
+  items: SecretReadinessItem[];
+  blockers: string[];
+  warnings: string[];
+  next_actions: string[];
+};
+
 export type AuthorizationResourceRead = {
   resource_type: string;
   relations: string[];

@@ -71,6 +71,32 @@ class AuthReadiness(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class SecretReadinessItem(BaseModel):
+    key: str
+    name: str
+    domain: str
+    status: str
+    required: bool
+    secret_path_configured: bool
+    inline_configured: bool
+    details: list[str] = Field(default_factory=list)
+
+
+class SecretReadiness(BaseModel):
+    environment: str
+    provider: str
+    status: str
+    configured_count: int
+    vault_path_count: int
+    inline_count: int
+    missing_required_count: int
+    local_default_count: int
+    items: list[SecretReadinessItem] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class AuthorizationResourceRead(BaseModel):
     resource_type: str
     relations: list[str] = Field(default_factory=list)

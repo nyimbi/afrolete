@@ -27,7 +27,8 @@ import type {
   AuthorizationSchemaRead,
   InfrastructureComponent,
   InfrastructureProbeSummary,
-  InfrastructureStatus
+  InfrastructureStatus,
+  SecretReadiness
 } from "@/types/platform";
 import type {
   AgentAssignmentRead,
@@ -1864,6 +1865,7 @@ export default function HomePage() {
   const [authReadiness, setAuthReadiness] = useState<AuthReadiness | null>(null);
   const [authorizationReadiness, setAuthorizationReadiness] = useState<AuthorizationReadiness | null>(null);
   const [authorizationSchema, setAuthorizationSchema] = useState<AuthorizationSchemaRead | null>(null);
+  const [secretReadiness, setSecretReadiness] = useState<SecretReadiness | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [offlineQueue, setOfflineQueue] = useState<OfflineQueueSnapshot>(initialOfflineQueueSnapshot);
@@ -3560,19 +3562,21 @@ export default function HomePage() {
   }, [identity]);
 
   const loadInfrastructure = useCallback(async () => {
-    const [status, probes, auth, authorization, schema] = await Promise.all([
+    const [status, probes, auth, authorization, schema, secrets] = await Promise.all([
       apiRequest<InfrastructureStatus>("/infrastructure"),
       apiRequest<InfrastructureProbeSummary>("/infrastructure/probes"),
       apiRequest<AuthReadiness>("/infrastructure/auth-readiness"),
       apiRequest<AuthorizationReadiness>("/infrastructure/authorization-readiness"),
-      apiRequest<AuthorizationSchemaRead>("/infrastructure/authorization-schema")
+      apiRequest<AuthorizationSchemaRead>("/infrastructure/authorization-schema"),
+      apiRequest<SecretReadiness>("/infrastructure/secrets-readiness")
     ]);
     setInfrastructureStatus(status);
     setInfrastructureProbes(probes);
     setAuthReadiness(auth);
     setAuthorizationReadiness(authorization);
     setAuthorizationSchema(schema);
-    return { status, probes, auth, authorization, schema };
+    setSecretReadiness(secrets);
+    return { status, probes, auth, authorization, schema, secrets };
   }, []);
 
   useEffect(() => {
@@ -13776,6 +13780,32 @@ export default function HomePage() {
               </div>
               {authorizationReadiness?.blockers[0] || authorizationReadiness?.warnings[0] ? (
                 <small>{authorizationReadiness.blockers[0] ?? authorizationReadiness.warnings[0]}</small>
+              ) : null}
+            </div>
+            <div className="auth-readiness-card">
+              <div>
+                <span>Secret custody</span>
+                <strong>{secretReadiness?.status.replaceAll("_", " ") ?? "checking"}</strong>
+                <small>{secretReadiness ? `${secretReadiness.provider} · ${secretReadiness.environment}` : "OpenBao readiness pending"}</small>
+              </div>
+              <div className="auth-endpoint-list">
+                <span>
+                  {secretReadiness?.vault_path_count ?? 0} vault paths · {secretReadiness?.inline_count ?? 0} inline ·{" "}
+                  {secretReadiness?.missing_required_count ?? 0} missing
+                </span>
+                <span>{secretReadiness?.local_default_count ?? 0} local defaults · {secretReadiness?.configured_count ?? 0} configured</span>
+                {(secretReadiness?.items ?? [])
+                  .filter((item) => item.status !== "not_required")
+                  .slice(0, 4)
+                  .map((item) => (
+                    <span key={item.key}>
+                      {item.domain} · {item.name} · {item.status.replaceAll("_", " ")}
+                    </span>
+                  ))}
+                {!secretReadiness ? <span>Load infrastructure to inspect secret custody.</span> : null}
+              </div>
+              {secretReadiness?.blockers[0] || secretReadiness?.warnings[0] ? (
+                <small>{secretReadiness.blockers[0] ?? secretReadiness.warnings[0]}</small>
               ) : null}
             </div>
             <label>

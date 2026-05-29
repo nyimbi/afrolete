@@ -9,6 +9,7 @@ from app.api.v1.routes.platform import (
     _parse_host_port,
     _redis_component,
     _safe_url_without_credentials,
+    _secrets_readiness,
     _temporal_component,
 )
 from app.core.config import Settings
@@ -62,6 +63,50 @@ def test_authorization_readiness_route_is_secret_safe(client) -> None:
     assert payload["relationship_count"] > 0
     assert "spicedb_key" not in response.text.lower()
     assert payload["next_actions"]
+
+
+def test_secrets_readiness_route_is_secret_safe(client) -> None:
+    response = client.get("/api/v1/infrastructure/secrets-readiness")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] in {"openbao", "environment"}
+    assert payload["configured_count"] >= payload["vault_path_count"]
+    assert payload["items"]
+    serialized = response.text.lower()
+    assert "openbao_token" not in serialized
+    assert "spicedb_key" not in serialized
+    assert "secret_key" not in serialized
+
+
+def test_secrets_readiness_classifies_vault_inline_and_defaults() -> None:
+    readiness = _secrets_readiness(
+        Settings(
+            env="production",
+            authz_mode="spicedb",
+            spicedb_key="spice-secret-value",
+            communication_delivery_mode="webhook",
+            communication_webhook_key_secret_path="secret/data/afrolete/communications",
+            object_storage_mode="s3",
+            object_storage_access_key_secret_path="secret/data/afrolete/object-storage",
+            object_storage_secret_key="object-storage-secret-value",
+        )
+    )
+    items = {item.key: item for item in readiness.items}
+
+    assert items["communication-delivery"].status == "vault_path"
+    assert items["object-storage-access-key"].status == "vault_path"
+    assert items["spicedb-api-key"].status == "inline"
+    assert items["object-storage-secret-key"].status == "inline"
+    assert items["report-artifact-signing"].status == "local_default"
+    assert readiness.status == "blocked"
+    assert readiness.missing_required_count == 1
+    assert any("OpenBao token" in blocker for blocker in readiness.blockers)
+
+    serialized = readiness.model_dump_json()
+    assert "spice-secret-value" not in serialized
+    assert "object-storage-secret-value" not in serialized
+    assert "secret/data/afrolete" not in serialized
 
 
 def test_authorization_schema_route_exports_hash_and_content(client) -> None:
