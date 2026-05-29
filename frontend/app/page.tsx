@@ -52,6 +52,8 @@ import type {
   AgentScorecardPublicationReminderRunRead,
   AgentTaskApprovalRead,
   AgentTaskRead,
+  AgentTaskReviewQueueItemRead,
+  AgentTaskReviewQueueSummaryRead,
   AgentTaskStatus,
   AgentWorkerCallbackRead,
   AccountingExportRead,
@@ -1454,6 +1456,8 @@ export default function HomePage() {
   const [travelGeofenceZones, setTravelGeofenceZones] = useState<EventTravelGeofenceZoneRead[]>([]);
   const [agents, setAgents] = useState<AgentRead[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
+  const [agentReviewQueue, setAgentReviewQueue] = useState<AgentTaskReviewQueueItemRead[]>([]);
+  const [agentReviewSummary, setAgentReviewSummary] = useState<AgentTaskReviewQueueSummaryRead | null>(null);
   const [agentTaskApprovals, setAgentTaskApprovals] = useState<AgentTaskApprovalRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
   const [agentLedgerVerification, setAgentLedgerVerification] =
@@ -2678,8 +2682,16 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, runs, governance, policyRules, policyReport, policyHistory, policyHistorySnapshots, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
+    const [tasks, reviewQueue, reviewSummary, runs, governance, policyRules, policyReport, policyHistory, policyHistorySnapshots, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
+      apiRequest<AgentTaskReviewQueueItemRead[]>(
+        `/agents/tasks/review-queue?organization_id=${organizationId}&limit=8`,
+        { identity }
+      ),
+      apiRequest<AgentTaskReviewQueueSummaryRead>(
+        `/agents/tasks/review-summary?organization_id=${organizationId}`,
+        { identity }
+      ),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
       apiRequest<AgentGovernanceSummaryRead>(`/agents/governance?organization_id=${organizationId}`),
       apiRequest<AgentGovernancePolicyRuleRead[]>(`/agents/governance-policy-rules?organization_id=${organizationId}`),
@@ -2715,6 +2727,8 @@ export default function HomePage() {
       )
     ]);
     setAgentTasks(tasks);
+    setAgentReviewQueue(reviewQueue);
+    setAgentReviewSummary(reviewSummary);
     const approvalLists = await Promise.all(
       tasks.slice(0, 20).map((task) =>
         apiRequest<AgentTaskApprovalRead[]>(`/agents/tasks/${task.id}/approvals`)
@@ -7741,6 +7755,34 @@ export default function HomePage() {
       (task) => {
         setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
         addLog(`Task moved to ${task.status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
+        }
+      }
+    );
+  };
+
+  const assignAgentTaskReview = (task: AgentTaskRead, priority: "normal" | "urgent" = "normal") => {
+    const dueAt = new Date(Date.now() + (priority === "urgent" ? 4 : 24) * 60 * 60 * 1000).toISOString();
+    runAction(
+      `agent-task-${task.id}-review-assignment`,
+      () =>
+        apiRequest<AgentTaskRead>(`/agents/tasks/${task.id}/review-assignment`, {
+          method: "PATCH",
+          identity,
+          body: {
+            assign_to_self: true,
+            review_due_at: dueAt,
+            review_priority: priority,
+            review_assignment_notes:
+              priority === "urgent"
+                ? "Claimed for urgent human review from the AI task queue."
+                : "Claimed for human review from the AI task queue."
+          }
+        }),
+      (updated) => {
+        setAgentTasks((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        addLog(`Review assigned with ${updated.review_priority} priority`, "good");
         if (selectedOrganizationId) {
           void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
         }
@@ -17685,6 +17727,14 @@ export default function HomePage() {
                 <strong>{agentGovernance?.approval_pending ?? 0}</strong>
               </div>
               <div>
+                <span className="muted">Assigned</span>
+                <strong>{agentReviewSummary?.assigned_count ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Overdue</span>
+                <strong>{agentReviewSummary?.overdue_count ?? 0}</strong>
+              </div>
+              <div>
                 <span className="muted">Failed</span>
                 <strong>{agentGovernance?.failed_tasks ?? 0}</strong>
               </div>
@@ -17725,6 +17775,39 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {agentReviewSummary ? (
+                <article className="task-card">
+                  <div>
+                    <strong>AI review queue · {agentReviewSummary.open_count} open</strong>
+                    <span>
+                      {agentReviewSummary.assigned_count} assigned · {agentReviewSummary.unassigned_count} unassigned · {agentReviewSummary.pending_approval_count} approvals pending
+                    </span>
+                    <span>
+                      {agentReviewSummary.overdue_count} overdue · {agentReviewSummary.due_soon_count} due soon · {agentReviewSummary.urgent_count} urgent
+                    </span>
+                  </div>
+                </article>
+              ) : null}
+              {agentReviewQueue.slice(0, 4).map((item) => (
+                <article key={`review-${item.task.id}`} className="task-card">
+                  <div>
+                    <strong>{item.task.title} · {item.review_sla_state.replaceAll("_", " ")}</strong>
+                    <span>
+                      {item.agent_name} · {item.task.review_priority} priority · {item.review_assigned_to_name ?? "unassigned"}
+                    </span>
+                    <span>
+                      {item.review_age_hours}h in review · {item.pending_approval_count} approvals pending
+                      {item.task.review_due_at ? ` · due ${new Date(item.task.review_due_at).toLocaleString()}` : ""}
+                    </span>
+                    {item.task.review_assignment_notes ? <span>{item.task.review_assignment_notes}</span> : null}
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => assignAgentTaskReview(item.task)}>Assign me</button>
+                    <button type="button" onClick={() => assignAgentTaskReview(item.task, "urgent")}>Urgent</button>
+                    <button type="button" onClick={() => updateAgentTask(item.task.id, "completed")}>Done</button>
+                  </div>
+                </article>
+              ))}
               {agentGovernancePolicyReport ? (
                 <article className="task-card">
                   <div>
@@ -18170,6 +18253,10 @@ export default function HomePage() {
                       <span>
                         Approval {task.approval_status.replaceAll("_", " ")} · {task.approval_approved_count}/{task.approval_required_count || approvals.length || 0} accepted · {task.approval_pending_count} pending
                       </span>
+                      <span>
+                        Review {task.review_assigned_to_person_id ? "assigned" : "unassigned"} · {task.review_priority}
+                        {task.review_due_at ? ` · due ${new Date(task.review_due_at).toLocaleString()}` : ""}
+                      </span>
                       {task.governance_policy_code ? (
                         <span>
                           Policy {task.governance_policy_code} · {task.governance_policy_decision?.replaceAll("_", " ")} · {task.governance_policy_risk_level}
@@ -18188,6 +18275,7 @@ export default function HomePage() {
                       <button type="button" onClick={() => executeAgentTask(task.id)}>Run</button>
                       <button type="button" onClick={() => applyAgentWorkerCallback(task)}>Callback</button>
                       <button type="button" onClick={() => requestAgentTaskApprovals(task)}>Approvals</button>
+                      <button type="button" onClick={() => assignAgentTaskReview(task)}>Assign me</button>
                       <button type="button" onClick={() => submitAgentDecisionAppeal(task)}>Appeal</button>
                       <button type="button" onClick={() => updateAgentTask(task.id, "waiting_for_review")}>Review</button>
                       <button type="button" onClick={() => updateAgentTask(task.id, "completed")}>Done</button>

@@ -138,6 +138,51 @@ def test_agent_assignment_and_task_review_workflow(client, identity_headers) -> 
     assert reviewed["output_ref"] == f"agent-output:{task['id']}"
     assert "human review" in reviewed["review_notes"]
 
+    assignment_update = client.patch(
+        f"/api/v1/agents/tasks/{task['id']}/review-assignment",
+        headers=identity_headers,
+        json={
+            "assign_to_self": True,
+            "review_due_at": "2026-06-01T12:00:00Z",
+            "review_priority": "urgent",
+            "review_assignment_notes": "Owner is accountable for final guardian-message review.",
+        },
+    )
+    assert assignment_update.status_code == 200
+    assigned = assignment_update.json()
+    assert assigned["review_assigned_to_person_id"] is not None
+    assert assigned["review_due_at"].startswith("2026-06-01T12:00:00")
+    assert assigned["review_priority"] == "urgent"
+    assert "guardian-message review" in assigned["review_assignment_notes"]
+
+    review_queue = client.get(
+        f"/api/v1/agents/tasks/review-queue?organization_id={organization['id']}&assignment=mine&priority=urgent",
+        headers=identity_headers,
+    )
+    assert review_queue.status_code == 200
+    queue_items = review_queue.json()
+    assert len(queue_items) == 1
+    assert queue_items[0]["task"]["id"] == task["id"]
+    assert queue_items[0]["agent_name"] == "Safeguarding Watch"
+    assert queue_items[0]["pending_approval_count"] == 0
+    assert queue_items[0]["review_sla_state"] in {"overdue", "due_soon", "on_track"}
+
+    review_summary = client.get(
+        f"/api/v1/agents/tasks/review-summary?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert review_summary.status_code == 200
+    summary = review_summary.json()
+    assert summary["open_count"] == 1
+    assert summary["assigned_count"] == 1
+    assert summary["urgent_count"] == 1
+
+    runs = client.get(
+        f"/api/v1/agents/runs?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert "review_assigned" in [run["event_type"] for run in runs]
+
 
 def test_agent_task_multi_approval_routing(client, identity_headers) -> None:
     organization, team = create_org_and_team(client, identity_headers, "approval")

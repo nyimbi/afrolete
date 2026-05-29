@@ -200,6 +200,7 @@ They are expected to have:
 - Task queues.
 - Execution mode.
 - Human review.
+- Reviewer assignment, due dates, priority, and queue summaries.
 - Policy enforcement.
 - Audit trails.
 - Run ledgers.

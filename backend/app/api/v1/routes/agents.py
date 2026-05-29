@@ -62,6 +62,9 @@ from app.schemas.agent import (
     AgentTaskApprovalDecisionUpdate,
     AgentTaskApprovalRead,
     AgentTaskApprovalRequestCreate,
+    AgentTaskReviewAssignmentUpdate,
+    AgentTaskReviewQueueItemRead,
+    AgentTaskReviewQueueSummaryRead,
     AgentTaskRead,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
@@ -97,6 +100,7 @@ from app.services.agents import (
     list_agent_governance_policy_rules,
     list_agent_model_registry,
     list_agent_task_approvals,
+    list_agent_task_review_queue,
     list_agent_scorecard_comments,
     list_agent_scorecard_comments_for_moderation,
     list_agent_scorecard_publications,
@@ -125,9 +129,11 @@ from app.services.agents import (
     update_agent_model_registry,
     update_agent_scorecard_comment,
     update_agent_task,
+    update_agent_task_review_assignment,
     validate_agent_worker_callback_signature,
     verify_agent_run_ledger,
     scorecard_publication_actions,
+    agent_task_review_queue_summary,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -193,6 +199,10 @@ def to_task_read(task) -> AgentTaskRead:
         input_ref=task.input_ref,
         output_ref=task.output_ref,
         review_notes=task.review_notes,
+        review_assigned_to_person_id=task.review_assigned_to_person_id,
+        review_due_at=task.review_due_at,
+        review_priority=task.review_priority or "normal",
+        review_assignment_notes=task.review_assignment_notes,
         approval_required_count=task.approval_required_count or 0,
         approval_approved_count=task.approval_approved_count or 0,
         approval_rejected_count=task.approval_rejected_count or 0,
@@ -204,6 +214,19 @@ def to_task_read(task) -> AgentTaskRead:
         governance_policy_decision=task.governance_policy_decision,
         governance_policy_risk_level=task.governance_policy_risk_level,
         governance_policy_rationale=task.governance_policy_rationale,
+    )
+
+
+def to_task_review_queue_item_read(item: dict[str, object]) -> AgentTaskReviewQueueItemRead:
+    return AgentTaskReviewQueueItemRead(
+        task=to_task_read(item["task"]),
+        agent_name=str(item["agent_name"]),
+        review_assigned_to_name=(
+            str(item["review_assigned_to_name"]) if item["review_assigned_to_name"] else None
+        ),
+        review_sla_state=str(item["review_sla_state"]),
+        review_age_hours=int(item["review_age_hours"]),
+        pending_approval_count=int(item["pending_approval_count"]),
     )
 
 
@@ -1028,6 +1051,44 @@ async def list_agent_tasks_route(
     ]
 
 
+@router.get("/tasks/review-queue", response_model=list[AgentTaskReviewQueueItemRead])
+async def list_agent_task_review_queue_route(
+    organization_id: UUID = Query(),
+    assignment: str = Query(default="all", pattern="^(all|mine|assigned|unassigned)$"),
+    sla: str = Query(default="all", pattern="^(all|unassigned|overdue|due_soon|on_track)$"),
+    priority: str = Query(default="all", pattern="^(all|low|normal|high|urgent)$"),
+    limit: int = Query(default=25, ge=1, le=100),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[AgentTaskReviewQueueItemRead]:
+    return [
+        to_task_review_queue_item_read(item)
+        for item in await list_agent_task_review_queue(
+            db,
+            identity,
+            organization_id,
+            authz,
+            limit=limit,
+            assignment=assignment,
+            sla=sla,
+            priority=priority,
+        )
+    ]
+
+
+@router.get("/tasks/review-summary", response_model=AgentTaskReviewQueueSummaryRead)
+async def agent_task_review_queue_summary_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentTaskReviewQueueSummaryRead:
+    return AgentTaskReviewQueueSummaryRead(
+        **await agent_task_review_queue_summary(db, identity, organization_id, authz)
+    )
+
+
 @router.get("/tasks/{task_id}/approvals", response_model=list[AgentTaskApprovalRead])
 async def list_agent_task_approvals_route(
     task_id: UUID,
@@ -1063,6 +1124,19 @@ async def decide_agent_task_approval_route(
 ) -> AgentTaskApprovalRead:
     return to_task_approval_read(
         await decide_agent_task_approval(db, identity, approval_id, payload, authz)
+    )
+
+
+@router.patch("/tasks/{task_id}/review-assignment", response_model=AgentTaskRead)
+async def update_agent_task_review_assignment_route(
+    task_id: UUID,
+    payload: AgentTaskReviewAssignmentUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentTaskRead:
+    return to_task_read(
+        await update_agent_task_review_assignment(db, identity, task_id, payload, authz)
     )
 
 

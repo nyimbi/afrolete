@@ -3571,6 +3571,10 @@ export type AgentTaskRead = {
   input_ref: string | null;
   output_ref: string | null;
   review_notes: string | null;
+  review_assigned_to_person_id: UUID | null;
+  review_due_at: string | null;
+  review_priority: string;
+  review_assignment_notes: string | null;
   approval_required_count: number;
   approval_approved_count: number;
   approval_rejected_count: number;
@@ -3725,6 +3729,26 @@ export type AgentTaskApprovalRead = {
   decided_by_person_id: UUID | null;
   decided_at: string | null;
   sequence: number;
+};
+
+export type AgentTaskReviewQueueItemRead = {
+  task: AgentTaskRead;
+  agent_name: string;
+  review_assigned_to_name: string | null;
+  review_sla_state: string;
+  review_age_hours: number;
+  pending_approval_count: number;
+};
+
+export type AgentTaskReviewQueueSummaryRead = {
+  organization_id: UUID;
+  open_count: number;
+  assigned_count: number;
+  unassigned_count: number;
+  overdue_count: number;
+  due_soon_count: number;
+  urgent_count: number;
+  pending_approval_count: number;
 };
 
 export type AgentWorkerCallbackRead = {

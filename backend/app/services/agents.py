@@ -67,6 +67,7 @@ from app.schemas.agent import (
     AgentTaskCreate,
     AgentTaskApprovalDecisionUpdate,
     AgentTaskApprovalRequestCreate,
+    AgentTaskReviewAssignmentUpdate,
     AgentTaskWorkerRunRead,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
@@ -2833,6 +2834,194 @@ async def update_agent_task(
     await db.commit()
     await db.refresh(task)
     return task
+
+
+def agent_task_needs_review(task: AgentTask) -> bool:
+    return task.status == AgentTaskStatus.WAITING_FOR_REVIEW or task.approval_status == "pending"
+
+
+def agent_task_review_sla_state(task: AgentTask, now: datetime | None = None) -> str:
+    if task.review_due_at is None:
+        return "unassigned"
+    selected_now = now or datetime.now(UTC)
+    due_at = task.review_due_at
+    if due_at.tzinfo is None:
+        due_at = due_at.replace(tzinfo=UTC)
+    if due_at <= selected_now:
+        return "overdue"
+    if due_at - selected_now <= timedelta(hours=24):
+        return "due_soon"
+    return "on_track"
+
+
+def agent_task_review_age_hours(task: AgentTask, now: datetime | None = None) -> int:
+    selected_now = now or datetime.now(UTC)
+    started_at = task.updated_at or task.created_at or selected_now
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=UTC)
+    return max(int((selected_now - started_at).total_seconds() // 3600), 0)
+
+
+def review_sort_datetime(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.max.replace(tzinfo=UTC)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def pending_agent_task_approval_count(task: AgentTask) -> int:
+    return max(
+        int(task.approval_required_count or 0)
+        - int(task.approval_approved_count or 0)
+        - int(task.approval_rejected_count or 0),
+        0,
+    )
+
+
+async def agent_task_review_queue_rows(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[tuple[AgentTask, Agent, Person | None]]:
+    return list(
+        (
+            await db.execute(
+                select(AgentTask, Agent, Person)
+                .join(Agent, Agent.id == AgentTask.agent_id)
+                .outerjoin(Person, Person.id == AgentTask.review_assigned_to_person_id)
+                .where(
+                    AgentTask.organization_id == organization_id,
+                    or_(
+                        AgentTask.status == AgentTaskStatus.WAITING_FOR_REVIEW,
+                        AgentTask.approval_status == "pending",
+                    ),
+                )
+            )
+        ).all()
+    )
+
+
+async def list_agent_task_review_queue(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    *,
+    limit: int = 25,
+    assignment: str = "all",
+    sla: str = "all",
+    priority: str = "all",
+) -> list[dict[str, object]]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    now = datetime.now(UTC)
+    priority_rank = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
+    rows = []
+    for task, agent, assignee in await agent_task_review_queue_rows(db, organization_id):
+        if priority != "all" and task.review_priority != priority:
+            continue
+        if assignment == "mine" and task.review_assigned_to_person_id != identity.person_id:
+            continue
+        if assignment == "unassigned" and task.review_assigned_to_person_id is not None:
+            continue
+        if assignment == "assigned" and task.review_assigned_to_person_id is None:
+            continue
+        sla_state = agent_task_review_sla_state(task, now)
+        if sla != "all" and sla_state != sla:
+            continue
+        rows.append(
+            {
+                "task": task,
+                "agent_name": agent.name,
+                "review_assigned_to_name": assignee.display_name if assignee else None,
+                "review_sla_state": sla_state,
+                "review_age_hours": agent_task_review_age_hours(task, now),
+                "pending_approval_count": pending_agent_task_approval_count(task),
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            priority_rank.get(str(item["task"].review_priority), 2),
+            review_sort_datetime(item["task"].review_due_at),
+            review_sort_datetime(item["task"].created_at),
+        )
+    )
+    return rows[: max(limit, 1)]
+
+
+async def agent_task_review_queue_summary(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    now = datetime.now(UTC)
+    rows = [row[0] for row in await agent_task_review_queue_rows(db, organization_id)]
+    sla_states = [agent_task_review_sla_state(task, now) for task in rows]
+    return {
+        "organization_id": organization_id,
+        "open_count": len(rows),
+        "assigned_count": sum(1 for task in rows if task.review_assigned_to_person_id is not None),
+        "unassigned_count": sum(1 for task in rows if task.review_assigned_to_person_id is None),
+        "overdue_count": sum(1 for state in sla_states if state == "overdue"),
+        "due_soon_count": sum(1 for state in sla_states if state == "due_soon"),
+        "urgent_count": sum(1 for task in rows if task.review_priority == "urgent"),
+        "pending_approval_count": sum(pending_agent_task_approval_count(task) for task in rows),
+    }
+
+
+async def update_agent_task_review_assignment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    task_id: UUID,
+    payload: AgentTaskReviewAssignmentUpdate,
+    authz: AuthorizationService,
+) -> AgentTask:
+    task = await db.get(AgentTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent task not found")
+    await ensure_manage_organization(authz, identity, task.organization_id)
+    if payload.clear_assignment:
+        task.review_assigned_to_person_id = None
+    elif payload.assign_to_self:
+        task.review_assigned_to_person_id = identity.person_id
+    elif payload.assigned_to_person_id is not None:
+        assignee = await db.get(Person, payload.assigned_to_person_id)
+        if assignee is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review assignee not found")
+        task.review_assigned_to_person_id = assignee.id
+    if payload.review_due_at is not None:
+        task.review_due_at = payload.review_due_at
+    if payload.review_priority is not None:
+        task.review_priority = payload.review_priority
+    if payload.review_assignment_notes is not None:
+        task.review_assignment_notes = payload.review_assignment_notes
+        task.review_notes = append_review_note(
+            task.review_notes,
+            f"Review assignment: {payload.review_assignment_notes}",
+        )
+
+    agent = await db.get(Agent, task.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    await append_agent_run_record(
+        db,
+        agent,
+        task,
+        identity,
+        event_type="review_assigned",
+        settings=get_settings(),
+        governance_note=agent_task_review_assignment_governance_note(task),
+    )
+    await db.commit()
+    await db.refresh(task)
+    return task
+
+
+def agent_task_review_assignment_governance_note(task: AgentTask) -> str:
+    assignee = "assigned" if task.review_assigned_to_person_id else "unassigned"
+    due = task.review_due_at.isoformat() if task.review_due_at else "no due date"
+    return f"Agent output review is {assignee}, priority {task.review_priority}, due {due}."
 
 
 async def apply_agent_worker_callback(

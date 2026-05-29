@@ -57,6 +57,10 @@ class AgentTaskRead(BaseModel):
     input_ref: str | None
     output_ref: str | None
     review_notes: str | None
+    review_assigned_to_person_id: UUID | None
+    review_due_at: datetime | None
+    review_priority: str
+    review_assignment_notes: str | None
     approval_required_count: int
     approval_approved_count: int
     approval_rejected_count: int
@@ -271,6 +275,50 @@ class AgentTaskApprovalRead(BaseModel):
     decided_by_person_id: UUID | None
     decided_at: datetime | None
     sequence: int
+
+
+class AgentTaskReviewAssignmentUpdate(BaseModel):
+    assign_to_self: bool = False
+    assigned_to_person_id: UUID | None = None
+    clear_assignment: bool = False
+    review_due_at: datetime | None = None
+    review_priority: str | None = Field(default=None, pattern="^(low|normal|high|urgent)$")
+    review_assignment_notes: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def at_least_one_action(self) -> "AgentTaskReviewAssignmentUpdate":
+        if (
+            not self.assign_to_self
+            and self.assigned_to_person_id is None
+            and not self.clear_assignment
+            and self.review_due_at is None
+            and self.review_priority is None
+            and self.review_assignment_notes is None
+        ):
+            raise ValueError("review assignment update requires at least one action")
+        if self.clear_assignment and (self.assign_to_self or self.assigned_to_person_id is not None):
+            raise ValueError("clear_assignment cannot be combined with an assignee")
+        return self
+
+
+class AgentTaskReviewQueueItemRead(BaseModel):
+    task: AgentTaskRead
+    agent_name: str
+    review_assigned_to_name: str | None
+    review_sla_state: str
+    review_age_hours: int
+    pending_approval_count: int
+
+
+class AgentTaskReviewQueueSummaryRead(BaseModel):
+    organization_id: UUID
+    open_count: int
+    assigned_count: int
+    unassigned_count: int
+    overdue_count: int
+    due_soon_count: int
+    urgent_count: int
+    pending_approval_count: int
 
 
 class AgentTaskWorkerRunRead(BaseModel):

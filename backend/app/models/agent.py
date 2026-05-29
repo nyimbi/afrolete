@@ -52,6 +52,12 @@ class AgentTask(IdMixin, TimestampMixin, Base):
     input_ref: Mapped[str | None] = mapped_column(String(500))
     output_ref: Mapped[str | None] = mapped_column(String(500))
     review_notes: Mapped[str | None] = mapped_column(Text)
+    review_assigned_to_person_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("persons.id"), index=True
+    )
+    review_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    review_priority: Mapped[str] = mapped_column(String(40), default="normal", nullable=False, index=True)
+    review_assignment_notes: Mapped[str | None] = mapped_column(Text)
     approval_required_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     approval_approved_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     approval_rejected_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
