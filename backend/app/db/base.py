@@ -50,6 +50,8 @@ from app.models.commercial import (  # noqa: F401,E402
     MerchandiseOrder,
     MerchandiseOrderLine,
     MerchandiseProduct,
+    SponsorActivationCampaign,
+    SponsorCouponRedemption,
     Sponsor,
     SponsorshipAgreement,
     Ticket,

@@ -43,6 +43,75 @@ class SponsorshipAgreementRead(SponsorshipAgreementCreate):
     status: CommercialStatus
 
 
+class SponsorActivationCampaignCreate(BaseModel):
+    organization_id: UUID
+    sponsor_id: UUID
+    sponsorship_agreement_id: UUID | None = None
+    fan_challenge_id: UUID | None = None
+    title: str = Field(min_length=2, max_length=220)
+    objective: str = Field(min_length=2, max_length=240)
+    offer_summary: str = Field(default="", max_length=4000)
+    coupon_code: str = Field(min_length=2, max_length=80)
+    discount_type: str = Field(default="percent", min_length=2, max_length=40)
+    discount_value: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    target_url: str | None = Field(default=None, max_length=500)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+
+class SponsorActivationCampaignRead(SponsorActivationCampaignCreate):
+    id: UUID
+    status: CommercialStatus
+    sponsor_name: str | None = None
+    challenge_title: str | None = None
+    impression_count: int
+    signup_count: int
+    redemption_count: int
+    conversion_value: Decimal
+
+
+class SponsorCouponRedemptionCreate(BaseModel):
+    organization_id: UUID
+    coupon_code: str = Field(min_length=2, max_length=80)
+    supporter_profile_id: UUID | None = None
+    redeemer_name: str = Field(min_length=2, max_length=180)
+    redeemer_email: str = Field(min_length=3, max_length=320)
+    source: str = Field(default="public_site", min_length=2, max_length=80)
+    order_reference: str | None = Field(default=None, max_length=240)
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    purchase_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+
+
+class SponsorCouponRedemptionRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    activation_campaign_id: UUID
+    coupon_code: str
+    sponsor_name: str | None = None
+    supporter_profile_id: UUID | None
+    redeemer_name: str
+    redeemer_email: str
+    source: str
+    order_reference: str | None
+    discount_amount: Decimal
+    purchase_amount: Decimal
+    status: CommercialStatus
+    redeemed_at: datetime
+
+
+class SponsorActivationDashboardRead(BaseModel):
+    organization_id: UUID
+    campaign_count: int
+    active_campaign_count: int
+    total_impressions: int
+    total_signups: int
+    total_redemptions: int
+    conversion_value: Decimal
+    top_coupon_code: str | None
+    roi_signal: str
+    recommendations: list[str]
+
+
 class FundraisingCampaignCreate(BaseModel):
     organization_id: UUID
     team_id: UUID | None = None

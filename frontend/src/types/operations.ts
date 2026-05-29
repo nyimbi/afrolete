@@ -2729,6 +2729,60 @@ export type SponsorshipAgreementRead = {
   status: CommercialStatus;
 };
 
+export type SponsorActivationCampaignRead = {
+  id: UUID;
+  organization_id: UUID;
+  sponsor_id: UUID;
+  sponsorship_agreement_id: UUID | null;
+  fan_challenge_id: UUID | null;
+  title: string;
+  objective: string;
+  offer_summary: string;
+  coupon_code: string;
+  discount_type: string;
+  discount_value: string;
+  target_url: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  status: CommercialStatus;
+  sponsor_name: string | null;
+  challenge_title: string | null;
+  impression_count: number;
+  signup_count: number;
+  redemption_count: number;
+  conversion_value: string;
+};
+
+export type SponsorCouponRedemptionRead = {
+  id: UUID;
+  organization_id: UUID;
+  activation_campaign_id: UUID;
+  coupon_code: string;
+  sponsor_name: string | null;
+  supporter_profile_id: UUID | null;
+  redeemer_name: string;
+  redeemer_email: string;
+  source: string;
+  order_reference: string | null;
+  discount_amount: string;
+  purchase_amount: string;
+  status: CommercialStatus;
+  redeemed_at: string;
+};
+
+export type SponsorActivationDashboardRead = {
+  organization_id: UUID;
+  campaign_count: number;
+  active_campaign_count: number;
+  total_impressions: number;
+  total_signups: number;
+  total_redemptions: number;
+  conversion_value: string;
+  top_coupon_code: string | null;
+  roi_signal: string;
+  recommendations: string[];
+};
+
 export type FundraisingCampaignRead = {
   id: UUID;
   organization_id: UUID;

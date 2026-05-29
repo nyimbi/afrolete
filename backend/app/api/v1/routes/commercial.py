@@ -45,6 +45,11 @@ from app.schemas.commercial import (
     MerchandiseStoreDashboardRead,
     PaymentSettlementRead,
     SponsorCreate,
+    SponsorActivationCampaignCreate,
+    SponsorActivationCampaignRead,
+    SponsorActivationDashboardRead,
+    SponsorCouponRedemptionCreate,
+    SponsorCouponRedemptionRead,
     SponsorPortalRead,
     SponsorRead,
     SponsorshipDashboardRead,
@@ -74,6 +79,7 @@ from app.services.commercial import (
     create_merchandise_product,
     create_commercial_invoice_provider_checkout,
     create_sponsor,
+    create_sponsor_activation_campaign,
     create_sponsorship,
     create_ticket_order,
     create_ticket_product,
@@ -89,6 +95,8 @@ from app.services.commercial import (
     list_invoices,
     list_commercial_payment_sessions,
     list_sponsors,
+    list_sponsor_activation_campaigns,
+    list_sponsor_coupon_redemptions,
     list_sponsorships,
     list_ticket_products,
     list_tickets,
@@ -97,12 +105,14 @@ from app.services.commercial import (
     list_merchandise_products,
     payment_settlement,
     record_donation,
+    record_sponsor_coupon_redemption,
     record_payment,
     reconcile_commercial_settlement_payout_callback,
     refund_invoice,
     refund_ticket,
     settle_commercial_invoice_checkout,
     sponsor_portal,
+    sponsor_activation_dashboard,
     sponsorship_dashboard,
     sync_accounting_export,
     tax_quote,
@@ -228,6 +238,58 @@ async def list_sponsorships_route(
         sponsorship_read(agreement)
         for agreement in await list_sponsorships(db, organization_id)
     ]
+
+
+@router.post(
+    "/sponsor-activations",
+    response_model=SponsorActivationCampaignRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_sponsor_activation_route(
+    payload: SponsorActivationCampaignCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SponsorActivationCampaignRead:
+    return await create_sponsor_activation_campaign(db, identity, payload, authz)
+
+
+@router.get("/sponsor-activations", response_model=list[SponsorActivationCampaignRead])
+async def list_sponsor_activation_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[SponsorActivationCampaignRead]:
+    return await list_sponsor_activation_campaigns(db, organization_id)
+
+
+@router.post(
+    "/sponsor-coupon-redemptions",
+    response_model=SponsorCouponRedemptionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_sponsor_coupon_redemption_route(
+    payload: SponsorCouponRedemptionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SponsorCouponRedemptionRead:
+    return await record_sponsor_coupon_redemption(db, identity, payload, authz)
+
+
+@router.get("/sponsor-coupon-redemptions", response_model=list[SponsorCouponRedemptionRead])
+async def list_sponsor_coupon_redemptions_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[SponsorCouponRedemptionRead]:
+    return await list_sponsor_coupon_redemptions(db, organization_id)
+
+
+@router.get("/sponsor-activation-dashboard", response_model=SponsorActivationDashboardRead)
+async def sponsor_activation_dashboard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> SponsorActivationDashboardRead:
+    return await sponsor_activation_dashboard(db, organization_id)
 
 
 @router.post("/campaigns", response_model=FundraisingCampaignRead, status_code=status.HTTP_201_CREATED)

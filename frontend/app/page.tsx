@@ -363,6 +363,9 @@ import type {
   ComplianceReconciliationRead,
   ComplianceSummaryRead,
   ScheduledReportRead,
+  SponsorActivationCampaignRead,
+  SponsorActivationDashboardRead,
+  SponsorCouponRedemptionRead,
   SponsorRead,
   SponsorshipAgreementRead,
   SponsorshipDashboardRead,
@@ -1784,6 +1787,9 @@ export default function HomePage() {
   const [accountingSync, setAccountingSync] = useState<AccountingSyncRead | null>(null);
   const [commercialRefund, setCommercialRefund] = useState<CommercialRefundRead | null>(null);
   const [sponsorshipDashboard, setSponsorshipDashboard] = useState<SponsorshipDashboardRead[]>([]);
+  const [sponsorActivations, setSponsorActivations] = useState<SponsorActivationCampaignRead[]>([]);
+  const [sponsorCouponRedemptions, setSponsorCouponRedemptions] = useState<SponsorCouponRedemptionRead[]>([]);
+  const [sponsorActivationDashboard, setSponsorActivationDashboard] = useState<SponsorActivationDashboardRead | null>(null);
   const [reportDefinitions, setReportDefinitions] = useState<ReportDefinitionRead[]>([]);
   const [generatedReports, setGeneratedReports] = useState<GeneratedReportRead[]>([]);
   const [scheduledReports, setScheduledReports] = useState<ScheduledReportRead[]>([]);
@@ -2493,7 +2499,20 @@ export default function HomePage() {
     tier: "Gold",
     value_amount: 10000,
     deliverables: "Logo on kits, matchday signage, branded challenge, coupon code.",
-    activation_notes: "Launch branded first-touch challenge for U17 athletes."
+    activation_notes: "Launch branded first-touch challenge for U17 athletes.",
+    activation_title: "Matchday coupon challenge",
+    activation_objective: "Convert matchday engagement into sponsor-tracked purchases.",
+    activation_offer_summary: "10% off sponsor merchandise for fans and families.",
+    coupon_code: "MATCHDAY10",
+    discount_type: "percent",
+    discount_value: 10,
+    activation_target_url: "https://shop.afrolete.local/matchday",
+    redemption_name: "Family Fan",
+    redemption_email: "fan@example.com",
+    redemption_source: "matchday_store",
+    order_reference: "ORDER-1001",
+    discount_amount: 8,
+    purchase_amount: 80
   });
   const [campaignForm, setCampaignForm] = useState({
     name: "New Training Facility",
@@ -3676,6 +3695,9 @@ export default function HomePage() {
     const [
       sponsorData,
       sponsorshipData,
+      sponsorActivationData,
+      sponsorCouponRedemptionData,
+      sponsorActivationDashboardData,
       campaignData,
       grantOpportunityData,
       grantApplicationData,
@@ -3694,6 +3716,9 @@ export default function HomePage() {
     ] = await Promise.all([
       apiRequest<SponsorRead[]>(`/commercial/sponsors?organization_id=${organizationId}`),
       apiRequest<SponsorshipAgreementRead[]>(`/commercial/sponsorships?organization_id=${organizationId}`),
+      apiRequest<SponsorActivationCampaignRead[]>(`/commercial/sponsor-activations?organization_id=${organizationId}`),
+      apiRequest<SponsorCouponRedemptionRead[]>(`/commercial/sponsor-coupon-redemptions?organization_id=${organizationId}`),
+      apiRequest<SponsorActivationDashboardRead>(`/commercial/sponsor-activation-dashboard?organization_id=${organizationId}`),
       apiRequest<FundraisingCampaignRead[]>(`/commercial/campaigns?organization_id=${organizationId}`),
       apiRequest<GrantOpportunityRead[]>(`/commercial/grants/opportunities?organization_id=${organizationId}`),
       apiRequest<GrantApplicationRead[]>(`/commercial/grants/applications?organization_id=${organizationId}`),
@@ -3714,6 +3739,9 @@ export default function HomePage() {
     ]);
     setSponsors(sponsorData);
     setSponsorships(sponsorshipData);
+    setSponsorActivations(sponsorActivationData);
+    setSponsorCouponRedemptions(sponsorCouponRedemptionData);
+    setSponsorActivationDashboard(sponsorActivationDashboardData);
     setCampaigns(campaignData);
     setGrantOpportunities(grantOpportunityData);
     setGrantApplications(grantApplicationData);
@@ -4222,6 +4250,9 @@ export default function HomePage() {
       setAccountingSync(null);
       setCommercialRefund(null);
       setSponsorshipDashboard([]);
+      setSponsorActivations([]);
+      setSponsorCouponRedemptions([]);
+      setSponsorActivationDashboard(null);
       setSelectedGrantOpportunityId("");
       setSelectedGrantApplicationId("");
       setSelectedMerchandiseProductId("");
@@ -12918,6 +12949,81 @@ export default function HomePage() {
     );
   };
 
+  const createSponsorActivationCampaign = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const sponsorId = selectedSponsorId || sponsors[0]?.id;
+    if (!sponsorId) {
+      addLog("Create or select a sponsor first", "bad");
+      return;
+    }
+    runAction(
+      "create-sponsor-activation",
+      () =>
+        apiRequest<SponsorActivationCampaignRead>("/commercial/sponsor-activations", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sponsor_id: sponsorId,
+            sponsorship_agreement_id: sponsorships.find((agreement) => agreement.sponsor_id === sponsorId)?.id ?? null,
+            fan_challenge_id: selectedFanChallenge?.id ?? null,
+            title: sponsorForm.activation_title,
+            objective: sponsorForm.activation_objective,
+            offer_summary: sponsorForm.activation_offer_summary,
+            coupon_code: sponsorForm.coupon_code,
+            discount_type: sponsorForm.discount_type,
+            discount_value: String(sponsorForm.discount_value),
+            target_url: sponsorForm.activation_target_url || null
+          }
+        }),
+      (activation) => {
+        setSponsorActivations((current) => [
+          activation,
+          ...current.filter((item) => item.id !== activation.id)
+        ]);
+        addLog(`${activation.coupon_code} sponsor activation launched`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const recordSponsorCouponRedemption = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "record-sponsor-coupon",
+      () =>
+        apiRequest<SponsorCouponRedemptionRead>("/commercial/sponsor-coupon-redemptions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            coupon_code: sponsorForm.coupon_code,
+            supporter_profile_id: selectedSupporter?.id ?? null,
+            redeemer_name: sponsorForm.redemption_name,
+            redeemer_email: sponsorForm.redemption_email,
+            source: sponsorForm.redemption_source,
+            order_reference: sponsorForm.order_reference || null,
+            discount_amount: String(sponsorForm.discount_amount),
+            purchase_amount: String(sponsorForm.purchase_amount)
+          }
+        }),
+      (redemption) => {
+        setSponsorCouponRedemptions((current) => [
+          redemption,
+          ...current.filter((item) => item.id !== redemption.id)
+        ]);
+        addLog(`${redemption.coupon_code} redemption tracked`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const createCampaignAndDonation = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -16969,6 +17075,8 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createSponsorAndAgreement} disabled={busyAction !== null}>Sponsor</button>
+                <button type="button" onClick={createSponsorActivationCampaign} disabled={busyAction !== null}>Activation</button>
+                <button type="button" onClick={recordSponsorCouponRedemption} disabled={busyAction !== null}>Redeem</button>
                 <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
@@ -16977,10 +17085,20 @@ export default function HomePage() {
               </div>
             </div>
             <div className="score-summary">
-              <strong>{merchandiseDashboard?.gross_revenue ?? grantDashboard?.awarded_amount ?? commercialSummary?.fundraising_raised ?? "0.00"}</strong>
-              <span>{merchandiseDashboard ? "Store revenue" : grantDashboard ? `${grantDashboard.pipeline_status} grant pipeline` : "Raised"}</span>
+              <strong>{sponsorActivationDashboard?.conversion_value ?? merchandiseDashboard?.gross_revenue ?? grantDashboard?.awarded_amount ?? commercialSummary?.fundraising_raised ?? "0.00"}</strong>
+              <span>
+                {sponsorActivationDashboard
+                  ? `${sponsorActivationDashboard.roi_signal} sponsor activation`
+                  : merchandiseDashboard
+                  ? "Store revenue"
+                  : grantDashboard
+                  ? `${grantDashboard.pipeline_status} grant pipeline`
+                  : "Raised"}
+              </span>
               <small>
-                {merchandiseDashboard
+                {sponsorActivationDashboard
+                  ? `${sponsorActivationDashboard.campaign_count} campaigns · ${sponsorActivationDashboard.total_redemptions} redemptions · top ${sponsorActivationDashboard.top_coupon_code ?? "none"}`
+                  : merchandiseDashboard
                   ? `${merchandiseDashboard.product_count} products · ${merchandiseDashboard.order_count} orders · ${merchandiseDashboard.low_stock_count} low stock`
                   : grantDashboard
                   ? `${grantDashboard.opportunity_count} grants · ${grantDashboard.application_count} applications · ${grantDashboard.report_count} reports`
@@ -17009,6 +17127,30 @@ export default function HomePage() {
               <label className="wide-field">
                 Deliverables
                 <input value={sponsorForm.deliverables} onChange={(event) => setSponsorForm({ ...sponsorForm, deliverables: event.target.value })} />
+              </label>
+              <label>
+                Activation
+                <input value={sponsorForm.activation_title} onChange={(event) => setSponsorForm({ ...sponsorForm, activation_title: event.target.value })} />
+              </label>
+              <label>
+                Coupon
+                <input value={sponsorForm.coupon_code} onChange={(event) => setSponsorForm({ ...sponsorForm, coupon_code: event.target.value })} />
+              </label>
+              <label>
+                Discount
+                <input type="number" min="0" value={sponsorForm.discount_value} onChange={(event) => setSponsorForm({ ...sponsorForm, discount_value: Number(event.target.value) })} />
+              </label>
+              <label>
+                Redeemer
+                <input value={sponsorForm.redemption_email} onChange={(event) => setSponsorForm({ ...sponsorForm, redemption_email: event.target.value })} />
+              </label>
+              <label>
+                Purchase
+                <input type="number" min="0" value={sponsorForm.purchase_amount} onChange={(event) => setSponsorForm({ ...sponsorForm, purchase_amount: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Offer
+                <input value={sponsorForm.activation_offer_summary} onChange={(event) => setSponsorForm({ ...sponsorForm, activation_offer_summary: event.target.value })} />
               </label>
               <label>
                 Campaign
@@ -17124,11 +17266,40 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {sponsorActivationDashboard ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Sponsor activation · {sponsorActivationDashboard.roi_signal}</strong>
+                    <span>
+                      {sponsorActivationDashboard.total_redemptions} redemptions · {sponsorActivationDashboard.conversion_value} conversion value
+                    </span>
+                    <span>{sponsorActivationDashboard.recommendations[0] ?? "Sponsor activation is measurable"}</span>
+                  </div>
+                </article>
+              ) : null}
+              {sponsorActivations.slice(0, 3).map((activation) => (
+                <article key={activation.id} className="task-card">
+                  <div>
+                    <strong>{activation.coupon_code} · {activation.title}</strong>
+                    <span>
+                      {activation.sponsor_name ?? "Sponsor"} · {activation.redemption_count} redemptions · {activation.conversion_value} value
+                    </span>
+                  </div>
+                </article>
+              ))}
+              {sponsorCouponRedemptions.slice(0, 2).map((redemption) => (
+                <article key={redemption.id} className="task-card">
+                  <div>
+                    <strong>{redemption.redeemer_name} used {redemption.coupon_code}</strong>
+                    <span>{redemption.purchase_amount} purchase · {redemption.source} · {redemption.status}</span>
+                  </div>
+                </article>
+              ))}
               {sponsorshipDashboard.slice(0, 3).map((dashboard) => (
                 <article key={dashboard.sponsor_id} className="task-card">
                   <div>
                     <strong>{dashboard.sponsor_name}</strong>
-                    <span>ROI {dashboard.roi_score} · {dashboard.recommendation}</span>
+                    <span>ROI {dashboard.roi_score} · {dashboard.activation_count} activations · {dashboard.recommendation}</span>
                   </div>
                 </article>
               ))}

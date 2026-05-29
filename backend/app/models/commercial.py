@@ -46,6 +46,60 @@ class SponsorshipAgreement(IdMixin, TimestampMixin, Base):
     )
 
 
+class SponsorActivationCampaign(IdMixin, TimestampMixin, Base):
+    __tablename__ = "sponsor_activation_campaigns"
+    __table_args__ = (UniqueConstraint("organization_id", "coupon_code"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    sponsor_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("sponsors.id"), index=True)
+    sponsorship_agreement_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("sponsorship_agreements.id"), index=True
+    )
+    fan_challenge_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("fan_engagement_challenges.id"), index=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    objective: Mapped[str] = mapped_column(String(240), nullable=False)
+    offer_summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    coupon_code: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    discount_type: Mapped[str] = mapped_column(String(40), default="percent", nullable=False, index=True)
+    discount_value: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    target_url: Mapped[str | None] = mapped_column(String(500))
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[CommercialStatus] = mapped_column(
+        enum_type(CommercialStatus),
+        default=CommercialStatus.ACTIVE,
+        nullable=False,
+        index=True,
+    )
+    impression_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    signup_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    redemption_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    conversion_value: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+
+
+class SponsorCouponRedemption(IdMixin, TimestampMixin, Base):
+    __tablename__ = "sponsor_coupon_redemptions"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    activation_campaign_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("sponsor_activation_campaigns.id"), index=True
+    )
+    supporter_profile_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("supporter_profiles.id"), index=True)
+    redeemer_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    redeemer_email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(80), default="public_site", nullable=False, index=True)
+    order_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    purchase_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    status: Mapped[CommercialStatus] = mapped_column(
+        enum_type(CommercialStatus),
+        default=CommercialStatus.PAID,
+        nullable=False,
+        index=True,
+    )
+    redeemed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class FundraisingCampaign(IdMixin, TimestampMixin, Base):
     __tablename__ = "fundraising_campaigns"
 

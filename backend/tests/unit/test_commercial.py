@@ -75,6 +75,63 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     ).json()
     assert agreement["status"] == "active"
 
+    activation = client.post(
+        "/api/v1/commercial/sponsor-activations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sponsor_id": sponsor["id"],
+            "sponsorship_agreement_id": agreement["id"],
+            "title": "Acme matchday coupon",
+            "objective": "Track sponsor-driven store and ticket conversion.",
+            "offer_summary": "10% off sponsor merchandise and matchday purchases.",
+            "coupon_code": " acme derby 10 ",
+            "discount_type": "percent",
+            "discount_value": "10.00",
+            "target_url": "https://shop.example/acme-derby",
+        },
+    ).json()
+    assert activation["coupon_code"] == "ACME-DERBY-10"
+    assert activation["sponsor_name"] == "Acme Sports"
+
+    redemption = client.post(
+        "/api/v1/commercial/sponsor-coupon-redemptions",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "coupon_code": "acme derby 10",
+            "redeemer_name": "Family Fan",
+            "redeemer_email": "FAMILY@example.com",
+            "source": "matchday_store",
+            "order_reference": "ORDER-ACME-1",
+            "discount_amount": "8.00",
+            "purchase_amount": "80.00",
+        },
+    ).json()
+    assert redemption["coupon_code"] == "ACME-DERBY-10"
+    assert redemption["redeemer_email"] == "family@example.com"
+    assert redemption["purchase_amount"] == "80.00"
+
+    activation_dashboard = client.get(
+        f"/api/v1/commercial/sponsor-activation-dashboard?organization_id={organization['id']}"
+    ).json()
+    assert activation_dashboard["campaign_count"] == 1
+    assert activation_dashboard["active_campaign_count"] == 1
+    assert activation_dashboard["total_redemptions"] == 1
+    assert activation_dashboard["conversion_value"] == "80.00"
+    assert activation_dashboard["top_coupon_code"] == "ACME-DERBY-10"
+    assert activation_dashboard["roi_signal"] == "building"
+
+    activation_list = client.get(
+        f"/api/v1/commercial/sponsor-activations?organization_id={organization['id']}"
+    ).json()
+    assert activation_list[0]["redemption_count"] == 1
+
+    redemption_list = client.get(
+        f"/api/v1/commercial/sponsor-coupon-redemptions?organization_id={organization['id']}"
+    ).json()
+    assert redemption_list[0]["order_reference"] == "ORDER-ACME-1"
+
     campaign = client.post(
         "/api/v1/commercial/campaigns",
         headers=identity_headers,
@@ -396,6 +453,7 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     ).json()
     assert dashboard[0]["sponsor_name"] == "Acme Sports"
     assert dashboard[0]["deliverable_count"] == 3
+    assert dashboard[0]["activation_count"] == 2
     assert dashboard[0]["roi_score"] >= 85
 
 

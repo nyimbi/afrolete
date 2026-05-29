@@ -30,11 +30,14 @@ from app.models.commercial import (
     MerchandiseOrderLine,
     MerchandiseProduct,
     Sponsor,
+    SponsorActivationCampaign,
+    SponsorCouponRedemption,
     SponsorshipAgreement,
     Ticket,
     TicketOrder,
     TicketProduct,
 )
+from app.models.community import FanEngagementChallenge, SupporterProfile
 from app.models.enums import CommercialStatus, TicketStatus
 from app.models.event import Event
 from app.models.organization import Organization
@@ -72,6 +75,11 @@ from app.schemas.commercial import (
     MerchandiseStoreDashboardRead,
     PaymentSettlementRead,
     SponsorCreate,
+    SponsorActivationCampaignCreate,
+    SponsorActivationCampaignRead,
+    SponsorActivationDashboardRead,
+    SponsorCouponRedemptionCreate,
+    SponsorCouponRedemptionRead,
     SponsorPortalAgreementRead,
     SponsorPortalInvoiceRead,
     SponsorPortalRead,
@@ -139,6 +147,126 @@ async def create_sponsorship(db: AsyncSession, identity: CurrentIdentity, payloa
 
 async def list_sponsorships(db: AsyncSession, organization_id: UUID) -> list[SponsorshipAgreement]:
     return list((await db.scalars(select(SponsorshipAgreement).where(SponsorshipAgreement.organization_id == organization_id).order_by(SponsorshipAgreement.created_at.desc()))).all())
+
+
+async def create_sponsor_activation_campaign(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SponsorActivationCampaignCreate,
+    authz: AuthorizationService,
+) -> SponsorActivationCampaignRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    await get_sponsor_for_organization(db, payload.sponsor_id, payload.organization_id)
+    if payload.sponsorship_agreement_id is not None:
+        await get_sponsorship_for_organization(db, payload.sponsorship_agreement_id, payload.organization_id)
+    if payload.fan_challenge_id is not None:
+        await get_fan_challenge_for_organization(db, payload.fan_challenge_id, payload.organization_id)
+    campaign = SponsorActivationCampaign(
+        **payload.model_dump(exclude={"coupon_code"}),
+        coupon_code=normalize_coupon_code(payload.coupon_code),
+    )
+    db.add(campaign)
+    await db.commit()
+    await db.refresh(campaign)
+    return await sponsor_activation_campaign_read(db, campaign)
+
+
+async def list_sponsor_activation_campaigns(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[SponsorActivationCampaignRead]:
+    campaigns = list(
+        (
+            await db.scalars(
+                select(SponsorActivationCampaign)
+                .where(SponsorActivationCampaign.organization_id == organization_id)
+                .order_by(SponsorActivationCampaign.created_at.desc())
+            )
+        ).all()
+    )
+    return [await sponsor_activation_campaign_read(db, campaign) for campaign in campaigns]
+
+
+async def record_sponsor_coupon_redemption(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SponsorCouponRedemptionCreate,
+    authz: AuthorizationService,
+) -> SponsorCouponRedemptionRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    campaign = await get_activation_by_coupon(db, payload.organization_id, payload.coupon_code)
+    supporter = None
+    if payload.supporter_profile_id is not None:
+        supporter = await db.get(SupporterProfile, payload.supporter_profile_id)
+        if supporter is None or supporter.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supporter profile not found")
+    redemption = SponsorCouponRedemption(
+        organization_id=payload.organization_id,
+        activation_campaign_id=campaign.id,
+        supporter_profile_id=payload.supporter_profile_id,
+        redeemer_name=payload.redeemer_name,
+        redeemer_email=payload.redeemer_email.strip().lower(),
+        source=payload.source,
+        order_reference=payload.order_reference,
+        discount_amount=payload.discount_amount,
+        purchase_amount=payload.purchase_amount,
+        redeemed_at=datetime.now(UTC),
+    )
+    campaign.redemption_count += 1
+    campaign.conversion_value += payload.purchase_amount
+    if supporter is not None:
+        supporter.engagement_points += sponsor_activation_points(payload.purchase_amount)
+        supporter.last_engagement_at = redemption.redeemed_at
+    db.add(redemption)
+    await db.commit()
+    await db.refresh(redemption)
+    await db.refresh(campaign)
+    return await sponsor_coupon_redemption_read(db, redemption, campaign)
+
+
+async def list_sponsor_coupon_redemptions(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[SponsorCouponRedemptionRead]:
+    rows = (
+        await db.execute(
+            select(SponsorCouponRedemption, SponsorActivationCampaign)
+            .join(SponsorActivationCampaign, SponsorActivationCampaign.id == SponsorCouponRedemption.activation_campaign_id)
+            .where(SponsorCouponRedemption.organization_id == organization_id)
+            .order_by(SponsorCouponRedemption.redeemed_at.desc())
+        )
+    ).all()
+    return [
+        await sponsor_coupon_redemption_read(db, redemption, campaign)
+        for redemption, campaign in rows
+    ]
+
+
+async def sponsor_activation_dashboard(db: AsyncSession, organization_id: UUID) -> SponsorActivationDashboardRead:
+    campaigns = list(
+        (
+            await db.scalars(
+                select(SponsorActivationCampaign).where(SponsorActivationCampaign.organization_id == organization_id)
+            )
+        ).all()
+    )
+    total_impressions = sum(campaign.impression_count for campaign in campaigns)
+    total_signups = sum(campaign.signup_count for campaign in campaigns)
+    total_redemptions = sum(campaign.redemption_count for campaign in campaigns)
+    conversion_value = sum((campaign.conversion_value for campaign in campaigns), Decimal("0"))
+    top_campaign = max(campaigns, key=lambda item: item.redemption_count, default=None)
+    return SponsorActivationDashboardRead(
+        organization_id=organization_id,
+        campaign_count=len(campaigns),
+        active_campaign_count=sum(1 for campaign in campaigns if campaign.status == CommercialStatus.ACTIVE),
+        total_impressions=total_impressions,
+        total_signups=total_signups,
+        total_redemptions=total_redemptions,
+        conversion_value=conversion_value,
+        top_coupon_code=top_campaign.coupon_code if top_campaign else None,
+        roi_signal=sponsor_activation_roi_signal(total_redemptions, conversion_value),
+        recommendations=sponsor_activation_recommendations(campaigns, total_redemptions, conversion_value),
+    )
 
 
 async def create_campaign(db: AsyncSession, identity: CurrentIdentity, payload: FundraisingCampaignCreate, authz: AuthorizationService) -> FundraisingCampaign:
@@ -1479,6 +1607,7 @@ async def sync_accounting_export(
 async def sponsorship_dashboard(db: AsyncSession, organization_id: UUID) -> list[SponsorshipDashboardRead]:
     sponsors = await list_sponsors(db, organization_id)
     agreements = await list_sponsorships(db, organization_id)
+    activation_counts = await sponsor_activation_counts_by_sponsor(db, organization_id)
     dashboards = []
     for sponsor in sponsors:
         sponsor_agreements = [agreement for agreement in agreements if agreement.sponsor_id == sponsor.id]
@@ -1488,7 +1617,10 @@ async def sponsorship_dashboard(db: AsyncSession, organization_id: UUID) -> list
             Decimal("0"),
         )
         deliverable_count = sum(count_deliverables(agreement.deliverables) for agreement in sponsor_agreements)
-        activation_count = sum(1 for agreement in sponsor_agreements if agreement.activation_notes)
+        activation_count = sum(1 for agreement in sponsor_agreements if agreement.activation_notes) + activation_counts.get(
+            sponsor.id,
+            0,
+        )
         roi_score = min(100, int((active_value / contracted_value * 70) if contracted_value else 0) + min(deliverable_count * 5, 20) + min(activation_count * 10, 10))
         dashboards.append(
             SponsorshipDashboardRead(
@@ -1726,6 +1858,44 @@ async def get_sponsor_for_organization(db: AsyncSession, sponsor_id: UUID, organ
     if sponsor is None or sponsor.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor not found")
     return sponsor
+
+
+async def get_sponsorship_for_organization(
+    db: AsyncSession,
+    sponsorship_agreement_id: UUID,
+    organization_id: UUID,
+) -> SponsorshipAgreement:
+    agreement = await db.get(SponsorshipAgreement, sponsorship_agreement_id)
+    if agreement is None or agreement.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsorship agreement not found")
+    return agreement
+
+
+async def get_fan_challenge_for_organization(
+    db: AsyncSession,
+    fan_challenge_id: UUID,
+    organization_id: UUID,
+) -> FanEngagementChallenge:
+    challenge = await db.get(FanEngagementChallenge, fan_challenge_id)
+    if challenge is None or challenge.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fan challenge not found")
+    return challenge
+
+
+async def get_activation_by_coupon(
+    db: AsyncSession,
+    organization_id: UUID,
+    coupon_code: str,
+) -> SponsorActivationCampaign:
+    campaign = await db.scalar(
+        select(SponsorActivationCampaign).where(
+            SponsorActivationCampaign.organization_id == organization_id,
+            SponsorActivationCampaign.coupon_code == normalize_coupon_code(coupon_code),
+        )
+    )
+    if campaign is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor activation coupon not found")
+    return campaign
 
 
 async def get_campaign_for_organization(db: AsyncSession, campaign_id: UUID, organization_id: UUID) -> FundraisingCampaign:
@@ -2543,3 +2713,104 @@ def sponsorship_recommendation(roi_score: int) -> str:
     if roi_score >= 60:
         return "Keep active; add measurable deliverables and conversion tracking."
     return "Needs activation plan and sponsor-facing proof of value."
+
+
+async def sponsor_activation_counts_by_sponsor(db: AsyncSession, organization_id: UUID) -> dict[UUID, int]:
+    rows = (
+        await db.execute(
+            select(SponsorActivationCampaign.sponsor_id, func.count(SponsorActivationCampaign.id))
+            .where(SponsorActivationCampaign.organization_id == organization_id)
+            .group_by(SponsorActivationCampaign.sponsor_id)
+        )
+    ).all()
+    return {sponsor_id: int(count) for sponsor_id, count in rows}
+
+
+def normalize_coupon_code(value: str) -> str:
+    normalized = sub(r"[^A-Z0-9_-]+", "-", value.strip().upper()).strip("-")
+    return normalized[:80] or "SPONSOR"
+
+
+def sponsor_activation_points(purchase_amount: Decimal) -> int:
+    return min(500, max(25, int(purchase_amount)))
+
+
+async def sponsor_activation_campaign_read(
+    db: AsyncSession,
+    campaign: SponsorActivationCampaign,
+) -> SponsorActivationCampaignRead:
+    sponsor = await db.get(Sponsor, campaign.sponsor_id)
+    challenge = await db.get(FanEngagementChallenge, campaign.fan_challenge_id) if campaign.fan_challenge_id else None
+    return SponsorActivationCampaignRead(
+        id=campaign.id,
+        organization_id=campaign.organization_id,
+        sponsor_id=campaign.sponsor_id,
+        sponsorship_agreement_id=campaign.sponsorship_agreement_id,
+        fan_challenge_id=campaign.fan_challenge_id,
+        title=campaign.title,
+        objective=campaign.objective,
+        offer_summary=campaign.offer_summary,
+        coupon_code=campaign.coupon_code,
+        discount_type=campaign.discount_type,
+        discount_value=campaign.discount_value,
+        target_url=campaign.target_url,
+        starts_at=campaign.starts_at,
+        ends_at=campaign.ends_at,
+        status=campaign.status,
+        sponsor_name=sponsor.name if sponsor else None,
+        challenge_title=challenge.title if challenge else None,
+        impression_count=campaign.impression_count,
+        signup_count=campaign.signup_count,
+        redemption_count=campaign.redemption_count,
+        conversion_value=campaign.conversion_value,
+    )
+
+
+async def sponsor_coupon_redemption_read(
+    db: AsyncSession,
+    redemption: SponsorCouponRedemption,
+    campaign: SponsorActivationCampaign | None = None,
+) -> SponsorCouponRedemptionRead:
+    campaign = campaign or await db.get(SponsorActivationCampaign, redemption.activation_campaign_id)
+    sponsor = await db.get(Sponsor, campaign.sponsor_id) if campaign else None
+    return SponsorCouponRedemptionRead(
+        id=redemption.id,
+        organization_id=redemption.organization_id,
+        activation_campaign_id=redemption.activation_campaign_id,
+        coupon_code=campaign.coupon_code if campaign else "",
+        sponsor_name=sponsor.name if sponsor else None,
+        supporter_profile_id=redemption.supporter_profile_id,
+        redeemer_name=redemption.redeemer_name,
+        redeemer_email=redemption.redeemer_email,
+        source=redemption.source,
+        order_reference=redemption.order_reference,
+        discount_amount=redemption.discount_amount,
+        purchase_amount=redemption.purchase_amount,
+        status=redemption.status,
+        redeemed_at=redemption.redeemed_at,
+    )
+
+
+def sponsor_activation_roi_signal(total_redemptions: int, conversion_value: Decimal) -> str:
+    if total_redemptions >= 25 or conversion_value >= Decimal("1000"):
+        return "strong"
+    if total_redemptions >= 5 or conversion_value > 0:
+        return "building"
+    return "needs_distribution"
+
+
+def sponsor_activation_recommendations(
+    campaigns: list[SponsorActivationCampaign],
+    total_redemptions: int,
+    conversion_value: Decimal,
+) -> list[str]:
+    recommendations: list[str] = []
+    if not campaigns:
+        recommendations.append("Create a sponsor activation campaign with a measurable coupon code.")
+    if campaigns and not total_redemptions:
+        recommendations.append("Publish the coupon through the public fan zone and matchday communications.")
+    if campaigns and conversion_value == 0:
+        recommendations.append("Connect coupon redemption tracking to merchandise, tickets, or sponsor landing pages.")
+    if total_redemptions:
+        recommendations.append("Share redemption and conversion results with sponsors before renewal conversations.")
+    return recommendations[:5]
