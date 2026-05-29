@@ -49,6 +49,9 @@ from app.schemas.organization import (
     PublicRegistrationDocumentUpload,
     PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
+    RegistrationLearningModuleRead,
+    RegistrationLearningPathCreate,
+    RegistrationLearningPathRead,
     RegistrationOnboardingMissionRead,
     RegistrationInquiryImportCreate,
     RegistrationInquiryImportPreviewRowRead,
@@ -872,6 +875,148 @@ def registration_onboarding_missions(
             href=f"/admissions?organization_id={first_managed.id}" if first_managed is not None else "/register?mode=organization",
         ),
     ]
+
+
+def registration_learning_path(payload: RegistrationLearningPathCreate) -> RegistrationLearningPathRead:
+    role = normalize_learning_key(payload.role)
+    primary_goal = normalize_learning_key(payload.primary_goal)
+    skill_level = normalize_learning_key(payload.skill_level)
+    learning_style = normalize_learning_key(payload.learning_style)
+    core_module = learning_core_module(role, primary_goal, learning_style)
+    modules = [
+        RegistrationLearningModuleRead(
+            key="orientation",
+            title=learning_orientation_title(role),
+            duration_minutes=8 if skill_level in {"intermediate", "advanced"} else 12,
+            format=learning_format(learning_style, fallback="guided walkthrough"),
+            objective="Understand the AfroLete workspace, roles, data boundaries, and AI assistant handoffs.",
+            practice_task="Open the registration readiness cockpit and identify the next unlocked mission.",
+            completion_badge="Platform Ready",
+        ),
+        core_module,
+        RegistrationLearningModuleRead(
+            key="ai_assistant_practice",
+            title="Practice with the AI assistant safely",
+            duration_minutes=10,
+            format=learning_format(learning_style, fallback="scenario"),
+            objective="Use AI-generated drafts, recommendations, and review states without bypassing human approval.",
+            practice_task="Run a deterministic concierge or admissions review draft and decide whether to accept it.",
+            completion_badge="AI Review Steward",
+        ),
+    ]
+    if primary_goal in {"track_performance", "analyze_video", "coach_athletes"}:
+        modules.append(
+            RegistrationLearningModuleRead(
+                key="performance_practice",
+                title="Analyze a performance scenario",
+                duration_minutes=15 if skill_level == "beginner" else 10,
+                format=learning_format(learning_style, fallback="sandbox exercise"),
+                objective="Read performance trends, video-coaching cues, and readiness signals as one coaching story.",
+                practice_task="Compare an athlete readiness score with a video coaching recommendation.",
+                completion_badge="Performance Tracking Pro",
+            )
+        )
+    if role in {"parent_guardian", "player"}:
+        modules.append(
+            RegistrationLearningModuleRead(
+                key="family_portal_practice",
+                title="Manage family follow-through",
+                duration_minutes=9,
+                format=learning_format(learning_style, fallback="checklist"),
+                objective="Resume packets, review consent, track payments, and enter the family portal confidently.",
+                practice_task="Find a pending registration card and name the next required packet action.",
+                completion_badge="Family Portal Navigator",
+            )
+        )
+    difficulty = {
+        "beginner": "foundation",
+        "intermediate": "applied",
+        "advanced": "accelerated",
+    }.get(skill_level, "foundation")
+    accessibility_supports = ["keyboard navigation", "plain-language steps", "high contrast compatible"]
+    if payload.accessibility_mode:
+        accessibility_supports.insert(0, payload.accessibility_mode.strip())
+    return RegistrationLearningPathRead(
+        role=role,
+        primary_goal=primary_goal,
+        skill_level=skill_level,
+        learning_style=learning_style,
+        path_title=learning_path_title(role, primary_goal),
+        estimated_minutes=sum(module.duration_minutes for module in modules),
+        difficulty=difficulty,
+        first_action=modules[0].practice_task,
+        modules=modules,
+        accessibility_supports=accessibility_supports,
+    )
+
+
+def normalize_learning_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_") or "general"
+
+
+def learning_path_title(role: str, goal: str) -> str:
+    role_label = role.replace("_", " ").title()
+    goal_label = goal.replace("_", " ").title()
+    return f"{role_label} path: {goal_label}"
+
+
+def learning_orientation_title(role: str) -> str:
+    if role in {"parent_guardian", "player"}:
+        return "Find your family starting point"
+    if role in {"head_coach", "assistant_coach", "coach"}:
+        return "Set up the coaching workspace"
+    return "Set up the operations workspace"
+
+
+def learning_core_module(role: str, goal: str, learning_style: str) -> RegistrationLearningModuleRead:
+    if goal in {"track_performance", "analyze_video", "coach_athletes"}:
+        return RegistrationLearningModuleRead(
+            key="performance_analytics",
+            title="Read performance and video insights",
+            duration_minutes=15,
+            format=learning_format(learning_style, fallback="interactive demo"),
+            objective="Connect athlete metrics, readiness, video coaching cues, and AI recommendations.",
+            practice_task="Open a performance card and identify one strength, one risk, and one coaching cue.",
+            completion_badge="Performance Analyst Starter",
+        )
+    if goal in {"manage_communications", "coordinate_families"} or role == "parent_guardian":
+        return RegistrationLearningModuleRead(
+            key="communications_and_family",
+            title="Coordinate family communication",
+            duration_minutes=12,
+            format=learning_format(learning_style, fallback="guided checklist"),
+            objective="Use inbox, consent, schedules, and follow-up messages without losing family context.",
+            practice_task="Find the family portal link and identify the latest consent or packet action.",
+            completion_badge="Family Coordination Starter",
+        )
+    if goal in {"schedule_training", "plan_sessions"}:
+        return RegistrationLearningModuleRead(
+            key="training_planning",
+            title="Plan a safe training week",
+            duration_minutes=14,
+            format=learning_format(learning_style, fallback="practice scenario"),
+            objective="Balance drills, readiness, schedule conflicts, and training load recommendations.",
+            practice_task="Choose one drill and explain how readiness changes the session intensity.",
+            completion_badge="Training Planner Starter",
+        )
+    return RegistrationLearningModuleRead(
+        key="registration_launch",
+        title="Launch registration and admissions",
+        duration_minutes=12,
+        format=learning_format(learning_style, fallback="hands-on setup"),
+        objective="Create the workspace, publish public intake, collect packets, and review admissions.",
+        practice_task="Create or inspect a starter program and follow the admissions link.",
+        completion_badge="Registration Launch Starter",
+    )
+
+
+def learning_format(learning_style: str, fallback: str) -> str:
+    return {
+        "visual": "visual walkthrough",
+        "hands_on": "hands-on exercise",
+        "reading": "short reading and checklist",
+        "audio": "audio-friendly script",
+    }.get(learning_style, fallback)
 
 
 async def get_organization_for_identity(

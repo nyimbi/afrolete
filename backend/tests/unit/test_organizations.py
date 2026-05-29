@@ -97,6 +97,32 @@ def test_organization_handle_availability_suggests_conflict_recovery(client, ide
     assert detail["subdomain_suggestions"][0] == "harbor-youth-2"
 
 
+def test_registration_learning_path_personalizes_onboarding(client) -> None:
+    response = client.post(
+        "/api/v1/organizations/registration-learning-path",
+        json={
+            "role": "head_coach",
+            "primary_goal": "track_performance",
+            "skill_level": "intermediate",
+            "learning_style": "visual",
+            "accessibility_mode": "captions",
+        },
+    )
+
+    assert response.status_code == 200
+    path = response.json()
+    assert path["role"] == "head_coach"
+    assert path["primary_goal"] == "track_performance"
+    assert path["difficulty"] == "applied"
+    assert path["path_title"] == "Head Coach path: Track Performance"
+    assert path["estimated_minutes"] == sum(module["duration_minutes"] for module in path["modules"])
+    assert path["modules"][0]["title"] == "Set up the coaching workspace"
+    assert path["modules"][1]["key"] == "performance_analytics"
+    assert path["modules"][1]["format"] == "visual walkthrough"
+    assert path["modules"][-1]["completion_badge"] == "Performance Tracking Pro"
+    assert "captions" in path["accessibility_supports"]
+
+
 def test_self_service_onboarding_creates_school_and_public_directory(client, identity_headers) -> None:
     response = client.post(
         "/api/v1/organizations/onboarding",

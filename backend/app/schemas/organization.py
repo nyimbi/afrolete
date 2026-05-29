@@ -244,6 +244,37 @@ class RegistrationOnboardingMissionRead(BaseModel):
     href: str
 
 
+class RegistrationLearningPathCreate(BaseModel):
+    role: str = Field(default="club_manager", min_length=2, max_length=80)
+    primary_goal: str = Field(default="launch_registration", min_length=2, max_length=120)
+    skill_level: str = Field(default="beginner", min_length=2, max_length=40)
+    learning_style: str = Field(default="hands_on", min_length=2, max_length=40)
+    accessibility_mode: str | None = Field(default=None, max_length=80)
+
+
+class RegistrationLearningModuleRead(BaseModel):
+    key: str
+    title: str
+    duration_minutes: int
+    format: str
+    objective: str
+    practice_task: str
+    completion_badge: str
+
+
+class RegistrationLearningPathRead(BaseModel):
+    role: str
+    primary_goal: str
+    skill_level: str
+    learning_style: str
+    path_title: str
+    estimated_minutes: int
+    difficulty: str
+    first_action: str
+    modules: list[RegistrationLearningModuleRead]
+    accessibility_supports: list[str] = Field(default_factory=list)
+
+
 class RegistrationReadinessRead(BaseModel):
     auth_mode: str
     identity_email: str

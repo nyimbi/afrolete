@@ -43,6 +43,8 @@ from app.schemas.organization import (
     RegistrationInquiryImportTemplateRead,
     RegistrationInquiryRead,
     RegistrationInquiryUpdate,
+    RegistrationLearningPathCreate,
+    RegistrationLearningPathRead,
     RegistrationPaymentHostedCheckoutRead,
     RegistrationPaymentSessionCreate,
     RegistrationPaymentSessionRead,
@@ -81,6 +83,7 @@ from app.services.organizations import (
     queue_onboarding_concierge_agent_task,
     registration_packet_summary,
     registration_inquiry_import_template,
+    registration_learning_path,
     registration_readiness,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
@@ -500,6 +503,13 @@ async def registration_readiness_route(
     settings: Settings = Depends(get_settings),
 ) -> RegistrationReadinessRead:
     return await registration_readiness(db, identity, settings)
+
+
+@router.post("/registration-learning-path", response_model=RegistrationLearningPathRead)
+async def registration_learning_path_route(
+    payload: RegistrationLearningPathCreate,
+) -> RegistrationLearningPathRead:
+    return registration_learning_path(payload)
 
 
 @router.post("/onboarding", response_model=OrganizationOnboardingRead, status_code=status.HTTP_201_CREATED)

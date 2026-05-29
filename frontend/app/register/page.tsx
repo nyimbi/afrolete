@@ -19,6 +19,8 @@ import type {
   OrganizationPublicSiteRead,
   SportFormat,
   OrganizationType,
+  RegistrationLearningPathCreate,
+  RegistrationLearningPathRead,
   RegistrationReadinessRead,
   RegistrationPacketRead,
   RegistrationInquiryAccountReadinessRead,
@@ -110,6 +112,14 @@ const defaultPacketForm = {
   payment_status: "pending_verification"
 };
 
+const defaultLearningProfile: RegistrationLearningPathCreate = {
+  role: "club_manager",
+  primary_goal: "launch_registration",
+  skill_level: "beginner",
+  learning_style: "hands_on",
+  accessibility_mode: null
+};
+
 function registrationAccountStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     linked: "account linked",
@@ -141,6 +151,8 @@ export default function RegistrationPage() {
   const [registrationPacket, setRegistrationPacket] = useState<RegistrationPacketRead | null>(null);
   const [paymentSession, setPaymentSession] = useState<RegistrationPaymentSessionRead | null>(null);
   const [registrationReadiness, setRegistrationReadiness] = useState<RegistrationReadinessRead | null>(null);
+  const [learningProfile, setLearningProfile] = useState<RegistrationLearningPathCreate>(defaultLearningProfile);
+  const [learningPath, setLearningPath] = useState<RegistrationLearningPathRead | null>(null);
   const [readinessError, setReadinessError] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -399,6 +411,22 @@ export default function RegistrationPage() {
       setReadinessError("");
     } catch (caught) {
       setReadinessError(caught instanceof Error ? caught.message : "Registration readiness could not be loaded");
+    }
+  }
+
+  async function generateLearningPath() {
+    setBusy("learning-path");
+    setError("");
+    try {
+      const path = await apiRequest<RegistrationLearningPathRead>("/organizations/registration-learning-path", {
+        method: "POST",
+        body: learningProfile
+      });
+      setLearningPath(path);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Learning path could not be generated");
+    } finally {
+      setBusy("");
     }
   }
 
@@ -1016,6 +1044,100 @@ export default function RegistrationPage() {
             </p>
           )}
           {readinessError && registrationReadiness ? <small className="form-error">{readinessError}</small> : null}
+        </section>
+
+        <section className="registration-learning-panel" aria-label="Personalized learning path">
+          <div className="registration-learning-head">
+            <div>
+              <p className="section-label">Personalized onboarding</p>
+              <h2>{learningPath ? learningPath.path_title : "Build a first-week learning path"}</h2>
+            </div>
+            <button type="button" onClick={generateLearningPath} disabled={busy !== ""}>
+              {busy === "learning-path" ? "Building" : "Build path"}
+            </button>
+          </div>
+          <div className="registration-learning-form">
+            <label>
+              Role
+              <select
+                value={learningProfile.role}
+                onChange={(event) => setLearningProfile({ ...learningProfile, role: event.target.value })}
+              >
+                <option value="club_manager">Club manager</option>
+                <option value="head_coach">Head coach</option>
+                <option value="assistant_coach">Assistant coach</option>
+                <option value="team_administrator">Team administrator</option>
+                <option value="parent_guardian">Parent or guardian</option>
+                <option value="player">Player</option>
+              </select>
+            </label>
+            <label>
+              Goal
+              <select
+                value={learningProfile.primary_goal}
+                onChange={(event) => setLearningProfile({ ...learningProfile, primary_goal: event.target.value })}
+              >
+                <option value="launch_registration">Launch registration</option>
+                <option value="track_performance">Track performance</option>
+                <option value="analyze_video">Analyze video</option>
+                <option value="schedule_training">Schedule training</option>
+                <option value="manage_communications">Manage communications</option>
+                <option value="coordinate_families">Coordinate families</option>
+              </select>
+            </label>
+            <label>
+              Skill level
+              <select
+                value={learningProfile.skill_level}
+                onChange={(event) => setLearningProfile({ ...learningProfile, skill_level: event.target.value })}
+              >
+                <option value="beginner">Beginner</option>
+                <option value="intermediate">Intermediate</option>
+                <option value="advanced">Advanced</option>
+              </select>
+            </label>
+            <label>
+              Learning style
+              <select
+                value={learningProfile.learning_style}
+                onChange={(event) => setLearningProfile({ ...learningProfile, learning_style: event.target.value })}
+              >
+                <option value="hands_on">Hands-on</option>
+                <option value="visual">Visual</option>
+                <option value="reading">Reading</option>
+                <option value="audio">Audio</option>
+              </select>
+            </label>
+          </div>
+          {learningPath ? (
+            <div className="registration-learning-result">
+              <div className="registration-learning-summary">
+                <span>{learningPath.difficulty}</span>
+                <strong>{learningPath.estimated_minutes} minutes</strong>
+                <small>{learningPath.first_action}</small>
+              </div>
+              <div className="registration-learning-modules">
+                {learningPath.modules.map((module) => (
+                  <article key={module.key}>
+                    <span>{module.format} · {module.duration_minutes} min</span>
+                    <strong>{module.title}</strong>
+                    <p>{module.objective}</p>
+                    <small>{module.practice_task}</small>
+                    <em>{module.completion_badge}</em>
+                  </article>
+                ))}
+              </div>
+              <div className="registration-learning-supports">
+                {learningPath.accessibility_supports.map((support) => (
+                  <span key={support}>{support}</span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="registration-learning-empty">
+              Choose a role, goal, skill level, and learning style to generate the first practical path.
+            </p>
+          )}
         </section>
 
         {mode === "organization" ? (

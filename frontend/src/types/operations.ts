@@ -458,6 +458,37 @@ export type RegistrationOnboardingMissionRead = {
   href: string;
 };
 
+export type RegistrationLearningPathCreate = {
+  role: string;
+  primary_goal: string;
+  skill_level: string;
+  learning_style: string;
+  accessibility_mode?: string | null;
+};
+
+export type RegistrationLearningModuleRead = {
+  key: string;
+  title: string;
+  duration_minutes: number;
+  format: string;
+  objective: string;
+  practice_task: string;
+  completion_badge: string;
+};
+
+export type RegistrationLearningPathRead = {
+  role: string;
+  primary_goal: string;
+  skill_level: string;
+  learning_style: string;
+  path_title: string;
+  estimated_minutes: number;
+  difficulty: string;
+  first_action: string;
+  modules: RegistrationLearningModuleRead[];
+  accessibility_supports: string[];
+};
+
 export type RegistrationReadinessRead = {
   auth_mode: string;
   identity_email: string;
