@@ -64,6 +64,19 @@ if (event) {
   });
 }
 
+const [agent] = await client.agents.list({
+  organizationId: organization.id,
+});
+
+if (agent) {
+  await client.agents.tasks.queue(agent.id, {
+    organization_id: organization.id,
+    task_type: "training_plan_review",
+    title: "Review imported academy training data",
+    input_ref: `person:${athlete.id}`,
+  });
+}
+
 const [metric] = await client.performance.metrics.list({
   organizationId: organization.id,
   sport: "football",

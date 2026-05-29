@@ -31,7 +31,10 @@ def test_public_developer_docs(client) -> None:
     assert docs["webhook_signature_header"] == "X-Afrolete-Webhook-Signature"
     assert len(docs["quickstarts"]) >= 5
     assert "read:organization" in {scope["scope"] for scope in docs["scopes"]}
+    assert "read:agents" in {scope["scope"] for scope in docs["scopes"]}
+    assert "write:agents" in {scope["scope"] for scope in docs["scopes"]}
     assert any(event["event_type"] == "training.drill.created" for event in docs["webhook_events"])
+    assert any(event["event_type"] == "agents.task.queued" for event in docs["webhook_events"])
     assert any(sdk["language"] == "Raw HTTP" and sdk["status"] == "active" for sdk in docs["sdks"])
     assert "operations" in docs["marketplace_categories"]
     assert docs["security_requirements"]
@@ -53,6 +56,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
                 "write:people",
                 "read:attendance",
                 "write:attendance",
+                "read:agents",
+                "write:agents",
                 "write:training",
             ],
             "contact_email": "integrations@example.com",
@@ -71,6 +76,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         "write:people",
         "read:attendance",
         "write:attendance",
+        "read:agents",
+        "write:agents",
         "write:training",
     ]
 
@@ -104,6 +111,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
                 "write:people",
                 "read:attendance",
                 "write:attendance",
+                "read:agents",
+                "write:agents",
                 "write:training",
             ],
             "environment": "sandbox",
@@ -123,6 +132,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         "write:people",
         "read:attendance",
         "write:attendance",
+        "read:agents",
+        "write:agents",
         "write:training",
     ]
     assert "key_hash" not in api_key
@@ -371,7 +382,47 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert sdk_event_created["emission_status"] == "active"
     assert "write:events" in sdk_event_created["recommended_scopes"]
+    sdk_agent_queued = next(
+        event for event in catalog["webhook_events"] if event["event_type"] == "agents.task.queued"
+    )
+    assert sdk_agent_queued["emission_status"] == "active"
+    assert "write:agents" in sdk_agent_queued["recommended_scopes"]
+    assert any(
+        "client.agents.tasks.queue" in sdk["entry_points"]
+        for sdk in catalog["sdks"]
+        if sdk["language"] == "TypeScript"
+    )
     assert any(sdk["language"] == "Raw HTTP" and sdk["status"] == "active" for sdk in catalog["sdks"])
+
+    agent_response = client.post(
+        "/api/v1/agents",
+        json={
+            "organization_id": organization["id"],
+            "name": "SDK Coaching Agent",
+            "kind": "coaching",
+            "purpose": "Review imported partner data and prepare coach-facing recommendations.",
+            "model_policy": "sdk-agent-policy-v1",
+        },
+        headers=identity_headers,
+    )
+    assert agent_response.status_code == 201
+    agent = agent_response.json()
+    policy_response = client.post(
+        "/api/v1/agents/governance-policy-rules",
+        json={
+            "organization_id": organization["id"],
+            "rule_code": "sdk_training_plan_review",
+            "title": "SDK training plan review gate",
+            "agent_kind": "coaching",
+            "task_type_contains": "training_plan",
+            "decision": "require_approval",
+            "required_approval_count": 2,
+            "risk_level": "high",
+            "rationale": "Partner-queued coaching changes require human review before reaching athletes.",
+        },
+        headers=identity_headers,
+    )
+    assert policy_response.status_code == 201
 
     event_start = (datetime.now(UTC) + timedelta(days=7)).isoformat()
     sdk_event_response = client.post(
@@ -432,6 +483,37 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert sdk_attendance_list_response.status_code == 200
     assert sdk_attendance_list_response.json()[0]["note"] == "Imported by external attendance kiosk."
+
+    sdk_agents_response = client.get(
+        f"/api/v1/sdk/agents?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_agents_response.status_code == 200
+    assert sdk_agents_response.json()[0]["name"] == "SDK Coaching Agent"
+
+    sdk_agent_task_response = client.post(
+        f"/api/v1/sdk/agents/{agent['id']}/tasks",
+        json={
+            "organization_id": organization["id"],
+            "task_type": "training_plan_review",
+            "title": "Review SDK imported training load",
+            "input_ref": f"person:{sdk_person['id']}",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_agent_task_response.status_code == 201
+    sdk_agent_task = sdk_agent_task_response.json()
+    assert sdk_agent_task["requested_by_person_id"] is None
+    assert sdk_agent_task["governance_policy_code"] == "sdk_training_plan_review"
+    assert sdk_agent_task["approval_required_count"] == 2
+    assert sdk_agent_task["approval_pending_count"] == 2
+
+    sdk_agent_tasks_response = client.get(
+        f"/api/v1/sdk/agents/tasks?organization_id={organization['id']}&agent_id={agent['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_agent_tasks_response.status_code == 200
+    assert sdk_agent_tasks_response.json()[0]["id"] == sdk_agent_task["id"]
 
     sdk_drill_response = client.post(
         "/api/v1/sdk/training/drills",

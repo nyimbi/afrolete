@@ -252,6 +252,51 @@ export interface AttendanceRecord {
   attendance_policy_warnings: string[];
 }
 
+export interface Agent {
+  id: UUID;
+  organization_id: UUID | null;
+  name: string;
+  kind: string;
+  purpose: string;
+  status: string;
+  model_policy: string | null;
+}
+
+export interface AgentTaskCreate {
+  organization_id: UUID;
+  task_type: string;
+  title: string;
+  input_ref?: string | null;
+}
+
+export interface AgentTask {
+  id: UUID;
+  agent_id: UUID;
+  organization_id: UUID;
+  task_type: string;
+  title: string;
+  status: string;
+  requested_by_person_id: UUID | null;
+  input_ref: string | null;
+  output_ref: string | null;
+  review_notes: string | null;
+  review_assigned_to_person_id: UUID | null;
+  review_due_at: ISODateTime | null;
+  review_priority: string;
+  review_assignment_notes: string | null;
+  approval_required_count: number;
+  approval_approved_count: number;
+  approval_rejected_count: number;
+  approval_pending_count: number;
+  approval_status: string;
+  approval_last_decided_at: ISODateTime | null;
+  governance_policy_rule_id: UUID | null;
+  governance_policy_code: string | null;
+  governance_policy_decision: string | null;
+  governance_policy_risk_level: string | null;
+  governance_policy_rationale: string | null;
+}
+
 export interface TrainingDrill {
   id: UUID;
   organization_id: UUID;
@@ -395,6 +440,24 @@ export class AfroLeteClient {
         this.request<AttendanceRecord>(`/events/${eventId}/attendance`, {
           method: "POST",
           query: { organization_id: params.organizationId },
+          body: payload,
+        }),
+    },
+  };
+
+  readonly agents = {
+    list: (params: { organizationId: UUID }): Promise<Agent[]> =>
+      this.request<Agent[]>("/agents", {
+        query: { organization_id: params.organizationId },
+      }),
+    tasks: {
+      list: (params: { organizationId: UUID; agentId?: UUID | null }): Promise<AgentTask[]> =>
+        this.request<AgentTask[]>("/agents/tasks", {
+          query: { organization_id: params.organizationId, agent_id: params.agentId },
+        }),
+      queue: (agentId: UUID, payload: AgentTaskCreate): Promise<AgentTask> =>
+        this.request<AgentTask>(`/agents/${agentId}/tasks`, {
+          method: "POST",
           body: payload,
         }),
     },

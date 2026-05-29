@@ -100,6 +100,30 @@ class _EventAttendanceResource:
 
 
 @dataclass(frozen=True)
+class _AgentTasksResource:
+    client: AfroLeteClient
+
+    def list(self, *, organization_id: str, agent_id: str | None = None) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            "/agents/tasks",
+            query={"organization_id": organization_id, "agent_id": agent_id},
+        )
+
+    def queue(self, agent_id: str, payload: JsonObject) -> JsonObject:
+        return self.client.request("POST", f"/agents/{agent_id}/tasks", body=payload)
+
+
+@dataclass(frozen=True)
+class _AgentsResource:
+    client: AfroLeteClient
+    tasks: _AgentTasksResource
+
+    def list(self, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request("GET", "/agents", query={"organization_id": organization_id})
+
+
+@dataclass(frozen=True)
 class _TrainingDrillsResource:
     client: AfroLeteClient
 
@@ -165,6 +189,7 @@ class AfroLeteClient:
         self.people = _PeopleResource(self)
         self.teams = _TeamsResource(self)
         self.events = _EventsResource(self, attendance=_EventAttendanceResource(self))
+        self.agents = _AgentsResource(self, tasks=_AgentTasksResource(self))
         self.training = _TrainingResource(drills=_TrainingDrillsResource(self))
         self.performance = _PerformanceResource(
             metrics=_PerformanceMetricsResource(self),

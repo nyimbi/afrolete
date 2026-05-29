@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.agent import Agent, AgentTask
 from app.models.enums import ConsentRequestStatus, MemberSubjectType, MembershipRole
 from app.models.event import ConsentRequest, Event
 from app.models.identity import Person
@@ -23,6 +24,7 @@ from app.schemas.developer import (
     DeveloperPersonCreate,
     DeveloperPersonRead,
 )
+from app.schemas.agent import AgentRead, AgentTaskCreate, AgentTaskRead
 from app.schemas.event import AttendanceRecordRead, AttendanceRecordUpsert, EventCreate, EventRead
 from app.schemas.organization import OrganizationRead
 from app.schemas.performance import (
@@ -36,6 +38,11 @@ from app.services.authz.service import (
     AuthorizationService,
     Relationship,
     get_authorization_service,
+)
+from app.services.agents import (
+    list_agent_tasks,
+    list_agents as list_ai_agents,
+    queue_agent_task,
 )
 from app.services.developer import (
     deliver_developer_webhook_event,
@@ -132,6 +139,54 @@ def to_attendance_read(attendance, **policy_fields: object) -> AttendanceRecordR
         attendance_policy_code=policy_fields.get("attendance_policy_code"),
         attendance_policy_decision=policy_fields.get("attendance_policy_decision"),
         attendance_policy_warnings=list(policy_fields.get("attendance_policy_warnings") or []),
+    )
+
+
+def to_agent_read(agent: Agent) -> AgentRead:
+    return AgentRead(
+        id=agent.id,
+        organization_id=agent.organization_id,
+        name=agent.name,
+        kind=agent.kind,
+        purpose=agent.purpose,
+        status=agent.status,
+        model_policy=agent.model_policy,
+    )
+
+
+def to_agent_task_read(task: AgentTask) -> AgentTaskRead:
+    approval_pending_count = max(
+        int(task.approval_required_count or 0)
+        - int(task.approval_approved_count or 0)
+        - int(task.approval_rejected_count or 0),
+        0,
+    )
+    return AgentTaskRead(
+        id=task.id,
+        agent_id=task.agent_id,
+        organization_id=task.organization_id,
+        task_type=task.task_type,
+        title=task.title,
+        status=task.status,
+        requested_by_person_id=task.requested_by_person_id,
+        input_ref=task.input_ref,
+        output_ref=task.output_ref,
+        review_notes=task.review_notes,
+        review_assigned_to_person_id=task.review_assigned_to_person_id,
+        review_due_at=task.review_due_at,
+        review_priority=task.review_priority or "normal",
+        review_assignment_notes=task.review_assignment_notes,
+        approval_required_count=task.approval_required_count or 0,
+        approval_approved_count=task.approval_approved_count or 0,
+        approval_rejected_count=task.approval_rejected_count or 0,
+        approval_pending_count=approval_pending_count,
+        approval_status=task.approval_status or "not_requested",
+        approval_last_decided_at=task.approval_last_decided_at,
+        governance_policy_rule_id=task.governance_policy_rule_id,
+        governance_policy_code=task.governance_policy_code,
+        governance_policy_decision=task.governance_policy_decision,
+        governance_policy_risk_level=task.governance_policy_risk_level,
+        governance_policy_rationale=task.governance_policy_rationale,
     )
 
 
@@ -270,6 +325,70 @@ async def sdk_organization(
     if organization is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
     return to_organization_read(organization)
+
+
+@router.get("/agents", response_model=list[AgentRead])
+async def sdk_list_agents(
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:agents", "write:agents"})
+    return [to_agent_read(agent) for agent in await list_ai_agents(db, organization_id)]
+
+
+@router.get("/agents/tasks", response_model=list[AgentTaskRead])
+async def sdk_list_agent_tasks(
+    organization_id: UUID = Query(),
+    agent_id: UUID | None = Query(default=None),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentTaskRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:agents", "write:agents"})
+    if agent_id is not None:
+        agent = await db.get(Agent, agent_id)
+        if agent is None or agent.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    return [
+        to_agent_task_read(task)
+        for task in await list_agent_tasks(db, organization_id, agent_id=agent_id)
+    ]
+
+
+@router.post("/agents/{agent_id}/tasks", response_model=AgentTaskRead, status_code=status.HTTP_201_CREATED)
+async def sdk_queue_agent_task(
+    agent_id: UUID,
+    payload: AgentTaskCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> AgentTaskRead:
+    ensure_developer_api_scope(credential, payload.organization_id, {"write:agents"})
+    task = await queue_agent_task(
+        db,
+        None,
+        agent_id,
+        payload,
+        None,
+        enforce_manage_organization=False,
+    )
+    await deliver_developer_webhook_event(
+        db,
+        payload.organization_id,
+        "agents.task.queued",
+        str(task.id),
+        {
+            "id": str(task.id),
+            "organization_id": str(task.organization_id),
+            "agent_id": str(task.agent_id),
+            "task_type": task.task_type,
+            "title": task.title,
+            "status": task.status.value,
+            "governance_policy_code": task.governance_policy_code,
+            "governance_policy_decision": task.governance_policy_decision,
+            "origin": "developer_api",
+        },
+    )
+    return to_agent_task_read(task)
 
 
 @router.get("/events", response_model=list[EventRead])

@@ -64,6 +64,17 @@ if events:
             "note": "Imported from the matchday kiosk.",
         },
     )
+agents = client.agents.list(organization_id=organization["id"])
+if agents:
+    client.agents.tasks.queue(
+        agents[0]["id"],
+        {
+            "organization_id": organization["id"],
+            "task_type": "training_plan_review",
+            "title": "Review imported academy training data",
+            "input_ref": f"person:{athlete['id']}",
+        },
+    )
 metrics = client.performance.metrics.list(
     organization_id=organization["id"],
     sport="football",

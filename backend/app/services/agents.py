@@ -1180,13 +1180,21 @@ async def list_agent_assignments(
 
 async def queue_agent_task(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     agent_id: UUID,
     payload: AgentTaskCreate,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
+    *,
+    enforce_manage_organization: bool = True,
 ) -> AgentTask:
     agent = await get_agent_for_organization(db, agent_id, payload.organization_id)
-    await ensure_manage_organization(authz, identity, payload.organization_id)
+    if enforce_manage_organization:
+        if identity is None or authz is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Identity and authorization required",
+            )
+        await ensure_manage_organization(authz, identity, payload.organization_id)
     policy_rule = await matching_agent_governance_policy_rule(db, agent, payload)
     if policy_rule is not None and policy_rule.decision == "block":
         raise HTTPException(
@@ -1199,7 +1207,7 @@ async def queue_agent_task(
         organization_id=payload.organization_id,
         task_type=payload.task_type,
         title=payload.title,
-        requested_by_person_id=identity.person_id,
+        requested_by_person_id=identity.person_id if identity is not None else None,
         input_ref=payload.input_ref,
     )
     if policy_rule is not None:
@@ -1210,7 +1218,7 @@ async def queue_agent_task(
         await create_agent_task_approval_slots(
             db,
             task=task,
-            requested_by_person_id=identity.person_id,
+            requested_by_person_id=identity.person_id if identity is not None else None,
             required_count=policy_rule.required_approval_count,
             request_notes=f"Required by AI governance policy {policy_rule.rule_code}: {policy_rule.rationale}",
         )
