@@ -174,6 +174,96 @@ class _CommunicationsResource:
 
 
 @dataclass(frozen=True)
+class _BillingPlansResource:
+    client: AfroLeteClient
+
+    def list(self) -> list[JsonObject]:
+        return self.client.request("GET", "/billing/plans")
+
+
+@dataclass(frozen=True)
+class _BillingSubscriptionsResource:
+    client: AfroLeteClient
+
+    def list(self, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            "/billing/subscriptions",
+            query={"organization_id": organization_id},
+        )
+
+
+@dataclass(frozen=True)
+class _BillingMetersResource:
+    client: AfroLeteClient
+
+    def list(self) -> list[JsonObject]:
+        return self.client.request("GET", "/billing/meters")
+
+
+@dataclass(frozen=True)
+class _BillingUsageResource:
+    client: AfroLeteClient
+
+    def list(self, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            "/billing/usage",
+            query={"organization_id": organization_id},
+        )
+
+    def record(self, payload: JsonObject) -> JsonObject:
+        return self.client.request("POST", "/billing/usage", body=payload)
+
+
+@dataclass(frozen=True)
+class _BillingInvoicesResource:
+    client: AfroLeteClient
+
+    def list(self, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            "/billing/invoices",
+            query={"organization_id": organization_id},
+        )
+
+
+@dataclass(frozen=True)
+class _BillingEntitlementsResource:
+    client: AfroLeteClient
+
+    def list(self, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            "/billing/entitlements",
+            query={"organization_id": organization_id},
+        )
+
+
+@dataclass(frozen=True)
+class _BillingSummaryResource:
+    client: AfroLeteClient
+
+    def get(self, *, organization_id: str) -> JsonObject:
+        return self.client.request(
+            "GET",
+            "/billing/summary",
+            query={"organization_id": organization_id},
+        )
+
+
+@dataclass(frozen=True)
+class _BillingResource:
+    plans: _BillingPlansResource
+    subscriptions: _BillingSubscriptionsResource
+    meters: _BillingMetersResource
+    usage: _BillingUsageResource
+    invoices: _BillingInvoicesResource
+    entitlements: _BillingEntitlementsResource
+    summary: _BillingSummaryResource
+
+
+@dataclass(frozen=True)
 class _TrainingDrillsResource:
     client: AfroLeteClient
 
@@ -361,6 +451,15 @@ class AfroLeteClient:
         self.communications = _CommunicationsResource(
             templates=_CommunicationTemplatesResource(self),
             messages=_CommunicationMessagesResource(self),
+        )
+        self.billing = _BillingResource(
+            plans=_BillingPlansResource(self),
+            subscriptions=_BillingSubscriptionsResource(self),
+            meters=_BillingMetersResource(self),
+            usage=_BillingUsageResource(self),
+            invoices=_BillingInvoicesResource(self),
+            entitlements=_BillingEntitlementsResource(self),
+            summary=_BillingSummaryResource(self),
         )
         self.training = _TrainingResource(
             drills=_TrainingDrillsResource(self),

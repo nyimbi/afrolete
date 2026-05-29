@@ -101,6 +101,20 @@ client.communications.messages.dispatch(
     message["id"],
     organization_id=organization["id"],
 )
+subscriptions = client.billing.subscriptions.list(organization_id=organization["id"])
+meters = client.billing.meters.list()
+if subscriptions and meters:
+    client.billing.usage.record(
+        {
+            "organization_id": organization["id"],
+            "subscription_id": subscriptions[0]["id"],
+            "usage_meter_id": meters[0]["id"],
+            "quantity": 14,
+            "source": "partner_billing_sync",
+            "external_reference": "usage-sdk-001",
+        }
+    )
+    client.billing.summary.get(organization_id=organization["id"])
 metrics = client.performance.metrics.list(
     organization_id=organization["id"],
     sport="football",

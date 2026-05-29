@@ -60,6 +60,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
                 "write:agents",
                 "read:communications",
                 "write:communications",
+                "read:billing",
+                "write:billing",
                 "write:training",
             ],
             "contact_email": "integrations@example.com",
@@ -82,6 +84,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         "write:agents",
         "read:communications",
         "write:communications",
+        "read:billing",
+        "write:billing",
         "write:training",
     ]
 
@@ -119,6 +123,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
                 "write:agents",
                 "read:communications",
                 "write:communications",
+                "read:billing",
+                "write:billing",
                 "write:training",
             ],
             "environment": "sandbox",
@@ -142,6 +148,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         "write:agents",
         "read:communications",
         "write:communications",
+        "read:billing",
+        "write:billing",
         "write:training",
     ]
     assert "key_hash" not in api_key
@@ -420,6 +428,11 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert sdk_message_dispatched["emission_status"] == "active"
     assert "write:communications" in sdk_message_dispatched["recommended_scopes"]
+    sdk_billing_usage_recorded = next(
+        event for event in catalog["webhook_events"] if event["event_type"] == "billing.usage.recorded"
+    )
+    assert sdk_billing_usage_recorded["emission_status"] == "active"
+    assert "write:billing" in sdk_billing_usage_recorded["recommended_scopes"]
     assert any(
         "client.agents.tasks.queue" in sdk["entry_points"]
         for sdk in catalog["sdks"]
@@ -431,12 +444,22 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         if sdk["language"] == "TypeScript"
     )
     assert any(
+        "client.billing.usage.record" in sdk["entry_points"]
+        for sdk in catalog["sdks"]
+        if sdk["language"] == "TypeScript"
+    )
+    assert any(
         "client.training.sessions.feedback.record" in sdk["entry_points"]
         for sdk in catalog["sdks"]
         if sdk["language"] == "Python"
     )
     assert any(
         "POST /sdk/communications/messages/{message_id}/dispatch" in sdk["entry_points"]
+        for sdk in catalog["sdks"]
+        if sdk["language"] == "Raw HTTP"
+    )
+    assert any(
+        "POST /sdk/billing/usage" in sdk["entry_points"]
         for sdk in catalog["sdks"]
         if sdk["language"] == "Raw HTTP"
     )
@@ -488,6 +511,93 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert team_response.status_code == 201
     team = team_response.json()
+
+    billing_plan_response = client.post(
+        "/api/v1/billing/plans",
+        json={
+            "code": "sdk-growth",
+            "name": "SDK Growth",
+            "description": "Plan used by trusted SDK billing integrations.",
+            "base_price": "199.00",
+            "currency": "USD",
+            "billing_cycle": "monthly",
+            "included_athletes": 50,
+            "included_teams": 4,
+            "included_agent_tasks": 25,
+            "included_storage_gb": 100,
+            "per_athlete_price": "2.00",
+            "per_agent_task_price": "0.50",
+            "features": "sdk,billing,agents",
+        },
+        headers=identity_headers,
+    )
+    assert billing_plan_response.status_code == 201
+    billing_plan = billing_plan_response.json()
+
+    billing_subscription_response = client.post(
+        "/api/v1/billing/subscriptions",
+        json={
+            "organization_id": organization["id"],
+            "billing_plan_id": billing_plan["id"],
+            "billing_cycle": "monthly",
+            "current_period_start": "2026-06-01",
+            "current_period_end": "2026-06-30",
+            "next_billing_on": "2026-07-01",
+            "seats_purchased": 50,
+            "negotiated_price": "149.00",
+            "discount_code": "SDK",
+            "notes": "Provisioned for SDK billing workflow coverage.",
+        },
+        headers=identity_headers,
+    )
+    assert billing_subscription_response.status_code == 201
+    billing_subscription = billing_subscription_response.json()
+
+    usage_meter_response = client.post(
+        "/api/v1/billing/meters",
+        json={
+            "code": "sdk-agent-task",
+            "name": "SDK Agent Tasks",
+            "unit": "agent_task",
+            "included_quantity": 10,
+            "overage_price": "0.2500",
+            "aggregation": "sum",
+        },
+        headers=identity_headers,
+    )
+    assert usage_meter_response.status_code == 201
+    usage_meter = usage_meter_response.json()
+
+    entitlement_response = client.post(
+        "/api/v1/billing/entitlements",
+        json={
+            "organization_id": organization["id"],
+            "subscription_id": billing_subscription["id"],
+            "feature_key": "agent_tasks",
+            "limit_value": 25,
+            "used_value": 0,
+        },
+        headers=identity_headers,
+    )
+    assert entitlement_response.status_code == 201
+    billing_entitlement = entitlement_response.json()
+
+    invoice_response = client.post(
+        "/api/v1/billing/invoices",
+        json={
+            "organization_id": organization["id"],
+            "subscription_id": billing_subscription["id"],
+            "invoice_number": "SDK-2026-001",
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-30",
+            "tax_amount": "0.00",
+            "discount_amount": "0.00",
+            "due_on": "2026-07-14",
+        },
+        headers=identity_headers,
+    )
+    assert invoice_response.status_code == 201
+    billing_invoice = invoice_response.json()
 
     event_start = (datetime.now(UTC) + timedelta(days=7)).isoformat()
     sdk_event_response = client.post(
@@ -593,6 +703,76 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     assert sdk_dispatch_response.status_code == 200
     assert sdk_dispatch_response.json()["attempted"] == 1
     assert sdk_dispatch_response.json()["queued"] == 1
+
+    sdk_billing_plans_response = client.get(
+        "/api/v1/sdk/billing/plans",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_billing_plans_response.status_code == 200
+    assert any(plan["id"] == billing_plan["id"] for plan in sdk_billing_plans_response.json())
+
+    sdk_billing_subscriptions_response = client.get(
+        f"/api/v1/sdk/billing/subscriptions?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_billing_subscriptions_response.status_code == 200
+    assert sdk_billing_subscriptions_response.json()[0]["id"] == billing_subscription["id"]
+
+    sdk_billing_meters_response = client.get(
+        "/api/v1/sdk/billing/meters",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_billing_meters_response.status_code == 200
+    assert any(meter["id"] == usage_meter["id"] for meter in sdk_billing_meters_response.json())
+
+    sdk_usage_record_response = client.post(
+        "/api/v1/sdk/billing/usage",
+        json={
+            "organization_id": organization["id"],
+            "subscription_id": billing_subscription["id"],
+            "usage_meter_id": usage_meter["id"],
+            "quantity": 14,
+            "source": "partner_billing_sync",
+            "external_reference": "usage-sdk-001",
+            "notes": "Imported from partner metering.",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_usage_record_response.status_code == 201
+    sdk_usage_record = sdk_usage_record_response.json()
+    assert sdk_usage_record["quantity"] == 14
+    assert sdk_usage_record["source"] == "partner_billing_sync"
+
+    sdk_usage_records_response = client.get(
+        f"/api/v1/sdk/billing/usage?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_usage_records_response.status_code == 200
+    assert sdk_usage_records_response.json()[0]["id"] == sdk_usage_record["id"]
+
+    sdk_billing_invoices_response = client.get(
+        f"/api/v1/sdk/billing/invoices?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_billing_invoices_response.status_code == 200
+    assert sdk_billing_invoices_response.json()[0]["invoice_number"] == billing_invoice["invoice_number"]
+
+    sdk_billing_entitlements_response = client.get(
+        f"/api/v1/sdk/billing/entitlements?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_billing_entitlements_response.status_code == 200
+    assert sdk_billing_entitlements_response.json()[0]["id"] == billing_entitlement["id"]
+
+    sdk_billing_summary_response = client.get(
+        f"/api/v1/sdk/billing/summary?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_billing_summary_response.status_code == 200
+    sdk_billing_summary = sdk_billing_summary_response.json()
+    assert sdk_billing_summary["usage_records"] >= 1
+    assert sdk_billing_summary["open_invoices"] >= 1
+    assert sdk_billing_summary["entitlements"] >= 1
 
     sdk_attendance_response = client.post(
         f"/api/v1/sdk/events/{sdk_created_event_id}/attendance?organization_id={organization['id']}",

@@ -16,6 +16,16 @@ from app.models.organization import Membership, Organization
 from app.models.performance import AthletePerformanceObservation, PerformanceMetricDefinition
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.models.training import TrainingDrill, TrainingPlan, TrainingSessionPlan
+from app.schemas.billing import (
+    BillingEntitlementRead,
+    BillingPlanRead,
+    BillingSummaryRead,
+    SaaSInvoiceRead,
+    SubscriptionRead,
+    UsageMeterRead,
+    UsageRecordCreate,
+    UsageRecordRead,
+)
 from app.schemas.developer import (
     DeveloperApiKeyInspectionRead,
     DeveloperConsentRequestCreate,
@@ -67,6 +77,16 @@ from app.services.agents import (
     list_agents as list_ai_agents,
     queue_agent_task,
 )
+from app.services.billing import (
+    billing_summary,
+    list_entitlements,
+    list_invoices,
+    list_plans,
+    list_subscriptions,
+    list_usage_meters,
+    list_usage_records,
+    record_usage,
+)
 from app.services.communications import (
     create_message,
     create_template,
@@ -101,6 +121,19 @@ from app.services.training import (
 )
 
 router = APIRouter(prefix="/sdk", tags=["sdk"])
+
+
+def read_model(model, schema_type):
+    return schema_type(**{name: getattr(model, name) for name in schema_type.model_fields})
+
+
+def ensure_developer_api_has_scope(
+    credential: DeveloperApiKeyInspectionRead,
+    required_scopes: set[str],
+) -> None:
+    granted_scopes = set(credential.scopes)
+    if "admin:*" not in granted_scopes and granted_scopes.isdisjoint(required_scopes):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API key scope is insufficient")
 
 
 async def get_sdk_credential(
@@ -764,6 +797,119 @@ async def sdk_dispatch_communication_message(
         },
     )
     return summary
+
+
+@router.get("/billing/plans", response_model=list[BillingPlanRead])
+async def sdk_list_billing_plans(
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[BillingPlanRead]:
+    ensure_developer_api_has_scope(credential, {"read:billing", "write:billing"})
+    return [read_model(plan, BillingPlanRead) for plan in await list_plans(db)]
+
+
+@router.get("/billing/subscriptions", response_model=list[SubscriptionRead])
+async def sdk_list_billing_subscriptions(
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[SubscriptionRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:billing", "write:billing"})
+    return [
+        read_model(subscription, SubscriptionRead)
+        for subscription in await list_subscriptions(db, organization_id)
+    ]
+
+
+@router.get("/billing/meters", response_model=list[UsageMeterRead])
+async def sdk_list_billing_usage_meters(
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[UsageMeterRead]:
+    ensure_developer_api_has_scope(credential, {"read:billing", "write:billing"})
+    return [read_model(meter, UsageMeterRead) for meter in await list_usage_meters(db)]
+
+
+@router.get("/billing/usage", response_model=list[UsageRecordRead])
+async def sdk_list_billing_usage_records(
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[UsageRecordRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:billing", "write:billing"})
+    return [
+        read_model(record, UsageRecordRead)
+        for record in await list_usage_records(db, organization_id)
+    ]
+
+
+@router.post("/billing/usage", response_model=UsageRecordRead, status_code=status.HTTP_201_CREATED)
+async def sdk_record_billing_usage(
+    payload: UsageRecordCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> UsageRecordRead:
+    ensure_developer_api_scope(credential, payload.organization_id, {"write:billing"})
+    record = await record_usage(
+        db,
+        None,
+        payload,
+        None,
+        enforce_manage_billing_scope=False,
+    )
+    await deliver_developer_webhook_event(
+        db,
+        payload.organization_id,
+        "billing.usage.recorded",
+        str(record.id),
+        {
+            "id": str(record.id),
+            "organization_id": str(record.organization_id),
+            "subscription_id": str(record.subscription_id),
+            "usage_meter_id": str(record.usage_meter_id),
+            "quantity": record.quantity,
+            "source": record.source,
+            "external_reference": record.external_reference,
+            "origin": "developer_api",
+        },
+    )
+    return read_model(record, UsageRecordRead)
+
+
+@router.get("/billing/invoices", response_model=list[SaaSInvoiceRead])
+async def sdk_list_billing_invoices(
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[SaaSInvoiceRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:billing", "write:billing"})
+    return [
+        read_model(invoice, SaaSInvoiceRead)
+        for invoice in await list_invoices(db, organization_id)
+    ]
+
+
+@router.get("/billing/entitlements", response_model=list[BillingEntitlementRead])
+async def sdk_list_billing_entitlements(
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[BillingEntitlementRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:billing", "write:billing"})
+    return [
+        read_model(entitlement, BillingEntitlementRead)
+        for entitlement in await list_entitlements(db, organization_id)
+    ]
+
+
+@router.get("/billing/summary", response_model=BillingSummaryRead)
+async def sdk_get_billing_summary(
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> BillingSummaryRead:
+    ensure_developer_api_scope(credential, organization_id, {"read:billing", "write:billing"})
+    return BillingSummaryRead(**await billing_summary(db, organization_id))
 
 
 @router.get("/teams", response_model=list[TeamRead])

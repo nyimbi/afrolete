@@ -1492,14 +1492,14 @@ def developer_scope_catalog() -> list[DeveloperApiScopeCatalogRead]:
         DeveloperApiScopeCatalogRead(
             scope="read:billing",
             category="billing",
-            description="Read subscription, invoice, entitlement, and marketplace commerce metadata.",
+            description="Read billing plans, subscriptions, usage meters, usage records, invoices, entitlements, and tenant billing summaries.",
             recommended_for=["accounting sync", "marketplace analytics", "finance dashboards"],
         ),
         DeveloperApiScopeCatalogRead(
             scope="write:billing",
             category="billing",
-            description="Submit approved billing, payment, and settlement updates.",
-            recommended_for=["payment processors", "tax filing adapters", "accounting systems"],
+            description="Record tenant billing usage through SDK routes and submit protected provider updates through signed billing boundaries.",
+            recommended_for=["usage metering", "accounting systems", "finance dashboards"],
         ),
         DeveloperApiScopeCatalogRead(
             scope="admin:*",
@@ -1791,6 +1791,33 @@ def developer_webhook_event_catalog() -> list[DeveloperWebhookEventCatalogRead]:
                 "currency": "USD",
             },
         ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="billing.usage.recorded",
+            category="billing",
+            description="A developer API key recorded metered tenant billing usage.",
+            emission_status="active",
+            payload_fields=[
+                "organization_id",
+                "id",
+                "subscription_id",
+                "usage_meter_id",
+                "quantity",
+                "source",
+                "external_reference",
+                "origin",
+            ],
+            recommended_scopes=["write:billing"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "id": "usage-record-uuid",
+                "subscription_id": "subscription-uuid",
+                "usage_meter_id": "usage-meter-uuid",
+                "quantity": 14,
+                "source": "partner_billing_sync",
+                "external_reference": "usage-sdk-001",
+                "origin": "developer_api",
+            },
+        ),
     ]
 
 
@@ -1823,6 +1850,14 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "client.communications.messages.create",
                 "client.communications.messages.recipients",
                 "client.communications.messages.dispatch",
+                "client.billing.plans.list",
+                "client.billing.subscriptions.list",
+                "client.billing.meters.list",
+                "client.billing.usage.list",
+                "client.billing.usage.record",
+                "client.billing.invoices.list",
+                "client.billing.entitlements.list",
+                "client.billing.summary.get",
                 "client.performance.metrics.list",
                 "client.performance.observations.list",
                 "client.performance.observations.create",
@@ -1867,6 +1902,14 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "client.communications.messages.create",
                 "client.communications.messages.recipients",
                 "client.communications.messages.dispatch",
+                "client.billing.plans.list",
+                "client.billing.subscriptions.list",
+                "client.billing.meters.list",
+                "client.billing.usage.list",
+                "client.billing.usage.record",
+                "client.billing.invoices.list",
+                "client.billing.entitlements.list",
+                "client.billing.summary.get",
                 "client.performance.metrics.list",
                 "client.performance.observations.list",
                 "client.performance.observations.create",
@@ -1911,6 +1954,14 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "POST /sdk/communications/messages",
                 "GET /sdk/communications/messages/{message_id}/recipients",
                 "POST /sdk/communications/messages/{message_id}/dispatch",
+                "GET /sdk/billing/plans",
+                "GET /sdk/billing/subscriptions",
+                "GET /sdk/billing/meters",
+                "GET /sdk/billing/usage",
+                "POST /sdk/billing/usage",
+                "GET /sdk/billing/invoices",
+                "GET /sdk/billing/entitlements",
+                "GET /sdk/billing/summary",
                 "GET /sdk/performance/metrics",
                 "GET /sdk/performance/athletes/{athlete_profile_id}/observations",
                 "POST /sdk/performance/athletes/{athlete_profile_id}/observations",
@@ -2019,6 +2070,25 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
                 "  -d '{\"organization_id\":\"'$ORG_ID'\",\"message_type\":\"reminder\","
                 "\"channel\":\"email\",\"scope_type\":\"team\",\"scope_id\":\"'$TEAM_ID'\","
                 "\"subject\":\"Training reminder\",\"body\":\"Training starts at 16:00.\"}'"
+            ),
+        ),
+        DeveloperQuickstartRead(
+            title="Record tenant usage",
+            language="HTTP",
+            description="Record metered tenant billing usage through the SDK route protected by write:billing.",
+            steps=[
+                "Grant the API key write:billing for the tenant.",
+                "Read subscriptions and usage meters through /api/v1/sdk/billing/* or map provider IDs internally.",
+                "POST a usage payload to /api/v1/sdk/billing/usage with a tenant subscription and meter.",
+                "Subscribe to billing.usage.recorded for accounting and finance-sync workflows.",
+            ],
+            code_sample=(
+                "curl -s \"$AFROLETE_API/api/v1/sdk/billing/usage\" \\\n"
+                "  -H \"Content-Type: application/json\" \\\n"
+                "  -H \"X-Afrolete-API-Key: $AFROLETE_API_KEY\" \\\n"
+                "  -d '{\"organization_id\":\"'$ORG_ID'\",\"subscription_id\":\"'$SUBSCRIPTION_ID'\","
+                "\"usage_meter_id\":\"'$USAGE_METER_ID'\",\"quantity\":14,"
+                "\"source\":\"partner_billing_sync\",\"external_reference\":\"usage-sdk-001\"}'"
             ),
         ),
         DeveloperQuickstartRead(

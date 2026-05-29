@@ -101,6 +101,26 @@ await client.communications.messages.dispatch(message.id, {
   organizationId: organization.id,
 });
 
+const [subscription] = await client.billing.subscriptions.list({
+  organizationId: organization.id,
+});
+const [meter] = await client.billing.meters.list();
+
+if (subscription && meter) {
+  await client.billing.usage.record({
+    organization_id: organization.id,
+    subscription_id: subscription.id,
+    usage_meter_id: meter.id,
+    quantity: 14,
+    source: "partner_billing_sync",
+    external_reference: "usage-sdk-001",
+  });
+
+  await client.billing.summary.get({
+    organizationId: organization.id,
+  });
+}
+
 const [metric] = await client.performance.metrics.list({
   organizationId: organization.id,
   sport: "football",

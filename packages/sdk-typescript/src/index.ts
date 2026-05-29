@@ -362,6 +362,134 @@ export interface CommunicationDispatchSummary {
   transport_mode: string;
 }
 
+export type BillingMoney = string;
+export type BillingCycle = "monthly" | "quarterly" | "annual";
+export type SubscriptionStatus =
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "paused"
+  | "cancelled";
+export type BillingInvoiceStatus = "draft" | "open" | "paid" | "partial" | "void" | "uncollectible";
+export type UsageUnit = "athlete" | "team" | "agent_task" | "report" | "storage_gb" | "message";
+
+export interface BillingPlan {
+  id: UUID;
+  code: string;
+  name: string;
+  description: string | null;
+  base_price: BillingMoney;
+  currency: string;
+  billing_cycle: BillingCycle;
+  included_athletes: number;
+  included_teams: number;
+  included_agent_tasks: number;
+  included_storage_gb: number;
+  per_athlete_price: BillingMoney;
+  per_agent_task_price: BillingMoney;
+  features: string | null;
+  status: string;
+}
+
+export interface BillingSubscription {
+  id: UUID;
+  organization_id: UUID;
+  billing_plan_id: UUID;
+  billing_cycle: BillingCycle;
+  current_period_start: ISODate;
+  current_period_end: ISODate;
+  trial_ends_on: ISODate | null;
+  next_billing_on: ISODate | null;
+  seats_purchased: number;
+  negotiated_price: BillingMoney | null;
+  discount_code: string | null;
+  external_customer_id: string | null;
+  external_subscription_id: string | null;
+  notes: string | null;
+  status: SubscriptionStatus;
+  cancel_at_period_end: boolean;
+}
+
+export interface BillingUsageMeter {
+  id: UUID;
+  code: string;
+  name: string;
+  unit: UsageUnit;
+  included_quantity: number;
+  overage_price: BillingMoney;
+  aggregation: string;
+  status: string;
+}
+
+export interface BillingUsageRecordCreate {
+  organization_id: UUID;
+  subscription_id: UUID;
+  usage_meter_id: UUID;
+  quantity: number;
+  source?: string;
+  external_reference?: string | null;
+  notes?: string | null;
+}
+
+export interface BillingUsageRecord extends BillingUsageRecordCreate {
+  id: UUID;
+  recorded_at: ISODateTime;
+}
+
+export interface BillingInvoice {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  invoice_number: string;
+  period_start: ISODate;
+  period_end: ISODate;
+  subtotal: BillingMoney;
+  tax_amount: BillingMoney;
+  discount_amount: BillingMoney;
+  total: BillingMoney;
+  amount_paid: BillingMoney;
+  currency: string;
+  due_on: ISODate | null;
+  status: BillingInvoiceStatus;
+  line_items: string | null;
+  external_invoice_id: string | null;
+  dunning_count: number;
+  dunning_last_sent_at: ISODateTime | null;
+  dunning_last_severity: string | null;
+  late_fee_total: BillingMoney;
+  late_fee_count: number;
+  late_fee_last_applied_on: ISODate | null;
+  payment_retry_count: number;
+  payment_retry_last_attempted_at: ISODateTime | null;
+  payment_retry_next_attempt_at: ISODateTime | null;
+  payment_retry_last_status: string | null;
+  payment_retry_last_failure_reason: string | null;
+  payment_retry_last_provider_reference: string | null;
+}
+
+export interface BillingEntitlement {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  feature_key: string;
+  limit_value: number | null;
+  used_value: number;
+  status: string;
+  source: string;
+}
+
+export interface BillingSummary {
+  organization_id: UUID;
+  active_subscriptions: number;
+  plans: number;
+  usage_meters: number;
+  usage_records: number;
+  open_invoices: number;
+  monthly_recurring_revenue: BillingMoney;
+  invoice_outstanding: BillingMoney;
+  entitlements: number;
+}
+
 export interface Agent {
   id: UUID;
   organization_id: UUID | null;
@@ -766,6 +894,52 @@ export class AfroLeteClient {
       ): Promise<CommunicationDispatchSummary> =>
         this.request<CommunicationDispatchSummary>(`/communications/messages/${messageId}/dispatch`, {
           method: "POST",
+          query: { organization_id: params.organizationId },
+        }),
+    },
+  };
+
+  readonly billing = {
+    plans: {
+      list: (): Promise<BillingPlan[]> =>
+        this.request<BillingPlan[]>("/billing/plans"),
+    },
+    subscriptions: {
+      list: (params: { organizationId: UUID }): Promise<BillingSubscription[]> =>
+        this.request<BillingSubscription[]>("/billing/subscriptions", {
+          query: { organization_id: params.organizationId },
+        }),
+    },
+    meters: {
+      list: (): Promise<BillingUsageMeter[]> =>
+        this.request<BillingUsageMeter[]>("/billing/meters"),
+    },
+    usage: {
+      list: (params: { organizationId: UUID }): Promise<BillingUsageRecord[]> =>
+        this.request<BillingUsageRecord[]>("/billing/usage", {
+          query: { organization_id: params.organizationId },
+        }),
+      record: (payload: BillingUsageRecordCreate): Promise<BillingUsageRecord> =>
+        this.request<BillingUsageRecord>("/billing/usage", {
+          method: "POST",
+          body: payload,
+        }),
+    },
+    invoices: {
+      list: (params: { organizationId: UUID }): Promise<BillingInvoice[]> =>
+        this.request<BillingInvoice[]>("/billing/invoices", {
+          query: { organization_id: params.organizationId },
+        }),
+    },
+    entitlements: {
+      list: (params: { organizationId: UUID }): Promise<BillingEntitlement[]> =>
+        this.request<BillingEntitlement[]>("/billing/entitlements", {
+          query: { organization_id: params.organizationId },
+        }),
+    },
+    summary: {
+      get: (params: { organizationId: UUID }): Promise<BillingSummary> =>
+        this.request<BillingSummary>("/billing/summary", {
           query: { organization_id: params.organizationId },
         }),
     },

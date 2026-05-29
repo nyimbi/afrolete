@@ -126,11 +126,19 @@ async def list_usage_meters(db: AsyncSession) -> list[UsageMeter]:
 
 async def record_usage(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     payload: UsageRecordCreate,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
+    *,
+    enforce_manage_billing_scope: bool = True,
 ) -> UsageRecord:
-    await ensure_manage_billing(authz, identity, payload.organization_id)
+    if enforce_manage_billing_scope:
+        if identity is None or authz is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Identity and authorization required",
+            )
+        await ensure_manage_billing(authz, identity, payload.organization_id)
     await get_subscription_for_organization(db, payload.subscription_id, payload.organization_id)
     await get_usage_meter(db, payload.usage_meter_id)
     record = UsageRecord(recorded_at=datetime.now(UTC), **payload.model_dump())
