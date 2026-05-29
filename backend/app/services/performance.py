@@ -5,6 +5,7 @@ import hmac
 import hashlib
 import httpx
 import json
+import math
 from pathlib import Path
 import re
 import time
@@ -14,7 +15,7 @@ from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,6 +49,7 @@ from app.models.performance import (
     PerformanceModelExtractionBenchmarkDataset,
     PerformanceVideoAnnotation,
     PerformanceVideoAsset,
+    PerformanceVideoPoseSample,
     PerformanceWearableIngestEvent,
     PerformanceWearableProviderConnection,
     PerformanceWearableProviderSyncRun,
@@ -74,6 +76,7 @@ from app.schemas.performance import (
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
     PerformancePoseGaitAnalysisCreate,
+    PerformanceVideoPoseSampleBatchCreate,
     PerformanceVideoAnnotationCreate,
     PerformanceVideoCoachingCreate,
     PerformanceVideoUploadCreate,
@@ -599,15 +602,24 @@ async def analyze_pose_gait_for_video(
     video_asset = await get_performance_video_asset(db, video_asset_id)
     await ensure_manage_performance(authz, identity, video_asset.organization_id)
     focus = payload.analysis_focus or video_asset.analysis_focus or "pose, gait, and movement efficiency"
-    metrics = pose_gait_metric_cards(payload.evidence_text, video_asset.sport)
+    pose_samples = await list_performance_video_pose_samples(db, video_asset.id)
+    derived_metrics = derive_pose_sample_metrics(pose_samples)
+    metrics = pose_gait_metric_cards(payload.evidence_text, video_asset.sport, derived_metrics)
     phases = pose_gait_phase_cards(metrics, video_asset.duration_seconds)
     projections = optimal_projection_cards(metrics)
-    confidence = pose_gait_confidence(payload.evidence_text, video_asset)
-    summary = pose_gait_summary(video_asset, metrics, confidence)
+    confidence = pose_gait_confidence(payload.evidence_text, video_asset, len(pose_samples))
+    summary = pose_gait_summary(video_asset, metrics, confidence, len(pose_samples))
+    source_providers = sorted({sample.source_provider for sample in pose_samples})
     analysis = {
-        "model_policy": "afrolete-pose-gait-benchmark-v1",
+        "model_policy": (
+            "afrolete-pose-gait-keypoints-v1"
+            if pose_samples
+            else "afrolete-pose-gait-benchmark-v1"
+        ),
         "benchmark_profile": payload.benchmark_profile,
         "confidence": confidence,
+        "pose_sample_count": len(pose_samples),
+        "pose_sample_source_providers": source_providers,
         "summary": summary,
         "metrics": metrics,
         "phases": phases,
@@ -5822,6 +5834,234 @@ def decode_annotation_tags(value: str | None) -> list[str]:
     return [str(item) for item in parsed if str(item)]
 
 
+def decode_pose_keypoints(value: str | None) -> list[dict[str, object]]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    keypoints: list[dict[str, object]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip().lower().replace("-", "_").replace(" ", "_")
+        try:
+            x_percent = float(item["x_percent"])
+            y_percent = float(item["y_percent"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not name or not (0 <= x_percent <= 100) or not (0 <= y_percent <= 100):
+            continue
+        keypoints.append(
+            {
+                "name": name,
+                "x_percent": x_percent,
+                "y_percent": y_percent,
+                "z": item.get("z"),
+                "confidence": item.get("confidence"),
+            }
+        )
+    return keypoints
+
+
+def pose_keypoint_lookup(sample: PerformanceVideoPoseSample) -> dict[str, tuple[float, float]]:
+    lookup: dict[str, tuple[float, float]] = {}
+    for point in decode_pose_keypoints(sample.keypoints_json):
+        lookup[str(point["name"])] = (float(point["x_percent"]), float(point["y_percent"]))
+    return lookup
+
+
+def first_pose_point(
+    lookup: dict[str, tuple[float, float]],
+    *names: str,
+) -> tuple[float, float] | None:
+    for name in names:
+        normalized = name.lower().replace("-", "_").replace(" ", "_")
+        if normalized in lookup:
+            return lookup[normalized]
+    return None
+
+
+def midpoint(*points: tuple[float, float] | None) -> tuple[float, float] | None:
+    available = [point for point in points if point is not None]
+    if not available:
+        return None
+    return (
+        sum(point[0] for point in available) / len(available),
+        sum(point[1] for point in available) / len(available),
+    )
+
+
+def angle_from_vertical_degrees(
+    lower: tuple[float, float] | None,
+    upper: tuple[float, float] | None,
+) -> float | None:
+    if lower is None or upper is None:
+        return None
+    dx = upper[0] - lower[0]
+    dy = lower[1] - upper[1]
+    if abs(dx) < 0.001 and abs(dy) < 0.001:
+        return None
+    return abs(math.degrees(math.atan2(dx, dy)))
+
+
+def derive_pose_sample_metrics(
+    samples: list[PerformanceVideoPoseSample],
+) -> dict[str, float]:
+    if not samples:
+        return {}
+    torso_angles: list[float] = []
+    knee_drive_angles: list[float] = []
+    arm_symmetry_values: list[float] = []
+    contact_windows: dict[tuple[str, int], list[float]] = {}
+
+    for sample in samples:
+        lookup = pose_keypoint_lookup(sample)
+        left_shoulder = first_pose_point(lookup, "left_shoulder", "l_shoulder")
+        right_shoulder = first_pose_point(lookup, "right_shoulder", "r_shoulder")
+        left_hip = first_pose_point(lookup, "left_hip", "l_hip")
+        right_hip = first_pose_point(lookup, "right_hip", "r_hip")
+        shoulders = midpoint(left_shoulder, right_shoulder)
+        hips = midpoint(left_hip, right_hip)
+        torso_angle = angle_from_vertical_degrees(hips, shoulders)
+        if torso_angle is not None:
+            torso_angles.append(torso_angle)
+
+        for hip_name, knee_name, ankle_name in [
+            ("left_hip", "left_knee", "left_ankle"),
+            ("right_hip", "right_knee", "right_ankle"),
+        ]:
+            hip = first_pose_point(lookup, hip_name)
+            knee = first_pose_point(lookup, knee_name)
+            ankle = first_pose_point(lookup, ankle_name)
+            if hip is None or knee is None:
+                continue
+            vertical_lift = max(0.0, hip[1] - knee[1])
+            forward_drive = abs(knee[0] - hip[0])
+            lower_leg = abs((ankle[1] if ankle else hip[1] + 15) - hip[1]) or 15.0
+            lift_ratio = min(1.0, vertical_lift / max(lower_leg, 1.0))
+            knee_drive_angles.append(min(95.0, 58.0 + lift_ratio * 28.0 + min(forward_drive, 10.0) * 0.7))
+
+        left_elbow = first_pose_point(lookup, "left_elbow", "l_elbow")
+        right_elbow = first_pose_point(lookup, "right_elbow", "r_elbow")
+        left_arm_angle = angle_from_vertical_degrees(left_elbow, left_shoulder)
+        right_arm_angle = angle_from_vertical_degrees(right_elbow, right_shoulder)
+        if left_arm_angle is not None and right_arm_angle is not None:
+            diff = abs(left_arm_angle - right_arm_angle)
+            arm_symmetry_values.append(max(1.0, min(10.0, 10.0 - diff / 12.0)))
+
+        phase = (sample.phase or "").lower()
+        if sample.contact_foot or "contact" in phase or "stance" in phase:
+            key = (
+                (sample.contact_foot or "unknown").lower(),
+                sample.stride_index if sample.stride_index is not None else len(contact_windows),
+            )
+            contact_windows.setdefault(key, []).append(float(sample.timestamp_seconds))
+
+    metrics: dict[str, float] = {}
+    if torso_angles:
+        metrics["torso_lean_angle"] = round(sum(torso_angles) / len(torso_angles), 2)
+    if knee_drive_angles:
+        metrics["knee_drive_angle"] = round(max(knee_drive_angles), 2)
+    if arm_symmetry_values:
+        metrics["arm_swing_symmetry"] = round(sum(arm_symmetry_values) / len(arm_symmetry_values), 2)
+    contact_durations = [
+        (max(timestamps) - min(timestamps)) * 1000
+        for timestamps in contact_windows.values()
+        if len(timestamps) >= 2
+    ]
+    if contact_durations:
+        contact_window = sum(contact_durations) / len(contact_durations)
+        if 40 <= contact_window <= 350:
+            metrics["ground_contact_time"] = round(contact_window, 2)
+    contact_step_timestamps = sorted(
+        round(min(timestamps), 3)
+        for timestamps in contact_windows.values()
+        if timestamps
+    )
+    if len(contact_step_timestamps) >= 3:
+        duration = contact_step_timestamps[-1] - contact_step_timestamps[0]
+        if duration > 0:
+            metrics["stride_frequency"] = round((len(contact_step_timestamps) - 1) / duration, 2)
+    return metrics
+
+
+async def create_performance_video_pose_samples(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    video_asset_id: UUID,
+    payload: PerformanceVideoPoseSampleBatchCreate,
+    authz: AuthorizationService,
+) -> list[PerformanceVideoPoseSample]:
+    video_asset = await get_performance_video_asset(db, video_asset_id)
+    await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    if payload.organization_id != video_asset.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    if payload.replace_existing:
+        await db.execute(
+            delete(PerformanceVideoPoseSample).where(
+                PerformanceVideoPoseSample.video_asset_id == video_asset.id
+            )
+        )
+
+    rows: list[PerformanceVideoPoseSample] = []
+    for item in payload.samples:
+        keypoints = [
+            {
+                "name": point.name.strip().lower().replace("-", "_").replace(" ", "_"),
+                "x_percent": point.x_percent,
+                "y_percent": point.y_percent,
+                "z": point.z,
+                "confidence": point.confidence,
+            }
+            for point in item.keypoints
+        ]
+        sample = PerformanceVideoPoseSample(
+            organization_id=video_asset.organization_id,
+            video_asset_id=video_asset.id,
+            athlete_profile_id=video_asset.athlete_profile_id,
+            event_id=video_asset.event_id,
+            created_by_person_id=identity.person_id,
+            source_provider=item.source_provider,
+            frame_index=item.frame_index,
+            timestamp_seconds=item.timestamp_seconds,
+            phase=item.phase,
+            contact_foot=item.contact_foot,
+            stride_index=item.stride_index,
+            sample_confidence=item.sample_confidence,
+            keypoints_json=json.dumps(keypoints),
+        )
+        db.add(sample)
+        rows.append(sample)
+    await db.commit()
+    for row in rows:
+        await db.refresh(row)
+    return rows
+
+
+async def list_performance_video_pose_samples(
+    db: AsyncSession,
+    video_asset_id: UUID,
+    limit: int = 600,
+) -> list[PerformanceVideoPoseSample]:
+    return list(
+        (
+            await db.scalars(
+                select(PerformanceVideoPoseSample)
+                .where(PerformanceVideoPoseSample.video_asset_id == video_asset_id)
+                .order_by(
+                    PerformanceVideoPoseSample.timestamp_seconds,
+                    PerformanceVideoPoseSample.frame_index,
+                )
+                .limit(limit)
+            )
+        ).all()
+    )
+
+
 def pose_gait_templates(sport: str) -> list[dict[str, object]]:
     if sport == "athletics":
         return [
@@ -5922,11 +6162,24 @@ def pose_gait_templates(sport: str) -> list[dict[str, object]]:
     ]
 
 
-def pose_gait_metric_cards(evidence_text: str | None, sport: str) -> list[dict[str, object]]:
+def pose_gait_metric_cards(
+    evidence_text: str | None,
+    sport: str,
+    derived_metrics: dict[str, float] | None = None,
+) -> list[dict[str, object]]:
     text = (evidence_text or "").lower()
+    sample_metrics = derived_metrics or {}
     cards: list[dict[str, object]] = []
     for template in pose_gait_templates(sport):
-        observed = extract_labeled_float(evidence_text, str(template["label"]), str(template["key"]))
+        key = str(template["key"])
+        source = "benchmark_template"
+        observed = sample_metrics.get(key)
+        if observed is not None:
+            source = "pose_keypoints"
+        if observed is None:
+            observed = extract_labeled_float(evidence_text, str(template["label"]), key)
+            if observed is not None:
+                source = "evidence_text"
         if observed is None:
             observed = float(template["default"])
             if any(str(term) in text for term in template["positive_terms"]):
@@ -5957,6 +6210,7 @@ def pose_gait_metric_cards(evidence_text: str | None, sport: str) -> list[dict[s
                 "delta_from_optimal": delta,
                 "benchmark_label": template["benchmark"],
                 "coaching_cue": template["cue"],
+                "source": source,
             }
         )
     return cards
@@ -6034,13 +6288,21 @@ def optimal_projection_cards(metrics: list[dict[str, object]]) -> list[dict[str,
     return projections
 
 
-def pose_gait_confidence(evidence_text: str | None, video_asset: PerformanceVideoAsset) -> float:
+def pose_gait_confidence(
+    evidence_text: str | None,
+    video_asset: PerformanceVideoAsset,
+    pose_sample_count: int = 0,
+) -> float:
     confidence = 0.7
     if evidence_text and len(evidence_text) > 100:
         confidence += 0.08
     if video_asset.frame_rate and video_asset.frame_rate >= 60:
         confidence += 0.06
     if video_asset.frame_width and video_asset.frame_width >= 1280:
+        confidence += 0.04
+    if pose_sample_count >= 4:
+        confidence += 0.06
+    if pose_sample_count >= 12:
         confidence += 0.04
     return round(min(confidence, 0.88), 2)
 
@@ -6049,12 +6311,18 @@ def pose_gait_summary(
     video_asset: PerformanceVideoAsset,
     metrics: list[dict[str, object]],
     confidence: float,
+    pose_sample_count: int = 0,
 ) -> str:
     strongest = max(metrics, key=lambda item: float(item["score"]))
     weakest = min(metrics, key=lambda item: float(item["score"]))
+    sample_note = (
+        f" using {pose_sample_count} stored pose landmark samples"
+        if pose_sample_count
+        else ""
+    )
     return (
         f"Pose and gait analysis for {video_asset.clip_label or video_asset.filename} compares "
-        f"{video_asset.sport} movement against world-class benchmark ranges. "
+        f"{video_asset.sport} movement against world-class benchmark ranges{sample_note}. "
         f"Strongest pattern: {strongest['label']} ({float(strongest['score']):g}/10). "
         f"Priority correction: {weakest['label']} ({float(weakest['score']):g}/10). "
         f"Confidence {confidence:.0%}; coach review is required before training prescription."

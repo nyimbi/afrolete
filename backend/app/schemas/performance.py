@@ -229,6 +229,56 @@ class PerformanceVideoAnnotationRead(BaseModel):
     created_at: datetime
 
 
+class PerformancePoseKeypoint(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    x_percent: float = Field(ge=0, le=100)
+    y_percent: float = Field(ge=0, le=100)
+    z: float | None = Field(default=None, ge=-1000, le=1000)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class PerformanceVideoPoseSampleCreate(BaseModel):
+    source_provider: str = Field(default="manual_pose", min_length=2, max_length=80)
+    frame_index: int | None = Field(default=None, ge=0)
+    timestamp_seconds: float = Field(ge=0)
+    phase: str | None = Field(default=None, max_length=80)
+    contact_foot: str | None = Field(default=None, max_length=20)
+    stride_index: int | None = Field(default=None, ge=0)
+    sample_confidence: float | None = Field(default=None, ge=0, le=1)
+    keypoints: list[PerformancePoseKeypoint] = Field(min_length=4, max_length=80)
+
+
+class PerformanceVideoPoseSampleBatchCreate(BaseModel):
+    organization_id: UUID
+    replace_existing: bool = False
+    samples: list[PerformanceVideoPoseSampleCreate] = Field(min_length=1, max_length=600)
+
+
+class PerformanceVideoPoseSampleRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    athlete_profile_id: UUID
+    event_id: UUID | None
+    created_by_person_id: UUID | None
+    source_provider: str
+    frame_index: int | None
+    timestamp_seconds: float
+    phase: str | None
+    contact_foot: str | None
+    stride_index: int | None
+    sample_confidence: float | None
+    keypoints: list[PerformancePoseKeypoint]
+    created_at: datetime
+
+
+class PerformanceVideoPoseSampleBatchRead(BaseModel):
+    video_asset: PerformanceVideoAssetRead
+    sample_count: int
+    source_providers: list[str]
+    samples: list[PerformanceVideoPoseSampleRead]
+
+
 class PerformancePoseGaitMetricRead(BaseModel):
     key: str
     label: str
@@ -241,6 +291,7 @@ class PerformancePoseGaitMetricRead(BaseModel):
     delta_from_optimal: float
     benchmark_label: str
     coaching_cue: str
+    source: str = "benchmark_template"
 
 
 class PerformancePoseGaitPhaseRead(BaseModel):
@@ -272,6 +323,8 @@ class PerformancePoseGaitAnalysisRead(BaseModel):
     model_policy: str
     benchmark_profile: str
     confidence: float
+    pose_sample_count: int = 0
+    pose_sample_source_providers: list[str] = Field(default_factory=list)
     summary: str
     metrics: list[PerformancePoseGaitMetricRead]
     phases: list[PerformancePoseGaitPhaseRead]

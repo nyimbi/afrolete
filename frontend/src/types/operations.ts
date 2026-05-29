@@ -4513,6 +4513,39 @@ export type PerformanceVideoAnnotationRead = {
   created_at: string;
 };
 
+export type PerformancePoseKeypoint = {
+  name: string;
+  x_percent: number;
+  y_percent: number;
+  z: number | null;
+  confidence: number | null;
+};
+
+export type PerformanceVideoPoseSampleRead = {
+  id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  athlete_profile_id: UUID;
+  event_id: UUID | null;
+  created_by_person_id: UUID | null;
+  source_provider: string;
+  frame_index: number | null;
+  timestamp_seconds: number;
+  phase: string | null;
+  contact_foot: string | null;
+  stride_index: number | null;
+  sample_confidence: number | null;
+  keypoints: PerformancePoseKeypoint[];
+  created_at: string;
+};
+
+export type PerformanceVideoPoseSampleBatchRead = {
+  video_asset: PerformanceVideoAssetRead;
+  sample_count: number;
+  source_providers: string[];
+  samples: PerformanceVideoPoseSampleRead[];
+};
+
 export type PerformancePoseGaitMetricRead = {
   key: string;
   label: string;
@@ -4525,6 +4558,7 @@ export type PerformancePoseGaitMetricRead = {
   delta_from_optimal: number;
   benchmark_label: string;
   coaching_cue: string;
+  source: string;
 };
 
 export type PerformancePoseGaitPhaseRead = {
@@ -4549,6 +4583,8 @@ export type PerformancePoseGaitAnalysisRead = {
   model_policy: string;
   benchmark_profile: string;
   confidence: number;
+  pose_sample_count: number;
+  pose_sample_source_providers: string[];
   summary: string;
   metrics: PerformancePoseGaitMetricRead[];
   phases: PerformancePoseGaitPhaseRead[];

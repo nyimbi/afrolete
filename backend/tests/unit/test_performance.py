@@ -2828,6 +2828,50 @@ def test_performance_video_upload_pose_gait_analysis_and_annotations(
     assert annotation.status_code == 201
     assert annotation.json()["tags"] == ["posture", "slow-motion"]
 
+    def sprint_pose_sample(timestamp: float, foot: str, stride_index: int) -> dict[str, object]:
+        return {
+            "source_provider": "mediapipe_pose_landmarker",
+            "timestamp_seconds": timestamp,
+            "phase": "ground_contact",
+            "contact_foot": foot,
+            "stride_index": stride_index,
+            "sample_confidence": 0.91,
+            "keypoints": [
+                {"name": "left_shoulder", "x_percent": 45, "y_percent": 30, "confidence": 0.96},
+                {"name": "right_shoulder", "x_percent": 55, "y_percent": 30, "confidence": 0.96},
+                {"name": "left_hip", "x_percent": 48, "y_percent": 50, "confidence": 0.95},
+                {"name": "right_hip", "x_percent": 58, "y_percent": 50, "confidence": 0.95},
+                {"name": "left_knee", "x_percent": 58, "y_percent": 40, "confidence": 0.93},
+                {"name": "right_knee", "x_percent": 56, "y_percent": 61, "confidence": 0.92},
+                {"name": "left_ankle", "x_percent": 62, "y_percent": 72, "confidence": 0.91},
+                {"name": "right_ankle", "x_percent": 54, "y_percent": 76, "confidence": 0.91},
+                {"name": "left_elbow", "x_percent": 42, "y_percent": 45, "confidence": 0.9},
+                {"name": "right_elbow", "x_percent": 58, "y_percent": 45, "confidence": 0.9},
+            ],
+        }
+
+    pose_samples = client.post(
+        f"/api/v1/performance/videos/{video_asset['id']}/pose-samples",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "replace_existing": True,
+            "samples": [
+                sprint_pose_sample(1.00, "left", 0),
+                sprint_pose_sample(1.10, "left", 0),
+                sprint_pose_sample(1.23, "right", 1),
+                sprint_pose_sample(1.33, "right", 1),
+                sprint_pose_sample(1.45, "left", 2),
+                sprint_pose_sample(1.55, "left", 2),
+                sprint_pose_sample(1.68, "right", 3),
+                sprint_pose_sample(1.78, "right", 3),
+            ],
+        },
+    )
+    assert pose_samples.status_code == 201
+    assert pose_samples.json()["sample_count"] == 8
+    assert pose_samples.json()["source_providers"] == ["mediapipe_pose_landmarker"]
+
     analysis = client.post(
         f"/api/v1/performance/videos/{video_asset['id']}/pose-gait-analysis",
         headers=identity_headers,
@@ -2846,8 +2890,14 @@ def test_performance_video_upload_pose_gait_analysis_and_annotations(
     payload = analysis.json()
     assert payload["video_asset"]["status"] == "analyzed"
     assert payload["benchmark_profile"] == "world_class_sprint"
+    assert payload["pose_sample_count"] == 8
+    assert payload["pose_sample_source_providers"] == ["mediapipe_pose_landmarker"]
+    assert payload["model_policy"] == "afrolete-pose-gait-keypoints-v1"
     assert len(payload["metrics"]) >= 5
-    assert any(metric["key"] == "ground_contact_time" for metric in payload["metrics"])
+    assert any(
+        metric["key"] == "ground_contact_time" and metric["source"] == "pose_keypoints"
+        for metric in payload["metrics"]
+    )
     assert payload["optimal_projections"]
     assert payload["annotations"][0]["label"] == "Torso collapse"
     assert payload["coaching"]["review_required"] is True

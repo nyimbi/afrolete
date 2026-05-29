@@ -53,6 +53,9 @@ from app.schemas.performance import (
     PerformanceVideoCoachingCreate,
     PerformanceVideoCoachingMetricRead,
     PerformanceVideoCoachingRead,
+    PerformanceVideoPoseSampleBatchCreate,
+    PerformanceVideoPoseSampleBatchRead,
+    PerformanceVideoPoseSampleRead,
     PerformanceVideoUploadCreate,
     PerformanceWearableConnectionCreate,
     PerformanceWearableConnectionRead,
@@ -82,6 +85,7 @@ from app.services.performance import (
     create_metric_definition,
     create_observation,
     create_performance_video_annotation,
+    create_performance_video_pose_samples,
     create_performance_goal,
     create_performance_model_extraction_benchmark_dataset,
     create_player_self_assessment,
@@ -89,7 +93,9 @@ from app.services.performance import (
     decode_string_list,
     decode_uuid_list,
     evaluate_performance_achievements,
+    ensure_manage_performance,
     ingest_performance_evidence,
+    get_performance_video_asset,
     ingest_performance_wearable_webhook,
     list_assessment_review_queue,
     list_assessments,
@@ -99,6 +105,7 @@ from app.services.performance import (
     list_my_player_performance,
     list_observations,
     list_performance_video_annotations,
+    list_performance_video_pose_samples,
     list_performance_forecast_validation_runs,
     list_performance_model_extraction_benchmark_datasets,
     list_wearable_provider_connections,
@@ -127,6 +134,7 @@ from app.services.performance import (
     update_assessment_review_assignment,
     validate_performance_wearable_webhook_signature,
     decode_annotation_tags,
+    decode_pose_keypoints,
     downloadable_performance_video_asset,
     upload_performance_video_asset,
     video_slow_motion_rates,
@@ -322,6 +330,26 @@ def to_video_annotation_read(annotation) -> PerformanceVideoAnnotationRead:
         height_percent=annotation.height_percent,
         tags=decode_annotation_tags(annotation.tags_json),
         created_at=annotation.created_at,
+    )
+
+
+def to_video_pose_sample_read(sample) -> PerformanceVideoPoseSampleRead:
+    return PerformanceVideoPoseSampleRead(
+        id=sample.id,
+        organization_id=sample.organization_id,
+        video_asset_id=sample.video_asset_id,
+        athlete_profile_id=sample.athlete_profile_id,
+        event_id=sample.event_id,
+        created_by_person_id=sample.created_by_person_id,
+        source_provider=sample.source_provider,
+        frame_index=sample.frame_index,
+        timestamp_seconds=sample.timestamp_seconds,
+        phase=sample.phase,
+        contact_foot=sample.contact_foot,
+        stride_index=sample.stride_index,
+        sample_confidence=sample.sample_confidence,
+        keypoints=decode_pose_keypoints(sample.keypoints_json),
+        created_at=sample.created_at,
     )
 
 
@@ -663,6 +691,49 @@ async def list_performance_video_annotations_route(
 
 
 @router.post(
+    "/videos/{video_asset_id}/pose-samples",
+    response_model=PerformanceVideoPoseSampleBatchRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_performance_video_pose_samples_route(
+    video_asset_id: UUID,
+    payload: PerformanceVideoPoseSampleBatchCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceVideoPoseSampleBatchRead:
+    samples = await create_performance_video_pose_samples(db, identity, video_asset_id, payload, authz)
+    video_asset = await get_performance_video_asset(db, video_asset_id)
+    return PerformanceVideoPoseSampleBatchRead(
+        video_asset=to_video_asset_read(video_asset),
+        sample_count=len(samples),
+        source_providers=sorted({sample.source_provider for sample in samples}),
+        samples=[to_video_pose_sample_read(sample) for sample in samples],
+    )
+
+
+@router.get(
+    "/videos/{video_asset_id}/pose-samples",
+    response_model=PerformanceVideoPoseSampleBatchRead,
+)
+async def list_performance_video_pose_samples_route(
+    video_asset_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceVideoPoseSampleBatchRead:
+    samples = await list_performance_video_pose_samples(db, video_asset_id)
+    video_asset = await get_performance_video_asset(db, video_asset_id)
+    await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    return PerformanceVideoPoseSampleBatchRead(
+        video_asset=to_video_asset_read(video_asset),
+        sample_count=len(samples),
+        source_providers=sorted({sample.source_provider for sample in samples}),
+        samples=[to_video_pose_sample_read(sample) for sample in samples],
+    )
+
+
+@router.post(
     "/videos/{video_asset_id}/pose-gait-analysis",
     response_model=PerformancePoseGaitAnalysisRead,
     status_code=status.HTTP_201_CREATED,
@@ -681,6 +752,8 @@ async def analyze_pose_gait_for_video_route(
         model_policy=analysis["model_policy"],
         benchmark_profile=analysis["benchmark_profile"],
         confidence=analysis["confidence"],
+        pose_sample_count=analysis.get("pose_sample_count", 0),
+        pose_sample_source_providers=analysis.get("pose_sample_source_providers", []),
         summary=analysis["summary"],
         metrics=[
             PerformancePoseGaitMetricRead(**metric) for metric in analysis["metrics"]

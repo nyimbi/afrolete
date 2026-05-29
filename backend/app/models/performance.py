@@ -248,6 +248,30 @@ class PerformanceVideoAnnotation(IdMixin, TimestampMixin, Base):
     tags_json: Mapped[str | None] = mapped_column(Text)
 
 
+class PerformanceVideoPoseSample(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_video_pose_samples"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_video_assets.id"), nullable=False, index=True
+    )
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), nullable=False, index=True
+    )
+    event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    source_provider: Mapped[str] = mapped_column(String(80), default="manual_pose", nullable=False, index=True)
+    frame_index: Mapped[int | None] = mapped_column(Integer, index=True)
+    timestamp_seconds: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    phase: Mapped[str | None] = mapped_column(String(80), index=True)
+    contact_foot: Mapped[str | None] = mapped_column(String(20), index=True)
+    stride_index: Mapped[int | None] = mapped_column(Integer, index=True)
+    sample_confidence: Mapped[float | None] = mapped_column(Float)
+    keypoints_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class PerformanceModelExtractionBenchmarkDataset(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_model_extraction_benchmark_datasets"
     __table_args__ = (

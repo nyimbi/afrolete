@@ -274,6 +274,7 @@ import type {
   PerformanceVideoAnnotationRead,
   PerformanceVideoAssetRead,
   PerformanceVideoCoachingRead,
+  PerformanceVideoPoseSampleBatchRead,
   PerformanceWearableConnectionRead,
   PerformanceWearableOAuthCallbackRead,
   PerformanceWearableOAuthStartRead,
@@ -665,6 +666,29 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("File read failed"));
     reader.readAsDataURL(file);
   });
+}
+
+function sprintPoseSample(timestamp: number, foot: "left" | "right", strideIndex: number) {
+  return {
+    source_provider: "mediapipe_pose_landmarker",
+    timestamp_seconds: timestamp,
+    phase: "ground_contact",
+    contact_foot: foot,
+    stride_index: strideIndex,
+    sample_confidence: 0.91,
+    keypoints: [
+      { name: "left_shoulder", x_percent: 45, y_percent: 30, confidence: 0.96 },
+      { name: "right_shoulder", x_percent: 55, y_percent: 30, confidence: 0.96 },
+      { name: "left_hip", x_percent: 48, y_percent: 50, confidence: 0.95 },
+      { name: "right_hip", x_percent: 58, y_percent: 50, confidence: 0.95 },
+      { name: "left_knee", x_percent: 58, y_percent: 40, confidence: 0.93 },
+      { name: "right_knee", x_percent: 56, y_percent: 61, confidence: 0.92 },
+      { name: "left_ankle", x_percent: 62, y_percent: 72, confidence: 0.91 },
+      { name: "right_ankle", x_percent: 54, y_percent: 76, confidence: 0.91 },
+      { name: "left_elbow", x_percent: 42, y_percent: 45, confidence: 0.9 },
+      { name: "right_elbow", x_percent: 58, y_percent: 45, confidence: 0.9 }
+    ]
+  };
 }
 
 function toDateTimeLocalValue(value: string | null): string {
@@ -1476,6 +1500,8 @@ export default function HomePage() {
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
     useState<PerformanceVideoAnnotationRead[]>([]);
+  const [performancePoseSampleBatch, setPerformancePoseSampleBatch] =
+    useState<PerformanceVideoPoseSampleBatchRead | null>(null);
   const [selectedPerformanceVideoFile, setSelectedPerformanceVideoFile] = useState<File | null>(null);
   const [performanceModelBenchmark, setPerformanceModelBenchmark] =
     useState<PerformanceModelExtractionBenchmarkRunRead | null>(null);
@@ -3362,6 +3388,7 @@ export default function HomePage() {
       setPerformanceVideoPreviewUrl("");
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
+      setPerformancePoseSampleBatch(null);
       setSelectedPerformanceVideoFile(null);
       setPerformanceModelBenchmark(null);
       setPerformanceModelBenchmarkDatasets([]);
@@ -3713,6 +3740,7 @@ export default function HomePage() {
       setPerformanceVideoPreviewUrl("");
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
+      setPerformancePoseSampleBatch(null);
       setSelectedPerformanceVideoFile(null);
       setPerformanceBenchmarks([]);
       setPerformanceCohortComparisons([]);
@@ -7990,6 +8018,7 @@ export default function HomePage() {
         setPerformanceVideoAsset(videoAsset);
         setPerformancePoseGaitAnalysis(null);
         setPerformanceVideoAnnotations([]);
+        setPerformancePoseSampleBatch(null);
         if (performanceVideoPreviewUrl) {
           URL.revokeObjectURL(performanceVideoPreviewUrl);
         }
@@ -8030,6 +8059,42 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== annotation.id)
         ]);
         addLog(`Annotation saved at ${annotation.timestamp_seconds}s`, "good");
+      }
+    );
+  };
+
+  const importPerformancePoseSamples = () => {
+    if (!performanceVideoAsset || !selectedOrganizationId) {
+      addLog("Upload a performance video before importing pose landmarks", "bad");
+      return;
+    }
+    runAction(
+      "import-performance-pose-samples",
+      () =>
+        apiRequest<PerformanceVideoPoseSampleBatchRead>(
+          `/performance/videos/${performanceVideoAsset.id}/pose-samples`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              replace_existing: true,
+              samples: [
+                sprintPoseSample(1.0, "left", 0),
+                sprintPoseSample(1.1, "left", 0),
+                sprintPoseSample(1.23, "right", 1),
+                sprintPoseSample(1.33, "right", 1),
+                sprintPoseSample(1.45, "left", 2),
+                sprintPoseSample(1.55, "left", 2),
+                sprintPoseSample(1.68, "right", 3),
+                sprintPoseSample(1.78, "right", 3)
+              ]
+            }
+          }
+        ),
+      (batch) => {
+        setPerformancePoseSampleBatch(batch);
+        addLog(`Imported ${batch.sample_count} pose landmark samples`, "good");
       }
     );
   };
@@ -16286,6 +16351,7 @@ export default function HomePage() {
                 <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
                 <button type="button" onClick={analyzeAthleteVideoCoaching} disabled={busyAction !== null}>Video coach</button>
                 <button type="button" onClick={uploadPerformanceVideoAsset} disabled={busyAction !== null}>Upload video</button>
+                <button type="button" onClick={importPerformancePoseSamples} disabled={busyAction !== null}>Pose data</button>
                 <button type="button" onClick={analyzePerformancePoseGait} disabled={busyAction !== null}>Analyze gait</button>
                 <button type="button" onClick={annotatePerformanceVideo} disabled={busyAction !== null}>Annotate</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
@@ -16563,6 +16629,15 @@ export default function HomePage() {
                     <strong>{performancePoseGaitAnalysis?.benchmark_profile ?? "world_class_sprint"}</strong>
                     <p>{performancePoseGaitAnalysis?.summary ?? "Run pose/gait analysis to compare against elite movement templates."}</p>
                   </article>
+                  <article className="mini-card">
+                    <span className="muted">Pose landmarks</span>
+                    <strong>
+                      {performancePoseGaitAnalysis?.pose_sample_count ?? performancePoseSampleBatch?.sample_count ?? 0} samples
+                    </strong>
+                    <p>
+                      {(performancePoseGaitAnalysis?.pose_sample_source_providers ?? performancePoseSampleBatch?.source_providers ?? ["template fallback"]).join(", ")}
+                    </p>
+                  </article>
                 </div>
                 {performancePoseGaitAnalysis ? (
                   <div className="task-list">
@@ -16574,6 +16649,7 @@ export default function HomePage() {
                             {metric.observed_value}{metric.unit} · optimal {metric.optimal_min}-{metric.optimal_max}{metric.unit} · score {metric.score}/10
                           </span>
                           <small>{metric.benchmark_label} · {metric.coaching_cue}</small>
+                          <small>Source: {metric.source.replaceAll("_", " ")}</small>
                         </div>
                       </article>
                     ))}
