@@ -245,6 +245,21 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
         headers=guardian_identity_headers,
     )
     assert family_response.status_code == 200
+    family_registration_response = client.get(
+        f"/api/v1/organizations/my-registration-inquiries?organization_id={onboarding['organization']['id']}",
+        headers=guardian_identity_headers,
+    )
+    assert family_registration_response.status_code == 200
+    family_registrations = family_registration_response.json()
+    family_registration_by_id = {item["id"]: item for item in family_registrations}
+    assert set(family_registration_by_id) == {repeat_inquiry["id"], inquiry["id"]}
+    amina_registration = family_registration_by_id[inquiry["id"]]
+    assert amina_registration["athlete_name"] == "Amina Runner"
+    assert amina_registration["organization_public_name"] == "Makini Track"
+    assert amina_registration["public_site_path"] == "/site/makini-track"
+    assert amina_registration["account_status"] == "linked"
+    assert amina_registration["packet_complete"] is False
+    assert "proof_of_age" in amina_registration["missing_documents"]
     linked_readiness_response = client.get(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/account-readiness"
         "?email=parent.runner@example.com"

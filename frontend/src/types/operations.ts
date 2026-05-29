@@ -467,6 +467,28 @@ export type RegistrationInquiryAccountReadinessRead = {
   recommended_action: string;
 };
 
+export type FamilyRegistrationInquiryRead = {
+  id: UUID;
+  organization_id: UUID;
+  organization_name: string;
+  organization_public_name: string | null;
+  organization_slug: string;
+  public_site_path: string;
+  athlete_name: string;
+  guardian_name: string | null;
+  email: string;
+  status: string;
+  verification_status: string;
+  guardian_contact_status: string;
+  account_status: string;
+  payment_status: string;
+  packet_complete: boolean;
+  missing_documents: string[];
+  next_steps: string[];
+  created_at: string;
+  packet_submitted_at: string | null;
+};
+
 export type RegistrationDocumentSubmission = {
   document_type: string;
   filename: string;

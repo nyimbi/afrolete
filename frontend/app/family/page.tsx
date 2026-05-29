@@ -23,6 +23,7 @@ import type {
   FamilyConsentRequestRead,
   FamilyDashboardRead,
   FamilyEventSummaryRead,
+  FamilyRegistrationInquiryRead,
   FamilyPerformanceSummaryRead,
   LocalIdentity,
   MessageRecipientRead
@@ -36,6 +37,18 @@ const defaultFamilyIdentity: LocalIdentity = {
 
 const keycloakEnabled = afroleteAuthMode === "keycloak";
 
+function registrationStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    linked: "account linked",
+    pending_link: "sign-in ready",
+    invite_ready: "account ready",
+    account_review_required: "account review needed",
+    phone_only: "email needed",
+    missing_contact: "contact pending"
+  };
+  return labels[status] ?? status.replaceAll("_", " ");
+}
+
 export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
@@ -43,6 +56,7 @@ export default function FamilyPortalPage() {
   const [inviteRelationshipId, setInviteRelationshipId] = useState("");
   const [loadedInviteKey, setLoadedInviteKey] = useState("");
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
+  const [registrations, setRegistrations] = useState<FamilyRegistrationInquiryRead[]>([]);
   const [dashboard, setDashboard] = useState<FamilyDashboardRead | null>(null);
   const [performance, setPerformance] = useState<FamilyPerformanceSummaryRead[]>([]);
   const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
@@ -176,13 +190,29 @@ export default function FamilyPortalPage() {
     setError("");
     try {
       const organizationQuery = encodeURIComponent(organizationId);
-      const [dashboardSummary, familyRows, performanceRows, eventRows, pendingRequests, appeals, aiTaskRows, inbox] = await Promise.all([
+      const [
+        dashboardSummary,
+        familyRows,
+        registrationRows,
+        performanceRows,
+        eventRows,
+        pendingRequests,
+        appeals,
+        aiTaskRows,
+        inbox
+      ] = await Promise.all([
         apiRequest<FamilyDashboardRead>(`/safeguarding/my-family/dashboard?organization_id=${organizationQuery}`, {
           identity: requestIdentity
         }),
         apiRequest<FamilyAthleteSummaryRead[]>(`/safeguarding/my-family?organization_id=${organizationQuery}`, {
           identity: requestIdentity
         }),
+        apiRequest<FamilyRegistrationInquiryRead[]>(
+          `/organizations/my-registration-inquiries?organization_id=${organizationQuery}`,
+          {
+            identity: requestIdentity
+          }
+        ),
         apiRequest<FamilyPerformanceSummaryRead[]>(
           `/safeguarding/my-family/performance?organization_id=${organizationQuery}`,
           { identity: requestIdentity }
@@ -206,6 +236,7 @@ export default function FamilyPortalPage() {
       ]);
       setDashboard(dashboardSummary);
       setFamily(familyRows);
+      setRegistrations(registrationRows);
       setPerformance(performanceRows);
       setEvents(eventRows);
       setConsentRequests(pendingRequests);
@@ -482,6 +513,10 @@ export default function FamilyPortalPage() {
             <strong>{dashboard?.child_count ?? family.length}</strong>
           </div>
           <div>
+            <span>Registration</span>
+            <strong>{registrations.filter((item) => item.status !== "converted").length}</strong>
+          </div>
+          <div>
             <span>Consent</span>
             <strong>{dashboard?.pending_consent_count ?? pendingConsentCount}</strong>
           </div>
@@ -531,6 +566,37 @@ export default function FamilyPortalPage() {
                 </article>
               ))}
               {dashboard.action_items.length === 0 ? <span>No urgent family actions</span> : null}
+            </div>
+          </section>
+        ) : null}
+
+        {registrations.length > 0 ? (
+          <section className="family-ai-appeals">
+            <div>
+              <p className="section-label">Registration</p>
+              <h2>Pending player onboarding</h2>
+              <p>Track inquiries, packet readiness, missing documents, and account handoff before staff conversion.</p>
+            </div>
+            <div className="family-appeal-list">
+              {registrations.map((registration) => (
+                <article key={registration.id}>
+                  <strong>{registration.athlete_name}</strong>
+                  <span>
+                    {registration.organization_public_name ?? registration.organization_name} ·{" "}
+                    {registration.status.replaceAll("_", " ")} · {registration.verification_status.replaceAll("_", " ")}
+                  </span>
+                  <small>
+                    {registration.packet_complete ? "Packet complete" : "Packet incomplete"} · payment{" "}
+                    {registration.payment_status.replaceAll("_", " ")} · {registrationStatusLabel(registration.account_status)}
+                  </small>
+                  <small>
+                    {registration.missing_documents.length > 0
+                      ? `Missing: ${registration.missing_documents.join(", ")}`
+                      : registration.next_steps[0] ?? "Awaiting staff review"}
+                  </small>
+                  <a href={registration.public_site_path}>Open organization site</a>
+                </article>
+              ))}
             </div>
           </section>
         ) : null}

@@ -264,6 +264,28 @@ class RegistrationInquiryAccountReadinessRead(BaseModel):
     recommended_action: str
 
 
+class FamilyRegistrationInquiryRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    organization_name: str
+    organization_public_name: str | None
+    organization_slug: str
+    public_site_path: str
+    athlete_name: str
+    guardian_name: str | None
+    email: str
+    status: str
+    verification_status: str
+    guardian_contact_status: str
+    account_status: str
+    payment_status: str
+    packet_complete: bool
+    missing_documents: list[str]
+    next_steps: list[str]
+    created_at: datetime
+    packet_submitted_at: datetime | None
+
+
 class RegistrationDocumentSubmission(BaseModel):
     document_type: str = Field(min_length=2, max_length=80)
     filename: str = Field(min_length=2, max_length=240)

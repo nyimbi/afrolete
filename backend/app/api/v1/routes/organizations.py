@@ -12,6 +12,7 @@ from app.schemas.organization import (
     CommitteeMemberAdd,
     CommitteeMembershipRead,
     CommitteeRead,
+    FamilyRegistrationInquiryRead,
     MemberAdd,
     MembershipRead,
     OrganizationCreate,
@@ -62,6 +63,7 @@ from app.services.organizations import (
     get_organization_for_identity,
     get_public_site,
     organization_handle_availability,
+    list_family_registration_inquiries,
     list_committees,
     list_organizations_for_identity,
     list_registration_inquiries,
@@ -418,6 +420,15 @@ async def search_public_organizations_route(
             limit=limit,
         )
     ]
+
+
+@router.get("/my-registration-inquiries", response_model=list[FamilyRegistrationInquiryRead])
+async def list_family_registration_inquiries_route(
+    organization_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> list[FamilyRegistrationInquiryRead]:
+    return await list_family_registration_inquiries(db, identity, organization_id)
 
 
 @router.get("/handles/availability", response_model=OrganizationHandleAvailabilityRead)

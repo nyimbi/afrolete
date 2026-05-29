@@ -36,6 +36,7 @@ from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRost
 from app.schemas.organization import (
     CommitteeCreate,
     CommitteeMemberAdd,
+    FamilyRegistrationInquiryRead,
     MemberAdd,
     OrganizationHandleAvailabilityRead,
     OrganizationCreate,
@@ -777,6 +778,70 @@ async def get_public_registration_account_readiness(
         can_sign_in=account_status in {"linked", "pending_link", "invite_ready"},
         recommended_action=recommended_action,
     )
+
+
+async def list_family_registration_inquiries(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID | None = None,
+) -> list[FamilyRegistrationInquiryRead]:
+    email_key = normalize_contact_email(identity.email)
+    statement = (
+        select(RegistrationInquiry, Organization)
+        .join(Organization, Organization.id == RegistrationInquiry.organization_id)
+        .where(
+            or_(
+                RegistrationInquiry.guardian_person_id == identity.person_id,
+                func.lower(RegistrationInquiry.email) == email_key,
+            )
+        )
+        .order_by(RegistrationInquiry.created_at.desc())
+        .limit(50)
+    )
+    if organization_id is not None:
+        statement = statement.where(RegistrationInquiry.organization_id == organization_id)
+
+    rows = (await db.execute(statement)).all()
+    current_user = await db.get(AppUser, identity.user_id)
+    results: list[FamilyRegistrationInquiryRead] = []
+    for inquiry, organization in rows:
+        guardian = await db.get(Person, inquiry.guardian_person_id) if inquiry.guardian_person_id else None
+        linked_user = current_user if guardian is not None and current_user and current_user.person_id == guardian.id else None
+        email_user = (
+            current_user
+            if current_user is not None and normalize_contact_email(current_user.email) == normalize_contact_email(inquiry.email)
+            else None
+        )
+        account_status, _recommended_action = registration_guardian_account_status(
+            guardian,
+            linked_user,
+            email_user,
+        )
+        packet = registration_packet_summary(inquiry)
+        results.append(
+            FamilyRegistrationInquiryRead(
+                id=inquiry.id,
+                organization_id=inquiry.organization_id,
+                organization_name=organization.name,
+                organization_public_name=organization.public_name,
+                organization_slug=organization.slug,
+                public_site_path=public_site_path(organization),
+                athlete_name=inquiry.athlete_name,
+                guardian_name=inquiry.guardian_name,
+                email=inquiry.email,
+                status=inquiry.status,
+                verification_status=inquiry.verification_status,
+                guardian_contact_status=inquiry.guardian_contact_status,
+                account_status=account_status,
+                payment_status=inquiry.payment_status,
+                packet_complete=bool(packet["packet_complete"]),
+                missing_documents=[str(item) for item in packet["missing_documents"]],
+                next_steps=[str(item) for item in packet["next_steps"]],
+                created_at=inquiry.created_at,
+                packet_submitted_at=inquiry.packet_submitted_at,
+            )
+        )
+    return results
 
 
 def registration_guardian_account_status(
