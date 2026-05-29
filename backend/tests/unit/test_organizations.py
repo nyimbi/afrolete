@@ -221,6 +221,21 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert repeat_inquiry["guardian_person_id"] == inquiry["guardian_person_id"]
     assert repeat_inquiry["guardian_contact_status"] == "pending_account"
 
+    premature_conversion_response = client.post(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/{inquiry['id']}/convert",
+        headers=identity_headers,
+        json={
+            "team_id": onboarding["starter_team"]["id"],
+            "role": "player",
+            "create_guardian": True,
+            "send_guardian_invite": False,
+        },
+    )
+    assert premature_conversion_response.status_code == 409
+    premature_detail = premature_conversion_response.json()["detail"]
+    assert premature_detail["message"] == "Registration packet is not ready for conversion"
+    assert "proof_of_age" in premature_detail["missing_documents"]
+
     readiness_response = client.get(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/account-readiness"
         "?email=parent.runner@example.com"

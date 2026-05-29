@@ -1422,6 +1422,16 @@ async def convert_registration_inquiry(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
     if inquiry.status == "converted":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Inquiry already converted")
+    packet = registration_packet_summary(inquiry)
+    if not packet["packet_complete"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Registration packet is not ready for conversion",
+                "next_steps": packet["next_steps"],
+                "missing_documents": packet["missing_documents"],
+            },
+        )
 
     target_team_id = payload.team_id or inquiry.team_id
     team = None

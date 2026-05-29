@@ -533,8 +533,14 @@ export default function AdmissionsPage() {
                   <button type="button" onClick={() => sendFollowUp(inquiry)} disabled={busy !== "" || inquiry.status === "converted"}>
                     Follow up
                   </button>
-                  <button type="button" className="primary" onClick={() => convertInquiry(inquiry)} disabled={busy !== "" || inquiry.status === "converted"}>
-                    {busy === `convert-${inquiry.id}` ? "Converting" : "Convert"}
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => convertInquiry(inquiry)}
+                    disabled={busy !== "" || inquiry.status === "converted" || !inquiry.packet_complete}
+                    title={!inquiry.packet_complete ? "Complete documents, consent, emergency details, medical details, and payment before conversion." : undefined}
+                  >
+                    {busy === `convert-${inquiry.id}` ? "Converting" : inquiry.packet_complete ? "Convert" : "Packet incomplete"}
                   </button>
                 </div>
               </article>
