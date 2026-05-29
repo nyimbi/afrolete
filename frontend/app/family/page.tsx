@@ -7,6 +7,7 @@ import {
   completeKeycloakCallbackFromUrl,
   getStoredAuthSession,
   startKeycloakLogin,
+  startKeycloakRegistration,
   type AuthSession
 } from "@/lib/auth";
 import { afroleteAuthMode, keycloakClientId, keycloakIssuer } from "@/lib/config";
@@ -132,6 +133,15 @@ export default function FamilyPortalPage() {
     void startKeycloakLogin({ loginHint: identity.email || undefined, prompt: "login" }).catch((caught) => {
       setBusy(false);
       setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
+    });
+  };
+
+  const beginKeycloakRegistration = () => {
+    setBusy(true);
+    setError("");
+    void startKeycloakRegistration({ loginHint: identity.email || undefined }).catch((caught) => {
+      setBusy(false);
+      setError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
     });
   };
 
@@ -443,9 +453,14 @@ export default function FamilyPortalPage() {
             authSession ? (
               <button type="button" onClick={signOut} disabled={busy}>Sign out</button>
             ) : (
-              <button type="button" onClick={beginKeycloakLogin} disabled={busy}>
-                Sign in
-              </button>
+              <div className="family-auth-actions">
+                <button type="button" onClick={beginKeycloakRegistration} disabled={busy}>
+                  Create account
+                </button>
+                <button type="button" onClick={beginKeycloakLogin} disabled={busy}>
+                  Sign in
+                </button>
+              </div>
             )
           ) : null}
           <button type="submit" disabled={busy}>{busy ? "Loading" : "Load"}</button>

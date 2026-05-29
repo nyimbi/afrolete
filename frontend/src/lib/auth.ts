@@ -66,31 +66,11 @@ export function clearStoredAuthSession(): void {
 }
 
 export async function startKeycloakLogin(options: KeycloakLoginOptions = {}): Promise<void> {
-  assertBrowser();
+  window.location.assign((await keycloakAuthorizationUrl("auth", options)).toString());
+}
 
-  const verifier = randomString(64);
-  const state = randomString(32);
-  const challenge = await codeChallenge(verifier);
-
-  window.sessionStorage.setItem(VERIFIER_KEY, verifier);
-  window.sessionStorage.setItem(STATE_KEY, state);
-
-  const url = new URL(`${keycloakIssuer}/protocol/openid-connect/auth`);
-  url.searchParams.set("client_id", keycloakClientId);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("redirect_uri", redirectUri());
-  url.searchParams.set("scope", keycloakScope);
-  url.searchParams.set("state", state);
-  url.searchParams.set("code_challenge", challenge);
-  url.searchParams.set("code_challenge_method", "S256");
-  if (options.loginHint) {
-    url.searchParams.set("login_hint", options.loginHint);
-  }
-  if (options.prompt) {
-    url.searchParams.set("prompt", options.prompt);
-  }
-
-  window.location.assign(url.toString());
+export async function startKeycloakRegistration(options: KeycloakLoginOptions = {}): Promise<void> {
+  window.location.assign((await keycloakAuthorizationUrl("registrations", options)).toString());
 }
 
 export async function completeKeycloakCallbackFromUrl(): Promise<AuthSession | null> {
@@ -174,6 +154,36 @@ function clearCallbackParams(url: URL): void {
   url.searchParams.delete("iss");
   const query = url.searchParams.toString();
   window.history.replaceState(null, document.title, `${url.pathname}${query ? `?${query}` : ""}${url.hash}`);
+}
+
+async function keycloakAuthorizationUrl(
+  endpoint: "auth" | "registrations",
+  options: KeycloakLoginOptions,
+): Promise<URL> {
+  assertBrowser();
+
+  const verifier = randomString(64);
+  const state = randomString(32);
+  const challenge = await codeChallenge(verifier);
+
+  window.sessionStorage.setItem(VERIFIER_KEY, verifier);
+  window.sessionStorage.setItem(STATE_KEY, state);
+
+  const url = new URL(`${keycloakIssuer}/protocol/openid-connect/${endpoint}`);
+  url.searchParams.set("client_id", keycloakClientId);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("redirect_uri", redirectUri());
+  url.searchParams.set("scope", keycloakScope);
+  url.searchParams.set("state", state);
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  if (options.loginHint) {
+    url.searchParams.set("login_hint", options.loginHint);
+  }
+  if (options.prompt) {
+    url.searchParams.set("prompt", options.prompt);
+  }
+  return url;
 }
 
 function decodeJwtClaims(token: string): JwtClaims {

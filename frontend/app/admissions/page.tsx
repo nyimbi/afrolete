@@ -7,6 +7,7 @@ import {
   completeKeycloakCallbackFromUrl,
   getStoredAuthSession,
   startKeycloakLogin,
+  startKeycloakRegistration,
   type AuthSession
 } from "@/lib/auth";
 import { afroleteAuthMode, keycloakClientId, keycloakIssuer } from "@/lib/config";
@@ -145,6 +146,14 @@ export default function AdmissionsPage() {
     void startKeycloakLogin().catch((caught) => {
       setBusy("");
       setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
+    });
+  };
+
+  const beginKeycloakRegistration = () => {
+    setBusy("keycloak");
+    void startKeycloakRegistration().catch((caught) => {
+      setBusy("");
+      setError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
     });
   };
 
@@ -352,7 +361,14 @@ export default function AdmissionsPage() {
           <strong>{keycloakEnabled && !authSession ? "No browser session" : signedInLabel}</strong>
           {keycloakEnabled ? <small>{keycloakClientId} at {keycloakIssuer}</small> : <small>Used for local API headers.</small>}
           {keycloakEnabled ? (
-            authSession ? <button type="button" onClick={signOut}>Sign out</button> : <button type="button" onClick={beginKeycloakLogin}>Sign in</button>
+            authSession ? (
+              <button type="button" onClick={signOut}>Sign out</button>
+            ) : (
+              <div className="admissions-auth-actions">
+                <button type="button" onClick={beginKeycloakRegistration}>Create account</button>
+                <button type="button" onClick={beginKeycloakLogin}>Sign in</button>
+              </div>
+            )
           ) : null}
         </div>
       </section>

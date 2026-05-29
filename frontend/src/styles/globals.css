@@ -1076,6 +1076,12 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.family-auth-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
 .family-metrics {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -2500,6 +2506,12 @@ textarea:focus {
   justify-self: start;
 }
 
+.admissions-auth-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
 .admissions-error {
   margin: 0 28px 18px;
 }
@@ -2728,6 +2740,11 @@ textarea:focus {
 
 .register-auth-card {
   display: grid;
+}
+
+.register-auth-actions {
+  display: grid;
+  gap: 8px;
 }
 
 .register-auth-card button,

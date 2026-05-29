@@ -7,6 +7,7 @@ import {
   completeKeycloakCallbackFromUrl,
   getStoredAuthSession,
   startKeycloakLogin,
+  startKeycloakRegistration,
   type AuthSession
 } from "@/lib/auth";
 import { afroleteAuthMode, keycloakClientId, keycloakIssuer } from "@/lib/config";
@@ -159,6 +160,16 @@ export default function RegistrationPage() {
       setBusy("");
       setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
     });
+  };
+
+  const beginKeycloakRegistration = () => {
+    setBusy("keycloak");
+    void startKeycloakRegistration({ loginHint: organizationForm.contact_email || identity.email || undefined }).catch(
+      (caught) => {
+        setBusy("");
+        setError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
+      }
+    );
   };
 
   const signOut = () => {
@@ -415,7 +426,10 @@ export default function RegistrationPage() {
             authSession ? (
               <button type="button" onClick={signOut}>Sign out</button>
             ) : (
-              <button type="button" onClick={beginKeycloakLogin} disabled={busy !== ""}>Sign in</button>
+              <div className="register-auth-actions">
+                <button type="button" onClick={beginKeycloakRegistration} disabled={busy !== ""}>Create account</button>
+                <button type="button" onClick={beginKeycloakLogin} disabled={busy !== ""}>Sign in</button>
+              </div>
             )
           ) : null}
         </div>
