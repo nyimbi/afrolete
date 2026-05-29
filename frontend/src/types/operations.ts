@@ -2645,6 +2645,18 @@ export type BillingPlanChangeRead = BillingProrationQuoteRead & {
   applied_at: string;
 };
 
+export type BillingSubscriptionLifecycleRead = {
+  organization_id: UUID;
+  subscription_id: UUID;
+  action: string;
+  previous_status: SubscriptionStatus;
+  status: SubscriptionStatus;
+  cancel_at_period_end: boolean;
+  effective_on: string;
+  message: string;
+  subscription: SubscriptionRead;
+};
+
 export type BillingDunningNoticeRead = {
   organization_id: UUID;
   invoice_id: UUID;

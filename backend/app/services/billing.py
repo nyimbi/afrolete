@@ -37,6 +37,8 @@ from app.schemas.billing import (
     BillingPlanCreate,
     BillingRecurringInvoiceRunCreate,
     BillingRecurringInvoiceRunRead,
+    BillingSubscriptionLifecycleCreate,
+    BillingSubscriptionLifecycleRead,
     SaaSInvoiceCheckoutLinkRead,
     SaaSInvoiceCheckoutSettlementCreate,
     SaaSInvoiceCheckoutSettlementRead,
@@ -757,6 +759,79 @@ async def apply_plan_change(
         "subscription_status": subscription.status,
         "applied_at": datetime.now(UTC),
     }
+
+
+async def update_subscription_lifecycle(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    subscription_id: UUID,
+    payload: BillingSubscriptionLifecycleCreate,
+    authz: AuthorizationService,
+) -> BillingSubscriptionLifecycleRead:
+    await ensure_manage_billing(authz, identity, payload.organization_id)
+    subscription = await get_subscription_for_organization(db, subscription_id, payload.organization_id)
+    previous_status = subscription.status
+    effective_on = payload.effective_on or date.today()
+    action = payload.action
+    if action == "cancel_at_period_end":
+        if subscription.status == SubscriptionStatus.CANCELLED:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Cancelled subscriptions cannot be scheduled for cancellation",
+            )
+        subscription.cancel_at_period_end = True
+        message = "Subscription will cancel at the current period end."
+    elif action == "cancel_now":
+        subscription.status = SubscriptionStatus.CANCELLED
+        subscription.cancel_at_period_end = False
+        subscription.next_billing_on = None
+        message = "Subscription cancelled immediately."
+    elif action == "undo_cancel":
+        if not subscription.cancel_at_period_end and subscription.status != SubscriptionStatus.CANCELLED:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Subscription is not pending cancellation",
+            )
+        subscription.cancel_at_period_end = False
+        if subscription.status == SubscriptionStatus.CANCELLED:
+            subscription.status = SubscriptionStatus.ACTIVE
+            subscription.next_billing_on = subscription.current_period_end
+        message = "Subscription cancellation removed."
+    elif action == "pause":
+        if subscription.status == SubscriptionStatus.CANCELLED:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Cancelled subscriptions cannot be paused")
+        subscription.status = SubscriptionStatus.PAUSED
+        subscription.cancel_at_period_end = False
+        message = "Subscription paused."
+    else:
+        subscription.status = SubscriptionStatus.ACTIVE
+        subscription.cancel_at_period_end = False
+        if subscription.next_billing_on is None:
+            subscription.next_billing_on = subscription.current_period_end
+        message = "Subscription resumed."
+
+    subscription.notes = subscription_lifecycle_note(
+        subscription.notes,
+        action,
+        previous_status,
+        subscription.status,
+        effective_on,
+        payload.reason,
+        subscription.cancel_at_period_end,
+    )
+    await db.commit()
+    await db.refresh(subscription)
+    return BillingSubscriptionLifecycleRead(
+        organization_id=subscription.organization_id,
+        subscription_id=subscription.id,
+        action=action,
+        previous_status=previous_status,
+        status=subscription.status,
+        cancel_at_period_end=subscription.cancel_at_period_end,
+        effective_on=effective_on,
+        message=message,
+        subscription=subscription_read(subscription),
+    )
 
 
 async def dunning_notice(
@@ -1609,6 +1684,27 @@ def saas_invoice_hosted_checkout_read(
     )
 
 
+def subscription_read(subscription: TenantSubscription):
+    return {
+        "id": subscription.id,
+        "organization_id": subscription.organization_id,
+        "billing_plan_id": subscription.billing_plan_id,
+        "billing_cycle": subscription.billing_cycle,
+        "current_period_start": subscription.current_period_start,
+        "current_period_end": subscription.current_period_end,
+        "trial_ends_on": subscription.trial_ends_on,
+        "next_billing_on": subscription.next_billing_on,
+        "seats_purchased": subscription.seats_purchased,
+        "negotiated_price": subscription.negotiated_price,
+        "discount_code": subscription.discount_code,
+        "external_customer_id": subscription.external_customer_id,
+        "external_subscription_id": subscription.external_subscription_id,
+        "notes": subscription.notes,
+        "status": subscription.status,
+        "cancel_at_period_end": subscription.cancel_at_period_end,
+    }
+
+
 async def create_entitlement(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1778,4 +1874,23 @@ def subscription_plan_change_notes(
     )
     if note:
         entry = f"{entry} Note: {note}"
+    return "\n".join(part for part in [existing, entry] if part)
+
+
+def subscription_lifecycle_note(
+    existing: str | None,
+    action: str,
+    previous_status: SubscriptionStatus,
+    new_status: SubscriptionStatus,
+    effective_on: date,
+    reason: str | None,
+    cancel_at_period_end: bool,
+) -> str:
+    entry = (
+        f"{datetime.now(UTC).date()}: lifecycle {action} effective {effective_on}; "
+        f"status {previous_status.value} -> {new_status.value}; "
+        f"cancel_at_period_end={cancel_at_period_end}."
+    )
+    if reason:
+        entry = f"{entry} Reason: {reason}"
     return "\n".join(part for part in [existing, entry] if part)

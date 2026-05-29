@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -261,6 +262,25 @@ class BillingPlanChangeRead(BillingProrationQuoteRead):
     applied_price: Decimal
     subscription_status: SubscriptionStatus
     applied_at: datetime
+
+
+class BillingSubscriptionLifecycleCreate(BaseModel):
+    organization_id: UUID
+    action: Literal["cancel_at_period_end", "cancel_now", "undo_cancel", "pause", "resume"]
+    effective_on: date | None = None
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class BillingSubscriptionLifecycleRead(BaseModel):
+    organization_id: UUID
+    subscription_id: UUID
+    action: str
+    previous_status: SubscriptionStatus
+    status: SubscriptionStatus
+    cancel_at_period_end: bool
+    effective_on: date
+    message: str
+    subscription: SubscriptionRead
 
 
 class BillingDunningNoticeRead(BaseModel):

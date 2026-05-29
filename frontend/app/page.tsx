@@ -72,6 +72,7 @@ import type {
   BillingProrationQuoteRead,
   BillingRecurringInvoiceRunRead,
   BillingSummaryRead,
+  BillingSubscriptionLifecycleRead,
   BillingTaxFilingRead,
   BillingTaxQuoteRead,
   ChannelPreference,
@@ -1605,6 +1606,7 @@ export default function HomePage() {
   const [billingTaxFiling, setBillingTaxFiling] = useState<BillingTaxFilingRead | null>(null);
   const [billingProration, setBillingProration] = useState<BillingProrationQuoteRead | null>(null);
   const [billingPlanChange, setBillingPlanChange] = useState<BillingPlanChangeRead | null>(null);
+  const [billingLifecycle, setBillingLifecycle] = useState<BillingSubscriptionLifecycleRead | null>(null);
   const [billingDunning, setBillingDunning] = useState<BillingDunningNoticeRead | null>(null);
   const [billingDunningDelivery, setBillingDunningDelivery] =
     useState<BillingDunningDeliveryRead | null>(null);
@@ -11450,6 +11452,41 @@ export default function HomePage() {
     );
   };
 
+  const updateBillingSubscriptionLifecycle = (
+    action: "cancel_at_period_end" | "cancel_now" | "undo_cancel" | "pause" | "resume"
+  ) => {
+    if (!selectedOrganizationId || !selectedSubscriptionId) {
+      addLog("Create or select a subscription first", "bad");
+      return;
+    }
+    runAction(
+      `billing-lifecycle-${action}`,
+      () =>
+        apiRequest<BillingSubscriptionLifecycleRead>(
+          `/billing/subscriptions/${selectedSubscriptionId}/lifecycle`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              action,
+              effective_on: billingForm.period_end,
+              reason: `Console ${action.replaceAll("_", " ")} action.`
+            }
+          }
+        ),
+      (lifecycle) => {
+        setBillingLifecycle(lifecycle);
+        setSubscriptions((current) => [
+          lifecycle.subscription,
+          ...current.filter((item) => item.id !== lifecycle.subscription.id)
+        ]);
+        addLog(lifecycle.message, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
   const prepareDunningNotice = () => {
     if (!selectedOrganizationId || !selectedSaasInvoiceId) {
       addLog("Create or select a SaaS invoice first", "bad");
@@ -14651,6 +14688,10 @@ export default function HomePage() {
                 <button type="button" onClick={deliverBillingTaxFiling} disabled={busyAction !== null}>File Tax</button>
                 <button type="button" onClick={quoteBillingProration} disabled={busyAction !== null}>Prorate</button>
                 <button type="button" onClick={applyBillingPlanChange} disabled={busyAction !== null}>Apply</button>
+                <button type="button" onClick={() => updateBillingSubscriptionLifecycle("cancel_at_period_end")} disabled={busyAction !== null}>Cancel end</button>
+                <button type="button" onClick={() => updateBillingSubscriptionLifecycle("undo_cancel")} disabled={busyAction !== null}>Undo</button>
+                <button type="button" onClick={() => updateBillingSubscriptionLifecycle("pause")} disabled={busyAction !== null}>Pause</button>
+                <button type="button" onClick={() => updateBillingSubscriptionLifecycle("resume")} disabled={busyAction !== null}>Resume</button>
                 <button type="button" onClick={createBillingEntitlement} disabled={busyAction !== null}>Entitle</button>
               </div>
             </div>
@@ -14738,6 +14779,16 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {billingLifecycle ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{billingLifecycle.action.replaceAll("_", " ")} · {billingLifecycle.status}</strong>
+                    <span>
+                      {billingLifecycle.message} · cancel end {billingLifecycle.cancel_at_period_end ? "yes" : "no"}
+                    </span>
+                  </div>
+                </article>
+              ) : null}
               {subscriptions.slice(0, 3).map((subscription) => (
                 <button
                   type="button"
@@ -14747,7 +14798,7 @@ export default function HomePage() {
                 >
                   <div>
                     <strong>{subscription.status} · {subscription.billing_cycle}</strong>
-                    <span>{subscription.current_period_start} to {subscription.current_period_end}</span>
+                    <span>{subscription.current_period_start} to {subscription.current_period_end} · cancel end {subscription.cancel_at_period_end ? "yes" : "no"}</span>
                   </div>
                 </button>
               ))}

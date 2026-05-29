@@ -336,3 +336,63 @@ def test_saas_invoice_hosted_checkout_settles_invoice(client, identity_headers) 
     paid = next(item for item in invoices if item["id"] == invoice["id"])
     assert paid["status"] == "paid"
     assert paid["amount_paid"] == "249.00"
+
+
+def test_subscription_lifecycle_cancel_pause_resume_and_undo(client, identity_headers) -> None:
+    organization, _, subscription = create_billing_context(client, identity_headers)
+
+    cancel_response = client.post(
+        f"/api/v1/billing/subscriptions/{subscription['id']}/lifecycle",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "action": "cancel_at_period_end",
+            "effective_on": "2026-06-15",
+            "reason": "Customer requested end-of-season cancellation.",
+        },
+    )
+    assert cancel_response.status_code == 200
+    cancel = cancel_response.json()
+    assert cancel["status"] == "active"
+    assert cancel["cancel_at_period_end"] is True
+    assert cancel["subscription"]["cancel_at_period_end"] is True
+
+    undo_response = client.post(
+        f"/api/v1/billing/subscriptions/{subscription['id']}/lifecycle",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "action": "undo_cancel",
+            "effective_on": "2026-06-16",
+        },
+    )
+    assert undo_response.status_code == 200
+    assert undo_response.json()["cancel_at_period_end"] is False
+
+    pause_response = client.post(
+        f"/api/v1/billing/subscriptions/{subscription['id']}/lifecycle",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "action": "pause",
+            "effective_on": "2026-06-20",
+            "reason": "Off-season hold.",
+        },
+    )
+    assert pause_response.status_code == 200
+    assert pause_response.json()["status"] == "paused"
+
+    resume_response = client.post(
+        f"/api/v1/billing/subscriptions/{subscription['id']}/lifecycle",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "action": "resume",
+            "effective_on": "2026-06-25",
+        },
+    )
+    assert resume_response.status_code == 200
+    resumed = resume_response.json()
+    assert resumed["previous_status"] == "paused"
+    assert resumed["status"] == "active"
+    assert "lifecycle resume" in resumed["subscription"]["notes"]

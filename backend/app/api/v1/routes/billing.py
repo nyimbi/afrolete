@@ -27,6 +27,8 @@ from app.schemas.billing import (
     BillingRecurringInvoiceRunCreate,
     BillingRecurringInvoiceRunRead,
     BillingSummaryRead,
+    BillingSubscriptionLifecycleCreate,
+    BillingSubscriptionLifecycleRead,
     BillingTaxFilingRead,
     BillingTaxQuoteRead,
     SaaSInvoiceCheckoutLinkRead,
@@ -76,6 +78,7 @@ from app.services.billing import (
     run_payment_retry_scheduler,
     run_recurring_invoice_scheduler,
     settle_saas_invoice_checkout,
+    update_subscription_lifecycle,
     validate_payment_webhook_signature,
 )
 
@@ -140,6 +143,17 @@ async def apply_plan_change_route(
     return BillingPlanChangeRead(
         **await apply_plan_change(db, identity, subscription_id, payload, authz)
     )
+
+
+@router.post("/subscriptions/{subscription_id}/lifecycle", response_model=BillingSubscriptionLifecycleRead)
+async def update_subscription_lifecycle_route(
+    subscription_id: UUID,
+    payload: BillingSubscriptionLifecycleCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BillingSubscriptionLifecycleRead:
+    return await update_subscription_lifecycle(db, identity, subscription_id, payload, authz)
 
 
 @router.post("/meters", response_model=UsageMeterRead, status_code=status.HTTP_201_CREATED)
