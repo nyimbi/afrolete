@@ -80,6 +80,7 @@ from app.schemas.safeguarding import (
     ComplianceCredentialUpdate,
     ConsentRequestCreate,
     FamilyAthleteSummaryRead,
+    FamilyCoordinationRowRead,
     FamilyDashboardActionRead,
     FamilyDashboardRead,
     FamilyScheduleConflictRead,
@@ -5750,6 +5751,178 @@ async def get_my_family_dashboard(
         action_items=action_items,
         schedule_conflicts=schedule_conflicts,
     )
+
+
+async def get_my_family_coordination(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+) -> list[FamilyCoordinationRowRead]:
+    from app.services.organizations import list_family_registration_inquiries
+
+    family = await list_my_family(db, identity, organization_id)
+    registrations = await list_family_registration_inquiries(db, identity, organization_id)
+    consent_requests = await list_my_family_consent_requests(db, identity, organization_id)
+    events = await list_my_family_events(db, identity, organization_id, limit=100)
+    performance = await list_my_family_performance(db, identity, organization_id)
+    ai_tasks = await family_ai_task_rows(db, identity, organization_id)
+
+    rows: dict[str, FamilyCoordinationRowRead] = {}
+    name_to_key: dict[str, str] = {}
+    for athlete in family:
+        key = str(athlete.athlete_person_id)
+        rows[key] = FamilyCoordinationRowRead(
+            key=key,
+            athlete_person_id=athlete.athlete_person_id,
+            athlete_name=athlete.athlete_name,
+            relationship=athlete.relationship,
+            registration_count=0,
+            missing_document_count=0,
+            pending_consent_count=0,
+            rsvp_needed_count=0,
+            clearance_blocked_count=0,
+            active_goal_count=0,
+            ai_recommendation_count=0,
+            next_action_label="Current",
+            next_action_detail="No urgent family action is pending for this child.",
+            action_href=None,
+            urgency_score=0,
+        )
+        name_to_key[normalize_family_name(athlete.athlete_name)] = key
+
+    for registration in registrations:
+        if registration.status == "converted":
+            continue
+        key = name_to_key.get(normalize_family_name(registration.athlete_name), f"registration-{registration.id}")
+        row = ensure_family_coordination_row(rows, key, registration.athlete_name, "registration")
+        row.registration_count += 1
+        row.missing_document_count += len(registration.missing_documents)
+        resume_href = (
+            f"{registration.public_site_path}?"
+            f"{urlencode({'inquiry_id': str(registration.id), 'email': registration.email})}"
+        )
+        if not registration.packet_complete:
+            row.next_action_label = "Continue packet"
+            row.next_action_detail = (
+                f"Missing {', '.join(registration.missing_documents)} before staff can verify this registration."
+                if registration.missing_documents
+                else registration.next_steps[0]
+                if registration.next_steps
+                else "Finish the registration packet before staff conversion."
+            )
+            row.action_href = resume_href
+        elif row.next_action_label == "Current":
+            row.next_action_label = "Review admissions"
+            row.next_action_detail = "Packet is complete and waiting for admissions review."
+            row.action_href = resume_href
+
+    for request in consent_requests:
+        row = ensure_family_coordination_row(
+            rows,
+            str(request.athlete_person_id),
+            request.athlete_name,
+            "guardian",
+            athlete_person_id=request.athlete_person_id,
+        )
+        row.pending_consent_count += 1
+        if row.next_action_label in {"Current", "Review admissions"}:
+            row.next_action_label = "Respond to consent"
+            row.next_action_detail = f"{request.scope_type.value} consent is pending through {request.channel.value}."
+            row.action_href = None
+
+    for event in events:
+        row = ensure_family_coordination_row(
+            rows,
+            str(event.athlete_person_id),
+            event.athlete_name,
+            "guardian",
+            athlete_person_id=event.athlete_person_id,
+        )
+        if event.attendance_status is None:
+            row.rsvp_needed_count += 1
+            if row.next_action_label in {"Current", "Review admissions"}:
+                row.next_action_label = "RSVP"
+                row.next_action_detail = f"{event.title} needs a family RSVP."
+                row.action_href = None
+        if event.clearance_status != ParticipationClearanceStatus.CLEARED:
+            row.clearance_blocked_count += 1
+            if row.next_action_label in {"Current", "Review admissions", "RSVP"}:
+                row.next_action_label = "Resolve clearance"
+                row.next_action_detail = f"{event.title} is blocked: {event.reason}"
+                row.action_href = None
+
+    for item in performance:
+        row = ensure_family_coordination_row(
+            rows,
+            str(item.athlete_person_id),
+            item.athlete_name,
+            "guardian",
+            athlete_person_id=item.athlete_person_id,
+        )
+        row.active_goal_count = item.active_goal_count
+
+    for task in ai_tasks:
+        athlete_name = task.get("athlete_name")
+        status_value = str(task.get("status") or "")
+        if not athlete_name or status_value in {"completed", "cancelled"}:
+            continue
+        athlete_name_text = str(athlete_name)
+        key = name_to_key.get(normalize_family_name(athlete_name_text), f"ai-{normalize_family_name(athlete_name_text)}")
+        row = ensure_family_coordination_row(rows, key, athlete_name_text, "AI recommendation")
+        row.ai_recommendation_count += 1
+        if row.next_action_label in {"Current", "Review admissions"}:
+            row.next_action_label = "Review AI"
+            row.next_action_detail = str(task.get("simple_explanation") or task.get("title") or "Review the AI recommendation.")
+            row.action_href = None
+
+    for row in rows.values():
+        row.urgency_score = family_coordination_urgency(row)
+
+    return sorted(rows.values(), key=lambda item: (-item.urgency_score, item.athlete_name))
+
+
+def ensure_family_coordination_row(
+    rows: dict[str, FamilyCoordinationRowRead],
+    key: str,
+    athlete_name: str,
+    relationship: str,
+    athlete_person_id: UUID | None = None,
+) -> FamilyCoordinationRowRead:
+    if key in rows:
+        return rows[key]
+    rows[key] = FamilyCoordinationRowRead(
+        key=key,
+        athlete_person_id=athlete_person_id,
+        athlete_name=athlete_name,
+        relationship=relationship,
+        registration_count=0,
+        missing_document_count=0,
+        pending_consent_count=0,
+        rsvp_needed_count=0,
+        clearance_blocked_count=0,
+        active_goal_count=0,
+        ai_recommendation_count=0,
+        next_action_label="Current",
+        next_action_detail="No urgent family action is pending for this child.",
+        action_href=None,
+        urgency_score=0,
+    )
+    return rows[key]
+
+
+def family_coordination_urgency(row: FamilyCoordinationRowRead) -> int:
+    return (
+        row.missing_document_count * 8
+        + row.pending_consent_count * 7
+        + row.clearance_blocked_count * 6
+        + row.rsvp_needed_count * 4
+        + row.registration_count * 3
+        + row.ai_recommendation_count * 2
+    )
+
+
+def normalize_family_name(value: str) -> str:
+    return sub(r"\s+", " ", value.strip().lower())
 
 
 async def family_ai_task_rows(

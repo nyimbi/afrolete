@@ -21,6 +21,7 @@ import type {
   ConsentStatus,
   FamilyAthleteSummaryRead,
   FamilyConsentRequestRead,
+  FamilyCoordinationRowRead,
   FamilyDashboardRead,
   FamilyEventSummaryRead,
   FamilyRegistrationInquiryRead,
@@ -64,22 +65,6 @@ function currentFamilyReturnTo(): string {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
-type FamilyCoordinationRow = {
-  key: string;
-  athleteName: string;
-  relationship: string;
-  registrationCount: number;
-  missingDocumentCount: number;
-  pendingConsentCount: number;
-  rsvpNeededCount: number;
-  clearanceBlockedCount: number;
-  activeGoalCount: number;
-  aiRecommendationCount: number;
-  nextActionLabel: string;
-  nextActionDetail: string;
-  actionHref: string | null;
-};
-
 export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
@@ -93,6 +78,7 @@ export default function FamilyPortalPage() {
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
   const [registrations, setRegistrations] = useState<FamilyRegistrationInquiryRead[]>([]);
   const [dashboard, setDashboard] = useState<FamilyDashboardRead | null>(null);
+  const [coordinationRows, setCoordinationRows] = useState<FamilyCoordinationRowRead[]>([]);
   const [performance, setPerformance] = useState<FamilyPerformanceSummaryRead[]>([]);
   const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
   const [consentRequests, setConsentRequests] = useState<FamilyConsentRequestRead[]>([]);
@@ -219,10 +205,6 @@ export default function FamilyPortalPage() {
 
   const unreadCount = items.filter((item) => item.delivery_status !== "read").length;
   const pendingConsentCount = consentRequests.length;
-  const familyCoordinationRows = useMemo(
-    () => buildFamilyCoordinationRows(family, registrations, consentRequests, events, performance, aiTasks),
-    [aiTasks, consentRequests, events, family, performance, registrations]
-  );
 
   const loadWorkspace = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -248,6 +230,7 @@ export default function FamilyPortalPage() {
         registrationRows,
         performanceRows,
         eventRows,
+        coordination,
         pendingRequests,
         appeals,
         aiTaskRows,
@@ -272,6 +255,9 @@ export default function FamilyPortalPage() {
         apiRequest<FamilyEventSummaryRead[]>(`/safeguarding/my-family/events?organization_id=${organizationQuery}`, {
           identity: requestIdentity
         }),
+        apiRequest<FamilyCoordinationRowRead[]>(`/safeguarding/my-family/coordination?organization_id=${organizationQuery}`, {
+          identity: requestIdentity
+        }),
         apiRequest<FamilyConsentRequestRead[]>(
           `/safeguarding/my-family/consent-requests?organization_id=${organizationQuery}`,
           { identity: requestIdentity }
@@ -291,6 +277,7 @@ export default function FamilyPortalPage() {
       setRegistrations(registrationRows);
       setPerformance(performanceRows);
       setEvents(eventRows);
+      setCoordinationRows(coordination);
       setConsentRequests(pendingRequests);
       setAiTasks(aiTaskRows);
       setAiAppeals(appeals);
@@ -654,33 +641,33 @@ export default function FamilyPortalPage() {
           </section>
         ) : null}
 
-        {familyCoordinationRows.length > 0 ? (
+        {coordinationRows.length > 0 ? (
           <section className="family-coordination" aria-label="Family coordination board">
             <div className="family-coordination-head">
               <div>
                 <p className="section-label">Multi-child coordination</p>
                 <h2>One board for every child and registration</h2>
               </div>
-              <span>{familyCoordinationRows.filter((row) => row.nextActionLabel !== "Current").length} action rows</span>
+              <span>{coordinationRows.filter((row) => row.next_action_label !== "Current").length} action rows</span>
             </div>
             <div className="family-coordination-grid">
-              {familyCoordinationRows.map((row) => (
+              {coordinationRows.map((row) => (
                 <article key={row.key}>
                   <div className="family-coordination-title">
-                    <strong>{row.athleteName}</strong>
+                    <strong>{row.athlete_name}</strong>
                     <span>{row.relationship}</span>
                   </div>
                   <div className="family-coordination-stats">
-                    <span><strong>{row.registrationCount}</strong> registration</span>
-                    <span><strong>{row.missingDocumentCount}</strong> docs</span>
-                    <span><strong>{row.pendingConsentCount}</strong> consent</span>
-                    <span><strong>{row.rsvpNeededCount}</strong> RSVP</span>
-                    <span><strong>{row.clearanceBlockedCount}</strong> clearance</span>
-                    <span><strong>{row.activeGoalCount}</strong> goals</span>
-                    <span><strong>{row.aiRecommendationCount}</strong> AI</span>
+                    <span><strong>{row.registration_count}</strong> registration</span>
+                    <span><strong>{row.missing_document_count}</strong> docs</span>
+                    <span><strong>{row.pending_consent_count}</strong> consent</span>
+                    <span><strong>{row.rsvp_needed_count}</strong> RSVP</span>
+                    <span><strong>{row.clearance_blocked_count}</strong> clearance</span>
+                    <span><strong>{row.active_goal_count}</strong> goals</span>
+                    <span><strong>{row.ai_recommendation_count}</strong> AI</span>
                   </div>
-                  <p>{row.nextActionDetail}</p>
-                  {row.actionHref ? <a href={row.actionHref}>{row.nextActionLabel}</a> : <span>{row.nextActionLabel}</span>}
+                  <p>{row.next_action_detail}</p>
+                  {row.action_href ? <a href={row.action_href}>{row.next_action_label}</a> : <span>{row.next_action_label}</span>}
                 </article>
               ))}
             </div>
@@ -943,157 +930,4 @@ function formatDate(value: string | null): string {
     return "Pending";
   }
   return new Date(value).toLocaleString();
-}
-
-function buildFamilyCoordinationRows(
-  family: FamilyAthleteSummaryRead[],
-  registrations: FamilyRegistrationInquiryRead[],
-  consentRequests: FamilyConsentRequestRead[],
-  events: FamilyEventSummaryRead[],
-  performance: FamilyPerformanceSummaryRead[],
-  aiTasks: AgentFamilyTaskRead[]
-): FamilyCoordinationRow[] {
-  const rows = new Map<string, FamilyCoordinationRow>();
-  const nameToKey = new Map<string, string>();
-
-  for (const athlete of family) {
-    const key = athlete.athlete_person_id;
-    rows.set(key, {
-      key,
-      athleteName: athlete.athlete_name,
-      relationship: athlete.relationship,
-      registrationCount: 0,
-      missingDocumentCount: 0,
-      pendingConsentCount: 0,
-      rsvpNeededCount: 0,
-      clearanceBlockedCount: 0,
-      activeGoalCount: 0,
-      aiRecommendationCount: 0,
-      nextActionLabel: "Current",
-      nextActionDetail: "No urgent family action is pending for this child.",
-      actionHref: null
-    });
-    nameToKey.set(normalizeFamilyName(athlete.athlete_name), key);
-  }
-
-  for (const registration of registrations) {
-    if (registration.status === "converted") {
-      continue;
-    }
-    const key = nameToKey.get(normalizeFamilyName(registration.athlete_name)) ?? `registration-${registration.id}`;
-    const row = ensureFamilyCoordinationRow(rows, key, registration.athlete_name, "registration");
-    row.registrationCount += 1;
-    row.missingDocumentCount += registration.missing_documents.length;
-    if (!registration.packet_complete) {
-      row.nextActionLabel = "Continue packet";
-      row.nextActionDetail =
-        registration.missing_documents.length > 0
-          ? `Missing ${registration.missing_documents.join(", ")} before staff can verify this registration.`
-          : registration.next_steps[0] ?? "Finish the registration packet before staff conversion.";
-      row.actionHref = registrationResumeHref(registration);
-    } else if (row.nextActionLabel === "Current") {
-      row.nextActionLabel = "Review admissions";
-      row.nextActionDetail = "Packet is complete and waiting for admissions review.";
-      row.actionHref = registrationResumeHref(registration);
-    }
-  }
-
-  for (const request of consentRequests) {
-    const row = ensureFamilyCoordinationRow(rows, request.athlete_person_id, request.athlete_name, "guardian");
-    row.pendingConsentCount += 1;
-    if (row.nextActionLabel === "Current" || row.nextActionLabel === "Review admissions") {
-      row.nextActionLabel = "Respond to consent";
-      row.nextActionDetail = `${request.scope_type} consent is pending through ${request.channel}.`;
-      row.actionHref = null;
-    }
-  }
-
-  for (const event of events) {
-    const row = ensureFamilyCoordinationRow(rows, event.athlete_person_id, event.athlete_name, "guardian");
-    if (event.attendance_status === null) {
-      row.rsvpNeededCount += 1;
-      if (["Current", "Review admissions"].includes(row.nextActionLabel)) {
-        row.nextActionLabel = "RSVP";
-        row.nextActionDetail = `${event.title} needs a family RSVP.`;
-      }
-    }
-    if (event.clearance_status !== "cleared") {
-      row.clearanceBlockedCount += 1;
-      if (["Current", "Review admissions", "RSVP"].includes(row.nextActionLabel)) {
-        row.nextActionLabel = "Resolve clearance";
-        row.nextActionDetail = `${event.title} is blocked: ${event.reason}`;
-      }
-    }
-  }
-
-  for (const item of performance) {
-    const row = ensureFamilyCoordinationRow(rows, item.athlete_person_id, item.athlete_name, "guardian");
-    row.activeGoalCount = item.active_goal_count;
-  }
-
-  for (const task of aiTasks) {
-    if (!task.athlete_name || ["completed", "cancelled"].includes(task.status)) {
-      continue;
-    }
-    const key = nameToKey.get(normalizeFamilyName(task.athlete_name)) ?? `ai-${normalizeFamilyName(task.athlete_name)}`;
-    const row = ensureFamilyCoordinationRow(rows, key, task.athlete_name, "AI recommendation");
-    row.aiRecommendationCount += 1;
-    if (["Current", "Review admissions"].includes(row.nextActionLabel)) {
-      row.nextActionLabel = "Review AI";
-      row.nextActionDetail = task.simple_explanation || task.title;
-    }
-  }
-
-  return Array.from(rows.values()).sort((first, second) => {
-    const firstScore = familyCoordinationUrgency(first);
-    const secondScore = familyCoordinationUrgency(second);
-    if (firstScore !== secondScore) {
-      return secondScore - firstScore;
-    }
-    return first.athleteName.localeCompare(second.athleteName);
-  });
-}
-
-function ensureFamilyCoordinationRow(
-  rows: Map<string, FamilyCoordinationRow>,
-  key: string,
-  athleteName: string,
-  relationship: string
-): FamilyCoordinationRow {
-  const existing = rows.get(key);
-  if (existing) {
-    return existing;
-  }
-  const row: FamilyCoordinationRow = {
-    key,
-    athleteName,
-    relationship,
-    registrationCount: 0,
-    missingDocumentCount: 0,
-    pendingConsentCount: 0,
-    rsvpNeededCount: 0,
-    clearanceBlockedCount: 0,
-    activeGoalCount: 0,
-    aiRecommendationCount: 0,
-    nextActionLabel: "Current",
-    nextActionDetail: "No urgent family action is pending for this child.",
-    actionHref: null
-  };
-  rows.set(key, row);
-  return row;
-}
-
-function familyCoordinationUrgency(row: FamilyCoordinationRow): number {
-  return (
-    row.missingDocumentCount * 8 +
-    row.pendingConsentCount * 7 +
-    row.clearanceBlockedCount * 6 +
-    row.rsvpNeededCount * 4 +
-    row.registrationCount * 3 +
-    row.aiRecommendationCount * 2
-  );
-}
-
-function normalizeFamilyName(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
 }

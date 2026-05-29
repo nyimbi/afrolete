@@ -461,6 +461,21 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert guardian_missions["complete_family_packet"]["status"] == "active"
     assert guardian_missions["complete_family_packet"]["progress_percent"] == 60
     assert guardian_missions["complete_family_packet"]["action_label"] == "Resume packet"
+    family_coordination_response = client.get(
+        f"/api/v1/safeguarding/my-family/coordination?organization_id={onboarding['organization']['id']}",
+        headers=guardian_identity_headers,
+    )
+    assert family_coordination_response.status_code == 200
+    coordination_rows = family_coordination_response.json()
+    coordination_by_name = {row["athlete_name"]: row for row in coordination_rows}
+    assert {"Amina Runner", "Asha Runner"} <= set(coordination_by_name)
+    amina_coordination = coordination_by_name["Amina Runner"]
+    assert amina_coordination["registration_count"] == 1
+    assert amina_coordination["missing_document_count"] >= 1
+    assert amina_coordination["next_action_label"] == "Continue packet"
+    assert amina_coordination["action_href"].startswith("/site/makini-track?inquiry_id=")
+    assert "email=parent.runner%40example.com" in amina_coordination["action_href"]
+    assert amina_coordination["urgency_score"] > 0
     resume_packet_response = client.get(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/packet"
         "?email=parent.runner@example.com"

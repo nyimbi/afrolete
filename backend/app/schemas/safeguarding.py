@@ -220,6 +220,24 @@ class FamilyDashboardActionRead(BaseModel):
     due_at: datetime | None = None
 
 
+class FamilyCoordinationRowRead(BaseModel):
+    key: str
+    athlete_person_id: UUID | None = None
+    athlete_name: str
+    relationship: str
+    registration_count: int
+    missing_document_count: int
+    pending_consent_count: int
+    rsvp_needed_count: int
+    clearance_blocked_count: int
+    active_goal_count: int
+    ai_recommendation_count: int
+    next_action_label: str
+    next_action_detail: str
+    action_href: str | None = None
+    urgency_score: int
+
+
 class FamilyScheduleConflictRead(BaseModel):
     starts_at: datetime
     ends_at: datetime

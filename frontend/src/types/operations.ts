@@ -2042,6 +2042,24 @@ export type FamilyDashboardActionRead = {
   due_at: string | null;
 };
 
+export type FamilyCoordinationRowRead = {
+  key: string;
+  athlete_person_id: UUID | null;
+  athlete_name: string;
+  relationship: string;
+  registration_count: number;
+  missing_document_count: number;
+  pending_consent_count: number;
+  rsvp_needed_count: number;
+  clearance_blocked_count: number;
+  active_goal_count: number;
+  ai_recommendation_count: number;
+  next_action_label: string;
+  next_action_detail: string;
+  action_href: string | null;
+  urgency_score: number;
+};
+
 export type FamilyScheduleConflictRead = {
   starts_at: string;
   ends_at: string;
