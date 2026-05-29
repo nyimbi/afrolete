@@ -1919,6 +1919,8 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "client.training.sessions.feedback.record",
                 "client.training.availability.suggest",
                 "client.training.calendar.export",
+                "expectedAfroLeteWebhookSignature",
+                "verifyAfroLeteWebhookSignature",
             ],
         ),
         DeveloperSdkCatalogRead(
@@ -1971,6 +1973,8 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "client.training.sessions.feedback.record",
                 "client.training.availability.suggest",
                 "client.training.calendar.export",
+                "expected_webhook_signature",
+                "verify_webhook_signature",
             ],
         ),
         DeveloperSdkCatalogRead(
@@ -2210,13 +2214,17 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
             description="Validate provider-neutral AfroLete webhooks before processing event payloads.",
             steps=[
                 "Read the raw request body before JSON parsing.",
-                "Build timestamp.payload and compare the HMAC SHA-256 signature.",
-                "Reject old timestamps or mismatched signatures.",
+                "Pass the raw body, timestamp header, signature header, and one-time signing secret into the SDK helper.",
+                "Reject old timestamps or mismatched signatures before parsing trusted business fields.",
             ],
             code_sample=(
-                "const signed = `${timestamp}.${rawBody}`;\n"
-                "const expected = hmacSha256(signingSecretHash, signed);\n"
-                "if (`sha256=${expected}` !== signatureHeader) throw new Error(\"bad signature\");"
+                "const verified = await verifyAfroLeteWebhookSignature({\n"
+                "  payload: rawBody,\n"
+                "  timestamp: request.headers.get(\"X-Afrolete-Webhook-Timestamp\")!,\n"
+                "  signature: request.headers.get(\"X-Afrolete-Webhook-Signature\")!,\n"
+                "  signingSecret: process.env.AFROLETE_WEBHOOK_SECRET!,\n"
+                "});\n"
+                "if (!verified) throw new Error(\"bad signature\");"
             ),
         ),
     ]

@@ -3,7 +3,7 @@
 Repository package for server-side AfroLete developer API integrations.
 
 ```python
-from afrolete_sdk import AfroLeteClient
+from afrolete_sdk import AfroLeteClient, verify_webhook_signature
 
 client = AfroLeteClient(
     base_url="https://api.afrolete.example",
@@ -200,8 +200,19 @@ availability = client.training.availability.suggest(
         "duration_minutes": 75,
     }
 )
+
+signature_ok = verify_webhook_signature(
+    payload=raw_webhook_body,
+    timestamp=headers["X-Afrolete-Webhook-Timestamp"],
+    signature=headers["X-Afrolete-Webhook-Signature"],
+    signing_secret=AFROLETE_WEBHOOK_SECRET,
+)
+if not signature_ok:
+    raise ValueError("Invalid AfroLete webhook signature")
 ```
 
 The client sends `X-Afrolete-API-Key` and targets `/api/v1/sdk/*` routes. It
 uses only the Python standard library, so it can run in small worker jobs,
 serverless functions, and integration scripts without extra runtime packages.
+Webhook helpers verify the same timestamped HMAC-SHA256 contract used by
+AfroLete developer webhook deliveries.

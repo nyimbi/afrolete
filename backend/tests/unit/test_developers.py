@@ -38,6 +38,16 @@ def test_public_developer_docs(client) -> None:
     assert any(event["event_type"] == "training.drill.created" for event in docs["webhook_events"])
     assert any(event["event_type"] == "agents.task.queued" for event in docs["webhook_events"])
     assert any(sdk["language"] == "Raw HTTP" and sdk["status"] == "active" for sdk in docs["sdks"])
+    assert any(
+        "verifyAfroLeteWebhookSignature" in sdk["entry_points"]
+        for sdk in docs["sdks"]
+        if sdk["language"] == "TypeScript"
+    )
+    assert any(
+        "verify_webhook_signature" in sdk["entry_points"]
+        for sdk in docs["sdks"]
+        if sdk["language"] == "Python"
+    )
     assert "operations" in docs["marketplace_categories"]
     assert docs["security_requirements"]
 

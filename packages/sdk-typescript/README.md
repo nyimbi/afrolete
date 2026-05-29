@@ -4,6 +4,7 @@ Repository package for tenant-facing AfroLete developer APIs.
 
 ```ts
 import { AfroLeteClient } from "@afrolete/sdk";
+import { verifyAfroLeteWebhookSignature } from "@afrolete/sdk";
 
 const client = new AfroLeteClient({
   baseUrl: "https://api.afrolete.example",
@@ -196,8 +197,19 @@ const availability = await client.training.availability.suggest({
   starts_at: "2026-06-01T06:00:00Z",
   duration_minutes: 75,
 });
+
+const signatureOk = await verifyAfroLeteWebhookSignature({
+  payload: rawWebhookBody,
+  timestamp: request.headers.get("X-Afrolete-Webhook-Timestamp")!,
+  signature: request.headers.get("X-Afrolete-Webhook-Signature")!,
+  signingSecret: process.env.AFROLETE_WEBHOOK_SECRET!,
+});
+if (!signatureOk) {
+  throw new Error("Invalid AfroLete webhook signature");
+}
 ```
 
 The client sends `X-Afrolete-API-Key` and targets `/api/v1/sdk/*` routes. It is
 dependency-free and works in modern browsers, Node.js runtimes with `fetch`, and
-edge runtimes.
+edge runtimes. Webhook helpers verify the same timestamped HMAC-SHA256 contract
+used by AfroLete developer webhook deliveries.

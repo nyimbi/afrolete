@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hmac
 import json
+import time
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -17,6 +20,44 @@ class AfroLeteRequestError(RuntimeError):
         self.status = status
         self.reason = reason
         self.body = body
+
+
+def expected_webhook_signature(
+    *,
+    payload: str | bytes,
+    timestamp: str,
+    signing_secret: str,
+) -> str:
+    raw_payload = payload.encode("utf-8") if isinstance(payload, str) else payload
+    signing_secret_hash = sha256(signing_secret.encode("utf-8")).hexdigest()
+    signed = f"{timestamp}.".encode("utf-8") + raw_payload
+    digest = hmac.new(signing_secret_hash.encode("utf-8"), signed, sha256).hexdigest()
+    return f"sha256={digest}"
+
+
+def verify_webhook_signature(
+    *,
+    payload: str | bytes,
+    timestamp: str,
+    signature: str,
+    signing_secret: str,
+    tolerance_seconds: int | None = 300,
+    now: float | None = None,
+) -> bool:
+    if tolerance_seconds is not None:
+        try:
+            timestamp_seconds = int(timestamp)
+        except ValueError:
+            return False
+        current_seconds = time.time() if now is None else now
+        if abs(current_seconds - timestamp_seconds) > tolerance_seconds:
+            return False
+    expected = expected_webhook_signature(
+        payload=payload,
+        timestamp=timestamp,
+        signing_secret=signing_secret,
+    )
+    return hmac.compare_digest(signature.strip(), expected)
 
 
 @dataclass(frozen=True)

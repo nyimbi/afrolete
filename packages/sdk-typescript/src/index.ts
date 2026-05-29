@@ -14,6 +14,19 @@ export interface AfroLeteRequestErrorDetails {
   body: unknown;
 }
 
+export interface AfroLeteWebhookSignatureInput {
+  payload: string | Uint8Array;
+  timestamp: string;
+  signingSecret: string;
+  crypto?: Crypto;
+}
+
+export interface AfroLeteWebhookVerificationInput extends AfroLeteWebhookSignatureInput {
+  signature: string;
+  toleranceSeconds?: number | null;
+  now?: Date;
+}
+
 export class AfroLeteRequestError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -26,6 +39,47 @@ export class AfroLeteRequestError extends Error {
     this.statusText = details.statusText;
     this.body = details.body;
   }
+}
+
+export async function expectedAfroLeteWebhookSignature(
+  input: AfroLeteWebhookSignatureInput,
+): Promise<string> {
+  const cryptoImpl = input.crypto ?? globalThis.crypto;
+  if (!cryptoImpl?.subtle) {
+    throw new Error("Web Crypto subtle API is required to verify AfroLete webhooks");
+  }
+  const secretHash = await sha256Hex(input.signingSecret, cryptoImpl);
+  const key = await cryptoImpl.subtle.importKey(
+    "raw",
+    toArrayBuffer(utf8(secretHash)),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await cryptoImpl.subtle.sign(
+    "HMAC",
+    key,
+    toArrayBuffer(concatBytes(utf8(`${input.timestamp}.`), payloadBytes(input.payload))),
+  );
+  return `sha256=${hex(signature)}`;
+}
+
+export async function verifyAfroLeteWebhookSignature(
+  input: AfroLeteWebhookVerificationInput,
+): Promise<boolean> {
+  const toleranceSeconds = input.toleranceSeconds === undefined ? 300 : input.toleranceSeconds;
+  if (toleranceSeconds !== null) {
+    const timestampSeconds = Number.parseInt(input.timestamp, 10);
+    if (!Number.isFinite(timestampSeconds)) {
+      return false;
+    }
+    const nowSeconds = Math.floor((input.now ?? new Date()).getTime() / 1000);
+    if (Math.abs(nowSeconds - timestampSeconds) > toleranceSeconds) {
+      return false;
+    }
+  }
+  const expected = await expectedAfroLeteWebhookSignature(input);
+  return timingSafeEqual(input.signature.trim(), expected);
 }
 
 export interface DeveloperApiKeyInspection {
@@ -1154,4 +1208,44 @@ async function parseJsonResponse(response: Response): Promise<unknown> {
   } catch {
     return text;
   }
+}
+
+function utf8(value: string): Uint8Array {
+  return new TextEncoder().encode(value);
+}
+
+function payloadBytes(payload: string | Uint8Array): Uint8Array {
+  return typeof payload === "string" ? utf8(payload) : payload;
+}
+
+function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
+  const combined = new Uint8Array(left.length + right.length);
+  combined.set(left, 0);
+  combined.set(right, left.length);
+  return combined;
+}
+
+async function sha256Hex(value: string, cryptoImpl: Crypto): Promise<string> {
+  return hex(await cryptoImpl.subtle.digest("SHA-256", toArrayBuffer(utf8(value))));
+}
+
+function hex(value: ArrayBuffer): string {
+  return [...new Uint8Array(value)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function timingSafeEqual(left: string, right: string): boolean {
+  const leftBytes = utf8(left);
+  const rightBytes = utf8(right);
+  let difference = leftBytes.length ^ rightBytes.length;
+  const length = Math.max(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    difference |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
+  }
+  return difference === 0;
+}
+
+function toArrayBuffer(value: Uint8Array): ArrayBuffer {
+  return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
 }
