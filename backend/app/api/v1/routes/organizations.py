@@ -35,6 +35,11 @@ from app.schemas.organization import (
     RegistrationInquiryFollowUpRead,
     RegistrationInquiryRead,
     RegistrationInquiryUpdate,
+    RegistrationPaymentHostedCheckoutRead,
+    RegistrationPaymentSessionCreate,
+    RegistrationPaymentSessionRead,
+    RegistrationPaymentSettlementCreate,
+    RegistrationPaymentSettlementRead,
 )
 from app.schemas.team import TeamRead
 from app.services.auth.dependencies import get_current_identity
@@ -45,10 +50,12 @@ from app.services.organizations import (
     add_member,
     convert_registration_inquiry,
     create_registration_inquiry_follow_up,
+    create_registration_payment_session,
     create_public_registration_inquiry,
     create_committee,
     create_onboarding_starter_team,
     create_organization,
+    get_registration_payment_hosted_checkout,
     get_organization_for_identity,
     get_public_site,
     list_committees,
@@ -58,6 +65,7 @@ from app.services.organizations import (
     public_site_path,
     registration_packet_summary,
     search_public_organizations,
+    settle_registration_payment_checkout,
     upload_public_registration_document,
     update_public_registration_packet,
     update_registration_inquiry,
@@ -286,6 +294,17 @@ def to_registration_packet_read(inquiry) -> RegistrationPacketRead:
     )
 
 
+def to_registration_payment_session_read(item) -> RegistrationPaymentSessionRead:
+    inquiry, session_id, checkout_url, provider, hosted_checkout = item
+    return RegistrationPaymentSessionRead(
+        inquiry=to_registration_inquiry_read(inquiry),
+        session_id=session_id,
+        checkout_url=checkout_url,
+        provider=provider,
+        hosted_checkout=hosted_checkout,
+    )
+
+
 def to_registration_conversion_read(item) -> RegistrationInquiryConversionRead:
     inquiry, athlete, athlete_profile, roster_entry, guardian, guardian_invite, guardian_invite_url = item
     return RegistrationInquiryConversionRead(
@@ -459,6 +478,54 @@ async def upload_public_registration_document_route(
     return to_registration_packet_read(
         await upload_public_registration_document(db, site, inquiry_id, payload)
     )
+
+
+@router.post(
+    "/public/{site}/registration-inquiries/{inquiry_id}/payment-session",
+    response_model=RegistrationPaymentSessionRead,
+)
+async def create_registration_payment_session_route(
+    site: str,
+    inquiry_id: UUID,
+    payload: RegistrationPaymentSessionCreate,
+    db: AsyncSession = Depends(get_db),
+) -> RegistrationPaymentSessionRead:
+    return to_registration_payment_session_read(
+        await create_registration_payment_session(db, site, inquiry_id, payload)
+    )
+
+
+@router.get(
+    "/registration-checkout-sessions/{session_id}",
+    response_model=RegistrationPaymentHostedCheckoutRead,
+)
+async def get_registration_payment_checkout_session_route(
+    session_id: str,
+    site: str = Query(),
+    inquiry_id: UUID = Query(),
+    provider: str = Query(default="manual_gateway"),
+    db: AsyncSession = Depends(get_db),
+) -> RegistrationPaymentHostedCheckoutRead:
+    return await get_registration_payment_hosted_checkout(
+        db,
+        session_id,
+        site,
+        inquiry_id,
+        provider,
+    )
+
+
+@router.post(
+    "/registration-checkout-sessions/{session_id}/settle",
+    response_model=RegistrationPaymentSettlementRead,
+)
+async def settle_registration_payment_checkout_route(
+    session_id: str,
+    payload: RegistrationPaymentSettlementCreate,
+    site: str = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> RegistrationPaymentSettlementRead:
+    return await settle_registration_payment_checkout(db, session_id, site, payload)
 
 
 @router.get("/{organization_id}", response_model=OrganizationRead)

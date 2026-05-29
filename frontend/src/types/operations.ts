@@ -458,6 +458,47 @@ export type RegistrationPacketRead = {
   next_steps: string[];
 };
 
+export type RegistrationPaymentHostedCheckoutRead = {
+  inquiry_id: UUID;
+  organization_id: UUID;
+  registration_reference: string;
+  title: string;
+  memo: string | null;
+  due_on: string | null;
+  amount_due: string;
+  amount_paid: string;
+  open_amount: string;
+  currency: string;
+  status: string;
+  provider: string;
+  session_id: string;
+  session_status: string;
+  client_reference: string;
+  payment_methods: string[];
+  settlement_endpoint: string;
+  checkout_summary: string;
+};
+
+export type RegistrationPaymentSessionRead = {
+  inquiry: RegistrationInquiryRead;
+  session_id: string;
+  checkout_url: string;
+  provider: string;
+  hosted_checkout: RegistrationPaymentHostedCheckoutRead;
+};
+
+export type RegistrationPaymentSettlementRead = {
+  inquiry_id: UUID;
+  provider: string;
+  accepted: boolean;
+  payment_reference: string | null;
+  payment_status: string;
+  amount_paid: string;
+  open_amount: string;
+  session_status: string;
+  message: string;
+};
+
 export type RegistrationInquiryConversionRead = {
   inquiry: RegistrationInquiryRead;
   athlete_person_id: UUID;

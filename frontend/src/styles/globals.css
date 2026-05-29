@@ -2342,6 +2342,73 @@ textarea:focus {
   margin-top: 5px;
 }
 
+.public-registration-packet {
+  display: grid;
+  gap: 14px;
+}
+
+.public-registration-packet-head,
+.public-registration-actions {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 18px;
+}
+
+.public-registration-packet-head h3 {
+  margin: 4px 0 0;
+}
+
+.public-registration-grid,
+.public-registration-summary {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.public-registration-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.public-registration-document span {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.public-registration-document input[type="file"] {
+  min-width: 0;
+}
+
+.public-registration-document button,
+.public-registration-actions button.secondary {
+  background: transparent;
+  border: 1px solid var(--site-primary);
+  color: var(--site-primary);
+}
+
+.public-registration-checkbox {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.public-registration-summary strong,
+.public-registration-summary span,
+.public-registration-summary small {
+  display: block;
+}
+
 .register-page {
   min-height: 100vh;
   background:
@@ -3499,6 +3566,7 @@ textarea:focus {
 
   .public-site-inquiry,
   .public-site-inquiry form,
+  .public-registration-grid,
   .register-hero,
   .register-workspace,
   .register-inline-grid,
@@ -3519,6 +3587,12 @@ textarea:focus {
   .developer-oauth-scopes,
   .developer-oauth-result {
     grid-template-columns: 1fr;
+  }
+
+  .public-registration-packet-head,
+  .public-registration-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

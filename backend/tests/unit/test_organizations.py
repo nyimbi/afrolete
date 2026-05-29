@@ -169,21 +169,64 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
             "payment_amount": "1000.00",
             "payment_currency": "KES",
             "payment_method": "mpesa",
-            "payment_reference": "MPESA-ABC123",
-            "payment_status": "paid",
+            "payment_reference": None,
+            "payment_status": "pending",
         },
     )
 
     assert packet_response.status_code == 200
     packet = packet_response.json()
-    assert packet["packet_complete"] is True
+    assert packet["packet_complete"] is False
     assert packet["missing_documents"] == []
     assert packet["consent_complete"] is True
-    assert packet["payment_complete"] is True
+    assert packet["payment_complete"] is False
     assert packet["inquiry"]["status"] == "reviewing"
-    assert packet["inquiry"]["verification_status"] == "ready_for_review"
-    assert packet["inquiry"]["payment_reference"] == "MPESA-ABC123"
-    assert packet["next_steps"] == ["Registration packet is ready for staff verification."]
+    assert packet["inquiry"]["verification_status"] == "packet_incomplete"
+    assert "Record payment, waiver, or not-required status." in packet["next_steps"]
+
+    payment_session_response = client.post(
+        f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/payment-session",
+        json={
+            "email": "parent.runner@example.com",
+            "checkout_base_url": "/pay/sessions",
+            "provider": "manual_gateway",
+            "payment_method": "mobile_money",
+        },
+    )
+    assert payment_session_response.status_code == 200
+    payment_session = payment_session_response.json()
+    assert payment_session["checkout_url"].startswith(f"/pay/sessions/{payment_session['session_id']}")
+    assert "kind=registration" in payment_session["checkout_url"]
+    assert f"inquiry_id={inquiry['id']}" in payment_session["checkout_url"]
+    assert payment_session["hosted_checkout"]["open_amount"] == "1000.00"
+    assert payment_session["inquiry"]["payment_reference"] == payment_session["session_id"]
+
+    checkout_response = client.get(
+        f"/api/v1/organizations/registration-checkout-sessions/{payment_session['session_id']}"
+        f"?site=makini-track&inquiry_id={inquiry['id']}&provider=manual_gateway"
+    )
+    assert checkout_response.status_code == 200
+    checkout = checkout_response.json()
+    assert checkout["registration_reference"].startswith("REG-")
+    assert checkout["client_reference"] == f"registration-payment:{inquiry['id']}"
+
+    settlement_response = client.post(
+        f"/api/v1/organizations/registration-checkout-sessions/{payment_session['session_id']}/settle?site=makini-track",
+        json={
+            "inquiry_id": inquiry["id"],
+            "provider": "manual_gateway",
+            "amount": "1000.00",
+            "currency": "KES",
+            "method": "hosted_payment_page",
+            "external_payment_id": "MPESA-ABC123",
+            "status": "succeeded",
+        },
+    )
+    assert settlement_response.status_code == 200
+    settlement = settlement_response.json()
+    assert settlement["payment_status"] == "paid"
+    assert settlement["payment_reference"] == "MPESA-ABC123"
+    assert settlement["open_amount"] == "0.00"
 
     team_response = client.post(
         "/api/v1/teams",

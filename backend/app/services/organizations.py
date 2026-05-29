@@ -3,9 +3,10 @@ import re
 from base64 import b64decode
 from binascii import Error as BinasciiError
 from datetime import UTC, datetime
+from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -42,6 +43,10 @@ from app.schemas.organization import (
     PublicRegistrationInquiryCreate,
     RegistrationInquiryConversionCreate,
     RegistrationInquiryFollowUpCreate,
+    RegistrationPaymentHostedCheckoutRead,
+    RegistrationPaymentSessionCreate,
+    RegistrationPaymentSettlementCreate,
+    RegistrationPaymentSettlementRead,
     RegistrationInquiryUpdate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -232,6 +237,24 @@ def safe_registration_filename(filename: str) -> str:
     name = Path(filename).name.strip().replace(" ", "-")
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip(".-")
     return safe[:180] or "registration-document.bin"
+
+
+async def get_public_registration_inquiry(
+    db: AsyncSession,
+    site: str,
+    inquiry_id: UUID,
+) -> tuple[Organization, RegistrationInquiry]:
+    organization = await db.scalar(
+        select(Organization).where(
+            (Organization.slug == site) | (Organization.subdomain == site)
+        )
+    )
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    inquiry = await db.get(RegistrationInquiry, inquiry_id)
+    if inquiry is None or inquiry.organization_id != organization.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
+    return organization, inquiry
 
 
 async def can_manage_registration_inquiries(
@@ -673,6 +696,202 @@ def normalized_registration_payment_status(
     if payload.payment_reference:
         return "pending_verification"
     return inquiry.payment_status if inquiry.payment_status != "not_required" else "pending"
+
+
+def registration_payment_session_id(inquiry: RegistrationInquiry, provider: str) -> str:
+    token = sha256(
+        (
+            f"registration-payment:{inquiry.id}:{inquiry.email.casefold()}:"
+            f"{inquiry.payment_amount}:{inquiry.created_at}:{provider.casefold()}"
+        ).encode()
+    ).hexdigest()
+    provider_token = re.sub(r"[^a-z0-9]+", "-", provider.lower()).strip("-")[:24] or "processor"
+    return f"rpay_{provider_token}_{token[:24]}"
+
+
+def registration_payment_session_url(
+    base_url: str,
+    session_id: str,
+    site: str,
+    inquiry: RegistrationInquiry,
+    provider: str,
+) -> str:
+    return (
+        f"{base_url.rstrip('/')}/{session_id}"
+        f"?kind=registration&site={quote(site, safe='')}"
+        f"&inquiry_id={inquiry.id}&provider={quote(provider, safe='')}"
+    )
+
+
+def registration_payment_open_amount(inquiry: RegistrationInquiry) -> Decimal:
+    amount_due = inquiry.payment_amount or Decimal("0.00")
+    amount_paid = amount_due if inquiry.payment_status in REGISTRATION_PAYMENT_COMPLETE_STATUSES else Decimal("0.00")
+    return max(amount_due - amount_paid, Decimal("0.00")).quantize(Decimal("0.01"))
+
+
+def registration_payment_session_status(inquiry: RegistrationInquiry) -> str:
+    if registration_payment_open_amount(inquiry) <= 0:
+        return "paid" if inquiry.payment_amount else "not_required"
+    if inquiry.payment_status in {"failed", "cancelled"}:
+        return inquiry.payment_status
+    return "ready"
+
+
+def registration_payment_hosted_checkout_read(
+    inquiry: RegistrationInquiry,
+    provider: str,
+    session_id: str,
+) -> RegistrationPaymentHostedCheckoutRead:
+    amount_due = (inquiry.payment_amount or Decimal("0.00")).quantize(Decimal("0.01"))
+    amount_paid = amount_due if inquiry.payment_status in REGISTRATION_PAYMENT_COMPLETE_STATUSES else Decimal("0.00")
+    open_amount = registration_payment_open_amount(inquiry)
+    registration_reference = f"REG-{str(inquiry.id).split('-')[0].upper()}"
+    title = f"Registration fee for {inquiry.athlete_name}"
+    return RegistrationPaymentHostedCheckoutRead(
+        inquiry_id=inquiry.id,
+        organization_id=inquiry.organization_id,
+        registration_reference=registration_reference,
+        title=title,
+        memo=inquiry.message,
+        due_on=None,
+        amount_due=amount_due,
+        amount_paid=amount_paid.quantize(Decimal("0.01")),
+        open_amount=open_amount,
+        currency=(inquiry.payment_currency or "USD").upper(),
+        status=inquiry.payment_status,
+        provider=provider,
+        session_id=session_id,
+        session_status=registration_payment_session_status(inquiry),
+        client_reference=f"registration-payment:{inquiry.id}",
+        payment_methods=["mobile_money", "card", "bank_transfer", "cash_office"],
+        settlement_endpoint=f"/api/v1/organizations/registration-checkout-sessions/{session_id}/settle",
+        checkout_summary=(
+            f"{title} has {open_amount} {(inquiry.payment_currency or 'USD').upper()} outstanding."
+            if open_amount > 0
+            else f"{title} is fully paid."
+        ),
+    )
+
+
+async def create_registration_payment_session(
+    db: AsyncSession,
+    site: str,
+    inquiry_id: UUID,
+    payload: RegistrationPaymentSessionCreate,
+) -> tuple[RegistrationInquiry, str, str, str, RegistrationPaymentHostedCheckoutRead]:
+    _organization, inquiry = await get_public_registration_inquiry(db, site, inquiry_id)
+    if inquiry.email.lower() != payload.email.lower():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inquiry email mismatch")
+    if inquiry.status == "converted":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Converted inquiry cannot be updated")
+    if inquiry.payment_amount is None or inquiry.payment_amount <= 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Registration fee amount is required")
+
+    provider = payload.provider.strip().lower() or "manual_gateway"
+    session_id = registration_payment_session_id(inquiry, provider)
+    if inquiry.payment_status not in REGISTRATION_PAYMENT_COMPLETE_STATUSES:
+        inquiry.payment_status = "pending"
+    inquiry.payment_reference = inquiry.payment_reference or session_id
+    inquiry.payment_method = payload.payment_method or inquiry.payment_method or provider
+    inquiry.payment_currency = (inquiry.payment_currency or "USD").upper()
+    inquiry.packet_submitted_at = inquiry.packet_submitted_at or datetime.now(UTC)
+    inquiry.verification_status = (
+        "ready_for_review"
+        if registration_packet_summary(inquiry)["packet_complete"]
+        else "packet_incomplete"
+    )
+    await db.commit()
+    await db.refresh(inquiry)
+
+    hosted_checkout = registration_payment_hosted_checkout_read(inquiry, provider, session_id)
+    return (
+        inquiry,
+        session_id,
+        registration_payment_session_url(
+            payload.checkout_base_url,
+            session_id,
+            site,
+            inquiry,
+            provider,
+        ),
+        provider,
+        hosted_checkout,
+    )
+
+
+async def get_registration_payment_hosted_checkout(
+    db: AsyncSession,
+    session_id: str,
+    site: str,
+    inquiry_id: UUID,
+    provider: str,
+) -> RegistrationPaymentHostedCheckoutRead:
+    _organization, inquiry = await get_public_registration_inquiry(db, site, inquiry_id)
+    expected_session_id = registration_payment_session_id(inquiry, provider)
+    if session_id != expected_session_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration payment session not found")
+    if inquiry.payment_amount is None or inquiry.payment_amount <= 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration payment session not found")
+    return registration_payment_hosted_checkout_read(inquiry, provider, session_id)
+
+
+async def settle_registration_payment_checkout(
+    db: AsyncSession,
+    session_id: str,
+    site: str,
+    payload: RegistrationPaymentSettlementCreate,
+) -> RegistrationPaymentSettlementRead:
+    _organization, inquiry = await get_public_registration_inquiry(db, site, payload.inquiry_id)
+    expected_session_id = registration_payment_session_id(inquiry, payload.provider)
+    if session_id != expected_session_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration payment session not found")
+    if inquiry.payment_amount is None or inquiry.payment_amount <= 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Registration fee amount is required")
+    if payload.currency and payload.currency.upper() != (inquiry.payment_currency or "USD").upper():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Currency mismatch")
+    amount = payload.amount or inquiry.payment_amount
+    if amount > inquiry.payment_amount:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment exceeds registration fee")
+
+    accepted = payload.status == "succeeded"
+    if accepted:
+        inquiry.payment_status = "paid" if amount >= inquiry.payment_amount else "pending_verification"
+        inquiry.payment_reference = payload.external_payment_id or inquiry.payment_reference or session_id
+    elif payload.status == "pending":
+        inquiry.payment_status = "pending_verification"
+        inquiry.payment_reference = payload.external_payment_id or inquiry.payment_reference or session_id
+    else:
+        inquiry.payment_status = payload.status
+        inquiry.payment_reference = payload.external_payment_id or inquiry.payment_reference or session_id
+    inquiry.payment_method = payload.method
+    inquiry.payment_currency = (payload.currency or inquiry.payment_currency or "USD").upper()
+    inquiry.packet_submitted_at = inquiry.packet_submitted_at or datetime.now(UTC)
+    inquiry.verification_status = (
+        "ready_for_review"
+        if registration_packet_summary(inquiry)["packet_complete"]
+        else "packet_incomplete"
+    )
+    if inquiry.status == "new":
+        inquiry.status = "reviewing"
+
+    await db.commit()
+    await db.refresh(inquiry)
+    open_amount = registration_payment_open_amount(inquiry)
+    return RegistrationPaymentSettlementRead(
+        inquiry_id=inquiry.id,
+        provider=payload.provider,
+        accepted=accepted,
+        payment_reference=inquiry.payment_reference,
+        payment_status=inquiry.payment_status,
+        amount_paid=(inquiry.payment_amount - open_amount).quantize(Decimal("0.01")),
+        open_amount=open_amount,
+        session_status=registration_payment_session_status(inquiry),
+        message=(
+            "Registration payment recorded."
+            if accepted
+            else f"Registration payment marked {payload.status}."
+        ),
+    )
 
 
 def merge_registration_documents(

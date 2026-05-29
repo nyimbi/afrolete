@@ -276,6 +276,65 @@ class RegistrationPacketRead(BaseModel):
     next_steps: list[str]
 
 
+class RegistrationPaymentSessionCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    checkout_base_url: str = Field(default="/pay/sessions", min_length=1, max_length=800)
+    provider: str = Field(default="manual_gateway", min_length=2, max_length=80)
+    payment_method: str | None = Field(default=None, max_length=80)
+
+
+class RegistrationPaymentHostedCheckoutRead(BaseModel):
+    inquiry_id: UUID
+    organization_id: UUID
+    registration_reference: str
+    title: str
+    memo: str | None
+    due_on: date | None
+    amount_due: Decimal
+    amount_paid: Decimal
+    open_amount: Decimal
+    currency: str
+    status: str
+    provider: str
+    session_id: str
+    session_status: str
+    client_reference: str
+    payment_methods: list[str]
+    settlement_endpoint: str
+    checkout_summary: str
+
+
+class RegistrationPaymentSessionRead(BaseModel):
+    inquiry: RegistrationInquiryRead
+    session_id: str
+    checkout_url: str
+    provider: str
+    hosted_checkout: RegistrationPaymentHostedCheckoutRead
+
+
+class RegistrationPaymentSettlementCreate(BaseModel):
+    inquiry_id: UUID
+    provider: str = Field(default="manual_gateway", min_length=2, max_length=80)
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    method: str = Field(default="hosted_payment_page", min_length=2, max_length=80)
+    external_payment_id: str | None = Field(default=None, max_length=240)
+    status: str = Field(default="succeeded", pattern="^(succeeded|pending|failed|cancelled)$")
+    raw_reference: str | None = Field(default=None, max_length=2000)
+
+
+class RegistrationPaymentSettlementRead(BaseModel):
+    inquiry_id: UUID
+    provider: str
+    accepted: bool
+    payment_reference: str | None
+    payment_status: str
+    amount_paid: Decimal
+    open_amount: Decimal
+    session_status: str
+    message: str
+
+
 class RegistrationInquiryUpdate(BaseModel):
     status: str | None = Field(default=None, max_length=40)
     review_notes: str | None = Field(default=None, max_length=4000)

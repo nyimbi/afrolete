@@ -10,8 +10,41 @@ import type {
   VolunteerGroupApplicationRead,
   PublicVolunteerSignupRead,
   VolunteerOpportunityRead,
-  RegistrationInquiryRead
+  RegistrationInquiryRead,
+  RegistrationPacketRead,
+  RegistrationPaymentSessionRead
 } from "@/types/operations";
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Registration document could not be read"));
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      resolve(result.includes(",") ? result.split(",").pop() ?? "" : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+const defaultPacketForm = {
+  date_of_birth: "",
+  emergency_contact_name: "",
+  emergency_contact_phone: "",
+  medical_notes: "",
+  consent_signer_name: "",
+  guardian_consent_acknowledged: false,
+  privacy_acknowledged: false,
+  proof_of_age_filename: "",
+  medical_information_filename: "",
+  guardian_consent_filename: "",
+  photo_release_filename: "",
+  payment_amount: "",
+  payment_currency: "KES",
+  payment_method: "mobile_money",
+  payment_reference: "",
+  payment_status: "pending"
+};
 
 export default function PublicOrganizationSitePage() {
   const params = useParams<{ slug?: string | string[] }>();
@@ -52,13 +85,18 @@ export default function PublicOrganizationSitePage() {
     message: ""
   });
   const [submittedInquiry, setSubmittedInquiry] = useState<RegistrationInquiryRead | null>(null);
+  const [packetForm, setPacketForm] = useState(defaultPacketForm);
+  const [registrationPacket, setRegistrationPacket] = useState<RegistrationPacketRead | null>(null);
+  const [paymentSession, setPaymentSession] = useState<RegistrationPaymentSessionRead | null>(null);
   const [submittedVolunteerSignup, setSubmittedVolunteerSignup] = useState<PublicVolunteerSignupRead | null>(null);
   const [submittedVolunteerGroup, setSubmittedVolunteerGroup] = useState<VolunteerGroupApplicationRead | null>(null);
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
+  const [packetError, setPacketError] = useState("");
   const [volunteerFormError, setVolunteerFormError] = useState("");
   const [volunteerGroupFormError, setVolunteerGroupFormError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [packetBusy, setPacketBusy] = useState("");
   const [volunteerBusy, setVolunteerBusy] = useState(false);
   const [volunteerGroupBusy, setVolunteerGroupBusy] = useState(false);
 
@@ -173,6 +211,15 @@ export default function PublicOrganizationSitePage() {
         }
       );
       setSubmittedInquiry(created);
+      setRegistrationPacket(null);
+      setPaymentSession(null);
+      setPacketForm((current) => ({
+        ...current,
+        emergency_contact_name: created.guardian_name ?? current.emergency_contact_name,
+        emergency_contact_phone: created.phone ?? current.emergency_contact_phone,
+        consent_signer_name: created.guardian_name ?? current.consent_signer_name,
+        medical_information_filename: `${created.athlete_name.replaceAll(" ", "-").toLowerCase()}-medical.pdf`
+      }));
       setInquiry({
         team_id: "",
         athlete_name: "",
@@ -187,6 +234,124 @@ export default function PublicOrganizationSitePage() {
       setFormError(caught instanceof Error ? caught.message : "Inquiry could not be sent");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const submitRegistrationPacket = async () => {
+    if (!site || !submittedInquiry) {
+      setPacketError("Send the registration inquiry before completing the packet.");
+      return;
+    }
+    setPacketBusy("packet");
+    setPacketError("");
+    try {
+      const documents = [
+        { document_type: "proof_of_age", filename: packetForm.proof_of_age_filename },
+        { document_type: "medical_information", filename: packetForm.medical_information_filename },
+        { document_type: "guardian_consent", filename: packetForm.guardian_consent_filename },
+        { document_type: "photo_release", filename: packetForm.photo_release_filename }
+      ]
+        .filter((item) => item.filename.trim())
+        .map((item) => ({
+          document_type: item.document_type,
+          filename: item.filename.trim(),
+          storage_url: null,
+          checksum: null,
+          content_type: null,
+          size_bytes: null,
+          notes: null
+        }));
+      const packet = await apiRequest<RegistrationPacketRead>(
+        `/organizations/public/${encodeURIComponent(site.slug)}/registration-inquiries/${submittedInquiry.id}/packet`,
+        {
+          method: "PATCH",
+          body: {
+            email: submittedInquiry.email,
+            date_of_birth: packetForm.date_of_birth || null,
+            emergency_contact_name: packetForm.emergency_contact_name || null,
+            emergency_contact_phone: packetForm.emergency_contact_phone || null,
+            medical_notes: packetForm.medical_notes || null,
+            consent_signer_name: packetForm.consent_signer_name || null,
+            guardian_consent_acknowledged: packetForm.guardian_consent_acknowledged,
+            privacy_acknowledged: packetForm.privacy_acknowledged,
+            documents,
+            payment_amount: packetForm.payment_amount || null,
+            payment_currency: packetForm.payment_currency || null,
+            payment_method: packetForm.payment_method || null,
+            payment_reference: packetForm.payment_reference || null,
+            payment_status: packetForm.payment_status || null
+          }
+        }
+      );
+      setRegistrationPacket(packet);
+      setSubmittedInquiry(packet.inquiry);
+    } catch (caught) {
+      setPacketError(caught instanceof Error ? caught.message : "Registration packet could not be saved");
+    } finally {
+      setPacketBusy("");
+    }
+  };
+
+  const uploadRegistrationDocument = async (documentType: string, file: File) => {
+    if (!site || !submittedInquiry) {
+      setPacketError("Send the registration inquiry before uploading documents.");
+      return;
+    }
+    setPacketBusy(`upload-${documentType}`);
+    setPacketError("");
+    try {
+      const contentBase64 = await readFileAsBase64(file);
+      const packet = await apiRequest<RegistrationPacketRead>(
+        `/organizations/public/${encodeURIComponent(site.slug)}/registration-inquiries/${submittedInquiry.id}/documents`,
+        {
+          method: "POST",
+          body: {
+            email: submittedInquiry.email,
+            document_type: documentType,
+            filename: file.name,
+            content_type: file.type || "application/octet-stream",
+            content_base64: contentBase64,
+            notes: "Uploaded from public registration form"
+          }
+        }
+      );
+      setRegistrationPacket(packet);
+      setSubmittedInquiry(packet.inquiry);
+    } catch (caught) {
+      setPacketError(caught instanceof Error ? caught.message : "Registration document could not be uploaded");
+    } finally {
+      setPacketBusy("");
+    }
+  };
+
+  const createRegistrationPaymentSession = async () => {
+    if (!site || !submittedInquiry) {
+      setPacketError("Send the registration inquiry before creating a payment link.");
+      return;
+    }
+    setPacketBusy("payment");
+    setPacketError("");
+    try {
+      const baseUrl = `${window.location.origin}/pay/sessions`;
+      const session = await apiRequest<RegistrationPaymentSessionRead>(
+        `/organizations/public/${encodeURIComponent(site.slug)}/registration-inquiries/${submittedInquiry.id}/payment-session`,
+        {
+          method: "POST",
+          body: {
+            email: submittedInquiry.email,
+            checkout_base_url: baseUrl,
+            provider: "manual_gateway",
+            payment_method: packetForm.payment_method || "mobile_money"
+          }
+        }
+      );
+      setPaymentSession(session);
+      setSubmittedInquiry(session.inquiry);
+      window.open(session.checkout_url, "_blank", "noopener,noreferrer");
+    } catch (caught) {
+      setPacketError(caught instanceof Error ? caught.message : "Registration payment link could not be created");
+    } finally {
+      setPacketBusy("");
     }
   };
 
@@ -673,9 +838,171 @@ export default function PublicOrganizationSitePage() {
           <p>Send a player or family inquiry to the organization staff.</p>
         </div>
         {submittedInquiry ? (
-          <div className="public-site-success">
-            <strong>Inquiry received</strong>
-            <span>{submittedInquiry.athlete_name} · {submittedInquiry.status}</span>
+          <div className="public-registration-packet">
+            <div className="public-site-success">
+              <strong>Inquiry received</strong>
+              <span>{submittedInquiry.athlete_name} · {submittedInquiry.status} · {submittedInquiry.verification_status}</span>
+            </div>
+            <div className="public-registration-packet-head">
+              <div>
+                <p className="section-label">Registration packet</p>
+                <h3>Documents, consent, and fees</h3>
+              </div>
+              <button type="button" onClick={submitRegistrationPacket} disabled={packetBusy !== ""}>
+                {packetBusy === "packet" ? "Saving" : "Save packet"}
+              </button>
+            </div>
+            <div className="public-registration-grid">
+              <label>
+                Date of birth
+                <input
+                  type="date"
+                  value={packetForm.date_of_birth}
+                  onChange={(event) => setPacketForm({ ...packetForm, date_of_birth: event.target.value })}
+                />
+              </label>
+              <label>
+                Emergency contact
+                <input
+                  value={packetForm.emergency_contact_name}
+                  onChange={(event) => setPacketForm({ ...packetForm, emergency_contact_name: event.target.value })}
+                />
+              </label>
+              <label>
+                Emergency phone
+                <input
+                  value={packetForm.emergency_contact_phone}
+                  onChange={(event) => setPacketForm({ ...packetForm, emergency_contact_phone: event.target.value })}
+                />
+              </label>
+              <label>
+                Consent signer
+                <input
+                  value={packetForm.consent_signer_name}
+                  onChange={(event) => setPacketForm({ ...packetForm, consent_signer_name: event.target.value })}
+                />
+              </label>
+              <label className="public-site-wide">
+                Medical notes
+                <textarea
+                  value={packetForm.medical_notes}
+                  onChange={(event) => setPacketForm({ ...packetForm, medical_notes: event.target.value })}
+                />
+              </label>
+              <RegistrationDocumentInput
+                label="Proof of age"
+                documentType="proof_of_age"
+                value={packetForm.proof_of_age_filename}
+                onChange={(value) => setPacketForm({ ...packetForm, proof_of_age_filename: value })}
+                onUpload={uploadRegistrationDocument}
+                busy={packetBusy}
+              />
+              <RegistrationDocumentInput
+                label="Medical information"
+                documentType="medical_information"
+                value={packetForm.medical_information_filename}
+                onChange={(value) => setPacketForm({ ...packetForm, medical_information_filename: value })}
+                onUpload={uploadRegistrationDocument}
+                busy={packetBusy}
+              />
+              <RegistrationDocumentInput
+                label="Guardian consent"
+                documentType="guardian_consent"
+                value={packetForm.guardian_consent_filename}
+                onChange={(value) => setPacketForm({ ...packetForm, guardian_consent_filename: value })}
+                onUpload={uploadRegistrationDocument}
+                busy={packetBusy}
+              />
+              <RegistrationDocumentInput
+                label="Photo release"
+                documentType="photo_release"
+                value={packetForm.photo_release_filename}
+                onChange={(value) => setPacketForm({ ...packetForm, photo_release_filename: value })}
+                onUpload={uploadRegistrationDocument}
+                busy={packetBusy}
+              />
+              <label>
+                Fee amount
+                <input
+                  value={packetForm.payment_amount}
+                  onChange={(event) => setPacketForm({ ...packetForm, payment_amount: event.target.value })}
+                  placeholder="1000.00"
+                />
+              </label>
+              <label>
+                Currency
+                <input
+                  maxLength={3}
+                  value={packetForm.payment_currency}
+                  onChange={(event) => setPacketForm({ ...packetForm, payment_currency: event.target.value.toUpperCase() })}
+                />
+              </label>
+              <label>
+                Payment method
+                <select
+                  value={packetForm.payment_method}
+                  onChange={(event) => setPacketForm({ ...packetForm, payment_method: event.target.value })}
+                >
+                  <option value="mobile_money">Mobile money</option>
+                  <option value="card">Card</option>
+                  <option value="bank_transfer">Bank transfer</option>
+                  <option value="cash_office">Cash office</option>
+                  <option value="waiver">Waiver</option>
+                </select>
+              </label>
+              <label>
+                Payment reference
+                <input
+                  value={packetForm.payment_reference}
+                  onChange={(event) => setPacketForm({ ...packetForm, payment_reference: event.target.value })}
+                />
+              </label>
+              <label className="public-registration-checkbox">
+                <input
+                  type="checkbox"
+                  checked={packetForm.privacy_acknowledged}
+                  onChange={(event) => setPacketForm({ ...packetForm, privacy_acknowledged: event.target.checked })}
+                />
+                Privacy consent acknowledged
+              </label>
+              <label className="public-registration-checkbox">
+                <input
+                  type="checkbox"
+                  checked={packetForm.guardian_consent_acknowledged}
+                  onChange={(event) => setPacketForm({ ...packetForm, guardian_consent_acknowledged: event.target.checked })}
+                />
+                Guardian consent acknowledged
+              </label>
+            </div>
+            <div className="public-registration-actions">
+              <button type="button" onClick={submitRegistrationPacket} disabled={packetBusy !== ""}>
+                {packetBusy === "packet" ? "Saving packet" : "Save packet"}
+              </button>
+              <button type="button" className="secondary" onClick={createRegistrationPaymentSession} disabled={packetBusy !== "" || !packetForm.payment_amount}>
+                {packetBusy === "payment" ? "Preparing link" : "Open payment link"}
+              </button>
+            </div>
+            {packetError ? <p className="form-error">{packetError}</p> : null}
+            {paymentSession ? (
+              <div className="public-site-success">
+                <strong>Payment link ready</strong>
+                <a href={paymentSession.checkout_url}>{paymentSession.hosted_checkout.registration_reference}</a>
+              </div>
+            ) : null}
+            {registrationPacket ? (
+              <div className="public-registration-summary">
+                <strong>{registrationPacket.packet_complete ? "Ready for staff verification" : "Still needs attention"}</strong>
+                <span>Missing: {registrationPacket.missing_documents.length ? registrationPacket.missing_documents.join(", ") : "none"}</span>
+                {registrationPacket.submitted_documents.map((document) => (
+                  <small key={`${document.document_type}-${document.checksum ?? document.filename}`}>
+                    {document.document_type}: {document.filename} · {document.storage_url ?? "not stored"}
+                  </small>
+                ))}
+                {registrationPacket.next_steps.map((step) => (
+                  <small key={step}>{step}</small>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : (
           <form onSubmit={submitInquiry}>
@@ -777,4 +1104,43 @@ function splitCsv(value: string): string[] {
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+function RegistrationDocumentInput({
+  label,
+  documentType,
+  value,
+  onChange,
+  onUpload,
+  busy
+}: {
+  label: string;
+  documentType: string;
+  value: string;
+  onChange: (value: string) => void;
+  onUpload: (documentType: string, file: File) => void;
+  busy: string;
+}) {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const uploadDisabled = busy !== "" || selectedFile === null;
+
+  return (
+    <label className="public-registration-document">
+      {label}
+      <span>
+        <input
+          type="file"
+          onChange={(event) => {
+            const file = event.target.files?.[0] ?? null;
+            setSelectedFile(file);
+            onChange(file?.name ?? "");
+          }}
+        />
+        <button type="button" onClick={() => selectedFile && onUpload(documentType, selectedFile)} disabled={uploadDisabled}>
+          {busy === `upload-${documentType}` ? "Uploading" : "Upload"}
+        </button>
+      </span>
+      {value ? <small>{value}</small> : null}
+    </label>
+  );
 }
