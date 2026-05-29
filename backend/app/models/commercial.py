@@ -413,6 +413,65 @@ class Ticket(IdMixin, TimestampMixin, Base):
     gate: Mapped[str | None] = mapped_column(String(80))
 
 
+class TicketBundleOffer(IdMixin, TimestampMixin, Base):
+    __tablename__ = "ticket_bundle_offers"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    event_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    ticket_product_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("ticket_products.id"), index=True)
+    merchandise_product_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("merchandise_products.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    package_type: Mapped[str] = mapped_column(String(80), default="ticket_bundle", nullable=False, index=True)
+    ticket_quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    channel: Mapped[str] = mapped_column(String(80), default="online", nullable=False, index=True)
+    sales_limit: Mapped[int | None] = mapped_column(Integer)
+    sold_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[CommercialStatus] = mapped_column(
+        enum_type(CommercialStatus),
+        default=CommercialStatus.ACTIVE,
+        nullable=False,
+        index=True,
+    )
+
+
+class TicketSeatAssignment(IdMixin, TimestampMixin, Base):
+    __tablename__ = "ticket_seat_assignments"
+    __table_args__ = (UniqueConstraint("ticket_id"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    event_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    ticket_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("tickets.id"), index=True)
+    section: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    row: Mapped[str | None] = mapped_column(String(40), index=True)
+    seat: Mapped[str | None] = mapped_column(String(40), index=True)
+    access_zone: Mapped[str | None] = mapped_column(String(120), index=True)
+    accessible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    companion_seat: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class TicketResaleListing(IdMixin, TimestampMixin, Base):
+    __tablename__ = "ticket_resale_listings"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    event_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    ticket_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("tickets.id"), index=True)
+    seller_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    seller_email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    resale_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="listed", nullable=False, index=True)
+    buyer_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    buyer_email: Mapped[str | None] = mapped_column(String(320), index=True)
+    listed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    sold_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class FinanceInvoice(IdMixin, TimestampMixin, Base):
     __tablename__ = "finance_invoices"
 

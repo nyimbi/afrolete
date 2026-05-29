@@ -542,6 +542,107 @@ class TicketCheckIn(BaseModel):
     gate: str | None = Field(default=None, max_length=80)
 
 
+class TicketBundleOfferCreate(BaseModel):
+    organization_id: UUID
+    event_id: UUID
+    ticket_product_id: UUID
+    merchandise_product_id: UUID | None = None
+    name: str = Field(min_length=2, max_length=180)
+    package_type: str = Field(default="ticket_bundle", min_length=2, max_length=80)
+    ticket_quantity: int = Field(default=1, ge=1, le=100)
+    price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    channel: str = Field(default="online", min_length=2, max_length=80)
+    sales_limit: int | None = Field(default=None, ge=1)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+
+class TicketBundleOfferRead(TicketBundleOfferCreate):
+    id: UUID
+    ticket_product_name: str | None = None
+    merchandise_product_name: str | None = None
+    sold_count: int
+    status: CommercialStatus
+
+
+class ComplimentaryTicketCreate(BaseModel):
+    organization_id: UUID
+    ticket_product_id: UUID
+    recipient_name: str = Field(min_length=2, max_length=180)
+    recipient_email: str = Field(min_length=3, max_length=320)
+    quantity: int = Field(default=1, ge=1, le=100)
+    reason: str = Field(default="sponsor_media_guest", min_length=2, max_length=120)
+    sponsor_id: UUID | None = None
+
+
+class TicketSeatAssignmentCreate(BaseModel):
+    organization_id: UUID
+    ticket_id: UUID
+    event_id: UUID | None = None
+    section: str = Field(min_length=1, max_length=80)
+    row: str | None = Field(default=None, max_length=40)
+    seat: str | None = Field(default=None, max_length=40)
+    access_zone: str | None = Field(default=None, max_length=120)
+    accessible: bool = False
+    companion_seat: bool = False
+
+
+class TicketSeatAssignmentRead(TicketSeatAssignmentCreate):
+    id: UUID
+    event_id: UUID
+    holder_name: str | None = None
+    ticket_status: TicketStatus | None = None
+    assigned_at: datetime
+
+
+class TicketResaleListingCreate(BaseModel):
+    organization_id: UUID
+    ticket_id: UUID
+    seller_name: str = Field(min_length=2, max_length=180)
+    seller_email: str = Field(min_length=3, max_length=320)
+    resale_price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class TicketResalePurchaseCreate(BaseModel):
+    organization_id: UUID
+    buyer_name: str = Field(min_length=2, max_length=180)
+    buyer_email: str = Field(min_length=3, max_length=320)
+
+
+class TicketResaleListingRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    event_id: UUID
+    ticket_id: UUID
+    seller_name: str
+    seller_email: str
+    resale_price: Decimal
+    currency: str
+    status: str
+    buyer_name: str | None
+    buyer_email: str | None
+    listed_at: datetime
+    sold_at: datetime | None
+    notes: str | None
+
+
+class TicketAccessDashboardRead(BaseModel):
+    organization_id: UUID
+    ticket_product_count: int
+    ticket_count: int
+    checked_in_count: int
+    complimentary_count: int
+    assigned_seat_count: int
+    accessible_seat_count: int
+    resale_listing_count: int
+    resale_sold_count: int
+    package_offer_count: int
+    recommendations: list[str]
+
+
 class CommercialRefundCreate(BaseModel):
     amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
     reason: str = Field(min_length=2, max_length=500)

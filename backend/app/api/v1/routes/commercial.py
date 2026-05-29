@@ -68,12 +68,21 @@ from app.schemas.commercial import (
     SponsorshipDeliverableMilestoneCreate,
     SponsorshipDeliverableMilestoneRead,
     TaxQuoteRead,
+    ComplimentaryTicketCreate,
+    TicketAccessDashboardRead,
+    TicketBundleOfferCreate,
+    TicketBundleOfferRead,
     TicketCheckIn,
     TicketOrderCreate,
     TicketOrderRead,
     TicketProductCreate,
     TicketProductRead,
     TicketRead,
+    TicketResaleListingCreate,
+    TicketResaleListingRead,
+    TicketResalePurchaseCreate,
+    TicketSeatAssignmentCreate,
+    TicketSeatAssignmentRead,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -97,12 +106,15 @@ from app.services.commercial import (
     create_sponsor_interaction,
     create_sponsorship_milestone,
     create_sponsorship,
+    create_ticket_bundle_offer,
     create_ticket_order,
     create_ticket_product,
+    create_ticket_resale_listing,
     deliver_commercial_tax_filing,
     execute_payment_settlement_payout,
     get_commercial_invoice_hosted_checkout,
     ingest_commercial_invoice_payment_webhook,
+    issue_complimentary_tickets,
     list_commercial_settlement_payouts,
     list_campaigns,
     list_grant_applications,
@@ -119,12 +131,16 @@ from app.services.commercial import (
     list_sponsor_interactions,
     list_sponsorship_milestones,
     list_sponsorships,
+    list_ticket_bundle_offers,
     list_ticket_products,
+    list_ticket_resale_listings,
+    list_ticket_seat_assignments,
     list_tickets,
     grant_dashboard,
     list_merchandise_orders,
     list_merchandise_products,
     payment_settlement,
+    purchase_ticket_resale_listing,
     record_donation,
     review_sponsor_content_asset,
     record_sponsor_coupon_redemption,
@@ -140,6 +156,8 @@ from app.services.commercial import (
     sponsor_stewardship_dashboard,
     sync_accounting_export,
     tax_quote,
+    ticket_access_dashboard,
+    assign_ticket_seat,
     merchandise_order_read,
     merchandise_store_dashboard,
     update_merchandise_fulfillment,
@@ -631,6 +649,24 @@ async def list_ticket_products_route(
     ]
 
 
+@router.post("/tickets/bundles", response_model=TicketBundleOfferRead, status_code=status.HTTP_201_CREATED)
+async def create_ticket_bundle_offer_route(
+    payload: TicketBundleOfferCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TicketBundleOfferRead:
+    return await create_ticket_bundle_offer(db, identity, payload, authz)
+
+
+@router.get("/tickets/bundles", response_model=list[TicketBundleOfferRead])
+async def list_ticket_bundle_offers_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[TicketBundleOfferRead]:
+    return await list_ticket_bundle_offers(db, organization_id)
+
+
 @router.post("/tickets/orders", response_model=TicketOrderRead, status_code=status.HTTP_201_CREATED)
 async def create_ticket_order_route(
     payload: TicketOrderCreate,
@@ -642,12 +678,78 @@ async def create_ticket_order_route(
     return order_read(order, tickets)
 
 
+@router.post("/tickets/complimentary", response_model=TicketOrderRead, status_code=status.HTTP_201_CREATED)
+async def issue_complimentary_tickets_route(
+    payload: ComplimentaryTicketCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TicketOrderRead:
+    order, tickets = await issue_complimentary_tickets(db, identity, payload, authz)
+    return order_read(order, tickets)
+
+
 @router.get("/tickets", response_model=list[TicketRead])
 async def list_tickets_route(
     organization_id: UUID = Query(),
     db: AsyncSession = Depends(get_db),
 ) -> list[TicketRead]:
     return [ticket_read(ticket) for ticket in await list_tickets(db, organization_id)]
+
+
+@router.post("/tickets/seats", response_model=TicketSeatAssignmentRead, status_code=status.HTTP_201_CREATED)
+async def assign_ticket_seat_route(
+    payload: TicketSeatAssignmentCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TicketSeatAssignmentRead:
+    return await assign_ticket_seat(db, identity, payload, authz)
+
+
+@router.get("/tickets/seats", response_model=list[TicketSeatAssignmentRead])
+async def list_ticket_seat_assignments_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[TicketSeatAssignmentRead]:
+    return await list_ticket_seat_assignments(db, organization_id)
+
+
+@router.post("/tickets/resale-listings", response_model=TicketResaleListingRead, status_code=status.HTTP_201_CREATED)
+async def create_ticket_resale_listing_route(
+    payload: TicketResaleListingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TicketResaleListingRead:
+    return await create_ticket_resale_listing(db, identity, payload, authz)
+
+
+@router.get("/tickets/resale-listings", response_model=list[TicketResaleListingRead])
+async def list_ticket_resale_listings_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[TicketResaleListingRead]:
+    return await list_ticket_resale_listings(db, organization_id)
+
+
+@router.post("/tickets/resale-listings/{listing_id}/purchase", response_model=TicketResaleListingRead)
+async def purchase_ticket_resale_listing_route(
+    listing_id: UUID,
+    payload: TicketResalePurchaseCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TicketResaleListingRead:
+    return await purchase_ticket_resale_listing(db, identity, listing_id, payload, authz)
+
+
+@router.get("/tickets/access-dashboard", response_model=TicketAccessDashboardRead)
+async def ticket_access_dashboard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> TicketAccessDashboardRead:
+    return await ticket_access_dashboard(db, organization_id)
 
 
 @router.patch("/tickets/{ticket_id}/check-in", response_model=TicketRead)

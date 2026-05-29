@@ -60,8 +60,11 @@ from app.models.commercial import (  # noqa: F401,E402
     SponsorshipAgreement,
     SponsorshipDeliverableMilestone,
     Ticket,
+    TicketBundleOffer,
     TicketOrder,
     TicketProduct,
+    TicketResaleListing,
+    TicketSeatAssignment,
 )
 from app.models.community import (  # noqa: F401,E402
     AlumniProfile,

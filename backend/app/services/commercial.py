@@ -39,8 +39,11 @@ from app.models.commercial import (
     SponsorshipAgreement,
     SponsorshipDeliverableMilestone,
     Ticket,
+    TicketBundleOffer,
     TicketOrder,
     TicketProduct,
+    TicketResaleListing,
+    TicketSeatAssignment,
 )
 from app.models.community import FanEngagementChallenge, SupporterProfile
 from app.models.enums import CommercialStatus, TicketStatus
@@ -106,9 +109,18 @@ from app.schemas.commercial import (
     SponsorshipDeliverableMilestoneCreate,
     SponsorshipDeliverableMilestoneRead,
     TaxQuoteRead,
+    ComplimentaryTicketCreate,
+    TicketAccessDashboardRead,
+    TicketBundleOfferCreate,
+    TicketBundleOfferRead,
     TicketCheckIn,
     TicketOrderCreate,
     TicketProductCreate,
+    TicketResaleListingCreate,
+    TicketResaleListingRead,
+    TicketResalePurchaseCreate,
+    TicketSeatAssignmentCreate,
+    TicketSeatAssignmentRead,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
@@ -1033,6 +1045,101 @@ def merchandise_recommendations(
     return recommendations[:6]
 
 
+def ticket_bundle_offer_read(
+    offer: TicketBundleOffer,
+    ticket_product: TicketProduct | None = None,
+    merchandise_product: MerchandiseProduct | None = None,
+) -> TicketBundleOfferRead:
+    return TicketBundleOfferRead(
+        organization_id=offer.organization_id,
+        event_id=offer.event_id,
+        ticket_product_id=offer.ticket_product_id,
+        merchandise_product_id=offer.merchandise_product_id,
+        name=offer.name,
+        package_type=offer.package_type,
+        ticket_quantity=offer.ticket_quantity,
+        price=offer.price,
+        currency=offer.currency,
+        channel=offer.channel,
+        sales_limit=offer.sales_limit,
+        starts_at=offer.starts_at,
+        ends_at=offer.ends_at,
+        id=offer.id,
+        ticket_product_name=ticket_product.name if ticket_product else None,
+        merchandise_product_name=merchandise_product.name if merchandise_product else None,
+        sold_count=offer.sold_count,
+        status=offer.status,
+    )
+
+
+def ticket_seat_assignment_read(
+    assignment: TicketSeatAssignment,
+    ticket: Ticket | None = None,
+) -> TicketSeatAssignmentRead:
+    return TicketSeatAssignmentRead(
+        organization_id=assignment.organization_id,
+        ticket_id=assignment.ticket_id,
+        event_id=assignment.event_id,
+        section=assignment.section,
+        row=assignment.row,
+        seat=assignment.seat,
+        access_zone=assignment.access_zone,
+        accessible=assignment.accessible,
+        companion_seat=assignment.companion_seat,
+        id=assignment.id,
+        holder_name=ticket.holder_name if ticket else None,
+        ticket_status=ticket.status if ticket else None,
+        assigned_at=assignment.assigned_at,
+    )
+
+
+def ticket_resale_listing_read(listing: TicketResaleListing) -> TicketResaleListingRead:
+    return TicketResaleListingRead(
+        id=listing.id,
+        organization_id=listing.organization_id,
+        event_id=listing.event_id,
+        ticket_id=listing.ticket_id,
+        seller_name=listing.seller_name,
+        seller_email=listing.seller_email,
+        resale_price=listing.resale_price,
+        currency=listing.currency,
+        status=listing.status,
+        buyer_name=listing.buyer_name,
+        buyer_email=listing.buyer_email,
+        listed_at=listing.listed_at,
+        sold_at=listing.sold_at,
+        notes=listing.notes,
+    )
+
+
+def ticket_access_recommendations(
+    products: list[TicketProduct],
+    tickets: list[Ticket],
+    orders: list[TicketOrder],
+    assignments: list[TicketSeatAssignment],
+    listings: list[TicketResaleListing],
+    offers: list[TicketBundleOffer],
+) -> list[str]:
+    recommendations: list[str] = []
+    if not products:
+        recommendations.append("Create ticket products before publishing event registration or matchday purchase links.")
+    if products and not offers:
+        recommendations.append("Add family, VIP, or merch-linked ticket bundles to lift event yield.")
+    if tickets and len(assignments) < len(tickets):
+        recommendations.append("Assign reserved, accessible, or access-zone seats before gates open.")
+    if tickets and not any(assignment.accessible for assignment in assignments):
+        recommendations.append("Mark accessible seating and companion seats for inclusion and venue operations.")
+    if orders and not any(order.total_amount == Decimal("0") for order in orders):
+        recommendations.append("Use complimentary tickets for sponsors, media, officials, and approved guests.")
+    if tickets and not listings:
+        recommendations.append("Enable managed resale to keep exchanges visible and prevent informal ticket transfers.")
+    if tickets and sum(1 for ticket in tickets if ticket.status == TicketStatus.CHECKED_IN) == 0:
+        recommendations.append("Run gate scan rehearsal and verify QR scanner permissions before event day.")
+    if not recommendations:
+        recommendations.append("Ticket access operations are configured; monitor scans, resale, and seating exceptions.")
+    return recommendations[:6]
+
+
 async def create_ticket_product(db: AsyncSession, identity: CurrentIdentity, payload: TicketProductCreate, authz: AuthorizationService) -> TicketProduct:
     await ensure_manage_commercial(authz, identity, payload.organization_id)
     await get_event_for_organization(db, payload.event_id, payload.organization_id)
@@ -1045,6 +1152,31 @@ async def create_ticket_product(db: AsyncSession, identity: CurrentIdentity, pay
 
 async def list_ticket_products(db: AsyncSession, organization_id: UUID) -> list[TicketProduct]:
     return list((await db.scalars(select(TicketProduct).where(TicketProduct.organization_id == organization_id).order_by(TicketProduct.created_at.desc()))).all())
+
+
+async def list_ticket_orders(db: AsyncSession, organization_id: UUID) -> list[TicketOrder]:
+    return list(
+        (
+            await db.scalars(
+                select(TicketOrder)
+                .where(TicketOrder.organization_id == organization_id)
+                .order_by(TicketOrder.created_at.desc())
+            )
+        ).all()
+    )
+
+
+async def paid_ticket_revenue(db: AsyncSession, orders: list[TicketOrder]) -> Decimal:
+    revenue = Decimal("0")
+    for order in orders:
+        if order.total_amount <= 0 or order.status == CommercialStatus.CANCELLED:
+            continue
+        active_ticket_count = await tickets_remaining_in_order(db, order.id)
+        if active_ticket_count == 0:
+            continue
+        per_ticket_amount = order.total_amount / Decimal(order.quantity)
+        revenue += per_ticket_amount * active_ticket_count
+    return revenue.quantize(Decimal("0.01"))
 
 
 async def create_ticket_order(db: AsyncSession, identity: CurrentIdentity, payload: TicketOrderCreate, authz: AuthorizationService) -> tuple[TicketOrder, list[Ticket]]:
@@ -1083,6 +1215,263 @@ async def create_ticket_order(db: AsyncSession, identity: CurrentIdentity, paylo
 
 async def list_tickets(db: AsyncSession, organization_id: UUID) -> list[Ticket]:
     return list((await db.scalars(select(Ticket).where(Ticket.organization_id == organization_id).order_by(Ticket.created_at.desc()))).all())
+
+
+async def create_ticket_bundle_offer(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: TicketBundleOfferCreate,
+    authz: AuthorizationService,
+) -> TicketBundleOfferRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    await get_event_for_organization(db, payload.event_id, payload.organization_id)
+    ticket_product = await get_ticket_product_for_organization(db, payload.ticket_product_id, payload.organization_id)
+    if ticket_product.event_id != payload.event_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ticket product belongs to another event")
+    merchandise_product = None
+    if payload.merchandise_product_id is not None:
+        merchandise_product = await db.get(MerchandiseProduct, payload.merchandise_product_id)
+        if merchandise_product is None or merchandise_product.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merchandise product not found")
+    offer = TicketBundleOffer(**payload.model_dump())
+    db.add(offer)
+    await db.commit()
+    await db.refresh(offer)
+    return ticket_bundle_offer_read(offer, ticket_product, merchandise_product)
+
+
+async def list_ticket_bundle_offers(db: AsyncSession, organization_id: UUID) -> list[TicketBundleOfferRead]:
+    offers = list(
+        (
+            await db.scalars(
+                select(TicketBundleOffer)
+                .where(TicketBundleOffer.organization_id == organization_id)
+                .order_by(TicketBundleOffer.created_at.desc())
+            )
+        ).all()
+    )
+    product_ids = {offer.ticket_product_id for offer in offers}
+    merchandise_ids = {offer.merchandise_product_id for offer in offers if offer.merchandise_product_id is not None}
+    products = {
+        product.id: product
+        for product in (
+            await db.scalars(select(TicketProduct).where(TicketProduct.id.in_(product_ids)))
+        ).all()
+    } if product_ids else {}
+    merchandise = {
+        product.id: product
+        for product in (
+            await db.scalars(select(MerchandiseProduct).where(MerchandiseProduct.id.in_(merchandise_ids)))
+        ).all()
+    } if merchandise_ids else {}
+    return [
+        ticket_bundle_offer_read(offer, products.get(offer.ticket_product_id), merchandise.get(offer.merchandise_product_id))
+        for offer in offers
+    ]
+
+
+async def issue_complimentary_tickets(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ComplimentaryTicketCreate,
+    authz: AuthorizationService,
+) -> tuple[TicketOrder, list[Ticket]]:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    ticket_product = await get_ticket_product_for_organization(db, payload.ticket_product_id, payload.organization_id)
+    if payload.sponsor_id is not None:
+        await get_sponsor_for_organization(db, payload.sponsor_id, payload.organization_id)
+    if ticket_product.sold_count + payload.quantity > ticket_product.capacity:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ticket capacity exceeded")
+    order = TicketOrder(
+        organization_id=payload.organization_id,
+        ticket_product_id=payload.ticket_product_id,
+        buyer_name=payload.recipient_name,
+        buyer_email=payload.recipient_email.strip().lower(),
+        quantity=payload.quantity,
+        total_amount=Decimal("0"),
+        currency=ticket_product.currency,
+        external_payment_reference=f"COMP-{payload.reason.upper()}-{uuid4().hex[:10]}",
+    )
+    db.add(order)
+    await db.flush()
+    tickets = [
+        Ticket(
+            organization_id=payload.organization_id,
+            ticket_order_id=order.id,
+            ticket_product_id=ticket_product.id,
+            holder_name=payload.recipient_name,
+            qr_token=f"tkt_{uuid4().hex}",
+        )
+        for _ in range(payload.quantity)
+    ]
+    ticket_product.sold_count += payload.quantity
+    db.add_all(tickets)
+    await db.commit()
+    await db.refresh(order)
+    return order, tickets
+
+
+async def assign_ticket_seat(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: TicketSeatAssignmentCreate,
+    authz: AuthorizationService,
+) -> TicketSeatAssignmentRead:
+    ticket = await get_ticket_for_organization(db, payload.ticket_id, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    product = await get_ticket_product_for_organization(db, ticket.ticket_product_id, payload.organization_id)
+    event_id = payload.event_id or product.event_id
+    if event_id != product.event_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ticket belongs to another event")
+
+    existing = await db.scalar(select(TicketSeatAssignment).where(TicketSeatAssignment.ticket_id == ticket.id))
+    if payload.row and payload.seat:
+        duplicate = await db.scalar(
+            select(TicketSeatAssignment).where(
+                TicketSeatAssignment.organization_id == payload.organization_id,
+                TicketSeatAssignment.event_id == event_id,
+                TicketSeatAssignment.section == payload.section,
+                TicketSeatAssignment.row == payload.row,
+                TicketSeatAssignment.seat == payload.seat,
+                TicketSeatAssignment.ticket_id != ticket.id,
+            )
+        )
+        if duplicate is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Seat already assigned")
+
+    assignment = existing or TicketSeatAssignment(
+        organization_id=payload.organization_id,
+        event_id=event_id,
+        ticket_id=ticket.id,
+        assigned_at=datetime.now(UTC),
+    )
+    assignment.section = payload.section
+    assignment.row = payload.row
+    assignment.seat = payload.seat
+    assignment.access_zone = payload.access_zone or product.access_zone
+    assignment.accessible = payload.accessible
+    assignment.companion_seat = payload.companion_seat
+    assignment.assigned_at = datetime.now(UTC)
+    db.add(assignment)
+    await db.commit()
+    await db.refresh(assignment)
+    return ticket_seat_assignment_read(assignment, ticket)
+
+
+async def list_ticket_seat_assignments(db: AsyncSession, organization_id: UUID) -> list[TicketSeatAssignmentRead]:
+    assignments = list(
+        (
+            await db.scalars(
+                select(TicketSeatAssignment)
+                .where(TicketSeatAssignment.organization_id == organization_id)
+                .order_by(TicketSeatAssignment.assigned_at.desc())
+            )
+        ).all()
+    )
+    ticket_ids = {assignment.ticket_id for assignment in assignments}
+    tickets = {
+        ticket.id: ticket
+        for ticket in (await db.scalars(select(Ticket).where(Ticket.id.in_(ticket_ids)))).all()
+    } if ticket_ids else {}
+    return [ticket_seat_assignment_read(assignment, tickets.get(assignment.ticket_id)) for assignment in assignments]
+
+
+async def create_ticket_resale_listing(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: TicketResaleListingCreate,
+    authz: AuthorizationService,
+) -> TicketResaleListingRead:
+    ticket = await get_ticket_for_organization(db, payload.ticket_id, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    if ticket.status != TicketStatus.ISSUED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only issued tickets can be listed")
+    product = await get_ticket_product_for_organization(db, ticket.ticket_product_id, payload.organization_id)
+    duplicate = await db.scalar(
+        select(TicketResaleListing).where(
+            TicketResaleListing.ticket_id == ticket.id,
+            TicketResaleListing.status == "listed",
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ticket already has an active resale listing")
+    listing = TicketResaleListing(
+        organization_id=payload.organization_id,
+        event_id=product.event_id,
+        ticket_id=ticket.id,
+        seller_name=payload.seller_name,
+        seller_email=payload.seller_email.strip().lower(),
+        resale_price=payload.resale_price,
+        currency=payload.currency,
+        listed_at=datetime.now(UTC),
+        notes=payload.notes,
+    )
+    db.add(listing)
+    await db.commit()
+    await db.refresh(listing)
+    return ticket_resale_listing_read(listing)
+
+
+async def list_ticket_resale_listings(db: AsyncSession, organization_id: UUID) -> list[TicketResaleListingRead]:
+    listings = list(
+        (
+            await db.scalars(
+                select(TicketResaleListing)
+                .where(TicketResaleListing.organization_id == organization_id)
+                .order_by(TicketResaleListing.listed_at.desc())
+            )
+        ).all()
+    )
+    return [ticket_resale_listing_read(listing) for listing in listings]
+
+
+async def purchase_ticket_resale_listing(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    listing_id: UUID,
+    payload: TicketResalePurchaseCreate,
+    authz: AuthorizationService,
+) -> TicketResaleListingRead:
+    listing = await get_ticket_resale_listing_for_organization(db, listing_id, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    if listing.status != "listed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Resale listing is not available")
+    ticket = await get_ticket_for_organization(db, listing.ticket_id, payload.organization_id)
+    if ticket.status != TicketStatus.ISSUED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ticket cannot be transferred")
+    listing.status = "sold"
+    listing.buyer_name = payload.buyer_name
+    listing.buyer_email = payload.buyer_email.strip().lower()
+    listing.sold_at = datetime.now(UTC)
+    ticket.holder_name = payload.buyer_name
+    await db.commit()
+    await db.refresh(listing)
+    return ticket_resale_listing_read(listing)
+
+
+async def ticket_access_dashboard(db: AsyncSession, organization_id: UUID) -> TicketAccessDashboardRead:
+    products = list((await db.scalars(select(TicketProduct).where(TicketProduct.organization_id == organization_id))).all())
+    tickets = list((await db.scalars(select(Ticket).where(Ticket.organization_id == organization_id))).all())
+    orders = list((await db.scalars(select(TicketOrder).where(TicketOrder.organization_id == organization_id))).all())
+    assignments = list(
+        (await db.scalars(select(TicketSeatAssignment).where(TicketSeatAssignment.organization_id == organization_id))).all()
+    )
+    listings = list((await db.scalars(select(TicketResaleListing).where(TicketResaleListing.organization_id == organization_id))).all())
+    offers = list((await db.scalars(select(TicketBundleOffer).where(TicketBundleOffer.organization_id == organization_id))).all())
+    recommendations = ticket_access_recommendations(products, tickets, orders, assignments, listings, offers)
+    return TicketAccessDashboardRead(
+        organization_id=organization_id,
+        ticket_product_count=len(products),
+        ticket_count=len(tickets),
+        checked_in_count=sum(1 for ticket in tickets if ticket.status == TicketStatus.CHECKED_IN),
+        complimentary_count=sum(1 for order in orders if order.total_amount == Decimal("0")),
+        assigned_seat_count=len(assignments),
+        accessible_seat_count=sum(1 for assignment in assignments if assignment.accessible),
+        resale_listing_count=sum(1 for listing in listings if listing.status == "listed"),
+        resale_sold_count=sum(1 for listing in listings if listing.status == "sold"),
+        package_offer_count=len(offers),
+        recommendations=recommendations,
+    )
 
 
 async def check_in_ticket(db: AsyncSession, identity: CurrentIdentity, ticket_id: UUID, payload: TicketCheckIn, authz: AuthorizationService) -> Ticket:
@@ -1566,14 +1955,14 @@ async def payment_settlement(
     fixed_fee: Decimal,
 ) -> PaymentSettlementRead:
     await get_organization(db, organization_id)
-    ticket_products = await list_ticket_products(db, organization_id)
+    ticket_orders = await list_ticket_orders(db, organization_id)
     payments = await list_payments(db, organization_id)
     donations = await list_donations(db, organization_id)
-    gross_ticket_revenue = sum((item.price * item.sold_count for item in ticket_products), Decimal("0"))
+    gross_ticket_revenue = await paid_ticket_revenue(db, ticket_orders)
     gross_invoice_payments = sum((payment.amount for payment in payments), Decimal("0"))
     gross_donations = sum((donation.amount for donation in donations), Decimal("0"))
     gross_amount = gross_ticket_revenue + gross_invoice_payments + gross_donations
-    line_count = len(ticket_products) + len(payments) + len(donations)
+    line_count = len(ticket_orders) + len(payments) + len(donations)
     fee_amount = ((gross_amount * fee_rate / Decimal("100")) + (fixed_fee * line_count)).quantize(Decimal("0.01"))
     return PaymentSettlementRead(
         organization_id=organization_id,
@@ -2095,15 +2484,15 @@ async def commercial_summary(db: AsyncSession, organization_id: UUID) -> Commerc
     sponsors = await list_sponsors(db, organization_id)
     sponsorships = await list_sponsorships(db, organization_id)
     campaigns = await list_campaigns(db, organization_id)
-    ticket_products = await list_ticket_products(db, organization_id)
     tickets = await list_tickets(db, organization_id)
+    ticket_orders = await list_ticket_orders(db, organization_id)
     invoices = await list_invoices(db, organization_id)
     return CommercialSummaryRead(
         organization_id=organization_id,
         sponsorship_value=sum((item.value_amount for item in sponsorships), Decimal("0")),
         fundraising_goal=sum((item.goal_amount for item in campaigns), Decimal("0")),
         fundraising_raised=sum((item.raised_amount for item in campaigns), Decimal("0")),
-        ticket_revenue=sum((item.price * item.sold_count for item in ticket_products), Decimal("0")),
+        ticket_revenue=await paid_ticket_revenue(db, ticket_orders),
         invoice_outstanding=sum((item.amount_due - item.amount_paid for item in invoices), Decimal("0")),
         active_sponsors=len(sponsors),
         active_campaigns=sum(1 for item in campaigns if item.status == CommercialStatus.ACTIVE),
@@ -2246,6 +2635,24 @@ async def get_ticket_product_for_organization(db: AsyncSession, ticket_product_i
     return ticket_product
 
 
+async def get_ticket_for_organization(db: AsyncSession, ticket_id: UUID, organization_id: UUID) -> Ticket:
+    ticket = await db.get(Ticket, ticket_id)
+    if ticket is None or ticket.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    return ticket
+
+
+async def get_ticket_resale_listing_for_organization(
+    db: AsyncSession,
+    listing_id: UUID,
+    organization_id: UUID,
+) -> TicketResaleListing:
+    listing = await db.get(TicketResaleListing, listing_id)
+    if listing is None or listing.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket resale listing not found")
+    return listing
+
+
 async def get_invoice_for_organization(db: AsyncSession, invoice_id: UUID, organization_id: UUID) -> FinanceInvoice:
     invoice = await db.get(FinanceInvoice, invoice_id)
     if invoice is None or invoice.organization_id != organization_id:
@@ -2277,16 +2684,18 @@ async def get_event_for_organization(db: AsyncSession, event_id: UUID, organizat
 async def tickets_remaining_in_order(
     db: AsyncSession,
     order_id: UUID,
-    excluding_ticket_id: UUID,
+    excluding_ticket_id: UUID | None = None,
 ) -> int:
+    conditions = [
+        Ticket.ticket_order_id == order_id,
+        Ticket.status != TicketStatus.REFUNDED,
+    ]
+    if excluding_ticket_id is not None:
+        conditions.append(Ticket.id != excluding_ticket_id)
     tickets = list(
         (
             await db.scalars(
-                select(Ticket).where(
-                    Ticket.ticket_order_id == order_id,
-                    Ticket.id != excluding_ticket_id,
-                    Ticket.status != TicketStatus.REFUNDED,
-                )
+                select(Ticket).where(*conditions)
             )
         ).all()
     )

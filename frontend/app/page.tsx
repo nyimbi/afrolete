@@ -395,9 +395,13 @@ import type {
   TrainingPlanRead,
   TrainingSessionFeedbackRead,
   TrainingSessionPlanRead,
+  TicketAccessDashboardRead,
+  TicketBundleOfferRead,
   TicketOrderRead,
   TicketProductRead,
   TicketRead,
+  TicketResaleListingRead,
+  TicketSeatAssignmentRead,
   UsageMeterRead,
   UsageRecordRead,
   UsageUnit,
@@ -1781,6 +1785,10 @@ export default function HomePage() {
   const [ticketProducts, setTicketProducts] = useState<TicketProductRead[]>([]);
   const [ticketOrders, setTicketOrders] = useState<TicketOrderRead[]>([]);
   const [tickets, setTickets] = useState<TicketRead[]>([]);
+  const [ticketBundles, setTicketBundles] = useState<TicketBundleOfferRead[]>([]);
+  const [ticketSeatAssignments, setTicketSeatAssignments] = useState<TicketSeatAssignmentRead[]>([]);
+  const [ticketResaleListings, setTicketResaleListings] = useState<TicketResaleListingRead[]>([]);
+  const [ticketAccessDashboard, setTicketAccessDashboard] = useState<TicketAccessDashboardRead | null>(null);
   const [invoices, setInvoices] = useState<FinanceInvoiceRead[]>([]);
   const [payments, setPayments] = useState<FinancePaymentRead[]>([]);
   const [commercialSummary, setCommercialSummary] = useState<CommercialSummaryRead | null>(null);
@@ -2683,7 +2691,26 @@ export default function HomePage() {
     buyer_name: "Ticket Buyer",
     buyer_email: "buyer@example.com",
     quantity: 2,
-    gate: "Gate A"
+    gate: "Gate A",
+    bundle_name: "Family derby pack",
+    bundle_package_type: "family_merch_bundle",
+    bundle_ticket_quantity: 4,
+    bundle_price: 55,
+    bundle_sales_limit: 25,
+    complimentary_recipient_name: "Media Guest",
+    complimentary_recipient_email: "media@example.com",
+    complimentary_quantity: 1,
+    complimentary_reason: "media",
+    seat_section: "East Stand",
+    seat_row: "A",
+    seat_label: "12",
+    accessible_seating: true,
+    companion_seat: true,
+    resale_seller_name: "Ticket Buyer",
+    resale_seller_email: "buyer@example.com",
+    resale_price: 8,
+    resale_buyer_name: "Second Buyer",
+    resale_buyer_email: "second@example.com"
   });
   const [invoiceForm, setInvoiceForm] = useState({
     invoice_number: "INV-2026-001",
@@ -3761,6 +3788,10 @@ export default function HomePage() {
       merchandiseDashboardData,
       ticketProductData,
       ticketData,
+      ticketBundleData,
+      ticketSeatData,
+      ticketResaleData,
+      ticketAccessDashboardData,
       invoiceData,
       summaryData,
       dashboardData,
@@ -3789,6 +3820,10 @@ export default function HomePage() {
       apiRequest<MerchandiseStoreDashboardRead>(`/commercial/merchandise/dashboard?organization_id=${organizationId}`),
       apiRequest<TicketProductRead[]>(`/commercial/tickets/products?organization_id=${organizationId}`),
       apiRequest<TicketRead[]>(`/commercial/tickets?organization_id=${organizationId}`),
+      apiRequest<TicketBundleOfferRead[]>(`/commercial/tickets/bundles?organization_id=${organizationId}`),
+      apiRequest<TicketSeatAssignmentRead[]>(`/commercial/tickets/seats?organization_id=${organizationId}`),
+      apiRequest<TicketResaleListingRead[]>(`/commercial/tickets/resale-listings?organization_id=${organizationId}`),
+      apiRequest<TicketAccessDashboardRead>(`/commercial/tickets/access-dashboard?organization_id=${organizationId}`),
       apiRequest<FinanceInvoiceRead[]>(`/commercial/invoices?organization_id=${organizationId}`),
       apiRequest<CommercialSummaryRead>(`/commercial/summary?organization_id=${organizationId}`),
       apiRequest<SponsorshipDashboardRead[]>(
@@ -3819,6 +3854,10 @@ export default function HomePage() {
     setMerchandiseDashboard(merchandiseDashboardData);
     setTicketProducts(ticketProductData);
     setTickets(ticketData);
+    setTicketBundles(ticketBundleData);
+    setTicketSeatAssignments(ticketSeatData);
+    setTicketResaleListings(ticketResaleData);
+    setTicketAccessDashboard(ticketAccessDashboardData);
     setInvoices(invoiceData);
     setCommercialSummary(summaryData);
     setSponsorshipDashboard(dashboardData);
@@ -4304,6 +4343,10 @@ export default function HomePage() {
       setTicketProducts([]);
       setTicketOrders([]);
       setTickets([]);
+      setTicketBundles([]);
+      setTicketSeatAssignments([]);
+      setTicketResaleListings([]);
+      setTicketAccessDashboard(null);
       setInvoices([]);
       setPayments([]);
       setCommercialSummary(null);
@@ -13513,6 +13556,159 @@ export default function HomePage() {
     );
   };
 
+  const createTicketBundleOffer = () => {
+    if (!selectedOrganizationId || !selectedEventId || !selectedTicketProductId) {
+      addLog("Create or select a ticket product first", "bad");
+      return;
+    }
+    runAction(
+      "create-ticket-bundle",
+      () =>
+        apiRequest<TicketBundleOfferRead>("/commercial/tickets/bundles", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            event_id: selectedEventId,
+            ticket_product_id: selectedTicketProductId,
+            merchandise_product_id: selectedMerchandiseProductId || null,
+            name: ticketForm.bundle_name,
+            package_type: ticketForm.bundle_package_type,
+            ticket_quantity: ticketForm.bundle_ticket_quantity,
+            price: String(ticketForm.bundle_price),
+            channel: "public_site",
+            sales_limit: ticketForm.bundle_sales_limit
+          }
+        }),
+      (offer) => {
+        setTicketBundles((current) => [offer, ...current.filter((item) => item.id !== offer.id)]);
+        addLog(`Ticket bundle ready: ${offer.name}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const issueComplimentaryTickets = () => {
+    if (!selectedOrganizationId || !selectedTicketProductId) {
+      addLog("Create or select a ticket product first", "bad");
+      return;
+    }
+    runAction(
+      "issue-complimentary-tickets",
+      () =>
+        apiRequest<TicketOrderRead>("/commercial/tickets/complimentary", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            ticket_product_id: selectedTicketProductId,
+            recipient_name: ticketForm.complimentary_recipient_name,
+            recipient_email: ticketForm.complimentary_recipient_email,
+            quantity: ticketForm.complimentary_quantity,
+            reason: ticketForm.complimentary_reason,
+            sponsor_id: selectedSponsorId || null
+          }
+        }),
+      (order) => {
+        setTicketOrders((current) => [order, ...current.filter((item) => item.id !== order.id)]);
+        addLog(`${order.quantity} complimentary ticket(s) issued`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const assignSelectedTicketSeat = () => {
+    if (!selectedOrganizationId || !selectedTicketId) {
+      addLog("Sell or select a ticket first", "bad");
+      return;
+    }
+    runAction(
+      "assign-ticket-seat",
+      () =>
+        apiRequest<TicketSeatAssignmentRead>("/commercial/tickets/seats", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            ticket_id: selectedTicketId,
+            event_id: selectedEventId || null,
+            section: ticketForm.seat_section,
+            row: ticketForm.seat_row,
+            seat: ticketForm.seat_label,
+            access_zone: ticketForm.access_zone,
+            accessible: ticketForm.accessible_seating,
+            companion_seat: ticketForm.companion_seat
+          }
+        }),
+      (assignment) => {
+        setTicketSeatAssignments((current) => [assignment, ...current.filter((item) => item.id !== assignment.id)]);
+        addLog(`Seat assigned: ${assignment.section} ${assignment.row ?? ""}${assignment.seat ?? ""}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const listSelectedTicketForResale = () => {
+    if (!selectedOrganizationId || !selectedTicketId) {
+      addLog("Sell or select a ticket first", "bad");
+      return;
+    }
+    runAction(
+      "list-ticket-resale",
+      () =>
+        apiRequest<TicketResaleListingRead>("/commercial/tickets/resale-listings", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            ticket_id: selectedTicketId,
+            seller_name: ticketForm.resale_seller_name,
+            seller_email: ticketForm.resale_seller_email,
+            resale_price: String(ticketForm.resale_price),
+            currency: "USD",
+            notes: "Managed exchange through AfroLete ticketing."
+          }
+        }),
+      (listing) => {
+        setTicketResaleListings((current) => [listing, ...current.filter((item) => item.id !== listing.id)]);
+        addLog(`Resale listed for ${listing.resale_price}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const purchaseSelectedResaleListing = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const listing =
+      ticketResaleListings.find((item) => item.ticket_id === selectedTicketId && item.status === "listed") ??
+      ticketResaleListings.find((item) => item.status === "listed");
+    if (!listing) {
+      addLog("Create a resale listing first", "bad");
+      return;
+    }
+    runAction(
+      "purchase-ticket-resale",
+      () =>
+        apiRequest<TicketResaleListingRead>(`/commercial/tickets/resale-listings/${listing.id}/purchase`, {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            buyer_name: ticketForm.resale_buyer_name,
+            buyer_email: ticketForm.resale_buyer_email
+          }
+        }),
+      (updated) => {
+        setTicketResaleListings((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        addLog(`Resale purchased by ${updated.buyer_name ?? "buyer"}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const checkInSelectedTicket = () => {
     if (!selectedTicketId || !selectedOrganizationId) {
       addLog("Sell or select a ticket first", "bad");
@@ -17732,6 +17928,11 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createTicketSale} disabled={busyAction !== null}>Ticket</button>
+                <button type="button" onClick={createTicketBundleOffer} disabled={busyAction !== null}>Bundle</button>
+                <button type="button" onClick={issueComplimentaryTickets} disabled={busyAction !== null}>Comp</button>
+                <button type="button" onClick={assignSelectedTicketSeat} disabled={busyAction !== null}>Seat</button>
+                <button type="button" onClick={listSelectedTicketForResale} disabled={busyAction !== null}>Resale</button>
+                <button type="button" onClick={purchaseSelectedResaleListing} disabled={busyAction !== null}>Buy resale</button>
                 <button type="button" onClick={checkInSelectedTicket} disabled={busyAction !== null}>Scan</button>
                 <button type="button" onClick={refundSelectedTicket} disabled={busyAction !== null}>Refund ticket</button>
                 <button type="button" onClick={createInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
@@ -17757,6 +17958,22 @@ export default function HomePage() {
               <div>
                 <span className="muted">Checked in</span>
                 <strong>{commercialSummary?.tickets_checked_in ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Packages</span>
+                <strong>{ticketAccessDashboard?.package_offer_count ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Seats</span>
+                <strong>{ticketAccessDashboard?.assigned_seat_count ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Resale</span>
+                <strong>{ticketAccessDashboard?.resale_listing_count ?? 0}/{ticketAccessDashboard?.resale_sold_count ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Comped</span>
+                <strong>{ticketAccessDashboard?.complimentary_count ?? 0}</strong>
               </div>
               <div>
                 <span className="muted">Outstanding</span>
@@ -17787,6 +18004,58 @@ export default function HomePage() {
               <label>
                 Gate
                 <input value={ticketForm.gate} onChange={(event) => setTicketForm({ ...ticketForm, gate: event.target.value })} />
+              </label>
+              <label>
+                Bundle
+                <input value={ticketForm.bundle_name} onChange={(event) => setTicketForm({ ...ticketForm, bundle_name: event.target.value })} />
+              </label>
+              <label>
+                Bundle price
+                <input type="number" min="0" value={ticketForm.bundle_price} onChange={(event) => setTicketForm({ ...ticketForm, bundle_price: Number(event.target.value) })} />
+              </label>
+              <label>
+                Bundle qty
+                <input type="number" min="1" value={ticketForm.bundle_ticket_quantity} onChange={(event) => setTicketForm({ ...ticketForm, bundle_ticket_quantity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Comp guest
+                <input value={ticketForm.complimentary_recipient_email} onChange={(event) => setTicketForm({ ...ticketForm, complimentary_recipient_email: event.target.value })} />
+              </label>
+              <label>
+                Comp qty
+                <input type="number" min="1" value={ticketForm.complimentary_quantity} onChange={(event) => setTicketForm({ ...ticketForm, complimentary_quantity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Section
+                <input value={ticketForm.seat_section} onChange={(event) => setTicketForm({ ...ticketForm, seat_section: event.target.value })} />
+              </label>
+              <label>
+                Row
+                <input value={ticketForm.seat_row} onChange={(event) => setTicketForm({ ...ticketForm, seat_row: event.target.value })} />
+              </label>
+              <label>
+                Seat
+                <input value={ticketForm.seat_label} onChange={(event) => setTicketForm({ ...ticketForm, seat_label: event.target.value })} />
+              </label>
+              <label>
+                Accessible
+                <input type="checkbox" checked={ticketForm.accessible_seating} onChange={(event) => setTicketForm({ ...ticketForm, accessible_seating: event.target.checked })} />
+              </label>
+              <label>
+                Companion
+                <input type="checkbox" checked={ticketForm.companion_seat} onChange={(event) => setTicketForm({ ...ticketForm, companion_seat: event.target.checked })} />
+              </label>
+              <label>
+                Resale seller
+                <input value={ticketForm.resale_seller_email} onChange={(event) => setTicketForm({ ...ticketForm, resale_seller_email: event.target.value })} />
+              </label>
+              <label>
+                Resale price
+                <input type="number" min="0" value={ticketForm.resale_price} onChange={(event) => setTicketForm({ ...ticketForm, resale_price: Number(event.target.value) })} />
+              </label>
+              <label>
+                Resale buyer
+                <input value={ticketForm.resale_buyer_email} onChange={(event) => setTicketForm({ ...ticketForm, resale_buyer_email: event.target.value })} />
               </label>
               <label>
                 Invoice
@@ -17907,6 +18176,38 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {ticketAccessDashboard?.recommendations.slice(0, 1).map((recommendation) => (
+                <article key={recommendation} className="task-card">
+                  <div>
+                    <strong>Access dashboard</strong>
+                    <span>{recommendation}</span>
+                  </div>
+                </article>
+              ))}
+              {ticketBundles.slice(0, 2).map((offer) => (
+                <article key={offer.id} className="task-card">
+                  <div>
+                    <strong>{offer.name}</strong>
+                    <span>{offer.ticket_quantity} tickets · {offer.price} · {offer.merchandise_product_name ?? offer.channel}</span>
+                  </div>
+                </article>
+              ))}
+              {ticketSeatAssignments.slice(0, 2).map((assignment) => (
+                <article key={assignment.id} className="task-card">
+                  <div>
+                    <strong>{assignment.section} {assignment.row ?? ""}{assignment.seat ?? ""}</strong>
+                    <span>{assignment.holder_name ?? "Holder"} · {assignment.accessible ? "accessible" : "standard"} · {assignment.access_zone ?? "No zone"}</span>
+                  </div>
+                </article>
+              ))}
+              {ticketResaleListings.slice(0, 2).map((listing) => (
+                <article key={listing.id} className="task-card">
+                  <div>
+                    <strong>{listing.status} resale · {listing.resale_price}</strong>
+                    <span>{listing.seller_email} {listing.buyer_email ? `to ${listing.buyer_email}` : "available"}</span>
+                  </div>
+                </article>
+              ))}
               {tickets.slice(0, 3).map((ticket) => (
                 <button
                   type="button"

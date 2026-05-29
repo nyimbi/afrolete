@@ -454,6 +454,100 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     ).json()
     ticket_id = order["ticket_ids"][0]
 
+    bundle = client.post(
+        "/api/v1/commercial/tickets/bundles",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "event_id": event["id"],
+            "ticket_product_id": product["id"],
+            "merchandise_product_id": merchandise_product["id"],
+            "name": "Family derby pack",
+            "package_type": "family_merch_bundle",
+            "ticket_quantity": 4,
+            "price": "55.00",
+            "channel": "public_site",
+            "sales_limit": 25,
+        },
+    ).json()
+    assert bundle["ticket_product_name"] == "General Admission"
+    assert bundle["merchandise_product_name"] == "Home jersey"
+    assert bundle["status"] == "active"
+
+    complimentary = client.post(
+        "/api/v1/commercial/tickets/complimentary",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "ticket_product_id": product["id"],
+            "recipient_name": "Media Guest",
+            "recipient_email": "MEDIA@example.com",
+            "quantity": 1,
+            "reason": "media",
+            "sponsor_id": sponsor["id"],
+        },
+    ).json()
+    assert complimentary["total_amount"] == "0.00"
+    assert complimentary["buyer_email"] == "media@example.com"
+    assert len(complimentary["ticket_ids"]) == 1
+
+    seat = client.post(
+        "/api/v1/commercial/tickets/seats",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "ticket_id": ticket_id,
+            "section": "East Stand",
+            "row": "A",
+            "seat": "12",
+            "access_zone": "Main gate",
+            "accessible": True,
+            "companion_seat": True,
+        },
+    ).json()
+    assert seat["section"] == "East Stand"
+    assert seat["accessible"] is True
+    assert seat["holder_name"] == "Buyer Example"
+
+    resale_listing = client.post(
+        "/api/v1/commercial/tickets/resale-listings",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "ticket_id": ticket_id,
+            "seller_name": "Buyer Example",
+            "seller_email": "BUYER@example.com",
+            "resale_price": "8.00",
+            "currency": "USD",
+            "notes": "Family cannot attend.",
+        },
+    ).json()
+    assert resale_listing["status"] == "listed"
+    assert resale_listing["seller_email"] == "buyer@example.com"
+
+    resale_purchase = client.post(
+        f"/api/v1/commercial/tickets/resale-listings/{resale_listing['id']}/purchase",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "buyer_name": "Second Buyer",
+            "buyer_email": "SECOND@example.com",
+        },
+    ).json()
+    assert resale_purchase["status"] == "sold"
+    assert resale_purchase["buyer_email"] == "second@example.com"
+
+    access_dashboard = client.get(
+        f"/api/v1/commercial/tickets/access-dashboard?organization_id={organization['id']}"
+    ).json()
+    assert access_dashboard["ticket_product_count"] == 1
+    assert access_dashboard["ticket_count"] == 3
+    assert access_dashboard["complimentary_count"] == 1
+    assert access_dashboard["assigned_seat_count"] == 1
+    assert access_dashboard["accessible_seat_count"] == 1
+    assert access_dashboard["resale_sold_count"] == 1
+    assert access_dashboard["package_offer_count"] == 1
+
     invoice = client.post(
         "/api/v1/commercial/invoices",
         headers=identity_headers,

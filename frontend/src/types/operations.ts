@@ -3412,6 +3412,74 @@ export type TicketRead = {
   gate: string | null;
 };
 
+export type TicketBundleOfferRead = {
+  id: UUID;
+  organization_id: UUID;
+  event_id: UUID;
+  ticket_product_id: UUID;
+  merchandise_product_id: UUID | null;
+  name: string;
+  package_type: string;
+  ticket_quantity: number;
+  price: string;
+  currency: string;
+  channel: string;
+  sales_limit: number | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  ticket_product_name: string | null;
+  merchandise_product_name: string | null;
+  sold_count: number;
+  status: CommercialStatus;
+};
+
+export type TicketSeatAssignmentRead = {
+  id: UUID;
+  organization_id: UUID;
+  ticket_id: UUID;
+  event_id: UUID;
+  section: string;
+  row: string | null;
+  seat: string | null;
+  access_zone: string | null;
+  accessible: boolean;
+  companion_seat: boolean;
+  holder_name: string | null;
+  ticket_status: TicketStatus | null;
+  assigned_at: string;
+};
+
+export type TicketResaleListingRead = {
+  id: UUID;
+  organization_id: UUID;
+  event_id: UUID;
+  ticket_id: UUID;
+  seller_name: string;
+  seller_email: string;
+  resale_price: string;
+  currency: string;
+  status: string;
+  buyer_name: string | null;
+  buyer_email: string | null;
+  listed_at: string;
+  sold_at: string | null;
+  notes: string | null;
+};
+
+export type TicketAccessDashboardRead = {
+  organization_id: UUID;
+  ticket_product_count: number;
+  ticket_count: number;
+  checked_in_count: number;
+  complimentary_count: number;
+  assigned_seat_count: number;
+  accessible_seat_count: number;
+  resale_listing_count: number;
+  resale_sold_count: number;
+  package_offer_count: number;
+  recommendations: string[];
+};
+
 export type FinanceInvoiceRead = {
   id: UUID;
   organization_id: UUID;
