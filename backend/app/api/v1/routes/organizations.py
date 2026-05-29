@@ -285,13 +285,15 @@ def to_registration_packet_read(inquiry) -> RegistrationPacketRead:
 
 
 def to_registration_conversion_read(item) -> RegistrationInquiryConversionRead:
-    inquiry, athlete, athlete_profile, roster_entry, guardian = item
+    inquiry, athlete, athlete_profile, roster_entry, guardian, guardian_invite, guardian_invite_url = item
     return RegistrationInquiryConversionRead(
         inquiry=to_registration_inquiry_read(inquiry),
         athlete_person_id=athlete.id,
         athlete_profile_id=athlete_profile.id,
         roster_entry_id=roster_entry.id if roster_entry is not None else None,
         guardian_person_id=guardian.id if guardian is not None else None,
+        guardian_invite_message_id=guardian_invite.id if guardian_invite is not None else None,
+        guardian_invite_portal_url=guardian_invite_url,
     )
 
 

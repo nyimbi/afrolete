@@ -463,6 +463,8 @@ export type RegistrationInquiryConversionRead = {
   athlete_profile_id: UUID;
   roster_entry_id: UUID | null;
   guardian_person_id: UUID | null;
+  guardian_invite_message_id: UUID | null;
+  guardian_invite_portal_url: string | null;
 };
 
 export type RegistrationInquiryFollowUpRead = {

@@ -5,6 +5,7 @@ from binascii import Error as BinasciiError
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -16,6 +17,7 @@ from app.models.communication import CommunicationMessage
 from app.models.commercial import FundraisingCampaign, Sponsor, SponsorshipAgreement, TicketProduct
 from app.models.enums import (
     CommercialStatus,
+    CommunicationChannel,
     CommunicationMessageType,
     CommunicationScopeType,
     GuardianRelationshipKind,
@@ -799,7 +801,15 @@ async def convert_registration_inquiry(
     inquiry_id: UUID,
     payload: RegistrationInquiryConversionCreate,
     authz: AuthorizationService,
-) -> tuple[RegistrationInquiry, Person, AthleteProfile, TeamRosterEntry | None, Person | None]:
+) -> tuple[
+    RegistrationInquiry,
+    Person,
+    AthleteProfile,
+    TeamRosterEntry | None,
+    Person | None,
+    CommunicationMessage | None,
+    str | None,
+]:
     if not await can_manage_registration_inquiries(identity, organization_id, authz):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
@@ -869,6 +879,7 @@ async def convert_registration_inquiry(
         )
 
     guardian = None
+    guardian_relationship = None
     if payload.create_guardian:
         guardian = await db.scalar(select(Person).where(Person.primary_email == inquiry.email))
         if guardian is None:
@@ -889,17 +900,19 @@ async def convert_registration_inquiry(
             )
         )
         if existing_guardian is None:
-            db.add(
-                GuardianRelationship(
-                    athlete_person_id=athlete.id,
-                    guardian_person_id=guardian.id,
-                    relationship_kind=GuardianRelationshipKind.PARENT,
-                    relationship="parent",
-                    can_sign_consent=True,
-                    emergency_contact=True,
-                    is_primary=True,
-                )
+            guardian_relationship = GuardianRelationship(
+                athlete_person_id=athlete.id,
+                guardian_person_id=guardian.id,
+                relationship_kind=GuardianRelationshipKind.PARENT,
+                relationship="parent",
+                can_sign_consent=True,
+                emergency_contact=True,
+                is_primary=True,
             )
+            db.add(guardian_relationship)
+            await db.flush()
+        else:
+            guardian_relationship = existing_guardian
 
     inquiry.status = "converted"
     inquiry.reviewed_by_person_id = identity.person_id
@@ -921,7 +934,101 @@ async def convert_registration_inquiry(
         await db.refresh(roster_entry)
     if guardian is not None:
         await db.refresh(guardian)
-    return inquiry, athlete, athlete_profile, roster_entry, guardian
+    guardian_invite = None
+    guardian_invite_url = None
+    if guardian is not None and guardian_relationship is not None and payload.send_guardian_invite:
+        organization = await db.get(Organization, organization_id)
+        if organization is not None:
+            guardian_invite_url = registration_guardian_portal_invite_url(
+                payload.guardian_portal_url,
+                organization_id,
+                guardian_relationship.id,
+                guardian,
+            )
+            guardian_invite = await create_registration_guardian_invite(
+                db,
+                identity,
+                organization,
+                athlete,
+                guardian,
+                payload.guardian_invite_channel,
+                guardian_invite_url,
+                authz,
+            )
+            inquiry.review_notes = append_review_note(
+                inquiry.review_notes,
+                f"Guardian portal invite queued via {payload.guardian_invite_channel.value}: {guardian_invite_url}",
+            )
+            await db.commit()
+            await db.refresh(inquiry)
+            await db.refresh(guardian_invite)
+    return inquiry, athlete, athlete_profile, roster_entry, guardian, guardian_invite, guardian_invite_url
+
+
+def registration_guardian_portal_invite_url(
+    base_url: str,
+    organization_id: UUID,
+    relationship_id: UUID,
+    guardian: Person,
+) -> str:
+    parts = urlsplit(base_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("organization_id", str(organization_id))
+    query.setdefault("relationship_id", str(relationship_id))
+    query.setdefault("guardian_sub", f"guardian-{relationship_id}")
+    query.setdefault("guardian_name", guardian.display_name)
+    if guardian.primary_email:
+        query.setdefault("guardian_email", guardian.primary_email)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+async def create_registration_guardian_invite(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization: Organization,
+    athlete: Person,
+    guardian: Person,
+    channel: CommunicationChannel,
+    portal_url: str,
+    authz: AuthorizationService,
+) -> CommunicationMessage:
+    organization_name = organization.public_name or organization.name
+    return await create_message(
+        db,
+        identity,
+        CommunicationMessageCreate(
+            organization_id=organization.id,
+            message_type=CommunicationMessageType.REQUEST,
+            channel=channel,
+            scope_type=CommunicationScopeType.PERSON,
+            scope_id=guardian.id,
+            recipient_person_ids=[guardian.id],
+            subject=f"{organization_name} family portal invitation",
+            body=registration_guardian_invite_body(organization_name, athlete, guardian, portal_url),
+            urgent=False,
+            quiet_hours_override=False,
+            copy_guardians_for_minors=False,
+        ),
+        authz,
+        enforce_manage_communications_scope=False,
+    )
+
+
+def registration_guardian_invite_body(
+    organization_name: str,
+    athlete: Person,
+    guardian: Person,
+    portal_url: str,
+) -> str:
+    return "\n\n".join(
+        [
+            f"Hello {guardian.display_name},",
+            f"{organization_name} has accepted {athlete.display_name}'s registration inquiry and created your AfroLete family portal access.",
+            "Sign in with the email address where you received this message so AfroLete can link your guardian account automatically.",
+            f"Open the family portal: {portal_url}",
+            "From the portal you can review consent requests, RSVP for events, monitor schedules, and see family-visible athlete development updates.",
+        ]
+    )
 
 
 async def add_member(

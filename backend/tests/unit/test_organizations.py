@@ -168,6 +168,56 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert packet["inquiry"]["payment_reference"] == "MPESA-ABC123"
     assert packet["next_steps"] == ["Registration packet is ready for staff verification."]
 
+    team_response = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": onboarding["organization"]["id"],
+            "name": "Makini U15 Sprint",
+            "sport": "athletics",
+            "sport_format": "individual",
+        },
+    )
+    assert team_response.status_code == 201
+    team = team_response.json()
+
+    conversion_response = client.post(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/{inquiry['id']}/convert",
+        headers=identity_headers,
+        json={
+            "team_id": team["id"],
+            "role": "player",
+            "create_guardian": True,
+            "send_guardian_invite": True,
+            "guardian_invite_channel": "email",
+            "guardian_portal_url": "http://localhost:3000/family",
+            "jersey_number": "7",
+            "primary_position": "sprinter",
+        },
+    )
+
+    assert conversion_response.status_code == 200
+    conversion = conversion_response.json()
+    assert conversion["inquiry"]["status"] == "converted"
+    assert conversion["roster_entry_id"]
+    assert conversion["guardian_person_id"]
+    assert conversion["guardian_invite_message_id"]
+    assert conversion["guardian_invite_portal_url"].startswith("http://localhost:3000/family?")
+    assert f"organization_id={onboarding['organization']['id']}" in conversion["guardian_invite_portal_url"]
+    assert "guardian_email=parent.runner%40example.com" in conversion["guardian_invite_portal_url"]
+
+    messages_response = client.get(
+        f"/api/v1/communications/messages?organization_id={onboarding['organization']['id']}"
+    )
+    assert messages_response.status_code == 200
+    invite_message = next(
+        item for item in messages_response.json() if item["id"] == conversion["guardian_invite_message_id"]
+    )
+    assert invite_message["message_type"] == "request"
+    assert invite_message["channel"] == "email"
+    assert "family portal invitation" in invite_message["subject"]
+    assert conversion["guardian_invite_portal_url"] in invite_message["body"]
+
 
 def test_public_site_exposes_commercial_support_opportunities(client, identity_headers) -> None:
     organization = client.post(

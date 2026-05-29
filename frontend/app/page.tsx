@@ -4460,7 +4460,10 @@ export default function HomePage() {
             body: {
               team_id: inquiry.team_id || selectedTeamId || null,
               role: "player",
-              create_guardian: true
+              create_guardian: true,
+              send_guardian_invite: true,
+              guardian_invite_channel: "email",
+              guardian_portal_url: `${window.location.origin}/family`
             }
           }
         ),
@@ -4487,7 +4490,12 @@ export default function HomePage() {
           ...current.filter((item) => item.personId !== conversion.athlete_person_id)
         ]);
         setSelectedAthleteId(conversion.athlete_person_id);
-        addLog(`${conversion.inquiry.athlete_name} converted from inquiry`, "good");
+        addLog(
+          conversion.guardian_invite_message_id
+            ? `${conversion.inquiry.athlete_name} converted and guardian invite queued`
+            : `${conversion.inquiry.athlete_name} converted from inquiry`,
+          "good"
+        );
       }
     );
   };

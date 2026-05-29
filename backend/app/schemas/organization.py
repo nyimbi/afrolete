@@ -285,6 +285,9 @@ class RegistrationInquiryConversionCreate(BaseModel):
     team_id: UUID | None = None
     role: TeamRole = TeamRole.PLAYER
     create_guardian: bool = True
+    send_guardian_invite: bool = True
+    guardian_invite_channel: CommunicationChannel = CommunicationChannel.EMAIL
+    guardian_portal_url: str = Field(default="https://afrolete.lindela.io/family", max_length=500)
     jersey_number: str | None = Field(default=None, max_length=16)
     primary_position: str | None = Field(default=None, max_length=80)
 
@@ -295,6 +298,8 @@ class RegistrationInquiryConversionRead(BaseModel):
     athlete_profile_id: UUID
     roster_entry_id: UUID | None
     guardian_person_id: UUID | None
+    guardian_invite_message_id: UUID | None = None
+    guardian_invite_portal_url: str | None = None
 
 
 class RegistrationInquiryFollowUpRead(BaseModel):
