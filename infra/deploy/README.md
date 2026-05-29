@@ -8,7 +8,7 @@ base URL and Keycloak public client metadata.
 
 The due-worker service also reads `/run/pjs/afrolete-backend.env` and should be
 enabled through `afrolete-due-worker.timer`. It runs the unified worker command
-for queued agent tasks, scheduled SaaS dunning, due recurring SaaS invoices, daily/weekly communication digest runs, urgent
+for queued agent tasks, scheduled SaaS dunning, automated SaaS late fees, due recurring SaaS invoices, daily/weekly communication digest runs, urgent
 communication escalation timers, compliance expiry reconciliation, due travel
 consent reminders, emergency escalation timers, due developer webhook retries,
 performance achievement scans, forecast validation with drift auto-alerting,
@@ -37,6 +37,7 @@ set +a
   --limit 5 \
   --auto-alert-performance-forecast-drift \
   --dry-run-billing-dunning \
+  --dry-run-billing-late-fees \
   --dry-run-billing-recurring-invoices \
   --dry-run-emergency-escalations \
   --dry-run-event-travel-consent-reminders \

@@ -28,6 +28,8 @@ from app.schemas.billing import (
     BillingPlanChangeCreate,
     BillingDunningRunCreate,
     BillingDunningRunRead,
+    BillingLateFeeRunCreate,
+    BillingLateFeeRunRead,
     BillingPaymentWebhookCreate,
     BillingPlanCreate,
     BillingRecurringInvoiceRunCreate,
@@ -887,6 +889,157 @@ async def invoices_due_for_dunning(
             or normalize_datetime(invoice.dunning_last_sent_at).date() <= repeat_cutoff
         )
     ]
+
+
+async def run_late_fee_scheduler(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: BillingLateFeeRunCreate,
+    authz: AuthorizationService,
+) -> BillingLateFeeRunRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_billing(authz, identity, payload.organization_id)
+    return await run_late_fee_worker(
+        db,
+        organization_id=payload.organization_id,
+        apply_on=payload.apply_on,
+        overdue_after_days=payload.overdue_after_days,
+        repeat_after_days=payload.repeat_after_days,
+        fixed_fee=payload.fixed_fee,
+        percentage_rate=payload.percentage_rate,
+        max_fee=payload.max_fee,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+    )
+
+
+async def run_late_fee_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    apply_on: date | None = None,
+    overdue_after_days: int = 0,
+    repeat_after_days: int = 30,
+    fixed_fee: Decimal = Decimal("0"),
+    percentage_rate: Decimal = Decimal("0"),
+    max_fee: Decimal | None = None,
+    limit: int = 100,
+    dry_run: bool = False,
+) -> BillingLateFeeRunRead:
+    effective_apply_on = apply_on or date.today()
+    invoices = await invoices_due_for_late_fee(
+        db,
+        organization_id=organization_id,
+        apply_on=effective_apply_on,
+        overdue_after_days=overdue_after_days,
+        repeat_after_days=repeat_after_days,
+        limit=limit,
+    )
+    invoice_ids: list[UUID] = []
+    subscription_ids: list[UUID] = []
+    skipped_count = 0
+    failed_count = 0
+    total_late_fees = Decimal("0")
+
+    for invoice in invoices:
+        fee = calculate_late_fee(
+            invoice,
+            fixed_fee=fixed_fee,
+            percentage_rate=percentage_rate,
+            max_fee=max_fee,
+        )
+        if fee <= 0:
+            skipped_count += 1
+            continue
+        if dry_run:
+            skipped_count += 1
+            total_late_fees += fee
+            continue
+        try:
+            invoice.total = money(invoice.total + fee)
+            invoice.late_fee_total = money((invoice.late_fee_total or Decimal("0")) + fee)
+            invoice.late_fee_count = (invoice.late_fee_count or 0) + 1
+            invoice.late_fee_last_applied_on = effective_apply_on
+            invoice.line_items = append_note(
+                invoice.line_items,
+                f"Late fee {fee} {invoice.currency} applied on {effective_apply_on.isoformat()}.",
+            )
+            subscription = await db.get(TenantSubscription, invoice.subscription_id)
+            if subscription and subscription.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING}:
+                subscription.status = SubscriptionStatus.PAST_DUE
+                subscription.notes = append_note(
+                    subscription.notes,
+                    f"Marked past_due after late fee on invoice {invoice.invoice_number}.",
+                )
+            await db.commit()
+            invoice_ids.append(invoice.id)
+            subscription_ids.append(invoice.subscription_id)
+            total_late_fees += fee
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return BillingLateFeeRunRead(
+        organization_id=organization_id,
+        apply_on=effective_apply_on,
+        eligible_count=len(invoices),
+        executed_count=len(invoices) - skipped_count,
+        fee_count=len(invoice_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        invoice_ids=invoice_ids,
+        subscription_ids=list(dict.fromkeys(subscription_ids)),
+        total_late_fees=money(total_late_fees),
+    )
+
+
+async def invoices_due_for_late_fee(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    apply_on: date,
+    overdue_after_days: int,
+    repeat_after_days: int,
+    limit: int,
+) -> list[SaaSInvoice]:
+    cutoff = apply_on - timedelta(days=overdue_after_days)
+    statement = (
+        select(SaaSInvoice)
+        .where(SaaSInvoice.status.in_([BillingInvoiceStatus.OPEN, BillingInvoiceStatus.PARTIAL]))
+        .where(SaaSInvoice.due_on.is_not(None))
+        .where(SaaSInvoice.due_on <= cutoff)
+        .order_by(SaaSInvoice.due_on.asc(), SaaSInvoice.created_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(SaaSInvoice.organization_id == organization_id)
+    rows = list((await db.scalars(statement)).all())
+    repeat_cutoff = apply_on - timedelta(days=repeat_after_days)
+    return [
+        invoice
+        for invoice in rows
+        if invoice.total > invoice.amount_paid
+        and (
+            invoice.late_fee_last_applied_on is None
+            or invoice.late_fee_last_applied_on <= repeat_cutoff
+        )
+    ]
+
+
+def calculate_late_fee(
+    invoice: SaaSInvoice,
+    *,
+    fixed_fee: Decimal,
+    percentage_rate: Decimal,
+    max_fee: Decimal | None,
+) -> Decimal:
+    outstanding = money(max(invoice.total - invoice.amount_paid, Decimal("0")))
+    percentage_fee = money(outstanding * percentage_rate / Decimal("100"))
+    fee = money(fixed_fee + percentage_fee)
+    if max_fee is not None:
+        fee = min(fee, money(max_fee))
+    return money(fee)
 
 
 async def billing_dunning_headers(settings: Settings) -> dict[str, str]:

@@ -3,6 +3,7 @@ import asyncio
 import json
 from collections.abc import Sequence
 from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +13,7 @@ from app.db.session import SessionLocal
 from app.models.enums import CommunicationChannel, NotificationFrequency
 from app.services.agents import run_agent_task_worker
 from app.services.assets import run_emergency_escalation_timer_worker
-from app.services.billing import run_dunning_worker, run_recurring_invoice_worker
+from app.services.billing import run_dunning_worker, run_late_fee_worker, run_recurring_invoice_worker
 from app.services.communications import (
     run_digest_scheduler_worker,
     run_message_escalation_worker,
@@ -35,6 +36,7 @@ from app.services.safeguarding import (
 WORKER_LANES = (
     "agent-tasks",
     "billing-dunning",
+    "billing-late-fees",
     "billing-recurring-invoices",
     "communication-digests",
     "communication-escalations",
@@ -63,6 +65,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--billing-dunning-overdue-after-days", type=int, default=0)
     parser.add_argument("--billing-dunning-repeat-after-days", type=int, default=7)
     parser.add_argument("--dry-run-billing-dunning", action="store_true")
+    parser.add_argument("--billing-late-fee-limit", type=int, default=None)
+    parser.add_argument("--billing-late-fee-apply-on", type=date_from_isoformat, default=None)
+    parser.add_argument("--billing-late-fee-overdue-after-days", type=int, default=0)
+    parser.add_argument("--billing-late-fee-repeat-after-days", type=int, default=30)
+    parser.add_argument("--billing-late-fee-fixed-fee", type=Decimal, default=Decimal("0"))
+    parser.add_argument("--billing-late-fee-percentage-rate", type=Decimal, default=Decimal("2.00"))
+    parser.add_argument("--billing-late-fee-max-fee", type=Decimal, default=None)
+    parser.add_argument("--dry-run-billing-late-fees", action="store_true")
     parser.add_argument("--billing-recurring-invoice-limit", type=int, default=None)
     parser.add_argument("--billing-recurring-invoice-bill-on", type=date_from_isoformat, default=None)
     parser.add_argument("--billing-recurring-invoice-due-in-days", type=int, default=14)
@@ -173,6 +183,14 @@ async def run_due_workers(
     billing_dunning_overdue_after_days: int = 0,
     billing_dunning_repeat_after_days: int = 7,
     dry_run_billing_dunning: bool = False,
+    billing_late_fee_limit: int | None = None,
+    billing_late_fee_apply_on: date | None = None,
+    billing_late_fee_overdue_after_days: int = 0,
+    billing_late_fee_repeat_after_days: int = 30,
+    billing_late_fee_fixed_fee: Decimal = Decimal("0"),
+    billing_late_fee_percentage_rate: Decimal = Decimal("2.00"),
+    billing_late_fee_max_fee: Decimal | None = None,
+    dry_run_billing_late_fees: bool = False,
     billing_recurring_invoice_limit: int | None = None,
     billing_recurring_invoice_bill_on: date | None = None,
     billing_recurring_invoice_due_in_days: int = 14,
@@ -248,6 +266,21 @@ async def run_due_workers(
                 repeat_after_days=billing_dunning_repeat_after_days,
                 limit=billing_dunning_limit or limit,
                 dry_run=dry_run_billing_dunning,
+            )
+        ).model_dump(mode="json")
+    if "billing-late-fees" in active_lanes:
+        results["billing_late_fees"] = (
+            await run_late_fee_worker(
+                db,
+                organization_id=organization_id,
+                apply_on=billing_late_fee_apply_on,
+                overdue_after_days=billing_late_fee_overdue_after_days,
+                repeat_after_days=billing_late_fee_repeat_after_days,
+                fixed_fee=billing_late_fee_fixed_fee,
+                percentage_rate=billing_late_fee_percentage_rate,
+                max_fee=billing_late_fee_max_fee,
+                limit=billing_late_fee_limit or limit,
+                dry_run=dry_run_billing_late_fees,
             )
         ).model_dump(mode="json")
     if "billing-recurring-invoices" in active_lanes:
@@ -431,6 +464,7 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             or result.get("dispatched_count")
             or result.get("alerted_count")
             or result.get("invoiced_count")
+            or result.get("fee_count")
             or result.get("notice_count")
             or result.get("reminded_count")
             or result.get("retried_count")
@@ -457,6 +491,14 @@ async def run() -> None:
             billing_dunning_overdue_after_days=args.billing_dunning_overdue_after_days,
             billing_dunning_repeat_after_days=args.billing_dunning_repeat_after_days,
             dry_run_billing_dunning=args.dry_run_billing_dunning,
+            billing_late_fee_limit=args.billing_late_fee_limit,
+            billing_late_fee_apply_on=args.billing_late_fee_apply_on,
+            billing_late_fee_overdue_after_days=args.billing_late_fee_overdue_after_days,
+            billing_late_fee_repeat_after_days=args.billing_late_fee_repeat_after_days,
+            billing_late_fee_fixed_fee=args.billing_late_fee_fixed_fee,
+            billing_late_fee_percentage_rate=args.billing_late_fee_percentage_rate,
+            billing_late_fee_max_fee=args.billing_late_fee_max_fee,
+            dry_run_billing_late_fees=args.dry_run_billing_late_fees,
             billing_recurring_invoice_limit=args.billing_recurring_invoice_limit,
             billing_recurring_invoice_bill_on=args.billing_recurring_invoice_bill_on,
             billing_recurring_invoice_due_in_days=args.billing_recurring_invoice_due_in_days,

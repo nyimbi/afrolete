@@ -144,3 +144,62 @@ def test_dunning_run_records_notice_and_marks_subscription_past_due(client, iden
     ).json()
     renewed = next(item for item in subscriptions if item["id"] == subscription["id"])
     assert renewed["status"] == "past_due"
+
+
+def test_late_fee_run_applies_configured_fee_and_marks_subscription_past_due(client, identity_headers) -> None:
+    organization, _, subscription = create_billing_context(client, identity_headers)
+    invoice = client.post(
+        "/api/v1/billing/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "subscription_id": subscription["id"],
+            "invoice_number": "FEE-2026-001",
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-30",
+            "tax_amount": "0.00",
+            "discount_amount": "0.00",
+            "due_on": "2026-06-01",
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/billing/late-fees/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "apply_on": "2026-06-20",
+            "overdue_after_days": 0,
+            "repeat_after_days": 30,
+            "fixed_fee": "10.00",
+            "percentage_rate": "5.00",
+            "max_fee": "30.00",
+            "limit": 10,
+        },
+    )
+
+    assert response.status_code == 200
+    run = response.json()
+    assert run["eligible_count"] == 1
+    assert run["fee_count"] == 1
+    assert run["total_late_fees"] == "22.45"
+    assert run["invoice_ids"] == [invoice["id"]]
+    assert run["subscription_ids"] == [subscription["id"]]
+
+    invoices = client.get(
+        f"/api/v1/billing/invoices?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    charged = next(item for item in invoices if item["id"] == invoice["id"])
+    assert charged["total"] == "271.45"
+    assert charged["late_fee_total"] == "22.45"
+    assert charged["late_fee_count"] == 1
+    assert charged["late_fee_last_applied_on"] == "2026-06-20"
+    assert "Late fee 22.45 USD applied on 2026-06-20." in charged["line_items"]
+
+    subscriptions = client.get(
+        f"/api/v1/billing/subscriptions?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    renewed = next(item for item in subscriptions if item["id"] == subscription["id"])
+    assert renewed["status"] == "past_due"

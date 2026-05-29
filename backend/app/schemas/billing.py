@@ -116,6 +116,9 @@ class SaaSInvoiceRead(BaseModel):
     dunning_count: int
     dunning_last_sent_at: datetime | None
     dunning_last_severity: str | None
+    late_fee_total: Decimal
+    late_fee_count: int
+    late_fee_last_applied_on: date | None
 
 
 class SaaSPaymentCreate(BaseModel):
@@ -246,6 +249,38 @@ class BillingDunningRunRead(BaseModel):
     subscription_ids: list[UUID]
     total_outstanding: Decimal
     severity_counts: dict[str, int]
+
+
+class BillingLateFeeRunCreate(BaseModel):
+    organization_id: UUID
+    apply_on: date | None = None
+    overdue_after_days: int = Field(default=0, ge=0, le=365)
+    repeat_after_days: int = Field(default=30, ge=1, le=365)
+    fixed_fee: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    percentage_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100, max_digits=6, decimal_places=2)
+    max_fee: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    limit: int = Field(default=100, ge=1, le=1000)
+    dry_run: bool = False
+
+    @model_validator(mode="after")
+    def has_fee_rule(self) -> "BillingLateFeeRunCreate":
+        if self.fixed_fee == 0 and self.percentage_rate == 0:
+            raise ValueError("fixed_fee or percentage_rate must be greater than zero")
+        return self
+
+
+class BillingLateFeeRunRead(BaseModel):
+    organization_id: UUID | None
+    apply_on: date
+    eligible_count: int
+    executed_count: int
+    fee_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool = False
+    invoice_ids: list[UUID]
+    subscription_ids: list[UUID]
+    total_late_fees: Decimal
 
 
 class BillingPaymentWebhookCreate(BaseModel):

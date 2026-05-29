@@ -2520,6 +2520,9 @@ export type SaaSInvoiceRead = {
   dunning_count: number;
   dunning_last_sent_at: string | null;
   dunning_last_severity: string | null;
+  late_fee_total: string;
+  late_fee_count: number;
+  late_fee_last_applied_on: string | null;
 };
 
 export type SaaSPaymentRead = {
@@ -2630,6 +2633,20 @@ export type BillingDunningRunRead = {
   subscription_ids: UUID[];
   total_outstanding: string;
   severity_counts: Record<string, number>;
+};
+
+export type BillingLateFeeRunRead = {
+  organization_id: UUID | null;
+  apply_on: string;
+  eligible_count: number;
+  executed_count: number;
+  fee_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  invoice_ids: UUID[];
+  subscription_ids: UUID[];
+  total_late_fees: string;
 };
 
 export type BillingPaymentWebhookRead = {

@@ -50,6 +50,12 @@ a systemd drop-in when a tenant needs different throughput or alert policy:
 | `AFROLETE_DUE_WORKER_BILLING_DUNNING_LIMIT` | `100` | Overdue SaaS invoices scanned for scheduled dunning notices. |
 | `AFROLETE_DUE_WORKER_BILLING_DUNNING_OVERDUE_AFTER_DAYS` | `0` | Grace period after invoice due date before scheduled dunning. |
 | `AFROLETE_DUE_WORKER_BILLING_DUNNING_REPEAT_AFTER_DAYS` | `7` | Suppression window for repeated dunning on the same SaaS invoice. |
+| `AFROLETE_DUE_WORKER_BILLING_LATE_FEE_LIMIT` | `100` | Overdue SaaS invoices scanned for automated late-fee application. |
+| `AFROLETE_DUE_WORKER_BILLING_LATE_FEE_OVERDUE_AFTER_DAYS` | `0` | Grace period after invoice due date before late fees are eligible. |
+| `AFROLETE_DUE_WORKER_BILLING_LATE_FEE_REPEAT_AFTER_DAYS` | `30` | Suppression window before another late fee can be added to the same SaaS invoice. |
+| `AFROLETE_DUE_WORKER_BILLING_LATE_FEE_FIXED_FEE` | `0` | Fixed late fee added to each eligible overdue invoice. |
+| `AFROLETE_DUE_WORKER_BILLING_LATE_FEE_PERCENTAGE_RATE` | `2` | Percentage of outstanding invoice balance added as a late fee. |
+| `AFROLETE_DUE_WORKER_BILLING_LATE_FEE_MAX_FEE` | `50` | Cap per late-fee application. |
 | `AFROLETE_DUE_WORKER_BILLING_RECURRING_INVOICE_LIMIT` | `100` | Subscriptions scanned for due recurring SaaS invoices. |
 | `AFROLETE_DUE_WORKER_BILLING_RECURRING_INVOICE_DUE_IN_DAYS` | `14` | Payment due-date offset for generated recurring SaaS invoices. |
 | `AFROLETE_DUE_WORKER_BILLING_RECURRING_INVOICE_PREFIX` | `SAAS` | Invoice-number prefix for scheduler-generated SaaS invoices. |
@@ -86,6 +92,7 @@ a systemd drop-in when a tenant needs different throughput or alert policy:
 For a deployment smoke without sending messages, run the command manually with
 `--dry-run-communication-escalations`,
 `--dry-run-billing-dunning`,
+`--dry-run-billing-late-fees`,
 `--dry-run-billing-recurring-invoices`,
 `--dry-run-emergency-escalations`,
 `--dry-run-performance-forecast-drift-alerts`,

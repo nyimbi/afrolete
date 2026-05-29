@@ -64,6 +64,7 @@ import type {
   BillingDunningNoticeRead,
   BillingDunningRunRead,
   BillingEntitlementRead,
+  BillingLateFeeRunRead,
   BillingPaymentWebhookRead,
   BillingPlanChangeRead,
   BillingPlanRead,
@@ -1606,6 +1607,7 @@ export default function HomePage() {
   const [billingDunningDelivery, setBillingDunningDelivery] =
     useState<BillingDunningDeliveryRead | null>(null);
   const [billingDunningRun, setBillingDunningRun] = useState<BillingDunningRunRead | null>(null);
+  const [billingLateFeeRun, setBillingLateFeeRun] = useState<BillingLateFeeRunRead | null>(null);
   const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
   const [billingRecurringRun, setBillingRecurringRun] = useState<BillingRecurringInvoiceRunRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
@@ -2245,6 +2247,9 @@ export default function HomePage() {
     tax_jurisdiction: "KE",
     discount_amount: 20,
     payment_amount: 159,
+    late_fee_fixed: 10,
+    late_fee_rate: 2,
+    late_fee_max: 50,
     prorated_price: 249,
     webhook_provider: "stripe",
     entitlement_feature: "ai_agents",
@@ -11509,6 +11514,37 @@ export default function HomePage() {
     );
   };
 
+  const runBillingLateFees = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "billing-late-fees-run",
+      () =>
+        apiRequest<BillingLateFeeRunRead>("/billing/late-fees/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            apply_on: billingForm.period_end,
+            overdue_after_days: 0,
+            repeat_after_days: 30,
+            fixed_fee: String(billingForm.late_fee_fixed),
+            percentage_rate: String(billingForm.late_fee_rate),
+            max_fee: String(billingForm.late_fee_max),
+            limit: 100,
+            dry_run: false
+          }
+        }),
+      (run) => {
+        setBillingLateFeeRun(run);
+        addLog(`Late fees applied to ${run.fee_count}/${run.eligible_count} invoices`, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
   const ingestBillingWebhook = () => {
     if (!selectedOrganizationId || !selectedSaasInvoiceId) {
       addLog("Create or select a SaaS invoice first", "bad");
@@ -14678,6 +14714,7 @@ export default function HomePage() {
                 <button type="button" onClick={createSaaSInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
                 <button type="button" onClick={prepareDunningNotice} disabled={busyAction !== null}>Dunning</button>
                 <button type="button" onClick={runBillingDunning} disabled={busyAction !== null}>Run dunning</button>
+                <button type="button" onClick={runBillingLateFees} disabled={busyAction !== null}>Run fees</button>
                 <button type="button" onClick={deliverBillingDunningNotice} disabled={busyAction !== null}>Deliver</button>
                 <button type="button" onClick={ingestBillingWebhook} disabled={busyAction !== null}>Webhook</button>
               </div>
@@ -14737,6 +14774,18 @@ export default function HomePage() {
                 <input type="number" min="0" value={billingForm.payment_amount} onChange={(event) => setBillingForm({ ...billingForm, payment_amount: Number(event.target.value) })} />
               </label>
               <label>
+                Late fee
+                <input type="number" min="0" value={billingForm.late_fee_fixed} onChange={(event) => setBillingForm({ ...billingForm, late_fee_fixed: Number(event.target.value) })} />
+              </label>
+              <label>
+                Fee %
+                <input type="number" min="0" max="100" value={billingForm.late_fee_rate} onChange={(event) => setBillingForm({ ...billingForm, late_fee_rate: Number(event.target.value) })} />
+              </label>
+              <label>
+                Fee cap
+                <input type="number" min="0" value={billingForm.late_fee_max} onChange={(event) => setBillingForm({ ...billingForm, late_fee_max: Number(event.target.value) })} />
+              </label>
+              <label>
                 Provider
                 <input value={billingForm.webhook_provider} onChange={(event) => setBillingForm({ ...billingForm, webhook_provider: event.target.value })} />
               </label>
@@ -14762,6 +14811,16 @@ export default function HomePage() {
                     <strong>{billingDunningRun.notice_count} dunning notices</strong>
                     <span>
                       {billingDunningRun.total_outstanding} outstanding · {billingDunningRun.past_due_count} past due · {billingDunningRun.failed_count} failed
+                    </span>
+                  </div>
+                </article>
+              ) : null}
+              {billingLateFeeRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{billingLateFeeRun.fee_count} late fees</strong>
+                    <span>
+                      {billingLateFeeRun.total_late_fees} applied · {billingLateFeeRun.eligible_count} eligible · {billingLateFeeRun.failed_count} failed
                     </span>
                   </div>
                 </article>
@@ -14803,7 +14862,7 @@ export default function HomePage() {
                 >
                   <div>
                     <strong>{invoice.invoice_number}</strong>
-                    <span>{invoice.amount_paid}/{invoice.total} · {invoice.status} · dunning {invoice.dunning_count}</span>
+                    <span>{invoice.amount_paid}/{invoice.total} · {invoice.status} · dunning {invoice.dunning_count} · fees {invoice.late_fee_total}</span>
                   </div>
                 </button>
               ))}

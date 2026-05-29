@@ -116,6 +116,9 @@ class SaaSInvoice(IdMixin, TimestampMixin, Base):
     dunning_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     dunning_last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     dunning_last_severity: Mapped[str | None] = mapped_column(String(40), index=True)
+    late_fee_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    late_fee_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    late_fee_last_applied_on: Mapped[date | None] = mapped_column(index=True)
 
 
 class SaaSPayment(IdMixin, TimestampMixin, Base):
