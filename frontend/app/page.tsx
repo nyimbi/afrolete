@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiRequest, OfflineQueueError } from "@/lib/api";
 import {
   clearStoredAuthSession,
@@ -270,6 +270,9 @@ import type {
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceObservationRead,
+  PerformancePoseGaitAnalysisRead,
+  PerformanceVideoAnnotationRead,
+  PerformanceVideoAssetRead,
   PerformanceVideoCoachingRead,
   PerformanceWearableConnectionRead,
   PerformanceWearableOAuthCallbackRead,
@@ -1371,6 +1374,7 @@ function CompetitionBracketLane({ round }: { round: CompetitionBracketRoundRead 
 }
 
 export default function HomePage() {
+  const performanceVideoRef = useRef<HTMLVideoElement | null>(null);
   const [identity, setIdentity] = useState<LocalIdentity>(defaultIdentity);
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [organizations, setOrganizations] = useState<OrganizationRead[]>([]);
@@ -1466,6 +1470,13 @@ export default function HomePage() {
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
   const [performanceVideoCoaching, setPerformanceVideoCoaching] =
     useState<PerformanceVideoCoachingRead | null>(null);
+  const [performanceVideoAsset, setPerformanceVideoAsset] = useState<PerformanceVideoAssetRead | null>(null);
+  const [performanceVideoPreviewUrl, setPerformanceVideoPreviewUrl] = useState("");
+  const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
+    useState<PerformancePoseGaitAnalysisRead | null>(null);
+  const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
+    useState<PerformanceVideoAnnotationRead[]>([]);
+  const [selectedPerformanceVideoFile, setSelectedPerformanceVideoFile] = useState<File | null>(null);
   const [performanceModelBenchmark, setPerformanceModelBenchmark] =
     useState<PerformanceModelExtractionBenchmarkRunRead | null>(null);
   const [performanceModelBenchmarkDatasets, setPerformanceModelBenchmarkDatasets] =
@@ -1974,6 +1985,18 @@ export default function HomePage() {
     analysis_focus: "stride mechanics, posture, arm drive, ground contact, rhythm",
     evidence_text:
       "Stride efficiency 8.1. Posture control 6.4 due to late torso collapse. Ground contact control 7.2. Arm drive 6.8 with cross-body swing. Rhythm consistency 7.5."
+  });
+  const [poseGaitEvidenceText, setPoseGaitEvidenceText] = useState(
+    "Torso lean angle 18 degrees with late torso collapse. Front knee drive 64 degrees. Ground contact time 138 ms. Arm swing symmetry 6.5 with cross-body movement. Stride frequency 4.1 Hz."
+  );
+  const [videoAnnotationForm, setVideoAnnotationForm] = useState({
+    timestamp_seconds: 0,
+    playback_rate: 0.25,
+    annotation_type: "pose_correction",
+    label: "Torso collapse",
+    notes: "Compare trunk line with optimal world-class sprint posture.",
+    body_region: "torso",
+    tags: "posture,slow-motion"
   });
   const [performanceGoalForm, setPerformanceGoalForm] = useState({
     title: "Reach first-touch score 9",
@@ -3335,6 +3358,11 @@ export default function HomePage() {
       setObservations([]);
       setPerformanceIngestion(null);
       setPerformanceVideoCoaching(null);
+      setPerformanceVideoAsset(null);
+      setPerformanceVideoPreviewUrl("");
+      setPerformancePoseGaitAnalysis(null);
+      setPerformanceVideoAnnotations([]);
+      setSelectedPerformanceVideoFile(null);
       setPerformanceModelBenchmark(null);
       setPerformanceModelBenchmarkDatasets([]);
       setPerformanceForecastValidationRun(null);
@@ -3681,6 +3709,11 @@ export default function HomePage() {
       setObservations([]);
       setAssessments([]);
       setPerformanceVideoCoaching(null);
+      setPerformanceVideoAsset(null);
+      setPerformanceVideoPreviewUrl("");
+      setPerformancePoseGaitAnalysis(null);
+      setPerformanceVideoAnnotations([]);
+      setSelectedPerformanceVideoFile(null);
       setPerformanceBenchmarks([]);
       setPerformanceCohortComparisons([]);
       setPerformanceTrends([]);
@@ -7907,6 +7940,142 @@ export default function HomePage() {
         ]);
         addLog(`Video coach created ${coaching.observations.length} review items`, "good");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const setPerformanceVideoPlaybackRate = (rate: number) => {
+    if (performanceVideoRef.current) {
+      performanceVideoRef.current.playbackRate = rate;
+    }
+    setVideoAnnotationForm((current) => ({ ...current, playback_rate: rate }));
+  };
+
+  const capturePerformanceVideoTimestamp = () => {
+    const timestamp = performanceVideoRef.current?.currentTime ?? 0;
+    setVideoAnnotationForm((current) => ({
+      ...current,
+      timestamp_seconds: Math.round(timestamp * 100) / 100
+    }));
+  };
+
+  const uploadPerformanceVideoAsset = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || !selectedPerformanceVideoFile) {
+      addLog("Select an athlete and choose a video first", "bad");
+      return;
+    }
+    runAction(
+      "upload-performance-video",
+      async () => {
+        const contentBase64 = await fileToBase64(selectedPerformanceVideoFile);
+        return apiRequest<PerformanceVideoAssetRead>(
+          `/performance/athletes/${selectedAthlete.athleteProfileId}/videos`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              event_id: selectedEventId || null,
+              sport: videoCoachingForm.sport,
+              filename: selectedPerformanceVideoFile.name,
+              content_type: selectedPerformanceVideoFile.type || "video/mp4",
+              content_base64: contentBase64,
+              clip_label: videoCoachingForm.clip_label || selectedPerformanceVideoFile.name,
+              analysis_focus: videoCoachingForm.analysis_focus
+            }
+          }
+        );
+      },
+      (videoAsset) => {
+        setPerformanceVideoAsset(videoAsset);
+        setPerformancePoseGaitAnalysis(null);
+        setPerformanceVideoAnnotations([]);
+        if (performanceVideoPreviewUrl) {
+          URL.revokeObjectURL(performanceVideoPreviewUrl);
+        }
+        const previewUrl = URL.createObjectURL(selectedPerformanceVideoFile);
+        setPerformanceVideoPreviewUrl(previewUrl);
+        addLog(`${videoAsset.filename} stored for slow-motion pose review`, "good");
+      }
+    );
+  };
+
+  const annotatePerformanceVideo = () => {
+    if (!performanceVideoAsset) {
+      addLog("Upload a performance video before annotating", "bad");
+      return;
+    }
+    runAction(
+      "annotate-performance-video",
+      () =>
+        apiRequest<PerformanceVideoAnnotationRead>(
+          `/performance/videos/${performanceVideoAsset.id}/annotations`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              timestamp_seconds: videoAnnotationForm.timestamp_seconds,
+              playback_rate: videoAnnotationForm.playback_rate,
+              annotation_type: videoAnnotationForm.annotation_type,
+              label: videoAnnotationForm.label,
+              notes: videoAnnotationForm.notes,
+              body_region: videoAnnotationForm.body_region,
+              tags: videoAnnotationForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean)
+            }
+          }
+        ),
+      (annotation) => {
+        setPerformanceVideoAnnotations((current) => [
+          annotation,
+          ...current.filter((item) => item.id !== annotation.id)
+        ]);
+        addLog(`Annotation saved at ${annotation.timestamp_seconds}s`, "good");
+      }
+    );
+  };
+
+  const analyzePerformancePoseGait = () => {
+    if (!performanceVideoAsset) {
+      addLog("Upload a performance video before pose/gait analysis", "bad");
+      return;
+    }
+    runAction(
+      "pose-gait-analysis",
+      () =>
+        apiRequest<PerformancePoseGaitAnalysisRead>(
+          `/performance/videos/${performanceVideoAsset.id}/pose-gait-analysis`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              benchmark_profile: "world_class_sprint",
+              evidence_text: poseGaitEvidenceText,
+              analysis_focus: videoCoachingForm.analysis_focus,
+              create_coaching_outputs: true
+            }
+          }
+        ),
+      (analysis) => {
+        setPerformancePoseGaitAnalysis(analysis);
+        setPerformanceVideoAsset(analysis.video_asset);
+        setPerformanceVideoAnnotations(analysis.annotations);
+        if (analysis.coaching) {
+          setPerformanceVideoCoaching(analysis.coaching);
+          setObservations((current) => [
+            ...analysis.coaching!.observations,
+            ...current.filter(
+              (item) => !analysis.coaching!.observations.some((observation) => observation.id === item.id)
+            )
+          ]);
+          setAssessments((current) => [
+            analysis.coaching!.assessment,
+            ...current.filter((item) => item.id !== analysis.coaching!.assessment.id)
+          ]);
+        }
+        addLog("Pose/gait benchmark analysis completed", "good");
+        if (selectedOrganizationId && selectedAthlete?.athleteProfileId) {
+          void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+        }
       }
     );
   };
@@ -16116,6 +16285,9 @@ export default function HomePage() {
                 <button type="button" onClick={recordObservation} disabled={busyAction !== null}>Observe</button>
                 <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
                 <button type="button" onClick={analyzeAthleteVideoCoaching} disabled={busyAction !== null}>Video coach</button>
+                <button type="button" onClick={uploadPerformanceVideoAsset} disabled={busyAction !== null}>Upload video</button>
+                <button type="button" onClick={analyzePerformancePoseGait} disabled={busyAction !== null}>Analyze gait</button>
+                <button type="button" onClick={annotatePerformanceVideo} disabled={busyAction !== null}>Annotate</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
                 <button type="button" onClick={runPerformanceForecastValidation} disabled={busyAction !== null}>Forecast QA</button>
@@ -16221,6 +16393,34 @@ export default function HomePage() {
                 Video evidence
                 <textarea value={videoCoachingForm.evidence_text} onChange={(event) => setVideoCoachingForm({ ...videoCoachingForm, evidence_text: event.target.value })} />
               </label>
+              <label className="wide-field">
+                Upload video
+                <input type="file" accept="video/*" onChange={(event) => setSelectedPerformanceVideoFile(event.target.files?.[0] ?? null)} />
+              </label>
+              <label className="wide-field">
+                Pose/gait evidence
+                <textarea value={poseGaitEvidenceText} onChange={(event) => setPoseGaitEvidenceText(event.target.value)} />
+              </label>
+              <label>
+                Annotation label
+                <input value={videoAnnotationForm.label} onChange={(event) => setVideoAnnotationForm({ ...videoAnnotationForm, label: event.target.value })} />
+              </label>
+              <label>
+                Timestamp
+                <input type="number" step="0.01" value={videoAnnotationForm.timestamp_seconds} onChange={(event) => setVideoAnnotationForm({ ...videoAnnotationForm, timestamp_seconds: Number(event.target.value) })} />
+              </label>
+              <label>
+                Body region
+                <input value={videoAnnotationForm.body_region} onChange={(event) => setVideoAnnotationForm({ ...videoAnnotationForm, body_region: event.target.value })} />
+              </label>
+              <label>
+                Playback rate
+                <input type="number" step="0.125" min="0.05" max="2" value={videoAnnotationForm.playback_rate} onChange={(event) => setPerformanceVideoPlaybackRate(Number(event.target.value))} />
+              </label>
+              <label className="wide-field">
+                Annotation notes
+                <input value={videoAnnotationForm.notes} onChange={(event) => setVideoAnnotationForm({ ...videoAnnotationForm, notes: event.target.value })} />
+              </label>
               <label>
                 Goal
                 <input value={performanceGoalForm.title} onChange={(event) => setPerformanceGoalForm({ ...performanceGoalForm, title: event.target.value })} />
@@ -16325,6 +16525,84 @@ export default function HomePage() {
               trends={performanceTrends}
               benchmarks={performanceBenchmarks}
             />
+            {performanceVideoAsset ? (
+              <div className="video-analysis-panel">
+                <div className="panel-head">
+                  <div>
+                    <p className="section-label">Pose and gait</p>
+                    <h3>{performanceVideoAsset.clip_label ?? performanceVideoAsset.filename}</h3>
+                  </div>
+                  <div className="event-toolbar">
+                    {performanceVideoAsset.slow_motion_rates.map((rate) => (
+                      <button key={rate} type="button" onClick={() => setPerformanceVideoPlaybackRate(rate)}>
+                        {rate}x
+                      </button>
+                    ))}
+                    <button type="button" onClick={capturePerformanceVideoTimestamp}>Mark time</button>
+                  </div>
+                </div>
+                {performanceVideoPreviewUrl ? (
+                  <video
+                    ref={performanceVideoRef}
+                    className="video-review-player"
+                    src={performanceVideoPreviewUrl}
+                    controls
+                    playsInline
+                  />
+                ) : (
+                  <div className="video-placeholder">Upload a local clip to enable slow-motion review.</div>
+                )}
+                <div className="mini-grid">
+                  <article className="mini-card">
+                    <span className="muted">Stored asset</span>
+                    <strong>{performanceVideoAsset.status}</strong>
+                    <p>{Math.round(performanceVideoAsset.size_bytes / 1024)} KB · {performanceVideoAsset.content_type}</p>
+                  </article>
+                  <article className="mini-card">
+                    <span className="muted">Benchmark</span>
+                    <strong>{performancePoseGaitAnalysis?.benchmark_profile ?? "world_class_sprint"}</strong>
+                    <p>{performancePoseGaitAnalysis?.summary ?? "Run pose/gait analysis to compare against elite movement templates."}</p>
+                  </article>
+                </div>
+                {performancePoseGaitAnalysis ? (
+                  <div className="task-list">
+                    {performancePoseGaitAnalysis.metrics.map((metric) => (
+                      <article key={metric.key} className="task-card">
+                        <div>
+                          <strong>{metric.label}</strong>
+                          <span>
+                            {metric.observed_value}{metric.unit} · optimal {metric.optimal_min}-{metric.optimal_max}{metric.unit} · score {metric.score}/10
+                          </span>
+                          <small>{metric.benchmark_label} · {metric.coaching_cue}</small>
+                        </div>
+                      </article>
+                    ))}
+                    {performancePoseGaitAnalysis.optimal_projections.map((projection) => (
+                      <article key={projection.priority} className="task-card">
+                        <div>
+                          <strong>{projection.priority} projection</strong>
+                          <span>{projection.current_score}/10 to {projection.projected_score}/10 · {projection.target_change}</span>
+                          <small>{projection.drill}</small>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+                {performanceVideoAnnotations.length ? (
+                  <div className="task-list">
+                    {performanceVideoAnnotations.map((annotation) => (
+                      <article key={annotation.id} className="task-card">
+                        <div>
+                          <strong>{annotation.label}</strong>
+                          <span>{annotation.timestamp_seconds}s · {annotation.playback_rate}x · {annotation.body_region ?? "whole body"}</span>
+                          <small>{annotation.notes ?? "No notes"} {annotation.tags.length ? `· ${annotation.tags.join(", ")}` : ""}</small>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <PerformanceInjuryRiskCard
               risk={performanceInjuryRisk}
               alert={performanceInjuryRiskAlert}

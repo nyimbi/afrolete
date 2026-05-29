@@ -183,6 +183,71 @@ class PerformanceWearableProviderSyncRun(IdMixin, TimestampMixin, Base):
     message: Mapped[str | None] = mapped_column(Text)
 
 
+class PerformanceVideoAsset(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_video_assets"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "checksum",
+            name="uq_performance_video_assets_org_checksum",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), nullable=False, index=True
+    )
+    event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    uploaded_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    sport: Mapped[str] = mapped_column(String(80), default="athletics", nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    storage_url: Mapped[str] = mapped_column(String(800), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    video_uri: Mapped[str] = mapped_column(String(900), nullable=False, index=True)
+    clip_label: Mapped[str | None] = mapped_column(String(180))
+    analysis_focus: Mapped[str | None] = mapped_column(String(1000))
+    duration_seconds: Mapped[float | None] = mapped_column(Float)
+    frame_rate: Mapped[float | None] = mapped_column(Float)
+    frame_width: Mapped[int | None] = mapped_column(Integer)
+    frame_height: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(40), default="uploaded", nullable=False, index=True)
+    analysis_model_policy: Mapped[str | None] = mapped_column(String(180), index=True)
+    pose_analysis_json: Mapped[str | None] = mapped_column(Text)
+    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class PerformanceVideoAnnotation(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_video_annotations"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_video_assets.id"), nullable=False, index=True
+    )
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), nullable=False, index=True
+    )
+    event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    author_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    timestamp_seconds: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    playback_rate: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    annotation_type: Mapped[str] = mapped_column(String(80), default="coach_note", nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(180), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    body_region: Mapped[str | None] = mapped_column(String(80), index=True)
+    x_percent: Mapped[float | None] = mapped_column(Float)
+    y_percent: Mapped[float | None] = mapped_column(Float)
+    width_percent: Mapped[float | None] = mapped_column(Float)
+    height_percent: Mapped[float | None] = mapped_column(Float)
+    tags_json: Mapped[str | None] = mapped_column(Text)
+
+
 class PerformanceModelExtractionBenchmarkDataset(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_model_extraction_benchmark_datasets"
     __table_args__ = (

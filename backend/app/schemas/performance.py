@@ -150,6 +150,137 @@ class PerformanceVideoCoachingRead(BaseModel):
     next_actions: list[str]
 
 
+class PerformanceVideoUploadCreate(BaseModel):
+    organization_id: UUID
+    event_id: UUID | None = None
+    sport: str = Field(default="athletics", min_length=2, max_length=80)
+    filename: str = Field(min_length=1, max_length=240)
+    content_type: str = Field(default="video/mp4", max_length=120)
+    content_base64: str = Field(min_length=1)
+    clip_label: str | None = Field(default=None, max_length=180)
+    analysis_focus: str = Field(
+        default="pose, gait, stride mechanics, posture, arm drive, and movement efficiency",
+        max_length=1000,
+    )
+    duration_seconds: float | None = Field(default=None, ge=0, le=12 * 60 * 60)
+    frame_rate: float | None = Field(default=None, ge=1, le=1000)
+    frame_width: int | None = Field(default=None, ge=1, le=16384)
+    frame_height: int | None = Field(default=None, ge=1, le=16384)
+
+
+class PerformanceVideoAssetRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    athlete_profile_id: UUID
+    event_id: UUID | None
+    uploaded_by_person_id: UUID | None
+    sport: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    checksum: str
+    storage_url: str
+    video_uri: str
+    clip_label: str | None
+    analysis_focus: str | None
+    duration_seconds: float | None
+    frame_rate: float | None
+    frame_width: int | None
+    frame_height: int | None
+    status: str
+    analysis_model_policy: str | None
+    analyzed_at: datetime | None
+    slow_motion_rates: list[float]
+    review_default_rate: float
+
+
+class PerformanceVideoAnnotationCreate(BaseModel):
+    timestamp_seconds: float = Field(ge=0)
+    playback_rate: float = Field(default=0.5, ge=0.05, le=2)
+    annotation_type: str = Field(default="coach_note", min_length=2, max_length=80)
+    label: str = Field(min_length=2, max_length=180)
+    notes: str | None = Field(default=None, max_length=4000)
+    body_region: str | None = Field(default=None, max_length=80)
+    x_percent: float | None = Field(default=None, ge=0, le=100)
+    y_percent: float | None = Field(default=None, ge=0, le=100)
+    width_percent: float | None = Field(default=None, ge=0, le=100)
+    height_percent: float | None = Field(default=None, ge=0, le=100)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class PerformanceVideoAnnotationRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    athlete_profile_id: UUID
+    event_id: UUID | None
+    author_person_id: UUID | None
+    timestamp_seconds: float
+    playback_rate: float
+    annotation_type: str
+    label: str
+    notes: str | None
+    body_region: str | None
+    x_percent: float | None
+    y_percent: float | None
+    width_percent: float | None
+    height_percent: float | None
+    tags: list[str]
+    created_at: datetime
+
+
+class PerformancePoseGaitMetricRead(BaseModel):
+    key: str
+    label: str
+    category: MetricCategory
+    observed_value: float
+    optimal_min: float
+    optimal_max: float
+    unit: str
+    score: float
+    delta_from_optimal: float
+    benchmark_label: str
+    coaching_cue: str
+
+
+class PerformancePoseGaitPhaseRead(BaseModel):
+    phase: str
+    timestamp_seconds: float
+    playback_rate: float
+    focus: str
+    finding: str
+    benchmark_note: str
+
+
+class PerformanceOptimalProjectionRead(BaseModel):
+    priority: str
+    current_score: float
+    projected_score: float
+    target_change: str
+    drill: str
+
+
+class PerformancePoseGaitAnalysisCreate(BaseModel):
+    evidence_text: str | None = Field(default=None, max_length=12000)
+    analysis_focus: str | None = Field(default=None, max_length=1000)
+    benchmark_profile: str = Field(default="world_class_sprint", max_length=120)
+    create_coaching_outputs: bool = True
+
+
+class PerformancePoseGaitAnalysisRead(BaseModel):
+    video_asset: PerformanceVideoAssetRead
+    model_policy: str
+    benchmark_profile: str
+    confidence: float
+    summary: str
+    metrics: list[PerformancePoseGaitMetricRead]
+    phases: list[PerformancePoseGaitPhaseRead]
+    optimal_projections: list[PerformanceOptimalProjectionRead]
+    slow_motion_rates: list[float]
+    annotations: list[PerformanceVideoAnnotationRead]
+    coaching: PerformanceVideoCoachingRead | None
+
+
 class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
     case_id: str = Field(min_length=2, max_length=120)
     metric_code: str = Field(min_length=2, max_length=80)

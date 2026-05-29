@@ -149,7 +149,8 @@ Major capability areas include:
   clearance, regulatory packages, and emergency action plans.
 - Performance metric definitions, observations, assessments, ALS-style scores,
   goals, awards, trend analysis, benchmarks, forecasts, injury-risk signals,
-  wearable data, AI video coaching analysis, and athlete dashboards.
+  wearable data, stored video, pose/gait benchmarking, AI video coaching
+  analysis, slow-motion review, human annotations, and athlete dashboards.
 - Training drills, plans, sessions, readiness checks, feedback, workload
   management, schedule exports, and AI-assisted plan generation.
 - Competition management, standings, officials, fixture generation, brackets,
@@ -208,6 +209,11 @@ pending-review movement metrics, drafts a coach-verifiable assessment, and
 returns concrete correction cues. Future computer-vision providers can replace
 or enrich the deterministic extractor without changing the human-review
 contract.
+
+Video review now includes stored performance clips, slow-motion playback rates,
+timestamped human annotations, pose/gait benchmark comparisons against
+world-class sprint movement templates, and optimal movement projections. The
+output remains advisory and pending review until a coach accepts it.
 
 ## Architecture
 

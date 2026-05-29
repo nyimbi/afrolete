@@ -485,6 +485,33 @@ textarea:focus {
   line-height: 1.35;
 }
 
+.video-analysis-panel {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.video-review-player {
+  width: 100%;
+  max-height: 460px;
+  border-radius: 8px;
+  background: #05070b;
+}
+
+.video-placeholder {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--wash);
+}
+
 .log-line {
   border-left: 3px solid var(--blue);
   margin: 0;

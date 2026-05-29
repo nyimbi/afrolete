@@ -1,8 +1,11 @@
+from base64 import b64decode
+from binascii import Error as Base64Error
 from datetime import UTC, date, datetime, timedelta
 import hmac
 import hashlib
 import httpx
 import json
+from pathlib import Path
 import re
 import time
 from secrets import token_urlsafe
@@ -43,6 +46,8 @@ from app.models.performance import (
     PerformanceForecastValidationRun,
     PerformanceModelExtractionBenchmarkCase,
     PerformanceModelExtractionBenchmarkDataset,
+    PerformanceVideoAnnotation,
+    PerformanceVideoAsset,
     PerformanceWearableIngestEvent,
     PerformanceWearableProviderConnection,
     PerformanceWearableProviderSyncRun,
@@ -68,7 +73,10 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkRunCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
+    PerformancePoseGaitAnalysisCreate,
+    PerformanceVideoAnnotationCreate,
     PerformanceVideoCoachingCreate,
+    PerformanceVideoUploadCreate,
     PerformanceWearableConnectionCreate,
     PerformanceWearableOAuthCallbackCreate,
     PerformanceWearableProviderTokenResponse,
@@ -89,6 +97,7 @@ from app.services.communications import (
     initial_delivery_status,
 )
 from app.services.secrets import resolve_secret
+from app.services.storage.objects import get_object, put_object
 
 
 async def ensure_manage_performance(
@@ -423,6 +432,219 @@ async def analyze_video_for_coaching(
         "assessment": assessment,
         "metrics": metric_cards,
         "next_actions": video_coaching_next_actions(weakest),
+    }
+
+
+async def upload_performance_video_asset(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    athlete_profile_id: UUID,
+    payload: PerformanceVideoUploadCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> PerformanceVideoAsset:
+    athlete_profile = await get_athlete_profile(db, athlete_profile_id, payload.organization_id)
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    if payload.event_id is not None:
+        event = await db.get(Event, payload.event_id)
+        if event is None or event.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    if not payload.content_type.startswith("video/"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Upload must be a video file")
+
+    content = decode_performance_upload_content(payload.content_base64)
+    if not content:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Video file is empty")
+    selected_settings = settings or get_settings()
+    if len(content) > selected_settings.performance_video_max_upload_bytes:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Video upload exceeds tenant limit")
+
+    checksum = hashlib.sha256(content).hexdigest()
+    safe_name = safe_performance_upload_filename(payload.filename)
+    existing = await db.scalar(
+        select(PerformanceVideoAsset).where(
+            PerformanceVideoAsset.organization_id == payload.organization_id,
+            PerformanceVideoAsset.checksum == checksum,
+        )
+    )
+    if existing is not None:
+        return existing
+
+    storage_name = f"{checksum[:16]}-{safe_name}"
+    relative_path = (
+        Path(str(payload.organization_id))
+        / str(athlete_profile.id)
+        / storage_name
+    ).as_posix()
+    stored = put_object(
+        selected_settings,
+        local_root=selected_settings.performance_video_file_dir,
+        local_url_prefix=selected_settings.performance_video_file_url_prefix,
+        key=relative_path,
+        content=content,
+        content_type=payload.content_type,
+    )
+    video_asset = PerformanceVideoAsset(
+        organization_id=payload.organization_id,
+        athlete_profile_id=athlete_profile.id,
+        event_id=payload.event_id,
+        uploaded_by_person_id=identity.person_id,
+        sport=payload.sport.strip().lower(),
+        filename=safe_name,
+        content_type=payload.content_type,
+        size_bytes=len(content),
+        checksum=checksum,
+        storage_url=stored.url,
+        storage_path=stored.path,
+        video_uri=f"performance-video://{payload.organization_id}/{athlete_profile.id}/{checksum[:16]}",
+        clip_label=payload.clip_label,
+        analysis_focus=payload.analysis_focus,
+        duration_seconds=payload.duration_seconds,
+        frame_rate=payload.frame_rate,
+        frame_width=payload.frame_width,
+        frame_height=payload.frame_height,
+        status="uploaded",
+    )
+    db.add(video_asset)
+    await db.commit()
+    await db.refresh(video_asset)
+    return video_asset
+
+
+async def downloadable_performance_video_asset(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    video_asset_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    video_asset = await get_performance_video_asset(db, video_asset_id)
+    await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    selected_settings = settings or get_settings()
+    key = performance_video_object_key(video_asset, selected_settings)
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.performance_video_file_dir,
+        key=key,
+    )
+    checksum = hashlib.sha256(content).hexdigest()
+    if checksum != video_asset.checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Video checksum mismatch")
+    return {
+        "content": content,
+        "content_type": video_asset.content_type,
+        "filename": video_asset.filename,
+        "checksum": checksum,
+    }
+
+
+async def create_performance_video_annotation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    video_asset_id: UUID,
+    payload: PerformanceVideoAnnotationCreate,
+    authz: AuthorizationService,
+) -> PerformanceVideoAnnotation:
+    video_asset = await get_performance_video_asset(db, video_asset_id)
+    await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    annotation = PerformanceVideoAnnotation(
+        organization_id=video_asset.organization_id,
+        video_asset_id=video_asset.id,
+        athlete_profile_id=video_asset.athlete_profile_id,
+        event_id=video_asset.event_id,
+        author_person_id=identity.person_id,
+        timestamp_seconds=payload.timestamp_seconds,
+        playback_rate=payload.playback_rate,
+        annotation_type=payload.annotation_type,
+        label=payload.label,
+        notes=payload.notes,
+        body_region=payload.body_region,
+        x_percent=payload.x_percent,
+        y_percent=payload.y_percent,
+        width_percent=payload.width_percent,
+        height_percent=payload.height_percent,
+        tags_json=json.dumps(payload.tags),
+    )
+    db.add(annotation)
+    await db.commit()
+    await db.refresh(annotation)
+    return annotation
+
+
+async def list_performance_video_annotations(
+    db: AsyncSession,
+    video_asset_id: UUID,
+) -> list[PerformanceVideoAnnotation]:
+    return list(
+        (
+            await db.scalars(
+                select(PerformanceVideoAnnotation)
+                .where(PerformanceVideoAnnotation.video_asset_id == video_asset_id)
+                .order_by(
+                    PerformanceVideoAnnotation.timestamp_seconds,
+                    PerformanceVideoAnnotation.created_at,
+                )
+            )
+        ).all()
+    )
+
+
+async def analyze_pose_gait_for_video(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    video_asset_id: UUID,
+    payload: PerformancePoseGaitAnalysisCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    video_asset = await get_performance_video_asset(db, video_asset_id)
+    await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    focus = payload.analysis_focus or video_asset.analysis_focus or "pose, gait, and movement efficiency"
+    metrics = pose_gait_metric_cards(payload.evidence_text, video_asset.sport)
+    phases = pose_gait_phase_cards(metrics, video_asset.duration_seconds)
+    projections = optimal_projection_cards(metrics)
+    confidence = pose_gait_confidence(payload.evidence_text, video_asset)
+    summary = pose_gait_summary(video_asset, metrics, confidence)
+    analysis = {
+        "model_policy": "afrolete-pose-gait-benchmark-v1",
+        "benchmark_profile": payload.benchmark_profile,
+        "confidence": confidence,
+        "summary": summary,
+        "metrics": metrics,
+        "phases": phases,
+        "optimal_projections": projections,
+        "slow_motion_rates": video_slow_motion_rates(),
+        "focus": focus,
+    }
+    video_asset.pose_analysis_json = json.dumps(analysis, default=str)
+    video_asset.analysis_model_policy = str(analysis["model_policy"])
+    video_asset.analyzed_at = datetime.now(UTC)
+    video_asset.status = "analyzed"
+    await db.commit()
+    await db.refresh(video_asset)
+    coaching_result = None
+    if payload.create_coaching_outputs:
+        coaching_result = await analyze_video_for_coaching(
+            db,
+            identity,
+            video_asset.athlete_profile_id,
+            PerformanceVideoCoachingCreate(
+                organization_id=video_asset.organization_id,
+                event_id=video_asset.event_id,
+                sport=video_asset.sport,
+                video_uri=video_asset.video_uri,
+                clip_label=video_asset.clip_label,
+                analysis_focus=focus,
+                evidence_text=pose_gait_evidence_text(video_asset, metrics, phases, payload.evidence_text),
+                provider="afrolete_pose_gait_benchmark",
+            ),
+            authz,
+        )
+        video_asset = await get_performance_video_asset(db, video_asset_id)
+    return {
+        "video_asset": video_asset,
+        "analysis": analysis,
+        "annotations": await list_performance_video_annotations(db, video_asset.id),
+        "coaching": coaching_result,
     }
 
 
@@ -5542,6 +5764,321 @@ def decode_string_list(value: str | None) -> list[str]:
     except json.JSONDecodeError:
         return []
     return [str(item) for item in items if str(item)]
+
+
+def video_slow_motion_rates() -> list[float]:
+    return [0.125, 0.25, 0.5, 0.75, 1.0]
+
+
+def decode_performance_upload_content(content_base64: str) -> bytes:
+    encoded = content_base64.split(",", 1)[1] if "," in content_base64 else content_base64
+    try:
+        return b64decode(encoded, validate=True)
+    except (Base64Error, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid video encoding") from exc
+
+
+def safe_performance_upload_filename(filename: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(filename).name).strip(".-")
+    return cleaned[:180] or "performance-video.mp4"
+
+
+async def get_performance_video_asset(
+    db: AsyncSession,
+    video_asset_id: UUID,
+) -> PerformanceVideoAsset:
+    video_asset = await db.get(PerformanceVideoAsset, video_asset_id)
+    if video_asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Performance video not found")
+    return video_asset
+
+
+def performance_video_object_key(video_asset: PerformanceVideoAsset, settings: Settings) -> str:
+    if video_asset.storage_path.startswith("s3://"):
+        prefix = f"s3://{settings.object_storage_bucket}/"
+        if video_asset.storage_path.startswith(prefix):
+            return video_asset.storage_path[len(prefix):]
+    local_root = Path(settings.performance_video_file_dir)
+    storage_path = Path(video_asset.storage_path)
+    try:
+        return storage_path.relative_to(local_root).as_posix()
+    except ValueError:
+        return (
+            Path(str(video_asset.organization_id))
+            / str(video_asset.athlete_profile_id)
+            / Path(video_asset.storage_path).name
+        ).as_posix()
+
+
+def decode_annotation_tags(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if str(item)]
+
+
+def pose_gait_templates(sport: str) -> list[dict[str, object]]:
+    if sport == "athletics":
+        return [
+            {
+                "key": "torso_lean_angle",
+                "label": "Torso Lean Angle",
+                "category": MetricCategory.TECHNICAL,
+                "unit": "degrees",
+                "optimal_min": 8.0,
+                "optimal_max": 14.0,
+                "benchmark": "world-class max-velocity sprint posture",
+                "cue": "Stack ribs over hips after acceleration and avoid folding from the waist.",
+                "risk_terms": ["collapse", "fold", "excessive lean", "late torso"],
+                "positive_terms": ["upright", "stacked", "tall posture"],
+                "default": 16.0,
+            },
+            {
+                "key": "knee_drive_angle",
+                "label": "Front Knee Drive",
+                "category": MetricCategory.PHYSICAL,
+                "unit": "degrees",
+                "optimal_min": 70.0,
+                "optimal_max": 90.0,
+                "benchmark": "elite sprint front-side mechanics",
+                "cue": "Punch the knee forward and up while keeping the foot dorsiflexed.",
+                "risk_terms": ["low knee", "drag", "backside"],
+                "positive_terms": ["high knee", "front-side", "knee drive"],
+                "default": 66.0,
+            },
+            {
+                "key": "ground_contact_time",
+                "label": "Ground Contact Time",
+                "category": MetricCategory.PHYSICAL,
+                "unit": "ms",
+                "optimal_min": 80.0,
+                "optimal_max": 120.0,
+                "benchmark": "world-class short ground contact window",
+                "cue": "Strike under the hips and leave the ground quickly without reaching.",
+                "risk_terms": ["long contact", "heavy", "braking", "flat foot"],
+                "positive_terms": ["quick contact", "reactive", "stiff ankle"],
+                "default": 132.0,
+                "lower_is_better": True,
+            },
+            {
+                "key": "arm_swing_symmetry",
+                "label": "Arm Swing Symmetry",
+                "category": MetricCategory.TECHNICAL,
+                "unit": "score",
+                "optimal_min": 8.0,
+                "optimal_max": 10.0,
+                "benchmark": "elite linear arm-drive pattern",
+                "cue": "Drive elbows back with compact hands and avoid crossing the midline.",
+                "risk_terms": ["cross-body", "wide", "twist", "late arms"],
+                "positive_terms": ["compact", "linear", "coordinated arms"],
+                "default": 6.8,
+            },
+            {
+                "key": "stride_frequency",
+                "label": "Stride Frequency",
+                "category": MetricCategory.TACTICAL,
+                "unit": "Hz",
+                "optimal_min": 4.2,
+                "optimal_max": 5.0,
+                "benchmark": "elite cadence consistency",
+                "cue": "Keep rhythm progressive and resist overstriding to chase speed.",
+                "risk_terms": ["ragged", "rushed", "overstride", "fatigue"],
+                "positive_terms": ["rhythm", "cadence", "consistent"],
+                "default": 4.0,
+            },
+        ]
+    return [
+        {
+            "key": "movement_symmetry",
+            "label": "Movement Symmetry",
+            "category": MetricCategory.TECHNICAL,
+            "unit": "score",
+            "optimal_min": 8.0,
+            "optimal_max": 10.0,
+            "benchmark": "elite sport movement symmetry",
+            "cue": "Match left and right mechanics before increasing intensity.",
+            "risk_terms": ["asymmetry", "limp", "collapse"],
+            "positive_terms": ["balanced", "symmetric", "controlled"],
+            "default": 7.0,
+        },
+        {
+            "key": "postural_control",
+            "label": "Postural Control",
+            "category": MetricCategory.TECHNICAL,
+            "unit": "score",
+            "optimal_min": 8.0,
+            "optimal_max": 10.0,
+            "benchmark": "elite posture under load",
+            "cue": "Keep trunk control through direction changes and fatigue.",
+            "risk_terms": ["unstable", "late", "fold"],
+            "positive_terms": ["stable", "tall", "controlled"],
+            "default": 7.1,
+        },
+    ]
+
+
+def pose_gait_metric_cards(evidence_text: str | None, sport: str) -> list[dict[str, object]]:
+    text = (evidence_text or "").lower()
+    cards: list[dict[str, object]] = []
+    for template in pose_gait_templates(sport):
+        observed = extract_labeled_float(evidence_text, str(template["label"]), str(template["key"]))
+        if observed is None:
+            observed = float(template["default"])
+            if any(str(term) in text for term in template["positive_terms"]):
+                observed += -8 if template.get("lower_is_better") else 0.7
+            if any(str(term) in text for term in template["risk_terms"]):
+                observed += 14 if template.get("lower_is_better") else -1.2
+        optimal_min = float(template["optimal_min"])
+        optimal_max = float(template["optimal_max"])
+        score = score_against_optimal_range(observed, optimal_min, optimal_max)
+        if template.get("lower_is_better") and observed <= optimal_max:
+            score = max(score, 8.0)
+        if observed < optimal_min:
+            delta = round(observed - optimal_min, 2)
+        elif observed > optimal_max:
+            delta = round(observed - optimal_max, 2)
+        else:
+            delta = 0.0
+        cards.append(
+            {
+                "key": template["key"],
+                "label": template["label"],
+                "category": template["category"],
+                "observed_value": round(observed, 2),
+                "optimal_min": optimal_min,
+                "optimal_max": optimal_max,
+                "unit": template["unit"],
+                "score": score,
+                "delta_from_optimal": delta,
+                "benchmark_label": template["benchmark"],
+                "coaching_cue": template["cue"],
+            }
+        )
+    return cards
+
+
+def extract_labeled_float(text: str | None, *labels: str) -> float | None:
+    if not text:
+        return None
+    normalized = text.replace("_", " ")
+    for label in labels:
+        escaped = re.escape(label.replace("_", " "))
+        patterns = [
+            rf"{escaped}\D{{0,80}}(-?\d+(?:\.\d+)?)",
+            rf"(-?\d+(?:\.\d+)?)\D{{0,80}}{escaped}",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, normalized, re.IGNORECASE)
+            if match:
+                return float(match.group(1))
+    return None
+
+
+def score_against_optimal_range(value: float, optimal_min: float, optimal_max: float) -> float:
+    if optimal_min <= value <= optimal_max:
+        return 9.2
+    nearest = optimal_min if value < optimal_min else optimal_max
+    span = max(abs(optimal_max - optimal_min), 1.0)
+    penalty = abs(value - nearest) / span * 2.5
+    return round(max(1.0, 9.2 - penalty), 1)
+
+
+def pose_gait_phase_cards(
+    metrics: list[dict[str, object]],
+    duration_seconds: float | None,
+) -> list[dict[str, object]]:
+    duration = duration_seconds or 8.0
+    weakest = sorted(metrics, key=lambda metric: float(metric["score"]))[:3]
+    phase_names = ["initial contact", "mid-stance", "toe-off", "flight recovery"]
+    phases: list[dict[str, object]] = []
+    for index, phase in enumerate(phase_names):
+        metric = weakest[index % len(weakest)]
+        phases.append(
+            {
+                "phase": phase,
+                "timestamp_seconds": round(duration * (index + 1) / (len(phase_names) + 1), 2),
+                "playback_rate": 0.25 if index in {1, 2} else 0.5,
+                "focus": str(metric["label"]),
+                "finding": f"{metric['label']} scored {float(metric['score']):g}/10.",
+                "benchmark_note": f"Compared with {metric['benchmark_label']}; delta {metric['delta_from_optimal']} {metric['unit']}.",
+            }
+        )
+    return phases
+
+
+def optimal_projection_cards(metrics: list[dict[str, object]]) -> list[dict[str, object]]:
+    projections: list[dict[str, object]] = []
+    for metric in sorted(metrics, key=lambda item: float(item["score"]))[:3]:
+        observed = float(metric["observed_value"])
+        optimal_min = float(metric["optimal_min"])
+        optimal_max = float(metric["optimal_max"])
+        target = observed
+        if observed < optimal_min:
+            target = optimal_min
+        elif observed > optimal_max:
+            target = optimal_max
+        projections.append(
+            {
+                "priority": str(metric["label"]),
+                "current_score": float(metric["score"]),
+                "projected_score": min(10.0, round(float(metric["score"]) + 1.4, 1)),
+                "target_change": f"Move from {observed:g} to {target:g} {metric['unit']}.",
+                "drill": str(metric["coaching_cue"]),
+            }
+        )
+    return projections
+
+
+def pose_gait_confidence(evidence_text: str | None, video_asset: PerformanceVideoAsset) -> float:
+    confidence = 0.7
+    if evidence_text and len(evidence_text) > 100:
+        confidence += 0.08
+    if video_asset.frame_rate and video_asset.frame_rate >= 60:
+        confidence += 0.06
+    if video_asset.frame_width and video_asset.frame_width >= 1280:
+        confidence += 0.04
+    return round(min(confidence, 0.88), 2)
+
+
+def pose_gait_summary(
+    video_asset: PerformanceVideoAsset,
+    metrics: list[dict[str, object]],
+    confidence: float,
+) -> str:
+    strongest = max(metrics, key=lambda item: float(item["score"]))
+    weakest = min(metrics, key=lambda item: float(item["score"]))
+    return (
+        f"Pose and gait analysis for {video_asset.clip_label or video_asset.filename} compares "
+        f"{video_asset.sport} movement against world-class benchmark ranges. "
+        f"Strongest pattern: {strongest['label']} ({float(strongest['score']):g}/10). "
+        f"Priority correction: {weakest['label']} ({float(weakest['score']):g}/10). "
+        f"Confidence {confidence:.0%}; coach review is required before training prescription."
+    )
+
+
+def pose_gait_evidence_text(
+    video_asset: PerformanceVideoAsset,
+    metrics: list[dict[str, object]],
+    phases: list[dict[str, object]],
+    evidence_text: str | None,
+) -> str:
+    metric_text = ". ".join(
+        f"{metric['label']} {metric['score']} with observed {metric['observed_value']} {metric['unit']}"
+        for metric in metrics
+    )
+    phase_text = ". ".join(
+        f"{phase['phase']} at {phase['timestamp_seconds']}s: {phase['finding']}"
+        for phase in phases
+    )
+    return (
+        f"{evidence_text or ''} Video {video_asset.video_uri}. "
+        f"Pose-gait benchmark analysis. {metric_text}. {phase_text}."
+    ).strip()
 
 
 def video_coaching_metric_specs(sport: str) -> list[dict[str, object]]:

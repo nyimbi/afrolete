@@ -234,6 +234,9 @@ class Settings(BaseSettings):
     performance_forecast_webhook_key_secret_path: str = ""
     performance_forecast_webhook_key_secret_field: str = "value"
     performance_forecast_timeout_seconds: float = 8.0
+    performance_video_file_dir: str = "data/performance-videos"
+    performance_video_file_url_prefix: str = "local://performance-videos"
+    performance_video_max_upload_bytes: int = 250_000_000
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"

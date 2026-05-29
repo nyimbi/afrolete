@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -42,9 +42,18 @@ from app.schemas.performance import (
     PerformanceObservationCreate,
     PerformanceObservationRead,
     PerformanceObservationReviewCreate,
+    PerformancePoseGaitAnalysisCreate,
+    PerformancePoseGaitAnalysisRead,
+    PerformancePoseGaitMetricRead,
+    PerformancePoseGaitPhaseRead,
+    PerformanceOptimalProjectionRead,
+    PerformanceVideoAnnotationCreate,
+    PerformanceVideoAnnotationRead,
+    PerformanceVideoAssetRead,
     PerformanceVideoCoachingCreate,
     PerformanceVideoCoachingMetricRead,
     PerformanceVideoCoachingRead,
+    PerformanceVideoUploadCreate,
     PerformanceWearableConnectionCreate,
     PerformanceWearableConnectionRead,
     PerformanceWearableOAuthCallbackCreate,
@@ -68,9 +77,11 @@ from app.services.authz.service import AuthorizationService, get_authorization_s
 from app.services.performance import (
     assessment_review_queue_summary,
     analyze_video_for_coaching,
+    analyze_pose_gait_for_video,
     create_assessment,
     create_metric_definition,
     create_observation,
+    create_performance_video_annotation,
     create_performance_goal,
     create_performance_model_extraction_benchmark_dataset,
     create_player_self_assessment,
@@ -87,6 +98,7 @@ from app.services.performance import (
     list_metric_definitions,
     list_my_player_performance,
     list_observations,
+    list_performance_video_annotations,
     list_performance_forecast_validation_runs,
     list_performance_model_extraction_benchmark_datasets,
     list_wearable_provider_connections,
@@ -114,6 +126,10 @@ from app.services.performance import (
     complete_wearable_provider_oauth,
     update_assessment_review_assignment,
     validate_performance_wearable_webhook_signature,
+    decode_annotation_tags,
+    downloadable_performance_video_asset,
+    upload_performance_video_asset,
+    video_slow_motion_rates,
 )
 
 router = APIRouter(prefix="/performance", tags=["performance"])
@@ -255,6 +271,81 @@ def to_assessment_read(assessment) -> AthleteAssessmentRead:
         review_escalation_count=assessment.review_escalation_count,
         review_escalation_message_id=assessment.review_escalation_message_id,
         verification_status=assessment.verification_status,
+    )
+
+
+def to_video_asset_read(video_asset) -> PerformanceVideoAssetRead:
+    return PerformanceVideoAssetRead(
+        id=video_asset.id,
+        organization_id=video_asset.organization_id,
+        athlete_profile_id=video_asset.athlete_profile_id,
+        event_id=video_asset.event_id,
+        uploaded_by_person_id=video_asset.uploaded_by_person_id,
+        sport=video_asset.sport,
+        filename=video_asset.filename,
+        content_type=video_asset.content_type,
+        size_bytes=video_asset.size_bytes,
+        checksum=video_asset.checksum,
+        storage_url=video_asset.storage_url,
+        video_uri=video_asset.video_uri,
+        clip_label=video_asset.clip_label,
+        analysis_focus=video_asset.analysis_focus,
+        duration_seconds=video_asset.duration_seconds,
+        frame_rate=video_asset.frame_rate,
+        frame_width=video_asset.frame_width,
+        frame_height=video_asset.frame_height,
+        status=video_asset.status,
+        analysis_model_policy=video_asset.analysis_model_policy,
+        analyzed_at=video_asset.analyzed_at,
+        slow_motion_rates=video_slow_motion_rates(),
+        review_default_rate=0.5,
+    )
+
+
+def to_video_annotation_read(annotation) -> PerformanceVideoAnnotationRead:
+    return PerformanceVideoAnnotationRead(
+        id=annotation.id,
+        organization_id=annotation.organization_id,
+        video_asset_id=annotation.video_asset_id,
+        athlete_profile_id=annotation.athlete_profile_id,
+        event_id=annotation.event_id,
+        author_person_id=annotation.author_person_id,
+        timestamp_seconds=annotation.timestamp_seconds,
+        playback_rate=annotation.playback_rate,
+        annotation_type=annotation.annotation_type,
+        label=annotation.label,
+        notes=annotation.notes,
+        body_region=annotation.body_region,
+        x_percent=annotation.x_percent,
+        y_percent=annotation.y_percent,
+        width_percent=annotation.width_percent,
+        height_percent=annotation.height_percent,
+        tags=decode_annotation_tags(annotation.tags_json),
+        created_at=annotation.created_at,
+    )
+
+
+def to_video_coaching_read(result) -> PerformanceVideoCoachingRead:
+    return PerformanceVideoCoachingRead(
+        organization_id=result["organization_id"],
+        athlete_profile_id=result["athlete_profile_id"],
+        event_id=result["event_id"],
+        sport=result["sport"],
+        video_uri=result["video_uri"],
+        clip_label=result["clip_label"],
+        model_policy=result["model_policy"],
+        confidence=result["confidence"],
+        summary=result["summary"],
+        coaching_plan=result["coaching_plan"],
+        review_required=result["review_required"],
+        observations=[
+            to_observation_read(observation) for observation in result["observations"]
+        ],
+        assessment=to_assessment_read(result["assessment"]),
+        metrics=[
+            PerformanceVideoCoachingMetricRead(**metric) for metric in result["metrics"]
+        ],
+        next_actions=result["next_actions"],
     )
 
 
@@ -502,26 +593,110 @@ async def analyze_video_for_coaching_route(
         payload,
         authz,
     )
-    return PerformanceVideoCoachingRead(
-        organization_id=result["organization_id"],
-        athlete_profile_id=result["athlete_profile_id"],
-        event_id=result["event_id"],
-        sport=result["sport"],
-        video_uri=result["video_uri"],
-        clip_label=result["clip_label"],
-        model_policy=result["model_policy"],
-        confidence=result["confidence"],
-        summary=result["summary"],
-        coaching_plan=result["coaching_plan"],
-        review_required=result["review_required"],
-        observations=[
-            to_observation_read(observation) for observation in result["observations"]
-        ],
-        assessment=to_assessment_read(result["assessment"]),
+    return to_video_coaching_read(result)
+
+
+@router.post(
+    "/athletes/{athlete_profile_id}/videos",
+    response_model=PerformanceVideoAssetRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_performance_video_asset_route(
+    athlete_profile_id: UUID,
+    payload: PerformanceVideoUploadCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceVideoAssetRead:
+    return to_video_asset_read(
+        await upload_performance_video_asset(db, identity, athlete_profile_id, payload, authz)
+    )
+
+
+@router.get("/videos/{video_asset_id}/content")
+async def download_performance_video_asset_route(
+    video_asset_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> Response:
+    artifact = await downloadable_performance_video_asset(db, identity, video_asset_id, authz)
+    return Response(
+        content=artifact["content"],
+        media_type=str(artifact["content_type"]),
+        headers={
+            "Content-Disposition": f"inline; filename={artifact['filename']}",
+            "X-Afrolete-Performance-Video-Checksum": str(artifact["checksum"]),
+        },
+    )
+
+
+@router.post(
+    "/videos/{video_asset_id}/annotations",
+    response_model=PerformanceVideoAnnotationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_performance_video_annotation_route(
+    video_asset_id: UUID,
+    payload: PerformanceVideoAnnotationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceVideoAnnotationRead:
+    return to_video_annotation_read(
+        await create_performance_video_annotation(db, identity, video_asset_id, payload, authz)
+    )
+
+
+@router.get(
+    "/videos/{video_asset_id}/annotations",
+    response_model=list[PerformanceVideoAnnotationRead],
+)
+async def list_performance_video_annotations_route(
+    video_asset_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceVideoAnnotationRead]:
+    return [
+        to_video_annotation_read(annotation)
+        for annotation in await list_performance_video_annotations(db, video_asset_id)
+    ]
+
+
+@router.post(
+    "/videos/{video_asset_id}/pose-gait-analysis",
+    response_model=PerformancePoseGaitAnalysisRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def analyze_pose_gait_for_video_route(
+    video_asset_id: UUID,
+    payload: PerformancePoseGaitAnalysisCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformancePoseGaitAnalysisRead:
+    result = await analyze_pose_gait_for_video(db, identity, video_asset_id, payload, authz)
+    analysis = result["analysis"]
+    return PerformancePoseGaitAnalysisRead(
+        video_asset=to_video_asset_read(result["video_asset"]),
+        model_policy=analysis["model_policy"],
+        benchmark_profile=analysis["benchmark_profile"],
+        confidence=analysis["confidence"],
+        summary=analysis["summary"],
         metrics=[
-            PerformanceVideoCoachingMetricRead(**metric) for metric in result["metrics"]
+            PerformancePoseGaitMetricRead(**metric) for metric in analysis["metrics"]
         ],
-        next_actions=result["next_actions"],
+        phases=[
+            PerformancePoseGaitPhaseRead(**phase) for phase in analysis["phases"]
+        ],
+        optimal_projections=[
+            PerformanceOptimalProjectionRead(**projection)
+            for projection in analysis["optimal_projections"]
+        ],
+        slow_motion_rates=analysis["slow_motion_rates"],
+        annotations=[
+            to_video_annotation_read(annotation) for annotation in result["annotations"]
+        ],
+        coaching=to_video_coaching_read(result["coaching"]) if result["coaching"] else None,
     )
 
 

@@ -114,6 +114,8 @@ from app.models.performance import (  # noqa: F401,E402
     PerformanceForecastValidationRun,
     PerformanceModelExtractionBenchmarkCase,
     PerformanceModelExtractionBenchmarkDataset,
+    PerformanceVideoAnnotation,
+    PerformanceVideoAsset,
     PerformanceWearableIngestEvent,
     PerformanceWearableProviderConnection,
     PerformanceWearableProviderSyncRun,

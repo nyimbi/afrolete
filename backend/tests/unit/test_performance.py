@@ -1,3 +1,4 @@
+import base64
 from datetime import UTC, datetime, timedelta
 import json
 
@@ -2776,6 +2777,81 @@ def test_video_coaching_analysis_creates_pending_review_outputs(
     metric_codes = {metric["metric_code"] for metric in coaching["metrics"]}
     assert "video_stride_efficiency" in metric_codes
     assert coaching["next_actions"]
+
+
+def test_performance_video_upload_pose_gait_analysis_and_annotations(
+    client,
+    identity_headers,
+) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    video_bytes = b"fake mp4 sprint clip"
+    upload = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "athletics",
+            "filename": "sprint-start.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(video_bytes).decode(),
+            "clip_label": "Sprint start side view",
+            "analysis_focus": "pose, gait, front knee drive, ground contact",
+            "duration_seconds": 8,
+            "frame_rate": 120,
+            "frame_width": 1920,
+            "frame_height": 1080,
+        },
+    )
+
+    assert upload.status_code == 201
+    video_asset = upload.json()
+    assert video_asset["video_uri"].startswith("performance-video://")
+    assert video_asset["slow_motion_rates"] == [0.125, 0.25, 0.5, 0.75, 1.0]
+
+    annotation = client.post(
+        f"/api/v1/performance/videos/{video_asset['id']}/annotations",
+        headers=identity_headers,
+        json={
+            "timestamp_seconds": 2.25,
+            "playback_rate": 0.25,
+            "annotation_type": "pose_correction",
+            "label": "Torso collapse",
+            "notes": "Pause here and compare trunk line with the optimal projection.",
+            "body_region": "torso",
+            "x_percent": 42,
+            "y_percent": 18,
+            "width_percent": 18,
+            "height_percent": 40,
+            "tags": ["posture", "slow-motion"],
+        },
+    )
+    assert annotation.status_code == 201
+    assert annotation.json()["tags"] == ["posture", "slow-motion"]
+
+    analysis = client.post(
+        f"/api/v1/performance/videos/{video_asset['id']}/pose-gait-analysis",
+        headers=identity_headers,
+        json={
+            "benchmark_profile": "world_class_sprint",
+            "evidence_text": (
+                "Torso lean angle 18 degrees with late torso collapse. "
+                "Front knee drive 64 degrees. Ground contact time 138 ms. "
+                "Arm swing symmetry 6.5 with cross-body movement. Stride frequency 4.1 Hz."
+            ),
+            "create_coaching_outputs": True,
+        },
+    )
+
+    assert analysis.status_code == 201
+    payload = analysis.json()
+    assert payload["video_asset"]["status"] == "analyzed"
+    assert payload["benchmark_profile"] == "world_class_sprint"
+    assert len(payload["metrics"]) >= 5
+    assert any(metric["key"] == "ground_contact_time" for metric in payload["metrics"])
+    assert payload["optimal_projections"]
+    assert payload["annotations"][0]["label"] == "Torso collapse"
+    assert payload["coaching"]["review_required"] is True
+    assert len(payload["coaching"]["observations"]) == 5
 
 
 def test_performance_observation_rejects_metric_from_other_organization(

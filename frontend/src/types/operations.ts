@@ -4466,6 +4466,98 @@ export type PerformanceVideoCoachingRead = {
   next_actions: string[];
 };
 
+export type PerformanceVideoAssetRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  event_id: UUID | null;
+  uploaded_by_person_id: UUID | null;
+  sport: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  checksum: string;
+  storage_url: string;
+  video_uri: string;
+  clip_label: string | null;
+  analysis_focus: string | null;
+  duration_seconds: number | null;
+  frame_rate: number | null;
+  frame_width: number | null;
+  frame_height: number | null;
+  status: string;
+  analysis_model_policy: string | null;
+  analyzed_at: string | null;
+  slow_motion_rates: number[];
+  review_default_rate: number;
+};
+
+export type PerformanceVideoAnnotationRead = {
+  id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  athlete_profile_id: UUID;
+  event_id: UUID | null;
+  author_person_id: UUID | null;
+  timestamp_seconds: number;
+  playback_rate: number;
+  annotation_type: string;
+  label: string;
+  notes: string | null;
+  body_region: string | null;
+  x_percent: number | null;
+  y_percent: number | null;
+  width_percent: number | null;
+  height_percent: number | null;
+  tags: string[];
+  created_at: string;
+};
+
+export type PerformancePoseGaitMetricRead = {
+  key: string;
+  label: string;
+  category: MetricCategory;
+  observed_value: number;
+  optimal_min: number;
+  optimal_max: number;
+  unit: string;
+  score: number;
+  delta_from_optimal: number;
+  benchmark_label: string;
+  coaching_cue: string;
+};
+
+export type PerformancePoseGaitPhaseRead = {
+  phase: string;
+  timestamp_seconds: number;
+  playback_rate: number;
+  focus: string;
+  finding: string;
+  benchmark_note: string;
+};
+
+export type PerformanceOptimalProjectionRead = {
+  priority: string;
+  current_score: number;
+  projected_score: number;
+  target_change: string;
+  drill: string;
+};
+
+export type PerformancePoseGaitAnalysisRead = {
+  video_asset: PerformanceVideoAssetRead;
+  model_policy: string;
+  benchmark_profile: string;
+  confidence: number;
+  summary: string;
+  metrics: PerformancePoseGaitMetricRead[];
+  phases: PerformancePoseGaitPhaseRead[];
+  optimal_projections: PerformanceOptimalProjectionRead[];
+  slow_motion_rates: number[];
+  annotations: PerformanceVideoAnnotationRead[];
+  coaching: PerformanceVideoCoachingRead | null;
+};
+
 export type AthleteAssessmentReviewQueueItemRead = {
   assessment: AthleteAssessmentRead;
   athlete_person_id: UUID;
