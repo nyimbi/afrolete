@@ -246,6 +246,16 @@ function HostedPaymentExperience() {
                 </button>
               ) : null}
               {settlement ? <p className="payment-result">{settlement.message}</p> : null}
+              {checkoutKind === "registration" && settlement ? (
+                <div className="payment-followups">
+                  <a href={(checkout as RegistrationPaymentHostedCheckoutRead).public_registration_path}>
+                    Return to registration packet
+                  </a>
+                  <a href={(checkout as RegistrationPaymentHostedCheckoutRead).family_portal_path}>
+                    Continue in family portal
+                  </a>
+                </div>
+              ) : null}
               {providerSession ? (
                 <p className="payment-result">
                   {providerSession.failure_reason ?? `Provider session ${providerSession.provider_session_id} ready`}

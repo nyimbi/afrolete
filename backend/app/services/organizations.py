@@ -1088,6 +1088,7 @@ def registration_payment_hosted_checkout_read(
     inquiry: RegistrationInquiry,
     provider: str,
     session_id: str,
+    site: str,
 ) -> RegistrationPaymentHostedCheckoutRead:
     amount_due = (inquiry.payment_amount or Decimal("0.00")).quantize(Decimal("0.01"))
     amount_paid = amount_due if inquiry.payment_status in REGISTRATION_PAYMENT_COMPLETE_STATUSES else Decimal("0.00")
@@ -1097,6 +1098,9 @@ def registration_payment_hosted_checkout_read(
     return RegistrationPaymentHostedCheckoutRead(
         inquiry_id=inquiry.id,
         organization_id=inquiry.organization_id,
+        athlete_name=inquiry.athlete_name,
+        guardian_name=inquiry.guardian_name,
+        guardian_email=inquiry.email,
         registration_reference=registration_reference,
         title=title,
         memo=inquiry.message,
@@ -1117,6 +1121,32 @@ def registration_payment_hosted_checkout_read(
             if open_amount > 0
             else f"{title} is fully paid."
         ),
+        public_registration_path=registration_resume_path(site, inquiry),
+        family_portal_path=registration_family_portal_path(inquiry),
+    )
+
+
+def registration_resume_path(site: str, inquiry: RegistrationInquiry) -> str:
+    return "/register?" + urlencode(
+        {
+            "mode": "player",
+            "site": site,
+            "inquiry_id": str(inquiry.id),
+            "email": inquiry.email,
+        }
+    )
+
+
+def registration_family_portal_path(inquiry: RegistrationInquiry) -> str:
+    return "/family?" + urlencode(
+        {
+            "organization_id": str(inquiry.organization_id),
+            "inquiry_id": str(inquiry.id),
+            "guardian_email": inquiry.email,
+            "guardian_name": inquiry.guardian_name or inquiry.email,
+            "athlete_name": inquiry.athlete_name,
+            "autoload": "1",
+        }
     )
 
 
@@ -1150,7 +1180,7 @@ async def create_registration_payment_session(
     await db.commit()
     await db.refresh(inquiry)
 
-    hosted_checkout = registration_payment_hosted_checkout_read(inquiry, provider, session_id)
+    hosted_checkout = registration_payment_hosted_checkout_read(inquiry, provider, session_id, site)
     return (
         inquiry,
         session_id,
@@ -1179,7 +1209,7 @@ async def get_registration_payment_hosted_checkout(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration payment session not found")
     if inquiry.payment_amount is None or inquiry.payment_amount <= 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration payment session not found")
-    return registration_payment_hosted_checkout_read(inquiry, provider, session_id)
+    return registration_payment_hosted_checkout_read(inquiry, provider, session_id, site)
 
 
 async def settle_registration_payment_checkout(

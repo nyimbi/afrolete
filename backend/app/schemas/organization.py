@@ -351,6 +351,9 @@ class RegistrationPaymentSessionCreate(BaseModel):
 class RegistrationPaymentHostedCheckoutRead(BaseModel):
     inquiry_id: UUID
     organization_id: UUID
+    athlete_name: str
+    guardian_name: str | None
+    guardian_email: str
     registration_reference: str
     title: str
     memo: str | None
@@ -367,6 +370,8 @@ class RegistrationPaymentHostedCheckoutRead(BaseModel):
     payment_methods: list[str]
     settlement_endpoint: str
     checkout_summary: str
+    public_registration_path: str
+    family_portal_path: str
 
 
 class RegistrationPaymentSessionRead(BaseModel):

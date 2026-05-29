@@ -3848,6 +3848,19 @@ textarea:focus {
   margin: 0;
 }
 
+.payment-followups {
+  display: grid;
+  gap: 8px;
+}
+
+.payment-followups a {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  padding: 11px 12px;
+  text-align: center;
+}
+
 .payment-loading,
 .payment-error {
   padding: 22px;

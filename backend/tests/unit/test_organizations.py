@@ -446,6 +446,11 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     checkout = checkout_response.json()
     assert checkout["registration_reference"].startswith("REG-")
     assert checkout["client_reference"] == f"registration-payment:{inquiry['id']}"
+    assert checkout["guardian_email"] == "parent.runner@example.com"
+    assert checkout["public_registration_path"].startswith("/register?mode=player&site=makini-track")
+    assert f"inquiry_id={inquiry['id']}" in checkout["public_registration_path"]
+    assert checkout["family_portal_path"].startswith(f"/family?organization_id={onboarding['organization']['id']}")
+    assert "autoload=1" in checkout["family_portal_path"]
 
     settlement_response = client.post(
         f"/api/v1/organizations/registration-checkout-sessions/{payment_session['session_id']}/settle?site=makini-track",

@@ -521,6 +521,9 @@ export type RegistrationPacketRead = {
 export type RegistrationPaymentHostedCheckoutRead = {
   inquiry_id: UUID;
   organization_id: UUID;
+  athlete_name: string;
+  guardian_name: string | null;
+  guardian_email: string;
   registration_reference: string;
   title: string;
   memo: string | null;
@@ -537,6 +540,8 @@ export type RegistrationPaymentHostedCheckoutRead = {
   payment_methods: string[];
   settlement_endpoint: string;
   checkout_summary: string;
+  public_registration_path: string;
+  family_portal_path: string;
 };
 
 export type RegistrationPaymentSessionRead = {
