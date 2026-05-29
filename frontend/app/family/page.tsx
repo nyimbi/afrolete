@@ -57,6 +57,13 @@ function registrationResumeHref(registration: FamilyRegistrationInquiryRead): st
   return `${registration.public_site_path}?${params.toString()}`;
 }
 
+function currentFamilyReturnTo(): string {
+  if (typeof window === "undefined") {
+    return "/family";
+  }
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
 export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
@@ -162,7 +169,11 @@ export default function FamilyPortalPage() {
   const beginKeycloakLogin = () => {
     setBusy(true);
     setError("");
-    void startKeycloakLogin({ loginHint: identity.email || undefined, prompt: "login" }).catch((caught) => {
+    void startKeycloakLogin({
+      loginHint: identity.email || undefined,
+      prompt: "login",
+      returnTo: currentFamilyReturnTo()
+    }).catch((caught) => {
       setBusy(false);
       setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
     });
@@ -171,7 +182,10 @@ export default function FamilyPortalPage() {
   const beginKeycloakRegistration = () => {
     setBusy(true);
     setError("");
-    void startKeycloakRegistration({ loginHint: identity.email || undefined }).catch((caught) => {
+    void startKeycloakRegistration({
+      loginHint: identity.email || undefined,
+      returnTo: currentFamilyReturnTo()
+    }).catch((caught) => {
       setBusy(false);
       setError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
     });

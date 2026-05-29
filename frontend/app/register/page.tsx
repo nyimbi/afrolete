@@ -903,20 +903,26 @@ export default function RegistrationPage() {
                   </div>
                   {keycloakEnabled ? (
                     <div>
-                      <button
-                        type="button"
-                        onClick={beginFamilyKeycloakRegistration}
-                        disabled={busy !== "" || (accountReadiness !== null && !accountReadiness.can_create_account)}
-                      >
-                        Create account
-                      </button>
-                      <button
-                        type="button"
-                        onClick={beginFamilyKeycloakLogin}
-                        disabled={busy !== "" || (accountReadiness !== null && !accountReadiness.can_sign_in)}
-                      >
-                        Sign in
-                      </button>
+                      {isSessionForInquiry(authSession, submittedInquiry) ? (
+                        <a href={familyPortalHref(selectedSite.id, submittedInquiry)}>Continue in family portal</a>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={beginFamilyKeycloakRegistration}
+                            disabled={busy !== "" || (accountReadiness !== null && !accountReadiness.can_create_account)}
+                          >
+                            Create account
+                          </button>
+                          <button
+                            type="button"
+                            onClick={beginFamilyKeycloakLogin}
+                            disabled={busy !== "" || (accountReadiness !== null && !accountReadiness.can_sign_in)}
+                          >
+                            Sign in
+                          </button>
+                        </>
+                      )}
                     </div>
                   ) : (
                     <a href={familyPortalHref(selectedSite.id, submittedInquiry)}>Open family portal</a>
@@ -1224,6 +1230,14 @@ function registrationReturnTo(siteSlug: string, inquiry: RegistrationInquiryRead
 
 function documentFilename(packet: RegistrationPacketRead, documentType: string): string | null {
   return packet.submitted_documents.find((document) => document.document_type === documentType)?.filename ?? null;
+}
+
+function isSessionForInquiry(session: AuthSession | null, inquiry: RegistrationInquiryRead): boolean {
+  return normalizeEmail(session?.email) !== "" && normalizeEmail(session?.email) === normalizeEmail(inquiry.email);
+}
+
+function normalizeEmail(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
 }
 
 function familyPortalHref(organizationId: string, inquiry: RegistrationInquiryRead): string {
