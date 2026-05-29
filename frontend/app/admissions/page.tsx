@@ -25,6 +25,9 @@ type ReviewForm = {
   status: string;
   review_notes: string;
   follow_up_at: string;
+  payment_status: string;
+  payment_method: string;
+  payment_reference: string;
 };
 
 const keycloakEnabled = afroleteAuthMode === "keycloak";
@@ -191,7 +194,10 @@ export default function AdmissionsPage() {
           next[inquiry.id] = next[inquiry.id] ?? {
             status: inquiry.status,
             review_notes: inquiry.review_notes ?? "",
-            follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at)
+            follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at),
+            payment_status: inquiry.payment_status,
+            payment_method: inquiry.payment_method ?? "",
+            payment_reference: inquiry.payment_reference ?? ""
           };
         });
         return next;
@@ -210,6 +216,9 @@ export default function AdmissionsPage() {
         status: current[inquiry.id]?.status ?? inquiry.status,
         review_notes: current[inquiry.id]?.review_notes ?? inquiry.review_notes ?? "",
         follow_up_at: current[inquiry.id]?.follow_up_at ?? toDateTimeLocalValue(inquiry.follow_up_at),
+        payment_status: current[inquiry.id]?.payment_status ?? inquiry.payment_status,
+        payment_method: current[inquiry.id]?.payment_method ?? inquiry.payment_method ?? "",
+        payment_reference: current[inquiry.id]?.payment_reference ?? inquiry.payment_reference ?? "",
         [field]: value
       }
     }));
@@ -223,15 +232,28 @@ export default function AdmissionsPage() {
     const form = reviewForms[inquiry.id] ?? {
       status: inquiry.status,
       review_notes: inquiry.review_notes ?? "",
-      follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at)
+      follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at),
+      payment_status: inquiry.payment_status,
+      payment_method: inquiry.payment_method ?? "",
+      payment_reference: inquiry.payment_reference ?? ""
     };
     const nextStatus = statusOverride ?? form.status;
     setBusy(`review-${inquiry.id}`);
     setError("");
     try {
-      const body: { status?: string; review_notes: string | null; follow_up_at: string | null } = {
+      const body: {
+        status?: string;
+        review_notes: string | null;
+        follow_up_at: string | null;
+        payment_status: string;
+        payment_method: string | null;
+        payment_reference: string | null;
+      } = {
         review_notes: form.review_notes || null,
-        follow_up_at: form.follow_up_at ? new Date(form.follow_up_at).toISOString() : null
+        follow_up_at: form.follow_up_at ? new Date(form.follow_up_at).toISOString() : null,
+        payment_status: form.payment_status,
+        payment_method: form.payment_method || null,
+        payment_reference: form.payment_reference || null
       };
       if (nextStatus !== "converted") {
         body.status = nextStatus;
@@ -340,7 +362,10 @@ export default function AdmissionsPage() {
       [updated.id]: {
         status: updated.status,
         review_notes: updated.review_notes ?? "",
-        follow_up_at: toDateTimeLocalValue(updated.follow_up_at)
+        follow_up_at: toDateTimeLocalValue(updated.follow_up_at),
+        payment_status: updated.payment_status,
+        payment_method: updated.payment_method ?? "",
+        payment_reference: updated.payment_reference ?? ""
       }
     }));
   };
@@ -457,7 +482,10 @@ export default function AdmissionsPage() {
             const form = reviewForms[inquiry.id] ?? {
               status: inquiry.status,
               review_notes: inquiry.review_notes ?? "",
-              follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at)
+              follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at),
+              payment_status: inquiry.payment_status,
+              payment_method: inquiry.payment_method ?? "",
+              payment_reference: inquiry.payment_reference ?? ""
             };
             return (
               <article className="admission-card" key={inquiry.id}>
@@ -511,6 +539,40 @@ export default function AdmissionsPage() {
                       type="datetime-local"
                       value={form.follow_up_at}
                       onChange={(event) => updateReviewForm(inquiry, "follow_up_at", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Payment
+                    <select
+                      value={form.payment_status}
+                      onChange={(event) => updateReviewForm(inquiry, "payment_status", event.target.value)}
+                      disabled={inquiry.status === "converted"}
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="pending_verification">Pending verification</option>
+                      <option value="paid">Paid</option>
+                      <option value="waived">Waived</option>
+                      <option value="not_required">Not required</option>
+                      <option value="failed">Failed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </label>
+                  <label>
+                    Method
+                    <input
+                      value={form.payment_method}
+                      onChange={(event) => updateReviewForm(inquiry, "payment_method", event.target.value)}
+                      placeholder="M-Pesa, card, waiver"
+                      disabled={inquiry.status === "converted"}
+                    />
+                  </label>
+                  <label>
+                    Reference
+                    <input
+                      value={form.payment_reference}
+                      onChange={(event) => updateReviewForm(inquiry, "payment_reference", event.target.value)}
+                      placeholder="Receipt or waiver code"
+                      disabled={inquiry.status === "converted"}
                     />
                   </label>
                   <label className="admission-wide">

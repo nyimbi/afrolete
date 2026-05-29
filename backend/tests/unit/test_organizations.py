@@ -367,6 +367,39 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert packet["inquiry"]["missing_documents"] == []
     assert "Record payment, waiver, or not-required status." in packet["next_steps"]
 
+    waiver_response = client.patch(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/{inquiry['id']}",
+        headers=identity_headers,
+        json={
+            "status": "reviewing",
+            "review_notes": "Fee waived for scholarship review.",
+            "payment_status": "waived",
+            "payment_method": "staff_waiver",
+            "payment_reference": "WAIVE-2026",
+        },
+    )
+    assert waiver_response.status_code == 200
+    waiver = waiver_response.json()
+    assert waiver["payment_status"] == "waived"
+    assert waiver["payment_method"] == "staff_waiver"
+    assert waiver["payment_reference"] == "WAIVE-2026"
+    assert waiver["verification_status"] == "ready_for_review"
+    assert waiver["packet_complete"] is True
+    assert waiver["next_steps"] == ["Registration packet is ready for staff verification."]
+
+    pending_payment_response = client.patch(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/{inquiry['id']}",
+        headers=identity_headers,
+        json={
+            "status": "reviewing",
+            "payment_status": "pending",
+            "payment_method": "registration_checkout",
+            "payment_reference": None,
+        },
+    )
+    assert pending_payment_response.status_code == 200
+    assert pending_payment_response.json()["verification_status"] == "packet_incomplete"
+
     payment_session_response = client.post(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/payment-session",
         json={

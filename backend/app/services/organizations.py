@@ -86,6 +86,12 @@ def organization_member_relation(subject_type: MemberSubjectType, role: Membersh
 
 INQUIRY_REVIEW_STATUSES = {"new", "reviewing", "contacted", "waitlisted", "rejected"}
 REGISTRATION_PAYMENT_COMPLETE_STATUSES = {"paid", "waived", "not_required"}
+REGISTRATION_PAYMENT_REVIEW_STATUSES = REGISTRATION_PAYMENT_COMPLETE_STATUSES | {
+    "pending",
+    "pending_verification",
+    "failed",
+    "cancelled",
+}
 DEFAULT_REGISTRATION_DOCUMENTS = ["proof_of_age", "medical_information"]
 
 
@@ -1294,6 +1300,13 @@ async def update_registration_inquiry(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
 
     changed = False
+    payment_fields = {"payment_status", "payment_method", "payment_reference"}
+    if inquiry.status == "converted" and payload.model_fields_set.intersection(payment_fields):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Converted inquiries cannot be modified",
+        )
+
     if "status" in payload.model_fields_set:
         if payload.status is None:
             raise HTTPException(
@@ -1325,6 +1338,36 @@ async def update_registration_inquiry(
     if "follow_up_at" in payload.model_fields_set:
         inquiry.follow_up_at = payload.follow_up_at
         changed = True
+    payment_changed = False
+    if "payment_status" in payload.model_fields_set:
+        if payload.payment_status is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Payment status cannot be empty",
+            )
+        normalized_payment_status = payload.payment_status.strip().lower()
+        if normalized_payment_status not in REGISTRATION_PAYMENT_REVIEW_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Payment status must be one of: {', '.join(sorted(REGISTRATION_PAYMENT_REVIEW_STATUSES))}",
+            )
+        inquiry.payment_status = normalized_payment_status
+        payment_changed = True
+        changed = True
+    if "payment_method" in payload.model_fields_set:
+        inquiry.payment_method = payload.payment_method.strip() if payload.payment_method else None
+        payment_changed = True
+        changed = True
+    if "payment_reference" in payload.model_fields_set:
+        inquiry.payment_reference = payload.payment_reference.strip() if payload.payment_reference else None
+        payment_changed = True
+        changed = True
+    if payment_changed:
+        inquiry.verification_status = (
+            "ready_for_review" if registration_packet_summary(inquiry)["packet_complete"] else "packet_incomplete"
+        )
+        if inquiry.status == "new":
+            inquiry.status = "reviewing"
 
     if changed:
         inquiry.reviewed_by_person_id = identity.person_id

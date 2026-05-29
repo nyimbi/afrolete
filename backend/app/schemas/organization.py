@@ -401,6 +401,9 @@ class RegistrationInquiryUpdate(BaseModel):
     status: str | None = Field(default=None, max_length=40)
     review_notes: str | None = Field(default=None, max_length=4000)
     follow_up_at: datetime | None = None
+    payment_status: str | None = Field(default=None, max_length=40)
+    payment_method: str | None = Field(default=None, max_length=80)
+    payment_reference: str | None = Field(default=None, max_length=240)
 
 
 class RegistrationInquiryFollowUpCreate(BaseModel):
