@@ -171,7 +171,10 @@ def _object_storage_component(settings: Settings) -> InfrastructureComponent:
             mode="local",
             configured=True,
             endpoint=settings.report_artifact_dir,
-            details=["local filesystem artifact mode"],
+            details=[
+                "local filesystem artifact mode",
+                f"lifecycle_retention_days={settings.object_storage_lifecycle_retention_days}",
+            ],
         )
     has_credentials = bool(
         settings.object_storage_access_key
@@ -187,7 +190,12 @@ def _object_storage_component(settings: Settings) -> InfrastructureComponent:
         mode=settings.object_storage_mode,
         configured=configured,
         endpoint=settings.object_storage_endpoint,
-        details=[f"bucket={settings.object_storage_bucket}", f"region={settings.object_storage_region}"],
+        details=[
+            f"bucket={settings.object_storage_bucket}",
+            f"region={settings.object_storage_region}",
+            f"lifecycle_retention_days={settings.object_storage_lifecycle_retention_days}",
+            f"lifecycle_prefixes={len(settings.object_storage_lifecycle_prefixes)}",
+        ],
     )
 
 

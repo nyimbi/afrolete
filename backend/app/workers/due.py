@@ -38,6 +38,7 @@ from app.services.safeguarding import (
     run_compliance_reconciliation_worker,
     run_guardian_portal_invite_reminder_worker,
 )
+from app.services.storage.lifecycle import run_object_storage_lifecycle
 
 WORKER_LANES = (
     "agent-tasks",
@@ -53,6 +54,7 @@ WORKER_LANES = (
     "emergency-escalations",
     "event-travel-consent-reminders",
     "family-portal-invite-reminders",
+    "object-storage-lifecycle",
     "performance-achievements",
     "performance-forecast-validations",
     "performance-review-escalations",
@@ -136,6 +138,8 @@ def parse_args() -> argparse.Namespace:
         default=CommunicationChannel.EMAIL.value,
     )
     parser.add_argument("--dry-run-family-portal-invite-reminders", action="store_true")
+    parser.add_argument("--object-storage-lifecycle-retention-days", type=int, default=None)
+    parser.add_argument("--dry-run-object-storage-lifecycle", action="store_true")
     parser.add_argument("--performance-limit", type=int, default=None)
     parser.add_argument("--performance-forecast-validation-limit", type=int, default=None)
     parser.add_argument("--auto-alert-performance-forecast-drift", action="store_true")
@@ -248,6 +252,8 @@ async def run_due_workers(
     family_portal_invite_reminder_repeat_after_hours: int = 24,
     family_portal_invite_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
     dry_run_family_portal_invite_reminders: bool = False,
+    object_storage_lifecycle_retention_days: int | None = None,
+    dry_run_object_storage_lifecycle: bool = False,
     performance_limit: int | None = None,
     performance_forecast_validation_limit: int | None = None,
     auto_alert_performance_forecast_drift: bool = False,
@@ -411,6 +417,11 @@ async def run_due_workers(
                 include_recorded=include_recorded_webhooks,
             )
         ).model_dump(mode="json")
+    if "object-storage-lifecycle" in active_lanes:
+        results["object_storage_lifecycle"] = run_object_storage_lifecycle(
+            retention_days=object_storage_lifecycle_retention_days,
+            dry_run=dry_run_object_storage_lifecycle,
+        )
     if "emergency-escalations" in active_lanes:
         results["emergency_escalations"] = (
             await run_emergency_escalation_timer_worker(
@@ -598,6 +609,8 @@ async def run() -> None:
                 args.family_portal_invite_reminder_channel
             ),
             dry_run_family_portal_invite_reminders=args.dry_run_family_portal_invite_reminders,
+            object_storage_lifecycle_retention_days=args.object_storage_lifecycle_retention_days,
+            dry_run_object_storage_lifecycle=args.dry_run_object_storage_lifecycle,
             performance_limit=args.performance_limit,
             performance_forecast_validation_limit=args.performance_forecast_validation_limit,
             auto_alert_performance_forecast_drift=args.auto_alert_performance_forecast_drift,

@@ -252,6 +252,22 @@ class Settings(BaseSettings):
     object_storage_secret_key_secret_path: str = ""
     object_storage_secret_key_secret_field: str = "secret_key"
     object_storage_public_url: str = ""
+    object_storage_lifecycle_enabled: bool = True
+    object_storage_lifecycle_retention_days: int = 365
+    object_storage_lifecycle_prefixes: list[str] = Field(
+        default_factory=lambda: [
+            "reports/",
+            "equipment-files/",
+            "travel-receipts/",
+            "travel-checklist-files/",
+            "travel-manifests/",
+            "safeguarding-incident-evidence/",
+            "safeguarding-incident-artifacts/",
+            "background-checks/",
+            "performance-videos/",
+            "ai-scorecards/",
+        ]
+    )
     supplier_order_submission_mode: Literal["record_only", "webhook"] = "record_only"
     supplier_order_webhook_url: str = ""
     supplier_order_webhook_key: str = ""
@@ -286,6 +302,13 @@ class Settings(BaseSettings):
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @field_validator("object_storage_lifecycle_prefixes", mode="before")
+    @classmethod
+    def parse_object_storage_lifecycle_prefixes(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [prefix.strip() for prefix in value.split(",") if prefix.strip()]
         return value
 
     @field_validator("travel_device_provider_idempotency_days", mode="before")

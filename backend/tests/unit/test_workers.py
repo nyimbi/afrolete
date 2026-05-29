@@ -96,10 +96,12 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
         "emergency-escalations",
         "event-travel-consent-reminders",
         "family-portal-invite-reminders",
+        "object-storage-lifecycle",
         "performance-achievements",
         "performance-forecast-validations",
         "performance-injury-risk-alerts",
         "performance-review-escalations",
+        "performance-video-pose",
         "wearable-pull-retries",
     ]
     assert result["summary"]["eligible_count"] == 2
@@ -117,10 +119,12 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["results"]["emergency_escalations"]["eligible_count"] == 0
     assert result["results"]["event_travel_consent_reminders"]["eligible_count"] == 0
     assert result["results"]["family_portal_invite_reminders"]["eligible_count"] == 0
+    assert result["results"]["object_storage_lifecycle"]["eligible_count"] == 0
     assert result["results"]["performance_achievements"]["eligible_count"] == 0
     assert result["results"]["performance_forecast_validations"]["eligible_count"] == 0
     assert result["results"]["performance_injury_risk_alerts"]["eligible_count"] == 0
     assert result["results"]["performance_review_escalations"]["eligible_count"] == 0
+    assert result["results"]["performance_video_pose"]["eligible_count"] == 0
     assert result["results"]["wearable_pull_retries"]["eligible_count"] == 0
     await db_session.refresh(task)
     assert task.status == AgentTaskStatus.WAITING_FOR_REVIEW
@@ -145,10 +149,12 @@ def test_selected_lanes_expands_all() -> None:
         "emergency-escalations",
         "event-travel-consent-reminders",
         "family-portal-invite-reminders",
+        "object-storage-lifecycle",
         "performance-achievements",
         "performance-forecast-validations",
         "performance-injury-risk-alerts",
         "performance-review-escalations",
+        "performance-video-pose",
         "wearable-pull-retries",
     }
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}

@@ -280,8 +280,13 @@ or MinIO. It must not duplicate backend source-of-truth business rules.
 The backend includes a unified due-worker that can run scheduler-ready lanes for
 agent tasks, developer webhooks, billing, communications, travel reminders,
 emergency escalation, performance achievements, forecast validation, review
-escalation, injury-risk alerts, performance video pose extraction, wearable
-pulls, and compliance reconciliation.
+escalation, injury-risk alerts, object-storage lifecycle cleanup, performance
+video pose extraction, wearable pulls, and compliance reconciliation.
+
+Object storage can run in local mode for demos or S3-compatible mode for MinIO.
+The same storage adapter supports retention policy enforcement: local mode
+prunes stale artifacts from configured storage roots, while S3 mode writes a
+bucket lifecycle configuration for the configured prefixes.
 
 The local Docker demo runs this worker continuously. Production deployment can
 run it through systemd, cron, Temporal activities, or container jobs depending
@@ -299,7 +304,7 @@ Production targets the shared PJS environment:
 | Secrets | OpenBao rendered into runtime environment files |
 | Cache and queues | Redis on shared PJS infrastructure |
 | Durable workflows | Temporal namespace `afrolete` |
-| Object storage | MinIO/S3-compatible storage |
+| Object storage | MinIO/S3-compatible storage with lifecycle retention policy |
 | Deployment | Systemd-managed services and PJS deploy scripts |
 
 Real secrets must never be committed. Runtime credentials should come from

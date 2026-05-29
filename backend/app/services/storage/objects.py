@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hmac
+from base64 import b64encode
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from hashlib import sha256
+from hashlib import md5, sha256
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlparse
 
@@ -132,6 +133,53 @@ def get_s3_object(settings: Settings, key: str) -> bytes:
     return response.content
 
 
+def put_s3_bucket_lifecycle(
+    settings: Settings,
+    *,
+    prefixes: list[str],
+    expiration_days: int,
+) -> dict[str, object]:
+    credentials = ensure_s3_configured(settings)
+    normalized_prefixes = [prefix.lstrip("/") for prefix in prefixes if prefix.strip()]
+    if not normalized_prefixes:
+        normalized_prefixes = [""]
+    content = s3_lifecycle_configuration_xml(
+        normalized_prefixes,
+        expiration_days=max(expiration_days, 1),
+    )
+    url = f"{s3_bucket_url(settings).rstrip('/')}?lifecycle="
+    headers = {
+        "content-md5": b64encode(md5(content).digest()).decode(),
+        "content-type": "application/xml",
+        "host": host_header(url),
+        "x-amz-content-sha256": sha256(content).hexdigest(),
+        "x-amz-date": amz_date(),
+    }
+    headers["authorization"] = s3_authorization(
+        settings,
+        credentials,
+        method="PUT",
+        url=url,
+        headers=headers,
+        payload_hash=headers["x-amz-content-sha256"],
+    )
+    try:
+        response = httpx.put(url, content=content, headers=headers, timeout=10.0)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Object lifecycle policy write failed: {exc}") from exc
+    if not 200 <= response.status_code < 300:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Object lifecycle policy write failed: {response.status_code} {response.text[:300]}",
+        )
+    return {
+        "bucket": settings.object_storage_bucket,
+        "prefix_count": len(normalized_prefixes),
+        "expiration_days": max(expiration_days, 1),
+        "status_code": response.status_code,
+    }
+
+
 def ensure_s3_configured(settings: Settings) -> S3Credentials:
     credentials = resolve_s3_credentials(settings)
     if not credentials.access_key or not credentials.secret_key:
@@ -163,6 +211,43 @@ def resolve_s3_credentials(settings: Settings) -> S3Credentials:
         )
         source = "openbao"
     return S3Credentials(access_key=access_key, secret_key=secret_key, source=source)
+
+
+def s3_lifecycle_configuration_xml(prefixes: list[str], expiration_days: int) -> bytes:
+    rules = []
+    for index, prefix in enumerate(prefixes, start=1):
+        safe_prefix = xml_escape(prefix)
+        rules.append(
+            "".join(
+                [
+                    "<Rule>",
+                    f"<ID>afrolete-retention-{index}</ID>",
+                    "<Status>Enabled</Status>",
+                    "<Filter>",
+                    f"<Prefix>{safe_prefix}</Prefix>",
+                    "</Filter>",
+                    "<Expiration>",
+                    f"<Days>{expiration_days}</Days>",
+                    "</Expiration>",
+                    "</Rule>",
+                ]
+            )
+        )
+    return (
+        '<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+        + "".join(rules)
+        + "</LifecycleConfiguration>"
+    ).encode()
+
+
+def xml_escape(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
 
 
 def resolve_openbao_storage_secret(
