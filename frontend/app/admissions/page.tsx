@@ -629,6 +629,16 @@ export default function AdmissionsPage() {
                 </div>
 
                 <div className="admission-actions">
+                  {selectedOrganization ? (
+                    <>
+                      <a href={registrationResumeHref(selectedOrganization, inquiry)} target="_blank" rel="noreferrer">
+                        Open packet
+                      </a>
+                      <a href={familyPortalHref(inquiry)} target="_blank" rel="noreferrer">
+                        Family portal
+                      </a>
+                    </>
+                  ) : null}
                   <button type="button" onClick={() => saveReview(inquiry)} disabled={busy !== "" || inquiry.status === "converted"}>
                     {busy === `review-${inquiry.id}` ? "Saving" : "Save"}
                   </button>
@@ -686,6 +696,18 @@ function registrationResumeHref(organization: OrganizationRead, inquiry: Registr
     email: inquiry.email
   });
   return `${window.location.origin}/site/${organization.subdomain || organization.slug}?${params.toString()}`;
+}
+
+function familyPortalHref(inquiry: RegistrationInquiryRead): string {
+  const params = new URLSearchParams({
+    organization_id: inquiry.organization_id,
+    inquiry_id: inquiry.id,
+    guardian_email: inquiry.email,
+    guardian_name: inquiry.guardian_name ?? inquiry.email,
+    athlete_name: inquiry.athlete_name,
+    autoload: "1"
+  });
+  return `${window.location.origin}/family?${params.toString()}`;
 }
 
 function toDateTimeLocalValue(value: string | null): string {

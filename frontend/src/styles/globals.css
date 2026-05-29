@@ -2761,10 +2761,13 @@ textarea:focus {
   gap: 8px;
 }
 
-.admission-actions button {
+.admission-actions button,
+.admission-actions a {
   background: transparent;
   border: 1px solid var(--line);
+  border-radius: 8px;
   color: var(--text);
+  padding: 10px 13px;
 }
 
 .admission-actions button.primary {
