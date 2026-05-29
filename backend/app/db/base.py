@@ -56,6 +56,14 @@ from app.models.commercial import (  # noqa: F401,E402
     TicketOrder,
     TicketProduct,
 )
+from app.models.community import (  # noqa: F401,E402
+    CommunityComment,
+    CommunityPost,
+    CommunityReaction,
+    FanPoll,
+    FanPollOption,
+    FanPollVote,
+)
 from app.models.developer import (  # noqa: F401,E402
     DeveloperApiKey,
     DeveloperApplication,

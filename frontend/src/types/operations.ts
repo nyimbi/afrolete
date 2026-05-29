@@ -2835,6 +2835,86 @@ export type MerchandiseStoreDashboardRead = {
   recommendations: string[];
 };
 
+export type CommunityPostRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  author_person_id: UUID | null;
+  title: string;
+  body: string;
+  post_type: string;
+  visibility: string;
+  media_url: string | null;
+  pinned: boolean;
+  status: string;
+  published_at: string;
+  comment_count: number;
+  reaction_count: number;
+  poll_count: number;
+};
+
+export type CommunityCommentRead = {
+  id: UUID;
+  organization_id: UUID;
+  post_id: UUID;
+  author_person_id: UUID | null;
+  body: string;
+  status: string;
+  created_at: string;
+};
+
+export type CommunityReactionRead = {
+  id: UUID;
+  organization_id: UUID;
+  post_id: UUID;
+  person_id: UUID;
+  reaction_type: string;
+  created_at: string;
+};
+
+export type FanPollOptionRead = {
+  id: UUID;
+  poll_id: UUID;
+  label: string;
+  sequence: number;
+  vote_count: number;
+};
+
+export type FanPollRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  post_id: UUID | null;
+  question: string;
+  audience: string;
+  status: string;
+  closes_at: string | null;
+  total_votes: number;
+  options: FanPollOptionRead[];
+};
+
+export type FanPollVoteRead = {
+  id: UUID;
+  organization_id: UUID;
+  poll_id: UUID;
+  option_id: UUID;
+  person_id: UUID;
+  created_at: string;
+};
+
+export type CommunityEngagementSummaryRead = {
+  organization_id: UUID;
+  post_count: number;
+  pinned_post_count: number;
+  comment_count: number;
+  reaction_count: number;
+  poll_count: number;
+  open_poll_count: number;
+  vote_count: number;
+  engagement_score: number;
+  recommendations: string[];
+};
+
 export type TicketProductRead = {
   id: UUID;
   organization_id: UUID;

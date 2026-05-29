@@ -118,7 +118,13 @@ import type {
   CommunicationScopeType,
   CommunicationScheduledDispatchWorkerRunRead,
   CommunicationTemplateRead,
+  CommunityCommentRead,
+  CommunityEngagementSummaryRead,
+  CommunityPostRead,
+  CommunityReactionRead,
   CommercialRefundRead,
+  FanPollRead,
+  FanPollVoteRead,
   AthleteTransferRead,
   CompetitionAdvancementRead,
   CompetitionBracketRead,
@@ -1693,6 +1699,12 @@ export default function HomePage() {
   const [scheduledDispatchRun, setScheduledDispatchRun] =
     useState<CommunicationScheduledDispatchWorkerRunRead | null>(null);
   const [notificationPreference, setNotificationPreference] = useState<NotificationPreferenceRead | null>(null);
+  const [communityPosts, setCommunityPosts] = useState<CommunityPostRead[]>([]);
+  const [communityComments, setCommunityComments] = useState<CommunityCommentRead[]>([]);
+  const [communityReaction, setCommunityReaction] = useState<CommunityReactionRead | null>(null);
+  const [fanPolls, setFanPolls] = useState<FanPollRead[]>([]);
+  const [fanPollVote, setFanPollVote] = useState<FanPollVoteRead | null>(null);
+  const [communitySummary, setCommunitySummary] = useState<CommunityEngagementSummaryRead | null>(null);
   const [facilities, setFacilities] = useState<FacilityRead[]>([]);
   const [emergencyPlans, setEmergencyPlans] = useState<EmergencyActionPlanRead[]>([]);
   const [emergencyActivations, setEmergencyActivations] = useState<EmergencyPlanActivationRead[]>([]);
@@ -1857,6 +1869,8 @@ export default function HomePage() {
   const [selectedCompetitionId, setSelectedCompetitionId] = useState("");
   const [selectedFixtureId, setSelectedFixtureId] = useState("");
   const [selectedMessageId, setSelectedMessageId] = useState("");
+  const [selectedCommunityPostId, setSelectedCommunityPostId] = useState("");
+  const [selectedFanPollId, setSelectedFanPollId] = useState("");
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
   const [selectedEquipmentId, setSelectedEquipmentId] = useState("");
   const [selectedCheckoutId, setSelectedCheckoutId] = useState("");
@@ -2502,6 +2516,20 @@ export default function HomePage() {
     delivery_method: "pickup",
     delivery_address: "Collect at Saturday home match."
   });
+  const [communityForm, setCommunityForm] = useState({
+    title: "Matchday moments wall",
+    body: "Share goals, photos, supporter notes, and a short coach reflection after the fixture.",
+    post_type: "matchday",
+    visibility: "public",
+    media_url: "https://media.example/matchday-highlight.jpg",
+    pinned: true,
+    comment: "Families loved the pressure and the bench energy.",
+    reaction_type: "celebrate",
+    poll_question: "Who was player of the match?",
+    poll_audience: "supporters",
+    poll_options: "Amina, Brian, Team defence",
+    vote_option_index: 0
+  });
   const [ticketForm, setTicketForm] = useState({
     name: "General admission",
     price: 5,
@@ -2634,6 +2662,14 @@ export default function HomePage() {
     [athletes, selectedAthleteId]
   );
   const selectedInboxPersonId = selectedAthlete?.personId ?? athletes[0]?.personId ?? "";
+  const selectedCommunityPost = useMemo(
+    () => communityPosts.find((post) => post.id === selectedCommunityPostId) ?? communityPosts[0] ?? null,
+    [communityPosts, selectedCommunityPostId]
+  );
+  const selectedFanPoll = useMemo(
+    () => fanPolls.find((poll) => poll.id === selectedFanPollId) ?? fanPolls[0] ?? null,
+    [fanPolls, selectedFanPollId]
+  );
   const assessmentReviewQueueSummary = useMemo(() => ({
     total: assessmentReviewQueue.length,
     overdue: assessmentReviewQueue.filter((item) => item.review_sla_state === "overdue").length,
@@ -3384,6 +3420,24 @@ export default function HomePage() {
     setInboxItems(data);
   }, [identity]);
 
+  const loadCommunity = useCallback(async (organizationId: string, teamId?: string) => {
+    const teamQuery = teamId ? `&team_id=${teamId}` : "";
+    const [posts, polls, summary] = await Promise.all([
+      apiRequest<CommunityPostRead[]>(`/community/posts?organization_id=${organizationId}${teamQuery}`),
+      apiRequest<FanPollRead[]>(`/community/polls?organization_id=${organizationId}${teamQuery}`),
+      apiRequest<CommunityEngagementSummaryRead>(`/community/summary?organization_id=${organizationId}`)
+    ]);
+    setCommunityPosts(posts);
+    setFanPolls(polls);
+    setCommunitySummary(summary);
+    setSelectedCommunityPostId((current) =>
+      posts.some((post) => post.id === current) ? current : posts[0]?.id ?? ""
+    );
+    setSelectedFanPollId((current) =>
+      polls.some((poll) => poll.id === current) ? current : polls[0]?.id ?? ""
+    );
+  }, []);
+
   const loadAssets = useCallback(async (organizationId: string, facilityId?: string) => {
     const facilityQuery = facilityId ? `&facility_id=${facilityId}` : "";
     const [
@@ -3947,6 +4001,14 @@ export default function HomePage() {
       setEscalationRun(null);
       setEscalationSchedulerRun(null);
       setNotificationPreference(null);
+      setCommunityPosts([]);
+      setCommunityComments([]);
+      setCommunityReaction(null);
+      setFanPolls([]);
+      setFanPollVote(null);
+      setCommunitySummary(null);
+      setSelectedCommunityPostId("");
+      setSelectedFanPollId("");
       setFacilities([]);
       setEquipmentItems([]);
       setEquipmentFiles([]);
@@ -4066,6 +4128,7 @@ export default function HomePage() {
       await loadCompetitions(selectedOrganizationId);
       await loadAthleteTransfers(selectedOrganizationId);
       await loadCommunications(selectedOrganizationId);
+      await loadCommunity(selectedOrganizationId);
       await loadAssets(selectedOrganizationId);
       await loadCommercial(selectedOrganizationId);
       await loadReporting(selectedOrganizationId);
@@ -4097,6 +4160,7 @@ export default function HomePage() {
     loadCompetitions,
     loadAthleteTransfers,
     loadCommunications,
+    loadCommunity,
     loadAssets,
     loadCommercial,
     loadReporting,
@@ -4137,10 +4201,21 @@ export default function HomePage() {
         await loadTraining(selectedOrganizationId, selectedTeamId || undefined);
         await loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
         await loadOppositionScouting(selectedOrganizationId, selectedTeamId || undefined);
+        await loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
       },
       () => addLog("Team lanes refreshed", "good")
     );
-  }, [selectedTeamId, selectedOrganizationId, loadEvents, loadTraining, loadVolunteers, loadOppositionScouting, runAction, addLog]);
+  }, [
+    selectedTeamId,
+    selectedOrganizationId,
+    loadEvents,
+    loadTraining,
+    loadVolunteers,
+    loadOppositionScouting,
+    loadCommunity,
+    runAction,
+    addLog
+  ]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -12125,6 +12200,145 @@ export default function HomePage() {
     );
   };
 
+  const createCommunityPost = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-community-post",
+      () =>
+        apiRequest<CommunityPostRead>("/community/posts", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            title: communityForm.title,
+            body: communityForm.body,
+            post_type: communityForm.post_type,
+            visibility: communityForm.visibility,
+            media_url: communityForm.media_url || null,
+            pinned: communityForm.pinned
+          }
+        }),
+      (post) => {
+        setCommunityPosts((current) => [post, ...current.filter((item) => item.id !== post.id)]);
+        setSelectedCommunityPostId(post.id);
+        addLog(`${post.title} published to the community wall`, "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const commentOnCommunityPost = () => {
+    if (!selectedCommunityPost || !selectedOrganizationId) {
+      addLog("Create or select a community post first", "bad");
+      return;
+    }
+    runAction(
+      "comment-community-post",
+      () =>
+        apiRequest<CommunityCommentRead>(`/community/posts/${selectedCommunityPost.id}/comments`, {
+          method: "POST",
+          identity,
+          body: { body: communityForm.comment }
+        }),
+      (comment) => {
+        setCommunityComments((current) => [comment, ...current.filter((item) => item.id !== comment.id)]);
+        addLog("Community comment added", "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const reactToCommunityPost = () => {
+    if (!selectedCommunityPost || !selectedOrganizationId) {
+      addLog("Create or select a community post first", "bad");
+      return;
+    }
+    runAction(
+      "react-community-post",
+      () =>
+        apiRequest<CommunityReactionRead>(`/community/posts/${selectedCommunityPost.id}/reactions`, {
+          method: "POST",
+          identity,
+          body: { reaction_type: communityForm.reaction_type }
+        }),
+      (reaction) => {
+        setCommunityReaction(reaction);
+        addLog(`${reaction.reaction_type} reaction captured`, "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const createFanPoll = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const options = communityForm.poll_options
+      .split(",")
+      .map((label) => label.trim())
+      .filter(Boolean)
+      .slice(0, 8)
+      .map((label) => ({ label }));
+    if (options.length < 2) {
+      addLog("Add at least two poll options", "bad");
+      return;
+    }
+    runAction(
+      "create-fan-poll",
+      () =>
+        apiRequest<FanPollRead>("/community/polls", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            post_id: selectedCommunityPost?.id ?? null,
+            question: communityForm.poll_question,
+            audience: communityForm.poll_audience,
+            options
+          }
+        }),
+      (poll) => {
+        setFanPolls((current) => [poll, ...current.filter((item) => item.id !== poll.id)]);
+        setSelectedFanPollId(poll.id);
+        addLog(`${poll.question} poll opened`, "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const voteInFanPoll = () => {
+    if (!selectedFanPoll || !selectedOrganizationId) {
+      addLog("Create or select a fan poll first", "bad");
+      return;
+    }
+    const option =
+      selectedFanPoll.options[communityForm.vote_option_index] ?? selectedFanPoll.options[0];
+    if (!option) {
+      addLog("Selected poll has no options", "bad");
+      return;
+    }
+    runAction(
+      "vote-fan-poll",
+      () =>
+        apiRequest<FanPollVoteRead>(`/community/polls/${selectedFanPoll.id}/votes`, {
+          method: "POST",
+          identity,
+          body: { option_id: option.id }
+        }),
+      (vote) => {
+        setFanPollVote(vote);
+        addLog(`Vote recorded for ${option.label}`, "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
   const createFacilityBooking = () => {
     if (!selectedOrganizationId || !selectedFacilityId) {
       addLog("Create or select a facility first", "bad");
@@ -17964,6 +18178,194 @@ export default function HomePage() {
                 <div>
                   <strong>Table updates</strong>
                   <span>Confirmed final scores immediately recalculate points and goal difference.</span>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid" id="community">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Community</p>
+                <h2>Social wall and fan pulse</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createCommunityPost} disabled={busyAction !== null}>Post</button>
+                <button type="button" onClick={commentOnCommunityPost} disabled={busyAction !== null || !selectedCommunityPost}>Comment</button>
+                <button type="button" onClick={reactToCommunityPost} disabled={busyAction !== null || !selectedCommunityPost}>React</button>
+                <button type="button" onClick={createFanPoll} disabled={busyAction !== null}>Poll</button>
+                <button type="button" onClick={voteInFanPoll} disabled={busyAction !== null || !selectedFanPoll}>Vote</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{communitySummary?.engagement_score ?? 0}</strong>
+              <span>{selectedCommunityPost?.title ?? "No community post selected"}</span>
+              <small>
+                {communitySummary
+                  ? `${communitySummary.post_count} posts · ${communitySummary.comment_count} comments · ${communitySummary.reaction_count} reactions · ${communitySummary.vote_count} votes`
+                  : "Community activity is ready for publishing"}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label className="wide-field">
+                Post title
+                <input value={communityForm.title} onChange={(event) => setCommunityForm({ ...communityForm, title: event.target.value })} />
+              </label>
+              <label>
+                Type
+                <select value={communityForm.post_type} onChange={(event) => setCommunityForm({ ...communityForm, post_type: event.target.value })}>
+                  <option value="announcement">Announcement</option>
+                  <option value="matchday">Matchday</option>
+                  <option value="highlight">Highlight</option>
+                  <option value="fundraiser">Fundraiser</option>
+                  <option value="volunteer">Volunteer</option>
+                </select>
+              </label>
+              <label>
+                Visibility
+                <select value={communityForm.visibility} onChange={(event) => setCommunityForm({ ...communityForm, visibility: event.target.value })}>
+                  <option value="public">Public</option>
+                  <option value="organization">Organization</option>
+                  <option value="team">Team</option>
+                  <option value="supporters">Supporters</option>
+                </select>
+              </label>
+              <label className="wide-field">
+                Body
+                <textarea value={communityForm.body} onChange={(event) => setCommunityForm({ ...communityForm, body: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Media URL
+                <input value={communityForm.media_url} onChange={(event) => setCommunityForm({ ...communityForm, media_url: event.target.value })} />
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={communityForm.pinned} onChange={(event) => setCommunityForm({ ...communityForm, pinned: event.target.checked })} />
+                Pin post
+              </label>
+              <label>
+                Reaction
+                <select value={communityForm.reaction_type} onChange={(event) => setCommunityForm({ ...communityForm, reaction_type: event.target.value })}>
+                  <option value="like">Like</option>
+                  <option value="celebrate">Celebrate</option>
+                  <option value="support">Support</option>
+                  <option value="thanks">Thanks</option>
+                </select>
+              </label>
+              <label className="wide-field">
+                Comment
+                <input value={communityForm.comment} onChange={(event) => setCommunityForm({ ...communityForm, comment: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {communitySummary?.recommendations.slice(0, 3).map((recommendation) => (
+                <article key={recommendation} className="task-card">
+                  <div>
+                    <strong>Engagement cue</strong>
+                    <span>{recommendation}</span>
+                  </div>
+                </article>
+              ))}
+              {communityPosts.slice(0, 5).map((post) => (
+                <button
+                  type="button"
+                  key={post.id}
+                  className={`task-card ${post.id === selectedCommunityPostId ? "selected" : ""}`}
+                  onClick={() => setSelectedCommunityPostId(post.id)}
+                >
+                  <div>
+                    <strong>{post.pinned ? "Pinned · " : ""}{post.title}</strong>
+                    <span>{post.post_type} · {post.visibility} · {post.comment_count} comments · {post.reaction_count} reactions</span>
+                    <span>{post.body}</span>
+                  </div>
+                </button>
+              ))}
+              {communityComments.slice(0, 2).map((comment) => (
+                <article key={comment.id} className="task-card">
+                  <div>
+                    <strong>Latest comment</strong>
+                    <span>{comment.body}</span>
+                  </div>
+                </article>
+              ))}
+              {communityReaction ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Last reaction</strong>
+                    <span>{communityReaction.reaction_type} captured at {new Date(communityReaction.created_at).toLocaleString()}</span>
+                  </div>
+                </article>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Supporters</p>
+                <h2>Polls and feedback loops</h2>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{selectedFanPoll?.total_votes ?? 0}</strong>
+              <span>{selectedFanPoll?.question ?? "No fan poll selected"}</span>
+              <small>
+                {communitySummary
+                  ? `${communitySummary.poll_count} polls · ${communitySummary.open_poll_count} open · audience ${selectedFanPoll?.audience ?? communityForm.poll_audience}`
+                  : "Open a pulse check for supporters, families, and members"}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label className="wide-field">
+                Poll question
+                <input value={communityForm.poll_question} onChange={(event) => setCommunityForm({ ...communityForm, poll_question: event.target.value })} />
+              </label>
+              <label>
+                Audience
+                <select value={communityForm.poll_audience} onChange={(event) => setCommunityForm({ ...communityForm, poll_audience: event.target.value })}>
+                  <option value="supporters">Supporters</option>
+                  <option value="members">Members</option>
+                  <option value="families">Families</option>
+                  <option value="public">Public</option>
+                </select>
+              </label>
+              <label>
+                Vote option
+                <input type="number" min="0" max="7" value={communityForm.vote_option_index} onChange={(event) => setCommunityForm({ ...communityForm, vote_option_index: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Options
+                <input value={communityForm.poll_options} onChange={(event) => setCommunityForm({ ...communityForm, poll_options: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {fanPollVote ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Vote captured</strong>
+                    <span>{fanPollVote.option_id} · {new Date(fanPollVote.created_at).toLocaleString()}</span>
+                  </div>
+                </article>
+              ) : null}
+              {fanPolls.slice(0, 5).map((poll) => (
+                <button
+                  type="button"
+                  key={poll.id}
+                  className={`task-card ${poll.id === selectedFanPollId ? "selected" : ""}`}
+                  onClick={() => setSelectedFanPollId(poll.id)}
+                >
+                  <div>
+                    <strong>{poll.question}</strong>
+                    <span>{poll.status} · {poll.total_votes} votes · {poll.audience}</span>
+                    <span>{poll.options.map((option) => `${option.label}: ${option.vote_count}`).join(" · ")}</span>
+                  </div>
+                </button>
+              ))}
+              <article className="task-card">
+                <div>
+                  <strong>Community operations</strong>
+                  <span>Posts, comments, reactions, and polls now persist by organization and team.</span>
                 </div>
               </article>
             </div>
