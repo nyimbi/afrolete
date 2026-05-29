@@ -372,6 +372,8 @@ class DeveloperIntegrationCatalogRead(BaseModel):
 class DeveloperPublicDocsRead(BaseModel):
     title: str
     version: str
+    search_query: str | None = None
+    search_result_count: int = 0
     api_base_path: str
     authentication: str
     auth_header: str

@@ -2612,6 +2612,8 @@ textarea:focus {
 
 .developer-docs-terminal,
 .developer-docs-metrics div,
+.developer-docs-search,
+.developer-docs-empty,
 .developer-docs-quickstarts article,
 .developer-docs-two-column article,
 .developer-docs-events article,
@@ -2662,6 +2664,10 @@ textarea:focus {
 .developer-docs-events strong,
 .developer-docs-events span,
 .developer-docs-events small,
+.developer-docs-search strong,
+.developer-docs-search span,
+.developer-docs-empty strong,
+.developer-docs-empty span,
 .developer-docs-footer span {
   display: block;
   overflow-wrap: anywhere;
@@ -2675,8 +2681,46 @@ textarea:focus {
 .developer-docs-list span,
 .developer-docs-events span,
 .developer-docs-events small,
+.developer-docs-search span,
+.developer-docs-empty span,
 .developer-docs-footer span {
   color: var(--muted);
+}
+
+.developer-docs-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 28px;
+  padding: 16px;
+}
+
+.developer-docs-search label {
+  display: grid;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.developer-docs-search input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7faf7;
+  color: var(--ink);
+  font: inherit;
+  padding: 13px 14px;
+}
+
+.developer-docs-search strong {
+  font-size: 30px;
+}
+
+.developer-docs-empty {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 28px;
+  padding: 18px;
 }
 
 .developer-docs-section,
@@ -3032,6 +3076,7 @@ textarea:focus {
   .public-ai-comments,
   .developer-docs-hero-grid,
   .developer-docs-metrics,
+  .developer-docs-search,
   .developer-docs-quickstarts,
   .developer-docs-two-column,
   .developer-docs-events,

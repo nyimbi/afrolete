@@ -7,10 +7,13 @@ import type { DeveloperPublicDocsRead } from "@/types/operations";
 export default function DeveloperDocsPage() {
   const [docs, setDocs] = useState<DeveloperPublicDocsRead | null>(null);
   const [error, setError] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const searchQuery = searchInput.trim();
 
   useEffect(() => {
     let cancelled = false;
-    apiRequest<DeveloperPublicDocsRead>("/developers/public/docs")
+    const query = searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : "";
+    apiRequest<DeveloperPublicDocsRead>(`/developers/public/docs${query}`)
       .then((data) => {
         if (!cancelled) {
           setDocs(data);
@@ -25,7 +28,7 @@ export default function DeveloperDocsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [searchQuery]);
 
   const activeEvents = useMemo(
     () => docs?.webhook_events.filter((event) => event.emission_status === "active") ?? [],
@@ -96,6 +99,31 @@ export default function DeveloperDocsPage() {
         <Metric label="SDK surfaces" value={docs.sdks.length} />
         <Metric label="Marketplace lanes" value={docs.marketplace_categories.length} />
       </section>
+
+      <section className="developer-docs-shell developer-docs-search">
+        <label>
+          <span>Search docs</span>
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Try billing, webhooks, SDK, agents, training"
+          />
+        </label>
+        <div>
+          <strong>{docs.search_result_count}</strong>
+          <span>
+            {docs.search_query ? `matches for "${docs.search_query}"` : "indexed docs entries"}
+          </span>
+        </div>
+      </section>
+
+      {docs.search_query && docs.search_result_count === 0 ? (
+        <section className="developer-docs-shell developer-docs-empty">
+          <strong>No developer docs matched "{docs.search_query}".</strong>
+          <span>Try a product area, scope name, webhook event, SDK language, or security keyword.</span>
+        </section>
+      ) : null}
 
       <section className="developer-docs-shell developer-docs-section">
         <div>

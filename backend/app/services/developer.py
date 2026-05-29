@@ -982,37 +982,83 @@ async def developer_integration_catalog(
     )
 
 
-def developer_public_docs() -> DeveloperPublicDocsRead:
+def developer_public_docs(search_query: str | None = None) -> DeveloperPublicDocsRead:
+    query = normalized_docs_query(search_query)
+    quickstarts = developer_quickstarts()
+    scopes = developer_scope_catalog()
+    webhook_events = developer_webhook_event_catalog()
+    sdks = developer_sdk_catalog()
+    marketplace_categories = [
+        "operations",
+        "performance",
+        "communications",
+        "billing",
+        "compliance",
+        "ai_agents",
+        "media",
+        "hardware",
+    ]
+    security_requirements = [
+        "Store raw API keys and webhook signing secrets outside source control.",
+        "Use sandbox keys until the tenant has approved production access.",
+        "Verify webhook signatures with the timestamped payload before trusting event bodies.",
+        "Request only the scopes needed for the integration workflow.",
+        "Treat cataloged webhook events as contracts in progress unless emission_status is active.",
+    ]
+    if query:
+        quickstarts = [item for item in quickstarts if docs_match(query, item)]
+        scopes = [item for item in scopes if docs_match(query, item)]
+        webhook_events = [item for item in webhook_events if docs_match(query, item)]
+        sdks = [item for item in sdks if docs_match(query, item)]
+        marketplace_categories = [item for item in marketplace_categories if docs_match(query, item)]
+        security_requirements = [item for item in security_requirements if docs_match(query, item)]
     return DeveloperPublicDocsRead(
         title="AfroLete Developer Platform",
         version="v1",
+        search_query=query,
+        search_result_count=(
+            len(quickstarts)
+            + len(scopes)
+            + len(webhook_events)
+            + len(sdks)
+            + len(marketplace_categories)
+            + len(security_requirements)
+        ),
         api_base_path="/api/v1/sdk",
         authentication="Send tenant developer API keys in the X-Afrolete-API-Key header.",
         auth_header="X-Afrolete-API-Key",
         webhook_signature_header="X-Afrolete-Webhook-Signature",
         webhook_timestamp_header="X-Afrolete-Webhook-Timestamp",
-        quickstarts=developer_quickstarts(),
-        scopes=developer_scope_catalog(),
-        webhook_events=developer_webhook_event_catalog(),
-        sdks=developer_sdk_catalog(),
-        marketplace_categories=[
-            "operations",
-            "performance",
-            "communications",
-            "billing",
-            "compliance",
-            "ai_agents",
-            "media",
-            "hardware",
-        ],
-        security_requirements=[
-            "Store raw API keys and webhook signing secrets outside source control.",
-            "Use sandbox keys until the tenant has approved production access.",
-            "Verify webhook signatures with the timestamped payload before trusting event bodies.",
-            "Request only the scopes needed for the integration workflow.",
-            "Treat cataloged webhook events as contracts in progress unless emission_status is active.",
-        ],
+        quickstarts=quickstarts,
+        scopes=scopes,
+        webhook_events=webhook_events,
+        sdks=sdks,
+        marketplace_categories=marketplace_categories,
+        security_requirements=security_requirements,
     )
+
+
+def normalized_docs_query(search_query: str | None) -> str | None:
+    if search_query is None:
+        return None
+    query = " ".join(search_query.strip().lower().split())
+    return query or None
+
+
+def docs_match(query: str, value: object) -> bool:
+    return query in docs_search_text(value)
+
+
+def docs_search_text(value: object) -> str:
+    if isinstance(value, str):
+        return value.lower()
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(docs_search_text(item) for item in value)
+    if isinstance(value, dict):
+        return " ".join(docs_search_text(item) for item in value.values())
+    if hasattr(value, "model_dump"):
+        return docs_search_text(value.model_dump())
+    return str(value).lower()
 
 
 async def developer_portal_summary(

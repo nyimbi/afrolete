@@ -163,8 +163,10 @@ def marketplace_listing_read(listing) -> DeveloperMarketplaceListingRead:
 
 
 @router.get("/public/docs", response_model=DeveloperPublicDocsRead)
-async def developer_public_docs_route() -> DeveloperPublicDocsRead:
-    return developer_public_docs()
+async def developer_public_docs_route(
+    q: str | None = Query(default=None, min_length=1, max_length=120),
+) -> DeveloperPublicDocsRead:
+    return developer_public_docs(q)
 
 
 @router.post("/api-keys", response_model=DeveloperApiKeyProvisionedRead, status_code=status.HTTP_201_CREATED)

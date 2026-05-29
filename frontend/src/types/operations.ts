@@ -3032,6 +3032,8 @@ export type DeveloperIntegrationCatalogRead = {
 export type DeveloperPublicDocsRead = {
   title: string;
   version: string;
+  search_query: string | null;
+  search_result_count: number;
   api_base_path: string;
   authentication: string;
   auth_header: string;
