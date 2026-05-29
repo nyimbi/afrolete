@@ -4,9 +4,12 @@ definition person {}
 
 definition agent {
   relation owner: user
+  relation assigned_to: user | person
   relation reviewer: user
 
-  permission administer = owner
+  permission manage = owner
+  permission view = manage + assigned_to + reviewer
+  permission analyze = view
   permission review = reviewer + owner
 }
 
@@ -42,7 +45,10 @@ definition organization {
   relation owner: user | person
   relation admin: user | person
   relation coach: user | person
+  relation assistant_coach: user | person
   relation staff: user | person
+  relation manager: user | person
+  relation captain: user | person
   relation guardian: user | person
   relation athlete: user | person
   relation viewer: user | person
@@ -52,13 +58,15 @@ definition organization {
   relation assigned_agent: agent
 
   permission manage = owner + admin
-  permission manage_roster = manage + coach + staff
+  permission manage_roster = manage + coach + assistant_coach + staff + manager + captain
   permission view = manage_roster + guardian + athlete + viewer + member_org->view + member_team->view + committee->view
-  permission use_agent = manage + assigned_agent->review
+  permission analyze = manage + assigned_agent->review
+  permission use_agent = analyze
 }
 
 definition team {
   relation parent_org: organization
+  relation owner: user | person
   relation player: user | person
   relation coach: user | person
   relation assistant_coach: user | person
@@ -77,23 +85,25 @@ definition team {
   relation committee: team_committee
   relation assigned_agent: agent
 
-  permission manage = parent_org->manage
+  permission manage = parent_org->manage + owner
   permission manage_roster = manage + coach + assistant_coach + staff + manager + captain + parent_org->manage_roster
   permission view = manage_roster + player + athlete + vice_captain + substitute + reserve + bench + individual_athlete + medic + analyst + guardian + committee->view + parent_org->view
-  permission use_agent = manage + assigned_agent->review + parent_org->use_agent
+  permission analyze = manage + assigned_agent->review + parent_org->use_agent
+  permission use_agent = analyze
 }
 
 definition athlete_profile {
   relation parent_org: organization
   relation team: team
-  relation subject: user
-  relation guardian: user
-  relation coach: user
-  relation medical_viewer: user
+  relation athlete: user | person
+  relation guardian: user | person
+  relation coach: user | person
+  relation medical_viewer: user | person
   relation assigned_agent: agent
 
   permission manage = parent_org->manage + team->manage_roster
-  permission view = manage + subject + guardian + coach + team->view
+  permission manage_roster = manage
+  permission view = manage + athlete + guardian + coach + team->view
   permission view_medical = manage + medical_viewer + guardian
   permission analyze = manage + assigned_agent->review + team->use_agent
 }
@@ -107,6 +117,7 @@ definition event {
   relation assigned_agent: agent
 
   permission manage = parent_org->manage + team->manage_roster + organizer
+  permission manage_roster = manage
   permission view = manage + participant + guardian + team->view
   permission record_attendance = manage
   permission analyze = manage + assigned_agent->review
@@ -142,4 +153,13 @@ definition report {
   permission manage = parent_org->manage + author
   permission view = manage + reader + parent_org->view
   permission generate = manage + assigned_agent->review
+}
+
+definition developer_application {
+  relation owner: user | person
+  relation operator: user | person
+  relation reviewer: user | person
+
+  permission manage = owner + operator
+  permission view = manage + reviewer
 }

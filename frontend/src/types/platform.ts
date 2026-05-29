@@ -71,10 +71,21 @@ export type AuthorizationReadiness = {
   status: string;
   endpoint: string | null;
   insecure_transport: boolean;
+  schema_hash: string | null;
+  schema_path: string | null;
   resources: AuthorizationResourceRead[];
   relationship_count: number;
   permission_count: number;
   blockers: string[];
   warnings: string[];
   next_actions: string[];
+};
+
+export type AuthorizationSchemaRead = {
+  path: string;
+  sha256: string;
+  resource_types: string[];
+  relation_count: number;
+  permission_count: number;
+  content: string;
 };

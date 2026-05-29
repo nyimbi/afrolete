@@ -24,3 +24,14 @@ AFROLETE_SPICEDB_REQUEST_TIMEOUT_SECONDS=3
 
 AfroLete writes relationships with `TOUCH` semantics so repeated API operations
 are idempotent. Permission checks fail closed if SpiceDB is unavailable.
+
+## Schema Drift Check
+
+The backend exposes the expected schema and SHA-256 checksum at:
+
+```text
+/api/v1/infrastructure/authorization-schema
+```
+
+Deployers should compare that checksum with the schema applied to the shared
+SpiceDB service before enabling production tenant traffic.

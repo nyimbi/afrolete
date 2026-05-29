@@ -1,6 +1,7 @@
 from app.api.v1.routes.platform import (
     _auth_readiness,
     _authorization_readiness,
+    _authorization_schema,
     _authorization_resources,
     _keycloak_discovery_details,
     _keycloak_expected_endpoints,
@@ -63,6 +64,26 @@ def test_authorization_readiness_route_is_secret_safe(client) -> None:
     assert payload["next_actions"]
 
 
+def test_authorization_schema_route_exports_hash_and_content(client) -> None:
+    response = client.get("/api/v1/infrastructure/authorization-schema")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["path"] == "infra/spicedb/afrolete.zed"
+    assert len(payload["sha256"]) == 64
+    assert "definition organization" in payload["content"]
+    assert "developer_application" in payload["resource_types"]
+
+
+def test_authorization_readiness_includes_schema_hash() -> None:
+    schema = _authorization_schema()
+    readiness = _authorization_readiness(Settings(authz_mode="spicedb", spicedb_key="test-key"))
+
+    assert readiness.schema_hash == schema.sha256
+    assert readiness.schema_path == schema.path
+    assert readiness.status == "ready"
+
+
 def test_authorization_readiness_reports_spicedb_blockers_without_key() -> None:
     readiness = _authorization_readiness(Settings(authz_mode="spicedb", spicedb_key=""))
 
@@ -82,10 +103,12 @@ def test_authorization_readiness_reports_memory_standby() -> None:
 
 def test_authorization_resources_cover_agent_and_incident_scopes() -> None:
     resources = {resource.resource_type: resource for resource in _authorization_resources()}
+    schema = _authorization_schema()
 
     assert "analyze" in resources["agent"].permissions
     assert "review_evidence" in resources["safeguarding_incident"].permissions
     assert "guardian" in resources["athlete_profile"].relations
+    assert set(resources) <= set(schema.resource_types)
 
 
 def test_auth_readiness_exposes_keycloak_account_creation_endpoint() -> None:

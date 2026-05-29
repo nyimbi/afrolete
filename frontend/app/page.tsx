@@ -24,6 +24,7 @@ import {
 import type {
   AuthReadiness,
   AuthorizationReadiness,
+  AuthorizationSchemaRead,
   InfrastructureComponent,
   InfrastructureProbeSummary,
   InfrastructureStatus
@@ -1862,6 +1863,7 @@ export default function HomePage() {
   const [infrastructureProbes, setInfrastructureProbes] = useState<InfrastructureProbeSummary | null>(null);
   const [authReadiness, setAuthReadiness] = useState<AuthReadiness | null>(null);
   const [authorizationReadiness, setAuthorizationReadiness] = useState<AuthorizationReadiness | null>(null);
+  const [authorizationSchema, setAuthorizationSchema] = useState<AuthorizationSchemaRead | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [offlineQueue, setOfflineQueue] = useState<OfflineQueueSnapshot>(initialOfflineQueueSnapshot);
@@ -3558,17 +3560,19 @@ export default function HomePage() {
   }, [identity]);
 
   const loadInfrastructure = useCallback(async () => {
-    const [status, probes, auth, authorization] = await Promise.all([
+    const [status, probes, auth, authorization, schema] = await Promise.all([
       apiRequest<InfrastructureStatus>("/infrastructure"),
       apiRequest<InfrastructureProbeSummary>("/infrastructure/probes"),
       apiRequest<AuthReadiness>("/infrastructure/auth-readiness"),
-      apiRequest<AuthorizationReadiness>("/infrastructure/authorization-readiness")
+      apiRequest<AuthorizationReadiness>("/infrastructure/authorization-readiness"),
+      apiRequest<AuthorizationSchemaRead>("/infrastructure/authorization-schema")
     ]);
     setInfrastructureStatus(status);
     setInfrastructureProbes(probes);
     setAuthReadiness(auth);
     setAuthorizationReadiness(authorization);
-    return { status, probes, auth, authorization };
+    setAuthorizationSchema(schema);
+    return { status, probes, auth, authorization, schema };
   }, []);
 
   useEffect(() => {
@@ -13759,6 +13763,10 @@ export default function HomePage() {
                 <span>
                   {authorizationReadiness?.provider ?? "authz"} · {authorizationReadiness?.relationship_count ?? 0} relations ·{" "}
                   {authorizationReadiness?.permission_count ?? 0} permissions
+                </span>
+                <span>
+                  schema {authorizationSchema?.sha256.slice(0, 12) ?? authorizationReadiness?.schema_hash?.slice(0, 12) ?? "pending"} ·{" "}
+                  {authorizationSchema?.resource_types.length ?? authorizationReadiness?.resources.length ?? 0} resources
                 </span>
                 {(authorizationReadiness?.resources ?? []).slice(0, 3).map((resource) => (
                   <span key={resource.resource_type}>

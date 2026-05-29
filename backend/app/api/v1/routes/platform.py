@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +18,7 @@ from app.schemas.platform import (
     AuthReadiness,
     AuthorizationReadiness,
     AuthorizationResourceRead,
+    AuthorizationSchemaRead,
     Capability,
     HealthResponse,
     InfrastructureComponent,
@@ -26,6 +29,8 @@ from app.schemas.platform import (
 )
 
 router = APIRouter()
+
+SPICEDB_SCHEMA_PATH = Path(__file__).resolve().parents[5] / "infra" / "spicedb" / "afrolete.zed"
 
 
 @router.get("/healthz", response_model=HealthResponse)
@@ -69,6 +74,11 @@ async def auth_readiness(settings: Settings = Depends(get_settings)) -> AuthRead
 @router.get("/infrastructure/authorization-readiness", response_model=AuthorizationReadiness)
 async def authorization_readiness(settings: Settings = Depends(get_settings)) -> AuthorizationReadiness:
     return _authorization_readiness(settings)
+
+
+@router.get("/infrastructure/authorization-schema", response_model=AuthorizationSchemaRead)
+async def authorization_schema() -> AuthorizationSchemaRead:
+    return _authorization_schema()
 
 
 @router.get("/infrastructure", response_model=InfrastructureStatus)
@@ -136,6 +146,7 @@ def _keycloak_component(settings: Settings) -> InfrastructureComponent:
 
 def _authorization_readiness(settings: Settings) -> AuthorizationReadiness:
     resources = _authorization_resources()
+    schema = _authorization_schema()
     relationship_count = sum(len(resource.relations) for resource in resources)
     permission_count = sum(len(resource.permissions) for resource in resources)
     if settings.authz_mode != "spicedb":
@@ -145,6 +156,8 @@ def _authorization_readiness(settings: Settings) -> AuthorizationReadiness:
             status="standby",
             endpoint=None,
             insecure_transport=False,
+            schema_hash=schema.sha256,
+            schema_path=schema.path,
             resources=resources,
             relationship_count=relationship_count,
             permission_count=permission_count,
@@ -171,12 +184,29 @@ def _authorization_readiness(settings: Settings) -> AuthorizationReadiness:
         status="blocked" if blockers else "ready_with_warnings" if warnings else "ready",
         endpoint=settings.spicedb_endpoint,
         insecure_transport=settings.spicedb_insecure,
+        schema_hash=schema.sha256,
+        schema_path=schema.path,
         resources=resources,
         relationship_count=relationship_count,
         permission_count=permission_count,
         blockers=blockers,
         warnings=warnings,
         next_actions=next_actions,
+    )
+
+
+def _authorization_schema(path: Path = SPICEDB_SCHEMA_PATH) -> AuthorizationSchemaRead:
+    content = path.read_text(encoding="utf-8")
+    resource_types = re.findall(r"^definition\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{", content, flags=re.MULTILINE)
+    relations = re.findall(r"^\s*relation\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:", content, flags=re.MULTILINE)
+    permissions = re.findall(r"^\s*permission\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=", content, flags=re.MULTILINE)
+    return AuthorizationSchemaRead(
+        path=str(path.relative_to(Path(__file__).resolve().parents[5])),
+        sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        resource_types=resource_types,
+        relation_count=len(relations),
+        permission_count=len(permissions),
+        content=content,
     )
 
 

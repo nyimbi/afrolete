@@ -84,9 +84,20 @@ class AuthorizationReadiness(BaseModel):
     status: str
     endpoint: str | None = None
     insecure_transport: bool
+    schema_hash: str | None = None
+    schema_path: str | None = None
     resources: list[AuthorizationResourceRead] = Field(default_factory=list)
     relationship_count: int
     permission_count: int
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
+
+
+class AuthorizationSchemaRead(BaseModel):
+    path: str
+    sha256: str
+    resource_types: list[str] = Field(default_factory=list)
+    relation_count: int
+    permission_count: int
+    content: str
