@@ -1480,13 +1480,13 @@ def developer_scope_catalog() -> list[DeveloperApiScopeCatalogRead]:
         DeveloperApiScopeCatalogRead(
             scope="read:communications",
             category="communications",
-            description="Read communication templates and delivery status metadata.",
+            description="Read communication templates, messages, recipients, and delivery status metadata.",
             recommended_for=["CRM sync", "guardian engagement", "message analytics"],
         ),
         DeveloperApiScopeCatalogRead(
             scope="write:communications",
             category="communications",
-            description="Request tenant-scoped communication delivery through approved channels.",
+            description="Create tenant-scoped communication templates, messages, and delivery dispatch requests.",
             recommended_for=["notification providers", "fan engagement", "emergency messaging"],
         ),
         DeveloperApiScopeCatalogRead(
@@ -1702,6 +1702,66 @@ def developer_webhook_event_catalog() -> list[DeveloperWebhookEventCatalogRead]:
             },
         ),
         DeveloperWebhookEventCatalogRead(
+            event_type="communications.message.created",
+            category="communications",
+            description="A developer API key created a tenant communication message.",
+            emission_status="active",
+            payload_fields=[
+                "organization_id",
+                "id",
+                "message_type",
+                "channel",
+                "scope_type",
+                "scope_id",
+                "recipient_count",
+                "origin",
+            ],
+            recommended_scopes=["write:communications"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "id": "message-uuid",
+                "message_type": "reminder",
+                "channel": "email",
+                "scope_type": "team",
+                "scope_id": "team-uuid",
+                "recipient_count": 24,
+                "origin": "developer_api",
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="communications.message.dispatched",
+            category="communications",
+            description="A developer API key requested dispatch for a tenant communication message.",
+            emission_status="active",
+            payload_fields=[
+                "organization_id",
+                "id",
+                "message_type",
+                "channel",
+                "attempted",
+                "sent",
+                "delivered",
+                "failed",
+                "suppressed",
+                "queued",
+                "origin",
+            ],
+            recommended_scopes=["write:communications"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "id": "message-uuid",
+                "message_type": "alert",
+                "channel": "sms",
+                "attempted": 24,
+                "sent": 20,
+                "delivered": 2,
+                "failed": 1,
+                "suppressed": 1,
+                "queued": 0,
+                "origin": "developer_api",
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
             event_type="agent.task.completed",
             category="ai_agents",
             description="A first-class AfroLete AI agent completed a tenant-scoped task.",
@@ -1757,6 +1817,12 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "client.agents.list",
                 "client.agents.tasks.list",
                 "client.agents.tasks.queue",
+                "client.communications.templates.list",
+                "client.communications.templates.create",
+                "client.communications.messages.list",
+                "client.communications.messages.create",
+                "client.communications.messages.recipients",
+                "client.communications.messages.dispatch",
                 "client.performance.metrics.list",
                 "client.performance.observations.list",
                 "client.performance.observations.create",
@@ -1795,6 +1861,12 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "client.agents.list",
                 "client.agents.tasks.list",
                 "client.agents.tasks.queue",
+                "client.communications.templates.list",
+                "client.communications.templates.create",
+                "client.communications.messages.list",
+                "client.communications.messages.create",
+                "client.communications.messages.recipients",
+                "client.communications.messages.dispatch",
                 "client.performance.metrics.list",
                 "client.performance.observations.list",
                 "client.performance.observations.create",
@@ -1833,6 +1905,12 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "GET /sdk/agents",
                 "GET /sdk/agents/tasks",
                 "POST /sdk/agents/{agent_id}/tasks",
+                "GET /sdk/communications/templates",
+                "POST /sdk/communications/templates",
+                "GET /sdk/communications/messages",
+                "POST /sdk/communications/messages",
+                "GET /sdk/communications/messages/{message_id}/recipients",
+                "POST /sdk/communications/messages/{message_id}/dispatch",
                 "GET /sdk/performance/metrics",
                 "GET /sdk/performance/athletes/{athlete_profile_id}/observations",
                 "POST /sdk/performance/athletes/{athlete_profile_id}/observations",
@@ -1922,6 +2000,25 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
                 "  -H \"X-Afrolete-API-Key: $AFROLETE_API_KEY\" \\\n"
                 "  -d '{\"organization_id\":\"'$ORG_ID'\",\"event_type\":\"match\","
                 "\"title\":\"U17 League Match\",\"starts_at\":\"2026-06-01T15:00:00Z\"}'"
+            ),
+        ),
+        DeveloperQuickstartRead(
+            title="Send a tenant communication",
+            language="HTTP",
+            description="Create a tenant message through the SDK route protected by write:communications.",
+            steps=[
+                "Grant the API key write:communications for the tenant.",
+                "POST a message payload to /api/v1/sdk/communications/messages with an organization, team, event, or person scope.",
+                "Use /api/v1/sdk/communications/messages/{message_id}/dispatch to push queued recipients through configured delivery adapters.",
+                "Subscribe to communications.message.created or communications.message.dispatched for downstream CRM and provider sync.",
+            ],
+            code_sample=(
+                "curl -s \"$AFROLETE_API/api/v1/sdk/communications/messages\" \\\n"
+                "  -H \"Content-Type: application/json\" \\\n"
+                "  -H \"X-Afrolete-API-Key: $AFROLETE_API_KEY\" \\\n"
+                "  -d '{\"organization_id\":\"'$ORG_ID'\",\"message_type\":\"reminder\","
+                "\"channel\":\"email\",\"scope_type\":\"team\",\"scope_id\":\"'$TEAM_ID'\","
+                "\"subject\":\"Training reminder\",\"body\":\"Training starts at 16:00.\"}'"
             ),
         ),
         DeveloperQuickstartRead(

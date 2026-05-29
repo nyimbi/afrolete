@@ -77,6 +77,30 @@ if (agent) {
   });
 }
 
+const template = await client.communications.templates.create({
+  organization_id: organization.id,
+  name: "Partner reminder",
+  message_type: "reminder",
+  channel: "email",
+  subject_template: "Reminder for {member.name}",
+  body_template: "Please confirm the latest schedule update.",
+});
+
+const message = await client.communications.messages.create({
+  organization_id: organization.id,
+  template_id: template.id,
+  message_type: "reminder",
+  channel: "email",
+  scope_type: "person",
+  scope_id: athlete.id,
+  subject: "Schedule updated",
+  body: "Your schedule was updated by a trusted integration.",
+});
+
+await client.communications.messages.dispatch(message.id, {
+  organizationId: organization.id,
+});
+
 const [metric] = await client.performance.metrics.list({
   organizationId: organization.id,
   sport: "football",

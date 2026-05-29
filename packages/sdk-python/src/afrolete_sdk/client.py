@@ -124,6 +124,56 @@ class _AgentsResource:
 
 
 @dataclass(frozen=True)
+class _CommunicationTemplatesResource:
+    client: AfroLeteClient
+
+    def list(self, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            "/communications/templates",
+            query={"organization_id": organization_id},
+        )
+
+    def create(self, payload: JsonObject) -> JsonObject:
+        return self.client.request("POST", "/communications/templates", body=payload)
+
+
+@dataclass(frozen=True)
+class _CommunicationMessagesResource:
+    client: AfroLeteClient
+
+    def list(self, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            "/communications/messages",
+            query={"organization_id": organization_id},
+        )
+
+    def create(self, payload: JsonObject) -> JsonObject:
+        return self.client.request("POST", "/communications/messages", body=payload)
+
+    def recipients(self, message_id: str, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            f"/communications/messages/{message_id}/recipients",
+            query={"organization_id": organization_id},
+        )
+
+    def dispatch(self, message_id: str, *, organization_id: str) -> JsonObject:
+        return self.client.request(
+            "POST",
+            f"/communications/messages/{message_id}/dispatch",
+            query={"organization_id": organization_id},
+        )
+
+
+@dataclass(frozen=True)
+class _CommunicationsResource:
+    templates: _CommunicationTemplatesResource
+    messages: _CommunicationMessagesResource
+
+
+@dataclass(frozen=True)
 class _TrainingDrillsResource:
     client: AfroLeteClient
 
@@ -308,6 +358,10 @@ class AfroLeteClient:
         self.teams = _TeamsResource(self)
         self.events = _EventsResource(self, attendance=_EventAttendanceResource(self))
         self.agents = _AgentsResource(self, tasks=_AgentTasksResource(self))
+        self.communications = _CommunicationsResource(
+            templates=_CommunicationTemplatesResource(self),
+            messages=_CommunicationMessagesResource(self),
+        )
         self.training = _TrainingResource(
             drills=_TrainingDrillsResource(self),
             plans=_TrainingPlansResource(self, items=_TrainingPlanItemsResource(self)),

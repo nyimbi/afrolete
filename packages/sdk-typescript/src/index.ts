@@ -253,6 +253,115 @@ export interface AttendanceRecord {
   attendance_policy_warnings: string[];
 }
 
+export type CommunicationMessageType =
+  | "announcement"
+  | "reminder"
+  | "alert"
+  | "request"
+  | "report";
+
+export type CommunicationChannel =
+  | "email"
+  | "sms"
+  | "whatsapp"
+  | "telegram"
+  | "push"
+  | "in_app";
+
+export type CommunicationScopeType = "organization" | "team" | "event" | "person";
+
+export type MessageDeliveryStatus =
+  | "queued"
+  | "sent"
+  | "delivered"
+  | "read"
+  | "failed"
+  | "suppressed";
+
+export interface CommunicationTemplateCreate {
+  organization_id: UUID;
+  name: string;
+  message_type: CommunicationMessageType;
+  channel?: CommunicationChannel;
+  subject_template: string;
+  body_template: string;
+  variables?: string | null;
+}
+
+export interface CommunicationTemplate {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  message_type: CommunicationMessageType;
+  channel: CommunicationChannel;
+  subject_template: string;
+  body_template: string;
+  variables: string | null;
+  status: string;
+}
+
+export interface CommunicationMessageCreate {
+  organization_id: UUID;
+  template_id?: UUID | null;
+  message_type: CommunicationMessageType;
+  channel?: CommunicationChannel;
+  scope_type: CommunicationScopeType;
+  scope_id: UUID;
+  recipient_person_ids?: UUID[];
+  subject: string;
+  body: string;
+  urgent?: boolean;
+  quiet_hours_override?: boolean;
+  scheduled_for?: ISODateTime | null;
+  copy_guardians_for_minors?: boolean;
+}
+
+export interface CommunicationMessage {
+  id: UUID;
+  organization_id: UUID;
+  template_id: UUID | null;
+  created_by_person_id: UUID | null;
+  message_type: CommunicationMessageType;
+  channel: CommunicationChannel;
+  scope_type: CommunicationScopeType;
+  scope_id: UUID;
+  subject: string;
+  body: string;
+  urgent: boolean;
+  quiet_hours_override: boolean;
+  scheduled_for: ISODateTime | null;
+  sent_at: ISODateTime | null;
+  status: string;
+  recipient_count: number;
+  escalates_message_id: UUID | null;
+  escalation_level: number;
+  escalation_triggered_at: ISODateTime | null;
+  escalation_reason: string | null;
+}
+
+export interface MessageRecipient {
+  id: UUID;
+  message_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  destination: string | null;
+  delivery_status: MessageDeliveryStatus;
+  delivered_at: ISODateTime | null;
+  read_at: ISODateTime | null;
+  failure_reason: string | null;
+}
+
+export interface CommunicationDispatchSummary {
+  message_id: UUID;
+  attempted: number;
+  sent: number;
+  delivered: number;
+  failed: number;
+  suppressed: number;
+  queued: number;
+  transport_mode: string;
+}
+
 export interface Agent {
   id: UUID;
   organization_id: UUID | null;
@@ -618,6 +727,46 @@ export class AfroLeteClient {
         this.request<AgentTask>(`/agents/${agentId}/tasks`, {
           method: "POST",
           body: payload,
+        }),
+    },
+  };
+
+  readonly communications = {
+    templates: {
+      list: (params: { organizationId: UUID }): Promise<CommunicationTemplate[]> =>
+        this.request<CommunicationTemplate[]>("/communications/templates", {
+          query: { organization_id: params.organizationId },
+        }),
+      create: (payload: CommunicationTemplateCreate): Promise<CommunicationTemplate> =>
+        this.request<CommunicationTemplate>("/communications/templates", {
+          method: "POST",
+          body: payload,
+        }),
+    },
+    messages: {
+      list: (params: { organizationId: UUID }): Promise<CommunicationMessage[]> =>
+        this.request<CommunicationMessage[]>("/communications/messages", {
+          query: { organization_id: params.organizationId },
+        }),
+      create: (payload: CommunicationMessageCreate): Promise<CommunicationMessage> =>
+        this.request<CommunicationMessage>("/communications/messages", {
+          method: "POST",
+          body: payload,
+        }),
+      recipients: (
+        messageId: UUID,
+        params: { organizationId: UUID },
+      ): Promise<MessageRecipient[]> =>
+        this.request<MessageRecipient[]>(`/communications/messages/${messageId}/recipients`, {
+          query: { organization_id: params.organizationId },
+        }),
+      dispatch: (
+        messageId: UUID,
+        params: { organizationId: UUID },
+      ): Promise<CommunicationDispatchSummary> =>
+        this.request<CommunicationDispatchSummary>(`/communications/messages/${messageId}/dispatch`, {
+          method: "POST",
+          query: { organization_id: params.organizationId },
         }),
     },
   };

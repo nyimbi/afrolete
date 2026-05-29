@@ -58,6 +58,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
                 "write:attendance",
                 "read:agents",
                 "write:agents",
+                "read:communications",
+                "write:communications",
                 "write:training",
             ],
             "contact_email": "integrations@example.com",
@@ -78,6 +80,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         "write:attendance",
         "read:agents",
         "write:agents",
+        "read:communications",
+        "write:communications",
         "write:training",
     ]
 
@@ -113,6 +117,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
                 "write:attendance",
                 "read:agents",
                 "write:agents",
+                "read:communications",
+                "write:communications",
                 "write:training",
             ],
             "environment": "sandbox",
@@ -134,6 +140,8 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         "write:attendance",
         "read:agents",
         "write:agents",
+        "read:communications",
+        "write:communications",
         "write:training",
     ]
     assert "key_hash" not in api_key
@@ -402,8 +410,23 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert sdk_agent_queued["emission_status"] == "active"
     assert "write:agents" in sdk_agent_queued["recommended_scopes"]
+    sdk_message_created = next(
+        event for event in catalog["webhook_events"] if event["event_type"] == "communications.message.created"
+    )
+    assert sdk_message_created["emission_status"] == "active"
+    assert "write:communications" in sdk_message_created["recommended_scopes"]
+    sdk_message_dispatched = next(
+        event for event in catalog["webhook_events"] if event["event_type"] == "communications.message.dispatched"
+    )
+    assert sdk_message_dispatched["emission_status"] == "active"
+    assert "write:communications" in sdk_message_dispatched["recommended_scopes"]
     assert any(
         "client.agents.tasks.queue" in sdk["entry_points"]
+        for sdk in catalog["sdks"]
+        if sdk["language"] == "TypeScript"
+    )
+    assert any(
+        "client.communications.messages.dispatch" in sdk["entry_points"]
         for sdk in catalog["sdks"]
         if sdk["language"] == "TypeScript"
     )
@@ -411,6 +434,11 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         "client.training.sessions.feedback.record" in sdk["entry_points"]
         for sdk in catalog["sdks"]
         if sdk["language"] == "Python"
+    )
+    assert any(
+        "POST /sdk/communications/messages/{message_id}/dispatch" in sdk["entry_points"]
+        for sdk in catalog["sdks"]
+        if sdk["language"] == "Raw HTTP"
     )
     assert any(
         "GET /sdk/training/calendar-artifact" in sdk["entry_points"]
@@ -498,6 +526,73 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert sdk_person_response.status_code == 201
     sdk_person = sdk_person_response.json()
+
+    sdk_template_response = client.post(
+        "/api/v1/sdk/communications/templates",
+        json={
+            "organization_id": organization["id"],
+            "name": "SDK reminder template",
+            "message_type": "reminder",
+            "channel": "email",
+            "subject_template": "Reminder for {member.name}",
+            "body_template": "Please confirm the latest schedule update.",
+            "variables": "member.name",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_template_response.status_code == 201
+    sdk_template = sdk_template_response.json()
+    assert sdk_template["name"] == "SDK reminder template"
+
+    sdk_templates_response = client.get(
+        f"/api/v1/sdk/communications/templates?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_templates_response.status_code == 200
+    assert sdk_templates_response.json()[0]["id"] == sdk_template["id"]
+
+    sdk_message_response = client.post(
+        "/api/v1/sdk/communications/messages",
+        json={
+            "organization_id": organization["id"],
+            "template_id": sdk_template["id"],
+            "message_type": "reminder",
+            "channel": "email",
+            "scope_type": "person",
+            "scope_id": sdk_person["id"],
+            "subject": "SDK schedule reminder",
+            "body": "Your schedule was updated by a trusted integration.",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_message_response.status_code == 201
+    sdk_message = sdk_message_response.json()
+    assert sdk_message["created_by_person_id"] is None
+    assert sdk_message["recipient_count"] == 1
+
+    sdk_messages_response = client.get(
+        f"/api/v1/sdk/communications/messages?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_messages_response.status_code == 200
+    assert sdk_messages_response.json()[0]["id"] == sdk_message["id"]
+
+    sdk_recipients_response = client.get(
+        f"/api/v1/sdk/communications/messages/{sdk_message['id']}/recipients?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_recipients_response.status_code == 200
+    sdk_recipient = sdk_recipients_response.json()[0]
+    assert sdk_recipient["person_id"] == sdk_person["id"]
+    assert sdk_recipient["destination"] == "sdk-attendance-player@example.com"
+
+    sdk_dispatch_response = client.post(
+        f"/api/v1/sdk/communications/messages/{sdk_message['id']}/dispatch?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_dispatch_response.status_code == 200
+    assert sdk_dispatch_response.json()["attempted"] == 1
+    assert sdk_dispatch_response.json()["queued"] == 1
 
     sdk_attendance_response = client.post(
         f"/api/v1/sdk/events/{sdk_created_event_id}/attendance?organization_id={organization['id']}",

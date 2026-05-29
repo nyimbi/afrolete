@@ -75,6 +75,32 @@ if agents:
             "input_ref": f"person:{athlete['id']}",
         },
     )
+template = client.communications.templates.create(
+    {
+        "organization_id": organization["id"],
+        "name": "Partner reminder",
+        "message_type": "reminder",
+        "channel": "email",
+        "subject_template": "Reminder for {member.name}",
+        "body_template": "Please confirm the latest schedule update.",
+    }
+)
+message = client.communications.messages.create(
+    {
+        "organization_id": organization["id"],
+        "template_id": template["id"],
+        "message_type": "reminder",
+        "channel": "email",
+        "scope_type": "person",
+        "scope_id": athlete["id"],
+        "subject": "Schedule updated",
+        "body": "Your schedule was updated by a trusted integration.",
+    }
+)
+client.communications.messages.dispatch(
+    message["id"],
+    organization_id=organization["id"],
+)
 metrics = client.performance.metrics.list(
     organization_id=organization["id"],
     sport="football",

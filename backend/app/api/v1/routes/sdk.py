@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.agent import Agent, AgentTask
+from app.models.communication import CommunicationMessage, CommunicationTemplate
 from app.models.enums import ConsentRequestStatus, MemberSubjectType, MembershipRole
 from app.models.event import ConsentRequest, Event
 from app.models.identity import Person
@@ -25,6 +26,14 @@ from app.schemas.developer import (
     DeveloperPersonRead,
 )
 from app.schemas.agent import AgentRead, AgentTaskCreate, AgentTaskRead
+from app.schemas.communication import (
+    CommunicationDispatchSummary,
+    CommunicationMessageCreate,
+    CommunicationMessageRead,
+    CommunicationTemplateCreate,
+    CommunicationTemplateRead,
+    MessageRecipientRead,
+)
 from app.schemas.event import AttendanceRecordRead, AttendanceRecordUpsert, EventCreate, EventRead
 from app.schemas.organization import OrganizationRead
 from app.schemas.performance import (
@@ -57,6 +66,15 @@ from app.services.agents import (
     list_agent_tasks,
     list_agents as list_ai_agents,
     queue_agent_task,
+)
+from app.services.communications import (
+    create_message,
+    create_template,
+    dispatch_message,
+    get_message,
+    list_messages,
+    list_recipients,
+    list_templates,
 )
 from app.services.developer import (
     deliver_developer_webhook_event,
@@ -188,6 +206,62 @@ def to_training_session_plan_read(session_plan: TrainingSessionPlan) -> Training
 
 def to_training_session_feedback_read(row: dict[str, object]) -> TrainingSessionFeedbackRead:
     return TrainingSessionFeedbackRead(**row)
+
+
+def to_communication_template_read(template: CommunicationTemplate) -> CommunicationTemplateRead:
+    return CommunicationTemplateRead(
+        id=template.id,
+        organization_id=template.organization_id,
+        name=template.name,
+        message_type=template.message_type,
+        channel=template.channel,
+        subject_template=template.subject_template,
+        body_template=template.body_template,
+        variables=template.variables,
+        status=template.status,
+    )
+
+
+def to_communication_message_read(
+    message: CommunicationMessage,
+    recipient_count: int = 0,
+) -> CommunicationMessageRead:
+    return CommunicationMessageRead(
+        id=message.id,
+        organization_id=message.organization_id,
+        template_id=message.template_id,
+        created_by_person_id=message.created_by_person_id,
+        message_type=message.message_type,
+        channel=message.channel,
+        scope_type=message.scope_type,
+        scope_id=message.scope_id,
+        subject=message.subject,
+        body=message.body,
+        urgent=message.urgent,
+        quiet_hours_override=message.quiet_hours_override,
+        scheduled_for=message.scheduled_for,
+        sent_at=message.sent_at,
+        status=message.status,
+        recipient_count=recipient_count,
+        escalates_message_id=message.escalates_message_id,
+        escalation_level=message.escalation_level,
+        escalation_triggered_at=message.escalation_triggered_at,
+        escalation_reason=message.escalation_reason,
+    )
+
+
+def to_message_recipient_read(recipient, person) -> MessageRecipientRead:
+    return MessageRecipientRead(
+        id=recipient.id,
+        message_id=recipient.message_id,
+        person_id=recipient.person_id,
+        person_name=person.display_name,
+        destination=recipient.destination,
+        delivery_status=recipient.delivery_status,
+        delivered_at=recipient.delivered_at,
+        read_at=recipient.read_at,
+        failure_reason=recipient.failure_reason,
+    )
 
 
 def to_event_read(event: Event) -> EventRead:
@@ -542,6 +616,154 @@ async def sdk_record_event_attendance(
         attendance_policy_decision=attendance_policy_decision,
         attendance_policy_warnings=attendance_policy_warnings,
     )
+
+
+@router.get("/communications/templates", response_model=list[CommunicationTemplateRead])
+async def sdk_list_communication_templates(
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[CommunicationTemplateRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:communications", "write:communications"})
+    return [
+        to_communication_template_read(template)
+        for template in await list_templates(db, organization_id)
+    ]
+
+
+@router.post(
+    "/communications/templates",
+    response_model=CommunicationTemplateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sdk_create_communication_template(
+    payload: CommunicationTemplateCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> CommunicationTemplateRead:
+    ensure_developer_api_scope(credential, payload.organization_id, {"write:communications"})
+    template = await create_template(
+        db,
+        None,
+        payload,
+        None,
+        enforce_manage_communications_scope=False,
+    )
+    return to_communication_template_read(template)
+
+
+@router.get("/communications/messages", response_model=list[CommunicationMessageRead])
+async def sdk_list_communication_messages(
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[CommunicationMessageRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:communications", "write:communications"})
+    return [
+        to_communication_message_read(message, recipient_count)
+        for message, recipient_count in await list_messages(db, organization_id)
+    ]
+
+
+@router.post(
+    "/communications/messages",
+    response_model=CommunicationMessageRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sdk_create_communication_message(
+    payload: CommunicationMessageCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> CommunicationMessageRead:
+    ensure_developer_api_scope(credential, payload.organization_id, {"write:communications"})
+    message = await create_message(
+        db,
+        None,
+        payload,
+        None,
+        enforce_manage_communications_scope=False,
+    )
+    recipients = await list_recipients(db, message.id)
+    await deliver_developer_webhook_event(
+        db,
+        payload.organization_id,
+        "communications.message.created",
+        str(message.id),
+        {
+            "id": str(message.id),
+            "organization_id": str(message.organization_id),
+            "message_type": message.message_type.value,
+            "channel": message.channel.value,
+            "scope_type": message.scope_type.value,
+            "scope_id": str(message.scope_id),
+            "recipient_count": len(recipients),
+            "origin": "developer_api",
+        },
+    )
+    return to_communication_message_read(message, recipient_count=len(recipients))
+
+
+@router.get(
+    "/communications/messages/{message_id}/recipients",
+    response_model=list[MessageRecipientRead],
+)
+async def sdk_list_communication_message_recipients(
+    message_id: UUID,
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[MessageRecipientRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:communications", "write:communications"})
+    message = await get_message(db, message_id)
+    if message.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    return [
+        to_message_recipient_read(recipient, person)
+        for recipient, person in await list_recipients(db, message_id)
+    ]
+
+
+@router.post(
+    "/communications/messages/{message_id}/dispatch",
+    response_model=CommunicationDispatchSummary,
+)
+async def sdk_dispatch_communication_message(
+    message_id: UUID,
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> CommunicationDispatchSummary:
+    ensure_developer_api_scope(credential, organization_id, {"write:communications"})
+    message = await get_message(db, message_id)
+    if message.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    summary = await dispatch_message(
+        db,
+        None,
+        message_id,
+        None,
+        enforce_manage_communications_scope=False,
+    )
+    await deliver_developer_webhook_event(
+        db,
+        organization_id,
+        "communications.message.dispatched",
+        str(message.id),
+        {
+            "id": str(message.id),
+            "organization_id": str(message.organization_id),
+            "message_type": message.message_type.value,
+            "channel": message.channel.value,
+            "attempted": summary.attempted,
+            "sent": summary.sent,
+            "delivered": summary.delivered,
+            "failed": summary.failed,
+            "suppressed": summary.suppressed,
+            "queued": summary.queued,
+            "origin": "developer_api",
+        },
+    )
+    return summary
 
 
 @router.get("/teams", response_model=list[TeamRead])

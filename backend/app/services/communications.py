@@ -80,12 +80,20 @@ async def ensure_manage_communications(
 
 async def create_template(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     payload: CommunicationTemplateCreate,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
+    *,
+    enforce_manage_communications_scope: bool = True,
 ) -> CommunicationTemplate:
     await get_organization(db, payload.organization_id)
-    await ensure_manage_communications(authz, identity, payload.organization_id)
+    if enforce_manage_communications_scope:
+        if identity is None or authz is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Identity and authorization required",
+            )
+        await ensure_manage_communications(authz, identity, payload.organization_id)
     existing = await db.scalar(
         select(CommunicationTemplate).where(
             CommunicationTemplate.organization_id == payload.organization_id,
@@ -120,12 +128,20 @@ async def list_templates(
 
 async def create_message(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     payload: CommunicationMessageCreate,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
+    *,
+    enforce_manage_communications_scope: bool = True,
 ) -> CommunicationMessage:
     await get_organization(db, payload.organization_id)
-    await ensure_manage_communications(authz, identity, payload.organization_id)
+    if enforce_manage_communications_scope:
+        if identity is None or authz is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Identity and authorization required",
+            )
+        await ensure_manage_communications(authz, identity, payload.organization_id)
     if payload.template_id is not None:
         template = await db.get(CommunicationTemplate, payload.template_id)
         if template is None or template.organization_id != payload.organization_id:
@@ -136,7 +152,7 @@ async def create_message(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No recipients")
 
     message = CommunicationMessage(
-        created_by_person_id=identity.person_id,
+        created_by_person_id=identity.person_id if identity is not None else None,
         status="sent" if payload.scheduled_for is None else "scheduled",
         sent_at=datetime.now(UTC) if payload.scheduled_for is None else None,
         **payload.model_dump(exclude={"recipient_person_ids", "copy_guardians_for_minors"}),
@@ -588,13 +604,21 @@ async def draft_message(
 
 async def dispatch_message(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     message_id: UUID,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
+    *,
+    enforce_manage_communications_scope: bool = True,
     settings: Settings | None = None,
 ) -> CommunicationDispatchSummary:
     message = await get_message(db, message_id)
-    await ensure_manage_communications(authz, identity, message.organization_id)
+    if enforce_manage_communications_scope:
+        if identity is None or authz is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Identity and authorization required",
+            )
+        await ensure_manage_communications(authz, identity, message.organization_id)
     settings = settings or get_settings()
     return await dispatch_message_delivery(db, message, settings)
 
