@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import re
+import tempfile
 import time
 from secrets import token_urlsafe
 from statistics import pstdev
@@ -16,6 +17,7 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +47,7 @@ from app.models.performance import (
     PerformanceGoal,
     PerformanceMetricDefinition,
     PerformanceForecastValidationRun,
+    PerformanceMovementReferenceProfile,
     PerformanceModelExtractionBenchmarkCase,
     PerformanceModelExtractionBenchmarkDataset,
     PerformanceVideoAnnotation,
@@ -73,10 +76,12 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
     PerformanceModelExtractionBenchmarkRunCreate,
+    PerformanceMovementReferenceProfileCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
     PerformancePoseGaitAnalysisCreate,
     PerformanceVideoPoseSampleBatchCreate,
+    PerformanceVideoPoseProcessingCreate,
     PerformanceVideoAnnotationCreate,
     PerformanceVideoCoachingCreate,
     PerformanceVideoUploadCreate,
@@ -602,9 +607,19 @@ async def analyze_pose_gait_for_video(
     video_asset = await get_performance_video_asset(db, video_asset_id)
     await ensure_manage_performance(authz, identity, video_asset.organization_id)
     focus = payload.analysis_focus or video_asset.analysis_focus or "pose, gait, and movement efficiency"
+    reference_profile = (
+        await get_movement_reference_profile(db, payload.reference_profile_id, video_asset.organization_id)
+        if payload.reference_profile_id
+        else None
+    )
     pose_samples = await list_performance_video_pose_samples(db, video_asset.id)
     derived_metrics = derive_pose_sample_metrics(pose_samples)
-    metrics = pose_gait_metric_cards(payload.evidence_text, video_asset.sport, derived_metrics)
+    metrics = pose_gait_metric_cards(
+        payload.evidence_text,
+        video_asset.sport,
+        derived_metrics,
+        reference_profile,
+    )
     phases = pose_gait_phase_cards(metrics, video_asset.duration_seconds)
     projections = optimal_projection_cards(metrics)
     confidence = pose_gait_confidence(payload.evidence_text, video_asset, len(pose_samples))
@@ -617,6 +632,9 @@ async def analyze_pose_gait_for_video(
             else "afrolete-pose-gait-benchmark-v1"
         ),
         "benchmark_profile": payload.benchmark_profile,
+        "reference_profile_id": str(reference_profile.id) if reference_profile else None,
+        "reference_profile_name": reference_profile.name if reference_profile else None,
+        "reference_profile_source": reference_profile.source_label if reference_profile else None,
         "confidence": confidence,
         "pose_sample_count": len(pose_samples),
         "pose_sample_source_providers": source_providers,
@@ -5998,6 +6016,21 @@ async def create_performance_video_pose_samples(
 ) -> list[PerformanceVideoPoseSample]:
     video_asset = await get_performance_video_asset(db, video_asset_id)
     await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    return await store_performance_video_pose_samples(
+        db,
+        video_asset,
+        payload,
+        actor_person_id=identity.person_id,
+    )
+
+
+async def store_performance_video_pose_samples(
+    db: AsyncSession,
+    video_asset: PerformanceVideoAsset,
+    payload: PerformanceVideoPoseSampleBatchCreate,
+    *,
+    actor_person_id: UUID | None,
+) -> list[PerformanceVideoPoseSample]:
     if payload.organization_id != video_asset.organization_id:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
     if payload.replace_existing:
@@ -6024,7 +6057,7 @@ async def create_performance_video_pose_samples(
             video_asset_id=video_asset.id,
             athlete_profile_id=video_asset.athlete_profile_id,
             event_id=video_asset.event_id,
-            created_by_person_id=identity.person_id,
+            created_by_person_id=actor_person_id,
             source_provider=item.source_provider,
             frame_index=item.frame_index,
             timestamp_seconds=item.timestamp_seconds,
@@ -6060,6 +6093,467 @@ async def list_performance_video_pose_samples(
             )
         ).all()
     )
+
+
+def clamp_percent(value: float) -> float:
+    return round(max(0.0, min(100.0, value)), 4)
+
+
+def infer_pose_contact(
+    keypoints: list[dict[str, object]],
+    previous_contact_foot: str | None,
+    current_stride_index: int,
+) -> tuple[str | None, str | None, int]:
+    ankle_points = {
+        str(point["name"]): point
+        for point in keypoints
+        if str(point["name"]) in {"left_ankle", "right_ankle"}
+    }
+    left = ankle_points.get("left_ankle")
+    right = ankle_points.get("right_ankle")
+    if not left and not right:
+        return None, "pose_frame", current_stride_index
+    left_y = float(left["y_percent"]) if left else -1.0
+    right_y = float(right["y_percent"]) if right else -1.0
+    foot = "left" if left_y >= right_y else "right"
+    lower_y = max(left_y, right_y)
+    if lower_y < 55:
+        return None, "flight_recovery", current_stride_index
+    stride_index = current_stride_index
+    if previous_contact_foot is not None and foot != previous_contact_foot:
+        stride_index += 1
+    return foot, "ground_contact", stride_index
+
+
+def extract_pose_samples_from_video_content(
+    content: bytes,
+    *,
+    max_frames: int,
+    sample_every_seconds: float,
+    min_detection_confidence: float,
+) -> dict[str, object]:
+    try:
+        import cv2
+        import mediapipe as mp
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="MediaPipe/OpenCV pose worker dependencies are not installed",
+        ) from exc
+
+    warnings: list[str] = []
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as handle:
+        handle.write(content)
+        handle.flush()
+        capture = cv2.VideoCapture(handle.name)
+        if not capture.isOpened():
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Video could not be decoded")
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        if fps <= 0:
+            fps = 25.0
+            warnings.append("Video FPS missing; assumed 25 fps for sampling.")
+        total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        duration_seconds = round(total_frames / fps, 3) if total_frames else None
+        sample_every_frames = max(1, int(round(fps * sample_every_seconds)))
+        pose = mp.solutions.pose.Pose(
+            static_image_mode=True,
+            model_complexity=1,
+            enable_segmentation=False,
+            min_detection_confidence=min_detection_confidence,
+        )
+        samples: list[dict[str, object]] = []
+        decoded_count = 0
+        processed_count = 0
+        frame_index = 0
+        contact_foot: str | None = None
+        stride_index = 0
+        try:
+            while len(samples) < max_frames:
+                ok, frame = capture.read()
+                if not ok:
+                    break
+                decoded_count += 1
+                if frame_index % sample_every_frames != 0:
+                    frame_index += 1
+                    continue
+                processed_count += 1
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                result = pose.process(rgb_frame)
+                if not result.pose_landmarks:
+                    frame_index += 1
+                    continue
+                keypoints = []
+                for landmark_id, landmark in enumerate(result.pose_landmarks.landmark):
+                    name = mp.solutions.pose.PoseLandmark(landmark_id).name.lower()
+                    keypoints.append(
+                        {
+                            "name": name,
+                            "x_percent": clamp_percent(float(landmark.x) * 100),
+                            "y_percent": clamp_percent(float(landmark.y) * 100),
+                            "z": round(float(landmark.z), 6),
+                            "confidence": round(float(getattr(landmark, "visibility", 0.0)), 4),
+                        }
+                    )
+                contact_foot, phase, stride_index = infer_pose_contact(keypoints, contact_foot, stride_index)
+                samples.append(
+                    {
+                        "source_provider": "mediapipe_pose_solution",
+                        "frame_index": frame_index,
+                        "timestamp_seconds": round(frame_index / fps, 3),
+                        "phase": phase,
+                        "contact_foot": contact_foot,
+                        "stride_index": stride_index,
+                        "sample_confidence": round(
+                            sum(float(point.get("confidence") or 0.0) for point in keypoints) / len(keypoints),
+                            4,
+                        ),
+                        "keypoints": keypoints,
+                    }
+                )
+                frame_index += 1
+        finally:
+            pose.close()
+            capture.release()
+    if not samples:
+        warnings.append("No human pose landmarks were detected in sampled frames.")
+    return {
+        "samples": samples,
+        "decoded_frame_count": decoded_count,
+        "processed_frame_count": processed_count,
+        "frame_rate": fps,
+        "frame_count": total_frames,
+        "duration_seconds": duration_seconds,
+        "warnings": warnings,
+        "source_provider": "mediapipe_pose_solution",
+        "model_policy": "mediapipe-pose-solution-v1",
+    }
+
+
+async def process_performance_video_pose_samples(
+    db: AsyncSession,
+    video_asset_id: UUID,
+    payload: PerformanceVideoPoseProcessingCreate,
+    *,
+    identity: CurrentIdentity | None = None,
+    authz: AuthorizationService | None = None,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    selected_settings = settings or get_settings()
+    video_asset = await get_performance_video_asset(db, video_asset_id)
+    if identity is not None:
+        if authz is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Authorization service required")
+        await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    if payload.organization_id != video_asset.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    if selected_settings.performance_pose_worker_provider == "disabled":
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pose worker is disabled")
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.performance_video_file_dir,
+        key=performance_video_object_key(video_asset, selected_settings),
+    )
+    if hashlib.sha256(content).hexdigest() != video_asset.checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Stored video checksum mismatch")
+    extracted = extract_pose_samples_from_video_content(
+        content,
+        max_frames=payload.max_frames,
+        sample_every_seconds=payload.sample_every_seconds,
+        min_detection_confidence=payload.min_detection_confidence,
+    )
+    samples = list(extracted["samples"])
+    rows: list[PerformanceVideoPoseSample] = []
+    if samples:
+        rows = await store_performance_video_pose_samples(
+            db,
+            video_asset,
+            PerformanceVideoPoseSampleBatchCreate(
+                organization_id=video_asset.organization_id,
+                replace_existing=payload.replace_existing,
+                samples=samples,
+            ),
+            actor_person_id=identity.person_id if identity else None,
+        )
+    elif payload.replace_existing:
+        await db.execute(
+            delete(PerformanceVideoPoseSample).where(
+                PerformanceVideoPoseSample.video_asset_id == video_asset.id
+            )
+        )
+        await db.commit()
+    video_asset.status = "pose_sampled" if rows else "pose_no_subject"
+    video_asset.frame_rate = video_asset.frame_rate or extracted.get("frame_rate")
+    video_asset.duration_seconds = video_asset.duration_seconds or extracted.get("duration_seconds")
+    await db.commit()
+    await db.refresh(video_asset)
+    analysis_result = None
+    if payload.run_analysis and rows:
+        analysis_result = await analyze_pose_gait_for_video(
+            db,
+            identity or CurrentIdentity(
+                user_id=video_asset.uploaded_by_person_id or video_asset.organization_id,
+                person_id=video_asset.uploaded_by_person_id or video_asset.organization_id,
+                keycloak_sub="system:performance-video-pose-worker",
+                email="system@afrolete.local",
+                display_name="AfroLete Pose Worker",
+            ),
+            video_asset.id,
+            PerformancePoseGaitAnalysisCreate(
+                evidence_text="Pose samples extracted by the MediaPipe video-processing worker.",
+                reference_profile_id=payload.reference_profile_id,
+                create_coaching_outputs=identity is not None,
+            ),
+            authz or AllowAllAuthorizationService(),
+        )
+        video_asset = analysis_result["video_asset"]
+    all_samples = await list_performance_video_pose_samples(db, video_asset.id)
+    return {
+        "video_asset": video_asset,
+        "samples": all_samples,
+        "created_samples": rows,
+        "sample_count": len(all_samples),
+        "processed_frame_count": extracted["processed_frame_count"],
+        "decoded_frame_count": extracted["decoded_frame_count"],
+        "warnings": extracted["warnings"],
+        "source_provider": extracted["source_provider"],
+        "model_policy": extracted["model_policy"],
+        "analysis": analysis_result["analysis"] if analysis_result else None,
+    }
+
+
+class AllowAllAuthorizationService:
+    async def check(self, **_: object) -> bool:
+        return True
+
+
+async def run_performance_video_pose_worker(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None = None,
+    limit: int = 10,
+    max_frames: int | None = None,
+    sample_every_seconds: float | None = None,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    selected_settings = settings or get_settings()
+    statement = select(PerformanceVideoAsset).where(
+        PerformanceVideoAsset.status.in_(["uploaded", "pose_failed", "pose_no_subject"])
+    )
+    if organization_id is not None:
+        statement = statement.where(PerformanceVideoAsset.organization_id == organization_id)
+    videos = list((await db.scalars(statement.order_by(PerformanceVideoAsset.created_at.asc()).limit(limit))).all())
+    processed_count = 0
+    failed_count = 0
+    skipped_count = 0
+    results: list[dict[str, object]] = []
+    for video_asset in videos:
+        try:
+            result = await process_performance_video_pose_samples(
+                db,
+                video_asset.id,
+                PerformanceVideoPoseProcessingCreate(
+                    organization_id=video_asset.organization_id,
+                    max_frames=max_frames or selected_settings.performance_pose_worker_max_frames,
+                    sample_every_seconds=(
+                        sample_every_seconds
+                        or selected_settings.performance_pose_worker_sample_every_seconds
+                    ),
+                    min_detection_confidence=selected_settings.performance_pose_worker_min_detection_confidence,
+                    run_analysis=True,
+                ),
+                settings=selected_settings,
+            )
+            processed_count += 1
+            results.append(
+                {
+                    "video_asset_id": str(video_asset.id),
+                    "status": result["video_asset"].status,
+                    "sample_count": result["sample_count"],
+                    "processed_frame_count": result["processed_frame_count"],
+                    "warning_count": len(result["warnings"]),
+                }
+            )
+        except HTTPException as exc:
+            await db.rollback()
+            video_asset.status = "pose_failed"
+            video_asset.pose_analysis_json = json.dumps({"error": exc.detail})
+            await db.commit()
+            failed_count += 1
+            results.append({"video_asset_id": str(video_asset.id), "status": "pose_failed", "error": str(exc.detail)})
+        except Exception as exc:
+            await db.rollback()
+            video_asset.status = "pose_failed"
+            video_asset.pose_analysis_json = json.dumps({"error": str(exc)})
+            await db.commit()
+            failed_count += 1
+            results.append({"video_asset_id": str(video_asset.id), "status": "pose_failed", "error": str(exc)})
+    return {
+        "organization_id": str(organization_id) if organization_id else None,
+        "eligible_count": len(videos),
+        "processed_count": processed_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+        "results": results,
+    }
+
+
+def decode_reference_metric_targets(value: str | None) -> list[dict[str, object]]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    targets: list[dict[str, object]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        try:
+            optimal_min = float(item["optimal_min"])
+            optimal_max = float(item["optimal_max"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if optimal_max <= optimal_min:
+            continue
+        category_value = item.get("category", MetricCategory.TECHNICAL)
+        try:
+            category = MetricCategory(category_value)
+        except ValueError:
+            category = MetricCategory.TECHNICAL
+        targets.append(
+            {
+                "key": str(item.get("key", "")).strip(),
+                "label": str(item.get("label", "")).strip(),
+                "category": category,
+                "unit": str(item.get("unit") or "score"),
+                "optimal_min": optimal_min,
+                "optimal_max": optimal_max,
+                "benchmark_label": item.get("benchmark_label"),
+                "coaching_cue": item.get("coaching_cue"),
+            }
+        )
+    return [target for target in targets if target["key"] and target["label"]]
+
+
+def decode_reference_pose_samples(value: str | None) -> list[dict[str, object]]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+async def create_movement_reference_profile(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: PerformanceMovementReferenceProfileCreate,
+    authz: AuthorizationService,
+) -> PerformanceMovementReferenceProfile:
+    organization = await db.get(Organization, payload.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    metric_targets = [
+        {
+            "key": target.key.strip().lower(),
+            "label": target.label,
+            "category": target.category.value,
+            "unit": target.unit,
+            "optimal_min": target.optimal_min,
+            "optimal_max": target.optimal_max,
+            "benchmark_label": target.benchmark_label,
+            "coaching_cue": target.coaching_cue,
+        }
+        for target in payload.metric_targets
+    ]
+    pose_samples = [
+        {
+            "source_provider": sample.source_provider,
+            "frame_index": sample.frame_index,
+            "timestamp_seconds": sample.timestamp_seconds,
+            "phase": sample.phase,
+            "contact_foot": sample.contact_foot,
+            "stride_index": sample.stride_index,
+            "sample_confidence": sample.sample_confidence,
+            "keypoints": [
+                {
+                    "name": point.name.strip().lower().replace("-", "_").replace(" ", "_"),
+                    "x_percent": point.x_percent,
+                    "y_percent": point.y_percent,
+                    "z": point.z,
+                    "confidence": point.confidence,
+                }
+                for point in sample.keypoints
+            ],
+        }
+        for sample in payload.pose_samples
+    ]
+    profile = PerformanceMovementReferenceProfile(
+        organization_id=payload.organization_id,
+        created_by_person_id=identity.person_id,
+        sport=payload.sport,
+        name=payload.name,
+        benchmark_profile=payload.benchmark_profile,
+        performer_name=payload.performer_name,
+        source_label=payload.source_label,
+        competition_context=payload.competition_context,
+        consent_basis=payload.consent_basis,
+        visibility=payload.visibility,
+        metric_targets_json=json.dumps(metric_targets),
+        pose_samples_json=json.dumps(pose_samples) if pose_samples else None,
+        notes=payload.notes,
+    )
+    db.add(profile)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Reference profile already exists") from exc
+    await db.refresh(profile)
+    return profile
+
+
+async def list_movement_reference_profiles(
+    db: AsyncSession,
+    organization_id: UUID,
+    sport: str | None = None,
+    benchmark_profile: str | None = None,
+) -> list[PerformanceMovementReferenceProfile]:
+    statement = select(PerformanceMovementReferenceProfile).where(
+        PerformanceMovementReferenceProfile.organization_id == organization_id,
+        PerformanceMovementReferenceProfile.status == "active",
+    )
+    if sport:
+        statement = statement.where(PerformanceMovementReferenceProfile.sport == sport)
+    if benchmark_profile:
+        statement = statement.where(
+            PerformanceMovementReferenceProfile.benchmark_profile == benchmark_profile
+        )
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    PerformanceMovementReferenceProfile.sport,
+                    PerformanceMovementReferenceProfile.name,
+                )
+            )
+        ).all()
+    )
+
+
+async def get_movement_reference_profile(
+    db: AsyncSession,
+    profile_id: UUID,
+    organization_id: UUID,
+) -> PerformanceMovementReferenceProfile:
+    profile = await db.get(PerformanceMovementReferenceProfile, profile_id)
+    if profile is None or profile.organization_id != organization_id or profile.status != "active":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reference profile not found")
+    return profile
 
 
 def pose_gait_templates(sport: str) -> list[dict[str, object]]:
@@ -6162,15 +6656,63 @@ def pose_gait_templates(sport: str) -> list[dict[str, object]]:
     ]
 
 
+def reference_enriched_pose_templates(
+    sport: str,
+    reference_profile: PerformanceMovementReferenceProfile | None,
+) -> list[dict[str, object]]:
+    templates = [dict(template) for template in pose_gait_templates(sport)]
+    if reference_profile is None:
+        return templates
+    targets = {str(target["key"]): target for target in decode_reference_metric_targets(reference_profile.metric_targets_json)}
+    for template in templates:
+        key = str(template["key"])
+        target = targets.get(key)
+        if target is None:
+            continue
+        template["label"] = target["label"]
+        template["category"] = target["category"]
+        template["unit"] = target["unit"]
+        template["optimal_min"] = target["optimal_min"]
+        template["optimal_max"] = target["optimal_max"]
+        template["benchmark"] = (
+            target.get("benchmark_label")
+            or reference_profile.source_label
+            or template["benchmark"]
+        )
+        template["cue"] = target.get("coaching_cue") or template["cue"]
+    known_keys = {str(template["key"]) for template in templates}
+    for target in targets.values():
+        key = str(target["key"])
+        if key in known_keys:
+            continue
+        templates.append(
+            {
+                "key": key,
+                "label": target["label"],
+                "category": target["category"],
+                "unit": target["unit"],
+                "optimal_min": target["optimal_min"],
+                "optimal_max": target["optimal_max"],
+                "benchmark": target.get("benchmark_label") or reference_profile.source_label,
+                "cue": target.get("coaching_cue") or "Review against the selected reference profile.",
+                "risk_terms": [],
+                "positive_terms": [],
+                "default": float(target["optimal_min"]),
+            }
+        )
+    return templates
+
+
 def pose_gait_metric_cards(
     evidence_text: str | None,
     sport: str,
     derived_metrics: dict[str, float] | None = None,
+    reference_profile: PerformanceMovementReferenceProfile | None = None,
 ) -> list[dict[str, object]]:
     text = (evidence_text or "").lower()
     sample_metrics = derived_metrics or {}
     cards: list[dict[str, object]] = []
-    for template in pose_gait_templates(sport):
+    for template in reference_enriched_pose_templates(sport, reference_profile):
         key = str(template["key"])
         source = "benchmark_template"
         observed = sample_metrics.get(key)

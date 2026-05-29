@@ -112,6 +112,7 @@ from app.models.performance import (  # noqa: F401,E402
     PerformanceGoal,
     PerformanceMetricDefinition,
     PerformanceForecastValidationRun,
+    PerformanceMovementReferenceProfile,
     PerformanceModelExtractionBenchmarkCase,
     PerformanceModelExtractionBenchmarkDataset,
     PerformanceVideoAnnotation,

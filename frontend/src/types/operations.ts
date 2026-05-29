@@ -4546,6 +4546,50 @@ export type PerformanceVideoPoseSampleBatchRead = {
   samples: PerformanceVideoPoseSampleRead[];
 };
 
+export type PerformanceVideoPoseProcessingRead = {
+  video_asset: PerformanceVideoAssetRead;
+  model_policy: string;
+  source_provider: string;
+  processed_frame_count: number;
+  decoded_frame_count: number;
+  sample_count: number;
+  warning_count: number;
+  warnings: string[];
+  pose_samples: PerformanceVideoPoseSampleBatchRead;
+  analysis_summary: string | null;
+  analysis_model_policy: string | null;
+};
+
+export type PerformanceMovementReferenceMetricTarget = {
+  key: string;
+  label: string;
+  category: MetricCategory;
+  unit: string;
+  optimal_min: number;
+  optimal_max: number;
+  benchmark_label: string | null;
+  coaching_cue: string | null;
+};
+
+export type PerformanceMovementReferenceProfileRead = {
+  id: UUID;
+  organization_id: UUID;
+  created_by_person_id: UUID | null;
+  sport: string;
+  name: string;
+  benchmark_profile: string;
+  performer_name: string | null;
+  source_label: string;
+  competition_context: string | null;
+  consent_basis: string | null;
+  visibility: string;
+  status: string;
+  metric_targets: PerformanceMovementReferenceMetricTarget[];
+  pose_samples: unknown[];
+  notes: string | null;
+  created_at: string;
+};
+
 export type PerformancePoseGaitMetricRead = {
   key: string;
   label: string;
@@ -4582,6 +4626,9 @@ export type PerformancePoseGaitAnalysisRead = {
   video_asset: PerformanceVideoAssetRead;
   model_policy: string;
   benchmark_profile: string;
+  reference_profile_id: UUID | null;
+  reference_profile_name: string | null;
+  reference_profile_source: string | null;
   confidence: number;
   pose_sample_count: number;
   pose_sample_source_providers: string[];

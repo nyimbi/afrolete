@@ -237,6 +237,10 @@ class Settings(BaseSettings):
     performance_video_file_dir: str = "data/performance-videos"
     performance_video_file_url_prefix: str = "local://performance-videos"
     performance_video_max_upload_bytes: int = 250_000_000
+    performance_pose_worker_provider: Literal["mediapipe", "disabled"] = "mediapipe"
+    performance_pose_worker_max_frames: int = 45
+    performance_pose_worker_sample_every_seconds: float = 0.2
+    performance_pose_worker_min_detection_confidence: float = 0.5
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"

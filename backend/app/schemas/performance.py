@@ -279,6 +279,81 @@ class PerformanceVideoPoseSampleBatchRead(BaseModel):
     samples: list[PerformanceVideoPoseSampleRead]
 
 
+class PerformanceVideoPoseProcessingCreate(BaseModel):
+    organization_id: UUID
+    replace_existing: bool = True
+    max_frames: int = Field(default=45, ge=1, le=600)
+    sample_every_seconds: float = Field(default=0.2, ge=0.033, le=10)
+    min_detection_confidence: float = Field(default=0.5, ge=0, le=1)
+    run_analysis: bool = True
+    reference_profile_id: UUID | None = None
+
+
+class PerformanceVideoPoseProcessingRead(BaseModel):
+    video_asset: PerformanceVideoAssetRead
+    model_policy: str
+    source_provider: str
+    processed_frame_count: int
+    decoded_frame_count: int
+    sample_count: int
+    warning_count: int
+    warnings: list[str]
+    pose_samples: PerformanceVideoPoseSampleBatchRead
+    analysis_summary: str | None = None
+    analysis_model_policy: str | None = None
+
+
+class PerformanceMovementReferenceMetricTarget(BaseModel):
+    key: str = Field(min_length=2, max_length=80)
+    label: str = Field(min_length=2, max_length=180)
+    category: MetricCategory = MetricCategory.TECHNICAL
+    unit: str = Field(default="score", max_length=40)
+    optimal_min: float
+    optimal_max: float
+    benchmark_label: str | None = Field(default=None, max_length=240)
+    coaching_cue: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def valid_target_range(self) -> "PerformanceMovementReferenceMetricTarget":
+        if self.optimal_max <= self.optimal_min:
+            raise ValueError("optimal_max must be greater than optimal_min")
+        return self
+
+
+class PerformanceMovementReferenceProfileCreate(BaseModel):
+    organization_id: UUID
+    sport: str = Field(default="athletics", min_length=2, max_length=80)
+    name: str = Field(min_length=2, max_length=180)
+    benchmark_profile: str = Field(default="world_class_sprint", min_length=2, max_length=120)
+    performer_name: str | None = Field(default=None, max_length=180)
+    source_label: str = Field(min_length=2, max_length=240)
+    competition_context: str | None = Field(default=None, max_length=240)
+    consent_basis: str | None = Field(default=None, max_length=240)
+    visibility: str = Field(default="tenant", max_length=40)
+    metric_targets: list[PerformanceMovementReferenceMetricTarget] = Field(min_length=1, max_length=30)
+    pose_samples: list[PerformanceVideoPoseSampleCreate] = Field(default_factory=list, max_length=100)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class PerformanceMovementReferenceProfileRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    created_by_person_id: UUID | None
+    sport: str
+    name: str
+    benchmark_profile: str
+    performer_name: str | None
+    source_label: str
+    competition_context: str | None
+    consent_basis: str | None
+    visibility: str
+    status: str
+    metric_targets: list[PerformanceMovementReferenceMetricTarget]
+    pose_samples: list[PerformanceVideoPoseSampleCreate]
+    notes: str | None
+    created_at: datetime
+
+
 class PerformancePoseGaitMetricRead(BaseModel):
     key: str
     label: str
@@ -315,6 +390,7 @@ class PerformancePoseGaitAnalysisCreate(BaseModel):
     evidence_text: str | None = Field(default=None, max_length=12000)
     analysis_focus: str | None = Field(default=None, max_length=1000)
     benchmark_profile: str = Field(default="world_class_sprint", max_length=120)
+    reference_profile_id: UUID | None = None
     create_coaching_outputs: bool = True
 
 
@@ -322,6 +398,9 @@ class PerformancePoseGaitAnalysisRead(BaseModel):
     video_asset: PerformanceVideoAssetRead
     model_policy: str
     benchmark_profile: str
+    reference_profile_id: UUID | None = None
+    reference_profile_name: str | None = None
+    reference_profile_source: str | None = None
     confidence: float
     pose_sample_count: int = 0
     pose_sample_source_providers: list[str] = Field(default_factory=list)

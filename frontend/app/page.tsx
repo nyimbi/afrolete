@@ -269,12 +269,14 @@ import type {
   PerformanceModelExtractionBenchmarkRunRead,
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
+  PerformanceMovementReferenceProfileRead,
   PerformanceObservationRead,
   PerformancePoseGaitAnalysisRead,
   PerformanceVideoAnnotationRead,
   PerformanceVideoAssetRead,
   PerformanceVideoCoachingRead,
   PerformanceVideoPoseSampleBatchRead,
+  PerformanceVideoPoseProcessingRead,
   PerformanceWearableConnectionRead,
   PerformanceWearableOAuthCallbackRead,
   PerformanceWearableOAuthStartRead,
@@ -1502,6 +1504,11 @@ export default function HomePage() {
     useState<PerformanceVideoAnnotationRead[]>([]);
   const [performancePoseSampleBatch, setPerformancePoseSampleBatch] =
     useState<PerformanceVideoPoseSampleBatchRead | null>(null);
+  const [performancePoseProcessing, setPerformancePoseProcessing] =
+    useState<PerformanceVideoPoseProcessingRead | null>(null);
+  const [movementReferenceProfiles, setMovementReferenceProfiles] =
+    useState<PerformanceMovementReferenceProfileRead[]>([]);
+  const [selectedMovementReferenceProfileId, setSelectedMovementReferenceProfileId] = useState("");
   const [selectedPerformanceVideoFile, setSelectedPerformanceVideoFile] = useState<File | null>(null);
   const [performanceModelBenchmark, setPerformanceModelBenchmark] =
     useState<PerformanceModelExtractionBenchmarkRunRead | null>(null);
@@ -2023,6 +2030,17 @@ export default function HomePage() {
     notes: "Compare trunk line with optimal world-class sprint posture.",
     body_region: "torso",
     tags: "posture,slow-motion"
+  });
+  const [movementReferenceForm, setMovementReferenceForm] = useState({
+    name: "Elite 100m side-view profile",
+    performer_name: "Reference sprinter",
+    source_label: "World-class 100m final side-view model",
+    competition_context: "championship final",
+    consent_basis: "licensed coaching reference",
+    torso_min: 9,
+    torso_max: 13,
+    ground_min: 85,
+    ground_max: 105
   });
   const [performanceGoalForm, setPerformanceGoalForm] = useState({
     title: "Reach first-touch score 9",
@@ -2766,6 +2784,22 @@ export default function HomePage() {
     setPerformanceModelBenchmarkDatasets(data);
   }, [identity]);
 
+  const loadMovementReferenceProfiles = useCallback(async (organizationId: string, sport: string) => {
+    const params = new URLSearchParams({
+      organization_id: organizationId,
+      sport,
+      benchmark_profile: "world_class_sprint"
+    });
+    const data = await apiRequest<PerformanceMovementReferenceProfileRead[]>(
+      `/performance/movement-reference-profiles?${params.toString()}`,
+      { identity }
+    );
+    setMovementReferenceProfiles(data);
+    setSelectedMovementReferenceProfileId((current) =>
+      current && data.some((profile) => profile.id === current) ? current : data[0]?.id ?? ""
+    );
+  }, [identity]);
+
   const loadPerformanceForecastValidationRuns = useCallback(async (organizationId: string, athleteProfileId?: string) => {
     const params = new URLSearchParams({ organization_id: organizationId, limit: "5" });
     if (athleteProfileId) {
@@ -3389,6 +3423,8 @@ export default function HomePage() {
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
+      setMovementReferenceProfiles([]);
+      setSelectedMovementReferenceProfileId("");
       setSelectedPerformanceVideoFile(null);
       setPerformanceModelBenchmark(null);
       setPerformanceModelBenchmarkDatasets([]);
@@ -3741,6 +3777,8 @@ export default function HomePage() {
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
+      setMovementReferenceProfiles([]);
+      setSelectedMovementReferenceProfileId("");
       setSelectedPerformanceVideoFile(null);
       setPerformanceBenchmarks([]);
       setPerformanceCohortComparisons([]);
@@ -3762,10 +3800,22 @@ export default function HomePage() {
     }
     runAction(
       "load-athlete-performance",
-      () => loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId),
+      async () => {
+        await Promise.all([
+          loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId),
+          loadMovementReferenceProfiles(selectedOrganizationId, videoCoachingForm.sport)
+        ]);
+      },
       () => undefined
     );
-  }, [selectedAthlete, selectedOrganizationId, loadAthletePerformance, runAction]);
+  }, [
+    selectedAthlete,
+    selectedOrganizationId,
+    loadAthletePerformance,
+    loadMovementReferenceProfiles,
+    runAction,
+    videoCoachingForm.sport
+  ]);
 
   useEffect(() => {
     if (!selectedTrainingPlanId) {
@@ -8099,6 +8149,97 @@ export default function HomePage() {
     );
   };
 
+  const processPerformanceVideoPose = () => {
+    if (!performanceVideoAsset || !selectedOrganizationId) {
+      addLog("Upload a performance video before processing pose landmarks", "bad");
+      return;
+    }
+    runAction(
+      "process-performance-video-pose",
+      () =>
+        apiRequest<PerformanceVideoPoseProcessingRead>(
+          `/performance/videos/${performanceVideoAsset.id}/pose-processing-runs`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              replace_existing: true,
+              max_frames: 45,
+              sample_every_seconds: 0.2,
+              min_detection_confidence: 0.5,
+              run_analysis: true,
+              reference_profile_id: selectedMovementReferenceProfileId || null
+            }
+          }
+        ),
+      (processing) => {
+        setPerformancePoseProcessing(processing);
+        setPerformanceVideoAsset(processing.video_asset);
+        setPerformancePoseSampleBatch(processing.pose_samples);
+        addLog(
+          `Processed ${processing.processed_frame_count} frames and stored ${processing.sample_count} pose samples`,
+          processing.warning_count ? "neutral" : "good"
+        );
+      }
+    );
+  };
+
+  const createMovementReferenceProfile = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a reference profile", "bad");
+      return;
+    }
+    runAction(
+      "create-movement-reference-profile",
+      () =>
+        apiRequest<PerformanceMovementReferenceProfileRead>("/performance/movement-reference-profiles", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sport: videoCoachingForm.sport,
+            name: movementReferenceForm.name,
+            benchmark_profile: "world_class_sprint",
+            performer_name: movementReferenceForm.performer_name,
+            source_label: movementReferenceForm.source_label,
+            competition_context: movementReferenceForm.competition_context,
+            consent_basis: movementReferenceForm.consent_basis,
+            metric_targets: [
+              {
+                key: "torso_lean_angle",
+                label: "Torso Lean Angle",
+                category: "technical",
+                unit: "degrees",
+                optimal_min: movementReferenceForm.torso_min,
+                optimal_max: movementReferenceForm.torso_max,
+                benchmark_label: `${movementReferenceForm.source_label} posture`,
+                coaching_cue: "Hold the trunk tall through mid-stance."
+              },
+              {
+                key: "ground_contact_time",
+                label: "Ground Contact Time",
+                category: "physical",
+                unit: "ms",
+                optimal_min: movementReferenceForm.ground_min,
+                optimal_max: movementReferenceForm.ground_max,
+                benchmark_label: `${movementReferenceForm.source_label} contact window`,
+                coaching_cue: "Strike down and back under the hip."
+              }
+            ]
+          }
+        }),
+      (profile) => {
+        setMovementReferenceProfiles((current) => [
+          profile,
+          ...current.filter((item) => item.id !== profile.id)
+        ]);
+        setSelectedMovementReferenceProfileId(profile.id);
+        addLog(`Reference profile ${profile.name} is ready`, "good");
+      }
+    );
+  };
+
   const analyzePerformancePoseGait = () => {
     if (!performanceVideoAsset) {
       addLog("Upload a performance video before pose/gait analysis", "bad");
@@ -8114,6 +8255,7 @@ export default function HomePage() {
             identity,
             body: {
               benchmark_profile: "world_class_sprint",
+              reference_profile_id: selectedMovementReferenceProfileId || null,
               evidence_text: poseGaitEvidenceText,
               analysis_focus: videoCoachingForm.analysis_focus,
               create_coaching_outputs: true
@@ -16350,8 +16492,10 @@ export default function HomePage() {
                 <button type="button" onClick={recordObservation} disabled={busyAction !== null}>Observe</button>
                 <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
                 <button type="button" onClick={analyzeAthleteVideoCoaching} disabled={busyAction !== null}>Video coach</button>
+                <button type="button" onClick={createMovementReferenceProfile} disabled={busyAction !== null}>Reference</button>
                 <button type="button" onClick={uploadPerformanceVideoAsset} disabled={busyAction !== null}>Upload video</button>
                 <button type="button" onClick={importPerformancePoseSamples} disabled={busyAction !== null}>Pose data</button>
+                <button type="button" onClick={processPerformanceVideoPose} disabled={busyAction !== null}>Process video</button>
                 <button type="button" onClick={analyzePerformancePoseGait} disabled={busyAction !== null}>Analyze gait</button>
                 <button type="button" onClick={annotatePerformanceVideo} disabled={busyAction !== null}>Annotate</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
@@ -16466,6 +16610,35 @@ export default function HomePage() {
               <label className="wide-field">
                 Pose/gait evidence
                 <textarea value={poseGaitEvidenceText} onChange={(event) => setPoseGaitEvidenceText(event.target.value)} />
+              </label>
+              <label>
+                Reference profile
+                <select value={selectedMovementReferenceProfileId} onChange={(event) => setSelectedMovementReferenceProfileId(event.target.value)}>
+                  <option value="">Built-in sprint template</option>
+                  {movementReferenceProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>{profile.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Reference name
+                <input value={movementReferenceForm.name} onChange={(event) => setMovementReferenceForm({ ...movementReferenceForm, name: event.target.value })} />
+              </label>
+              <label>
+                Performer
+                <input value={movementReferenceForm.performer_name} onChange={(event) => setMovementReferenceForm({ ...movementReferenceForm, performer_name: event.target.value })} />
+              </label>
+              <label>
+                Reference source
+                <input value={movementReferenceForm.source_label} onChange={(event) => setMovementReferenceForm({ ...movementReferenceForm, source_label: event.target.value })} />
+              </label>
+              <label>
+                Torso target
+                <input type="number" value={movementReferenceForm.torso_max} onChange={(event) => setMovementReferenceForm({ ...movementReferenceForm, torso_max: Number(event.target.value) })} />
+              </label>
+              <label>
+                Contact target
+                <input type="number" value={movementReferenceForm.ground_max} onChange={(event) => setMovementReferenceForm({ ...movementReferenceForm, ground_max: Number(event.target.value) })} />
               </label>
               <label>
                 Annotation label
@@ -16626,9 +16799,16 @@ export default function HomePage() {
                   </article>
                   <article className="mini-card">
                     <span className="muted">Benchmark</span>
-                    <strong>{performancePoseGaitAnalysis?.benchmark_profile ?? "world_class_sprint"}</strong>
+                    <strong>{performancePoseGaitAnalysis?.reference_profile_name ?? performancePoseGaitAnalysis?.benchmark_profile ?? "world_class_sprint"}</strong>
                     <p>{performancePoseGaitAnalysis?.summary ?? "Run pose/gait analysis to compare against elite movement templates."}</p>
                   </article>
+                  {performancePoseGaitAnalysis?.reference_profile_source ? (
+                    <article className="mini-card">
+                      <span className="muted">Reference source</span>
+                      <strong>{performancePoseGaitAnalysis.reference_profile_source}</strong>
+                      <p>{performancePoseGaitAnalysis.reference_profile_id}</p>
+                    </article>
+                  ) : null}
                   <article className="mini-card">
                     <span className="muted">Pose landmarks</span>
                     <strong>
@@ -16638,6 +16818,15 @@ export default function HomePage() {
                       {(performancePoseGaitAnalysis?.pose_sample_source_providers ?? performancePoseSampleBatch?.source_providers ?? ["template fallback"]).join(", ")}
                     </p>
                   </article>
+                  {performancePoseProcessing ? (
+                    <article className="mini-card">
+                      <span className="muted">Video worker</span>
+                      <strong>{performancePoseProcessing.model_policy}</strong>
+                      <p>
+                        {performancePoseProcessing.processed_frame_count} sampled · {performancePoseProcessing.decoded_frame_count} decoded · {performancePoseProcessing.warning_count} warnings
+                      </p>
+                    </article>
+                  ) : null}
                 </div>
                 {performancePoseGaitAnalysis ? (
                   <div className="task-list">

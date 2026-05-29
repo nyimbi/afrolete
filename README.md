@@ -35,6 +35,11 @@ Run the full local demo stack:
 docker compose up --build
 ```
 
+The Compose stack uses Postgres, runs migrations, seeds demo data, and starts
+the unified due-worker. The backend and due-worker run as `linux/amd64` images
+so the MediaPipe pose worker uses the available Linux wheel consistently on
+Apple Silicon and x86_64 hosts.
+
 Then open:
 
 - Operations console: `http://localhost:3000`
@@ -149,9 +154,10 @@ Major capability areas include:
   clearance, regulatory packages, and emergency action plans.
 - Performance metric definitions, observations, assessments, ALS-style scores,
   goals, awards, trend analysis, benchmarks, forecasts, injury-risk signals,
-  wearable data, stored video, provider-neutral pose landmark samples,
-  pose/gait benchmarking, AI video coaching analysis, slow-motion review,
-  human annotations, and athlete dashboards.
+  wearable data, stored video, MediaPipe/OpenCV pose extraction workers,
+  provider-neutral pose landmark samples, tenant-managed movement reference
+  profiles, pose/gait benchmarking, AI video coaching analysis, slow-motion
+  review, human annotations, and athlete dashboards.
 - Training drills, plans, sessions, readiness checks, feedback, workload
   management, schedule exports, and AI-assisted plan generation.
 - Competition management, standings, officials, fixture generation, brackets,
@@ -213,9 +219,12 @@ contract.
 
 Video review now includes stored performance clips, slow-motion playback rates,
 timestamped human annotations, provider-neutral pose/keypoint sample ingestion,
-pose/gait benchmark comparisons against world-class sprint movement templates,
-and optimal movement projections. The output remains advisory and pending
-review until a coach accepts it.
+and a MediaPipe/OpenCV worker that decodes stored clips, samples frames,
+extracts normalized body landmarks, and writes those landmarks through the same
+pose-sample contract used by external providers. Tenant-managed reference
+profiles for world-class or optimal movement models then drive pose/gait
+benchmark comparisons and optimal movement projections. The output remains
+advisory and pending review until a coach accepts it.
 
 ## Architecture
 
@@ -271,7 +280,8 @@ or MinIO. It must not duplicate backend source-of-truth business rules.
 The backend includes a unified due-worker that can run scheduler-ready lanes for
 agent tasks, developer webhooks, billing, communications, travel reminders,
 emergency escalation, performance achievements, forecast validation, review
-escalation, injury-risk alerts, wearable pulls, and compliance reconciliation.
+escalation, injury-risk alerts, performance video pose extraction, wearable
+pulls, and compliance reconciliation.
 
 The local Docker demo runs this worker continuously. Production deployment can
 run it through systemd, cron, Temporal activities, or container jobs depending

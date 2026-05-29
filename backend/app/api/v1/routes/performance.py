@@ -39,6 +39,8 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkRunRead,
     PerformanceMetricTrendRead,
     PerformanceMetricTrendSeriesRead,
+    PerformanceMovementReferenceProfileCreate,
+    PerformanceMovementReferenceProfileRead,
     PerformanceObservationCreate,
     PerformanceObservationRead,
     PerformanceObservationReviewCreate,
@@ -56,6 +58,8 @@ from app.schemas.performance import (
     PerformanceVideoPoseSampleBatchCreate,
     PerformanceVideoPoseSampleBatchRead,
     PerformanceVideoPoseSampleRead,
+    PerformanceVideoPoseProcessingCreate,
+    PerformanceVideoPoseProcessingRead,
     PerformanceVideoUploadCreate,
     PerformanceWearableConnectionCreate,
     PerformanceWearableConnectionRead,
@@ -83,6 +87,7 @@ from app.services.performance import (
     analyze_pose_gait_for_video,
     create_assessment,
     create_metric_definition,
+    create_movement_reference_profile,
     create_observation,
     create_performance_video_annotation,
     create_performance_video_pose_samples,
@@ -102,10 +107,12 @@ from app.services.performance import (
     list_performance_awards,
     list_performance_goals,
     list_metric_definitions,
+    list_movement_reference_profiles,
     list_my_player_performance,
     list_observations,
     list_performance_video_annotations,
     list_performance_video_pose_samples,
+    process_performance_video_pose_samples,
     list_performance_forecast_validation_runs,
     list_performance_model_extraction_benchmark_datasets,
     list_wearable_provider_connections,
@@ -135,6 +142,8 @@ from app.services.performance import (
     validate_performance_wearable_webhook_signature,
     decode_annotation_tags,
     decode_pose_keypoints,
+    decode_reference_metric_targets,
+    decode_reference_pose_samples,
     downloadable_performance_video_asset,
     upload_performance_video_asset,
     video_slow_motion_rates,
@@ -350,6 +359,36 @@ def to_video_pose_sample_read(sample) -> PerformanceVideoPoseSampleRead:
         sample_confidence=sample.sample_confidence,
         keypoints=decode_pose_keypoints(sample.keypoints_json),
         created_at=sample.created_at,
+    )
+
+
+def to_video_pose_sample_batch_read(video_asset, samples) -> PerformanceVideoPoseSampleBatchRead:
+    return PerformanceVideoPoseSampleBatchRead(
+        video_asset=to_video_asset_read(video_asset),
+        sample_count=len(samples),
+        source_providers=sorted({sample.source_provider for sample in samples}),
+        samples=[to_video_pose_sample_read(sample) for sample in samples],
+    )
+
+
+def to_movement_reference_profile_read(profile) -> PerformanceMovementReferenceProfileRead:
+    return PerformanceMovementReferenceProfileRead(
+        id=profile.id,
+        organization_id=profile.organization_id,
+        created_by_person_id=profile.created_by_person_id,
+        sport=profile.sport,
+        name=profile.name,
+        benchmark_profile=profile.benchmark_profile,
+        performer_name=profile.performer_name,
+        source_label=profile.source_label,
+        competition_context=profile.competition_context,
+        consent_basis=profile.consent_basis,
+        visibility=profile.visibility,
+        status=profile.status,
+        metric_targets=decode_reference_metric_targets(profile.metric_targets_json),
+        pose_samples=decode_reference_pose_samples(profile.pose_samples_json),
+        notes=profile.notes,
+        created_at=profile.created_at,
     )
 
 
@@ -625,6 +664,46 @@ async def analyze_video_for_coaching_route(
 
 
 @router.post(
+    "/movement-reference-profiles",
+    response_model=PerformanceMovementReferenceProfileRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_movement_reference_profile_route(
+    payload: PerformanceMovementReferenceProfileCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMovementReferenceProfileRead:
+    return to_movement_reference_profile_read(
+        await create_movement_reference_profile(db, identity, payload, authz)
+    )
+
+
+@router.get(
+    "/movement-reference-profiles",
+    response_model=list[PerformanceMovementReferenceProfileRead],
+)
+async def list_movement_reference_profiles_route(
+    organization_id: UUID = Query(),
+    sport: str | None = Query(default=None),
+    benchmark_profile: str | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMovementReferenceProfileRead]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    return [
+        to_movement_reference_profile_read(profile)
+        for profile in await list_movement_reference_profiles(
+            db,
+            organization_id,
+            sport=sport,
+            benchmark_profile=benchmark_profile,
+        )
+    ]
+
+
+@router.post(
     "/athletes/{athlete_profile_id}/videos",
     response_model=PerformanceVideoAssetRead,
     status_code=status.HTTP_201_CREATED,
@@ -704,12 +783,7 @@ async def create_performance_video_pose_samples_route(
 ) -> PerformanceVideoPoseSampleBatchRead:
     samples = await create_performance_video_pose_samples(db, identity, video_asset_id, payload, authz)
     video_asset = await get_performance_video_asset(db, video_asset_id)
-    return PerformanceVideoPoseSampleBatchRead(
-        video_asset=to_video_asset_read(video_asset),
-        sample_count=len(samples),
-        source_providers=sorted({sample.source_provider for sample in samples}),
-        samples=[to_video_pose_sample_read(sample) for sample in samples],
-    )
+    return to_video_pose_sample_batch_read(video_asset, samples)
 
 
 @router.get(
@@ -725,11 +799,41 @@ async def list_performance_video_pose_samples_route(
     samples = await list_performance_video_pose_samples(db, video_asset_id)
     video_asset = await get_performance_video_asset(db, video_asset_id)
     await ensure_manage_performance(authz, identity, video_asset.organization_id)
-    return PerformanceVideoPoseSampleBatchRead(
-        video_asset=to_video_asset_read(video_asset),
-        sample_count=len(samples),
-        source_providers=sorted({sample.source_provider for sample in samples}),
-        samples=[to_video_pose_sample_read(sample) for sample in samples],
+    return to_video_pose_sample_batch_read(video_asset, samples)
+
+
+@router.post(
+    "/videos/{video_asset_id}/pose-processing-runs",
+    response_model=PerformanceVideoPoseProcessingRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def process_performance_video_pose_samples_route(
+    video_asset_id: UUID,
+    payload: PerformanceVideoPoseProcessingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceVideoPoseProcessingRead:
+    result = await process_performance_video_pose_samples(
+        db,
+        video_asset_id,
+        payload,
+        identity=identity,
+        authz=authz,
+    )
+    analysis = result["analysis"]
+    return PerformanceVideoPoseProcessingRead(
+        video_asset=to_video_asset_read(result["video_asset"]),
+        model_policy=str(result["model_policy"]),
+        source_provider=str(result["source_provider"]),
+        processed_frame_count=int(result["processed_frame_count"]),
+        decoded_frame_count=int(result["decoded_frame_count"]),
+        sample_count=int(result["sample_count"]),
+        warning_count=len(result["warnings"]),
+        warnings=list(result["warnings"]),
+        pose_samples=to_video_pose_sample_batch_read(result["video_asset"], result["samples"]),
+        analysis_summary=analysis.get("summary") if analysis else None,
+        analysis_model_policy=analysis.get("model_policy") if analysis else None,
     )
 
 
@@ -751,6 +855,9 @@ async def analyze_pose_gait_for_video_route(
         video_asset=to_video_asset_read(result["video_asset"]),
         model_policy=analysis["model_policy"],
         benchmark_profile=analysis["benchmark_profile"],
+        reference_profile_id=analysis.get("reference_profile_id"),
+        reference_profile_name=analysis.get("reference_profile_name"),
+        reference_profile_source=analysis.get("reference_profile_source"),
         confidence=analysis["confidence"],
         pose_sample_count=analysis.get("pose_sample_count", 0),
         pose_sample_source_providers=analysis.get("pose_sample_source_providers", []),

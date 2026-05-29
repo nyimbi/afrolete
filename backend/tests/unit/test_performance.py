@@ -2782,6 +2782,7 @@ def test_video_coaching_analysis_creates_pending_review_outputs(
 def test_performance_video_upload_pose_gait_analysis_and_annotations(
     client,
     identity_headers,
+    monkeypatch,
 ) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     video_bytes = b"fake mp4 sprint clip"
@@ -2830,7 +2831,7 @@ def test_performance_video_upload_pose_gait_analysis_and_annotations(
 
     def sprint_pose_sample(timestamp: float, foot: str, stride_index: int) -> dict[str, object]:
         return {
-            "source_provider": "mediapipe_pose_landmarker",
+            "source_provider": "mediapipe_pose_solution",
             "timestamp_seconds": timestamp,
             "phase": "ground_contact",
             "contact_foot": foot,
@@ -2850,33 +2851,101 @@ def test_performance_video_upload_pose_gait_analysis_and_annotations(
             ],
         }
 
-    pose_samples = client.post(
-        f"/api/v1/performance/videos/{video_asset['id']}/pose-samples",
+    extracted_samples = [
+        sprint_pose_sample(1.00, "left", 0),
+        sprint_pose_sample(1.10, "left", 0),
+        sprint_pose_sample(1.23, "right", 1),
+        sprint_pose_sample(1.33, "right", 1),
+        sprint_pose_sample(1.45, "left", 2),
+        sprint_pose_sample(1.55, "left", 2),
+        sprint_pose_sample(1.68, "right", 3),
+        sprint_pose_sample(1.78, "right", 3),
+    ]
+
+    def fake_extract_pose_samples_from_video_content(*args, **kwargs) -> dict[str, object]:
+        return {
+            "samples": extracted_samples,
+            "decoded_frame_count": 24,
+            "processed_frame_count": 8,
+            "frame_rate": 120,
+            "frame_count": 960,
+            "duration_seconds": 8.0,
+            "warnings": [],
+            "source_provider": "mediapipe_pose_solution",
+            "model_policy": "mediapipe-pose-solution-v1",
+        }
+
+    monkeypatch.setattr(
+        performance_service,
+        "extract_pose_samples_from_video_content",
+        fake_extract_pose_samples_from_video_content,
+    )
+    pose_processing = client.post(
+        f"/api/v1/performance/videos/{video_asset['id']}/pose-processing-runs",
         headers=identity_headers,
         json={
             "organization_id": organization["id"],
             "replace_existing": True,
-            "samples": [
-                sprint_pose_sample(1.00, "left", 0),
-                sprint_pose_sample(1.10, "left", 0),
-                sprint_pose_sample(1.23, "right", 1),
-                sprint_pose_sample(1.33, "right", 1),
-                sprint_pose_sample(1.45, "left", 2),
-                sprint_pose_sample(1.55, "left", 2),
-                sprint_pose_sample(1.68, "right", 3),
-                sprint_pose_sample(1.78, "right", 3),
+            "max_frames": 45,
+            "sample_every_seconds": 0.2,
+            "run_analysis": False,
+        },
+    )
+    assert pose_processing.status_code == 201
+    processed = pose_processing.json()
+    assert processed["model_policy"] == "mediapipe-pose-solution-v1"
+    assert processed["source_provider"] == "mediapipe_pose_solution"
+    assert processed["processed_frame_count"] == 8
+    assert processed["decoded_frame_count"] == 24
+    assert processed["sample_count"] == 8
+    assert processed["pose_samples"]["sample_count"] == 8
+    assert processed["pose_samples"]["source_providers"] == ["mediapipe_pose_solution"]
+
+    reference_profile = client.post(
+        "/api/v1/performance/movement-reference-profiles",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "athletics",
+            "name": "Elite 100m side-view profile",
+            "benchmark_profile": "world_class_sprint",
+            "performer_name": "Reference sprinter",
+            "source_label": "World-class 100m final side-view model",
+            "competition_context": "championship final",
+            "consent_basis": "licensed coaching reference",
+            "metric_targets": [
+                {
+                    "key": "torso_lean_angle",
+                    "label": "Torso Lean Angle",
+                    "category": "technical",
+                    "unit": "degrees",
+                    "optimal_min": 9,
+                    "optimal_max": 13,
+                    "benchmark_label": "reference sprinter max-velocity posture",
+                    "coaching_cue": "Hold the trunk tall through mid-stance.",
+                },
+                {
+                    "key": "ground_contact_time",
+                    "label": "Ground Contact Time",
+                    "category": "physical",
+                    "unit": "ms",
+                    "optimal_min": 85,
+                    "optimal_max": 105,
+                    "benchmark_label": "reference sprinter contact window",
+                    "coaching_cue": "Strike down and back under the hip.",
+                },
             ],
         },
     )
-    assert pose_samples.status_code == 201
-    assert pose_samples.json()["sample_count"] == 8
-    assert pose_samples.json()["source_providers"] == ["mediapipe_pose_landmarker"]
+    assert reference_profile.status_code == 201
+    assert reference_profile.json()["source_label"] == "World-class 100m final side-view model"
 
     analysis = client.post(
         f"/api/v1/performance/videos/{video_asset['id']}/pose-gait-analysis",
         headers=identity_headers,
         json={
             "benchmark_profile": "world_class_sprint",
+            "reference_profile_id": reference_profile.json()["id"],
             "evidence_text": (
                 "Torso lean angle 18 degrees with late torso collapse. "
                 "Front knee drive 64 degrees. Ground contact time 138 ms. "
@@ -2890,12 +2959,16 @@ def test_performance_video_upload_pose_gait_analysis_and_annotations(
     payload = analysis.json()
     assert payload["video_asset"]["status"] == "analyzed"
     assert payload["benchmark_profile"] == "world_class_sprint"
+    assert payload["reference_profile_name"] == "Elite 100m side-view profile"
+    assert payload["reference_profile_source"] == "World-class 100m final side-view model"
     assert payload["pose_sample_count"] == 8
-    assert payload["pose_sample_source_providers"] == ["mediapipe_pose_landmarker"]
+    assert payload["pose_sample_source_providers"] == ["mediapipe_pose_solution"]
     assert payload["model_policy"] == "afrolete-pose-gait-keypoints-v1"
     assert len(payload["metrics"]) >= 5
     assert any(
-        metric["key"] == "ground_contact_time" and metric["source"] == "pose_keypoints"
+        metric["key"] == "ground_contact_time"
+        and metric["source"] == "pose_keypoints"
+        and metric["optimal_max"] == 105
         for metric in payload["metrics"]
     )
     assert payload["optimal_projections"]

@@ -272,6 +272,38 @@ class PerformanceVideoPoseSample(IdMixin, TimestampMixin, Base):
     keypoints_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class PerformanceMovementReferenceProfile(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_movement_reference_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "sport",
+            "benchmark_profile",
+            "name",
+            name="uq_performance_movement_reference_profiles_name",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    sport: Mapped[str] = mapped_column(String(80), default="athletics", nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    benchmark_profile: Mapped[str] = mapped_column(
+        String(120), default="world_class_sprint", nullable=False, index=True
+    )
+    performer_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    source_label: Mapped[str] = mapped_column(String(240), nullable=False)
+    competition_context: Mapped[str | None] = mapped_column(String(240))
+    consent_basis: Mapped[str | None] = mapped_column(String(240))
+    visibility: Mapped[str] = mapped_column(String(40), default="tenant", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    metric_targets_json: Mapped[str] = mapped_column(Text, nullable=False)
+    pose_samples_json: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class PerformanceModelExtractionBenchmarkDataset(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_model_extraction_benchmark_datasets"
     __table_args__ = (

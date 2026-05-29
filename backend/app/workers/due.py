@@ -31,6 +31,7 @@ from app.services.performance import (
     run_performance_achievement_worker,
     run_performance_forecast_validation_worker,
     run_performance_injury_risk_alert_scan_worker,
+    run_performance_video_pose_worker,
     run_wearable_pull_retry_worker,
 )
 from app.services.safeguarding import (
@@ -56,6 +57,7 @@ WORKER_LANES = (
     "performance-forecast-validations",
     "performance-review-escalations",
     "performance-injury-risk-alerts",
+    "performance-video-pose",
     "wearable-pull-retries",
 )
 
@@ -159,6 +161,9 @@ def parse_args() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument("--dry-run-performance-injury-risk-alerts", action="store_true")
+    parser.add_argument("--performance-video-pose-limit", type=int, default=None)
+    parser.add_argument("--performance-video-pose-max-frames", type=int, default=None)
+    parser.add_argument("--performance-video-pose-sample-every-seconds", type=float, default=None)
     parser.add_argument("--wearable-pull-limit", type=int, default=None)
     parser.add_argument("--wearable-pull-max-pages", type=int, default=3)
     parser.add_argument("--wearable-pull-default-retry-after-seconds", type=int, default=300)
@@ -258,6 +263,9 @@ async def run_due_workers(
     performance_injury_risk_repeat_after_hours: int = 24,
     performance_injury_risk_channels: Sequence[CommunicationChannel] | None = None,
     dry_run_performance_injury_risk_alerts: bool = False,
+    performance_video_pose_limit: int | None = None,
+    performance_video_pose_max_frames: int | None = None,
+    performance_video_pose_sample_every_seconds: float | None = None,
     wearable_pull_limit: int | None = None,
     wearable_pull_max_pages: int = 3,
     wearable_pull_default_retry_after_seconds: int = 300,
@@ -459,6 +467,14 @@ async def run_due_workers(
                 dry_run=dry_run_performance_injury_risk_alerts,
             )
         ).model_dump(mode="json")
+    if "performance-video-pose" in active_lanes:
+        results["performance_video_pose"] = await run_performance_video_pose_worker(
+            db,
+            organization_id=organization_id,
+            limit=performance_video_pose_limit or performance_limit or limit,
+            max_frames=performance_video_pose_max_frames,
+            sample_every_seconds=performance_video_pose_sample_every_seconds,
+        )
     if "wearable-pull-retries" in active_lanes:
         results["wearable_pull_retries"] = (
             await run_wearable_pull_retry_worker(
@@ -503,6 +519,7 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             or result.get("notice_count")
             or result.get("reminded_count")
             or result.get("retried_count")
+            or result.get("processed_count")
             or 0
         )
         summary["skipped_count"] += int(result.get("skipped_count") or 0)
@@ -604,6 +621,9 @@ async def run() -> None:
             if args.performance_injury_risk_channel
             else None,
             dry_run_performance_injury_risk_alerts=args.dry_run_performance_injury_risk_alerts,
+            performance_video_pose_limit=args.performance_video_pose_limit,
+            performance_video_pose_max_frames=args.performance_video_pose_max_frames,
+            performance_video_pose_sample_every_seconds=args.performance_video_pose_sample_every_seconds,
             wearable_pull_limit=args.wearable_pull_limit,
             wearable_pull_max_pages=args.wearable_pull_max_pages,
             wearable_pull_default_retry_after_seconds=args.wearable_pull_default_retry_after_seconds,
