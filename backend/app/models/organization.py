@@ -94,6 +94,8 @@ class RegistrationInquiry(IdMixin, TimestampMixin, Base):
     follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     reviewed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    guardian_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    guardian_contact_status: Mapped[str] = mapped_column(String(40), default="pending_account", nullable=False, index=True)
     date_of_birth: Mapped[date | None] = mapped_column(Date, index=True)
     emergency_contact_name: Mapped[str | None] = mapped_column(String(240))
     emergency_contact_phone: Mapped[str | None] = mapped_column(String(64))

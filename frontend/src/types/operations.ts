@@ -437,6 +437,8 @@ export type RegistrationInquiryRead = {
   follow_up_at: string | null;
   reviewed_by_person_id: UUID | null;
   reviewed_at: string | null;
+  guardian_person_id: UUID | null;
+  guardian_contact_status: string;
   date_of_birth: string | null;
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;

@@ -323,6 +323,20 @@ def append_review_note(existing: str | None, note: str) -> str:
     return f"{existing.rstrip()}\n{note}"
 
 
+def normalize_contact_email(email: str) -> str:
+    return email.strip().lower()
+
+
+async def find_person_by_email(db: AsyncSession, email: str) -> Person | None:
+    normalized_email = normalize_contact_email(email)
+    return await db.scalar(
+        select(Person)
+        .where(func.lower(Person.primary_email) == normalized_email)
+        .order_by(Person.created_at)
+        .limit(1)
+    )
+
+
 async def create_organization(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -647,6 +661,7 @@ async def create_public_registration_inquiry(
         team = await db.get(Team, payload.team_id)
         if team is None or team.organization_id != organization.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    guardian = await ensure_registration_guardian_contact(db, organization.id, payload)
 
     required_documents = organization_registration_required_documents(organization)
     if not required_documents:
@@ -654,9 +669,13 @@ async def create_public_registration_inquiry(
         if payload.guardian_name or is_youth_age_group(payload.age_group):
             required_documents.extend(["guardian_consent", "photo_release"])
 
+    inquiry_payload = payload.model_dump()
+    inquiry_payload["email"] = normalize_contact_email(payload.email)
     inquiry = RegistrationInquiry(
         organization_id=organization.id,
-        **payload.model_dump(),
+        **inquiry_payload,
+        guardian_person_id=guardian.id,
+        guardian_contact_status="pending_account",
         required_documents_json=json.dumps(
             [{"document_type": document_type, "filename": document_type} for document_type in required_documents],
             sort_keys=True,
@@ -670,6 +689,48 @@ async def create_public_registration_inquiry(
     await db.commit()
     await db.refresh(inquiry)
     return inquiry
+
+
+async def ensure_registration_guardian_contact(
+    db: AsyncSession,
+    organization_id: UUID,
+    payload: PublicRegistrationInquiryCreate,
+) -> Person:
+    guardian_email = normalize_contact_email(payload.email)
+    guardian = await find_person_by_email(db, guardian_email)
+    if guardian is None:
+        guardian = Person(
+            display_name=payload.guardian_name or guardian_email,
+            primary_email=guardian_email,
+            primary_phone=payload.phone,
+        )
+        db.add(guardian)
+        await db.flush()
+    else:
+        if payload.guardian_name and guardian.display_name == guardian.primary_email:
+            guardian.display_name = payload.guardian_name
+        if payload.phone and not guardian.primary_phone:
+            guardian.primary_phone = payload.phone
+
+    membership = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == organization_id,
+            Membership.subject_type == MemberSubjectType.PERSON,
+            Membership.subject_id == guardian.id,
+            Membership.role == MembershipRole.GUARDIAN,
+        )
+    )
+    if membership is None:
+        db.add(
+            Membership(
+                organization_id=organization_id,
+                subject_type=MemberSubjectType.PERSON,
+                subject_id=guardian.id,
+                role=MembershipRole.GUARDIAN,
+                title="Registration guardian",
+            )
+        )
+    return guardian
 
 
 async def update_public_registration_packet(
@@ -688,7 +749,7 @@ async def update_public_registration_packet(
     inquiry = await db.get(RegistrationInquiry, inquiry_id)
     if inquiry is None or inquiry.organization_id != organization.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
-    if inquiry.email.lower() != payload.email.lower():
+    if normalize_contact_email(inquiry.email) != normalize_contact_email(payload.email):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inquiry email mismatch")
     if inquiry.status == "converted":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Converted inquiry cannot be updated")
@@ -751,7 +812,7 @@ async def upload_public_registration_document(
     inquiry = await db.get(RegistrationInquiry, inquiry_id)
     if inquiry is None or inquiry.organization_id != organization.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
-    if inquiry.email.lower() != payload.email.lower():
+    if normalize_contact_email(inquiry.email) != normalize_contact_email(payload.email):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inquiry email mismatch")
     if inquiry.status == "converted":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Converted inquiry cannot be updated")
@@ -904,7 +965,7 @@ async def create_registration_payment_session(
     payload: RegistrationPaymentSessionCreate,
 ) -> tuple[RegistrationInquiry, str, str, str, RegistrationPaymentHostedCheckoutRead]:
     _organization, inquiry = await get_public_registration_inquiry(db, site, inquiry_id)
-    if inquiry.email.lower() != payload.email.lower():
+    if normalize_contact_email(inquiry.email) != normalize_contact_email(payload.email):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inquiry email mismatch")
     if inquiry.status == "converted":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Converted inquiry cannot be updated")
@@ -1137,11 +1198,12 @@ async def create_registration_inquiry_follow_up(
     if inquiry is None or inquiry.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
 
-    recipient = await db.scalar(select(Person).where(Person.primary_email == inquiry.email))
+    recipient = await db.get(Person, inquiry.guardian_person_id) if inquiry.guardian_person_id else None
+    recipient = recipient or await find_person_by_email(db, inquiry.email)
     if recipient is None:
         recipient = Person(
             display_name=inquiry.guardian_name or inquiry.email,
-            primary_email=inquiry.email,
+            primary_email=normalize_contact_email(inquiry.email),
             primary_phone=inquiry.phone,
         )
         db.add(recipient)
@@ -1149,6 +1211,7 @@ async def create_registration_inquiry_follow_up(
     elif inquiry.phone and not recipient.primary_phone:
         recipient.primary_phone = inquiry.phone
         await db.flush()
+    inquiry.guardian_person_id = recipient.id
 
     message = await create_message(
         db,
@@ -1270,17 +1333,20 @@ async def convert_registration_inquiry(
     guardian = None
     guardian_relationship = None
     if payload.create_guardian:
-        guardian = await db.scalar(select(Person).where(Person.primary_email == inquiry.email))
+        guardian = await db.get(Person, inquiry.guardian_person_id) if inquiry.guardian_person_id else None
+        guardian = guardian or await find_person_by_email(db, inquiry.email)
         if guardian is None:
             guardian = Person(
                 display_name=inquiry.guardian_name or inquiry.email,
-                primary_email=inquiry.email,
+                primary_email=normalize_contact_email(inquiry.email),
                 primary_phone=inquiry.phone,
             )
             db.add(guardian)
             await db.flush()
         elif inquiry.phone and not guardian.primary_phone:
             guardian.primary_phone = inquiry.phone
+        inquiry.guardian_person_id = guardian.id
+        inquiry.guardian_contact_status = "linked_to_athlete"
 
         existing_guardian = await db.scalar(
             select(GuardianRelationship).where(

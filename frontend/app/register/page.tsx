@@ -781,7 +781,10 @@ export default function RegistrationPage() {
                 <div className="registration-account-card">
                   <div>
                     <strong>{submittedInquiry.email}</strong>
-                    <span>{keycloakEnabled ? "Family account" : "Family portal"}</span>
+                    <span>
+                      {keycloakEnabled ? "Family account" : "Family portal"} ·{" "}
+                      {submittedInquiry.guardian_person_id ? "contact ready" : submittedInquiry.guardian_contact_status}
+                    </span>
                   </div>
                   {keycloakEnabled ? (
                     <div>

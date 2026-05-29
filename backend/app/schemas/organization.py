@@ -234,6 +234,8 @@ class RegistrationInquiryRead(BaseModel):
     follow_up_at: datetime | None
     reviewed_by_person_id: UUID | None
     reviewed_at: datetime | None
+    guardian_person_id: UUID | None
+    guardian_contact_status: str
     date_of_birth: date | None
     emergency_contact_name: str | None
     emergency_contact_phone: str | None

@@ -281,6 +281,8 @@ def to_registration_inquiry_read(inquiry) -> RegistrationInquiryRead:
         follow_up_at=inquiry.follow_up_at,
         reviewed_by_person_id=inquiry.reviewed_by_person_id,
         reviewed_at=inquiry.reviewed_at,
+        guardian_person_id=inquiry.guardian_person_id,
+        guardian_contact_status=inquiry.guardian_contact_status,
         date_of_birth=inquiry.date_of_birth,
         emergency_contact_name=inquiry.emergency_contact_name,
         emergency_contact_phone=inquiry.emergency_contact_phone,

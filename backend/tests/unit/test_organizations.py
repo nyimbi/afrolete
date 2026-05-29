@@ -197,6 +197,26 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert inquiry["payment_amount"] == "1000.00"
     assert inquiry["payment_currency"] == "KES"
     assert inquiry["payment_status"] == "pending"
+    assert inquiry["guardian_person_id"]
+    assert inquiry["guardian_contact_status"] == "pending_account"
+
+    repeat_inquiry_response = client.post(
+        "/api/v1/organizations/public/makini-track/registration-inquiries",
+        json={
+            "athlete_name": "Asha Runner",
+            "guardian_name": "Parent Runner",
+            "email": "PARENT.RUNNER@example.com",
+            "phone": "+254700000001",
+            "age_group": "U13",
+            "sport_interest": "athletics",
+            "team_id": onboarding["starter_team"]["id"],
+        },
+    )
+    assert repeat_inquiry_response.status_code == 201
+    repeat_inquiry = repeat_inquiry_response.json()
+    assert repeat_inquiry["email"] == "parent.runner@example.com"
+    assert repeat_inquiry["guardian_person_id"] == inquiry["guardian_person_id"]
+    assert repeat_inquiry["guardian_contact_status"] == "pending_account"
 
     document_response = client.post(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/documents",
@@ -335,8 +355,10 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert conversion_response.status_code == 200
     conversion = conversion_response.json()
     assert conversion["inquiry"]["status"] == "converted"
+    assert conversion["inquiry"]["guardian_person_id"] == inquiry["guardian_person_id"]
+    assert conversion["inquiry"]["guardian_contact_status"] == "linked_to_athlete"
     assert conversion["roster_entry_id"]
-    assert conversion["guardian_person_id"]
+    assert conversion["guardian_person_id"] == inquiry["guardian_person_id"]
     assert conversion["guardian_invite_message_id"]
     assert conversion["guardian_invite_portal_url"].startswith("http://localhost:3000/family?")
     assert f"organization_id={onboarding['organization']['id']}" in conversion["guardian_invite_portal_url"]
