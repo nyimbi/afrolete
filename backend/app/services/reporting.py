@@ -12,6 +12,7 @@ from urllib.parse import quote
 from uuid import UUID, uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,7 +45,7 @@ from app.schemas.reporting import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
-from app.services.secrets import resolve_secret_sync
+from app.services.secrets import resolve_secret, resolve_secret_sync
 from app.services.storage.objects import get_object, put_object
 
 
@@ -547,37 +548,324 @@ async def generate_live_insight(
     identity: CurrentIdentity,
     organization_id: UUID,
     authz: AuthorizationService,
+    settings: Settings | None = None,
 ) -> IntelligenceInsight:
+    selected_settings = settings or get_settings()
     await ensure_manage_reporting(authz, identity, organization_id)
     reports = await list_generated_reports(db, organization_id)
     risks = await list_risk_scores(db, organization_id)
     summary = await reporting_summary(db, organization_id)
     highest_risk = max((risk.score for risk in risks), default=0)
     severity = InsightSeverity.CRITICAL if highest_risk >= 85 else InsightSeverity.WARNING if highest_risk >= 70 else InsightSeverity.WATCH
-    title = "AI reporting review: delivery and risk signals"
-    evidence = (
+    deterministic_evidence = (
         f"{summary['generated_reports']} reports, {summary['export_jobs']} exports, "
         f"{summary['open_insights']} open insights, highest risk score {highest_risk}."
     )
-    recommendation = (
+    deterministic_recommendation = (
         "Prioritize high-risk athlete review before publishing the next stakeholder packet."
         if highest_risk >= 70
         else "Convert the latest report into scheduled delivery and keep monitoring trend changes."
     )
+    provider_result = await request_reporting_insight_provider(
+        selected_settings,
+        organization_id,
+        summary,
+        reports,
+        risks,
+        highest_risk,
+        severity,
+        deterministic_evidence,
+        deterministic_recommendation,
+    )
+    provider_payload = provider_result.get("payload") if provider_result else None
+    if not isinstance(provider_payload, dict):
+        provider_payload = {}
+    provider_notes = str(provider_result.get("notes") or "") if provider_result else ""
+    provider_reference = str(provider_result.get("provider_reference") or "") if provider_result else ""
+    evidence = bounded_provider_text(provider_payload, "evidence", deterministic_evidence, 8000)
+    if provider_notes and provider_result and provider_result.get("provider") == "deterministic_fallback":
+        evidence = f"{evidence} Provider fallback: {provider_notes}"[:8000]
+    if provider_reference:
+        evidence = f"{evidence} Provider reference: {provider_reference}"[:8000]
     insight = IntelligenceInsight(
         organization_id=organization_id,
-        title=title,
-        insight_type="ai_generated_reporting_review",
-        severity=severity,
-        confidence=0.82 if reports else 0.66,
+        title=bounded_provider_text(
+            provider_payload,
+            "title",
+            "AI reporting review: delivery and risk signals",
+            220,
+        ),
+        insight_type=bounded_provider_text(
+            provider_payload,
+            "insight_type",
+            "ai_generated_reporting_review",
+            80,
+        ),
+        severity=provider_insight_severity(provider_payload, severity),
+        confidence=bounded_provider_float(
+            provider_payload,
+            "confidence",
+            0.82 if reports else 0.66,
+            0,
+            1,
+        ),
         evidence=evidence,
-        recommendation=recommendation,
-        model_name="afrolete-deterministic-insight-v1",
+        recommendation=bounded_provider_text(provider_payload, "recommendation", deterministic_recommendation, 8000),
+        model_name=bounded_provider_text(
+            provider_payload,
+            "model_name",
+            str(provider_result.get("model_policy")) if provider_result else "afrolete-deterministic-insight-v1",
+            120,
+        ),
     )
     db.add(insight)
     await db.commit()
     await db.refresh(insight)
     return insight
+
+
+async def request_reporting_insight_provider(
+    settings: Settings,
+    organization_id: UUID,
+    summary: dict,
+    reports: list[GeneratedReport],
+    risks: list[PredictiveRiskScore],
+    highest_risk: int,
+    deterministic_severity: InsightSeverity,
+    deterministic_evidence: str,
+    deterministic_recommendation: str,
+) -> dict[str, object] | None:
+    if settings.reporting_insight_generation_mode != "webhook":
+        return None
+    if not settings.reporting_insight_generation_webhook_url:
+        return {
+            "provider": "deterministic_fallback",
+            "model_policy": settings.reporting_insight_generation_model,
+            "status_code": None,
+            "provider_reference": None,
+            "notes": "Reporting insight webhook mode is enabled but no webhook URL is configured.",
+            "payload": {},
+        }
+    key_resolution = await resolve_reporting_insight_generation_key(settings)
+    if key_resolution["failure_reason"]:
+        return {
+            "provider": "deterministic_fallback",
+            "model_policy": settings.reporting_insight_generation_model,
+            "status_code": None,
+            "provider_reference": None,
+            "notes": key_resolution["failure_reason"],
+            "payload": {},
+        }
+    request_payload = reporting_insight_provider_payload(
+        settings,
+        organization_id,
+        summary,
+        reports,
+        risks,
+        highest_risk,
+        deterministic_severity,
+        deterministic_evidence,
+        deterministic_recommendation,
+    )
+    body = reporting_insight_generation_body(request_payload)
+    try:
+        async with httpx.AsyncClient(timeout=settings.reporting_insight_generation_timeout_seconds) as client:
+            response = await client.post(
+                settings.reporting_insight_generation_webhook_url,
+                content=body,
+                headers=reporting_insight_generation_headers(settings, body, str(key_resolution["key"] or "")),
+            )
+    except httpx.HTTPError as exc:
+        return {
+            "provider": "deterministic_fallback",
+            "model_policy": settings.reporting_insight_generation_model,
+            "status_code": None,
+            "provider_reference": None,
+            "notes": str(exc)[:600],
+            "payload": {},
+        }
+    if not 200 <= response.status_code < 300:
+        return {
+            "provider": "deterministic_fallback",
+            "model_policy": settings.reporting_insight_generation_model,
+            "status_code": response.status_code,
+            "provider_reference": None,
+            "notes": f"Reporting insight provider returned {response.status_code}: {response.text[:400]}",
+            "payload": {},
+        }
+    try:
+        response_payload = response.json()
+    except ValueError:
+        response_payload = {}
+    if not isinstance(response_payload, dict):
+        response_payload = {}
+    return {
+        "provider": "webhook",
+        "model_policy": str(response_payload.get("model_name") or settings.reporting_insight_generation_model),
+        "status_code": response.status_code,
+        "provider_reference": bounded_optional_provider_text(response_payload, "provider_reference", 240),
+        "notes": bounded_optional_provider_text(response_payload, "notes", 600)
+        or bounded_optional_provider_text(response_payload, "summary", 600),
+        "payload": response_payload,
+    }
+
+
+async def resolve_reporting_insight_generation_key(settings: Settings) -> dict[str, str | None]:
+    source = "openbao" if settings.reporting_insight_generation_webhook_key_secret_path else "env"
+    try:
+        secret = await resolve_secret(
+            settings,
+            env_value=settings.reporting_insight_generation_webhook_key,
+            path=settings.reporting_insight_generation_webhook_key_secret_path,
+            field_name=settings.reporting_insight_generation_webhook_key_secret_field,
+            label="reporting insight generation webhook key",
+        )
+    except HTTPException as exc:
+        return {"key": None, "source": "openbao", "failure_reason": str(exc.detail)}
+    return {"key": secret, "source": source if secret else "unset", "failure_reason": None}
+
+
+def reporting_insight_provider_payload(
+    settings: Settings,
+    organization_id: UUID,
+    summary: dict,
+    reports: list[GeneratedReport],
+    risks: list[PredictiveRiskScore],
+    highest_risk: int,
+    deterministic_severity: InsightSeverity,
+    deterministic_evidence: str,
+    deterministic_recommendation: str,
+) -> dict[str, object]:
+    return {
+        "event": "afrolete.reporting.insight.generate",
+        "model": settings.reporting_insight_generation_model,
+        "idempotency_key": f"{organization_id}:reporting-insight:{summary.get('generated_reports', 0)}:{highest_risk}",
+        "organization_id": str(organization_id),
+        "summary": summary,
+        "context": {
+            "highest_risk_score": highest_risk,
+            "deterministic_severity": deterministic_severity.value,
+            "deterministic_evidence": deterministic_evidence,
+            "deterministic_recommendation": deterministic_recommendation,
+            "recent_reports": [
+                {
+                    "id": str(report.id),
+                    "title": report.title,
+                    "status": report.status.value,
+                    "summary": report.summary,
+                    "findings": report.findings,
+                    "recommendations": report.recommendations,
+                    "created_at": report.created_at.isoformat() if report.created_at else None,
+                }
+                for report in reports[:5]
+            ],
+            "recent_risk_scores": [
+                {
+                    "id": str(risk.id),
+                    "athlete_profile_id": str(risk.athlete_profile_id),
+                    "model_name": risk.model_name,
+                    "score": risk.score,
+                    "risk_band": risk.risk_band,
+                    "drivers": risk.drivers,
+                    "recommendation": risk.recommendation,
+                    "valid_for_date": risk.valid_for_date.isoformat(),
+                }
+                for risk in risks[:10]
+            ],
+        },
+        "output_contract": {
+            "title": "string",
+            "insight_type": "string",
+            "severity": "info|watch|warning|critical",
+            "confidence": "number 0..1",
+            "evidence": "string",
+            "recommendation": "string",
+            "model_name": "string",
+            "provider_reference": "string",
+        },
+    }
+
+
+def reporting_insight_generation_headers(settings: Settings, body: bytes, signing_key: str = "") -> dict[str, str]:
+    headers = {
+        "User-Agent": "AfroLete-Reporting-Insight/1.0",
+        "Content-Type": "application/json",
+    }
+    if signing_key:
+        timestamp = str(int(time.time()))
+        headers["X-Afrolete-Reporting-Key-Source"] = (
+            "openbao" if settings.reporting_insight_generation_webhook_key_secret_path else "env"
+        )
+        headers["X-Afrolete-Reporting-Timestamp"] = timestamp
+        headers["X-Afrolete-Reporting-Signature"] = reporting_insight_generation_signature(
+            signing_key,
+            timestamp,
+            body,
+        )
+    return headers
+
+
+def reporting_insight_generation_body(payload: dict[str, object]) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+
+
+def reporting_insight_generation_signature(signing_key: str, timestamp: str, body: bytes) -> str:
+    digest = hmac.new(signing_key.encode(), timestamp.encode() + b"." + body, sha256).hexdigest()
+    return f"sha256={digest}"
+
+
+def provider_insight_severity(
+    provider_payload: dict[str, object],
+    fallback: InsightSeverity,
+) -> InsightSeverity:
+    value = provider_payload.get("severity")
+    if isinstance(value, str):
+        try:
+            return InsightSeverity(value)
+        except ValueError:
+            return fallback
+    return fallback
+
+
+def bounded_provider_text(
+    provider_payload: dict[str, object],
+    key: str,
+    fallback: str,
+    max_length: int,
+) -> str:
+    value = provider_payload.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()[:max_length]
+    return fallback[:max_length]
+
+
+def bounded_optional_provider_text(
+    provider_payload: dict[str, object],
+    key: str,
+    max_length: int,
+) -> str | None:
+    value = provider_payload.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()[:max_length]
+    return None
+
+
+def bounded_provider_float(
+    provider_payload: dict[str, object],
+    key: str,
+    fallback: float,
+    lower: float,
+    upper: float,
+) -> float:
+    value = provider_payload.get(key)
+    if isinstance(value, int | float):
+        return min(max(float(value), lower), upper)
+    if isinstance(value, str):
+        try:
+            return min(max(float(value), lower), upper)
+        except ValueError:
+            return min(max(fallback, lower), upper)
+    return min(max(fallback, lower), upper)
 
 
 async def synthesize_report_text(

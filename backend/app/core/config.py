@@ -149,6 +149,13 @@ class Settings(BaseSettings):
     report_artifact_signing_key_secret_path: str = ""
     report_artifact_signing_key_secret_field: str = "value"
     report_artifact_url_ttl_seconds: int = 900
+    reporting_insight_generation_mode: Literal["deterministic", "webhook"] = "deterministic"
+    reporting_insight_generation_model: str = "afrolete-reporting-insight-v1"
+    reporting_insight_generation_webhook_url: str = ""
+    reporting_insight_generation_webhook_key: str = ""
+    reporting_insight_generation_webhook_key_secret_path: str = ""
+    reporting_insight_generation_webhook_key_secret_field: str = "value"
+    reporting_insight_generation_timeout_seconds: float = 8.0
     equipment_file_dir: str = "data/equipment-files"
     equipment_file_url_prefix: str = "local://equipment-files"
     travel_receipt_file_dir: str = "data/travel-receipts"

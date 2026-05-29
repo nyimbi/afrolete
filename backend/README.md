@@ -128,6 +128,21 @@ The backend signs the canonical JSON payload with
 `X-Afrolete-Training-Signature` and falls back to deterministic planning with
 provider metadata in the response if the provider is unavailable.
 
+Reporting insight generation also defaults to deterministic local review. To
+send reporting/risk context to a live model worker, set:
+
+```bash
+AFROLETE_REPORTING_INSIGHT_GENERATION_MODE=webhook
+AFROLETE_REPORTING_INSIGHT_GENERATION_MODEL=afrolete-reporting-insight-v1
+AFROLETE_REPORTING_INSIGHT_GENERATION_WEBHOOK_URL=https://models.example/reporting-insight
+AFROLETE_REPORTING_INSIGHT_GENERATION_WEBHOOK_KEY_SECRET_PATH=secret/data/afrolete/reporting
+AFROLETE_REPORTING_INSIGHT_GENERATION_WEBHOOK_KEY_SECRET_FIELD=webhook_key
+```
+
+The backend signs the canonical JSON payload with
+`X-Afrolete-Reporting-Signature` and records provider references in the
+generated insight evidence while retaining deterministic fallback behavior.
+
 ## Responsibilities
 
 - Domain API and OpenAPI contract.
