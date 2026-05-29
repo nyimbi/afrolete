@@ -190,6 +190,9 @@ class OrganizationOnboardingRead(BaseModel):
     organization: OrganizationRead
     starter_team: TeamRead | None = None
     public_site_path: str
+    registration_page_path: str
+    admissions_path: str
+    family_portal_path: str
     dashboard_path: str
     owner_email: str
     owner_display_name: str

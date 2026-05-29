@@ -47,6 +47,15 @@ const queueLabels: Record<AdmissionQueue, string> = {
   converted: "Converted"
 };
 
+function readAdmissionsOrganizationId(): string {
+  return new URLSearchParams(window.location.search).get("organization_id") ?? "";
+}
+
+function readAdmissionsQueue(): AdmissionQueue | null {
+  const value = new URLSearchParams(window.location.search).get("queue");
+  return value && value in queueLabels ? (value as AdmissionQueue) : null;
+}
+
 export default function AdmissionsPage() {
   const [identity, setIdentity] = useState<LocalIdentity>(defaultIdentity);
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
@@ -65,6 +74,10 @@ export default function AdmissionsPage() {
   const selectedOrganization = organizations.find((organization) => organization.id === selectedOrganizationId) ?? null;
 
   useEffect(() => {
+    const requestedQueue = readAdmissionsQueue();
+    if (requestedQueue) {
+      setQueue(requestedQueue);
+    }
     if (!keycloakEnabled) {
       const stored = window.localStorage.getItem("afrolete.admissionsIdentity");
       if (stored) {
@@ -171,7 +184,16 @@ export default function AdmissionsPage() {
     try {
       const loaded = await apiRequest<OrganizationRead[]>("/organizations", { identity: requestIdentity });
       setOrganizations(loaded);
-      setSelectedOrganizationId((current) => current || loaded[0]?.id || "");
+      setSelectedOrganizationId((current) => {
+        if (current) {
+          return current;
+        }
+        const requestedOrganizationId = readAdmissionsOrganizationId();
+        if (requestedOrganizationId && loaded.some((organization) => organization.id === requestedOrganizationId)) {
+          return requestedOrganizationId;
+        }
+        return loaded[0]?.id || "";
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Organizations could not be loaded");
     } finally {

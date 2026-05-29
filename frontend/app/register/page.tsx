@@ -165,8 +165,19 @@ export default function RegistrationPage() {
   }, [identity, keycloakEnabled]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedMode = params.get("mode");
+    const requestedSite = params.get("site");
+    if (requestedMode === "player" || requestedSite) {
+      setMode("player");
+    }
+    if (requestedSite) {
+      void loadPublicSite(requestedSite);
+      void searchDirectory(requestedSite);
+      return;
+    }
     void searchDirectory();
-    // Directory search is intentionally loaded once; manual controls drive later searches.
+    // Directory search and optional launch deeplink are intentionally loaded once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -318,14 +329,14 @@ export default function RegistrationPage() {
     }
   };
 
-  const selectDirectoryItem = async (item: OrganizationDirectoryRead) => {
-    setBusy(`site-${item.id}`);
+  const loadPublicSite = async (siteIdentifier: string, busyKey = `site-${siteIdentifier}`) => {
+    setBusy(busyKey);
     setError("");
     setSubmittedInquiry(null);
     setAccountReadiness(null);
     setRegistrationPacket(null);
     try {
-      const site = await apiRequest<OrganizationPublicSiteRead>(`/organizations/public/${encodeURIComponent(item.slug)}`);
+      const site = await apiRequest<OrganizationPublicSiteRead>(`/organizations/public/${encodeURIComponent(siteIdentifier)}`);
       setSelectedSite(site);
       setInquiryForm((current) => ({
         ...current,
@@ -343,6 +354,10 @@ export default function RegistrationPage() {
     } finally {
       setBusy("");
     }
+  };
+
+  const selectDirectoryItem = async (item: OrganizationDirectoryRead) => {
+    await loadPublicSite(item.slug, `site-${item.id}`);
   };
 
   const loadAccountReadiness = async (siteSlug: string, inquiry: RegistrationInquiryRead) => {
@@ -723,6 +738,9 @@ export default function RegistrationPage() {
                   <div className="register-result-links">
                     <a href={onboarding.dashboard_path}>Open console</a>
                     <a href={onboarding.public_site_path}>Open public site</a>
+                    <a href={onboarding.registration_page_path}>Open registration</a>
+                    <a href={onboarding.admissions_path}>Review admissions</a>
+                    <a href={onboarding.family_portal_path}>Family portal</a>
                   </div>
                   {onboarding.starter_team ? (
                     <p>

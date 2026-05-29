@@ -405,6 +405,9 @@ export type OrganizationOnboardingRead = {
   organization: OrganizationRead;
   starter_team: TeamRead | null;
   public_site_path: string;
+  registration_page_path: string;
+  admissions_path: string;
+  family_portal_path: string;
   dashboard_path: string;
   owner_email: string;
   owner_display_name: string;

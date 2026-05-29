@@ -138,6 +138,9 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert onboarding["organization"]["my_roles"] == ["owner"]
     assert onboarding["owner_email"] == identity_headers["X-Afrolete-Email"]
     assert onboarding["public_site_path"] == "/site/makini-track"
+    assert onboarding["registration_page_path"] == "/register?mode=player&site=makini-track"
+    assert onboarding["admissions_path"] == f"/admissions?organization_id={onboarding['organization']['id']}"
+    assert onboarding["family_portal_path"] == f"/family?organization_id={onboarding['organization']['id']}"
     assert onboarding["dashboard_path"].startswith("/?organization_id=")
     assert onboarding["starter_team"]["name"] == "Junior Sprint Squad"
     assert onboarding["starter_team"]["sport_format"] == "individual"
