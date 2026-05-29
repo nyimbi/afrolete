@@ -221,7 +221,11 @@ Video review now includes stored performance clips, slow-motion playback rates,
 timestamped human annotations, provider-neutral pose/keypoint sample ingestion,
 and a MediaPipe/OpenCV worker that decodes stored clips, samples frames,
 extracts normalized body landmarks, and writes those landmarks through the same
-pose-sample contract used by external providers. Tenant-managed reference
+pose-sample contract used by external providers. The worker also has an
+endpoint-ingest mode that posts extracted keypoint batches to
+`/api/v1/performance/videos/{video_asset_id}/pose-samples`, so containerized or
+remote workers exercise the same API boundary as third-party pose providers.
+Tenant-managed reference
 profiles for world-class or optimal movement models then drive pose/gait
 benchmark comparisons and optimal movement projections. The output remains
 advisory and pending review until a coach accepts it.
@@ -281,7 +285,10 @@ The backend includes a unified due-worker that can run scheduler-ready lanes for
 agent tasks, developer webhooks, billing, communications, travel reminders,
 emergency escalation, performance achievements, forecast validation, review
 escalation, injury-risk alerts, object-storage lifecycle cleanup, performance
-video pose extraction, wearable pulls, and compliance reconciliation.
+video pose extraction, wearable pulls, and compliance reconciliation. The video
+pose lane can run in direct in-process mode or endpoint-ingest mode, where the
+worker decodes stored media and posts normalized keypoints back through the
+existing pose-sample API.
 
 Object storage can run in local mode for demos or S3-compatible mode for MinIO.
 The same storage adapter supports retention policy enforcement: local mode

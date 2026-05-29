@@ -39,6 +39,7 @@ from app.services.safeguarding import (
     run_guardian_portal_invite_reminder_worker,
 )
 from app.services.storage.lifecycle import run_object_storage_lifecycle
+from app.workers.video_pose import run_performance_video_pose_endpoint_worker
 
 WORKER_LANES = (
     "agent-tasks",
@@ -168,6 +169,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--performance-video-pose-limit", type=int, default=None)
     parser.add_argument("--performance-video-pose-max-frames", type=int, default=None)
     parser.add_argument("--performance-video-pose-sample-every-seconds", type=float, default=None)
+    parser.add_argument("--performance-video-pose-api-base-url", default=None)
+    parser.add_argument("--performance-video-pose-bearer-token", default=None)
+    parser.add_argument("--performance-video-pose-local-auth-sub", default=None)
+    parser.add_argument("--performance-video-pose-local-auth-email", default=None)
+    parser.add_argument("--performance-video-pose-local-auth-name", default=None)
     parser.add_argument("--wearable-pull-limit", type=int, default=None)
     parser.add_argument("--wearable-pull-max-pages", type=int, default=3)
     parser.add_argument("--wearable-pull-default-retry-after-seconds", type=int, default=300)
@@ -191,6 +197,19 @@ def selected_lanes(lanes: Sequence[str]) -> set[str]:
     if "all" in lanes:
         return set(WORKER_LANES)
     return set(lanes)
+
+
+def performance_video_pose_request_headers(args: argparse.Namespace) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    if args.performance_video_pose_bearer_token:
+        headers["Authorization"] = f"Bearer {args.performance_video_pose_bearer_token}"
+    if args.performance_video_pose_local_auth_sub:
+        headers["X-Afrolete-Sub"] = args.performance_video_pose_local_auth_sub
+    if args.performance_video_pose_local_auth_email:
+        headers["X-Afrolete-Email"] = args.performance_video_pose_local_auth_email
+    if args.performance_video_pose_local_auth_name:
+        headers["X-Afrolete-Name"] = args.performance_video_pose_local_auth_name
+    return headers
 
 
 async def run_due_workers(
@@ -272,6 +291,8 @@ async def run_due_workers(
     performance_video_pose_limit: int | None = None,
     performance_video_pose_max_frames: int | None = None,
     performance_video_pose_sample_every_seconds: float | None = None,
+    performance_video_pose_api_base_url: str | None = None,
+    performance_video_pose_request_headers: dict[str, str] | None = None,
     wearable_pull_limit: int | None = None,
     wearable_pull_max_pages: int = 3,
     wearable_pull_default_retry_after_seconds: int = 300,
@@ -479,13 +500,24 @@ async def run_due_workers(
             )
         ).model_dump(mode="json")
     if "performance-video-pose" in active_lanes:
-        results["performance_video_pose"] = await run_performance_video_pose_worker(
-            db,
-            organization_id=organization_id,
-            limit=performance_video_pose_limit or performance_limit or limit,
-            max_frames=performance_video_pose_max_frames,
-            sample_every_seconds=performance_video_pose_sample_every_seconds,
-        )
+        if performance_video_pose_api_base_url:
+            results["performance_video_pose"] = await run_performance_video_pose_endpoint_worker(
+                db,
+                api_base_url=performance_video_pose_api_base_url,
+                organization_id=organization_id,
+                limit=performance_video_pose_limit or performance_limit or limit,
+                max_frames=performance_video_pose_max_frames,
+                sample_every_seconds=performance_video_pose_sample_every_seconds,
+                request_headers=performance_video_pose_request_headers,
+            )
+        else:
+            results["performance_video_pose"] = await run_performance_video_pose_worker(
+                db,
+                organization_id=organization_id,
+                limit=performance_video_pose_limit or performance_limit or limit,
+                max_frames=performance_video_pose_max_frames,
+                sample_every_seconds=performance_video_pose_sample_every_seconds,
+            )
     if "wearable-pull-retries" in active_lanes:
         results["wearable_pull_retries"] = (
             await run_wearable_pull_retry_worker(
@@ -637,6 +669,8 @@ async def run() -> None:
             performance_video_pose_limit=args.performance_video_pose_limit,
             performance_video_pose_max_frames=args.performance_video_pose_max_frames,
             performance_video_pose_sample_every_seconds=args.performance_video_pose_sample_every_seconds,
+            performance_video_pose_api_base_url=args.performance_video_pose_api_base_url,
+            performance_video_pose_request_headers=performance_video_pose_request_headers(args),
             wearable_pull_limit=args.wearable_pull_limit,
             wearable_pull_max_pages=args.wearable_pull_max_pages,
             wearable_pull_default_retry_after_seconds=args.wearable_pull_default_retry_after_seconds,

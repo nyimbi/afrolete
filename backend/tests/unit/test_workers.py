@@ -1,8 +1,12 @@
+import hashlib
+import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
+import httpx
 from sqlalchemy import func, select
 
+from app.core.config import Settings
 from app.models.agent import Agent, AgentRunRecord, AgentTask
 from app.models.assets import EmergencyActionPlan, EmergencyPlanActivation
 from app.models.billing import BillingPlan, SaaSInvoice, TenantSubscription
@@ -44,12 +48,16 @@ from app.models.performance import (
     AthletePerformanceObservation,
     PerformanceForecastValidationRun,
     PerformanceMetricDefinition,
+    PerformanceVideoAsset,
     PerformanceWearableProviderConnection,
     PerformanceWearableProviderSyncRun,
 )
 from app.models.team import AthleteProfile, GuardianRelationship
 from app.services import performance as performance_service
+from app.services.storage.objects import put_object
 from app.workers.due import run_due_workers, selected_lanes
+from app.workers import video_pose as video_pose_worker
+from app.workers.video_pose import run_performance_video_pose_endpoint_worker
 
 
 async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None:
@@ -158,6 +166,125 @@ def test_selected_lanes_expands_all() -> None:
         "wearable-pull-retries",
     }
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}
+
+
+async def test_video_pose_worker_posts_extracted_keypoints_to_pose_samples_endpoint(
+    db_session,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    organization = Organization(
+        name="Endpoint Pose Worker Club",
+        slug="endpoint-pose-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="athletics",
+    )
+    person = Person(display_name="Endpoint Sprinter", primary_email="endpoint-sprinter@example.com")
+    db_session.add_all([organization, person])
+    await db_session.flush()
+    athlete = AthleteProfile(organization_id=organization.id, person_id=person.id)
+    db_session.add(athlete)
+    await db_session.flush()
+    video_bytes = b"fake sprint video bytes"
+    settings = Settings(performance_video_file_dir=str(tmp_path / "videos"))
+    storage_key = f"{organization.id}/{athlete.id}/endpoint-sprint.mp4"
+    stored = put_object(
+        settings,
+        local_root=settings.performance_video_file_dir,
+        local_url_prefix=settings.performance_video_file_url_prefix,
+        key=storage_key,
+        content=video_bytes,
+        content_type="video/mp4",
+    )
+    video = PerformanceVideoAsset(
+        organization_id=organization.id,
+        athlete_profile_id=athlete.id,
+        uploaded_by_person_id=person.id,
+        sport="athletics",
+        filename="endpoint-sprint.mp4",
+        content_type="video/mp4",
+        size_bytes=len(video_bytes),
+        checksum=hashlib.sha256(video_bytes).hexdigest(),
+        storage_url=stored.url,
+        storage_path=stored.path,
+        video_uri=f"performance-video://{organization.id}/{athlete.id}/endpoint",
+        status="uploaded",
+    )
+    db_session.add(video)
+    await db_session.commit()
+
+    extracted_sample = {
+        "source_provider": "mediapipe_pose_solution",
+        "frame_index": 12,
+        "timestamp_seconds": 0.5,
+        "phase": "ground_contact",
+        "contact_foot": "left",
+        "stride_index": 1,
+        "sample_confidence": 0.91,
+        "keypoints": [
+            {"name": "left_ankle", "x_percent": 42, "y_percent": 78, "confidence": 0.91},
+            {"name": "right_ankle", "x_percent": 55, "y_percent": 70, "confidence": 0.9},
+            {"name": "left_knee", "x_percent": 44, "y_percent": 58, "confidence": 0.92},
+            {"name": "right_knee", "x_percent": 54, "y_percent": 55, "confidence": 0.9},
+        ],
+    }
+
+    def fake_extract(content: bytes, **_: object) -> dict[str, object]:
+        assert content == video_bytes
+        return {
+            "samples": [extracted_sample],
+            "decoded_frame_count": 24,
+            "processed_frame_count": 1,
+            "frame_rate": 48.0,
+            "frame_count": 240,
+            "duration_seconds": 5.0,
+            "warnings": [],
+            "source_provider": "mediapipe_pose_solution",
+            "model_policy": "mediapipe-pose-solution-v1",
+        }
+
+    monkeypatch.setattr(
+        video_pose_worker,
+        "extract_pose_samples_from_video_content",
+        fake_extract,
+    )
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["path"] = request.url.path
+        captured["auth_sub"] = request.headers["x-afrolete-sub"]
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            status_code=201,
+            json={"sample_count": len(captured["payload"]["samples"])},
+        )
+
+    result = await run_performance_video_pose_endpoint_worker(
+        db_session,
+        api_base_url="http://api.test",
+        organization_id=organization.id,
+        limit=5,
+        request_headers={
+            "X-Afrolete-Sub": "kc-pose-worker",
+            "X-Afrolete-Email": "pose-worker@example.com",
+        },
+        settings=settings,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result["ingest_mode"] == "api_endpoint"
+    assert result["eligible_count"] == 1
+    assert result["processed_count"] == 1
+    assert captured["path"] == f"/api/v1/performance/videos/{video.id}/pose-samples"
+    assert captured["auth_sub"] == "kc-pose-worker"
+    payload = captured["payload"]
+    assert payload["organization_id"] == str(organization.id)
+    assert payload["replace_existing"] is True
+    assert payload["samples"][0]["keypoints"][0]["name"] == "left_ankle"
+    await db_session.refresh(video)
+    assert video.status == "pose_sampled"
+    assert video.frame_rate == 48.0
+    assert json.loads(video.pose_analysis_json)["endpoint_sample_count"] == 1
 
 
 async def test_due_worker_sends_dunning_for_overdue_saas_invoice(db_session) -> None:
