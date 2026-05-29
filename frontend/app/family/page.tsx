@@ -64,6 +64,7 @@ export default function FamilyPortalPage() {
   const [inviteRelationshipId, setInviteRelationshipId] = useState("");
   const [loadedInviteKey, setLoadedInviteKey] = useState("");
   const [focusedRegistrationId, setFocusedRegistrationId] = useState("");
+  const [focusedAthleteId, setFocusedAthleteId] = useState("");
   const [autoloadRequested, setAutoloadRequested] = useState(false);
   const [loadedAutoloadKey, setLoadedAutoloadKey] = useState("");
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
@@ -107,6 +108,7 @@ export default function FamilyPortalPage() {
     const organizationParam = params.get("organization_id") ?? params.get("organizationId");
     const relationshipParam = params.get("relationship_id") ?? "";
     const registrationParam = params.get("inquiry_id") ?? params.get("registration_id") ?? "";
+    const athleteParam = params.get("athlete_id") ?? "";
     const autoloadParam = params.get("autoload") === "1" || params.get("load") === "1";
     const emailParam = params.get("guardian_email") ?? params.get("email");
     const nameParam = params.get("guardian_name") ?? params.get("name") ?? emailParam;
@@ -130,7 +132,8 @@ export default function FamilyPortalPage() {
     setIdentity(nextIdentity);
     setInviteRelationshipId(nextInviteRelationshipId);
     setFocusedRegistrationId(registrationParam);
-    setAutoloadRequested(autoloadParam || Boolean(registrationParam && nextOrganizationId));
+    setFocusedAthleteId(athleteParam);
+    setAutoloadRequested(autoloadParam || Boolean((registrationParam || athleteParam) && nextOrganizationId));
     if (keycloakEnabled) {
       completeKeycloakCallbackFromUrl()
         .then((session) => setAuthSession(session ?? getStoredAuthSession()))
@@ -275,7 +278,7 @@ export default function FamilyPortalPage() {
     if (!autoloadRequested || !organizationId) {
       return;
     }
-    const key = `${organizationId}:${identity.email}:${focusedRegistrationId || "workspace"}`;
+    const key = `${organizationId}:${identity.email}:${focusedRegistrationId || focusedAthleteId || "workspace"}`;
     if (loadedAutoloadKey === key) {
       return;
     }
@@ -290,6 +293,7 @@ export default function FamilyPortalPage() {
   }, [
     autoloadRequested,
     authSession,
+    focusedAthleteId,
     focusedRegistrationId,
     identity.email,
     inviteEmailMismatch,
@@ -654,7 +658,10 @@ export default function FamilyPortalPage() {
 
         <div className="family-athletes">
           {family.map((athlete) => (
-            <article key={athlete.athlete_person_id}>
+            <article
+              key={athlete.athlete_person_id}
+              className={athlete.athlete_person_id === focusedAthleteId ? "family-athlete-focus" : undefined}
+            >
               <strong>{athlete.athlete_name}</strong>
               <span>{athlete.relationship} · {athlete.can_sign_consent ? "signer" : "viewer"}</span>
               <small>

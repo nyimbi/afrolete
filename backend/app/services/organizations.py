@@ -1603,6 +1603,7 @@ async def convert_registration_inquiry(
                 payload.guardian_portal_url,
                 organization_id,
                 guardian_relationship.id,
+                athlete.id,
                 guardian,
             )
             guardian_invite = await create_registration_guardian_invite(
@@ -1629,12 +1630,15 @@ def registration_guardian_portal_invite_url(
     base_url: str,
     organization_id: UUID,
     relationship_id: UUID,
+    athlete_id: UUID,
     guardian: Person,
 ) -> str:
     parts = urlsplit(base_url)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query.setdefault("organization_id", str(organization_id))
     query.setdefault("relationship_id", str(relationship_id))
+    query.setdefault("athlete_id", str(athlete_id))
+    query.setdefault("autoload", "1")
     query.setdefault("guardian_sub", f"guardian-{relationship_id}")
     query.setdefault("guardian_name", guardian.display_name)
     if guardian.primary_email:

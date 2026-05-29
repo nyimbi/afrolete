@@ -1166,6 +1166,12 @@ textarea:focus {
   padding: 12px;
 }
 
+.family-athletes article.family-athlete-focus {
+  border-color: color-mix(in srgb, var(--gold) 58%, var(--line));
+  background: color-mix(in srgb, var(--gold) 12%, #fff);
+  box-shadow: inset 4px 0 0 var(--gold);
+}
+
 .family-athletes strong,
 .family-athletes span,
 .family-athletes small {

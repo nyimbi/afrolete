@@ -485,6 +485,8 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert conversion["guardian_invite_message_id"]
     assert conversion["guardian_invite_portal_url"].startswith("http://localhost:3000/family?")
     assert f"organization_id={onboarding['organization']['id']}" in conversion["guardian_invite_portal_url"]
+    assert f"athlete_id={conversion['athlete_person_id']}" in conversion["guardian_invite_portal_url"]
+    assert "autoload=1" in conversion["guardian_invite_portal_url"]
     assert "guardian_email=parent.runner%40example.com" in conversion["guardian_invite_portal_url"]
 
     messages_response = client.get(
