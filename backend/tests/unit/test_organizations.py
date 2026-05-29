@@ -260,6 +260,21 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert amina_registration["account_status"] == "linked"
     assert amina_registration["packet_complete"] is False
     assert "proof_of_age" in amina_registration["missing_documents"]
+    resume_packet_response = client.get(
+        f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/packet"
+        "?email=parent.runner@example.com"
+    )
+    assert resume_packet_response.status_code == 200
+    resume_packet = resume_packet_response.json()
+    assert resume_packet["inquiry"]["id"] == inquiry["id"]
+    assert resume_packet["inquiry"]["guardian_person_id"] == inquiry["guardian_person_id"]
+    assert resume_packet["packet_complete"] is False
+    assert "proof_of_age" in resume_packet["missing_documents"]
+    forbidden_resume_response = client.get(
+        f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/packet"
+        "?email=other.parent@example.com"
+    )
+    assert forbidden_resume_response.status_code == 403
     linked_readiness_response = client.get(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/account-readiness"
         "?email=parent.runner@example.com"

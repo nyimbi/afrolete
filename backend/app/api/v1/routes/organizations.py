@@ -1,7 +1,7 @@
 from uuid import UUID
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -61,6 +61,7 @@ from app.services.organizations import (
     get_public_registration_account_readiness,
     get_registration_payment_hosted_checkout,
     get_organization_for_identity,
+    get_public_registration_inquiry,
     get_public_site,
     organization_handle_availability,
     list_family_registration_inquiries,
@@ -499,6 +500,22 @@ async def get_public_registration_account_readiness_route(
     db: AsyncSession = Depends(get_db),
 ) -> RegistrationInquiryAccountReadinessRead:
     return await get_public_registration_account_readiness(db, site, inquiry_id, email)
+
+
+@router.get(
+    "/public/{site}/registration-inquiries/{inquiry_id}/packet",
+    response_model=RegistrationPacketRead,
+)
+async def get_public_registration_packet_route(
+    site: str,
+    inquiry_id: UUID,
+    email: str = Query(min_length=3, max_length=320),
+    db: AsyncSession = Depends(get_db),
+) -> RegistrationPacketRead:
+    _organization, inquiry = await get_public_registration_inquiry(db, site, inquiry_id)
+    if inquiry.email.strip().lower() != email.strip().lower():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inquiry email mismatch")
+    return to_registration_packet_read(inquiry)
 
 
 @router.patch(

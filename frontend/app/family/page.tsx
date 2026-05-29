@@ -49,6 +49,14 @@ function registrationStatusLabel(status: string): string {
   return labels[status] ?? status.replaceAll("_", " ");
 }
 
+function registrationResumeHref(registration: FamilyRegistrationInquiryRead): string {
+  const params = new URLSearchParams({
+    inquiry_id: registration.id,
+    email: registration.email
+  });
+  return `${registration.public_site_path}?${params.toString()}`;
+}
+
 export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
@@ -594,7 +602,7 @@ export default function FamilyPortalPage() {
                       ? `Missing: ${registration.missing_documents.join(", ")}`
                       : registration.next_steps[0] ?? "Awaiting staff review"}
                   </small>
-                  <a href={registration.public_site_path}>Open organization site</a>
+                  <a href={registrationResumeHref(registration)}>Continue packet</a>
                 </article>
               ))}
             </div>

@@ -118,6 +118,7 @@ export default function PublicOrganizationSitePage() {
   const [accountBusy, setAccountBusy] = useState("");
   const [volunteerBusy, setVolunteerBusy] = useState(false);
   const [volunteerGroupBusy, setVolunteerGroupBusy] = useState(false);
+  const [loadedResumeKey, setLoadedResumeKey] = useState("");
 
   useEffect(() => {
     if (!slug) {
@@ -170,6 +171,69 @@ export default function PublicOrganizationSitePage() {
     }) as CSSProperties,
     [site?.brand_primary_color, site?.brand_secondary_color]
   );
+
+  useEffect(() => {
+    if (!site) {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const inquiryId = params.get("inquiry_id") ?? params.get("inquiryId");
+    const email = params.get("email") ?? params.get("guardian_email");
+    if (!inquiryId || !email) {
+      return;
+    }
+    const resumeKey = `${site.slug}:${inquiryId}:${email.toLowerCase()}`;
+    if (loadedResumeKey === resumeKey) {
+      return;
+    }
+    setLoadedResumeKey(resumeKey);
+    setPacketBusy("resume");
+    setPacketError("");
+    const query = new URLSearchParams({ email });
+    apiRequest<RegistrationPacketRead>(
+      `/organizations/public/${encodeURIComponent(site.slug)}/registration-inquiries/${inquiryId}/packet?${query.toString()}`
+    )
+      .then((packet) => {
+        const submittedByType = new Map(
+          packet.submitted_documents.map((document) => [document.document_type, document.filename])
+        );
+        setRegistrationPacket(packet);
+        setSubmittedInquiry(packet.inquiry);
+        setPaymentSession(null);
+        setPacketForm((current) => ({
+          ...current,
+          date_of_birth: packet.inquiry.date_of_birth ?? "",
+          emergency_contact_name: packet.inquiry.emergency_contact_name ?? packet.inquiry.guardian_name ?? "",
+          emergency_contact_phone: packet.inquiry.emergency_contact_phone ?? packet.inquiry.phone ?? "",
+          medical_notes: packet.inquiry.medical_notes ?? "",
+          consent_signer_name: packet.inquiry.consent_signer_name ?? packet.inquiry.guardian_name ?? "",
+          proof_of_age_filename: submittedByType.get("proof_of_age") ?? current.proof_of_age_filename,
+          medical_information_filename:
+            submittedByType.get("medical_information") ?? current.medical_information_filename,
+          guardian_consent_filename: submittedByType.get("guardian_consent") ?? current.guardian_consent_filename,
+          photo_release_filename: submittedByType.get("photo_release") ?? current.photo_release_filename,
+          payment_amount: packet.inquiry.payment_amount ?? current.payment_amount,
+          payment_currency: packet.inquiry.payment_currency ?? current.payment_currency,
+          payment_method: packet.inquiry.payment_method ?? current.payment_method,
+          payment_reference: packet.inquiry.payment_reference ?? current.payment_reference,
+          payment_status: packet.inquiry.payment_status ?? current.payment_status,
+          privacy_acknowledged: packet.inquiry.privacy_acknowledged_at !== null,
+          guardian_consent_acknowledged: packet.inquiry.guardian_consent_acknowledged_at !== null
+        }));
+        return apiRequest<RegistrationInquiryAccountReadinessRead>(
+          `/organizations/public/${encodeURIComponent(site.slug)}/registration-inquiries/${packet.inquiry.id}/account-readiness?${query.toString()}`
+        );
+      })
+      .then((readiness) => {
+        setAccountReadiness(readiness);
+      })
+      .catch((caught) => {
+        setPacketError(caught instanceof Error ? caught.message : "Registration packet could not be resumed");
+      })
+      .finally(() => {
+        setPacketBusy("");
+      });
+  }, [loadedResumeKey, site]);
 
   if (error) {
     return (
