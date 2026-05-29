@@ -202,6 +202,8 @@ They are expected to have:
 - Human review.
 - Reviewer assignment, due dates, priority, and queue summaries.
 - Review workload trends and manager-facing queue balancing.
+- Cohort-level outcome comparisons for completion, failure, review, approval,
+  and appeal rates.
 - Policy enforcement.
 - Audit trails.
 - Run ledgers.

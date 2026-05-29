@@ -413,6 +413,119 @@ async def list_agent_governance_policy_history_snapshots(
     )
 
 
+async def agent_outcome_cohort_comparison(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    *,
+    horizon_days: int = 90,
+    cohort_by: str = "task_type",
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    allowed_cohorts = {"task_type", "agent_kind", "model_policy", "policy_code", "risk_level", "approval_status"}
+    normalized_cohort = cohort_by.strip().lower()
+    if normalized_cohort not in allowed_cohorts:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported AI outcome cohort")
+    now = datetime.now(UTC)
+    horizon = max(1, min(horizon_days, 365))
+    since = now - timedelta(days=horizon)
+    rows = list(
+        (
+            await db.execute(
+                select(AgentTask, Agent)
+                .join(Agent, Agent.id == AgentTask.agent_id)
+                .where(AgentTask.organization_id == organization_id)
+                .where(AgentTask.created_at >= since)
+                .order_by(AgentTask.created_at.desc())
+            )
+        ).all()
+    )
+    tasks = [task for task, _ in rows]
+    appeal_counts: dict[UUID, int] = {}
+    if tasks:
+        appeal_rows = (
+            await db.execute(
+                select(AgentDecisionAppeal.task_id, func.count(AgentDecisionAppeal.id))
+                .where(AgentDecisionAppeal.organization_id == organization_id)
+                .where(AgentDecisionAppeal.task_id.in_([task.id for task in tasks]))
+                .group_by(AgentDecisionAppeal.task_id)
+            )
+        ).all()
+        appeal_counts = {task_id: int(count) for task_id, count in appeal_rows}
+
+    stats_by_key: dict[str, dict[str, object]] = {}
+    for task, agent in rows:
+        cohort_key, cohort_label = agent_outcome_cohort_value(task, agent, normalized_cohort)
+        stats = stats_by_key.setdefault(
+            cohort_key,
+            {
+                "cohort_key": cohort_key,
+                "cohort_label": cohort_label,
+                "task_count": 0,
+                "completed_count": 0,
+                "waiting_for_review_count": 0,
+                "failed_count": 0,
+                "cancelled_count": 0,
+                "approval_required_count": 0,
+                "approval_rejected_count": 0,
+                "appeal_count": 0,
+                "age_hours": [],
+                "latest_task_at": None,
+            },
+        )
+        stats["task_count"] = int(stats["task_count"]) + 1
+        if task.status == AgentTaskStatus.COMPLETED:
+            stats["completed_count"] = int(stats["completed_count"]) + 1
+        if task.status == AgentTaskStatus.WAITING_FOR_REVIEW or task.approval_status == "pending":
+            stats["waiting_for_review_count"] = int(stats["waiting_for_review_count"]) + 1
+        if task.status == AgentTaskStatus.FAILED:
+            stats["failed_count"] = int(stats["failed_count"]) + 1
+        if task.status == AgentTaskStatus.CANCELLED:
+            stats["cancelled_count"] = int(stats["cancelled_count"]) + 1
+        if int(task.approval_required_count or 0) > 0:
+            stats["approval_required_count"] = int(stats["approval_required_count"]) + 1
+        if int(task.approval_rejected_count or 0) > 0 or task.approval_status == "rejected":
+            stats["approval_rejected_count"] = int(stats["approval_rejected_count"]) + 1
+        stats["appeal_count"] = int(stats["appeal_count"]) + appeal_counts.get(task.id, 0)
+        stats["age_hours"].append(agent_task_outcome_age_hours(task, now))
+        latest_task_at = stats["latest_task_at"]
+        if latest_task_at is None or review_sort_datetime(task.created_at) > review_sort_datetime(latest_task_at):
+            stats["latest_task_at"] = task.created_at
+
+    cohorts = [agent_outcome_cohort_read(stats) for stats in stats_by_key.values()]
+    cohorts.sort(
+        key=lambda item: (
+            -float(item["failure_rate"]),
+            -float(item["appeal_rate"]),
+            -float(item["review_rate"]),
+            -int(item["task_count"]),
+            str(item["cohort_label"]),
+        )
+    )
+    highest_risk_cohort = str(cohorts[0]["cohort_label"]) if cohorts else None
+    completed_count = count_tasks(tasks, AgentTaskStatus.COMPLETED)
+    failed_count = count_tasks(tasks, AgentTaskStatus.FAILED)
+    waiting_for_review_count = sum(
+        1 for task in tasks if task.status == AgentTaskStatus.WAITING_FOR_REVIEW or task.approval_status == "pending"
+    )
+    appeal_count = sum(appeal_counts.values())
+    return {
+        "organization_id": organization_id,
+        "generated_at": now,
+        "horizon_days": horizon,
+        "cohort_by": normalized_cohort,
+        "total_task_count": len(tasks),
+        "completed_count": completed_count,
+        "failed_count": failed_count,
+        "waiting_for_review_count": waiting_for_review_count,
+        "appeal_count": appeal_count,
+        "highest_risk_cohort": highest_risk_cohort,
+        "cohorts": cohorts,
+        "recommendation": agent_outcome_comparison_recommendation(cohorts),
+    }
+
+
 async def simulate_agent_governance_policy(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3111,6 +3224,73 @@ def agent_task_review_trend_recommendation(
     if open_count:
         return "Review load is active; keep due dates current and complete low-risk items promptly."
     return "AI review workload is clear."
+
+
+def agent_outcome_cohort_value(task: AgentTask, agent: Agent, cohort_by: str) -> tuple[str, str]:
+    if cohort_by == "agent_kind":
+        value = agent.kind.value if hasattr(agent.kind, "value") else str(agent.kind)
+    elif cohort_by == "model_policy":
+        value = agent.model_policy or get_settings().agent_default_model
+    elif cohort_by == "policy_code":
+        value = task.governance_policy_code or "ungoverned"
+    elif cohort_by == "risk_level":
+        value = task.governance_policy_risk_level or "unclassified"
+    elif cohort_by == "approval_status":
+        value = task.approval_status or "not_requested"
+    else:
+        value = task.task_type
+    return value, value.replace("_", " ").title()
+
+
+def agent_task_outcome_age_hours(task: AgentTask, now: datetime | None = None) -> int:
+    selected_now = now or datetime.now(UTC)
+    created_at = task.created_at or selected_now
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    return max(int((selected_now - created_at).total_seconds() // 3600), 0)
+
+
+def agent_outcome_cohort_read(stats: dict[str, object]) -> dict[str, object]:
+    task_count = int(stats["task_count"])
+    ages = list(stats["age_hours"])
+    completed_count = int(stats["completed_count"])
+    failed_count = int(stats["failed_count"])
+    waiting_count = int(stats["waiting_for_review_count"])
+    appeal_count = int(stats["appeal_count"])
+    return {
+        "cohort_key": stats["cohort_key"],
+        "cohort_label": stats["cohort_label"],
+        "task_count": task_count,
+        "completed_count": completed_count,
+        "waiting_for_review_count": waiting_count,
+        "failed_count": failed_count,
+        "cancelled_count": stats["cancelled_count"],
+        "approval_required_count": stats["approval_required_count"],
+        "approval_rejected_count": stats["approval_rejected_count"],
+        "appeal_count": appeal_count,
+        "completion_rate": round(completed_count / task_count, 3) if task_count else 0.0,
+        "failure_rate": round(failed_count / task_count, 3) if task_count else 0.0,
+        "review_rate": round(waiting_count / task_count, 3) if task_count else 0.0,
+        "appeal_rate": round(appeal_count / task_count, 3) if task_count else 0.0,
+        "average_age_hours": int(sum(ages) / len(ages)) if ages else 0,
+        "latest_task_at": stats["latest_task_at"],
+    }
+
+
+def agent_outcome_comparison_recommendation(cohorts: list[dict[str, object]]) -> str:
+    if not cohorts:
+        return "No AI task outcomes are available for this cohort window yet."
+    highest = cohorts[0]
+    label = str(highest["cohort_label"])
+    if float(highest["failure_rate"]) >= 0.25:
+        return f"Investigate {label}; its AI tasks are failing more often than other cohorts."
+    if float(highest["appeal_rate"]) >= 0.2:
+        return f"Review {label}; families or operators are appealing this cohort at an elevated rate."
+    if float(highest["review_rate"]) >= 0.5:
+        return f"Rebalance {label}; too much AI work is waiting for human review."
+    if len(cohorts) > 1:
+        return "AI outcomes are comparable across cohorts; keep monitoring failure, review, and appeal rates."
+    return "AI outcome volume is concentrated in one cohort; add more cohorts before drawing fairness conclusions."
 
 
 async def update_agent_task_review_assignment(

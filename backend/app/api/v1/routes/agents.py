@@ -33,6 +33,7 @@ from app.schemas.agent import (
     AgentModelRegistryUpdate,
     AgentModelTransparencyReportRead,
     AgentMyDecisionAppealCreate,
+    AgentOutcomeComparisonRead,
     AgentRunLedgerVerificationRead,
     AgentRunRecordRead,
     AgentScorecardAutomationRunCreate,
@@ -78,6 +79,7 @@ from app.services.agents import (
     agent_governance_policy_history,
     agent_governance_summary,
     agent_model_transparency_report,
+    agent_outcome_cohort_comparison,
     agent_scorecard_publication_readiness,
     agent_run_records,
     assign_agent,
@@ -1106,6 +1108,30 @@ async def agent_task_review_trends_route(
             organization_id,
             authz,
             horizon_days=horizon_days,
+        )
+    )
+
+
+@router.get("/outcome-cohorts", response_model=AgentOutcomeComparisonRead)
+async def agent_outcome_cohort_comparison_route(
+    organization_id: UUID = Query(),
+    horizon_days: int = Query(default=90, ge=1, le=365),
+    cohort_by: str = Query(
+        default="task_type",
+        pattern="^(task_type|agent_kind|model_policy|policy_code|risk_level|approval_status)$",
+    ),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentOutcomeComparisonRead:
+    return AgentOutcomeComparisonRead(
+        **await agent_outcome_cohort_comparison(
+            db,
+            identity,
+            organization_id,
+            authz,
+            horizon_days=horizon_days,
+            cohort_by=cohort_by,
         )
     )
 

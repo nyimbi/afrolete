@@ -35,6 +35,7 @@ import type {
   AgentModelGovernanceEvidenceArtifactRead,
   AgentModelRegistryRead,
   AgentModelTransparencyReportRead,
+  AgentOutcomeComparisonRead,
   AgentRead,
   AgentRunLedgerVerificationRead,
   AgentRunRecordRead,
@@ -1460,6 +1461,7 @@ export default function HomePage() {
   const [agentReviewQueue, setAgentReviewQueue] = useState<AgentTaskReviewQueueItemRead[]>([]);
   const [agentReviewSummary, setAgentReviewSummary] = useState<AgentTaskReviewQueueSummaryRead | null>(null);
   const [agentReviewTrends, setAgentReviewTrends] = useState<AgentTaskReviewTrendRead | null>(null);
+  const [agentOutcomeComparison, setAgentOutcomeComparison] = useState<AgentOutcomeComparisonRead | null>(null);
   const [agentTaskApprovals, setAgentTaskApprovals] = useState<AgentTaskApprovalRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
   const [agentLedgerVerification, setAgentLedgerVerification] =
@@ -2684,7 +2686,7 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, reviewQueue, reviewSummary, reviewTrends, runs, governance, policyRules, policyReport, policyHistory, policyHistorySnapshots, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
+    const [tasks, reviewQueue, reviewSummary, reviewTrends, outcomeComparison, runs, governance, policyRules, policyReport, policyHistory, policyHistorySnapshots, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentTaskReviewQueueItemRead[]>(
         `/agents/tasks/review-queue?organization_id=${organizationId}&limit=8`,
@@ -2696,6 +2698,10 @@ export default function HomePage() {
       ),
       apiRequest<AgentTaskReviewTrendRead>(
         `/agents/tasks/review-trends?organization_id=${organizationId}&horizon_days=14`,
+        { identity }
+      ),
+      apiRequest<AgentOutcomeComparisonRead>(
+        `/agents/outcome-cohorts?organization_id=${organizationId}&cohort_by=task_type&horizon_days=90`,
         { identity }
       ),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
@@ -2736,6 +2742,7 @@ export default function HomePage() {
     setAgentReviewQueue(reviewQueue);
     setAgentReviewSummary(reviewSummary);
     setAgentReviewTrends(reviewTrends);
+    setAgentOutcomeComparison(outcomeComparison);
     const approvalLists = await Promise.all(
       tasks.slice(0, 20).map((task) =>
         apiRequest<AgentTaskApprovalRead[]>(`/agents/tasks/${task.id}/approvals`)
@@ -3410,6 +3417,10 @@ export default function HomePage() {
       setTravelGeofenceZones([]);
       setAgents([]);
       setAgentTasks([]);
+      setAgentReviewQueue([]);
+      setAgentReviewSummary(null);
+      setAgentReviewTrends(null);
+      setAgentOutcomeComparison(null);
       setAgentTaskApprovals([]);
       setAgentRuns([]);
       setAgentLedgerVerification(null);
@@ -17809,6 +17820,33 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {agentOutcomeComparison ? (
+                <article className="task-card">
+                  <div>
+                    <strong>AI outcome cohorts · {agentOutcomeComparison.cohort_by.replaceAll("_", " ")}</strong>
+                    <span>
+                      {agentOutcomeComparison.total_task_count} tasks · {agentOutcomeComparison.completed_count} complete · {agentOutcomeComparison.waiting_for_review_count} in review · {agentOutcomeComparison.failed_count} failed
+                    </span>
+                    <span>
+                      {agentOutcomeComparison.appeal_count} appeals · highest variance {agentOutcomeComparison.highest_risk_cohort ?? "none"}
+                    </span>
+                    <span>{agentOutcomeComparison.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {agentOutcomeComparison?.cohorts.slice(0, 3).map((cohort) => (
+                <article key={`agent-outcome-${cohort.cohort_key}`} className="task-card">
+                  <div>
+                    <strong>{cohort.cohort_label} · {cohort.task_count} AI tasks</strong>
+                    <span>
+                      {Math.round(cohort.completion_rate * 100)}% complete · {Math.round(cohort.review_rate * 100)}% review · {Math.round(cohort.failure_rate * 100)}% failed
+                    </span>
+                    <span>
+                      {cohort.appeal_count} appeals · {cohort.approval_required_count} approval-gated · {cohort.average_age_hours}h average age
+                    </span>
+                  </div>
+                </article>
+              ))}
               {agentReviewTrends?.reviewers.slice(0, 3).map((reviewer) => (
                 <article key={`reviewer-${reviewer.reviewer_person_id ?? "unassigned"}`} className="task-card">
                   <div>

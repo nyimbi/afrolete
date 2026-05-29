@@ -502,6 +502,53 @@ def test_agent_governance_policy_requires_approvals_and_blocks_tasks(client, ide
     assert [item["id"] for item in snapshots] == [snapshot["id"]]
     assert "Recommend tournament squad" in snapshots[0]["content"]
 
+    completed_task = client.post(
+        f"/api/v1/agents/{agent['id']}/tasks",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "task_type": "match_report",
+            "title": "Summarize last match learning themes",
+            "input_ref": f"team:{team['id']}",
+        },
+    ).json()
+    completed_update = client.patch(
+        f"/api/v1/agents/tasks/{completed_task['id']}",
+        headers=identity_headers,
+        json={"status": "completed", "review_notes": "Coach accepted summary after spot check."},
+    )
+    assert completed_update.status_code == 200
+
+    appeal_response = client.post(
+        f"/api/v1/agents/tasks/{task['id']}/appeals",
+        headers=identity_headers,
+        json={
+            "reason": "selection_fairness",
+            "question": "Why was this athlete ranked below the matchday cutoff?",
+            "supporting_evidence_ref": f"team:{team['id']}:selection-notes",
+        },
+    )
+    assert appeal_response.status_code == 201
+
+    outcome_response = client.get(
+        f"/api/v1/agents/outcome-cohorts?organization_id={organization['id']}&cohort_by=task_type&horizon_days=30",
+        headers=identity_headers,
+    )
+    assert outcome_response.status_code == 200
+    outcomes = outcome_response.json()
+    assert outcomes["cohort_by"] == "task_type"
+    assert outcomes["total_task_count"] == 2
+    assert outcomes["completed_count"] == 1
+    assert outcomes["waiting_for_review_count"] == 1
+    assert outcomes["appeal_count"] == 1
+    cohorts = {item["cohort_key"]: item for item in outcomes["cohorts"]}
+    assert cohorts["selection_recommendation"]["approval_required_count"] == 1
+    assert cohorts["selection_recommendation"]["appeal_count"] == 1
+    assert cohorts["selection_recommendation"]["review_rate"] == 1.0
+    assert cohorts["match_report"]["completion_rate"] == 1.0
+    assert outcomes["highest_risk_cohort"] == "Selection Recommendation"
+    assert outcomes["recommendation"]
+
 
 async def test_agent_task_worker_executes_queued_tasks(db_session) -> None:
     organization = Organization(

@@ -251,6 +251,40 @@ class AgentGovernancePolicyHistorySnapshotRead(BaseModel):
     updated_at: datetime
 
 
+class AgentOutcomeCohortRead(BaseModel):
+    cohort_key: str
+    cohort_label: str
+    task_count: int
+    completed_count: int
+    waiting_for_review_count: int
+    failed_count: int
+    cancelled_count: int
+    approval_required_count: int
+    approval_rejected_count: int
+    appeal_count: int
+    completion_rate: float
+    failure_rate: float
+    review_rate: float
+    appeal_rate: float
+    average_age_hours: int
+    latest_task_at: datetime | None
+
+
+class AgentOutcomeComparisonRead(BaseModel):
+    organization_id: UUID
+    generated_at: datetime
+    horizon_days: int
+    cohort_by: str
+    total_task_count: int
+    completed_count: int
+    failed_count: int
+    waiting_for_review_count: int
+    appeal_count: int
+    highest_risk_cohort: str | None
+    cohorts: list[AgentOutcomeCohortRead]
+    recommendation: str
+
+
 class AgentTaskApprovalRequestCreate(BaseModel):
     required_count: int = Field(default=2, ge=1, le=10)
     reviewer_person_ids: list[UUID] = Field(default_factory=list, max_length=10)

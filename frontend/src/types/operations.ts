@@ -3716,6 +3716,40 @@ export type AgentGovernancePolicyHistorySnapshotRead = {
   updated_at: string;
 };
 
+export type AgentOutcomeCohortRead = {
+  cohort_key: string;
+  cohort_label: string;
+  task_count: number;
+  completed_count: number;
+  waiting_for_review_count: number;
+  failed_count: number;
+  cancelled_count: number;
+  approval_required_count: number;
+  approval_rejected_count: number;
+  appeal_count: number;
+  completion_rate: number;
+  failure_rate: number;
+  review_rate: number;
+  appeal_rate: number;
+  average_age_hours: number;
+  latest_task_at: string | null;
+};
+
+export type AgentOutcomeComparisonRead = {
+  organization_id: UUID;
+  generated_at: string;
+  horizon_days: number;
+  cohort_by: string;
+  total_task_count: number;
+  completed_count: number;
+  failed_count: number;
+  waiting_for_review_count: number;
+  appeal_count: number;
+  highest_risk_cohort: string | null;
+  cohorts: AgentOutcomeCohortRead[];
+  recommendation: string;
+};
+
 export type AgentTaskApprovalRead = {
   id: UUID;
   organization_id: UUID;
