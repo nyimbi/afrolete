@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.models.enums import OrganizationType
 from app.schemas.communication import CommunicationMessageRead
+from app.schemas.agent import AgentTaskRead
 from app.schemas.organization import (
     CommitteeCreate,
     CommitteeMemberAdd,
@@ -72,6 +73,7 @@ from app.services.organizations import (
     organization_public_registration_documents,
     public_site_path,
     registration_packet_summary,
+    queue_registration_inquiry_agent_review,
     search_public_organizations,
     settle_registration_payment_checkout,
     upload_public_registration_document,
@@ -339,6 +341,42 @@ def to_registration_conversion_read(item) -> RegistrationInquiryConversionRead:
         guardian_person_id=guardian.id if guardian is not None else None,
         guardian_invite_message_id=guardian_invite.id if guardian_invite is not None else None,
         guardian_invite_portal_url=guardian_invite_url,
+    )
+
+
+def to_agent_task_read(task) -> AgentTaskRead:
+    approval_pending_count = max(
+        int(task.approval_required_count or 0)
+        - int(task.approval_approved_count or 0)
+        - int(task.approval_rejected_count or 0),
+        0,
+    )
+    return AgentTaskRead(
+        id=task.id,
+        agent_id=task.agent_id,
+        organization_id=task.organization_id,
+        task_type=task.task_type,
+        title=task.title,
+        status=task.status,
+        requested_by_person_id=task.requested_by_person_id,
+        input_ref=task.input_ref,
+        output_ref=task.output_ref,
+        review_notes=task.review_notes,
+        review_assigned_to_person_id=task.review_assigned_to_person_id,
+        review_due_at=task.review_due_at,
+        review_priority=task.review_priority or "normal",
+        review_assignment_notes=task.review_assignment_notes,
+        approval_required_count=task.approval_required_count or 0,
+        approval_approved_count=task.approval_approved_count or 0,
+        approval_rejected_count=task.approval_rejected_count or 0,
+        approval_pending_count=approval_pending_count,
+        approval_status=task.approval_status or "not_requested",
+        approval_last_decided_at=task.approval_last_decided_at,
+        governance_policy_rule_id=task.governance_policy_rule_id,
+        governance_policy_code=task.governance_policy_code,
+        governance_policy_decision=task.governance_policy_decision,
+        governance_policy_risk_level=task.governance_policy_risk_level,
+        governance_policy_rationale=task.governance_policy_rationale,
     )
 
 
@@ -661,6 +699,23 @@ async def create_registration_inquiry_follow_up_route(
     )
     recipients = await list_recipients(db, item[1].id)
     return to_registration_follow_up_read(item, recipient_count=len(recipients))
+
+
+@router.post(
+    "/{organization_id}/registration-inquiries/{inquiry_id}/agent-review",
+    response_model=AgentTaskRead,
+    status_code=201,
+)
+async def queue_registration_inquiry_agent_review_route(
+    organization_id: UUID,
+    inquiry_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentTaskRead:
+    return to_agent_task_read(
+        await queue_registration_inquiry_agent_review(db, identity, organization_id, inquiry_id, authz)
+    )
 
 
 @router.post(

@@ -14,9 +14,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
+from app.models.agent import Agent, AgentTask
 from app.models.communication import CommunicationMessage
 from app.models.commercial import FundraisingCampaign, Sponsor, SponsorshipAgreement, TicketProduct
 from app.models.enums import (
+    AgentKind,
     CommercialStatus,
     CommunicationChannel,
     CommunicationMessageType,
@@ -52,8 +54,10 @@ from app.schemas.organization import (
     RegistrationPaymentSettlementRead,
     RegistrationInquiryUpdate,
 )
+from app.schemas.agent import AgentTaskCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
+from app.services.agents import queue_agent_task
 from app.services.communications import create_message
 from app.schemas.communication import CommunicationMessageCreate
 from app.services.storage.objects import put_object
@@ -1376,6 +1380,89 @@ async def update_registration_inquiry(
     await db.commit()
     await db.refresh(inquiry)
     return inquiry
+
+
+async def queue_registration_inquiry_agent_review(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    inquiry_id: UUID,
+    authz: AuthorizationService,
+) -> AgentTask:
+    if not await can_manage_registration_inquiries(identity, organization_id, authz):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    inquiry = await db.get(RegistrationInquiry, inquiry_id)
+    if inquiry is None or inquiry.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
+    if inquiry.status == "converted":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Converted inquiries no longer need admissions AI review",
+        )
+
+    agent = await db.scalar(
+        select(Agent)
+        .where(
+            Agent.organization_id == organization_id,
+            Agent.kind == AgentKind.OPERATIONS,
+            Agent.name == "Admissions Intake Agent",
+        )
+        .order_by(Agent.created_at)
+        .limit(1)
+    )
+    if agent is None:
+        agent = Agent(
+            organization_id=organization_id,
+            name="Admissions Intake Agent",
+            kind=AgentKind.OPERATIONS,
+            purpose=(
+                "Review registration inquiries for packet readiness, consent gaps, "
+                "payment blockers, and family handoff risks before staff conversion."
+            ),
+            status="active",
+            model_policy="human_review_required",
+        )
+        db.add(agent)
+        await db.flush()
+        await authz.touch(
+            Relationship(
+                resource_type="agent",
+                resource_id=str(agent.id),
+                relation="owner",
+                subject_type="user",
+                subject_id=str(identity.user_id),
+            )
+        )
+
+    packet = registration_packet_summary(inquiry)
+    task = await queue_agent_task(
+        db,
+        identity,
+        agent.id,
+        AgentTaskCreate(
+            organization_id=organization_id,
+            task_type="registration_inquiry_review",
+            title=f"Review registration packet for {inquiry.athlete_name}",
+            input_ref=(
+                f"registration-inquiry:{inquiry.id};"
+                f"status:{inquiry.status};"
+                f"verification:{inquiry.verification_status};"
+                f"payment:{inquiry.payment_status};"
+                f"packet_complete:{packet['packet_complete']}"
+            ),
+        ),
+        authz,
+    )
+    inquiry.review_notes = append_review_note(
+        inquiry.review_notes,
+        f"AI admissions review queued for {inquiry.athlete_name}: agent task {task.id}",
+    )
+    inquiry.reviewed_by_person_id = identity.person_id
+    inquiry.reviewed_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(task)
+    return task
 
 
 async def create_registration_inquiry_follow_up(

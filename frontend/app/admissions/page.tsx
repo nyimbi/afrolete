@@ -12,6 +12,7 @@ import {
 } from "@/lib/auth";
 import { afroleteAuthMode, keycloakClientId, keycloakIssuer } from "@/lib/config";
 import type {
+  AgentTaskRead,
   LocalIdentity,
   OrganizationRead,
   RegistrationInquiryConversionRead,
@@ -345,6 +346,26 @@ export default function AdmissionsPage() {
     }
   };
 
+  const queueAiReview = async (inquiry: RegistrationInquiryRead) => {
+    if (!selectedOrganizationId) {
+      setError("Choose an organization before queueing AI review.");
+      return;
+    }
+    setBusy(`ai-review-${inquiry.id}`);
+    setError("");
+    try {
+      const task = await apiRequest<AgentTaskRead>(
+        `/organizations/${selectedOrganizationId}/registration-inquiries/${inquiry.id}/agent-review`,
+        { method: "POST", identity: requestIdentity }
+      );
+      addLog(`AI review queued for ${inquiry.athlete_name}: ${task.status.replaceAll("_", " ")}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "AI review could not be queued");
+    } finally {
+      setBusy("");
+    }
+  };
+
   const convertInquiry = async (inquiry: RegistrationInquiryRead) => {
     if (!selectedOrganizationId) {
       setError("Choose an organization before converting admissions.");
@@ -616,6 +637,9 @@ export default function AdmissionsPage() {
                   </button>
                   <button type="button" onClick={() => sendFollowUp(inquiry)} disabled={busy !== "" || inquiry.status === "converted"}>
                     Follow up
+                  </button>
+                  <button type="button" onClick={() => queueAiReview(inquiry)} disabled={busy !== "" || inquiry.status === "converted"}>
+                    {busy === `ai-review-${inquiry.id}` ? "Queueing AI" : "AI review"}
                   </button>
                   <button
                     type="button"

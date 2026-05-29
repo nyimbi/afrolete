@@ -403,6 +403,24 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert pending_payment_response.status_code == 200
     assert pending_payment_response.json()["verification_status"] == "packet_incomplete"
 
+    agent_review_response = client.post(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/{inquiry['id']}/agent-review",
+        headers=identity_headers,
+    )
+    assert agent_review_response.status_code == 201
+    agent_review = agent_review_response.json()
+    assert agent_review["task_type"] == "registration_inquiry_review"
+    assert agent_review["title"] == "Review registration packet for Amina Runner"
+    assert agent_review["input_ref"].startswith(f"registration-inquiry:{inquiry['id']};")
+    assert "packet_complete:False" in agent_review["input_ref"]
+
+    agent_tasks_response = client.get(
+        f"/api/v1/agents/tasks?organization_id={onboarding['organization']['id']}",
+        headers=identity_headers,
+    )
+    assert agent_tasks_response.status_code == 200
+    assert agent_tasks_response.json()[0]["id"] == agent_review["id"]
+
     payment_session_response = client.post(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/payment-session",
         json={
