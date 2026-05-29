@@ -16,6 +16,7 @@ from app.api.v1.routes import safeguarding
 from app.api.v1.routes import sdk
 from app.api.v1.routes import teams
 from app.api.v1.routes import training
+from app.api.v1.routes import volunteers
 
 api_router = APIRouter()
 api_router.include_router(platform.router, tags=["platform"])
@@ -34,3 +35,4 @@ api_router.include_router(safeguarding.router)
 api_router.include_router(sdk.router)
 api_router.include_router(teams.router)
 api_router.include_router(training.router)
+api_router.include_router(volunteers.router)

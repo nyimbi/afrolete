@@ -24,6 +24,7 @@ class MembershipRole(StrEnum):
     STAFF = "staff"
     ATHLETE = "athlete"
     GUARDIAN = "guardian"
+    VOLUNTEER = "volunteer"
     VIEWER = "viewer"
     AGENT = "agent"
 

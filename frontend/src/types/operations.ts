@@ -15,6 +15,7 @@ export type MembershipRole =
   | "staff"
   | "athlete"
   | "guardian"
+  | "volunteer"
   | "viewer"
   | "agent";
 
@@ -411,6 +412,108 @@ export type MembershipRead = {
   role: MembershipRole;
   title: string | null;
   status: string;
+};
+
+export type VolunteerProfileRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  person_email: string | null;
+  volunteer_type: string;
+  certification_level: string | null;
+  availability: string[];
+  skills: string[];
+  background_check_status: string;
+  background_check_expires_on: string | null;
+  training_status: string;
+  onboarding_status: string;
+  reliability_score: number;
+  emergency_contact: string | null;
+  notes: string | null;
+  status: string;
+};
+
+export type VolunteerOpportunityRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  event_id: UUID | null;
+  title: string;
+  role_type: string;
+  description: string | null;
+  required_skills: string[];
+  starts_at: string;
+  ends_at: string | null;
+  location: string | null;
+  slots_required: number;
+  assigned_count: number;
+  open_slots: number;
+  min_age: number | null;
+  background_check_required: boolean;
+  training_required: boolean;
+  public_signup: boolean;
+  priority: string;
+  status: string;
+};
+
+export type VolunteerAssignmentRead = {
+  id: UUID;
+  organization_id: UUID;
+  opportunity_id: UUID;
+  volunteer_profile_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  opportunity_title: string;
+  role_type: string;
+  status: string;
+  match_score: number;
+  confirmed_at: string | null;
+  checked_in_at: string | null;
+  checked_out_at: string | null;
+  hours_logged: number;
+  notes: string | null;
+};
+
+export type VolunteerTrainingRecordRead = {
+  id: UUID;
+  organization_id: UUID;
+  volunteer_profile_id: UUID;
+  module_name: string;
+  role_type: string | null;
+  required: boolean;
+  status: string;
+  assigned_at: string;
+  completed_at: string | null;
+  expires_on: string | null;
+  score: number | null;
+  certificate_url: string | null;
+};
+
+export type VolunteerRecognitionRead = {
+  id: UUID;
+  organization_id: UUID;
+  volunteer_profile_id: UUID;
+  recognition_type: string;
+  badge_code: string;
+  title: string;
+  points: number;
+  awarded_on: string;
+  source_summary: string | null;
+};
+
+export type VolunteerSummaryRead = {
+  organization_id: UUID;
+  active_volunteers: number;
+  open_opportunities: number;
+  open_slots: number;
+  assigned_shifts: number;
+  confirmed_shifts: number;
+  completed_hours: number;
+  training_compliance_percent: number;
+  coverage_percent: number;
+  top_skills: string[];
+  shortage_roles: string[];
 };
 
 export type TeamRead = {

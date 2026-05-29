@@ -354,6 +354,12 @@ import type {
   UsageMeterRead,
   UsageRecordRead,
   UsageUnit,
+  VolunteerAssignmentRead,
+  VolunteerOpportunityRead,
+  VolunteerProfileRead,
+  VolunteerRecognitionRead,
+  VolunteerSummaryRead,
+  VolunteerTrainingRecordRead,
   WorkOrderPriority,
   WorkOrderStatus,
   MaintenanceWorkOrderRead
@@ -1616,6 +1622,12 @@ export default function HomePage() {
   const [trainingFeedback, setTrainingFeedback] = useState<TrainingSessionFeedbackRead[]>([]);
   const [trainingAvailability, setTrainingAvailability] = useState<TrainingAvailabilityRead | null>(null);
   const [generatedTrainingPlan, setGeneratedTrainingPlan] = useState<GeneratedTrainingPlanRead | null>(null);
+  const [volunteerProfiles, setVolunteerProfiles] = useState<VolunteerProfileRead[]>([]);
+  const [volunteerOpportunities, setVolunteerOpportunities] = useState<VolunteerOpportunityRead[]>([]);
+  const [volunteerAssignments, setVolunteerAssignments] = useState<VolunteerAssignmentRead[]>([]);
+  const [volunteerTrainingRecords, setVolunteerTrainingRecords] = useState<VolunteerTrainingRecordRead[]>([]);
+  const [volunteerRecognitions, setVolunteerRecognitions] = useState<VolunteerRecognitionRead[]>([]);
+  const [volunteerSummary, setVolunteerSummary] = useState<VolunteerSummaryRead | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionRead[]>([]);
   const [competitionParticipants, setCompetitionParticipants] = useState<CompetitionParticipantRead[]>([]);
   const [competitionFixtures, setCompetitionFixtures] = useState<CompetitionFixtureRead[]>([]);
@@ -1801,6 +1813,9 @@ export default function HomePage() {
   const [selectedObservationId, setSelectedObservationId] = useState("");
   const [selectedTrainingPlanId, setSelectedTrainingPlanId] = useState("");
   const [selectedTrainingSessionId, setSelectedTrainingSessionId] = useState("");
+  const [selectedVolunteerProfileId, setSelectedVolunteerProfileId] = useState("");
+  const [selectedVolunteerOpportunityId, setSelectedVolunteerOpportunityId] = useState("");
+  const [selectedVolunteerAssignmentId, setSelectedVolunteerAssignmentId] = useState("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState("");
   const [selectedFixtureId, setSelectedFixtureId] = useState("");
   const [selectedMessageId, setSelectedMessageId] = useState("");
@@ -2168,6 +2183,45 @@ export default function HomePage() {
     feedback: "Felt strong after warm-up; slight tightness near the end.",
     coach_notes: "Keep next session technical if soreness rises tomorrow."
   });
+  const [volunteerForm, setVolunteerForm] = useState({
+    display_name: "Maria Volunteer",
+    email: "maria.volunteer@example.com",
+    volunteer_type: "first_aid",
+    certification_level: "Certified first responder",
+    availability: "saturday,evenings",
+    skills: "first aid,safeguarding,spanish",
+    background_check_status: "cleared",
+    background_check_expires_on: "2027-07-01",
+    training_status: "in_progress",
+    onboarding_status: "active",
+    reliability_score: 0.96,
+    emergency_contact: "+254711000001"
+  });
+  const [volunteerOpportunityForm, setVolunteerOpportunityForm] = useState({
+    title: "Matchday first aid station",
+    role_type: "first_aid",
+    description: "Cover the medical table and incident log.",
+    required_skills: "first aid,safeguarding",
+    starts_at: "2026-07-04T09:00",
+    ends_at: "2026-07-04T13:00",
+    location: "North touchline",
+    slots_required: 1,
+    background_check_required: true,
+    training_required: true,
+    priority: "high"
+  });
+  const [volunteerTrainingForm, setVolunteerTrainingForm] = useState({
+    module_name: "Safeguarding for Matchday Volunteers",
+    status: "complete",
+    score: 94,
+    expires_on: "2027-06-25"
+  });
+  const [volunteerRecognitionForm, setVolunteerRecognitionForm] = useState({
+    badge_code: "first-aid-certified",
+    title: "First Aid Certified",
+    points: 250,
+    source_summary: "Covered matchday medical station."
+  });
   const [competitionForm, setCompetitionForm] = useState({
     name: "U17 City League",
     sport: "football",
@@ -2475,6 +2529,18 @@ export default function HomePage() {
   const selectedTrainingSession = useMemo(
     () => trainingSessions.find((sessionPlan) => sessionPlan.id === selectedTrainingSessionId) ?? null,
     [trainingSessions, selectedTrainingSessionId]
+  );
+  const selectedVolunteerProfile = useMemo(
+    () => volunteerProfiles.find((profile) => profile.id === selectedVolunteerProfileId) ?? null,
+    [volunteerProfiles, selectedVolunteerProfileId]
+  );
+  const selectedVolunteerOpportunity = useMemo(
+    () => volunteerOpportunities.find((opportunity) => opportunity.id === selectedVolunteerOpportunityId) ?? null,
+    [volunteerOpportunities, selectedVolunteerOpportunityId]
+  );
+  const selectedVolunteerAssignment = useMemo(
+    () => volunteerAssignments.find((assignment) => assignment.id === selectedVolunteerAssignmentId) ?? null,
+    [volunteerAssignments, selectedVolunteerAssignmentId]
   );
   const selectedCompetition = useMemo(
     () => competitions.find((competition) => competition.id === selectedCompetitionId) ?? null,
@@ -3066,6 +3132,40 @@ export default function HomePage() {
     setTrainingFeedback(data);
   }, []);
 
+  const loadVolunteers = useCallback(async (organizationId: string, teamId?: string) => {
+    const teamQuery = teamId ? `&team_id=${teamId}` : "";
+    const [
+      profiles,
+      opportunities,
+      assignments,
+      trainingRecords,
+      recognitions,
+      summary
+    ] = await Promise.all([
+      apiRequest<VolunteerProfileRead[]>(`/volunteers/profiles?organization_id=${organizationId}`),
+      apiRequest<VolunteerOpportunityRead[]>(`/volunteers/opportunities?organization_id=${organizationId}${teamQuery}`),
+      apiRequest<VolunteerAssignmentRead[]>(`/volunteers/assignments?organization_id=${organizationId}`),
+      apiRequest<VolunteerTrainingRecordRead[]>(`/volunteers/training-records?organization_id=${organizationId}`),
+      apiRequest<VolunteerRecognitionRead[]>(`/volunteers/recognitions?organization_id=${organizationId}`),
+      apiRequest<VolunteerSummaryRead>(`/volunteers/summary?organization_id=${organizationId}`)
+    ]);
+    setVolunteerProfiles(profiles);
+    setVolunteerOpportunities(opportunities);
+    setVolunteerAssignments(assignments);
+    setVolunteerTrainingRecords(trainingRecords);
+    setVolunteerRecognitions(recognitions);
+    setVolunteerSummary(summary);
+    setSelectedVolunteerProfileId((current) =>
+      profiles.some((profile) => profile.id === current) ? current : profiles[0]?.id ?? ""
+    );
+    setSelectedVolunteerOpportunityId((current) =>
+      opportunities.some((opportunity) => opportunity.id === current) ? current : opportunities[0]?.id ?? ""
+    );
+    setSelectedVolunteerAssignmentId((current) =>
+      assignments.some((assignment) => assignment.id === current) ? current : assignments[0]?.id ?? ""
+    );
+  }, []);
+
   const loadCompetitions = useCallback(async (organizationId: string) => {
     const data = await apiRequest<CompetitionRead[]>(`/competitions?organization_id=${organizationId}`);
     setCompetitions(data);
@@ -3583,6 +3683,15 @@ export default function HomePage() {
       setTrainingFeedback([]);
       setTrainingAvailability(null);
       setGeneratedTrainingPlan(null);
+      setVolunteerProfiles([]);
+      setVolunteerOpportunities([]);
+      setVolunteerAssignments([]);
+      setVolunteerTrainingRecords([]);
+      setVolunteerRecognitions([]);
+      setVolunteerSummary(null);
+      setSelectedVolunteerProfileId("");
+      setSelectedVolunteerOpportunityId("");
+      setSelectedVolunteerAssignmentId("");
       setCompetitions([]);
       setCompetitionParticipants([]);
       setCompetitionFixtures([]);
@@ -3743,6 +3852,7 @@ export default function HomePage() {
       await loadPerformanceBenchmarkDatasets(selectedOrganizationId);
       await loadOppositionScouting(selectedOrganizationId);
       await loadTraining(selectedOrganizationId);
+      await loadVolunteers(selectedOrganizationId);
       await loadCompetitions(selectedOrganizationId);
       await loadAthleteTransfers(selectedOrganizationId);
       await loadCommunications(selectedOrganizationId);
@@ -3773,6 +3883,7 @@ export default function HomePage() {
     loadPerformanceBenchmarkDatasets,
     loadOppositionScouting,
     loadTraining,
+    loadVolunteers,
     loadCompetitions,
     loadAthleteTransfers,
     loadCommunications,
@@ -3814,11 +3925,12 @@ export default function HomePage() {
       async () => {
         await loadEvents(selectedOrganizationId, selectedTeamId || undefined);
         await loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+        await loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
         await loadOppositionScouting(selectedOrganizationId, selectedTeamId || undefined);
       },
       () => addLog("Team lanes refreshed", "good")
     );
-  }, [selectedTeamId, selectedOrganizationId, loadEvents, loadTraining, loadOppositionScouting, runAction, addLog]);
+  }, [selectedTeamId, selectedOrganizationId, loadEvents, loadTraining, loadVolunteers, loadOppositionScouting, runAction, addLog]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -9571,6 +9683,213 @@ export default function HomePage() {
         if (selectedOrganizationId) {
           void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
         }
+      }
+    );
+  };
+
+  const createVolunteerProfile = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-volunteer-profile",
+      () =>
+        apiRequest<VolunteerProfileRead>("/volunteers/profiles", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            email: volunteerForm.email,
+            display_name: volunteerForm.display_name,
+            volunteer_type: volunteerForm.volunteer_type,
+            certification_level: volunteerForm.certification_level,
+            availability: parseCommaList(volunteerForm.availability),
+            skills: parseCommaList(volunteerForm.skills),
+            background_check_status: volunteerForm.background_check_status,
+            background_check_expires_on: volunteerForm.background_check_expires_on || null,
+            training_status: volunteerForm.training_status,
+            onboarding_status: volunteerForm.onboarding_status,
+            reliability_score: volunteerForm.reliability_score,
+            emergency_contact: volunteerForm.emergency_contact
+          }
+        }),
+      (profile) => {
+        setVolunteerProfiles((current) => [profile, ...current.filter((item) => item.id !== profile.id)]);
+        setSelectedVolunteerProfileId(profile.id);
+        addLog(`${profile.person_name} is ready for volunteer scheduling`, "good");
+        void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const createVolunteerOpportunity = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-volunteer-opportunity",
+      () =>
+        apiRequest<VolunteerOpportunityRead>("/volunteers/opportunities", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            event_id: selectedEventId || null,
+            title: volunteerOpportunityForm.title,
+            role_type: volunteerOpportunityForm.role_type,
+            description: volunteerOpportunityForm.description,
+            required_skills: parseCommaList(volunteerOpportunityForm.required_skills),
+            starts_at: new Date(volunteerOpportunityForm.starts_at).toISOString(),
+            ends_at: volunteerOpportunityForm.ends_at ? new Date(volunteerOpportunityForm.ends_at).toISOString() : null,
+            location: volunteerOpportunityForm.location,
+            slots_required: volunteerOpportunityForm.slots_required,
+            background_check_required: volunteerOpportunityForm.background_check_required,
+            training_required: volunteerOpportunityForm.training_required,
+            priority: volunteerOpportunityForm.priority
+          }
+        }),
+      (opportunity) => {
+        setVolunteerOpportunities((current) => [
+          opportunity,
+          ...current.filter((item) => item.id !== opportunity.id)
+        ]);
+        setSelectedVolunteerOpportunityId(opportunity.id);
+        addLog(`${opportunity.title} needs ${opportunity.slots_required} volunteer slot(s)`, "good");
+      }
+    );
+  };
+
+  const assignVolunteer = () => {
+    if (!selectedOrganizationId || !selectedVolunteerProfileId || !selectedVolunteerOpportunityId) {
+      addLog("Select a volunteer and opportunity first", "bad");
+      return;
+    }
+    runAction(
+      "assign-volunteer",
+      () =>
+        apiRequest<VolunteerAssignmentRead>("/volunteers/assignments", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            opportunity_id: selectedVolunteerOpportunityId,
+            volunteer_profile_id: selectedVolunteerProfileId,
+            notes: "Assigned from the operations console."
+          }
+        }),
+      (assignment) => {
+        setVolunteerAssignments((current) => [
+          assignment,
+          ...current.filter((item) => item.id !== assignment.id)
+        ]);
+        setSelectedVolunteerAssignmentId(assignment.id);
+        addLog(`${assignment.person_name} matched at ${Math.round(assignment.match_score * 100)}%`, "good");
+        void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const completeVolunteerAssignment = () => {
+    if (!selectedVolunteerAssignmentId) {
+      addLog("Select a volunteer assignment first", "bad");
+      return;
+    }
+    const selectedOpportunity = volunteerOpportunities.find(
+      (opportunity) => opportunity.id === selectedVolunteerAssignment?.opportunity_id
+    );
+    const checkedIn = selectedOpportunity?.starts_at ?? new Date().toISOString();
+    const checkedOut = selectedOpportunity?.ends_at ?? new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    runAction(
+      "complete-volunteer-assignment",
+      () =>
+        apiRequest<VolunteerAssignmentRead>(`/volunteers/assignments/${selectedVolunteerAssignmentId}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: "confirmed",
+            checked_in_at: checkedIn,
+            checked_out_at: checkedOut,
+            notes: "Completed and logged from the operations console."
+          }
+        }),
+      (assignment) => {
+        setVolunteerAssignments((current) => [
+          assignment,
+          ...current.filter((item) => item.id !== assignment.id)
+        ]);
+        addLog(`${assignment.person_name} logged ${assignment.hours_logged} volunteer hours`, "good");
+        if (selectedOrganizationId) {
+          void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+        }
+      }
+    );
+  };
+
+  const createVolunteerTrainingRecord = () => {
+    if (!selectedOrganizationId || !selectedVolunteerProfileId) {
+      addLog("Select a volunteer before assigning training", "bad");
+      return;
+    }
+    runAction(
+      "create-volunteer-training",
+      () =>
+        apiRequest<VolunteerTrainingRecordRead>("/volunteers/training-records", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            volunteer_profile_id: selectedVolunteerProfileId,
+            module_name: volunteerTrainingForm.module_name,
+            role_type: selectedVolunteerProfile?.volunteer_type ?? volunteerForm.volunteer_type,
+            required: true,
+            status: volunteerTrainingForm.status,
+            completed_at: volunteerTrainingForm.status === "complete" ? new Date().toISOString() : null,
+            expires_on: volunteerTrainingForm.expires_on || null,
+            score: volunteerTrainingForm.score
+          }
+        }),
+      (record) => {
+        setVolunteerTrainingRecords((current) => [
+          record,
+          ...current.filter((item) => item.id !== record.id)
+        ]);
+        addLog(`${record.module_name} ${record.status}`, "good");
+        void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const createVolunteerRecognition = () => {
+    if (!selectedOrganizationId || !selectedVolunteerProfileId) {
+      addLog("Select a volunteer before awarding recognition", "bad");
+      return;
+    }
+    runAction(
+      "create-volunteer-recognition",
+      () =>
+        apiRequest<VolunteerRecognitionRead>("/volunteers/recognitions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            volunteer_profile_id: selectedVolunteerProfileId,
+            recognition_type: "badge",
+            badge_code: volunteerRecognitionForm.badge_code,
+            title: volunteerRecognitionForm.title,
+            points: volunteerRecognitionForm.points,
+            awarded_on: new Date().toISOString().slice(0, 10),
+            source_summary: volunteerRecognitionForm.source_summary
+          }
+        }),
+      (recognition) => {
+        setVolunteerRecognitions((current) => [
+          recognition,
+          ...current.filter((item) => item.id !== recognition.id)
+        ]);
+        addLog(`${recognition.title} awarded`, "good");
       }
     );
   };
@@ -18288,6 +18607,206 @@ export default function HomePage() {
                   <div>
                     <strong>{feedback.readiness_band} readiness · RPE {feedback.actual_rpe ?? "pending"}</strong>
                     <span>{feedback.recommendation}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid" id="volunteers">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Volunteers</p>
+                <h2>Recruitment and readiness</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createVolunteerProfile} disabled={busyAction !== null}>Profile</button>
+                <button type="button" onClick={createVolunteerTrainingRecord} disabled={busyAction !== null}>Training</button>
+                <button type="button" onClick={createVolunteerRecognition} disabled={busyAction !== null}>Award</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{volunteerSummary?.active_volunteers ?? volunteerProfiles.length}</strong>
+              <span>Active volunteers</span>
+              <small>
+                {volunteerSummary
+                  ? `${volunteerSummary.training_compliance_percent}% training compliance · ${volunteerSummary.completed_hours} hours logged`
+                  : "Create volunteer profiles to staff matches, travel, events, and operations."}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Name
+                <input value={volunteerForm.display_name} onChange={(event) => setVolunteerForm({ ...volunteerForm, display_name: event.target.value })} />
+              </label>
+              <label>
+                Email
+                <input value={volunteerForm.email} onChange={(event) => setVolunteerForm({ ...volunteerForm, email: event.target.value })} />
+              </label>
+              <label>
+                Role
+                <input value={volunteerForm.volunteer_type} onChange={(event) => setVolunteerForm({ ...volunteerForm, volunteer_type: event.target.value })} />
+              </label>
+              <label>
+                Certification
+                <input value={volunteerForm.certification_level} onChange={(event) => setVolunteerForm({ ...volunteerForm, certification_level: event.target.value })} />
+              </label>
+              <label>
+                Background
+                <select value={volunteerForm.background_check_status} onChange={(event) => setVolunteerForm({ ...volunteerForm, background_check_status: event.target.value })}>
+                  <option value="not_started">Not started</option>
+                  <option value="pending">Pending</option>
+                  <option value="cleared">Cleared</option>
+                  <option value="expired">Expired</option>
+                </select>
+              </label>
+              <label>
+                Check expiry
+                <input type="date" value={volunteerForm.background_check_expires_on} onChange={(event) => setVolunteerForm({ ...volunteerForm, background_check_expires_on: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Skills
+                <input value={volunteerForm.skills} onChange={(event) => setVolunteerForm({ ...volunteerForm, skills: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Availability
+                <input value={volunteerForm.availability} onChange={(event) => setVolunteerForm({ ...volunteerForm, availability: event.target.value })} />
+              </label>
+              <label>
+                Training module
+                <input value={volunteerTrainingForm.module_name} onChange={(event) => setVolunteerTrainingForm({ ...volunteerTrainingForm, module_name: event.target.value })} />
+              </label>
+              <label>
+                Training score
+                <input type="number" min="0" max="100" value={volunteerTrainingForm.score} onChange={(event) => setVolunteerTrainingForm({ ...volunteerTrainingForm, score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Badge
+                <input value={volunteerRecognitionForm.title} onChange={(event) => setVolunteerRecognitionForm({ ...volunteerRecognitionForm, title: event.target.value })} />
+              </label>
+              <label>
+                Points
+                <input type="number" min="0" value={volunteerRecognitionForm.points} onChange={(event) => setVolunteerRecognitionForm({ ...volunteerRecognitionForm, points: Number(event.target.value) })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {volunteerProfiles.slice(0, 5).map((profile) => (
+                <article
+                  key={profile.id}
+                  className={`task-card ${profile.id === selectedVolunteerProfileId ? "selected" : ""}`}
+                  onClick={() => setSelectedVolunteerProfileId(profile.id)}
+                >
+                  <div>
+                    <strong>{profile.person_name} · {profile.volunteer_type.replaceAll("_", " ")}</strong>
+                    <span>{profile.background_check_status} · {profile.training_status} · {Math.round(profile.reliability_score * 100)}% reliable</span>
+                    <small>{profile.skills.join(", ") || "No skills recorded"}</small>
+                  </div>
+                </article>
+              ))}
+              {volunteerTrainingRecords.slice(0, 2).map((record) => (
+                <article key={record.id} className="task-card">
+                  <div>
+                    <strong>{record.module_name} · {record.status}</strong>
+                    <span>{record.score ?? "no score"}{record.expires_on ? ` · expires ${record.expires_on}` : ""}</span>
+                  </div>
+                </article>
+              ))}
+              {volunteerRecognitions.slice(0, 2).map((recognition) => (
+                <article key={recognition.id} className="task-card">
+                  <div>
+                    <strong>{recognition.title} · {recognition.points} pts</strong>
+                    <span>{recognition.badge_code} · {recognition.awarded_on}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Volunteer scheduling</p>
+                <h2>Shifts and coverage</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createVolunteerOpportunity} disabled={busyAction !== null}>Shift</button>
+                <button type="button" onClick={assignVolunteer} disabled={busyAction !== null}>Assign</button>
+                <button type="button" onClick={completeVolunteerAssignment} disabled={busyAction !== null}>Complete</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{volunteerSummary?.coverage_percent ?? 100}%</strong>
+              <span>Coverage</span>
+              <small>
+                {volunteerSummary
+                  ? `${volunteerSummary.open_slots} open slots · shortages: ${volunteerSummary.shortage_roles.join(", ") || "none"}`
+                  : "Create opportunities to track event-day staffing gaps."}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Shift
+                <input value={volunteerOpportunityForm.title} onChange={(event) => setVolunteerOpportunityForm({ ...volunteerOpportunityForm, title: event.target.value })} />
+              </label>
+              <label>
+                Role needed
+                <input value={volunteerOpportunityForm.role_type} onChange={(event) => setVolunteerOpportunityForm({ ...volunteerOpportunityForm, role_type: event.target.value })} />
+              </label>
+              <label>
+                Starts
+                <input type="datetime-local" value={volunteerOpportunityForm.starts_at} onChange={(event) => setVolunteerOpportunityForm({ ...volunteerOpportunityForm, starts_at: event.target.value })} />
+              </label>
+              <label>
+                Ends
+                <input type="datetime-local" value={volunteerOpportunityForm.ends_at} onChange={(event) => setVolunteerOpportunityForm({ ...volunteerOpportunityForm, ends_at: event.target.value })} />
+              </label>
+              <label>
+                Slots
+                <input type="number" min="1" value={volunteerOpportunityForm.slots_required} onChange={(event) => setVolunteerOpportunityForm({ ...volunteerOpportunityForm, slots_required: Number(event.target.value) })} />
+              </label>
+              <label>
+                Priority
+                <select value={volunteerOpportunityForm.priority} onChange={(event) => setVolunteerOpportunityForm({ ...volunteerOpportunityForm, priority: event.target.value })}>
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </label>
+              <label className="wide-field">
+                Required skills
+                <input value={volunteerOpportunityForm.required_skills} onChange={(event) => setVolunteerOpportunityForm({ ...volunteerOpportunityForm, required_skills: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Location
+                <input value={volunteerOpportunityForm.location} onChange={(event) => setVolunteerOpportunityForm({ ...volunteerOpportunityForm, location: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {volunteerOpportunities.slice(0, 5).map((opportunity) => (
+                <article
+                  key={opportunity.id}
+                  className={`task-card ${opportunity.id === selectedVolunteerOpportunityId ? "selected" : ""}`}
+                  onClick={() => setSelectedVolunteerOpportunityId(opportunity.id)}
+                >
+                  <div>
+                    <strong>{opportunity.title} · {opportunity.open_slots} open</strong>
+                    <span>{opportunity.role_type.replaceAll("_", " ")} · {new Date(opportunity.starts_at).toLocaleString()}</span>
+                    <small>{opportunity.required_skills.join(", ") || "No required skills"}</small>
+                  </div>
+                </article>
+              ))}
+              {volunteerAssignments.slice(0, 5).map((assignment) => (
+                <article
+                  key={assignment.id}
+                  className={`task-card ${assignment.id === selectedVolunteerAssignmentId ? "selected" : ""}`}
+                  onClick={() => setSelectedVolunteerAssignmentId(assignment.id)}
+                >
+                  <div>
+                    <strong>{assignment.person_name} · {assignment.status}</strong>
+                    <span>{assignment.opportunity_title} · {Math.round(assignment.match_score * 100)}% match</span>
+                    <small>{assignment.hours_logged} hours logged · {assignment.notes ?? "No notes"}</small>
                   </div>
                 </article>
               ))}

@@ -149,5 +149,12 @@ from app.models.training import (  # noqa: F401,E402
     TrainingSessionFeedback,
     TrainingSessionPlan,
 )
+from app.models.volunteer import (  # noqa: F401,E402
+    VolunteerAssignment,
+    VolunteerOpportunity,
+    VolunteerProfile,
+    VolunteerRecognition,
+    VolunteerTrainingRecord,
+)
 
 __all__ = ["Base"]
