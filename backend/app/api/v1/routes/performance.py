@@ -13,6 +13,8 @@ from app.schemas.performance import (
     AthleteAssessmentReviewAssignmentUpdate,
     AthleteAssessmentReviewQueueItemRead,
     AthleteAssessmentReviewCreate,
+    AthletePathwayProjectionCreate,
+    AthletePathwayProjectionRead,
     AthletePerformanceSummaryRead,
     MetricDefinitionCreate,
     MetricDefinitionRead,
@@ -91,6 +93,7 @@ from app.services.performance import (
     analyze_video_for_coaching,
     analyze_pose_gait_for_video,
     create_assessment,
+    create_athlete_pathway_projection,
     create_metric_definition,
     create_movement_reference_profile,
     create_observation,
@@ -110,6 +113,7 @@ from app.services.performance import (
     ingest_performance_wearable_webhook,
     list_assessment_review_queue,
     list_assessments,
+    list_athlete_pathway_projections,
     list_performance_awards,
     list_performance_goals,
     list_metric_definitions,
@@ -1515,6 +1519,39 @@ async def performance_summary_route(
         latest_assessment_id=latest_assessment_id,
         rating=rating,
     )
+
+
+@router.post(
+    "/athletes/{athlete_profile_id}/pathway-projections",
+    response_model=AthletePathwayProjectionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_athlete_pathway_projection_route(
+    athlete_profile_id: UUID,
+    payload: AthletePathwayProjectionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AthletePathwayProjectionRead:
+    return await create_athlete_pathway_projection(
+        db,
+        identity,
+        athlete_profile_id,
+        payload,
+        authz,
+    )
+
+
+@router.get(
+    "/athletes/{athlete_profile_id}/pathway-projections",
+    response_model=list[AthletePathwayProjectionRead],
+)
+async def list_athlete_pathway_projections_route(
+    athlete_profile_id: UUID,
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[AthletePathwayProjectionRead]:
+    return await list_athlete_pathway_projections(db, organization_id, athlete_profile_id)
 
 
 @router.get("/benchmarks", response_model=list[PerformanceMetricBenchmarkRead])

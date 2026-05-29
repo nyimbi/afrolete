@@ -79,6 +79,7 @@ import type {
   AssetUtilizationRecommendationRead,
   AthleteAssessmentRead,
   AthleteAssessmentReviewQueueItemRead,
+  AthletePathwayProjectionRead,
   AthletePerformanceSummaryRead,
   AttendanceRecordRead,
   EventAttendancePolicyRead,
@@ -1644,6 +1645,9 @@ export default function HomePage() {
   const [performanceTrendMetricCode, setPerformanceTrendMetricCode] = useState("");
   const [performanceForecastScenarios, setPerformanceForecastScenarios] = useState<PerformanceForecastScenarioRead[]>([]);
   const [performanceWhatIfScenarios, setPerformanceWhatIfScenarios] = useState<PerformanceForecastWhatIfRead[]>([]);
+  const [athletePathwayProjections, setAthletePathwayProjections] = useState<AthletePathwayProjectionRead[]>([]);
+  const [athletePathwayProjection, setAthletePathwayProjection] =
+    useState<AthletePathwayProjectionRead | null>(null);
   const [performanceForecastValidationRun, setPerformanceForecastValidationRun] =
     useState<PerformanceForecastValidationRunRead | null>(null);
   const [performanceForecastValidationRuns, setPerformanceForecastValidationRuns] =
@@ -2249,6 +2253,17 @@ export default function HomePage() {
     due_at: "2026-06-28",
     reward_badge: "First Touch Builder",
     notes: "Goal set from performance trend review."
+  });
+  const [pathwayForm, setPathwayForm] = useState({
+    sport: "football",
+    primary_position: "Forward",
+    academic_gpa: 3.4,
+    graduation_year: 2028,
+    target_pathway: "college_scholarship",
+    preferred_regions: "Kenya, East Africa, NCAA Division II",
+    recruiting_profile_url: "https://profiles.afrolete.local/performance-athlete",
+    notes: "Prioritize a dual academic and football pathway with consent-gated scout sharing.",
+    share_with_guardians: true
   });
   const [assessmentForm, setAssessmentForm] = useState({
     physical_score: 70,
@@ -3369,6 +3384,7 @@ export default function HomePage() {
         trendSeriesData,
         forecastScenarioData,
         whatIfScenarioData,
+        pathwayProjectionData,
         forecastValidationData,
         injuryRiskData,
         goalData,
@@ -3402,6 +3418,10 @@ export default function HomePage() {
         apiRequest<PerformanceForecastWhatIfRead[]>(
           `/performance/athletes/${athleteProfileId}/forecast-scenarios/what-if?organization_id=${organizationId}&training_adjustment_percent=${performanceWhatIfAdjustment}&readiness_score=${performanceWhatIfReadiness}`
         ),
+        apiRequest<AthletePathwayProjectionRead[]>(
+          `/performance/athletes/${athleteProfileId}/pathway-projections?organization_id=${organizationId}`,
+          { identity }
+        ),
         apiRequest<PerformanceForecastValidationRunRead[]>(
           `/performance/forecast-validation-runs?organization_id=${organizationId}&athlete_profile_id=${athleteProfileId}&limit=5`,
           { identity }
@@ -3429,6 +3449,8 @@ export default function HomePage() {
       setPerformanceTrendSeries(trendSeriesData);
       setPerformanceForecastScenarios(forecastScenarioData);
       setPerformanceWhatIfScenarios(whatIfScenarioData);
+      setAthletePathwayProjections(pathwayProjectionData);
+      setAthletePathwayProjection(pathwayProjectionData[0] ?? null);
       setPerformanceForecastValidationRuns(forecastValidationData);
       setPerformanceForecastValidationRun(forecastValidationData[0] ?? null);
       setPerformanceInjuryRisk(injuryRiskData);
@@ -4192,6 +4214,8 @@ export default function HomePage() {
       setPerformanceForecastValidationRun(null);
       setPerformanceForecastValidationRuns([]);
       setPerformanceForecastValidationAlert(null);
+      setAthletePathwayProjections([]);
+      setAthletePathwayProjection(null);
       setPerformanceWebhookIngest(null);
       setWearableConnections([]);
       setWearableSyncRun(null);
@@ -4640,6 +4664,8 @@ export default function HomePage() {
       setPerformanceTrendSeries([]);
       setPerformanceForecastScenarios([]);
       setPerformanceWhatIfScenarios([]);
+      setAthletePathwayProjections([]);
+      setAthletePathwayProjection(null);
       setPerformanceForecastValidationRun(null);
       setPerformanceForecastValidationRuns([]);
       setPerformanceForecastValidationAlert(null);
@@ -9834,6 +9860,51 @@ export default function HomePage() {
       (goal) => {
         setPerformanceGoals((current) => [goal, ...current.filter((item) => item.id !== goal.id)]);
         addLog(`Goal created: ${goal.title}`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const createAthletePathwayProjection = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before projecting pathway options", "bad");
+      return;
+    }
+    runAction(
+      "create-athlete-pathway-projection",
+      () =>
+        apiRequest<AthletePathwayProjectionRead>(
+          `/performance/athletes/${selectedAthlete.athleteProfileId}/pathway-projections`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              sport: pathwayForm.sport,
+              primary_position: pathwayForm.primary_position || null,
+              academic_gpa: Number(pathwayForm.academic_gpa),
+              graduation_year: Number(pathwayForm.graduation_year),
+              target_pathway: pathwayForm.target_pathway,
+              preferred_regions: pathwayForm.preferred_regions
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean),
+              recruiting_profile_url: pathwayForm.recruiting_profile_url || null,
+              notes: pathwayForm.notes || null,
+              share_with_guardians: pathwayForm.share_with_guardians
+            }
+          }
+        ),
+      (projection) => {
+        setAthletePathwayProjection(projection);
+        setAthletePathwayProjections((current) => [
+          projection,
+          ...current.filter((item) => item.id !== projection.id)
+        ]);
+        addLog(
+          `Pathway projection: ${projection.projected_level.replaceAll("_", " ")} · ${projection.readiness_score}/100`,
+          "good"
+        );
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
       }
     );
@@ -20269,6 +20340,7 @@ export default function HomePage() {
                 <button type="button" onClick={refreshWearableToken} disabled={busyAction !== null}>Refresh</button>
                 <button type="button" onClick={reviewSelectedObservation} disabled={busyAction !== null}>Review</button>
                 <button type="button" onClick={createPerformanceGoal} disabled={busyAction !== null}>Goal</button>
+                <button type="button" onClick={createAthletePathwayProjection} disabled={busyAction !== null}>Pathway</button>
                 <button type="button" onClick={evaluatePerformanceAchievements} disabled={busyAction !== null}>Award</button>
                 <button type="button" onClick={runPerformanceInjuryRiskAlertScan} disabled={busyAction !== null}>Risk scan</button>
                 <button type="button" onClick={runAssessmentReviewEscalations} disabled={busyAction !== null}>Escalate</button>
@@ -20483,6 +20555,57 @@ export default function HomePage() {
                 <input type="date" value={performanceGoalForm.due_at} onChange={(event) => setPerformanceGoalForm({ ...performanceGoalForm, due_at: event.target.value })} />
               </label>
               <label>
+                Pathway
+                <select value={pathwayForm.target_pathway} onChange={(event) => setPathwayForm({ ...pathwayForm, target_pathway: event.target.value })}>
+                  <option value="college_scholarship">College scholarship</option>
+                  <option value="professional_academy">Professional academy</option>
+                  <option value="semi_pro">Semi-pro</option>
+                  <option value="dual_career">Dual career</option>
+                  <option value="balanced">Balanced</option>
+                </select>
+              </label>
+              <label>
+                Pathway sport
+                <input value={pathwayForm.sport} onChange={(event) => setPathwayForm({ ...pathwayForm, sport: event.target.value })} />
+              </label>
+              <label>
+                Position
+                <input value={pathwayForm.primary_position} onChange={(event) => setPathwayForm({ ...pathwayForm, primary_position: event.target.value })} />
+              </label>
+              <label>
+                GPA
+                <input type="number" min="0" max="5" step="0.1" value={pathwayForm.academic_gpa} onChange={(event) => setPathwayForm({ ...pathwayForm, academic_gpa: Number(event.target.value) })} />
+              </label>
+              <label>
+                Graduation
+                <input type="number" min="2020" max="2100" value={pathwayForm.graduation_year} onChange={(event) => setPathwayForm({ ...pathwayForm, graduation_year: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Preferred regions
+                <input value={pathwayForm.preferred_regions} onChange={(event) => setPathwayForm({ ...pathwayForm, preferred_regions: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Profile URL
+                <input value={pathwayForm.recruiting_profile_url} onChange={(event) => setPathwayForm({ ...pathwayForm, recruiting_profile_url: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Pathway notes
+                <input value={pathwayForm.notes} onChange={(event) => setPathwayForm({ ...pathwayForm, notes: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Guardian sharing
+                <span className="check-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={pathwayForm.share_with_guardians}
+                      onChange={(event) => setPathwayForm({ ...pathwayForm, share_with_guardians: event.target.checked })}
+                    />
+                    Consent-gated guardian view
+                  </label>
+                </span>
+              </label>
+              <label>
                 Benchmark cohort
                 <select
                   value={performanceBenchmarkScope}
@@ -20574,6 +20697,74 @@ export default function HomePage() {
               trends={performanceTrends}
               benchmarks={performanceBenchmarks}
             />
+            {athletePathwayProjection ? (
+              <div className="task-list">
+                <article className="task-card">
+                  <div>
+                    <strong>
+                      Pathway projection · {athletePathwayProjection.projected_level.replaceAll("_", " ")}
+                    </strong>
+                    <span>
+                      readiness {athletePathwayProjection.readiness_score}/100 · confidence{" "}
+                      {Math.round(athletePathwayProjection.confidence * 100)}% ·{" "}
+                      {athletePathwayProjection.target_pathway.replaceAll("_", " ")}
+                    </span>
+                    <small>{athletePathwayProjection.summary}</small>
+                    <small>
+                      College {athletePathwayProjection.college_fit_score}/100 · semi-pro{" "}
+                      {athletePathwayProjection.semi_pro_fit_score}/100 · pro{" "}
+                      {athletePathwayProjection.professional_fit_score}/100 · scholarship{" "}
+                      {athletePathwayProjection.scholarship_fit_score}/100
+                    </small>
+                  </div>
+                  <span>
+                    <button type="button" onClick={createAthletePathwayProjection} disabled={busyAction !== null}>Re-run</button>
+                  </span>
+                </article>
+                {athletePathwayProjection.pathway_options.slice(0, 4).map((option) => (
+                  <article key={`${athletePathwayProjection.id}-${option.pathway}`} className="task-card">
+                    <div>
+                      <strong>{option.pathway.replaceAll("_", " ")} · {option.score}/100</strong>
+                      <span>{option.readiness.replaceAll("_", " ")} · {option.timeline}</span>
+                      <small>{option.rationale}</small>
+                      <small>{option.next_actions.slice(0, 2).join(" · ")}</small>
+                    </div>
+                  </article>
+                ))}
+                {athletePathwayProjection.milestones.slice(0, 5).map((milestone) => (
+                  <article key={`${athletePathwayProjection.id}-${milestone.title}`} className="task-card">
+                    <div>
+                      <strong>{milestone.title} · {milestone.priority}</strong>
+                      <span>{milestone.owner} · {milestone.status.replaceAll("_", " ")} · {milestone.due_label}</span>
+                      <small>{milestone.evidence}</small>
+                    </div>
+                  </article>
+                ))}
+                {athletePathwayProjection.risk_flags.length ? (
+                  <article className="task-card">
+                    <div>
+                      <strong>Pathway risk flags</strong>
+                      <span>{athletePathwayProjection.risk_flags.slice(0, 3).join(" · ")}</span>
+                    </div>
+                  </article>
+                ) : null}
+              </div>
+            ) : athletePathwayProjections.length ? (
+              <div className="task-list">
+                {athletePathwayProjections.slice(0, 2).map((projection) => (
+                  <article key={projection.id} className="task-card">
+                    <div>
+                      <strong>{projection.projected_level.replaceAll("_", " ")} · {projection.readiness_score}/100</strong>
+                      <span>{new Date(projection.generated_at).toLocaleString()} · {projection.model_policy}</span>
+                      <small>{projection.summary}</small>
+                    </div>
+                    <span>
+                      <button type="button" onClick={() => setAthletePathwayProjection(projection)}>Open</button>
+                    </span>
+                  </article>
+                ))}
+              </div>
+            ) : null}
             {performanceVideoAsset ? (
               <div className="video-analysis-panel">
                 <div className="panel-head">

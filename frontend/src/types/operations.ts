@@ -6430,6 +6430,55 @@ export type PerformanceForecastWhatIfRead = PerformanceForecastScenarioRead & {
   horizon: number;
 };
 
+export type AthletePathwayOptionRead = {
+  pathway: string;
+  score: number;
+  readiness: string;
+  timeline: string;
+  rationale: string;
+  next_actions: string[];
+};
+
+export type AthletePathwayMilestoneRead = {
+  title: string;
+  due_label: string;
+  priority: string;
+  owner: string;
+  status: string;
+  evidence: string;
+};
+
+export type AthletePathwayProjectionRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  athlete_name: string;
+  created_by_person_id: UUID | null;
+  sport: string;
+  primary_position: string | null;
+  age_years: number | null;
+  academic_gpa: number | null;
+  graduation_year: number | null;
+  target_pathway: string;
+  model_policy: string;
+  confidence: number;
+  readiness_score: number;
+  projected_level: string;
+  college_fit_score: number;
+  semi_pro_fit_score: number;
+  professional_fit_score: number;
+  scholarship_fit_score: number;
+  summary: string;
+  pathway_options: AthletePathwayOptionRead[];
+  milestones: AthletePathwayMilestoneRead[];
+  scout_actions: string[];
+  evidence: Record<string, unknown>;
+  risk_flags: string[];
+  status: string;
+  generated_at: string;
+  created_at: string;
+};
+
 export type PerformanceForecastValidationMetricRead = {
   athlete_profile_id: UUID;
   metric_definition_id: UUID;

@@ -1105,6 +1105,68 @@ class PerformanceForecastWhatIfRead(PerformanceForecastScenarioRead):
     horizon: int
 
 
+class AthletePathwayProjectionCreate(BaseModel):
+    organization_id: UUID
+    sport: str = Field(default="football", min_length=2, max_length=80)
+    primary_position: str | None = Field(default=None, max_length=80)
+    academic_gpa: float | None = Field(default=None, ge=0, le=5)
+    graduation_year: int | None = Field(default=None, ge=2020, le=2100)
+    target_pathway: str = Field(default="balanced", min_length=2, max_length=80)
+    preferred_regions: list[str] = Field(default_factory=list, max_length=12)
+    recruiting_profile_url: str | None = Field(default=None, max_length=800)
+    notes: str | None = Field(default=None, max_length=4000)
+    share_with_guardians: bool = False
+
+
+class AthletePathwayOptionRead(BaseModel):
+    pathway: str
+    score: float
+    readiness: str
+    timeline: str
+    rationale: str
+    next_actions: list[str]
+
+
+class AthletePathwayMilestoneRead(BaseModel):
+    title: str
+    due_label: str
+    priority: str
+    owner: str
+    status: str
+    evidence: str
+
+
+class AthletePathwayProjectionRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    athlete_profile_id: UUID
+    athlete_name: str
+    created_by_person_id: UUID | None
+    sport: str
+    primary_position: str | None
+    age_years: int | None
+    academic_gpa: float | None
+    graduation_year: int | None
+    target_pathway: str
+    model_policy: str
+    confidence: float
+    readiness_score: int
+    projected_level: str
+    college_fit_score: float
+    semi_pro_fit_score: float
+    professional_fit_score: float
+    scholarship_fit_score: float
+    summary: str
+    pathway_options: list[AthletePathwayOptionRead]
+    milestones: list[AthletePathwayMilestoneRead]
+    scout_actions: list[str]
+    evidence: dict[str, object]
+    risk_flags: list[str]
+    status: str
+    generated_at: datetime
+    created_at: datetime
+
+
 class PerformanceInjuryRiskRead(BaseModel):
     athlete_profile_id: UUID
     generated_at: datetime

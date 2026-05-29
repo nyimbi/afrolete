@@ -452,6 +452,40 @@ class PerformanceForecastValidationRun(IdMixin, TimestampMixin, Base):
     created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
 
 
+class AthletePathwayProjection(IdMixin, TimestampMixin, Base):
+    __tablename__ = "athlete_pathway_projections"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("athlete_profiles.id"), nullable=False, index=True
+    )
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    sport: Mapped[str] = mapped_column(String(80), default="football", nullable=False, index=True)
+    primary_position: Mapped[str | None] = mapped_column(String(80), index=True)
+    age_years: Mapped[int | None] = mapped_column(Integer, index=True)
+    academic_gpa: Mapped[float | None] = mapped_column(Float)
+    graduation_year: Mapped[int | None] = mapped_column(Integer, index=True)
+    target_pathway: Mapped[str] = mapped_column(String(80), default="balanced", nullable=False, index=True)
+    model_policy: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
+    readiness_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
+    projected_level: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    college_fit_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    semi_pro_fit_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    professional_fit_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    scholarship_fit_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    pathways_json: Mapped[str] = mapped_column(Text, nullable=False)
+    milestones_json: Mapped[str] = mapped_column(Text, nullable=False)
+    scout_actions_json: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_json: Mapped[str] = mapped_column(Text, nullable=False)
+    risk_flags_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class AthleteAssessment(IdMixin, TimestampMixin, Base):
     __tablename__ = "athlete_assessments"
 

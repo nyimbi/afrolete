@@ -32,6 +32,7 @@ from app.models.enums import (
     MetricCategory,
     MetricSource,
     MetricVerificationStatus,
+    RosterStatus,
     SafeguardingIncidentStatus,
     SafeguardingIncidentType,
     WeatherAlertLevel,
@@ -43,6 +44,7 @@ from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.performance import (
     AthleteAssessment,
+    AthletePathwayProjection,
     AthletePerformanceObservation,
     OppositionScoutingReport,
     OppositionScoutingVideoAsset,
@@ -66,6 +68,8 @@ from app.schemas.performance import (
     AssessmentReviewLoadRead,
     AssessmentReviewQueueSummaryRead,
     AthleteAssessmentCreate,
+    AthletePathwayProjectionCreate,
+    AthletePathwayProjectionRead,
     AthleteAssessmentReviewAssignmentUpdate,
     AthleteAssessmentReviewCreate,
     PerformanceAssessmentReviewEscalationRunRead,
@@ -4066,6 +4070,581 @@ async def get_athlete_profile(
     if athlete_profile is None or athlete_profile.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
     return athlete_profile
+
+
+async def create_athlete_pathway_projection(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    athlete_profile_id: UUID,
+    payload: AthletePathwayProjectionCreate,
+    authz: AuthorizationService,
+) -> AthletePathwayProjectionRead:
+    athlete_profile = await get_athlete_profile(db, athlete_profile_id, payload.organization_id)
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    person = await db.get(Person, athlete_profile.person_id)
+    if person is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete person not found")
+
+    latest_assessment = await latest_athlete_assessment(db, payload.organization_id, athlete_profile_id)
+    observation_rows = await pathway_observation_rows(db, payload.organization_id, athlete_profile_id)
+    benchmarks = await performance_metric_benchmarks(
+        db,
+        payload.organization_id,
+        athlete_profile_id=athlete_profile_id,
+        sport=payload.sport,
+        cohort_scope="tenant",
+    )
+    trends = await performance_metric_trends(
+        db,
+        payload.organization_id,
+        athlete_profile_id,
+        sport=payload.sport,
+    )
+    roster_position = await athlete_primary_position(db, athlete_profile_id)
+    primary_position = payload.primary_position or roster_position
+    age_years = person_age_years(person.date_of_birth)
+    model = athlete_pathway_model(
+        athlete_name=person.display_name or "Athlete",
+        payload=payload,
+        latest_assessment=latest_assessment,
+        observation_rows=observation_rows,
+        benchmarks=benchmarks,
+        trends=trends,
+        age_years=age_years,
+        primary_position=primary_position,
+    )
+    now = datetime.now(UTC)
+    projection = AthletePathwayProjection(
+        organization_id=payload.organization_id,
+        athlete_profile_id=athlete_profile_id,
+        created_by_person_id=identity.person_id,
+        sport=payload.sport,
+        primary_position=primary_position,
+        age_years=age_years,
+        academic_gpa=payload.academic_gpa,
+        graduation_year=payload.graduation_year,
+        target_pathway=payload.target_pathway.strip().lower(),
+        model_policy=model["model_policy"],
+        confidence=model["confidence"],
+        readiness_score=model["readiness_score"],
+        projected_level=model["projected_level"],
+        college_fit_score=model["college_fit_score"],
+        semi_pro_fit_score=model["semi_pro_fit_score"],
+        professional_fit_score=model["professional_fit_score"],
+        scholarship_fit_score=model["scholarship_fit_score"],
+        summary=model["summary"],
+        pathways_json=json.dumps(model["pathway_options"]),
+        milestones_json=json.dumps(model["milestones"]),
+        scout_actions_json=json.dumps(model["scout_actions"]),
+        evidence_json=json.dumps(model["evidence"]),
+        risk_flags_json=json.dumps(model["risk_flags"]),
+        status="active",
+        generated_at=now,
+    )
+    db.add(projection)
+    await db.commit()
+    await db.refresh(projection)
+    return athlete_pathway_projection_read(projection, person.display_name or "Athlete")
+
+
+async def list_athlete_pathway_projections(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+) -> list[AthletePathwayProjectionRead]:
+    athlete_profile = await get_athlete_profile(db, athlete_profile_id, organization_id)
+    person = await db.get(Person, athlete_profile.person_id)
+    athlete_name = person.display_name if person is not None and person.display_name else "Athlete"
+    projections = list(
+        (
+            await db.scalars(
+                select(AthletePathwayProjection)
+                .where(AthletePathwayProjection.organization_id == organization_id)
+                .where(AthletePathwayProjection.athlete_profile_id == athlete_profile_id)
+                .order_by(AthletePathwayProjection.generated_at.desc(), AthletePathwayProjection.created_at.desc())
+            )
+        ).all()
+    )
+    return [athlete_pathway_projection_read(projection, athlete_name) for projection in projections]
+
+
+async def latest_athlete_assessment(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+) -> AthleteAssessment | None:
+    return await db.scalar(
+        select(AthleteAssessment)
+        .where(AthleteAssessment.organization_id == organization_id)
+        .where(AthleteAssessment.athlete_profile_id == athlete_profile_id)
+        .where(AthleteAssessment.verification_status != MetricVerificationStatus.REJECTED)
+        .order_by(AthleteAssessment.assessed_at.desc(), AthleteAssessment.created_at.desc())
+        .limit(1)
+    )
+
+
+async def pathway_observation_rows(
+    db: AsyncSession,
+    organization_id: UUID,
+    athlete_profile_id: UUID,
+) -> list[tuple[AthletePerformanceObservation, PerformanceMetricDefinition]]:
+    rows = (
+        await db.execute(
+            select(AthletePerformanceObservation, PerformanceMetricDefinition)
+            .join(
+                PerformanceMetricDefinition,
+                PerformanceMetricDefinition.id == AthletePerformanceObservation.metric_definition_id,
+            )
+            .where(AthletePerformanceObservation.organization_id == organization_id)
+            .where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+            .where(AthletePerformanceObservation.verification_status != MetricVerificationStatus.REJECTED)
+            .order_by(AthletePerformanceObservation.observed_at.desc())
+            .limit(80)
+        )
+    ).all()
+    return [(observation, metric) for observation, metric in rows]
+
+
+async def athlete_primary_position(db: AsyncSession, athlete_profile_id: UUID) -> str | None:
+    value = await db.scalar(
+        select(TeamRosterEntry.primary_position)
+        .where(TeamRosterEntry.athlete_profile_id == athlete_profile_id)
+        .where(TeamRosterEntry.status == RosterStatus.ACTIVE)
+        .where(TeamRosterEntry.primary_position.is_not(None))
+        .order_by(TeamRosterEntry.created_at.desc())
+        .limit(1)
+    )
+    return value
+
+
+def person_age_years(date_of_birth: date | None) -> int | None:
+    if date_of_birth is None:
+        return None
+    today = date.today()
+    return today.year - date_of_birth.year - (
+        (today.month, today.day) < (date_of_birth.month, date_of_birth.day)
+    )
+
+
+def athlete_pathway_projection_read(
+    projection: AthletePathwayProjection,
+    athlete_name: str,
+) -> AthletePathwayProjectionRead:
+    return AthletePathwayProjectionRead(
+        id=projection.id,
+        organization_id=projection.organization_id,
+        athlete_profile_id=projection.athlete_profile_id,
+        athlete_name=athlete_name,
+        created_by_person_id=projection.created_by_person_id,
+        sport=projection.sport,
+        primary_position=projection.primary_position,
+        age_years=projection.age_years,
+        academic_gpa=projection.academic_gpa,
+        graduation_year=projection.graduation_year,
+        target_pathway=projection.target_pathway,
+        model_policy=projection.model_policy,
+        confidence=projection.confidence,
+        readiness_score=projection.readiness_score,
+        projected_level=projection.projected_level,
+        college_fit_score=projection.college_fit_score,
+        semi_pro_fit_score=projection.semi_pro_fit_score,
+        professional_fit_score=projection.professional_fit_score,
+        scholarship_fit_score=projection.scholarship_fit_score,
+        summary=projection.summary,
+        pathway_options=json.loads(projection.pathways_json or "[]"),
+        milestones=json.loads(projection.milestones_json or "[]"),
+        scout_actions=json.loads(projection.scout_actions_json or "[]"),
+        evidence=json.loads(projection.evidence_json or "{}"),
+        risk_flags=json.loads(projection.risk_flags_json or "[]"),
+        status=projection.status,
+        generated_at=projection.generated_at,
+        created_at=projection.created_at,
+    )
+
+
+def athlete_pathway_model(
+    athlete_name: str,
+    payload: AthletePathwayProjectionCreate,
+    latest_assessment: AthleteAssessment | None,
+    observation_rows: list[tuple[AthletePerformanceObservation, PerformanceMetricDefinition]],
+    benchmarks: list[dict[str, object]],
+    trends: list[dict[str, object]],
+    age_years: int | None,
+    primary_position: str | None,
+) -> dict[str, object]:
+    category_scores = pathway_category_scores(latest_assessment, observation_rows)
+    benchmark_score = pathway_benchmark_score(benchmarks)
+    trend_score = pathway_trend_score(trends)
+    academic_score = pathway_academic_score(payload.academic_gpa)
+    base_score = (
+        category_scores["physical"] * 0.22
+        + category_scores["technical"] * 0.24
+        + category_scores["tactical"] * 0.18
+        + category_scores["mental"] * 0.18
+        + benchmark_score * 0.1
+        + trend_score * 0.08
+    )
+    readiness_score = round_pathway_score(base_score)
+    college_fit = round_pathway_score(readiness_score * 0.62 + academic_score * 0.28 + trend_score * 0.1)
+    semi_pro_fit = round_pathway_score(readiness_score * 0.74 + benchmark_score * 0.18 + category_scores["mental"] * 0.08)
+    professional_fit = round_pathway_score(
+        readiness_score * 0.55
+        + benchmark_score * 0.25
+        + category_scores["physical"] * 0.1
+        + category_scores["technical"] * 0.1
+    )
+    scholarship_fit = round_pathway_score(college_fit * 0.62 + academic_score * 0.26 + category_scores["mental"] * 0.12)
+    projected_level = pathway_projected_level(readiness_score, professional_fit, college_fit)
+    confidence = pathway_confidence(
+        assessment_count=1 if latest_assessment is not None else 0,
+        observation_count=len(observation_rows),
+        benchmark_count=len([item for item in benchmarks if item.get("athlete_value") is not None]),
+        trend_count=len(trends),
+    )
+    risk_flags = pathway_risk_flags(
+        payload=payload,
+        readiness_score=readiness_score,
+        observation_count=len(observation_rows),
+        latest_assessment=latest_assessment,
+        age_years=age_years,
+        academic_score=academic_score,
+    )
+    top_pathway = max(
+        [
+            ("college scholarship", college_fit),
+            ("semi-pro", semi_pro_fit),
+            ("professional academy", professional_fit),
+            ("scholarship", scholarship_fit),
+        ],
+        key=lambda item: item[1],
+    )
+    summary = (
+        f"{athlete_name} projects as {projected_level.replace('_', ' ')} with "
+        f"{readiness_score}/100 pathway readiness. The strongest near-term route is "
+        f"{top_pathway[0]} ({top_pathway[1]}/100), backed by "
+        f"{len(observation_rows)} accepted observation(s), "
+        f"{'one verified assessment' if latest_assessment is not None else 'no verified assessment yet'}, "
+        f"and {len(trends)} trend signal(s)."
+    )
+    evidence = {
+        "assessment_count": 1 if latest_assessment is not None else 0,
+        "observation_count": len(observation_rows),
+        "benchmark_count": len(benchmarks),
+        "trend_count": len(trends),
+        "latest_overall_score": latest_assessment.overall_score if latest_assessment else None,
+        "category_scores": category_scores,
+        "benchmark_score": benchmark_score,
+        "trend_score": trend_score,
+        "academic_score": academic_score,
+        "preferred_regions": [item.strip() for item in payload.preferred_regions if item.strip()],
+        "recruiting_profile_url": payload.recruiting_profile_url,
+        "notes": payload.notes,
+        "primary_position": primary_position,
+    }
+    return {
+        "model_policy": "deterministic_pathway_projection_v1",
+        "confidence": confidence,
+        "readiness_score": readiness_score,
+        "projected_level": projected_level,
+        "college_fit_score": college_fit,
+        "semi_pro_fit_score": semi_pro_fit,
+        "professional_fit_score": professional_fit,
+        "scholarship_fit_score": scholarship_fit,
+        "summary": summary,
+        "pathway_options": pathway_options(
+            college_fit=college_fit,
+            semi_pro_fit=semi_pro_fit,
+            professional_fit=professional_fit,
+            scholarship_fit=scholarship_fit,
+            readiness_score=readiness_score,
+            target_pathway=payload.target_pathway,
+            age_years=age_years,
+        ),
+        "milestones": pathway_milestones(
+            payload=payload,
+            readiness_score=readiness_score,
+            primary_position=primary_position,
+            latest_assessment=latest_assessment,
+            observation_count=len(observation_rows),
+            risk_flags=risk_flags,
+        ),
+        "scout_actions": pathway_scout_actions(payload, projected_level, primary_position),
+        "evidence": evidence,
+        "risk_flags": risk_flags,
+    }
+
+
+def pathway_category_scores(
+    latest_assessment: AthleteAssessment | None,
+    observation_rows: list[tuple[AthletePerformanceObservation, PerformanceMetricDefinition]],
+) -> dict[str, float]:
+    scores = {
+        "physical": latest_assessment.physical_score if latest_assessment else None,
+        "technical": latest_assessment.technical_score if latest_assessment else None,
+        "tactical": latest_assessment.tactical_score if latest_assessment else None,
+        "mental": latest_assessment.mental_score if latest_assessment else None,
+    }
+    observed: dict[str, list[float]] = {key: [] for key in scores}
+    for observation, metric in observation_rows:
+        category = metric.category.value
+        if category in observed:
+            observed[category].append(normalized_metric_value(observation.value, metric))
+    for category, values in observed.items():
+        if scores[category] is None and values:
+            scores[category] = sum(values) / len(values)
+    fallback = latest_assessment.overall_score if latest_assessment else 55.0
+    return {
+        category: round(float(score if score is not None else fallback), 1)
+        for category, score in scores.items()
+    }
+
+
+def normalized_metric_value(value: float, metric: PerformanceMetricDefinition) -> float:
+    if metric.min_value is not None and metric.max_value is not None and metric.max_value != metric.min_value:
+        span = metric.max_value - metric.min_value
+        normalized = (value - metric.min_value) / span * 100
+        if not metric.higher_is_better:
+            normalized = 100 - normalized
+        return max(0, min(100, normalized))
+    return max(0, min(100, value))
+
+
+def pathway_benchmark_score(benchmarks: list[dict[str, object]]) -> float:
+    values = [
+        float(percentile)
+        for benchmark in benchmarks
+        if (percentile := benchmark.get("percentile_rank")) is not None
+    ]
+    if not values:
+        return 55.0
+    return round(sum(values) / len(values), 1)
+
+
+def pathway_trend_score(trends: list[dict[str, object]]) -> float:
+    if not trends:
+        return 55.0
+    score = 55.0
+    for trend in trends:
+        direction = str(trend.get("trend_direction") or "")
+        if direction == "improving":
+            score += 8
+        elif direction == "stable":
+            score += 3
+        elif direction == "declining":
+            score -= 8
+    return round(max(0, min(100, score)), 1)
+
+
+def pathway_academic_score(academic_gpa: float | None) -> float:
+    if academic_gpa is None:
+        return 55.0
+    return round(max(0, min(100, academic_gpa / 4.0 * 100)), 1)
+
+
+def round_pathway_score(value: float) -> int:
+    return int(round(max(0, min(100, value))))
+
+
+def pathway_projected_level(readiness_score: int, professional_fit: int, college_fit: int) -> str:
+    if professional_fit >= 86 and readiness_score >= 84:
+        return "professional_prospect"
+    if college_fit >= 78 and readiness_score >= 74:
+        return "college_recruit"
+    if readiness_score >= 72:
+        return "semi_pro_candidate"
+    if readiness_score >= 62:
+        return "regional_academy"
+    if readiness_score >= 50:
+        return "school_team"
+    return "foundation"
+
+
+def pathway_confidence(
+    assessment_count: int,
+    observation_count: int,
+    benchmark_count: int,
+    trend_count: int,
+) -> float:
+    value = 0.45 + min(0.16, assessment_count * 0.16) + min(0.18, observation_count * 0.025)
+    value += min(0.1, benchmark_count * 0.02) + min(0.08, trend_count * 0.02)
+    return round(max(0.35, min(0.94, value)), 2)
+
+
+def pathway_risk_flags(
+    payload: AthletePathwayProjectionCreate,
+    readiness_score: int,
+    observation_count: int,
+    latest_assessment: AthleteAssessment | None,
+    age_years: int | None,
+    academic_score: float,
+) -> list[str]:
+    flags: list[str] = []
+    if observation_count < 3:
+        flags.append("Thin performance data: record at least three accepted observations before external outreach.")
+    if latest_assessment is None:
+        flags.append("Missing verified coach assessment: projection should not be used for recruiting decisions yet.")
+    if payload.academic_gpa is None:
+        flags.append("Academic record missing: college and scholarship matching confidence is capped.")
+    elif academic_score < 65:
+        flags.append("Academic support needed before scholarship outreach.")
+    if not payload.recruiting_profile_url:
+        flags.append("Recruiting profile URL missing: create a consent-gated profile before sending scouts material.")
+    if age_years is not None and 16 <= age_years <= 19 and readiness_score >= 70:
+        flags.append("Time-sensitive recruiting window: schedule showcase, transcript, and highlight actions now.")
+    if readiness_score < 55:
+        flags.append("Readiness below external pathway threshold: prioritize development milestones before outreach.")
+    if payload.share_with_guardians:
+        flags.append("Guardian-sharing requested: verify consent and minor safeguarding settings before distribution.")
+    return flags
+
+
+def pathway_readiness_label(score: int) -> str:
+    if score >= 85:
+        return "ready_now"
+    if score >= 72:
+        return "shortlist"
+    if score >= 60:
+        return "developing"
+    return "foundation"
+
+
+def pathway_options(
+    college_fit: int,
+    semi_pro_fit: int,
+    professional_fit: int,
+    scholarship_fit: int,
+    readiness_score: int,
+    target_pathway: str,
+    age_years: int | None,
+) -> list[dict[str, object]]:
+    age_note = "current age window" if age_years is not None and age_years >= 16 else "development window"
+    options = [
+        {
+            "pathway": "college_scholarship",
+            "score": college_fit,
+            "readiness": pathway_readiness_label(college_fit),
+            "timeline": "0-12 months" if college_fit >= 72 else "12-24 months",
+            "rationale": f"Academic and performance blend supports college matching in the {age_note}.",
+            "next_actions": [
+                "Compile transcript and eligibility documents.",
+                "Build a coach-facing profile with verified metrics.",
+                "Shortlist schools by sport level, academics, geography, and budget.",
+            ],
+        },
+        {
+            "pathway": "semi_pro",
+            "score": semi_pro_fit,
+            "readiness": pathway_readiness_label(semi_pro_fit),
+            "timeline": "next season" if semi_pro_fit >= 72 else "two development blocks",
+            "rationale": "Match-readiness, tactical reliability, and cohort evidence drive semi-pro fit.",
+            "next_actions": [
+                "Arrange trials against comparable senior competition.",
+                "Verify physical benchmarks under match conditions.",
+                "Prepare coach references and recent match footage.",
+            ],
+        },
+        {
+            "pathway": "professional_academy",
+            "score": professional_fit,
+            "readiness": pathway_readiness_label(professional_fit),
+            "timeline": "active scout list" if professional_fit >= 82 else "18-36 months",
+            "rationale": "Professional projection weights top-quartile benchmark evidence and elite technical consistency.",
+            "next_actions": [
+                "Create a position-specific highlight reel.",
+                "Schedule elite benchmark testing.",
+                "Track scout feedback as structured evaluation evidence.",
+            ],
+        },
+        {
+            "pathway": "dual_career",
+            "score": round_pathway_score((scholarship_fit + readiness_score) / 2),
+            "readiness": pathway_readiness_label(round_pathway_score((scholarship_fit + readiness_score) / 2)),
+            "timeline": "rolling plan",
+            "rationale": "Dual-career planning protects academic, health, and sport options when outcomes remain uncertain.",
+            "next_actions": [
+                "Set academic and sport milestones side by side.",
+                "Review financial aid, transfer, and vocational alternatives.",
+                "Re-run projection after each assessment cycle.",
+            ],
+        },
+    ]
+    target = target_pathway.strip().lower().replace(" ", "_")
+    return sorted(
+        options,
+        key=lambda item: (0 if item["pathway"] == target else 1, -float(item["score"])),
+    )
+
+
+def pathway_milestones(
+    payload: AthletePathwayProjectionCreate,
+    readiness_score: int,
+    primary_position: str | None,
+    latest_assessment: AthleteAssessment | None,
+    observation_count: int,
+    risk_flags: list[str],
+) -> list[dict[str, str]]:
+    position_label = primary_position or "target role"
+    return [
+        {
+            "title": "Verified performance baseline",
+            "due_label": "this week" if latest_assessment is None or observation_count < 3 else "complete",
+            "priority": "high" if latest_assessment is None or observation_count < 3 else "normal",
+            "owner": "coach",
+            "status": "blocked" if latest_assessment is None else "in_progress",
+            "evidence": f"{observation_count} accepted observation(s); readiness {readiness_score}/100.",
+        },
+        {
+            "title": f"{position_label} highlight reel and scout packet",
+            "due_label": "14 days",
+            "priority": "high" if readiness_score >= 70 else "normal",
+            "owner": "performance analyst",
+            "status": "not_started",
+            "evidence": payload.recruiting_profile_url or "No recruiting profile URL recorded.",
+        },
+        {
+            "title": "Academic and eligibility review",
+            "due_label": "30 days",
+            "priority": "high" if payload.academic_gpa is None else "normal",
+            "owner": "family liaison",
+            "status": "in_progress" if payload.academic_gpa is not None else "blocked",
+            "evidence": f"GPA {payload.academic_gpa:g}" if payload.academic_gpa is not None else "Academic GPA missing.",
+        },
+        {
+            "title": "Target outreach list",
+            "due_label": "30-45 days",
+            "priority": "normal",
+            "owner": "recruiting lead",
+            "status": "not_started",
+            "evidence": ", ".join(payload.preferred_regions[:4]) if payload.preferred_regions else "No preferred regions recorded.",
+        },
+        {
+            "title": "Consent-gated sharing check",
+            "due_label": "before external sharing",
+            "priority": "high" if any("consent" in flag.lower() for flag in risk_flags) else "normal",
+            "owner": "safeguarding officer",
+            "status": "required",
+            "evidence": "Guardian-sharing requested." if payload.share_with_guardians else "Standard consent gate required.",
+        },
+    ]
+
+
+def pathway_scout_actions(
+    payload: AthletePathwayProjectionCreate,
+    projected_level: str,
+    primary_position: str | None,
+) -> list[str]:
+    position = primary_position or "primary role"
+    actions = [
+        f"Create a {position} scout sheet with latest assessment, trend, benchmark, and injury-risk evidence.",
+        "Generate a 90-second highlight reel with timestamps, opponent context, and coach annotation notes.",
+        "Use consent-gated profile links for guardians, schools, scouts, and scholarship offices.",
+        "Record every outreach response as structured scouting feedback before the next projection run.",
+    ]
+    if payload.preferred_regions:
+        actions.append(f"Prioritize outreach in {', '.join(payload.preferred_regions[:3])}.")
+    if projected_level in {"college_recruit", "professional_prospect"}:
+        actions.append("Schedule a showcase or verified trial while the readiness score is in an external-review band.")
+    return actions
 
 
 def rating_for_score(score: float | None) -> str | None:

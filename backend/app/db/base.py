@@ -142,6 +142,7 @@ from app.models.organization import (  # noqa: F401,E402
 )
 from app.models.performance import (  # noqa: F401,E402
     AthleteAssessment,
+    AthletePathwayProjection,
     AthletePerformanceObservation,
     OppositionScoutingReport,
     OppositionScoutingVideoAsset,

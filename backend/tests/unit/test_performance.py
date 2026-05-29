@@ -240,6 +240,107 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert filtered_profile["what_if_scenarios"][0]["horizon"] == 3
 
 
+def test_athlete_pathway_projection_builds_recruiting_roadmap(client, identity_headers) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metrics = [
+        ("pace", "Pace", "physical", 88),
+        ("first_touch", "First Touch", "technical", 84),
+        ("decision_speed", "Decision Speed", "tactical", 79),
+        ("composure", "Composure", "mental", 82),
+    ]
+    metric_ids = []
+    for code, name, category, value in metrics:
+        metric = client.post(
+            "/api/v1/performance/metrics",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "sport": "football",
+                "code": code,
+                "name": name,
+                "category": category,
+                "unit": "score",
+                "min_value": 0,
+                "max_value": 100,
+                "higher_is_better": True,
+            },
+        ).json()
+        metric_ids.append(metric["id"])
+        response = client.post(
+            f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/observations",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "metric_definition_id": metric["id"],
+                "value": value,
+                "observed_at": "2026-03-01T10:00:00Z",
+                "verification_status": "verified",
+            },
+        )
+        assert response.status_code == 201
+    assessment = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/assessments",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "physical_score": 88,
+            "technical_score": 84,
+            "tactical_score": 79,
+            "mental_score": 82,
+            "summary": "External pathway readiness baseline.",
+        },
+    )
+    assert assessment.status_code == 201
+
+    projection_response = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/pathway-projections",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "primary_position": "Forward",
+            "academic_gpa": 3.7,
+            "graduation_year": 2028,
+            "target_pathway": "college_scholarship",
+            "preferred_regions": ["Kenya", "East Africa", "NCAA Division II"],
+            "recruiting_profile_url": "https://profiles.afrolete.local/performance-athlete",
+            "notes": "Prioritize verified scout sharing.",
+            "share_with_guardians": True,
+        },
+    )
+
+    assert projection_response.status_code == 201
+    projection = projection_response.json()
+    assert projection["athlete_name"] == "Performance Athlete"
+    assert projection["model_policy"] == "deterministic_pathway_projection_v1"
+    assert projection["primary_position"] == "Forward"
+    assert projection["readiness_score"] >= 80
+    assert projection["projected_level"] in {
+        "college_recruit",
+        "semi_pro_candidate",
+        "professional_prospect",
+    }
+    assert projection["college_fit_score"] >= 80
+    assert projection["pathway_options"][0]["pathway"] == "college_scholarship"
+    assert projection["milestones"]
+    assert any("highlight" in milestone["title"].lower() for milestone in projection["milestones"])
+    assert any("consent" in action.lower() for action in projection["scout_actions"])
+    assert projection["evidence"]["observation_count"] == len(metrics)
+    assert projection["evidence"]["assessment_count"] == 1
+    assert "Guardian-sharing requested" in " ".join(projection["risk_flags"])
+
+    list_response = client.get(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/pathway-projections"
+        f"?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert list_response.status_code == 200
+    projections = list_response.json()
+    assert projections[0]["id"] == projection["id"]
+    assert projections[0]["pathway_options"][0]["next_actions"]
+    assert len(metric_ids) == len(metrics)
+
+
 def test_performance_benchmarks_can_scope_to_position_cohort(client, identity_headers) -> None:
     organization, team, _, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(
