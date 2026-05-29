@@ -122,6 +122,79 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     assert activation_dashboard["top_coupon_code"] == "ACME-DERBY-10"
     assert activation_dashboard["roi_signal"] == "building"
 
+    content_asset = client.post(
+        "/api/v1/commercial/sponsor-content-assets",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sponsor_id": sponsor["id"],
+            "sponsorship_agreement_id": agreement["id"],
+            "title": "Acme scoreboard overlay",
+            "asset_type": "digital_signage",
+            "channel": "scoreboard",
+            "format": "16:9",
+            "asset_url": "https://assets.example/acme-scoreboard.png",
+            "usage_guidelines": "Show before kickoff and at halftime.",
+            "rights_summary": "No athlete likeness in this version.",
+            "player_rights_required": False,
+        },
+    ).json()
+    assert content_asset["approval_status"] == "pending_review"
+    assert content_asset["sponsor_name"] == "Acme Sports"
+
+    approval = client.post(
+        "/api/v1/commercial/sponsor-content-approvals",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "content_asset_id": content_asset["id"],
+            "reviewer_name": "Commercial Manager",
+            "reviewer_email": "commercial@example.com",
+            "decision": "approved",
+            "notes": "Brand-safe and rights-cleared for matchday rotation.",
+        },
+    ).json()
+    assert approval["decision"] == "approved"
+    assert approval["content_title"] == "Acme scoreboard overlay"
+
+    placement = client.post(
+        "/api/v1/commercial/sponsor-placements",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sponsor_id": sponsor["id"],
+            "content_asset_id": content_asset["id"],
+            "activation_campaign_id": activation["id"],
+            "event_id": event["id"],
+            "placement_name": "Main entrance and scoreboard rotation",
+            "placement_type": "venue_zone",
+            "channel": "event_day",
+            "location_name": "Main gate",
+            "staff_requirements": "2 setup crew and 1 photographer.",
+            "inventory_checklist": "Banner, QR posters, product samples.",
+            "weather_contingency": "Move sampling table under covered concourse.",
+            "expected_impressions": 2500,
+        },
+    ).json()
+    assert placement["content_title"] == "Acme scoreboard overlay"
+    assert placement["campaign_title"] == "Acme matchday coupon"
+    assert placement["event_title"] == "Commercial derby"
+    assert placement["expected_impressions"] == 2500
+
+    content_dashboard = client.get(
+        f"/api/v1/commercial/sponsor-content-dashboard?organization_id={organization['id']}"
+    ).json()
+    assert content_dashboard["asset_count"] == 1
+    assert content_dashboard["approved_asset_count"] == 1
+    assert content_dashboard["placement_count"] == 1
+    assert content_dashboard["total_expected_impressions"] == 2500
+
+    content_assets = client.get(
+        f"/api/v1/commercial/sponsor-content-assets?organization_id={organization['id']}"
+    ).json()
+    assert content_assets[0]["usage_count"] == 1
+    assert content_assets[0]["approval_status"] == "approved"
+
     activation_list = client.get(
         f"/api/v1/commercial/sponsor-activations?organization_id={organization['id']}"
     ).json()

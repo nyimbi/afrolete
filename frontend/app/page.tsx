@@ -365,6 +365,10 @@ import type {
   ScheduledReportRead,
   SponsorActivationCampaignRead,
   SponsorActivationDashboardRead,
+  SponsorActivationPlacementRead,
+  SponsorContentApprovalRead,
+  SponsorContentAssetRead,
+  SponsorContentDashboardRead,
   SponsorCouponRedemptionRead,
   SponsorRead,
   SponsorshipAgreementRead,
@@ -1790,6 +1794,10 @@ export default function HomePage() {
   const [sponsorActivations, setSponsorActivations] = useState<SponsorActivationCampaignRead[]>([]);
   const [sponsorCouponRedemptions, setSponsorCouponRedemptions] = useState<SponsorCouponRedemptionRead[]>([]);
   const [sponsorActivationDashboard, setSponsorActivationDashboard] = useState<SponsorActivationDashboardRead | null>(null);
+  const [sponsorContentAssets, setSponsorContentAssets] = useState<SponsorContentAssetRead[]>([]);
+  const [sponsorContentApprovals, setSponsorContentApprovals] = useState<SponsorContentApprovalRead[]>([]);
+  const [sponsorPlacements, setSponsorPlacements] = useState<SponsorActivationPlacementRead[]>([]);
+  const [sponsorContentDashboard, setSponsorContentDashboard] = useState<SponsorContentDashboardRead | null>(null);
   const [reportDefinitions, setReportDefinitions] = useState<ReportDefinitionRead[]>([]);
   const [generatedReports, setGeneratedReports] = useState<GeneratedReportRead[]>([]);
   const [scheduledReports, setScheduledReports] = useState<ScheduledReportRead[]>([]);
@@ -2512,7 +2520,27 @@ export default function HomePage() {
     redemption_source: "matchday_store",
     order_reference: "ORDER-1001",
     discount_amount: 8,
-    purchase_amount: 80
+    purchase_amount: 80,
+    content_title: "Scoreboard launch overlay",
+    asset_type: "digital_signage",
+    content_channel: "scoreboard",
+    content_format: "16:9",
+    asset_url: "https://assets.afrolete.local/sponsors/matchday-overlay.png",
+    usage_guidelines: "Use during pre-match warmups and halftime only.",
+    rights_summary: "No player image rights required for this graphic.",
+    player_rights_required: false,
+    approval_decision: "approved",
+    reviewer_name: "Commercial Manager",
+    reviewer_email: "commercial@example.com",
+    approval_notes: "Brand colors and claims approved for matchday use.",
+    placement_name: "Main entrance banner and scoreboard rotation",
+    placement_type: "venue_zone",
+    placement_channel: "event_day",
+    location_name: "Main entrance and scoreboard",
+    expected_impressions: 5000,
+    staff_requirements: "2 setup crew, 1 photographer, 2 brand ambassadors.",
+    inventory_checklist: "Banner, tablet, product samples, QR posters.",
+    weather_contingency: "Move sampling table under covered concourse."
   });
   const [campaignForm, setCampaignForm] = useState({
     name: "New Training Facility",
@@ -3698,6 +3726,10 @@ export default function HomePage() {
       sponsorActivationData,
       sponsorCouponRedemptionData,
       sponsorActivationDashboardData,
+      sponsorContentAssetData,
+      sponsorContentApprovalData,
+      sponsorPlacementData,
+      sponsorContentDashboardData,
       campaignData,
       grantOpportunityData,
       grantApplicationData,
@@ -3719,6 +3751,10 @@ export default function HomePage() {
       apiRequest<SponsorActivationCampaignRead[]>(`/commercial/sponsor-activations?organization_id=${organizationId}`),
       apiRequest<SponsorCouponRedemptionRead[]>(`/commercial/sponsor-coupon-redemptions?organization_id=${organizationId}`),
       apiRequest<SponsorActivationDashboardRead>(`/commercial/sponsor-activation-dashboard?organization_id=${organizationId}`),
+      apiRequest<SponsorContentAssetRead[]>(`/commercial/sponsor-content-assets?organization_id=${organizationId}`),
+      apiRequest<SponsorContentApprovalRead[]>(`/commercial/sponsor-content-approvals?organization_id=${organizationId}`),
+      apiRequest<SponsorActivationPlacementRead[]>(`/commercial/sponsor-placements?organization_id=${organizationId}`),
+      apiRequest<SponsorContentDashboardRead>(`/commercial/sponsor-content-dashboard?organization_id=${organizationId}`),
       apiRequest<FundraisingCampaignRead[]>(`/commercial/campaigns?organization_id=${organizationId}`),
       apiRequest<GrantOpportunityRead[]>(`/commercial/grants/opportunities?organization_id=${organizationId}`),
       apiRequest<GrantApplicationRead[]>(`/commercial/grants/applications?organization_id=${organizationId}`),
@@ -3742,6 +3778,10 @@ export default function HomePage() {
     setSponsorActivations(sponsorActivationData);
     setSponsorCouponRedemptions(sponsorCouponRedemptionData);
     setSponsorActivationDashboard(sponsorActivationDashboardData);
+    setSponsorContentAssets(sponsorContentAssetData);
+    setSponsorContentApprovals(sponsorContentApprovalData);
+    setSponsorPlacements(sponsorPlacementData);
+    setSponsorContentDashboard(sponsorContentDashboardData);
     setCampaigns(campaignData);
     setGrantOpportunities(grantOpportunityData);
     setGrantApplications(grantApplicationData);
@@ -4253,6 +4293,10 @@ export default function HomePage() {
       setSponsorActivations([]);
       setSponsorCouponRedemptions([]);
       setSponsorActivationDashboard(null);
+      setSponsorContentAssets([]);
+      setSponsorContentApprovals([]);
+      setSponsorPlacements([]);
+      setSponsorContentDashboard(null);
       setSelectedGrantOpportunityId("");
       setSelectedGrantApplicationId("");
       setSelectedMerchandiseProductId("");
@@ -13024,6 +13068,89 @@ export default function HomePage() {
     );
   };
 
+  const createSponsorContentWorkflow = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const sponsorId = selectedSponsorId || sponsors[0]?.id;
+    if (!sponsorId) {
+      addLog("Create or select a sponsor first", "bad");
+      return;
+    }
+    runAction(
+      "create-sponsor-content-workflow",
+      async () => {
+        const asset = await apiRequest<SponsorContentAssetRead>("/commercial/sponsor-content-assets", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sponsor_id: sponsorId,
+            sponsorship_agreement_id: sponsorships.find((agreement) => agreement.sponsor_id === sponsorId)?.id ?? null,
+            title: sponsorForm.content_title,
+            asset_type: sponsorForm.asset_type,
+            channel: sponsorForm.content_channel,
+            format: sponsorForm.content_format,
+            asset_url: sponsorForm.asset_url,
+            usage_guidelines: sponsorForm.usage_guidelines,
+            rights_summary: sponsorForm.rights_summary,
+            player_rights_required: sponsorForm.player_rights_required
+          }
+        });
+        const approval = await apiRequest<SponsorContentApprovalRead>("/commercial/sponsor-content-approvals", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            content_asset_id: asset.id,
+            reviewer_name: sponsorForm.reviewer_name,
+            reviewer_email: sponsorForm.reviewer_email,
+            decision: sponsorForm.approval_decision,
+            notes: sponsorForm.approval_notes
+          }
+        });
+        const placement = await apiRequest<SponsorActivationPlacementRead>("/commercial/sponsor-placements", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sponsor_id: sponsorId,
+            content_asset_id: asset.id,
+            activation_campaign_id: sponsorActivations.find((activation) => activation.sponsor_id === sponsorId)?.id ?? null,
+            event_id: selectedEventId || null,
+            placement_name: sponsorForm.placement_name,
+            placement_type: sponsorForm.placement_type,
+            channel: sponsorForm.placement_channel,
+            location_name: sponsorForm.location_name,
+            expected_impressions: sponsorForm.expected_impressions,
+            staff_requirements: sponsorForm.staff_requirements,
+            inventory_checklist: sponsorForm.inventory_checklist,
+            weather_contingency: sponsorForm.weather_contingency,
+            notes: sponsorForm.activation_objective
+          }
+        });
+        return { asset, approval, placement };
+      },
+      ({ asset, approval, placement }) => {
+        setSponsorContentAssets((current) => [
+          { ...asset, approval_status: approval.decision, approved_by_name: approval.reviewer_name },
+          ...current.filter((item) => item.id !== asset.id)
+        ]);
+        setSponsorContentApprovals((current) => [
+          approval,
+          ...current.filter((item) => item.id !== approval.id)
+        ]);
+        setSponsorPlacements((current) => [
+          placement,
+          ...current.filter((item) => item.id !== placement.id)
+        ]);
+        addLog(`${asset.title} approved and placed for sponsor activation`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const createCampaignAndDonation = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -17077,6 +17204,7 @@ export default function HomePage() {
                 <button type="button" onClick={createSponsorAndAgreement} disabled={busyAction !== null}>Sponsor</button>
                 <button type="button" onClick={createSponsorActivationCampaign} disabled={busyAction !== null}>Activation</button>
                 <button type="button" onClick={recordSponsorCouponRedemption} disabled={busyAction !== null}>Redeem</button>
+                <button type="button" onClick={createSponsorContentWorkflow} disabled={busyAction !== null}>Content</button>
                 <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
@@ -17151,6 +17279,30 @@ export default function HomePage() {
               <label className="wide-field">
                 Offer
                 <input value={sponsorForm.activation_offer_summary} onChange={(event) => setSponsorForm({ ...sponsorForm, activation_offer_summary: event.target.value })} />
+              </label>
+              <label>
+                Asset
+                <input value={sponsorForm.content_title} onChange={(event) => setSponsorForm({ ...sponsorForm, content_title: event.target.value })} />
+              </label>
+              <label>
+                Channel
+                <input value={sponsorForm.content_channel} onChange={(event) => setSponsorForm({ ...sponsorForm, content_channel: event.target.value })} />
+              </label>
+              <label>
+                Placement
+                <input value={sponsorForm.placement_name} onChange={(event) => setSponsorForm({ ...sponsorForm, placement_name: event.target.value })} />
+              </label>
+              <label>
+                Impressions
+                <input type="number" min="0" value={sponsorForm.expected_impressions} onChange={(event) => setSponsorForm({ ...sponsorForm, expected_impressions: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Asset URL
+                <input value={sponsorForm.asset_url} onChange={(event) => setSponsorForm({ ...sponsorForm, asset_url: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Rights
+                <input value={sponsorForm.rights_summary} onChange={(event) => setSponsorForm({ ...sponsorForm, rights_summary: event.target.value })} />
               </label>
               <label>
                 Campaign
@@ -17277,6 +17429,43 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {sponsorContentDashboard ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Sponsor content · {sponsorContentDashboard.approved_asset_count}/{sponsorContentDashboard.asset_count} approved</strong>
+                    <span>
+                      {sponsorContentDashboard.placement_count} placements · {sponsorContentDashboard.total_expected_impressions} expected impressions
+                    </span>
+                    <span>{sponsorContentDashboard.recommendations[0] ?? "Sponsor content library ready"}</span>
+                  </div>
+                </article>
+              ) : null}
+              {sponsorContentAssets.slice(0, 3).map((asset) => (
+                <article key={asset.id} className="task-card">
+                  <div>
+                    <strong>{asset.title}</strong>
+                    <span>{asset.sponsor_name ?? "Sponsor"} · {asset.channel} · {asset.approval_status}</span>
+                  </div>
+                </article>
+              ))}
+              {sponsorPlacements.slice(0, 2).map((placement) => (
+                <article key={placement.id} className="task-card">
+                  <div>
+                    <strong>{placement.placement_name}</strong>
+                    <span>
+                      {placement.location_name ?? placement.channel} · {placement.expected_impressions} expected · {placement.status}
+                    </span>
+                  </div>
+                </article>
+              ))}
+              {sponsorContentApprovals.slice(0, 2).map((approval) => (
+                <article key={approval.id} className="task-card">
+                  <div>
+                    <strong>{approval.content_title ?? "Sponsor content"} · {approval.decision}</strong>
+                    <span>{approval.reviewer_name} · {approval.notes ?? "No notes"}</span>
+                  </div>
+                </article>
+              ))}
               {sponsorActivations.slice(0, 3).map((activation) => (
                 <article key={activation.id} className="task-card">
                   <div>

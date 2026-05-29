@@ -2783,6 +2783,82 @@ export type SponsorActivationDashboardRead = {
   recommendations: string[];
 };
 
+export type SponsorContentAssetRead = {
+  id: UUID;
+  organization_id: UUID;
+  sponsor_id: UUID;
+  sponsorship_agreement_id: UUID | null;
+  title: string;
+  asset_type: string;
+  channel: string;
+  format: string;
+  asset_url: string;
+  thumbnail_url: string | null;
+  usage_guidelines: string | null;
+  rights_summary: string | null;
+  player_rights_required: boolean;
+  expires_at: string | null;
+  version: number;
+  sponsor_name: string | null;
+  approval_status: string;
+  approved_at: string | null;
+  approved_by_name: string | null;
+  usage_count: number;
+  impression_count: number;
+  engagement_count: number;
+};
+
+export type SponsorContentApprovalRead = {
+  id: UUID;
+  organization_id: UUID;
+  content_asset_id: UUID;
+  reviewer_name: string;
+  reviewer_email: string | null;
+  decision: string;
+  notes: string | null;
+  content_title: string | null;
+  decided_at: string;
+};
+
+export type SponsorActivationPlacementRead = {
+  id: UUID;
+  organization_id: UUID;
+  sponsor_id: UUID;
+  content_asset_id: UUID | null;
+  activation_campaign_id: UUID | null;
+  event_id: UUID | null;
+  placement_name: string;
+  placement_type: string;
+  channel: string;
+  scheduled_at: string | null;
+  location_name: string | null;
+  staff_requirements: string | null;
+  inventory_checklist: string | null;
+  weather_contingency: string | null;
+  expected_impressions: number;
+  notes: string | null;
+  sponsor_name: string | null;
+  content_title: string | null;
+  campaign_title: string | null;
+  event_title: string | null;
+  status: string;
+  actual_impressions: number;
+  actual_engagements: number;
+};
+
+export type SponsorContentDashboardRead = {
+  organization_id: UUID;
+  asset_count: number;
+  approved_asset_count: number;
+  pending_asset_count: number;
+  expiring_asset_count: number;
+  placement_count: number;
+  planned_placement_count: number;
+  total_expected_impressions: number;
+  total_actual_impressions: number;
+  recommendations: string[];
+};
+
 export type FundraisingCampaignRead = {
   id: UUID;
   organization_id: UUID;

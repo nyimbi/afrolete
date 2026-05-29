@@ -1,7 +1,7 @@
 import json
 import time
 from typing import Any
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from decimal import InvalidOperation
 import hmac
@@ -31,6 +31,9 @@ from app.models.commercial import (
     MerchandiseProduct,
     Sponsor,
     SponsorActivationCampaign,
+    SponsorActivationPlacement,
+    SponsorContentApprovalReview,
+    SponsorContentAsset,
     SponsorCouponRedemption,
     SponsorshipAgreement,
     Ticket,
@@ -78,6 +81,13 @@ from app.schemas.commercial import (
     SponsorActivationCampaignCreate,
     SponsorActivationCampaignRead,
     SponsorActivationDashboardRead,
+    SponsorActivationPlacementCreate,
+    SponsorActivationPlacementRead,
+    SponsorContentApprovalCreate,
+    SponsorContentApprovalRead,
+    SponsorContentAssetCreate,
+    SponsorContentAssetRead,
+    SponsorContentDashboardRead,
     SponsorCouponRedemptionCreate,
     SponsorCouponRedemptionRead,
     SponsorPortalAgreementRead,
@@ -266,6 +276,157 @@ async def sponsor_activation_dashboard(db: AsyncSession, organization_id: UUID) 
         top_coupon_code=top_campaign.coupon_code if top_campaign else None,
         roi_signal=sponsor_activation_roi_signal(total_redemptions, conversion_value),
         recommendations=sponsor_activation_recommendations(campaigns, total_redemptions, conversion_value),
+    )
+
+
+async def create_sponsor_content_asset(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SponsorContentAssetCreate,
+    authz: AuthorizationService,
+) -> SponsorContentAssetRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    await get_sponsor_for_organization(db, payload.sponsor_id, payload.organization_id)
+    if payload.sponsorship_agreement_id is not None:
+        await get_sponsorship_for_organization(db, payload.sponsorship_agreement_id, payload.organization_id)
+    asset = SponsorContentAsset(**payload.model_dump())
+    db.add(asset)
+    await db.commit()
+    await db.refresh(asset)
+    return await sponsor_content_asset_read(db, asset)
+
+
+async def list_sponsor_content_assets(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[SponsorContentAssetRead]:
+    assets = list(
+        (
+            await db.scalars(
+                select(SponsorContentAsset)
+                .where(SponsorContentAsset.organization_id == organization_id)
+                .order_by(SponsorContentAsset.created_at.desc())
+            )
+        ).all()
+    )
+    return [await sponsor_content_asset_read(db, asset) for asset in assets]
+
+
+async def review_sponsor_content_asset(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SponsorContentApprovalCreate,
+    authz: AuthorizationService,
+) -> SponsorContentApprovalRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    asset = await get_sponsor_content_asset_for_organization(db, payload.content_asset_id, payload.organization_id)
+    decision = normalize_content_decision(payload.decision)
+    review = SponsorContentApprovalReview(
+        organization_id=payload.organization_id,
+        content_asset_id=payload.content_asset_id,
+        reviewer_name=payload.reviewer_name,
+        reviewer_email=payload.reviewer_email.strip().lower() if payload.reviewer_email else None,
+        decision=decision,
+        notes=payload.notes,
+        decided_at=datetime.now(UTC),
+    )
+    asset.approval_status = decision
+    if decision == "approved":
+        asset.approved_at = review.decided_at
+        asset.approved_by_name = payload.reviewer_name
+    elif decision in {"changes_requested", "rejected"}:
+        asset.approved_at = None
+        asset.approved_by_name = None
+    db.add(review)
+    await db.commit()
+    await db.refresh(review)
+    await db.refresh(asset)
+    return sponsor_content_approval_read(review, asset)
+
+
+async def list_sponsor_content_reviews(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[SponsorContentApprovalRead]:
+    rows = (
+        await db.execute(
+            select(SponsorContentApprovalReview, SponsorContentAsset)
+            .join(SponsorContentAsset, SponsorContentAsset.id == SponsorContentApprovalReview.content_asset_id)
+            .where(SponsorContentApprovalReview.organization_id == organization_id)
+            .order_by(SponsorContentApprovalReview.decided_at.desc())
+        )
+    ).all()
+    return [sponsor_content_approval_read(review, asset) for review, asset in rows]
+
+
+async def create_sponsor_activation_placement(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SponsorActivationPlacementCreate,
+    authz: AuthorizationService,
+) -> SponsorActivationPlacementRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    await get_sponsor_for_organization(db, payload.sponsor_id, payload.organization_id)
+    asset = None
+    if payload.content_asset_id is not None:
+        asset = await get_sponsor_content_asset_for_organization(db, payload.content_asset_id, payload.organization_id)
+        if asset.sponsor_id != payload.sponsor_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Content asset belongs to another sponsor")
+    if payload.activation_campaign_id is not None:
+        campaign = await db.get(SponsorActivationCampaign, payload.activation_campaign_id)
+        if campaign is None or campaign.organization_id != payload.organization_id or campaign.sponsor_id != payload.sponsor_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor activation campaign not found")
+    if payload.event_id is not None:
+        await get_event_for_organization(db, payload.event_id, payload.organization_id)
+    placement = SponsorActivationPlacement(**payload.model_dump())
+    if asset is not None:
+        asset.usage_count += 1
+    db.add(placement)
+    await db.commit()
+    await db.refresh(placement)
+    return await sponsor_activation_placement_read(db, placement)
+
+
+async def list_sponsor_activation_placements(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[SponsorActivationPlacementRead]:
+    placements = list(
+        (
+            await db.scalars(
+                select(SponsorActivationPlacement)
+                .where(SponsorActivationPlacement.organization_id == organization_id)
+                .order_by(SponsorActivationPlacement.created_at.desc())
+            )
+        ).all()
+    )
+    return [await sponsor_activation_placement_read(db, placement) for placement in placements]
+
+
+async def sponsor_content_dashboard(db: AsyncSession, organization_id: UUID) -> SponsorContentDashboardRead:
+    assets = list(
+        (await db.scalars(select(SponsorContentAsset).where(SponsorContentAsset.organization_id == organization_id))).all()
+    )
+    placements = list(
+        (
+            await db.scalars(
+                select(SponsorActivationPlacement).where(SponsorActivationPlacement.organization_id == organization_id)
+            )
+        ).all()
+    )
+    now = datetime.now(UTC)
+    expiring_before = now + timedelta(days=30)
+    return SponsorContentDashboardRead(
+        organization_id=organization_id,
+        asset_count=len(assets),
+        approved_asset_count=sum(1 for asset in assets if asset.approval_status == "approved"),
+        pending_asset_count=sum(1 for asset in assets if asset.approval_status == "pending_review"),
+        expiring_asset_count=sum(1 for asset in assets if asset.expires_at and now <= asset.expires_at <= expiring_before),
+        placement_count=len(placements),
+        planned_placement_count=sum(1 for placement in placements if placement.status == "planned"),
+        total_expected_impressions=sum(placement.expected_impressions for placement in placements),
+        total_actual_impressions=sum(placement.actual_impressions for placement in placements),
+        recommendations=sponsor_content_recommendations(assets, placements),
     )
 
 
@@ -1898,6 +2059,17 @@ async def get_activation_by_coupon(
     return campaign
 
 
+async def get_sponsor_content_asset_for_organization(
+    db: AsyncSession,
+    content_asset_id: UUID,
+    organization_id: UUID,
+) -> SponsorContentAsset:
+    asset = await db.get(SponsorContentAsset, content_asset_id)
+    if asset is None or asset.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor content asset not found")
+    return asset
+
+
 async def get_campaign_for_organization(db: AsyncSession, campaign_id: UUID, organization_id: UUID) -> FundraisingCampaign:
     campaign = await db.get(FundraisingCampaign, campaign_id)
     if campaign is None or campaign.organization_id != organization_id:
@@ -2813,4 +2985,114 @@ def sponsor_activation_recommendations(
         recommendations.append("Connect coupon redemption tracking to merchandise, tickets, or sponsor landing pages.")
     if total_redemptions:
         recommendations.append("Share redemption and conversion results with sponsors before renewal conversations.")
+    return recommendations[:5]
+
+
+def normalize_content_decision(value: str) -> str:
+    decision = value.strip().lower().replace(" ", "_").replace("-", "_")
+    allowed = {"pending_review", "approved", "changes_requested", "rejected", "expired"}
+    if decision not in allowed:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported sponsor content decision")
+    return decision
+
+
+async def sponsor_content_asset_read(db: AsyncSession, asset: SponsorContentAsset) -> SponsorContentAssetRead:
+    sponsor = await db.get(Sponsor, asset.sponsor_id)
+    return SponsorContentAssetRead(
+        id=asset.id,
+        organization_id=asset.organization_id,
+        sponsor_id=asset.sponsor_id,
+        sponsorship_agreement_id=asset.sponsorship_agreement_id,
+        title=asset.title,
+        asset_type=asset.asset_type,
+        channel=asset.channel,
+        format=asset.format,
+        asset_url=asset.asset_url,
+        thumbnail_url=asset.thumbnail_url,
+        usage_guidelines=asset.usage_guidelines,
+        rights_summary=asset.rights_summary,
+        player_rights_required=asset.player_rights_required,
+        expires_at=asset.expires_at,
+        version=asset.version,
+        sponsor_name=sponsor.name if sponsor else None,
+        approval_status=asset.approval_status,
+        approved_at=asset.approved_at,
+        approved_by_name=asset.approved_by_name,
+        usage_count=asset.usage_count,
+        impression_count=asset.impression_count,
+        engagement_count=asset.engagement_count,
+    )
+
+
+def sponsor_content_approval_read(
+    review: SponsorContentApprovalReview,
+    asset: SponsorContentAsset | None = None,
+) -> SponsorContentApprovalRead:
+    return SponsorContentApprovalRead(
+        id=review.id,
+        organization_id=review.organization_id,
+        content_asset_id=review.content_asset_id,
+        reviewer_name=review.reviewer_name,
+        reviewer_email=review.reviewer_email,
+        decision=review.decision,
+        notes=review.notes,
+        content_title=asset.title if asset else None,
+        decided_at=review.decided_at,
+    )
+
+
+async def sponsor_activation_placement_read(
+    db: AsyncSession,
+    placement: SponsorActivationPlacement,
+) -> SponsorActivationPlacementRead:
+    sponsor = await db.get(Sponsor, placement.sponsor_id)
+    asset = await db.get(SponsorContentAsset, placement.content_asset_id) if placement.content_asset_id else None
+    campaign = (
+        await db.get(SponsorActivationCampaign, placement.activation_campaign_id)
+        if placement.activation_campaign_id
+        else None
+    )
+    event = await db.get(Event, placement.event_id) if placement.event_id else None
+    return SponsorActivationPlacementRead(
+        id=placement.id,
+        organization_id=placement.organization_id,
+        sponsor_id=placement.sponsor_id,
+        content_asset_id=placement.content_asset_id,
+        activation_campaign_id=placement.activation_campaign_id,
+        event_id=placement.event_id,
+        placement_name=placement.placement_name,
+        placement_type=placement.placement_type,
+        channel=placement.channel,
+        scheduled_at=placement.scheduled_at,
+        location_name=placement.location_name,
+        staff_requirements=placement.staff_requirements,
+        inventory_checklist=placement.inventory_checklist,
+        weather_contingency=placement.weather_contingency,
+        expected_impressions=placement.expected_impressions,
+        notes=placement.notes,
+        sponsor_name=sponsor.name if sponsor else None,
+        content_title=asset.title if asset else None,
+        campaign_title=campaign.title if campaign else None,
+        event_title=event.title if event else None,
+        status=placement.status,
+        actual_impressions=placement.actual_impressions,
+        actual_engagements=placement.actual_engagements,
+    )
+
+
+def sponsor_content_recommendations(
+    assets: list[SponsorContentAsset],
+    placements: list[SponsorActivationPlacement],
+) -> list[str]:
+    recommendations: list[str] = []
+    if not assets:
+        recommendations.append("Upload sponsor brand assets, campaign creative, and rights notes before activation.")
+    if any(asset.approval_status == "pending_review" for asset in assets):
+        recommendations.append("Review pending sponsor content before placing it on public channels.")
+    if assets and not placements:
+        recommendations.append("Schedule approved sponsor content into event, social, newsletter, or venue placements.")
+    if any(asset.player_rights_required and asset.approval_status != "approved" for asset in assets):
+        recommendations.append("Confirm player image rights before using athlete-facing sponsor creative.")
+    if placements:
+        recommendations.append("Collect post-placement impressions and engagement to strengthen sponsor ROI reporting.")
     return recommendations[:5]

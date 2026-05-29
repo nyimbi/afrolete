@@ -100,6 +100,70 @@ class SponsorCouponRedemption(IdMixin, TimestampMixin, Base):
     redeemed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class SponsorContentAsset(IdMixin, TimestampMixin, Base):
+    __tablename__ = "sponsor_content_assets"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    sponsor_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("sponsors.id"), index=True)
+    sponsorship_agreement_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("sponsorship_agreements.id"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    asset_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    format: Mapped[str] = mapped_column(String(80), default="link", nullable=False, index=True)
+    asset_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    thumbnail_url: Mapped[str | None] = mapped_column(String(500))
+    usage_guidelines: Mapped[str | None] = mapped_column(Text)
+    rights_summary: Mapped[str | None] = mapped_column(Text)
+    player_rights_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    approval_status: Mapped[str] = mapped_column(String(40), default="pending_review", nullable=False, index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    approved_by_name: Mapped[str | None] = mapped_column(String(180))
+    usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    impression_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    engagement_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class SponsorContentApprovalReview(IdMixin, TimestampMixin, Base):
+    __tablename__ = "sponsor_content_approval_reviews"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    content_asset_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("sponsor_content_assets.id"), index=True)
+    reviewer_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    reviewer_email: Mapped[str | None] = mapped_column(String(320), index=True)
+    decision: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class SponsorActivationPlacement(IdMixin, TimestampMixin, Base):
+    __tablename__ = "sponsor_activation_placements"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    sponsor_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("sponsors.id"), index=True)
+    content_asset_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("sponsor_content_assets.id"), index=True)
+    activation_campaign_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("sponsor_activation_campaigns.id"), index=True
+    )
+    event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    placement_name: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    placement_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    location_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    staff_requirements: Mapped[str | None] = mapped_column(Text)
+    inventory_checklist: Mapped[str | None] = mapped_column(Text)
+    weather_contingency: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="planned", nullable=False, index=True)
+    expected_impressions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    actual_impressions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    actual_engagements: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class FundraisingCampaign(IdMixin, TimestampMixin, Base):
     __tablename__ = "fundraising_campaigns"
 

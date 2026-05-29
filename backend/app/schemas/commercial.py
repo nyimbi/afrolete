@@ -112,6 +112,91 @@ class SponsorActivationDashboardRead(BaseModel):
     recommendations: list[str]
 
 
+class SponsorContentAssetCreate(BaseModel):
+    organization_id: UUID
+    sponsor_id: UUID
+    sponsorship_agreement_id: UUID | None = None
+    title: str = Field(min_length=2, max_length=220)
+    asset_type: str = Field(default="brand_asset", min_length=2, max_length=80)
+    channel: str = Field(default="digital", min_length=2, max_length=80)
+    format: str = Field(default="link", min_length=2, max_length=80)
+    asset_url: str = Field(min_length=3, max_length=500)
+    thumbnail_url: str | None = Field(default=None, max_length=500)
+    usage_guidelines: str | None = Field(default=None, max_length=4000)
+    rights_summary: str | None = Field(default=None, max_length=4000)
+    player_rights_required: bool = False
+    expires_at: datetime | None = None
+    version: int = Field(default=1, ge=1)
+
+
+class SponsorContentAssetRead(SponsorContentAssetCreate):
+    id: UUID
+    sponsor_name: str | None = None
+    approval_status: str
+    approved_at: datetime | None
+    approved_by_name: str | None
+    usage_count: int
+    impression_count: int
+    engagement_count: int
+
+
+class SponsorContentApprovalCreate(BaseModel):
+    organization_id: UUID
+    content_asset_id: UUID
+    reviewer_name: str = Field(min_length=2, max_length=180)
+    reviewer_email: str | None = Field(default=None, max_length=320)
+    decision: str = Field(min_length=2, max_length=40)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class SponsorContentApprovalRead(SponsorContentApprovalCreate):
+    id: UUID
+    content_title: str | None = None
+    decided_at: datetime
+
+
+class SponsorActivationPlacementCreate(BaseModel):
+    organization_id: UUID
+    sponsor_id: UUID
+    content_asset_id: UUID | None = None
+    activation_campaign_id: UUID | None = None
+    event_id: UUID | None = None
+    placement_name: str = Field(min_length=2, max_length=220)
+    placement_type: str = Field(default="digital_signage", min_length=2, max_length=80)
+    channel: str = Field(default="event_day", min_length=2, max_length=80)
+    scheduled_at: datetime | None = None
+    location_name: str | None = Field(default=None, max_length=180)
+    staff_requirements: str | None = Field(default=None, max_length=4000)
+    inventory_checklist: str | None = Field(default=None, max_length=4000)
+    weather_contingency: str | None = Field(default=None, max_length=4000)
+    expected_impressions: int = Field(default=0, ge=0)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class SponsorActivationPlacementRead(SponsorActivationPlacementCreate):
+    id: UUID
+    sponsor_name: str | None = None
+    content_title: str | None = None
+    campaign_title: str | None = None
+    event_title: str | None = None
+    status: str
+    actual_impressions: int
+    actual_engagements: int
+
+
+class SponsorContentDashboardRead(BaseModel):
+    organization_id: UUID
+    asset_count: int
+    approved_asset_count: int
+    pending_asset_count: int
+    expiring_asset_count: int
+    placement_count: int
+    planned_placement_count: int
+    total_expected_impressions: int
+    total_actual_impressions: int
+    recommendations: list[str]
+
+
 class FundraisingCampaignCreate(BaseModel):
     organization_id: UUID
     team_id: UUID | None = None
