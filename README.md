@@ -201,6 +201,7 @@ They are expected to have:
 - Execution mode.
 - Human review.
 - Reviewer assignment, due dates, priority, and queue summaries.
+- Review workload trends and manager-facing queue balancing.
 - Policy enforcement.
 - Audit trails.
 - Run ledgers.

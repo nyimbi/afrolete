@@ -3751,6 +3751,38 @@ export type AgentTaskReviewQueueSummaryRead = {
   pending_approval_count: number;
 };
 
+export type AgentTaskReviewTrendBucketRead = {
+  label: string;
+  opened_count: number;
+  completed_count: number;
+  assigned_count: number;
+  urgent_count: number;
+  approval_pending_count: number;
+};
+
+export type AgentTaskReviewerWorkloadRead = {
+  reviewer_person_id: UUID | null;
+  reviewer_name: string;
+  assigned_count: number;
+  overdue_count: number;
+  urgent_count: number;
+  completed_count: number;
+  average_age_hours: number;
+};
+
+export type AgentTaskReviewTrendRead = {
+  organization_id: UUID;
+  generated_at: string;
+  horizon_days: number;
+  open_count: number;
+  completed_count: number;
+  overdue_count: number;
+  urgent_count: number;
+  buckets: AgentTaskReviewTrendBucketRead[];
+  reviewers: AgentTaskReviewerWorkloadRead[];
+  recommendation: string;
+};
+
 export type AgentWorkerCallbackRead = {
   accepted: boolean;
   duplicate: boolean;

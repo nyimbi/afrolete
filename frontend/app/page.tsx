@@ -54,6 +54,7 @@ import type {
   AgentTaskRead,
   AgentTaskReviewQueueItemRead,
   AgentTaskReviewQueueSummaryRead,
+  AgentTaskReviewTrendRead,
   AgentTaskStatus,
   AgentWorkerCallbackRead,
   AccountingExportRead,
@@ -1458,6 +1459,7 @@ export default function HomePage() {
   const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [agentReviewQueue, setAgentReviewQueue] = useState<AgentTaskReviewQueueItemRead[]>([]);
   const [agentReviewSummary, setAgentReviewSummary] = useState<AgentTaskReviewQueueSummaryRead | null>(null);
+  const [agentReviewTrends, setAgentReviewTrends] = useState<AgentTaskReviewTrendRead | null>(null);
   const [agentTaskApprovals, setAgentTaskApprovals] = useState<AgentTaskApprovalRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
   const [agentLedgerVerification, setAgentLedgerVerification] =
@@ -2682,7 +2684,7 @@ export default function HomePage() {
 
   const loadAgentTasks = useCallback(async (organizationId: string, agentId?: string) => {
     const query = agentId ? `&agent_id=${agentId}` : "";
-    const [tasks, reviewQueue, reviewSummary, runs, governance, policyRules, policyReport, policyHistory, policyHistorySnapshots, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
+    const [tasks, reviewQueue, reviewSummary, reviewTrends, runs, governance, policyRules, policyReport, policyHistory, policyHistorySnapshots, ledgerVerification, transparency, registry, biasAudits, appeals, scorecard, comments, publications, readiness, artifactAccesses, artifactAccessSummary] = await Promise.all([
       apiRequest<AgentTaskRead[]>(`/agents/tasks?organization_id=${organizationId}${query}`),
       apiRequest<AgentTaskReviewQueueItemRead[]>(
         `/agents/tasks/review-queue?organization_id=${organizationId}&limit=8`,
@@ -2690,6 +2692,10 @@ export default function HomePage() {
       ),
       apiRequest<AgentTaskReviewQueueSummaryRead>(
         `/agents/tasks/review-summary?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<AgentTaskReviewTrendRead>(
+        `/agents/tasks/review-trends?organization_id=${organizationId}&horizon_days=14`,
         { identity }
       ),
       apiRequest<AgentRunRecordRead[]>(`/agents/runs?organization_id=${organizationId}`),
@@ -2729,6 +2735,7 @@ export default function HomePage() {
     setAgentTasks(tasks);
     setAgentReviewQueue(reviewQueue);
     setAgentReviewSummary(reviewSummary);
+    setAgentReviewTrends(reviewTrends);
     const approvalLists = await Promise.all(
       tasks.slice(0, 20).map((task) =>
         apiRequest<AgentTaskApprovalRead[]>(`/agents/tasks/${task.id}/approvals`)
@@ -17788,6 +17795,31 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {agentReviewTrends ? (
+                <article className="task-card">
+                  <div>
+                    <strong>AI review workload · {agentReviewTrends.horizon_days} days</strong>
+                    <span>
+                      {agentReviewTrends.open_count} open · {agentReviewTrends.completed_count} completed · {agentReviewTrends.overdue_count} overdue · {agentReviewTrends.urgent_count} urgent
+                    </span>
+                    <span>
+                      {agentReviewTrends.buckets.slice(-5).map((bucket) => `${bucket.label.slice(5)}:${bucket.opened_count}/${bucket.completed_count}`).join(" · ")}
+                    </span>
+                    <span>{agentReviewTrends.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {agentReviewTrends?.reviewers.slice(0, 3).map((reviewer) => (
+                <article key={`reviewer-${reviewer.reviewer_person_id ?? "unassigned"}`} className="task-card">
+                  <div>
+                    <strong>{reviewer.reviewer_name} · {reviewer.assigned_count} active reviews</strong>
+                    <span>
+                      {reviewer.overdue_count} overdue · {reviewer.urgent_count} urgent · {reviewer.completed_count} completed
+                    </span>
+                    <span>{reviewer.average_age_hours}h average review age</span>
+                  </div>
+                </article>
+              ))}
               {agentReviewQueue.slice(0, 4).map((item) => (
                 <article key={`review-${item.task.id}`} className="task-card">
                   <div>

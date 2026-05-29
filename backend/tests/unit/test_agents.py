@@ -177,6 +177,20 @@ def test_agent_assignment_and_task_review_workflow(client, identity_headers) -> 
     assert summary["assigned_count"] == 1
     assert summary["urgent_count"] == 1
 
+    review_trends = client.get(
+        f"/api/v1/agents/tasks/review-trends?organization_id={organization['id']}&horizon_days=7",
+        headers=identity_headers,
+    )
+    assert review_trends.status_code == 200
+    trends = review_trends.json()
+    assert trends["open_count"] == 1
+    assert trends["urgent_count"] == 1
+    assert trends["horizon_days"] == 7
+    assert len(trends["buckets"]) == 7
+    assert trends["reviewers"][0]["reviewer_name"] == "Owner Example"
+    assert trends["reviewers"][0]["assigned_count"] == 1
+    assert trends["recommendation"]
+
     runs = client.get(
         f"/api/v1/agents/runs?organization_id={organization['id']}",
         headers=identity_headers,

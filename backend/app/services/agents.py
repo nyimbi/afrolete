@@ -6,7 +6,7 @@ import io
 import json
 import re
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from urllib.parse import quote
 from uuid import UUID
 
@@ -2968,6 +2968,149 @@ async def agent_task_review_queue_summary(
         "urgent_count": sum(1 for task in rows if task.review_priority == "urgent"),
         "pending_approval_count": sum(pending_agent_task_approval_count(task) for task in rows),
     }
+
+
+async def agent_task_review_trends(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    *,
+    horizon_days: int = 14,
+) -> dict[str, object]:
+    await ensure_manage_organization(authz, identity, organization_id)
+    now = datetime.now(UTC)
+    horizon = max(1, min(horizon_days, 90))
+    start_date = (now - timedelta(days=horizon - 1)).date()
+    rows = list(
+        (
+            await db.execute(
+                select(AgentTask, Person)
+                .outerjoin(Person, Person.id == AgentTask.review_assigned_to_person_id)
+                .where(AgentTask.organization_id == organization_id)
+            )
+        ).all()
+    )
+    buckets = {
+        start_date + timedelta(days=offset): {
+            "label": (start_date + timedelta(days=offset)).isoformat(),
+            "opened_count": 0,
+            "completed_count": 0,
+            "assigned_count": 0,
+            "urgent_count": 0,
+            "approval_pending_count": 0,
+        }
+        for offset in range(horizon)
+    }
+    reviewer_stats: dict[UUID | None, dict[str, object]] = {}
+    open_count = completed_count = overdue_count = urgent_count = 0
+    for task, reviewer in rows:
+        created_day = local_date(task.created_at)
+        updated_day = local_date(task.updated_at)
+        if created_day in buckets:
+            buckets[created_day]["opened_count"] += 1
+            if task.review_assigned_to_person_id:
+                buckets[created_day]["assigned_count"] += 1
+            if task.review_priority == "urgent":
+                buckets[created_day]["urgent_count"] += 1
+            if task.approval_status == "pending":
+                buckets[created_day]["approval_pending_count"] += pending_agent_task_approval_count(task)
+        if task.status == AgentTaskStatus.COMPLETED and updated_day in buckets:
+            buckets[updated_day]["completed_count"] += 1
+        if task.status == AgentTaskStatus.COMPLETED:
+            completed_count += 1
+        if agent_task_needs_review(task):
+            open_count += 1
+            if task.review_priority == "urgent":
+                urgent_count += 1
+            if agent_task_review_sla_state(task, now) == "overdue":
+                overdue_count += 1
+            key = task.review_assigned_to_person_id
+            stats = reviewer_stats.setdefault(
+                key,
+                {
+                    "reviewer_person_id": key,
+                    "reviewer_name": reviewer.display_name if reviewer else "Unassigned",
+                    "assigned_count": 0,
+                    "overdue_count": 0,
+                    "urgent_count": 0,
+                    "completed_count": 0,
+                    "age_hours": [],
+                },
+            )
+            stats["assigned_count"] = int(stats["assigned_count"]) + 1
+            if task.review_priority == "urgent":
+                stats["urgent_count"] = int(stats["urgent_count"]) + 1
+            if agent_task_review_sla_state(task, now) == "overdue":
+                stats["overdue_count"] = int(stats["overdue_count"]) + 1
+            stats["age_hours"].append(agent_task_review_age_hours(task, now))
+        elif task.review_assigned_to_person_id and task.status == AgentTaskStatus.COMPLETED:
+            stats = reviewer_stats.setdefault(
+                task.review_assigned_to_person_id,
+                {
+                    "reviewer_person_id": task.review_assigned_to_person_id,
+                    "reviewer_name": reviewer.display_name if reviewer else "Reviewer",
+                    "assigned_count": 0,
+                    "overdue_count": 0,
+                    "urgent_count": 0,
+                    "completed_count": 0,
+                    "age_hours": [],
+                },
+            )
+            stats["completed_count"] = int(stats["completed_count"]) + 1
+    reviewers = []
+    for stats in reviewer_stats.values():
+        ages = list(stats["age_hours"])
+        reviewers.append(
+            {
+                "reviewer_person_id": stats["reviewer_person_id"],
+                "reviewer_name": stats["reviewer_name"],
+                "assigned_count": stats["assigned_count"],
+                "overdue_count": stats["overdue_count"],
+                "urgent_count": stats["urgent_count"],
+                "completed_count": stats["completed_count"],
+                "average_age_hours": int(sum(ages) / len(ages)) if ages else 0,
+            }
+        )
+    reviewers.sort(key=lambda item: (-int(item["assigned_count"]), -int(item["overdue_count"]), str(item["reviewer_name"])))
+    return {
+        "organization_id": organization_id,
+        "generated_at": now,
+        "horizon_days": horizon,
+        "open_count": open_count,
+        "completed_count": completed_count,
+        "overdue_count": overdue_count,
+        "urgent_count": urgent_count,
+        "buckets": list(buckets.values()),
+        "reviewers": reviewers,
+        "recommendation": agent_task_review_trend_recommendation(open_count, overdue_count, urgent_count, reviewers),
+    }
+
+
+def local_date(value: datetime | None) -> date:
+    if value is None:
+        return datetime.now(UTC).date()
+    if value.tzinfo is None:
+        return value.date()
+    return value.astimezone(UTC).date()
+
+
+def agent_task_review_trend_recommendation(
+    open_count: int,
+    overdue_count: int,
+    urgent_count: int,
+    reviewers: list[dict[str, object]],
+) -> str:
+    unassigned = next((item for item in reviewers if item["reviewer_person_id"] is None), None)
+    if overdue_count:
+        return "Clear overdue AI review tasks before enabling downstream automation."
+    if unassigned and int(unassigned["assigned_count"]) > 0:
+        return "Assign unowned AI review tasks so every recommendation has an accountable human reviewer."
+    if urgent_count:
+        return "Prioritize urgent AI reviews and split load across available reviewers."
+    if open_count:
+        return "Review load is active; keep due dates current and complete low-risk items promptly."
+    return "AI review workload is clear."
 
 
 async def update_agent_task_review_assignment(

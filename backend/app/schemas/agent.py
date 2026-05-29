@@ -321,6 +321,38 @@ class AgentTaskReviewQueueSummaryRead(BaseModel):
     pending_approval_count: int
 
 
+class AgentTaskReviewTrendBucketRead(BaseModel):
+    label: str
+    opened_count: int
+    completed_count: int
+    assigned_count: int
+    urgent_count: int
+    approval_pending_count: int
+
+
+class AgentTaskReviewerWorkloadRead(BaseModel):
+    reviewer_person_id: UUID | None
+    reviewer_name: str
+    assigned_count: int
+    overdue_count: int
+    urgent_count: int
+    completed_count: int
+    average_age_hours: int
+
+
+class AgentTaskReviewTrendRead(BaseModel):
+    organization_id: UUID
+    generated_at: datetime
+    horizon_days: int
+    open_count: int
+    completed_count: int
+    overdue_count: int
+    urgent_count: int
+    buckets: list[AgentTaskReviewTrendBucketRead]
+    reviewers: list[AgentTaskReviewerWorkloadRead]
+    recommendation: str
+
+
 class AgentTaskWorkerRunRead(BaseModel):
     organization_id: UUID | None
     eligible_count: int

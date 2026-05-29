@@ -65,6 +65,7 @@ from app.schemas.agent import (
     AgentTaskReviewAssignmentUpdate,
     AgentTaskReviewQueueItemRead,
     AgentTaskReviewQueueSummaryRead,
+    AgentTaskReviewTrendRead,
     AgentTaskRead,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
@@ -134,6 +135,7 @@ from app.services.agents import (
     verify_agent_run_ledger,
     scorecard_publication_actions,
     agent_task_review_queue_summary,
+    agent_task_review_trends,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -1086,6 +1088,25 @@ async def agent_task_review_queue_summary_route(
 ) -> AgentTaskReviewQueueSummaryRead:
     return AgentTaskReviewQueueSummaryRead(
         **await agent_task_review_queue_summary(db, identity, organization_id, authz)
+    )
+
+
+@router.get("/tasks/review-trends", response_model=AgentTaskReviewTrendRead)
+async def agent_task_review_trends_route(
+    organization_id: UUID = Query(),
+    horizon_days: int = Query(default=14, ge=1, le=90),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentTaskReviewTrendRead:
+    return AgentTaskReviewTrendRead(
+        **await agent_task_review_trends(
+            db,
+            identity,
+            organization_id,
+            authz,
+            horizon_days=horizon_days,
+        )
     )
 
 
