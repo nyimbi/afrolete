@@ -457,6 +457,21 @@ export type VolunteerOpportunityRead = {
   status: string;
 };
 
+export type PublicVolunteerSignupRead = {
+  organization_id: UUID;
+  opportunity_id: UUID;
+  opportunity_title: string;
+  volunteer_profile_id: UUID;
+  assignment_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  person_email: string | null;
+  status: string;
+  match_score: number;
+  onboarding_status: string;
+  message: string | null;
+};
+
 export type VolunteerAssignmentRead = {
   id: UUID;
   organization_id: UUID;

@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.volunteer import (
+    PublicVolunteerSignupCreate,
+    PublicVolunteerSignupRead,
     VolunteerAssignmentCreate,
     VolunteerAssignmentRead,
     VolunteerAssignmentUpdate,
@@ -22,12 +24,14 @@ from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.volunteers import (
+    create_public_volunteer_signup,
     create_volunteer_assignment,
     create_volunteer_opportunity,
     create_volunteer_profile,
     create_volunteer_recognition,
     create_volunteer_training_record,
     decode_list,
+    list_public_volunteer_opportunities,
     list_volunteer_assignments,
     list_volunteer_opportunities,
     list_volunteer_profiles,
@@ -137,6 +141,42 @@ def to_recognition_read(recognition) -> VolunteerRecognitionRead:
         awarded_on=recognition.awarded_on,
         source_summary=recognition.source_summary,
     )
+
+
+def to_public_signup_read(item) -> PublicVolunteerSignupRead:
+    assignment, profile, person, opportunity = item
+    return PublicVolunteerSignupRead(
+        organization_id=assignment.organization_id,
+        opportunity_id=assignment.opportunity_id,
+        opportunity_title=opportunity.title,
+        volunteer_profile_id=profile.id,
+        assignment_id=assignment.id,
+        person_id=person.id,
+        person_name=person.display_name,
+        person_email=person.primary_email,
+        status=assignment.status,
+        match_score=assignment.match_score,
+        onboarding_status=profile.onboarding_status,
+        message=assignment.notes,
+    )
+
+
+@router.get("/public/{site}/opportunities", response_model=list[VolunteerOpportunityRead])
+async def list_public_volunteer_opportunities_route(
+    site: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[VolunteerOpportunityRead]:
+    _organization, rows = await list_public_volunteer_opportunities(db, site)
+    return [to_opportunity_read(opportunity, int(assigned_count)) for opportunity, assigned_count in rows]
+
+
+@router.post("/public/{site}/signups", response_model=PublicVolunteerSignupRead, status_code=status.HTTP_201_CREATED)
+async def create_public_volunteer_signup_route(
+    site: str,
+    payload: PublicVolunteerSignupCreate,
+    db: AsyncSession = Depends(get_db),
+) -> PublicVolunteerSignupRead:
+    return to_public_signup_read(await create_public_volunteer_signup(db, site, payload))
 
 
 @router.post("/profiles", response_model=VolunteerProfileRead, status_code=status.HTTP_201_CREATED)

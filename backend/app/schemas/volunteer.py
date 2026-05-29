@@ -84,6 +84,33 @@ class VolunteerOpportunityRead(BaseModel):
     status: str
 
 
+class PublicVolunteerSignupCreate(BaseModel):
+    opportunity_id: UUID
+    display_name: str = Field(min_length=2, max_length=240)
+    email: str = Field(min_length=3, max_length=320)
+    phone: str | None = Field(default=None, max_length=64)
+    availability: list[str] = Field(default_factory=list, max_length=30)
+    skills: list[str] = Field(default_factory=list, max_length=40)
+    emergency_contact: str | None = Field(default=None, max_length=240)
+    message: str | None = Field(default=None, max_length=2000)
+    source_url: str | None = Field(default=None, max_length=500)
+
+
+class PublicVolunteerSignupRead(BaseModel):
+    organization_id: UUID
+    opportunity_id: UUID
+    opportunity_title: str
+    volunteer_profile_id: UUID
+    assignment_id: UUID
+    person_id: UUID
+    person_name: str
+    person_email: str | None
+    status: str
+    match_score: float
+    onboarding_status: str
+    message: str | None
+
+
 class VolunteerAssignmentCreate(BaseModel):
     organization_id: UUID
     opportunity_id: UUID

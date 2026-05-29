@@ -20,6 +20,7 @@ from app.models.volunteer import (
     VolunteerTrainingRecord,
 )
 from app.schemas.volunteer import (
+    PublicVolunteerSignupCreate,
     VolunteerAssignmentCreate,
     VolunteerAssignmentUpdate,
     VolunteerOpportunityCreate,
@@ -69,10 +70,29 @@ def decode_list(value: str | None) -> list[str]:
     return [str(item) for item in parsed if str(item)]
 
 
+def now_for_datetime_column(value: datetime) -> datetime:
+    now = datetime.now(UTC)
+    return now.replace(tzinfo=None) if value.tzinfo is None else now
+
+
+def merge_encoded_lists(existing: str | None, incoming: list[str]) -> str:
+    merged = [*decode_list(existing), *[value.strip().lower() for value in incoming if value.strip()]]
+    return json.dumps(list(dict.fromkeys(merged)))
+
+
 async def ensure_organization(db: AsyncSession, organization_id: UUID) -> Organization:
     organization = await db.get(Organization, organization_id)
     if organization is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    return organization
+
+
+async def get_public_volunteer_organization(db: AsyncSession, site: str) -> Organization:
+    organization = await db.scalar(
+        select(Organization).where((Organization.slug == site) | (Organization.subdomain == site))
+    )
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
     return organization
 
 
@@ -110,6 +130,33 @@ async def get_or_create_volunteer_person(db: AsyncSession, payload: VolunteerPro
         db.add(person)
         await db.flush()
     return person
+
+
+async def ensure_volunteer_membership(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    person_id: UUID,
+    title: str,
+) -> None:
+    membership = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == organization_id,
+            Membership.subject_type == MemberSubjectType.PERSON,
+            Membership.subject_id == person_id,
+            Membership.role == MembershipRole.VOLUNTEER,
+        )
+    )
+    if membership is None:
+        db.add(
+            Membership(
+                organization_id=organization_id,
+                subject_type=MemberSubjectType.PERSON,
+                subject_id=person_id,
+                role=MembershipRole.VOLUNTEER,
+                title=title,
+            )
+        )
 
 
 async def create_volunteer_profile(
@@ -158,24 +205,12 @@ async def create_volunteer_profile(
         notes=payload.notes,
     )
     db.add(profile)
-    membership = await db.scalar(
-        select(Membership).where(
-            Membership.organization_id == payload.organization_id,
-            Membership.subject_type == MemberSubjectType.PERSON,
-            Membership.subject_id == person.id,
-            Membership.role == MembershipRole.VOLUNTEER,
-        )
+    await ensure_volunteer_membership(
+        db,
+        organization_id=payload.organization_id,
+        person_id=person.id,
+        title=f"{payload.volunteer_type.replace('_', ' ').title()} Volunteer",
     )
-    if membership is None:
-        db.add(
-            Membership(
-                organization_id=payload.organization_id,
-                subject_type=MemberSubjectType.PERSON,
-                subject_id=person.id,
-                role=MembershipRole.VOLUNTEER,
-                title=f"{payload.volunteer_type.replace('_', ' ').title()} Volunteer",
-            )
-        )
     await db.commit()
     await db.refresh(profile)
     return profile
@@ -250,6 +285,31 @@ async def list_volunteer_opportunities(
     return list((await db.execute(statement)).all())
 
 
+async def list_public_volunteer_opportunities(
+    db: AsyncSession,
+    site: str,
+) -> tuple[Organization, list[tuple[VolunteerOpportunity, int]]]:
+    organization = await get_public_volunteer_organization(db, site)
+    statement = (
+        select(VolunteerOpportunity, func.count(VolunteerAssignment.id))
+        .outerjoin(
+            VolunteerAssignment,
+            and_(
+                VolunteerAssignment.opportunity_id == VolunteerOpportunity.id,
+                VolunteerAssignment.status.in_(["assigned", "confirmed", "checked_in", "completed"]),
+            ),
+        )
+        .where(VolunteerOpportunity.organization_id == organization.id)
+        .where(VolunteerOpportunity.public_signup.is_(True))
+        .where(VolunteerOpportunity.status == "open")
+        .where(VolunteerOpportunity.starts_at >= datetime.now(UTC))
+        .group_by(VolunteerOpportunity.id)
+        .order_by(VolunteerOpportunity.starts_at, VolunteerOpportunity.priority.desc(), VolunteerOpportunity.title)
+        .limit(24)
+    )
+    return organization, list((await db.execute(statement)).all())
+
+
 async def get_volunteer_opportunity(db: AsyncSession, opportunity_id: UUID) -> VolunteerOpportunity:
     opportunity = await db.get(VolunteerOpportunity, opportunity_id)
     if opportunity is None:
@@ -281,6 +341,113 @@ def compute_match_score(profile: VolunteerProfile, opportunity: VolunteerOpportu
         readiness_score -= 0.25
     score = (skill_score * 0.4) + (availability_score * 0.25) + (role_score * 0.2) + (profile.reliability_score * 0.15)
     return round(max(0.0, min(score * readiness_score, 1.0)), 3)
+
+
+async def create_public_volunteer_signup(
+    db: AsyncSession,
+    site: str,
+    payload: PublicVolunteerSignupCreate,
+) -> tuple[VolunteerAssignment, VolunteerProfile, Person, VolunteerOpportunity]:
+    organization = await get_public_volunteer_organization(db, site)
+    opportunity = await get_volunteer_opportunity(db, payload.opportunity_id)
+    if opportunity.organization_id != organization.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opportunity not found")
+    if (
+        not opportunity.public_signup
+        or opportunity.status != "open"
+        or opportunity.starts_at < now_for_datetime_column(opportunity.starts_at)
+    ):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Opportunity is not accepting signups")
+
+    email = payload.email.lower()
+    person = await db.scalar(select(Person).where(Person.primary_email == email))
+    if person is None:
+        person = Person(
+            display_name=payload.display_name,
+            primary_email=email,
+            primary_phone=payload.phone,
+        )
+        db.add(person)
+        await db.flush()
+    else:
+        person.display_name = payload.display_name or person.display_name
+        if payload.phone and not person.primary_phone:
+            person.primary_phone = payload.phone
+
+    profile = await db.scalar(
+        select(VolunteerProfile).where(
+            VolunteerProfile.organization_id == organization.id,
+            VolunteerProfile.person_id == person.id,
+        )
+    )
+    if profile is None:
+        profile = VolunteerProfile(
+            organization_id=organization.id,
+            person_id=person.id,
+            volunteer_type=opportunity.role_type,
+            availability_json=encode_list(payload.availability),
+            skills_json=encode_list(payload.skills),
+            background_check_status="not_started",
+            training_status="not_started",
+            onboarding_status="applied",
+            reliability_score=0.75,
+            emergency_contact=payload.emergency_contact,
+            notes=payload.message,
+        )
+        db.add(profile)
+        await db.flush()
+    else:
+        profile.volunteer_type = profile.volunteer_type or opportunity.role_type
+        if payload.availability:
+            profile.availability_json = merge_encoded_lists(profile.availability_json, payload.availability)
+        if payload.skills:
+            profile.skills_json = merge_encoded_lists(profile.skills_json, payload.skills)
+        profile.onboarding_status = "applied" if profile.onboarding_status == "invited" else profile.onboarding_status
+        if payload.emergency_contact:
+            profile.emergency_contact = payload.emergency_contact
+        if payload.message:
+            profile.notes = payload.message
+
+    await ensure_volunteer_membership(
+        db,
+        organization_id=organization.id,
+        person_id=person.id,
+        title=f"{opportunity.role_type.replace('_', ' ').title()} Volunteer",
+    )
+
+    assignment = await db.scalar(
+        select(VolunteerAssignment).where(
+            VolunteerAssignment.opportunity_id == opportunity.id,
+            VolunteerAssignment.volunteer_profile_id == profile.id,
+        )
+    )
+    if assignment is None:
+        assigned_count = await db.scalar(
+            select(func.count(VolunteerAssignment.id)).where(
+                VolunteerAssignment.opportunity_id == opportunity.id,
+                VolunteerAssignment.status.in_(["assigned", "confirmed", "checked_in", "completed"]),
+            )
+        )
+        assignment = VolunteerAssignment(
+            organization_id=organization.id,
+            opportunity_id=opportunity.id,
+            volunteer_profile_id=profile.id,
+            person_id=person.id,
+            assigned_by_person_id=None,
+            status="waitlisted" if int(assigned_count or 0) >= opportunity.slots_required else "applied",
+            match_score=compute_match_score(profile, opportunity),
+            notes=payload.message,
+        )
+        db.add(assignment)
+    else:
+        assignment.match_score = compute_match_score(profile, opportunity)
+        if payload.message:
+            assignment.notes = payload.message
+    await db.commit()
+    await db.refresh(assignment)
+    await db.refresh(profile)
+    await db.refresh(person)
+    return assignment, profile, person, opportunity
 
 
 async def create_volunteer_assignment(

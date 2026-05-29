@@ -7,6 +7,8 @@ import { apiRequest } from "@/lib/api";
 import type {
   AgentEthicalScorecardRead,
   OrganizationPublicSiteRead,
+  PublicVolunteerSignupRead,
+  VolunteerOpportunityRead,
   RegistrationInquiryRead
 } from "@/types/operations";
 
@@ -15,6 +17,7 @@ export default function PublicOrganizationSitePage() {
   const slug = routeParam(params.slug);
   const [site, setSite] = useState<OrganizationPublicSiteRead | null>(null);
   const [scorecard, setScorecard] = useState<AgentEthicalScorecardRead | null>(null);
+  const [volunteerOpportunities, setVolunteerOpportunities] = useState<VolunteerOpportunityRead[]>([]);
   const [inquiry, setInquiry] = useState({
     team_id: "",
     athlete_name: "",
@@ -25,10 +28,23 @@ export default function PublicOrganizationSitePage() {
     sport_interest: "",
     message: ""
   });
+  const [volunteerSignup, setVolunteerSignup] = useState({
+    opportunity_id: "",
+    display_name: "",
+    email: "",
+    phone: "",
+    availability: "",
+    skills: "",
+    emergency_contact: "",
+    message: ""
+  });
   const [submittedInquiry, setSubmittedInquiry] = useState<RegistrationInquiryRead | null>(null);
+  const [submittedVolunteerSignup, setSubmittedVolunteerSignup] = useState<PublicVolunteerSignupRead | null>(null);
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
+  const [volunteerFormError, setVolunteerFormError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [volunteerBusy, setVolunteerBusy] = useState(false);
 
   useEffect(() => {
     if (!slug) {
@@ -40,6 +56,17 @@ export default function PublicOrganizationSitePage() {
         if (!cancelled) {
           setSite(data);
           setError("");
+          void apiRequest<VolunteerOpportunityRead[]>(`/volunteers/public/${encodeURIComponent(data.slug)}/opportunities`)
+            .then((opportunities) => {
+              if (!cancelled) {
+                setVolunteerOpportunities(opportunities);
+              }
+            })
+            .catch(() => {
+              if (!cancelled) {
+                setVolunteerOpportunities([]);
+              }
+            });
           void apiRequest<AgentEthicalScorecardRead>(`/agents/ethical-scorecard?organization_id=${data.id}`)
             .then((scorecardData) => {
               if (!cancelled) {
@@ -144,6 +171,46 @@ export default function PublicOrganizationSitePage() {
       setFormError(caught instanceof Error ? caught.message : "Inquiry could not be sent");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const submitVolunteerSignup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setVolunteerBusy(true);
+    setVolunteerFormError("");
+    try {
+      const created = await apiRequest<PublicVolunteerSignupRead>(
+        `/volunteers/public/${encodeURIComponent(site.slug)}/signups`,
+        {
+          method: "POST",
+          body: {
+            opportunity_id: volunteerSignup.opportunity_id,
+            display_name: volunteerSignup.display_name,
+            email: volunteerSignup.email,
+            phone: volunteerSignup.phone || null,
+            availability: splitCsv(volunteerSignup.availability),
+            skills: splitCsv(volunteerSignup.skills),
+            emergency_contact: volunteerSignup.emergency_contact || null,
+            message: volunteerSignup.message || null,
+            source_url: window.location.href
+          }
+        }
+      );
+      setSubmittedVolunteerSignup(created);
+      setVolunteerSignup({
+        opportunity_id: "",
+        display_name: "",
+        email: "",
+        phone: "",
+        availability: "",
+        skills: "",
+        emergency_contact: "",
+        message: ""
+      });
+    } catch (caught) {
+      setVolunteerFormError(caught instanceof Error ? caught.message : "Volunteer signup could not be sent");
+    } finally {
+      setVolunteerBusy(false);
     }
   };
 
@@ -266,6 +333,114 @@ export default function PublicOrganizationSitePage() {
               </div>
             </article>
           </div>
+        </section>
+      ) : null}
+
+      {volunteerOpportunities.length > 0 ? (
+        <section className="public-site-shell public-site-inquiry public-site-volunteers">
+          <div>
+            <p className="section-label">Volunteers</p>
+            <h2>Help run matchday</h2>
+            <p>Apply for an open role and staff will confirm fit, training, and clearance requirements.</p>
+            <div className="public-site-list">
+              {volunteerOpportunities.slice(0, 4).map((opportunity) => (
+                <div key={opportunity.id}>
+                  <strong>{opportunity.title}</strong>
+                  <span>
+                    {opportunity.role_type.replaceAll("_", " ")} · {formatDate(opportunity.starts_at)} ·{" "}
+                    {opportunity.open_slots} open
+                  </span>
+                  <small>
+                    {opportunity.location ?? "Location pending"}
+                    {opportunity.required_skills.length ? ` · ${opportunity.required_skills.join(" · ")}` : ""}
+                  </small>
+                </div>
+              ))}
+            </div>
+          </div>
+          {submittedVolunteerSignup ? (
+            <div className="public-site-success">
+              <strong>Volunteer signup received</strong>
+              <span>
+                {submittedVolunteerSignup.person_name} · {submittedVolunteerSignup.opportunity_title} ·{" "}
+                {submittedVolunteerSignup.status}
+              </span>
+            </div>
+          ) : (
+            <form onSubmit={submitVolunteerSignup}>
+              <label className="public-site-wide">
+                Role
+                <select
+                  value={volunteerSignup.opportunity_id}
+                  onChange={(event) => setVolunteerSignup({ ...volunteerSignup, opportunity_id: event.target.value })}
+                  required
+                >
+                  <option value="">Choose a volunteer role</option>
+                  {volunteerOpportunities.map((opportunity) => (
+                    <option value={opportunity.id} key={opportunity.id}>
+                      {opportunity.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Name
+                <input
+                  value={volunteerSignup.display_name}
+                  onChange={(event) => setVolunteerSignup({ ...volunteerSignup, display_name: event.target.value })}
+                  required
+                />
+              </label>
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={volunteerSignup.email}
+                  onChange={(event) => setVolunteerSignup({ ...volunteerSignup, email: event.target.value })}
+                  required
+                />
+              </label>
+              <label>
+                Phone
+                <input
+                  value={volunteerSignup.phone}
+                  onChange={(event) => setVolunteerSignup({ ...volunteerSignup, phone: event.target.value })}
+                />
+              </label>
+              <label>
+                Availability
+                <input
+                  value={volunteerSignup.availability}
+                  onChange={(event) => setVolunteerSignup({ ...volunteerSignup, availability: event.target.value })}
+                  placeholder="Saturday, evenings"
+                />
+              </label>
+              <label>
+                Skills
+                <input
+                  value={volunteerSignup.skills}
+                  onChange={(event) => setVolunteerSignup({ ...volunteerSignup, skills: event.target.value })}
+                  placeholder="First aid, timing"
+                />
+              </label>
+              <label>
+                Emergency contact
+                <input
+                  value={volunteerSignup.emergency_contact}
+                  onChange={(event) => setVolunteerSignup({ ...volunteerSignup, emergency_contact: event.target.value })}
+                />
+              </label>
+              <label className="public-site-wide">
+                Message
+                <textarea
+                  value={volunteerSignup.message}
+                  onChange={(event) => setVolunteerSignup({ ...volunteerSignup, message: event.target.value })}
+                />
+              </label>
+              {volunteerFormError ? <p className="form-error public-site-wide">{volunteerFormError}</p> : null}
+              <button type="submit" disabled={volunteerBusy}>{volunteerBusy ? "Sending" : "Apply to volunteer"}</button>
+            </form>
+          )}
         </section>
       ) : null}
 
@@ -411,4 +586,11 @@ function fundraisingPercent(raisedAmount: string, goalAmount: string): number {
     return 0;
   }
   return Math.min(Math.round((raised / goal) * 100), 100);
+}
+
+function splitCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
