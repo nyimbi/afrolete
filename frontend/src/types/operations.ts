@@ -6016,6 +6016,42 @@ export type TrainingCalendarArtifactRead = {
   size_bytes: number;
 };
 
+export type TrainingCommandMetricRead = {
+  key: string;
+  label: string;
+  value: number;
+  detail: string;
+  status: string;
+};
+
+export type TrainingCommandCheckRead = {
+  key: string;
+  label: string;
+  status: string;
+  detail: string;
+  action_label: string | null;
+};
+
+export type TrainingCommandCenterRead = {
+  organization_id: UUID;
+  team_id: UUID | null;
+  team_name: string | null;
+  command_status: string;
+  readiness_score: number;
+  active_plan_id: UUID | null;
+  active_plan_title: string | null;
+  next_session_id: UUID | null;
+  next_session_title: string | null;
+  next_session_at: string | null;
+  average_readiness_score: number | null;
+  average_load_delta: number | null;
+  high_risk_feedback_count: number;
+  metrics: TrainingCommandMetricRead[];
+  checks: TrainingCommandCheckRead[];
+  coach_actions: string[];
+  agent_task: AgentTaskRead | null;
+};
+
 export type CompetitionRead = {
   id: UUID;
   organization_id: UUID;

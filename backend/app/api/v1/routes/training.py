@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.training import (
     GeneratedTrainingPlanRead,
+    TrainingCommandCenterRead,
     TrainingAvailabilityCreate,
     TrainingAvailabilityRead,
     TrainingCalendarArtifactRead,
@@ -39,7 +40,9 @@ from app.services.training import (
     list_training_session_plans,
     record_training_session_feedback,
     suggest_training_availability,
+    training_command_center,
 )
+from app.schemas.agent import AgentTaskRead
 
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -117,6 +120,42 @@ def to_session_plan_read(session_plan) -> TrainingSessionPlanRead:
 
 def to_session_feedback_read(row: dict[str, object]) -> TrainingSessionFeedbackRead:
     return TrainingSessionFeedbackRead(**row)
+
+
+def to_agent_task_read(task) -> AgentTaskRead:
+    approval_pending_count = max(
+        int(task.approval_required_count or 0)
+        - int(task.approval_approved_count or 0)
+        - int(task.approval_rejected_count or 0),
+        0,
+    )
+    return AgentTaskRead(
+        id=task.id,
+        agent_id=task.agent_id,
+        organization_id=task.organization_id,
+        task_type=task.task_type,
+        title=task.title,
+        status=task.status,
+        requested_by_person_id=task.requested_by_person_id,
+        input_ref=task.input_ref,
+        output_ref=task.output_ref,
+        review_notes=task.review_notes,
+        review_assigned_to_person_id=task.review_assigned_to_person_id,
+        review_due_at=task.review_due_at,
+        review_priority=task.review_priority or "normal",
+        review_assignment_notes=task.review_assignment_notes,
+        approval_required_count=task.approval_required_count or 0,
+        approval_approved_count=task.approval_approved_count or 0,
+        approval_rejected_count=task.approval_rejected_count or 0,
+        approval_pending_count=approval_pending_count,
+        approval_status=task.approval_status or "not_requested",
+        approval_last_decided_at=task.approval_last_decided_at,
+        governance_policy_rule_id=task.governance_policy_rule_id,
+        governance_policy_code=task.governance_policy_code,
+        governance_policy_decision=task.governance_policy_decision,
+        governance_policy_risk_level=task.governance_policy_risk_level,
+        governance_policy_rationale=task.governance_policy_rationale,
+    )
 
 
 @router.post("/drills", response_model=TrainingDrillRead, status_code=status.HTTP_201_CREATED)
@@ -268,6 +307,45 @@ async def export_training_calendar_artifact_route(
             ends_at=ends_at,
         )
     )
+
+
+@router.get("/command-center", response_model=TrainingCommandCenterRead)
+async def get_training_command_center_route(
+    organization_id: UUID = Query(),
+    team_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TrainingCommandCenterRead:
+    center, task = await training_command_center(
+        db,
+        identity,
+        organization_id,
+        authz,
+        team_id=team_id,
+    )
+    center.agent_task = to_agent_task_read(task) if task else None
+    return center
+
+
+@router.post("/command-center/agent-task", response_model=TrainingCommandCenterRead)
+async def queue_training_command_center_agent_task_route(
+    organization_id: UUID = Query(),
+    team_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> TrainingCommandCenterRead:
+    center, task = await training_command_center(
+        db,
+        identity,
+        organization_id,
+        authz,
+        team_id=team_id,
+        ensure_agent_task=True,
+    )
+    center.agent_task = to_agent_task_read(task) if task else None
+    return center
 
 
 @router.post("/availability", response_model=TrainingAvailabilityRead)

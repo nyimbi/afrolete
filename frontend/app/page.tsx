@@ -352,6 +352,7 @@ import type {
   TravelPlanStatus,
   TrainingAvailabilityRead,
   TrainingCalendarArtifactRead,
+  TrainingCommandCenterRead,
   TrainingDrillRead,
   TrainingPlanItemRead,
   TrainingPlanRead,
@@ -1637,6 +1638,7 @@ export default function HomePage() {
   const [trainingFeedback, setTrainingFeedback] = useState<TrainingSessionFeedbackRead[]>([]);
   const [trainingAvailability, setTrainingAvailability] = useState<TrainingAvailabilityRead | null>(null);
   const [generatedTrainingPlan, setGeneratedTrainingPlan] = useState<GeneratedTrainingPlanRead | null>(null);
+  const [trainingCommandCenter, setTrainingCommandCenter] = useState<TrainingCommandCenterRead | null>(null);
   const [volunteerProfiles, setVolunteerProfiles] = useState<VolunteerProfileRead[]>([]);
   const [volunteerOpportunities, setVolunteerOpportunities] = useState<VolunteerOpportunityRead[]>([]);
   const [volunteerAssignments, setVolunteerAssignments] = useState<VolunteerAssignmentRead[]>([]);
@@ -3164,23 +3166,28 @@ export default function HomePage() {
 
   const loadTraining = useCallback(async (organizationId: string, teamId?: string) => {
     const teamQuery = teamId ? `&team_id=${teamId}` : "";
-    const [drills, plans, sessions] = await Promise.all([
+    const [drills, plans, sessions, commandCenter] = await Promise.all([
       apiRequest<TrainingDrillRead[]>(`/training/drills?organization_id=${organizationId}`),
       apiRequest<TrainingPlanRead[]>(`/training/plans?organization_id=${organizationId}${teamQuery}`),
       apiRequest<TrainingSessionPlanRead[]>(
         `/training/sessions?organization_id=${organizationId}${teamQuery}`
+      ),
+      apiRequest<TrainingCommandCenterRead>(
+        `/training/command-center?organization_id=${organizationId}${teamQuery}`,
+        { identity }
       )
     ]);
     setTrainingDrills(drills);
     setTrainingPlans(plans);
     setTrainingSessions(sessions);
+    setTrainingCommandCenter(commandCenter);
     setSelectedTrainingPlanId((current) =>
       plans.some((plan) => plan.id === current) ? current : plans[0]?.id ?? ""
     );
     setSelectedTrainingSessionId((current) =>
       sessions.some((sessionPlan) => sessionPlan.id === current) ? current : sessions[0]?.id ?? ""
     );
-  }, []);
+  }, [identity]);
 
   const loadTrainingPlanItems = useCallback(async (planId: string) => {
     const data = await apiRequest<TrainingPlanItemRead[]>(`/training/plans/${planId}/items`);
@@ -3765,6 +3772,7 @@ export default function HomePage() {
       setTrainingFeedback([]);
       setTrainingAvailability(null);
       setGeneratedTrainingPlan(null);
+      setTrainingCommandCenter(null);
       setVolunteerProfiles([]);
       setVolunteerOpportunities([]);
       setVolunteerAssignments([]);
@@ -9597,6 +9605,7 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== drill.id)
         ]);
         addLog(`${drill.name} added to the drill library`, "good");
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
       }
     );
   };
@@ -9637,6 +9646,7 @@ export default function HomePage() {
         setTrainingPlans((current) => [plan, ...current.filter((item) => item.id !== plan.id)]);
         setSelectedTrainingPlanId(plan.id);
         addLog(`${plan.title} opened for session planning`, "good");
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
       }
     );
   };
@@ -9739,6 +9749,7 @@ export default function HomePage() {
         ]);
         setSelectedTrainingSessionId(sessionPlan.id);
         addLog(`Session load ${sessionPlan.load_score} planned`, "good");
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
       }
     );
   };
@@ -10235,6 +10246,38 @@ export default function HomePage() {
       (artifact) => {
         downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
         addLog(`Downloaded ${artifact.session_count} training calendar session(s)`, "good");
+      }
+    );
+  };
+
+  const queueTrainingCommandAgent = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const query = new URLSearchParams({ organization_id: selectedOrganizationId });
+    if (selectedTeamId) {
+      query.set("team_id", selectedTeamId);
+    }
+    runAction(
+      "queue-training-command-agent",
+      () =>
+        apiRequest<TrainingCommandCenterRead>(`/training/command-center/agent-task?${query.toString()}`, {
+          method: "POST",
+          identity
+        }),
+      (center) => {
+        setTrainingCommandCenter(center);
+        const task = center.agent_task;
+        addLog(
+          task
+            ? `Training Strategy Agent task ${task.status} for readiness ${center.readiness_score}`
+            : `Training command center readiness ${center.readiness_score}`,
+          "good"
+        );
+        if (selectedOrganizationId) {
+          void loadAgents(selectedOrganizationId);
+        }
       }
     );
   };
@@ -18797,8 +18840,53 @@ export default function HomePage() {
                 <button type="button" onClick={createTrainingPlan} disabled={busyAction !== null}>Plan</button>
                 <button type="button" onClick={generateTrainingPlan} disabled={busyAction !== null}>AI Plan</button>
                 <button type="button" onClick={addTrainingPlanItem} disabled={busyAction !== null}>Block</button>
+                <button type="button" onClick={queueTrainingCommandAgent} disabled={busyAction !== null}>Agent</button>
               </div>
             </div>
+            {trainingCommandCenter ? (
+              <div className={`training-command-center status-${trainingCommandCenter.command_status}`}>
+                <div className="training-command-summary">
+                  <strong>{trainingCommandCenter.readiness_score}</strong>
+                  <div>
+                    <span>{trainingCommandCenter.command_status} command status</span>
+                    <small>
+                      {trainingCommandCenter.team_name ?? selectedOrganization?.name ?? "Organization"} ·{" "}
+                      {trainingCommandCenter.active_plan_title ?? "No active plan"} ·{" "}
+                      {trainingCommandCenter.next_session_at
+                        ? `next ${new Date(trainingCommandCenter.next_session_at).toLocaleString()}`
+                        : "no upcoming session"}
+                    </small>
+                  </div>
+                </div>
+                <div className="training-command-metrics">
+                  {trainingCommandCenter.metrics.slice(0, 7).map((metric) => (
+                    <article key={metric.key}>
+                      <span>{metric.label}</span>
+                      <strong>{metric.value}</strong>
+                      <small>{metric.detail}</small>
+                    </article>
+                  ))}
+                </div>
+                <div className="training-command-checks">
+                  {trainingCommandCenter.checks.slice(0, 6).map((check) => (
+                    <article key={check.key} className={`check-${check.status}`}>
+                      <strong>{check.label}</strong>
+                      <span>{check.detail}</span>
+                    </article>
+                  ))}
+                </div>
+                <div className="training-command-actions">
+                  <strong>
+                    {trainingCommandCenter.agent_task
+                      ? `Agent ${trainingCommandCenter.agent_task.status}`
+                      : "Coach actions"}
+                  </strong>
+                  {trainingCommandCenter.coach_actions.slice(0, 4).map((action) => (
+                    <span key={action}>{action}</span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="form-grid">
               <label>
                 Drill

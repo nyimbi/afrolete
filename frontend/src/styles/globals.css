@@ -990,6 +990,108 @@ textarea:focus {
   color: var(--muted);
 }
 
+.training-command-center {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7faf8;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.training-command-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.training-command-summary strong {
+  display: grid;
+  place-items: center;
+  min-width: 68px;
+  min-height: 68px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 34px;
+  line-height: 1;
+}
+
+.training-command-summary span,
+.training-command-actions strong {
+  display: block;
+  font-weight: 900;
+  text-transform: capitalize;
+}
+
+.training-command-summary small,
+.training-command-metrics small,
+.training-command-checks span,
+.training-command-actions span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.training-command-metrics,
+.training-command-checks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.training-command-metrics article,
+.training-command-checks article {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.training-command-metrics span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.training-command-metrics strong {
+  display: block;
+  font-size: 24px;
+  margin: 2px 0;
+}
+
+.training-command-checks strong,
+.training-command-actions span {
+  display: block;
+}
+
+.training-command-checks article {
+  border-left-width: 4px;
+}
+
+.training-command-checks .check-ready {
+  border-left-color: var(--green);
+}
+
+.training-command-checks .check-action {
+  border-left-color: var(--amber);
+}
+
+.training-command-checks .check-blocked {
+  border-left-color: var(--red);
+}
+
+.training-command-actions {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
 .safeguarding-panel {
   margin-bottom: 18px;
 }
@@ -4940,7 +5042,9 @@ textarea:focus {
   .developer-docs-footer,
   .developer-oauth-grid,
   .developer-oauth-scopes,
-  .developer-oauth-result {
+  .developer-oauth-result,
+  .training-command-metrics,
+  .training-command-checks {
     grid-template-columns: 1fr;
   }
 

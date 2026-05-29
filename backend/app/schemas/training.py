@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import TrainingPlanStatus, TrainingSessionStatus
+from app.schemas.agent import AgentTaskRead
 
 
 class TrainingDrillCreate(BaseModel):
@@ -245,3 +246,39 @@ class TrainingCalendarArtifactRead(BaseModel):
     content: str
     checksum: str
     size_bytes: int
+
+
+class TrainingCommandMetricRead(BaseModel):
+    key: str
+    label: str
+    value: float
+    detail: str
+    status: str
+
+
+class TrainingCommandCheckRead(BaseModel):
+    key: str
+    label: str
+    status: str
+    detail: str
+    action_label: str | None = None
+
+
+class TrainingCommandCenterRead(BaseModel):
+    organization_id: UUID
+    team_id: UUID | None = None
+    team_name: str | None = None
+    command_status: str
+    readiness_score: int
+    active_plan_id: UUID | None = None
+    active_plan_title: str | None = None
+    next_session_id: UUID | None = None
+    next_session_title: str | None = None
+    next_session_at: datetime | None = None
+    average_readiness_score: float | None = None
+    average_load_delta: float | None = None
+    high_risk_feedback_count: int
+    metrics: list[TrainingCommandMetricRead] = Field(default_factory=list)
+    checks: list[TrainingCommandCheckRead] = Field(default_factory=list)
+    coach_actions: list[str] = Field(default_factory=list)
+    agent_task: AgentTaskRead | None = None

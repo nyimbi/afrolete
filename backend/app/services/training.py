@@ -12,10 +12,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
+from app.models.agent import Agent, AgentTask
 from app.models.assets import FacilityBooking
 from app.models.competition import CompetitionFixture
 from app.models.event import Event
-from app.models.enums import FacilityBookingStatus, TrainingSessionStatus
+from app.models.enums import AgentKind, AgentTaskStatus, FacilityBookingStatus, TrainingPlanStatus, TrainingSessionStatus
 from app.models.organization import Organization
 from app.models.performance import AthleteAssessment, AthletePerformanceObservation
 from app.models.team import AthleteProfile, Team
@@ -28,6 +29,9 @@ from app.models.training import (
 )
 from app.schemas.training import (
     TrainingAvailabilityCreate,
+    TrainingCommandCenterRead,
+    TrainingCommandCheckRead,
+    TrainingCommandMetricRead,
     TrainingDrillCreate,
     TrainingPlanGenerateCreate,
     TrainingPlanCreate,
@@ -35,8 +39,10 @@ from app.schemas.training import (
     TrainingSessionFeedbackCreate,
     TrainingSessionPlanCreate,
 )
+from app.schemas.agent import AgentTaskCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.agents import queue_agent_task
 from app.services.secrets import resolve_secret
 
 
@@ -723,6 +729,383 @@ async def export_training_calendar_artifact(
         "checksum": hashlib.sha256(content_bytes).hexdigest(),
         "size_bytes": len(content_bytes),
     }
+
+
+async def training_command_center(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    *,
+    team_id: UUID | None = None,
+    ensure_agent_task: bool = False,
+) -> tuple[TrainingCommandCenterRead, AgentTask | None]:
+    await get_organization(db, organization_id)
+    await ensure_manage_training(authz, identity, organization_id)
+    team = await get_team_for_organization(db, team_id, organization_id) if team_id is not None else None
+    drills = await list_training_drills(db, organization_id, sport=team.sport if team else None)
+    plans = await list_training_plans(db, organization_id, team_id=team_id)
+    sessions = await list_training_session_plans(db, organization_id, team_id=team_id)
+    feedback_rows = await list_training_feedback_for_scope(db, organization_id, team_id=team_id)
+    now = datetime.now(UTC)
+    active_plan = next((plan for plan in plans if plan.status in {TrainingPlanStatus.ACTIVE, TrainingPlanStatus.DRAFT}), None)
+    upcoming_sessions = [session for session in sessions if ensure_utc(session.scheduled_for) >= now]
+    upcoming_sessions.sort(key=lambda session: ensure_utc(session.scheduled_for))
+    next_session = upcoming_sessions[0] if upcoming_sessions else None
+    completed_sessions = [session for session in sessions if session.status == TrainingSessionStatus.COMPLETED]
+    planned_sessions = [session for session in sessions if session.status == TrainingSessionStatus.PLANNED]
+    avg_readiness = average([float(row["readiness_score"]) for row in feedback_rows])
+    avg_load_delta = average(
+        [float(row["load_delta"]) for row in feedback_rows if row.get("load_delta") is not None]
+    )
+    high_risk_feedback_count = sum(
+        1
+        for row in feedback_rows
+        if int(row["readiness_score"]) < 45 or int(row["soreness_score"]) >= 8
+    )
+    checks = training_command_checks(
+        drill_count=len(drills),
+        plan_count=len(plans),
+        session_count=len(sessions),
+        upcoming_count=len(upcoming_sessions),
+        feedback_count=len(feedback_rows),
+        high_risk_feedback_count=high_risk_feedback_count,
+        avg_readiness=avg_readiness,
+        avg_load_delta=avg_load_delta,
+    )
+    readiness_score = round(
+        (sum(1 for check in checks if check.status == "ready") / max(len(checks), 1)) * 100
+    )
+    command_status = "ready" if readiness_score >= 80 else "attention" if readiness_score >= 50 else "blocked"
+    agent_task = await find_training_command_agent_task(db, organization_id, team_id)
+    if ensure_agent_task and agent_task is None:
+        agent_task = await queue_training_command_agent_task(
+            db,
+            identity,
+            organization_id,
+            team_id,
+            authz,
+            readiness_score=readiness_score,
+            plan_count=len(plans),
+            session_count=len(sessions),
+            feedback_count=len(feedback_rows),
+            high_risk_feedback_count=high_risk_feedback_count,
+        )
+    return (
+        TrainingCommandCenterRead(
+            organization_id=organization_id,
+            team_id=team_id,
+            team_name=team.name if team else None,
+            command_status=command_status,
+            readiness_score=readiness_score,
+            active_plan_id=active_plan.id if active_plan else None,
+            active_plan_title=active_plan.title if active_plan else None,
+            next_session_id=next_session.id if next_session else None,
+            next_session_title=next_session.title if next_session else None,
+            next_session_at=next_session.scheduled_for if next_session else None,
+            average_readiness_score=avg_readiness,
+            average_load_delta=avg_load_delta,
+            high_risk_feedback_count=high_risk_feedback_count,
+            metrics=training_command_metrics(
+                drill_count=len(drills),
+                plan_count=len(plans),
+                session_count=len(sessions),
+                upcoming_count=len(upcoming_sessions),
+                completed_count=len(completed_sessions),
+                planned_count=len(planned_sessions),
+                feedback_count=len(feedback_rows),
+                high_risk_feedback_count=high_risk_feedback_count,
+                avg_readiness=avg_readiness,
+                avg_load_delta=avg_load_delta,
+            ),
+            checks=checks,
+            coach_actions=training_command_actions(
+                checks,
+                active_plan=active_plan,
+                next_session=next_session,
+                avg_readiness=avg_readiness,
+                avg_load_delta=avg_load_delta,
+                high_risk_feedback_count=high_risk_feedback_count,
+                agent_task=agent_task,
+            ),
+        ),
+        agent_task,
+    )
+
+
+async def list_training_feedback_for_scope(
+    db: AsyncSession,
+    organization_id: UUID,
+    *,
+    team_id: UUID | None = None,
+) -> list[dict[str, object]]:
+    statement = (
+        select(TrainingSessionFeedback, TrainingSessionPlan)
+        .join(TrainingSessionPlan, TrainingSessionPlan.id == TrainingSessionFeedback.session_plan_id)
+        .where(TrainingSessionFeedback.organization_id == organization_id)
+        .order_by(TrainingSessionFeedback.recorded_at.desc())
+        .limit(100)
+    )
+    if team_id is not None:
+        statement = statement.where(TrainingSessionPlan.team_id == team_id)
+    rows = (await db.execute(statement)).all()
+    return [training_feedback_read(feedback, session_plan) for feedback, session_plan in rows]
+
+
+def training_command_metrics(
+    *,
+    drill_count: int,
+    plan_count: int,
+    session_count: int,
+    upcoming_count: int,
+    completed_count: int,
+    planned_count: int,
+    feedback_count: int,
+    high_risk_feedback_count: int,
+    avg_readiness: float | None,
+    avg_load_delta: float | None,
+) -> list[TrainingCommandMetricRead]:
+    return [
+        TrainingCommandMetricRead(
+            key="drills",
+            label="Drills",
+            value=drill_count,
+            detail="Reusable coaching blocks available for plan generation.",
+            status="ready" if drill_count else "action",
+        ),
+        TrainingCommandMetricRead(
+            key="plans",
+            label="Plans",
+            value=plan_count,
+            detail="Scoped training blocks for teams or athletes.",
+            status="ready" if plan_count else "action",
+        ),
+        TrainingCommandMetricRead(
+            key="sessions",
+            label="Sessions",
+            value=session_count,
+            detail=f"{upcoming_count} upcoming, {completed_count} completed, {planned_count} planned.",
+            status="ready" if upcoming_count else "action",
+        ),
+        TrainingCommandMetricRead(
+            key="feedback",
+            label="Feedback",
+            value=feedback_count,
+            detail="Readiness/RPE records powering load decisions.",
+            status="ready" if feedback_count else "action",
+        ),
+        TrainingCommandMetricRead(
+            key="readiness",
+            label="Avg readiness",
+            value=round(avg_readiness or 0, 1),
+            detail="Recent athlete/team readiness average.",
+            status="ready" if avg_readiness is not None and avg_readiness >= 65 else "action",
+        ),
+        TrainingCommandMetricRead(
+            key="load_delta",
+            label="Avg load delta",
+            value=round(avg_load_delta or 0, 1),
+            detail="Actual minus planned training load from feedback.",
+            status="ready" if avg_load_delta is None or abs(avg_load_delta) <= 150 else "action",
+        ),
+        TrainingCommandMetricRead(
+            key="risk",
+            label="High risk",
+            value=high_risk_feedback_count,
+            detail="Low-readiness or high-soreness feedback requiring intervention.",
+            status="action" if high_risk_feedback_count else "ready",
+        ),
+    ]
+
+
+def training_command_checks(
+    *,
+    drill_count: int,
+    plan_count: int,
+    session_count: int,
+    upcoming_count: int,
+    feedback_count: int,
+    high_risk_feedback_count: int,
+    avg_readiness: float | None,
+    avg_load_delta: float | None,
+) -> list[TrainingCommandCheckRead]:
+    return [
+        TrainingCommandCheckRead(
+            key="drill_library",
+            label="Drill library",
+            status="ready" if drill_count else "action",
+            detail=f"{drill_count} drill{'' if drill_count == 1 else 's'} available.",
+            action_label="Create drills",
+        ),
+        TrainingCommandCheckRead(
+            key="active_plan",
+            label="Training plan",
+            status="ready" if plan_count else "action",
+            detail=f"{plan_count} plan{'' if plan_count == 1 else 's'} in scope.",
+            action_label="Generate AI plan",
+        ),
+        TrainingCommandCheckRead(
+            key="scheduled_sessions",
+            label="Scheduled sessions",
+            status="ready" if upcoming_count else "action" if session_count else "blocked",
+            detail=(
+                f"{upcoming_count} upcoming session{'' if upcoming_count == 1 else 's'}."
+                if upcoming_count
+                else "Schedule the next coached session."
+            ),
+            action_label="Plan session",
+        ),
+        TrainingCommandCheckRead(
+            key="feedback_loop",
+            label="Feedback loop",
+            status="ready" if feedback_count else "action",
+            detail=(
+                f"{feedback_count} readiness/RPE feedback record{'' if feedback_count == 1 else 's'} captured."
+                if feedback_count
+                else "Capture readiness and post-session RPE after the next session."
+            ),
+            action_label="Record feedback",
+        ),
+        TrainingCommandCheckRead(
+            key="load_safety",
+            label="Load safety",
+            status="ready" if high_risk_feedback_count == 0 and (avg_readiness is None or avg_readiness >= 65) else "action",
+            detail=(
+                "No recent high-risk feedback."
+                if high_risk_feedback_count == 0 and (avg_readiness is None or avg_readiness >= 65)
+                else f"{high_risk_feedback_count} high-risk feedback record(s); avg readiness {round(avg_readiness or 0, 1)}."
+            ),
+            action_label="Adjust load",
+        ),
+        TrainingCommandCheckRead(
+            key="load_accuracy",
+            label="Load accuracy",
+            status="ready" if avg_load_delta is None or abs(avg_load_delta) <= 150 else "action",
+            detail=(
+                "Actual load is close to plan."
+                if avg_load_delta is None or abs(avg_load_delta) <= 150
+                else f"Average load delta is {avg_load_delta:+.1f}; recalibrate targets."
+            ),
+            action_label="Review RPE targets",
+        ),
+    ]
+
+
+def training_command_actions(
+    checks: list[TrainingCommandCheckRead],
+    *,
+    active_plan: TrainingPlan | None,
+    next_session: TrainingSessionPlan | None,
+    avg_readiness: float | None,
+    avg_load_delta: float | None,
+    high_risk_feedback_count: int,
+    agent_task: AgentTask | None,
+) -> list[str]:
+    actions = [f"{check.label}: {check.detail}" for check in checks if check.status in {"blocked", "action"}]
+    if active_plan is not None:
+        actions.append(f"Keep {active_plan.title} aligned with the latest feedback and competition context.")
+    if next_session is not None:
+        actions.append(f"Prepare coaching points, attendance, and readiness check for {next_session.title}.")
+    if avg_readiness is not None and avg_readiness < 65:
+        actions.append("Reduce high-intensity volume until readiness stabilizes above the moderate band.")
+    if avg_load_delta is not None and abs(avg_load_delta) > 150:
+        actions.append("Recalibrate session RPE or duration targets because actual load is drifting from plan.")
+    if high_risk_feedback_count:
+        actions.append("Escalate low-readiness or high-soreness athletes for recovery, medical, or guardian follow-up.")
+    if agent_task is None:
+        actions.append("Queue the Training Strategy Agent to turn the current plan, sessions, and feedback into a coach review draft.")
+    else:
+        actions.append(f"Review Training Strategy Agent task {agent_task.id} before changing the training block.")
+    return actions[:10]
+
+
+async def find_training_command_agent_task(
+    db: AsyncSession,
+    organization_id: UUID,
+    team_id: UUID | None,
+) -> AgentTask | None:
+    return await db.scalar(
+        select(AgentTask)
+        .where(
+            AgentTask.organization_id == organization_id,
+            AgentTask.task_type == "training_command_review",
+            AgentTask.input_ref.like(f"training-command:{organization_id};team:{team_id or 'all'};%"),
+            AgentTask.status.not_in([AgentTaskStatus.FAILED, AgentTaskStatus.CANCELLED]),
+        )
+        .order_by(AgentTask.created_at.desc())
+        .limit(1)
+    )
+
+
+async def queue_training_command_agent_task(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    team_id: UUID | None,
+    authz: AuthorizationService,
+    *,
+    readiness_score: int,
+    plan_count: int,
+    session_count: int,
+    feedback_count: int,
+    high_risk_feedback_count: int,
+) -> AgentTask:
+    existing = await find_training_command_agent_task(db, organization_id, team_id)
+    if existing is not None:
+        return existing
+
+    agent = await db.scalar(
+        select(Agent)
+        .where(
+            Agent.organization_id == organization_id,
+            Agent.kind == AgentKind.COACHING,
+            Agent.name == "Training Strategy Agent",
+        )
+        .order_by(Agent.created_at)
+        .limit(1)
+    )
+    if agent is None:
+        agent = Agent(
+            organization_id=organization_id,
+            name="Training Strategy Agent",
+            kind=AgentKind.COACHING,
+            purpose=(
+                "Review training plans, session load, athlete readiness, and feedback loops "
+                "so coaches can adjust the next block safely."
+            ),
+            status="active",
+            model_policy="human_review_required",
+        )
+        db.add(agent)
+        await db.flush()
+
+    input_ref = (
+        f"training-command:{organization_id};"
+        f"team:{team_id or 'all'};"
+        f"score:{readiness_score};"
+        f"plans:{plan_count};"
+        f"sessions:{session_count};"
+        f"feedback:{feedback_count};"
+        f"risk:{high_risk_feedback_count}"
+    )
+    return await queue_agent_task(
+        db,
+        identity,
+        agent.id,
+        AgentTaskCreate(
+            organization_id=organization_id,
+            task_type="training_command_review",
+            title="Review training command center",
+            input_ref=input_ref,
+        ),
+        authz,
+    )
+
+
+def average(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 1)
 
 
 async def record_training_session_feedback(

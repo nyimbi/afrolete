@@ -160,6 +160,73 @@ def test_training_drill_plan_item_and_session_workflow(client, identity_headers)
     assert "DTEND:20260603T161500Z" in calendar_artifact["content"]
     assert "Target RPE: 7" in calendar_artifact["content"]
 
+    feedback_response = client.post(
+        f"/api/v1/training/sessions/{session_plan['id']}/feedback",
+        headers=identity_headers,
+        json={
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "readiness_score": 76,
+            "soreness_score": 4,
+            "sleep_quality": 7,
+            "mood_score": 8,
+            "actual_rpe": 6,
+            "actual_duration_minutes": 70,
+            "completed": True,
+            "feedback": "Handled rondo pressure well and recovered quickly.",
+            "coach_notes": "Keep scanning cue before the next block.",
+        },
+    )
+    assert feedback_response.status_code == 201
+    feedback = feedback_response.json()
+    assert feedback["readiness_band"] == "moderate"
+    assert feedback["load_delta"] == -105.0
+
+    command_response = client.get(
+        f"/api/v1/training/command-center?organization_id={organization['id']}&team_id={team['id']}",
+        headers=identity_headers,
+    )
+    assert command_response.status_code == 200
+    command = command_response.json()
+    assert command["team_id"] == team["id"]
+    assert command["team_name"] == team["name"]
+    assert command["active_plan_id"] == plan["id"]
+    assert command["next_session_id"] == session_plan["id"]
+    assert command["average_readiness_score"] == 76.0
+    assert command["average_load_delta"] == -105.0
+    assert command["high_risk_feedback_count"] == 0
+    assert command["command_status"] == "ready"
+    assert command["readiness_score"] >= 80
+    assert command["agent_task"] is None
+    assert any(metric["key"] == "feedback" and metric["value"] == 1 for metric in command["metrics"])
+    assert any(check["key"] == "load_safety" and check["status"] == "ready" for check in command["checks"])
+    assert any("Training Strategy Agent" in action for action in command["coach_actions"])
+
+    command_agent_response = client.post(
+        f"/api/v1/training/command-center/agent-task?organization_id={organization['id']}&team_id={team['id']}",
+        headers=identity_headers,
+    )
+    assert command_agent_response.status_code == 200
+    command_with_agent = command_agent_response.json()
+    task = command_with_agent["agent_task"]
+    assert task["task_type"] == "training_command_review"
+    assert task["status"] == "queued"
+    assert "training-command" in task["input_ref"]
+
+    duplicate_agent_response = client.post(
+        f"/api/v1/training/command-center/agent-task?organization_id={organization['id']}&team_id={team['id']}",
+        headers=identity_headers,
+    )
+    assert duplicate_agent_response.status_code == 200
+    assert duplicate_agent_response.json()["agent_task"]["id"] == task["id"]
+
+    executed_task = client.post(
+        f"/api/v1/agents/tasks/{task['id']}/execute",
+        headers=identity_headers,
+    ).json()
+    assert executed_task["status"] == "waiting_for_review"
+    assert "deterministic training command review" in executed_task["review_notes"]
+    assert "Current training loop: 1 plans, 1 sessions, 1 feedback records, 0 high-risk signals." in executed_task["review_notes"]
+
     invalid_range = client.get(
         (
             f"/api/v1/training/calendar-artifact?organization_id={organization['id']}"
