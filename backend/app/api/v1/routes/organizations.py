@@ -20,6 +20,7 @@ from app.schemas.organization import (
     OrganizationOnboardingRead,
     OrganizationPublicSiteRead,
     OrganizationRead,
+    PublicRegistrationDocumentUpload,
     PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
     PublicSiteFundraisingCampaignRead,
@@ -55,6 +56,7 @@ from app.services.organizations import (
     public_site_path,
     registration_packet_summary,
     search_public_organizations,
+    upload_public_registration_document,
     update_public_registration_packet,
     update_registration_inquiry,
 )
@@ -412,6 +414,21 @@ async def update_public_registration_packet_route(
 ) -> RegistrationPacketRead:
     return to_registration_packet_read(
         await update_public_registration_packet(db, site, inquiry_id, payload)
+    )
+
+
+@router.post(
+    "/public/{site}/registration-inquiries/{inquiry_id}/documents",
+    response_model=RegistrationPacketRead,
+)
+async def upload_public_registration_document_route(
+    site: str,
+    inquiry_id: UUID,
+    payload: PublicRegistrationDocumentUpload,
+    db: AsyncSession = Depends(get_db),
+) -> RegistrationPacketRead:
+    return to_registration_packet_read(
+        await upload_public_registration_document(db, site, inquiry_id, payload)
     )
 
 

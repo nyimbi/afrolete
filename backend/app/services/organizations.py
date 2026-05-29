@@ -1,12 +1,17 @@
 import json
 import re
+from base64 import b64decode
+from binascii import Error as BinasciiError
 from datetime import UTC, datetime
+from hashlib import sha256
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.models.communication import CommunicationMessage
 from app.models.commercial import FundraisingCampaign, Sponsor, SponsorshipAgreement, TicketProduct
 from app.models.enums import (
@@ -29,6 +34,7 @@ from app.schemas.organization import (
     CommitteeMemberAdd,
     MemberAdd,
     OrganizationCreate,
+    PublicRegistrationDocumentUpload,
     PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
     RegistrationInquiryConversionCreate,
@@ -39,6 +45,7 @@ from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 from app.services.communications import create_message
 from app.schemas.communication import CommunicationMessageCreate
+from app.services.storage.objects import put_object
 
 
 def slugify(value: str) -> str:
@@ -90,7 +97,7 @@ def registration_required_documents(inquiry: RegistrationInquiry) -> list[str]:
     return required
 
 
-def parse_registration_documents(raw: str | None) -> list[dict[str, str | None]]:
+def parse_registration_documents(raw: str | None) -> list[dict[str, object]]:
     if not raw:
         return []
     try:
@@ -99,7 +106,7 @@ def parse_registration_documents(raw: str | None) -> list[dict[str, str | None]]
         return []
     if not isinstance(parsed, list):
         return []
-    documents: list[dict[str, str | None]] = []
+    documents: list[dict[str, object]] = []
     for item in parsed:
         if not isinstance(item, dict):
             continue
@@ -113,6 +120,8 @@ def parse_registration_documents(raw: str | None) -> list[dict[str, str | None]]
                 "filename": filename if isinstance(filename, str) else document_type,
                 "storage_url": item.get("storage_url") if isinstance(item.get("storage_url"), str) else None,
                 "checksum": item.get("checksum") if isinstance(item.get("checksum"), str) else None,
+                "content_type": item.get("content_type") if isinstance(item.get("content_type"), str) else None,
+                "size_bytes": item.get("size_bytes") if isinstance(item.get("size_bytes"), int) else None,
                 "notes": item.get("notes") if isinstance(item.get("notes"), str) else None,
             }
         )
@@ -169,6 +178,12 @@ def is_youth_age_group(age_group: str | None) -> bool:
         return False
     normalized = age_group.lower().replace(" ", "")
     return normalized.startswith("u") or "under" in normalized or "youth" in normalized
+
+
+def safe_registration_filename(filename: str) -> str:
+    name = Path(filename).name.strip().replace(" ", "-")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip(".-")
+    return safe[:180] or "registration-document.bin"
 
 
 async def can_manage_registration_inquiries(
@@ -500,7 +515,10 @@ async def update_public_registration_packet(
         sort_keys=True,
     )
     inquiry.submitted_documents_json = json.dumps(
-        [document.model_dump() for document in payload.documents],
+        merge_registration_documents(
+            parse_registration_documents(inquiry.submitted_documents_json),
+            [document.model_dump() for document in payload.documents],
+        ),
         sort_keys=True,
     )
     inquiry.payment_amount = payload.payment_amount
@@ -520,6 +538,82 @@ async def update_public_registration_packet(
     return inquiry
 
 
+async def upload_public_registration_document(
+    db: AsyncSession,
+    site: str,
+    inquiry_id: UUID,
+    payload: PublicRegistrationDocumentUpload,
+    settings: Settings | None = None,
+) -> RegistrationInquiry:
+    selected_settings = settings or get_settings()
+    organization = await db.scalar(
+        select(Organization).where(
+            (Organization.slug == site) | (Organization.subdomain == site)
+        )
+    )
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    inquiry = await db.get(RegistrationInquiry, inquiry_id)
+    if inquiry is None or inquiry.organization_id != organization.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
+    if inquiry.email.lower() != payload.email.lower():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inquiry email mismatch")
+    if inquiry.status == "converted":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Converted inquiry cannot be updated")
+
+    try:
+        content = b64decode(payload.content_base64, validate=True)
+    except (BinasciiError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid base64 document content") from exc
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document content is empty")
+    if len(content) > selected_settings.registration_document_max_bytes:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Document is too large")
+
+    checksum = sha256(content).hexdigest()
+    filename = safe_registration_filename(payload.filename)
+    storage_name = f"{checksum[:16]}-{filename}"
+    key = (Path("registration-documents") / str(organization.id) / str(inquiry.id) / storage_name).as_posix()
+    stored = put_object(
+        selected_settings,
+        local_root=selected_settings.registration_document_file_dir,
+        local_url_prefix=selected_settings.registration_document_file_url_prefix,
+        key=key,
+        content=content,
+        content_type=payload.content_type,
+    )
+    documents = [
+        item
+        for item in parse_registration_documents(inquiry.submitted_documents_json)
+        if item.get("document_type") != payload.document_type
+    ]
+    documents.append(
+        {
+            "document_type": payload.document_type,
+            "filename": filename,
+            "storage_url": stored.url,
+            "checksum": checksum,
+            "content_type": payload.content_type,
+            "size_bytes": len(content),
+            "notes": payload.notes,
+        }
+    )
+    inquiry.required_documents_json = json.dumps(
+        [{"document_type": document_type, "filename": document_type} for document_type in registration_required_documents(inquiry)],
+        sort_keys=True,
+    )
+    inquiry.submitted_documents_json = json.dumps(documents, sort_keys=True)
+    summary = registration_packet_summary(inquiry)
+    inquiry.verification_status = "ready_for_review" if summary["packet_complete"] else "packet_incomplete"
+    inquiry.packet_submitted_at = inquiry.packet_submitted_at or datetime.now(UTC)
+    if inquiry.status == "new":
+        inquiry.status = "reviewing"
+
+    await db.commit()
+    await db.refresh(inquiry)
+    return inquiry
+
+
 def normalized_registration_payment_status(
     payload: PublicRegistrationPacketUpdate,
     inquiry: RegistrationInquiry,
@@ -531,6 +625,33 @@ def normalized_registration_payment_status(
     if payload.payment_reference:
         return "pending_verification"
     return inquiry.payment_status if inquiry.payment_status != "not_required" else "pending"
+
+
+def merge_registration_documents(
+    existing_documents: list[dict[str, object]],
+    incoming_documents: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    existing_by_type = {
+        str(document.get("document_type")): document
+        for document in existing_documents
+        if document.get("document_type")
+    }
+    merged: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for document in incoming_documents:
+        document_type = str(document.get("document_type", ""))
+        if not document_type:
+            continue
+        existing = existing_by_type.get(document_type, {})
+        next_document = {**existing, **{key: value for key, value in document.items() if value is not None}}
+        merged.append(next_document)
+        seen.add(document_type)
+    merged.extend(
+        document
+        for document in existing_documents
+        if str(document.get("document_type", "")) not in seen
+    )
+    return merged
 
 
 async def list_registration_inquiries(

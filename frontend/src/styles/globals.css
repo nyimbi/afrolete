@@ -2551,6 +2551,17 @@ textarea:focus {
   width: auto;
 }
 
+.register-document-field span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.register-document-field button {
+  align-self: stretch;
+  padding-inline: 11px;
+}
+
 .register-packet-result {
   border-top: 1px solid var(--line);
   display: grid;

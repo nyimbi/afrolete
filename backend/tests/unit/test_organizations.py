@@ -1,3 +1,5 @@
+from base64 import b64encode
+
 from app.services.authz.service import authorization_service
 
 
@@ -103,6 +105,26 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert inquiry["organization_id"] == onboarding["organization"]["id"]
     assert inquiry["verification_status"] == "inquiry"
 
+    document_response = client.post(
+        f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/documents",
+        json={
+            "email": "parent.runner@example.com",
+            "document_type": "proof_of_age",
+            "filename": "birth certificate.pdf",
+            "content_type": "application/pdf",
+            "content_base64": b64encode(b"proof-of-age").decode(),
+            "notes": "Birth certificate scan.",
+        },
+    )
+
+    assert document_response.status_code == 200
+    uploaded_packet = document_response.json()
+    assert uploaded_packet["submitted_documents"][0]["document_type"] == "proof_of_age"
+    assert uploaded_packet["submitted_documents"][0]["filename"] == "birth-certificate.pdf"
+    assert uploaded_packet["submitted_documents"][0]["storage_url"].startswith("local://registration-documents/")
+    assert uploaded_packet["submitted_documents"][0]["size_bytes"] == len(b"proof-of-age")
+    assert "proof_of_age" not in uploaded_packet["missing_documents"]
+
     packet_response = client.patch(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/packet",
         json={
@@ -115,7 +137,14 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
             "guardian_consent_acknowledged": True,
             "privacy_acknowledged": True,
             "documents": [
-                {"document_type": "proof_of_age", "filename": "birth-certificate.pdf"},
+                {
+                    "document_type": "proof_of_age",
+                    "filename": "birth-certificate.pdf",
+                    "storage_url": uploaded_packet["submitted_documents"][0]["storage_url"],
+                    "checksum": uploaded_packet["submitted_documents"][0]["checksum"],
+                    "content_type": "application/pdf",
+                    "size_bytes": len(b"proof-of-age"),
+                },
                 {"document_type": "medical_information", "filename": "medical-form.pdf"},
                 {"document_type": "guardian_consent", "filename": "guardian-consent.pdf"},
                 {"document_type": "photo_release", "filename": "photo-release.pdf"},

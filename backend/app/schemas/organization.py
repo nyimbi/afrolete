@@ -223,6 +223,17 @@ class RegistrationDocumentSubmission(BaseModel):
     filename: str = Field(min_length=2, max_length=240)
     storage_url: str | None = Field(default=None, max_length=500)
     checksum: str | None = Field(default=None, max_length=128)
+    content_type: str | None = Field(default=None, max_length=120)
+    size_bytes: int | None = None
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class PublicRegistrationDocumentUpload(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    document_type: str = Field(min_length=2, max_length=80)
+    filename: str = Field(min_length=2, max_length=240)
+    content_type: str = Field(default="application/octet-stream", max_length=120)
+    content_base64: str = Field(min_length=4)
     notes: str | None = Field(default=None, max_length=500)
 
 

@@ -22,6 +22,18 @@ import type {
 
 type RegistrationMode = "organization" | "player";
 
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Registration document could not be read"));
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      resolve(result.includes(",") ? result.split(",").pop() ?? "" : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 const defaultIdentity: LocalIdentity = {
   name: "New Program Owner",
   email: "owner@example.com",
@@ -316,6 +328,38 @@ export default function RegistrationPage() {
     }
   };
 
+  const uploadRegistrationDocument = async (documentType: string, file: File) => {
+    if (!selectedSite || !submittedInquiry) {
+      setError("Send the registration inquiry before uploading documents.");
+      return;
+    }
+    setBusy(`upload-${documentType}`);
+    setError("");
+    try {
+      const contentBase64 = await readFileAsBase64(file);
+      const packet = await apiRequest<RegistrationPacketRead>(
+        `/organizations/public/${encodeURIComponent(selectedSite.slug)}/registration-inquiries/${submittedInquiry.id}/documents`,
+        {
+          method: "POST",
+          body: {
+            email: submittedInquiry.email,
+            document_type: documentType,
+            filename: file.name,
+            content_type: file.type || "application/octet-stream",
+            content_base64: contentBase64,
+            notes: "Uploaded from registration form"
+          }
+        }
+      );
+      setRegistrationPacket(packet);
+      setSubmittedInquiry(packet.inquiry);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Document upload failed");
+    } finally {
+      setBusy("");
+    }
+  };
+
   return (
     <main className="register-page">
       <section className="register-hero">
@@ -580,38 +624,38 @@ export default function RegistrationPage() {
                         onChange={(event) => setPacketForm({ ...packetForm, medical_notes: event.target.value })}
                       />
                     </label>
-                    <label>
-                      Proof of age file
-                      <input
-                        value={packetForm.proof_of_age_filename}
-                        onChange={(event) => setPacketForm({ ...packetForm, proof_of_age_filename: event.target.value })}
-                        placeholder="birth-certificate.pdf"
-                      />
-                    </label>
-                    <label>
-                      Medical file
-                      <input
-                        value={packetForm.medical_information_filename}
-                        onChange={(event) => setPacketForm({ ...packetForm, medical_information_filename: event.target.value })}
-                        placeholder="medical-form.pdf"
-                      />
-                    </label>
-                    <label>
-                      Guardian consent file
-                      <input
-                        value={packetForm.guardian_consent_filename}
-                        onChange={(event) => setPacketForm({ ...packetForm, guardian_consent_filename: event.target.value })}
-                        placeholder="guardian-consent.pdf"
-                      />
-                    </label>
-                    <label>
-                      Photo release file
-                      <input
-                        value={packetForm.photo_release_filename}
-                        onChange={(event) => setPacketForm({ ...packetForm, photo_release_filename: event.target.value })}
-                        placeholder="photo-release.pdf"
-                      />
-                    </label>
+                    <DocumentInput
+                      label="Proof of age file"
+                      documentType="proof_of_age"
+                      value={packetForm.proof_of_age_filename}
+                      onChange={(value) => setPacketForm({ ...packetForm, proof_of_age_filename: value })}
+                      onUpload={uploadRegistrationDocument}
+                      busy={busy}
+                    />
+                    <DocumentInput
+                      label="Medical file"
+                      documentType="medical_information"
+                      value={packetForm.medical_information_filename}
+                      onChange={(value) => setPacketForm({ ...packetForm, medical_information_filename: value })}
+                      onUpload={uploadRegistrationDocument}
+                      busy={busy}
+                    />
+                    <DocumentInput
+                      label="Guardian consent file"
+                      documentType="guardian_consent"
+                      value={packetForm.guardian_consent_filename}
+                      onChange={(value) => setPacketForm({ ...packetForm, guardian_consent_filename: value })}
+                      onUpload={uploadRegistrationDocument}
+                      busy={busy}
+                    />
+                    <DocumentInput
+                      label="Photo release file"
+                      documentType="photo_release"
+                      value={packetForm.photo_release_filename}
+                      onChange={(value) => setPacketForm({ ...packetForm, photo_release_filename: value })}
+                      onUpload={uploadRegistrationDocument}
+                      busy={busy}
+                    />
                     <label>
                       Amount
                       <input
@@ -689,6 +733,12 @@ export default function RegistrationPage() {
                       <span>
                         Missing: {registrationPacket.missing_documents.length ? registrationPacket.missing_documents.join(", ") : "none"}
                       </span>
+                      {registrationPacket.submitted_documents.map((document) => (
+                        <small key={`${document.document_type}-${document.checksum ?? document.filename}`}>
+                          {document.document_type}: {document.filename} · {document.size_bytes ?? 0} bytes ·{" "}
+                          {document.storage_url ?? "not stored"}
+                        </small>
+                      ))}
                       {registrationPacket.next_steps.map((step) => (
                         <small key={step}>{step}</small>
                       ))}
@@ -742,5 +792,44 @@ export default function RegistrationPage() {
         )}
       </section>
     </main>
+  );
+}
+
+function DocumentInput({
+  label,
+  documentType,
+  value,
+  onChange,
+  onUpload,
+  busy
+}: {
+  label: string;
+  documentType: string;
+  value: string;
+  onChange: (value: string) => void;
+  onUpload: (documentType: string, file: File) => void;
+  busy: string;
+}) {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const uploadDisabled = busy !== "" || selectedFile === null;
+
+  return (
+    <label className="register-document-field">
+      {label}
+      <span>
+        <input
+          type="file"
+          onChange={(event) => {
+            const file = event.target.files?.[0] ?? null;
+            setSelectedFile(file);
+            onChange(file?.name ?? "");
+          }}
+        />
+        <button type="button" onClick={() => selectedFile && onUpload(documentType, selectedFile)} disabled={uploadDisabled}>
+          {busy === `upload-${documentType}` ? "Uploading" : "Upload"}
+        </button>
+      </span>
+      {value ? <small>{value}</small> : null}
+    </label>
   );
 }

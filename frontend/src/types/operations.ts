@@ -439,6 +439,8 @@ export type RegistrationDocumentSubmission = {
   filename: string;
   storage_url: string | null;
   checksum: string | null;
+  content_type: string | null;
+  size_bytes: number | null;
   notes: string | null;
 };
 

@@ -158,6 +158,9 @@ class Settings(BaseSettings):
     reporting_insight_generation_timeout_seconds: float = 8.0
     equipment_file_dir: str = "data/equipment-files"
     equipment_file_url_prefix: str = "local://equipment-files"
+    registration_document_file_dir: str = "data/registration-documents"
+    registration_document_file_url_prefix: str = "local://registration-documents"
+    registration_document_max_bytes: int = 5_000_000
     travel_receipt_file_dir: str = "data/travel-receipts"
     travel_receipt_file_url_prefix: str = "local://travel-receipts"
     travel_checklist_file_dir: str = "data/travel-checklist-files"
@@ -280,6 +283,7 @@ class Settings(BaseSettings):
         default_factory=lambda: [
             "reports/",
             "equipment-files/",
+            "registration-documents/",
             "travel-receipts/",
             "travel-checklist-files/",
             "travel-manifests/",
