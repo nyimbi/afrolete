@@ -11,9 +11,11 @@ import {
 } from "@/lib/auth";
 import { afroleteAuthMode, apiBaseUrl, keycloakClientId, keycloakIssuer } from "@/lib/config";
 import {
+  cachedOfflineResponse,
   flushOfflineQueue,
   getOfflineQueueSnapshot,
   installOfflineQueueListeners,
+  prefetchOfflineUrls,
   registerOfflineServiceWorker,
   subscribeOfflineQueue,
   type OfflineQueueSnapshot
@@ -480,7 +482,21 @@ type TravelManifestEncryptedOfflineCache = {
 
 type TravelManifestOfflineCache = TravelManifestEncryptedOfflineCache | TravelManifestLegacyOfflineCache;
 
+type TravelManifestServiceWorkerPrefetch = {
+  travel_plan_id: string;
+  destination: string;
+  filename: string;
+  url: string;
+  cached_at: string;
+  expires_at: string;
+  checksum: string;
+  size_bytes: number;
+  content_type: string;
+  service_worker: true;
+};
+
 const travelManifestCacheKey = (travelPlanId: string) => `afrolete:travel-manifest:${travelPlanId}`;
+const travelManifestPrefetchKey = (travelPlanId: string) => `afrolete:travel-manifest-prefetch:${travelPlanId}`;
 const travelManifestCacheTtlMs = 7 * 24 * 60 * 60 * 1000;
 const travelManifestCacheSalt = "afrolete-travel-manifest-cache-v2";
 
@@ -1424,6 +1440,8 @@ export default function HomePage() {
     useState<EventTravelConsentReminderRunRead | null>(null);
   const [travelManifest, setTravelManifest] = useState<EventTravelManifestRead | null>(null);
   const [travelOfflineManifestCache, setTravelOfflineManifestCache] = useState<TravelManifestOfflineCache | null>(null);
+  const [travelManifestPrefetch, setTravelManifestPrefetch] =
+    useState<TravelManifestServiceWorkerPrefetch | null>(null);
   const [travelManifestExport, setTravelManifestExport] = useState<EventTravelManifestExportRead | null>(null);
   const [travelManifestOfflineLink, setTravelManifestOfflineLink] =
     useState<EventTravelManifestOfflineLinkRead | null>(null);
@@ -3392,6 +3410,7 @@ export default function HomePage() {
       setTravelConsentReminderRun(null);
       setTravelManifest(null);
       setTravelOfflineManifestCache(null);
+      setTravelManifestPrefetch(null);
       setTravelManifestExport(null);
       setTravelManifestOfflineLink(null);
       setTravelFeeBatch(null);
@@ -3751,6 +3770,7 @@ export default function HomePage() {
       setTravelConsentReminderRun(null);
       setTravelManifest(null);
       setTravelOfflineManifestCache(null);
+      setTravelManifestPrefetch(null);
       setTravelManifestExport(null);
       setTravelManifestOfflineLink(null);
       setTravelFeeBatch(null);
@@ -4670,6 +4690,79 @@ export default function HomePage() {
       (link) => {
         setTravelManifestOfflineLink(link);
         addLog(`Travel manifest PDF link ready until ${new Date(link.expires_at).toLocaleTimeString()}`, "good");
+      }
+    );
+  };
+
+  const prefetchTravelManifestOfflineLink = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-manifest-prefetch-${plan.id}`,
+      async () => {
+        const link = await apiRequest<EventTravelManifestOfflineLinkRead>(
+          `/events/travel-plans/${plan.id}/manifest/offline-link`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              format: "pdf",
+              ttl_seconds: 3600
+            }
+          }
+        );
+        const url = `${apiBaseUrl}${link.signed_url}`;
+        const [prefetch] = await prefetchOfflineUrls([url]);
+        if (!prefetch?.ok) {
+          throw new Error(prefetch?.error ?? "Service worker manifest prefetch failed");
+        }
+        const metadata: TravelManifestServiceWorkerPrefetch = {
+          travel_plan_id: plan.id,
+          destination: plan.destination,
+          filename: link.filename,
+          url,
+          cached_at: prefetch.cachedAt,
+          expires_at: link.expires_at,
+          checksum: link.checksum,
+          size_bytes: link.size_bytes,
+          content_type: link.content_type,
+          service_worker: true
+        };
+        localStorage.setItem(travelManifestPrefetchKey(plan.id), JSON.stringify(metadata));
+        return { link, metadata };
+      },
+      ({ link, metadata }) => {
+        setTravelManifestOfflineLink(link);
+        setTravelManifestPrefetch(metadata);
+        addLog(`Service worker prefetched ${metadata.filename} for offline field access`, "good");
+      }
+    );
+  };
+
+  const openPrefetchedTravelManifest = (plan: EventTravelPlanRead) => {
+    runAction(
+      `travel-manifest-prefetch-open-${plan.id}`,
+      async () => {
+        const stored = localStorage.getItem(travelManifestPrefetchKey(plan.id));
+        if (!stored) {
+          throw new Error(`No service-worker manifest prefetch found for ${plan.destination}`);
+        }
+        const metadata = JSON.parse(stored) as TravelManifestServiceWorkerPrefetch;
+        if (new Date(metadata.expires_at).getTime() <= Date.now()) {
+          localStorage.removeItem(travelManifestPrefetchKey(plan.id));
+          throw new Error(`Prefetched manifest for ${plan.destination} has expired`);
+        }
+        const response = await cachedOfflineResponse(metadata.url);
+        if (!response) {
+          throw new Error(`Prefetched manifest for ${plan.destination} is not in the service-worker cache`);
+        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        window.open(objectUrl, "_blank", "noopener,noreferrer");
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+        return metadata;
+      },
+      (metadata) => {
+        setTravelManifestPrefetch(metadata);
+        addLog(`Opened cached ${metadata.filename} from service-worker storage`, "good");
       }
     );
   };
@@ -13752,6 +13845,21 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {travelManifestPrefetch ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{travelManifestPrefetch.filename} prefetched</strong>
+                    <span>
+                      {travelManifestPrefetch.destination} · {travelManifestPrefetch.size_bytes} bytes · service-worker cache
+                    </span>
+                    <span>
+                      cached {new Date(travelManifestPrefetch.cached_at).toLocaleString()} · expires{" "}
+                      {new Date(travelManifestPrefetch.expires_at).toLocaleString()} ·{" "}
+                      {travelManifestPrefetch.checksum.slice(0, 12)}
+                    </span>
+                  </div>
+                </article>
+              ) : null}
               {travelReadiness ? (
                 <article className="task-card">
                   <div>
@@ -14115,6 +14223,8 @@ export default function HomePage() {
                     <button type="button" onClick={() => restoreTravelManifestOffline(plan)}>Offline</button>
                     <button type="button" onClick={() => exportTravelManifest(plan)}>Export</button>
                     <button type="button" onClick={() => createTravelManifestOfflineLink(plan)}>PDF link</button>
+                    <button type="button" onClick={() => prefetchTravelManifestOfflineLink(plan)}>Prefetch</button>
+                    <button type="button" onClick={() => openPrefetchedTravelManifest(plan)}>Open cached</button>
                     <button type="button" onClick={() => checkTravelReadiness(plan)}>Gate</button>
                     <button type="button" onClick={() => optimizeTravelRoute(plan)}>Optimize</button>
                     <button type="button" onClick={() => loadTravelRouteMap(plan)}>Map</button>

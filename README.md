@@ -546,9 +546,11 @@ Current implemented pieces include:
 - Manual and automatic replay of queued operations.
 - Encrypted travel-manifest offline cache.
 - Signed offline travel-manifest artifacts.
+- Service-worker prefetch for signed travel-manifest PDFs with cached open
+  controls for field operators.
 
 Future offline work should move toward a general IndexedDB-backed data layer,
-conflict resolution, sync receipts, device handoff, provider prefetch, and
+conflict resolution, sync receipts, device handoff, provider data prefetch, and
 browser QA across mobile field conditions.
 
 ## Commit And Progress Discipline

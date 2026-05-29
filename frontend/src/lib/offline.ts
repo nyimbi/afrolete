@@ -45,6 +45,15 @@ export type OfflineFlushResult = {
   remaining: number;
 };
 
+export type OfflinePrefetchResult = {
+  url: string;
+  ok: boolean;
+  status: number;
+  contentType?: string | null;
+  cachedAt: string;
+  error?: string;
+};
+
 let lastError: string | null = null;
 let lastFlushedAt: string | null = null;
 let serviceWorkerReady = false;
@@ -85,6 +94,53 @@ export async function registerOfflineServiceWorker(): Promise<void> {
   }
 }
 
+export async function prefetchOfflineUrls(urls: string[]): Promise<OfflinePrefetchResult[]> {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    return prefetchUrlsInWindow(urls);
+  }
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const worker = registration.active ?? navigator.serviceWorker.controller;
+    if (!worker) {
+      return prefetchUrlsInWindow(urls);
+    }
+    const channel = new MessageChannel();
+    const requestId = crypto.randomUUID();
+    const results = await new Promise<OfflinePrefetchResult[]>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        channel.port1.close();
+        reject(new Error("Service worker prefetch timed out"));
+      }, 15000);
+      channel.port1.onmessage = (event) => {
+        const message = event.data || {};
+        if (message.requestId !== requestId) {
+          return;
+        }
+        window.clearTimeout(timeout);
+        channel.port1.close();
+        if (message.error) {
+          reject(new Error(message.error));
+          return;
+        }
+        resolve(message.results ?? []);
+      };
+      worker.postMessage({ type: "AFROLETE_PREFETCH_URLS", requestId, urls }, [channel.port2]);
+    });
+    return results;
+  } catch (error) {
+    lastError = error instanceof Error ? error.message : "Service worker prefetch failed";
+    notify();
+    return prefetchUrlsInWindow(urls);
+  }
+}
+
+export async function cachedOfflineResponse(url: string): Promise<Response | null> {
+  if (typeof caches === "undefined") {
+    return null;
+  }
+  return (await caches.match(url)) ?? null;
+}
+
 export function installOfflineQueueListeners(onOnline?: () => void) {
   if (typeof window === "undefined") {
     return () => undefined;
@@ -100,6 +156,45 @@ export function installOfflineQueueListeners(onOnline?: () => void) {
     window.removeEventListener("online", handleOnline);
     window.removeEventListener("offline", handleOffline);
   };
+}
+
+async function prefetchUrlsInWindow(urls: string[]): Promise<OfflinePrefetchResult[]> {
+  if (typeof caches === "undefined") {
+    return urls.map((url) => ({
+      url,
+      ok: false,
+      status: 0,
+      cachedAt: new Date().toISOString(),
+      error: "Cache API is not available"
+    }));
+  }
+  const cache = await caches.open("afrolete-prefetch-v1");
+  return Promise.all(
+    urls.map(async (url) => {
+      try {
+        const response = await fetch(url, { credentials: "omit", mode: "cors" });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        await cache.put(url, response.clone());
+        return {
+          url,
+          ok: true,
+          status: response.status,
+          contentType: response.headers.get("content-type"),
+          cachedAt: new Date().toISOString()
+        };
+      } catch (error) {
+        return {
+          url,
+          ok: false,
+          status: 0,
+          cachedAt: new Date().toISOString(),
+          error: error instanceof Error ? error.message : "Prefetch failed"
+        };
+      }
+    })
+  );
 }
 
 export function queueOfflineRequest(input: QueueOfflineRequestInput): OfflineQueueItem {
