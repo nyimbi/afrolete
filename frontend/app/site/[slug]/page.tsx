@@ -4,7 +4,13 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useParams } from "next/navigation";
 import { apiRequest } from "@/lib/api";
-import { startKeycloakLogin, startKeycloakRegistration } from "@/lib/auth";
+import {
+  completeKeycloakCallbackFromUrl,
+  getStoredAuthSession,
+  startKeycloakLogin,
+  startKeycloakRegistration,
+  type AuthSession
+} from "@/lib/auth";
 import { afroleteAuthMode } from "@/lib/config";
 import type {
   AgentEthicalScorecardRead,
@@ -106,6 +112,7 @@ export default function PublicOrganizationSitePage() {
   const [packetForm, setPacketForm] = useState(defaultPacketForm);
   const [registrationPacket, setRegistrationPacket] = useState<RegistrationPacketRead | null>(null);
   const [paymentSession, setPaymentSession] = useState<RegistrationPaymentSessionRead | null>(null);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [submittedVolunteerSignup, setSubmittedVolunteerSignup] = useState<PublicVolunteerSignupRead | null>(null);
   const [submittedVolunteerGroup, setSubmittedVolunteerGroup] = useState<VolunteerGroupApplicationRead | null>(null);
   const [error, setError] = useState("");
@@ -119,6 +126,18 @@ export default function PublicOrganizationSitePage() {
   const [volunteerBusy, setVolunteerBusy] = useState(false);
   const [volunteerGroupBusy, setVolunteerGroupBusy] = useState(false);
   const [loadedResumeKey, setLoadedResumeKey] = useState("");
+
+  useEffect(() => {
+    if (!keycloakEnabled) {
+      return;
+    }
+    completeKeycloakCallbackFromUrl()
+      .then((session) => setAuthSession(session ?? getStoredAuthSession()))
+      .catch((caught) => {
+        setAuthSession(null);
+        setPacketError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
+      });
+  }, []);
 
   useEffect(() => {
     if (!slug) {
@@ -464,7 +483,7 @@ export default function PublicOrganizationSitePage() {
     setAccountBusy("registration");
     void startKeycloakRegistration({
       loginHint: submittedInquiry.email,
-      returnTo: registrationReturnTo(site.slug, submittedInquiry)
+      returnTo: publicRegistrationReturnTo(site.slug, submittedInquiry)
     }).catch((caught) => {
       setAccountBusy("");
       setPacketError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
@@ -479,7 +498,7 @@ export default function PublicOrganizationSitePage() {
     void startKeycloakLogin({
       loginHint: submittedInquiry.email,
       prompt: "login",
-      returnTo: registrationReturnTo(site.slug, submittedInquiry)
+      returnTo: publicRegistrationReturnTo(site.slug, submittedInquiry)
     }).catch((caught) => {
       setAccountBusy("");
       setPacketError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
@@ -998,22 +1017,28 @@ export default function PublicOrganizationSitePage() {
               </div>
               {keycloakEnabled ? (
                 <div>
-                  <button
-                    type="button"
-                    onClick={beginFamilyKeycloakRegistration}
-                    disabled={
-                      accountBusy !== "" || (accountReadiness !== null && !accountReadiness.can_create_account)
-                    }
-                  >
-                    {accountBusy === "registration" ? "Starting" : "Create account"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={beginFamilyKeycloakLogin}
-                    disabled={accountBusy !== "" || (accountReadiness !== null && !accountReadiness.can_sign_in)}
-                  >
-                    {accountBusy === "login" ? "Starting" : "Sign in"}
-                  </button>
+                  {isSessionForInquiry(authSession, submittedInquiry) ? (
+                    <a href={familyPortalHref(site.id, submittedInquiry)}>Continue in family portal</a>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={beginFamilyKeycloakRegistration}
+                        disabled={
+                          accountBusy !== "" || (accountReadiness !== null && !accountReadiness.can_create_account)
+                        }
+                      >
+                        {accountBusy === "registration" ? "Starting" : "Create account"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={beginFamilyKeycloakLogin}
+                        disabled={accountBusy !== "" || (accountReadiness !== null && !accountReadiness.can_sign_in)}
+                      >
+                        {accountBusy === "login" ? "Starting" : "Sign in"}
+                      </button>
+                    </>
+                  )}
                 </div>
               ) : (
                 <a href={familyPortalHref(site.id, submittedInquiry)}>Open family portal</a>
@@ -1296,14 +1321,20 @@ function familyPortalHref(organizationId: string, inquiry: RegistrationInquiryRe
   return `/family?${params.toString()}`;
 }
 
-function registrationReturnTo(siteSlug: string, inquiry: RegistrationInquiryRead): string {
+function publicRegistrationReturnTo(siteSlug: string, inquiry: RegistrationInquiryRead): string {
   const params = new URLSearchParams({
-    mode: "player",
-    site: siteSlug,
     inquiry_id: inquiry.id,
     email: inquiry.email
   });
-  return `/register?${params.toString()}`;
+  return `/site/${encodeURIComponent(siteSlug)}?${params.toString()}`;
+}
+
+function isSessionForInquiry(session: AuthSession | null, inquiry: RegistrationInquiryRead): boolean {
+  return normalizeEmail(session?.email) !== "" && normalizeEmail(session?.email) === normalizeEmail(inquiry.email);
+}
+
+function normalizeEmail(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
 }
 
 function RegistrationDocumentInput({
