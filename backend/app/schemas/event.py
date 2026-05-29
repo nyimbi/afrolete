@@ -274,7 +274,26 @@ class EventTravelManifestParticipantRead(BaseModel):
 class EventTravelManifestRead(BaseModel):
     event_id: UUID
     travel_plan_id: UUID
+    organization_id: UUID
+    organization_name: str
+    organization_contact_email: str | None = None
+    organization_contact_phone: str | None = None
+    organization_logo_url: str | None = None
+    brand_primary_color: str | None = None
+    brand_secondary_color: str | None = None
+    event_title: str
+    event_starts_at: datetime
+    venue_name: str | None = None
     destination: str
+    travel_mode: str
+    departure_at: datetime | None = None
+    return_at: datetime | None = None
+    route_summary: str | None = None
+    vehicle_details: str | None = None
+    driver_details: str | None = None
+    consent_required: bool
+    risk_level: TravelRiskLevel
+    risk_assessment: str
     participant_count: int
     emergency_contacts: str | None
     medical_access_plan: str | None

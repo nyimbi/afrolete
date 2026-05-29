@@ -13811,8 +13811,13 @@ export default function HomePage() {
               {travelManifest ? (
                 <article className="task-card">
                   <div>
-                    <strong>{travelManifest.destination} manifest</strong>
-                    <span>{travelManifest.participant_count} participants · {travelManifest.medical_access_plan ?? "Medical access plan not set"}</span>
+                    <strong>{travelManifest.organization_name} · {travelManifest.destination} manifest</strong>
+                    <span>
+                      {travelManifest.event_title} · {travelManifest.participant_count} participants · risk {travelManifest.risk_level}
+                    </span>
+                    <span>
+                      {travelManifest.travel_mode} · {travelManifest.venue_name ?? "Venue not set"} · {travelManifest.medical_access_plan ?? "Medical access plan not set"}
+                    </span>
                     <span>{travelManifest.participants[0]?.display_name ?? "No participants loaded"}</span>
                   </div>
                 </article>

@@ -1,9 +1,13 @@
 from datetime import UTC, date, datetime
+from uuid import uuid4
 
 import pytest
 
+from app.models.enums import MedicalClearanceStatus, TravelRiskLevel
 from app.models.identity import Person
+from app.schemas.event import EventTravelManifestParticipantRead, EventTravelManifestRead
 from app.services.authz.service import authorization_service
+from app.services.events import travel_manifest_pdf, travel_manifest_text
 
 
 @pytest.fixture
@@ -81,6 +85,59 @@ def create_org_team_event(client, identity_headers, sport: str = "football"):
         for relationship in authorization_service.relationships
     )
     return organization, team, event
+
+
+def test_travel_manifest_pdf_is_branded_field_document() -> None:
+    manifest = EventTravelManifestRead(
+        event_id=uuid4(),
+        travel_plan_id=uuid4(),
+        organization_id=uuid4(),
+        organization_name="Nairobi Rising FC",
+        organization_contact_email="ops@nairobi-rising.example",
+        organization_contact_phone="+254700000001",
+        organization_logo_url="https://static.example/logo.png",
+        brand_primary_color="#0E5A6F",
+        brand_secondary_color="#20B486",
+        event_title="Regional Final",
+        event_starts_at=datetime(2026, 6, 6, 10, 0, tzinfo=UTC),
+        venue_name="City Stadium",
+        destination="City Stadium",
+        travel_mode="Club minibus",
+        departure_at=datetime(2026, 6, 6, 7, 30, tzinfo=UTC),
+        return_at=datetime(2026, 6, 6, 14, 0, tzinfo=UTC),
+        route_summary="Clubhouse to City Stadium via Mombasa Road with backup stop at South C.",
+        vehicle_details="KDA 123A, 29-seat minibus, inspection current.",
+        driver_details="Driver: Amina Yusuf, PSV current.",
+        consent_required=True,
+        risk_level=TravelRiskLevel.MEDIUM,
+        risk_assessment="Driver certification, vehicle inspection, consent, and medical access reviewed.",
+        participant_count=1,
+        emergency_contacts="Coach Maria +254700000010; Medic Amina +254700000011",
+        medical_access_plan="Nearest hospital: City Medical Center.",
+        participants=[
+            EventTravelManifestParticipantRead(
+                person_id=uuid4(),
+                display_name="Amani Otieno",
+                guardian_names=["Parent Otieno"],
+                guardian_contacts=["parent@example.com", "+254700000020"],
+                medical_clearance_status=MedicalClearanceStatus.CLEARED,
+                medical_clearance_reason="Cleared for full participation.",
+            )
+        ],
+    )
+
+    text_manifest = travel_manifest_text(manifest)
+    pdf = travel_manifest_pdf(manifest)
+
+    assert "Nairobi Rising FC travel manifest" in text_manifest
+    assert "Risk: medium" in text_manifest
+    assert pdf.startswith(b"%PDF-1.4")
+    assert b"Nairobi Rising FC" in pdf
+    assert b"OFFLINE TRAVEL MANIFEST" in pdf
+    assert b"Regional Final" in pdf
+    assert b"DEPARTURE SAFETY CHECKLIST" in pdf
+    assert b"Amani Otieno" in pdf
+    assert b"0.0549 0.3529 0.4353 rg 0 720 612 72 re f" in pdf
 
 
 def test_team_event_seed_and_attendance_check_in(

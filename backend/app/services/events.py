@@ -853,6 +853,9 @@ async def get_travel_manifest(
     if plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel plan not found")
     event = await get_event(db, plan.event_id)
+    organization = await db.get(Organization, plan.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
     await ensure_manage_event_scope(authz, plan.organization_id, identity)
 
     participants: list[EventTravelManifestParticipantRead] = []
@@ -876,7 +879,26 @@ async def get_travel_manifest(
     return EventTravelManifestRead(
         event_id=event.id,
         travel_plan_id=plan.id,
+        organization_id=organization.id,
+        organization_name=organization.public_name or organization.name,
+        organization_contact_email=organization.contact_email,
+        organization_contact_phone=organization.contact_phone,
+        organization_logo_url=organization.logo_url,
+        brand_primary_color=organization.brand_primary_color,
+        brand_secondary_color=organization.brand_secondary_color,
+        event_title=event.title,
+        event_starts_at=event.starts_at,
+        venue_name=event.venue_name,
         destination=plan.destination,
+        travel_mode=plan.travel_mode,
+        departure_at=plan.departure_at,
+        return_at=plan.return_at,
+        route_summary=plan.route_summary,
+        vehicle_details=plan.vehicle_details,
+        driver_details=plan.driver_details,
+        consent_required=plan.consent_required,
+        risk_level=plan.risk_level,
+        risk_assessment=plan.risk_assessment,
         participant_count=len(participants),
         emergency_contacts=plan.emergency_contacts,
         medical_access_plan=plan.medical_access_plan,
@@ -5159,10 +5181,23 @@ def travel_manifest_csv(manifest: EventTravelManifestRead) -> str:
 
 def travel_manifest_text(manifest: EventTravelManifestRead) -> str:
     lines = [
-        f"Travel manifest: {manifest.destination}",
+        f"{manifest.organization_name} travel manifest",
+        f"Event: {manifest.event_title}",
+        f"Destination: {manifest.destination}",
+        f"Venue: {manifest.venue_name or 'not set'}",
+        f"Travel mode: {manifest.travel_mode}",
+        f"Departure: {manifest.departure_at.isoformat() if manifest.departure_at else 'not set'}",
+        f"Return: {manifest.return_at.isoformat() if manifest.return_at else 'not set'}",
+        f"Risk: {manifest.risk_level.value}",
         f"Participants: {manifest.participant_count}",
         f"Emergency contacts: {manifest.emergency_contacts or 'not set'}",
         f"Medical access: {manifest.medical_access_plan or 'not set'}",
+        f"Route: {manifest.route_summary or 'not set'}",
+        f"Vehicle: {manifest.vehicle_details or 'not set'}",
+        f"Driver: {manifest.driver_details or 'not set'}",
+        f"Consent required: {'yes' if manifest.consent_required else 'no'}",
+        "Risk assessment:",
+        manifest.risk_assessment,
         "",
     ]
     for participant in manifest.participants:
@@ -5200,32 +5235,30 @@ def travel_manifest_artifact(manifest: EventTravelManifestRead, format_value: st
 
 def travel_manifest_pdf(manifest: EventTravelManifestRead) -> bytes:
     body_lines = travel_manifest_pdf_lines(manifest)
-    chunks = [body_lines[index : index + 44] for index in range(0, len(body_lines), 44)] or [[]]
+    chunks = [body_lines[index : index + 34] for index in range(0, len(body_lines), 34)] or [[]]
     page_objects: list[bytes] = []
     page_ids: list[int] = []
     total_pages = len(chunks)
+    primary = travel_manifest_pdf_color(manifest.brand_primary_color, (0.05, 0.20, 0.24))
+    secondary = travel_manifest_pdf_color(manifest.brand_secondary_color, (0.12, 0.58, 0.50))
     for page_index, chunk in enumerate(chunks):
-        page_id = 4 + page_index * 2
+        page_id = 5 + page_index * 2
         stream_id = page_id + 1
         page_ids.append(page_id)
-        page_lines = [
-            f"Travel manifest: {manifest.destination}",
-            f"Page {page_index + 1} of {total_pages}",
-            "",
-            *chunk,
-        ]
-        text_commands = ["BT", "/F1 9 Tf", "54 748 Td"]
-        for line_index, line in enumerate(page_lines):
-            if line_index:
-                text_commands.append("0 -13 Td")
-            text_commands.append(f"({travel_manifest_pdf_escape(line[:112])}) Tj")
-        text_commands.append("ET")
-        stream = "\n".join(text_commands).encode()
+        text_commands = travel_manifest_pdf_page_commands(
+            manifest,
+            chunk,
+            page_number=page_index + 1,
+            total_pages=total_pages,
+            primary=primary,
+            secondary=secondary,
+        )
+        stream = "\n".join(text_commands).encode("latin-1", "replace")
         page_objects.extend(
             [
                 (
                     f"{page_id} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-                    f"/Resources << /Font << /F1 3 0 R >> >> /Contents {stream_id} 0 R >> endobj\n"
+                    f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {stream_id} 0 R >> endobj\n"
                 ).encode(),
                 (
                     f"{stream_id} 0 obj << /Length {len(stream)} >> stream\n".encode()
@@ -5239,6 +5272,7 @@ def travel_manifest_pdf(manifest: EventTravelManifestRead) -> bytes:
         b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
         f"2 0 obj << /Type /Pages /Kids [{kids}] /Count {total_pages} >> endobj\n".encode(),
         b"3 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n",
+        b"4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> endobj\n",
         *page_objects,
     ]
     output = io.BytesIO()
@@ -5260,27 +5294,212 @@ def travel_manifest_pdf(manifest: EventTravelManifestRead) -> bytes:
 
 def travel_manifest_pdf_lines(manifest: EventTravelManifestRead) -> list[str]:
     lines = [
+        "# Trip overview",
+        f"Event: {manifest.event_title}",
+        f"Start: {manifest.event_starts_at.isoformat()}",
+        f"Venue: {manifest.venue_name or 'not set'}",
+        f"Destination: {manifest.destination}",
+        f"Travel mode: {manifest.travel_mode}",
+        f"Departure: {manifest.departure_at.isoformat() if manifest.departure_at else 'not set'}",
+        f"Return: {manifest.return_at.isoformat() if manifest.return_at else 'not set'}",
         f"Participants: {manifest.participant_count}",
-        f"Emergency contacts: {manifest.emergency_contacts or 'not set'}",
-        f"Medical access: {manifest.medical_access_plan or 'not set'}",
+        f"Risk level: {manifest.risk_level.value}",
+        f"Consent required: {'yes' if manifest.consent_required else 'no'}",
         "",
-        "Participants",
+        "# Route and safety",
+        *travel_manifest_wrap("Route", manifest.route_summary or "not set", width=92),
+        *travel_manifest_wrap("Vehicle", manifest.vehicle_details or "not set", width=92),
+        *travel_manifest_wrap("Driver", manifest.driver_details or "not set", width=92),
+        *travel_manifest_wrap("Emergency contacts", manifest.emergency_contacts or "not set", width=92),
+        *travel_manifest_wrap("Medical access", manifest.medical_access_plan or "not set", width=92),
+        *travel_manifest_wrap("Risk assessment", manifest.risk_assessment, width=92),
+        "",
+        "# Departure safety checklist",
+        "[ ] Passenger count matches approved manifest",
+        "[ ] Driver certification and vehicle inspection reviewed",
+        "[ ] Guardian consent and medical restrictions reviewed",
+        "[ ] Emergency contacts, route, and backup stops confirmed",
+        "[ ] Equipment, first aid, hydration, and communications checked",
+        "",
+        "# Participant manifest",
     ]
     for participant in manifest.participants:
         medical_status = participant.medical_clearance_status.value if participant.medical_clearance_status else "not reviewed"
-        lines.extend(
-            [
-                f"- {participant.display_name} ({participant.person_id})",
-                f"  Guardians: {'; '.join(participant.guardian_names) or 'none listed'}",
-                f"  Contacts: {'; '.join(participant.guardian_contacts) or 'none listed'}",
-                f"  Medical: {medical_status} - {participant.medical_clearance_reason}",
-            ]
-        )
+        lines.append(f"- {participant.display_name} | Medical: {medical_status}")
+        lines.extend(travel_manifest_wrap("  Guardians", "; ".join(participant.guardian_names) or "none listed", width=92))
+        lines.extend(travel_manifest_wrap("  Contacts", "; ".join(participant.guardian_contacts) or "none listed", width=92))
+        lines.extend(travel_manifest_wrap("  Notes", participant.medical_clearance_reason, width=92))
     return lines
 
 
+def travel_manifest_pdf_page_commands(
+    manifest: EventTravelManifestRead,
+    lines: list[str],
+    *,
+    page_number: int,
+    total_pages: int,
+    primary: tuple[float, float, float],
+    secondary: tuple[float, float, float],
+) -> list[str]:
+    commands = [
+        f"q {travel_manifest_pdf_rgb(primary)} rg 0 720 612 72 re f Q",
+        f"q {travel_manifest_pdf_rgb(secondary)} rg 0 708 612 12 re f Q",
+        travel_manifest_pdf_text(
+            manifest.organization_name,
+            48,
+            764,
+            font="F2",
+            size=15,
+            color=(1, 1, 1),
+        ),
+        travel_manifest_pdf_text(
+            "OFFLINE TRAVEL MANIFEST",
+            48,
+            744,
+            font="F2",
+            size=10,
+            color=(0.88, 0.96, 0.95),
+        ),
+        travel_manifest_pdf_text(
+            f"{manifest.destination} | {manifest.participant_count} participants | risk {manifest.risk_level.value}",
+            48,
+            724,
+            font="F1",
+            size=9,
+            color=(1, 1, 1),
+        ),
+        travel_manifest_pdf_text(
+            f"Page {page_number} of {total_pages}",
+            504,
+            744,
+            font="F1",
+            size=8,
+            color=(1, 1, 1),
+        ),
+    ]
+    if manifest.organization_contact_email or manifest.organization_contact_phone:
+        commands.append(
+            travel_manifest_pdf_text(
+                " | ".join(
+                    item
+                    for item in [manifest.organization_contact_email, manifest.organization_contact_phone]
+                    if item
+                ),
+                48,
+                698,
+                font="F1",
+                size=8,
+                color=(0.18, 0.25, 0.29),
+            )
+        )
+    y = 676
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            y -= 8
+            continue
+        if line.startswith("# "):
+            commands.append(f"q {travel_manifest_pdf_rgb(secondary)} rg 48 {y - 4} 516 2 re f Q")
+            commands.append(
+                travel_manifest_pdf_text(
+                    line[2:].upper(),
+                    48,
+                    y + 4,
+                    font="F2",
+                    size=10,
+                    color=primary,
+                )
+            )
+            y -= 18
+            continue
+        font = "F2" if line.startswith("- ") else "F1"
+        size = 8.5 if line.startswith("- ") else 8
+        commands.append(
+            travel_manifest_pdf_text(
+                line,
+                54,
+                y,
+                font=font,
+                size=size,
+                color=(0.12, 0.16, 0.18),
+            )
+        )
+        y -= 13
+    commands.append(f"q {travel_manifest_pdf_rgb(primary)} rg 48 42 516 1 re f Q")
+    commands.append(
+        travel_manifest_pdf_text(
+            "Signed offline copy. Verify the link expiry, checksum, consent status, and medical clearance before departure.",
+            48,
+            28,
+            font="F1",
+            size=7,
+            color=(0.30, 0.35, 0.38),
+        )
+    )
+    return commands
+
+
+def travel_manifest_wrap(label: str, value: str, *, width: int) -> list[str]:
+    prefix = f"{label}: "
+    words = str(value or "not set").replace("\r", " ").replace("\n", " ").split()
+    if not words:
+        return [f"{prefix}not set"]
+    lines: list[str] = []
+    current = prefix
+    for word in words:
+        candidate = f"{current}{word}" if current == prefix else f"{current} {word}"
+        if len(candidate) > width and current != prefix:
+            lines.append(current)
+            current = " " * min(len(prefix), 14) + word
+        else:
+            current = candidate
+    lines.append(current)
+    return lines
+
+
+def travel_manifest_pdf_text(
+    value: str,
+    x: int,
+    y: int,
+    *,
+    font: str,
+    size: float,
+    color: tuple[float, float, float],
+) -> str:
+    return (
+        "BT "
+        f"{travel_manifest_pdf_rgb(color)} rg "
+        f"/{font} {size:g} Tf "
+        f"{x} {y} Td "
+        f"({travel_manifest_pdf_escape(value[:132])}) Tj "
+        "ET"
+    )
+
+
+def travel_manifest_pdf_color(
+    value: str | None,
+    fallback: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    if not value:
+        return fallback
+    cleaned = value.strip().lstrip("#")
+    if len(cleaned) != 6 or any(character not in "0123456789abcdefABCDEF" for character in cleaned):
+        return fallback
+    return (
+        round(int(cleaned[0:2], 16) / 255, 4),
+        round(int(cleaned[2:4], 16) / 255, 4),
+        round(int(cleaned[4:6], 16) / 255, 4),
+    )
+
+
+def travel_manifest_pdf_rgb(color: tuple[float, float, float]) -> str:
+    return " ".join(f"{component:.4f}".rstrip("0").rstrip(".") for component in color)
+
+
 def travel_manifest_pdf_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    cleaned = str(value).replace("\r", " ").replace("\n", " ")
+    return cleaned.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
 
 
 def signed_travel_manifest_url(

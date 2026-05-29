@@ -588,7 +588,26 @@ export type EventTravelManifestParticipantRead = {
 export type EventTravelManifestRead = {
   event_id: UUID;
   travel_plan_id: UUID;
+  organization_id: UUID;
+  organization_name: string;
+  organization_contact_email: string | null;
+  organization_contact_phone: string | null;
+  organization_logo_url: string | null;
+  brand_primary_color: string | null;
+  brand_secondary_color: string | null;
+  event_title: string;
+  event_starts_at: string;
+  venue_name: string | null;
   destination: string;
+  travel_mode: string;
+  departure_at: string | null;
+  return_at: string | null;
+  route_summary: string | null;
+  vehicle_details: string | null;
+  driver_details: string | null;
+  consent_required: boolean;
+  risk_level: TravelRiskLevel;
+  risk_assessment: string;
   participant_count: number;
   emergency_contacts: string | null;
   medical_access_plan: string | null;
