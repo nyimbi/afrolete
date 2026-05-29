@@ -25,6 +25,9 @@ class PoseSampleEndpointPostError(RuntimeError):
     pass
 
 
+POSE_SAMPLE_ENDPOINT_BATCH_SIZE = 600
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract pose landmarks from stored performance videos.")
     parser.add_argument("--organization-id", type=UUID, default=None)
@@ -104,6 +107,43 @@ async def post_pose_samples_to_endpoint(
     return response.json()
 
 
+async def post_pose_sample_batches_to_endpoint(
+    *,
+    api_base_url: str,
+    video_asset_id: UUID,
+    organization_id: UUID,
+    samples: list[dict[str, object]],
+    replace_existing: bool,
+    request_headers: Mapping[str, str],
+    timeout_seconds: float = 30.0,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, object]:
+    responses: list[dict[str, object]] = []
+    for start_index in range(0, len(samples), POSE_SAMPLE_ENDPOINT_BATCH_SIZE):
+        batch = samples[start_index : start_index + POSE_SAMPLE_ENDPOINT_BATCH_SIZE]
+        responses.append(
+            await post_pose_samples_to_endpoint(
+                api_base_url=api_base_url,
+                video_asset_id=video_asset_id,
+                organization_id=organization_id,
+                samples=batch,
+                replace_existing=replace_existing and start_index == 0,
+                request_headers=request_headers,
+                timeout_seconds=timeout_seconds,
+                transport=transport,
+            )
+        )
+    endpoint_sample_count = None
+    if responses:
+        endpoint_sample_count = responses[-1].get("sample_count")
+    return {
+        "batch_count": len(responses),
+        "posted_sample_count": len(samples),
+        "endpoint_sample_count": endpoint_sample_count,
+        "responses": responses,
+    }
+
+
 async def run_performance_video_pose_endpoint_worker(
     db: AsyncSession,
     *,
@@ -161,7 +201,7 @@ async def run_performance_video_pose_endpoint_worker(
             samples = list(extracted["samples"])
             endpoint_response: dict[str, object] | None = None
             if samples:
-                endpoint_response = await post_pose_samples_to_endpoint(
+                endpoint_response = await post_pose_sample_batches_to_endpoint(
                     api_base_url=api_base_url,
                     video_asset_id=video_asset.id,
                     organization_id=video_asset.organization_id,
@@ -186,7 +226,10 @@ async def run_performance_video_pose_endpoint_worker(
                     "decoded_frame_count": extracted["decoded_frame_count"],
                     "processed_frame_count": extracted["processed_frame_count"],
                     "posted_sample_count": len(samples),
-                    "endpoint_sample_count": endpoint_response.get("sample_count") if endpoint_response else 0,
+                    "posted_batch_count": endpoint_response.get("batch_count") if endpoint_response else 0,
+                    "endpoint_sample_count": (
+                        endpoint_response.get("endpoint_sample_count") if endpoint_response else 0
+                    ),
                     "warnings": extracted["warnings"],
                 }
             )
@@ -199,6 +242,7 @@ async def run_performance_video_pose_endpoint_worker(
                     "sample_count": len(samples),
                     "processed_frame_count": extracted["processed_frame_count"],
                     "decoded_frame_count": extracted["decoded_frame_count"],
+                    "posted_batch_count": endpoint_response.get("batch_count") if endpoint_response else 0,
                     "warning_count": len(extracted["warnings"]),
                     "ingest_endpoint": f"/api/v1/performance/videos/{video_asset.id}/pose-samples",
                 }

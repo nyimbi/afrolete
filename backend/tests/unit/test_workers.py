@@ -3,6 +3,7 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from uuid import uuid4
 
 import httpx
 from sqlalchemy import func, select
@@ -336,6 +337,50 @@ async def test_video_pose_worker_posts_extracted_keypoints_to_pose_samples_endpo
     assert video.status == "pose_sampled"
     assert video.frame_rate == 48.0
     assert json.loads(video.pose_analysis_json)["endpoint_sample_count"] == 1
+
+
+async def test_video_pose_worker_batches_pose_samples_for_endpoint_limits() -> None:
+    organization_id = uuid4()
+    video_asset_id = uuid4()
+    samples = [
+        {
+            "source_provider": "mediapipe_pose_solution",
+            "frame_index": index,
+            "timestamp_seconds": round(index * 0.02, 3),
+            "phase": "pose_frame",
+            "sample_confidence": 0.88,
+            "keypoints": [
+                {"name": "left_ankle", "x_percent": 42, "y_percent": 78, "confidence": 0.91},
+                {"name": "right_ankle", "x_percent": 55, "y_percent": 70, "confidence": 0.9},
+                {"name": "left_knee", "x_percent": 44, "y_percent": 58, "confidence": 0.92},
+                {"name": "right_knee", "x_percent": 54, "y_percent": 55, "confidence": 0.9},
+            ],
+        }
+        for index in range(605)
+    ]
+    captured_payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_payloads.append(json.loads(request.content))
+        posted_total = sum(len(payload["samples"]) for payload in captured_payloads)
+        return httpx.Response(status_code=201, json={"sample_count": posted_total})
+
+    result = await video_pose_worker.post_pose_sample_batches_to_endpoint(
+        api_base_url="http://api.test",
+        video_asset_id=video_asset_id,
+        organization_id=organization_id,
+        samples=samples,
+        replace_existing=True,
+        request_headers={"X-Afrolete-Sub": "kc-pose-worker"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result["batch_count"] == 2
+    assert result["posted_sample_count"] == 605
+    assert result["endpoint_sample_count"] == 605
+    assert [len(payload["samples"]) for payload in captured_payloads] == [600, 5]
+    assert [payload["replace_existing"] for payload in captured_payloads] == [True, False]
+    assert captured_payloads[0]["organization_id"] == str(organization_id)
 
 
 async def test_video_pose_endpoint_worker_skips_when_pose_provider_disabled(
