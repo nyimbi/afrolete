@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.competition import (
+    AthleteTransferCreate,
+    AthleteTransferRead,
     CompetitionAdvanceCreate,
     CompetitionAdvancementRead,
     CompetitionBroadcastCreate,
@@ -12,6 +14,8 @@ from app.schemas.competition import (
     CompetitionCreate,
     CompetitionBracketRead,
     CompetitionConflictRead,
+    CompetitionEligibilityCertificateRead,
+    CompetitionEligibilityCheckCreate,
     CompetitionFixtureCreate,
     CompetitionFixtureGenerationRead,
     CompetitionFixtureGenerateCreate,
@@ -41,11 +45,15 @@ from app.services.competitions import (
     competition_conflicts,
     assign_fixture_official,
     competition_standings,
+    create_athlete_transfer_record,
     create_competition,
     create_competition_fixture,
     create_competition_ticketing,
     generate_competition_fixtures,
+    issue_competition_eligibility_certificate,
+    list_athlete_transfer_records,
     list_competition_fixtures,
+    list_competition_eligibility_certificates,
     list_competition_participants,
     list_competition_ticketing,
     list_competitions,
@@ -184,6 +192,75 @@ async def list_competition_participants_route(
     return [
         to_participant_read(participant, team)
         for participant, team in await list_competition_participants(db, competition_id)
+    ]
+
+
+@router.post(
+    "/transfers",
+    response_model=AthleteTransferRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_athlete_transfer_route(
+    payload: AthleteTransferCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AthleteTransferRead:
+    return AthleteTransferRead(**await create_athlete_transfer_record(db, identity, payload, authz))
+
+
+@router.get("/transfers", response_model=list[AthleteTransferRead])
+async def list_athlete_transfers_route(
+    organization_id: UUID = Query(),
+    athlete_profile_id: UUID | None = Query(default=None),
+    team_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[AthleteTransferRead]:
+    return [
+        AthleteTransferRead(**row)
+        for row in await list_athlete_transfer_records(
+            db,
+            identity,
+            organization_id,
+            authz,
+            athlete_profile_id=athlete_profile_id,
+            team_id=team_id,
+        )
+    ]
+
+
+@router.post(
+    "/{competition_id}/eligibility-certificates",
+    response_model=CompetitionEligibilityCertificateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def issue_competition_eligibility_certificate_route(
+    competition_id: UUID,
+    payload: CompetitionEligibilityCheckCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CompetitionEligibilityCertificateRead:
+    return CompetitionEligibilityCertificateRead(
+        **await issue_competition_eligibility_certificate(db, identity, competition_id, payload, authz)
+    )
+
+
+@router.get(
+    "/{competition_id}/eligibility-certificates",
+    response_model=list[CompetitionEligibilityCertificateRead],
+)
+async def list_competition_eligibility_certificates_route(
+    competition_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[CompetitionEligibilityCertificateRead]:
+    return [
+        CompetitionEligibilityCertificateRead(**row)
+        for row in await list_competition_eligibility_certificates(db, identity, competition_id, authz)
     ]
 
 

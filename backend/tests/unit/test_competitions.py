@@ -213,6 +213,152 @@ def test_competition_fixture_rejects_cross_organization_team(client, identity_he
     assert response.json()["detail"] == "Team not found"
 
 
+def test_competition_transfer_and_eligibility_certificate_workflow(client, identity_headers) -> None:
+    organization, source_team, destination_team, _ = create_competition_context(client, identity_headers)
+    member, source_roster = add_competition_player(
+        client,
+        identity_headers,
+        organization["id"],
+        source_team["id"],
+        "Transfer Sprinter",
+        "transfer-sprinter@example.com",
+    )
+    destination_roster_response = client.post(
+        f"/api/v1/teams/{destination_team['id']}/members",
+        headers=identity_headers,
+        json={
+            "person_id": member["subject_id"],
+            "role": "player",
+            "status": "active",
+        },
+    )
+    assert destination_roster_response.status_code == 201
+    athlete_profile_id = source_roster["athlete_profile_id"]
+    competition = client.post(
+        "/api/v1/competitions",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Registrar Cup",
+            "sport": "football",
+            "competition_type": "tournament",
+            "format": "single_elimination",
+            "starts_on": "2026-06-01",
+            "ends_on": "2026-06-30",
+        },
+    ).json()
+    participant_response = client.post(
+        f"/api/v1/competitions/{competition['id']}/participants",
+        headers=identity_headers,
+        json={"team_id": destination_team["id"], "seed": 1},
+    )
+    assert participant_response.status_code == 201
+
+    transfer_response = client.post(
+        "/api/v1/competitions/transfers",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": athlete_profile_id,
+            "from_team_id": source_team["id"],
+            "to_team_id": destination_team["id"],
+            "transfer_type": "permanent",
+            "status": "approved",
+            "requested_on": "2026-05-20",
+            "effective_on": "2026-06-01",
+            "window_label": "Summer 2026",
+            "clearance_reference": "TR-2026-001",
+            "reason": "Academy pathway transfer.",
+        },
+    )
+    assert transfer_response.status_code == 201
+    transfer = transfer_response.json()
+    assert transfer["athlete_name"] == "Transfer Sprinter"
+    assert transfer["from_team_name"] == "Riverside"
+    assert transfer["to_team_name"] == "City Stars"
+    assert transfer["decided_at"] is not None
+
+    certificate_response = client.post(
+        f"/api/v1/competitions/{competition['id']}/eligibility-certificates",
+        headers=identity_headers,
+        json={
+            "athlete_profile_id": athlete_profile_id,
+            "team_id": destination_team["id"],
+            "transfer_record_id": transfer["id"],
+            "require_medical_clearance": False,
+            "require_compliance_credential": False,
+            "academic_status": "eligible",
+            "citizenship_status": "verified",
+            "disciplinary_status": "clear",
+        },
+    )
+    assert certificate_response.status_code == 201
+    certificate = certificate_response.json()
+    assert certificate["status"] == "eligible"
+    assert certificate["blocker_count"] == 0
+    assert certificate["certificate_number"].startswith("AFL-ELG-")
+    assert {check["key"] for check in certificate["checks"]} >= {
+        "active_roster",
+        "team_registration",
+        "transfer_clearance",
+    }
+
+    transfers = client.get(
+        f"/api/v1/competitions/transfers?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert transfers.status_code == 200
+    assert transfers.json()[0]["clearance_reference"] == "TR-2026-001"
+    certificates = client.get(
+        f"/api/v1/competitions/{competition['id']}/eligibility-certificates",
+        headers=identity_headers,
+    )
+    assert certificates.status_code == 200
+    assert certificates.json()[0]["id"] == certificate["id"]
+
+
+def test_competition_eligibility_certificate_blocks_unregistered_team(client, identity_headers) -> None:
+    organization, team, _, _ = create_competition_context(client, identity_headers)
+    _, roster = add_competition_player(
+        client,
+        identity_headers,
+        organization["id"],
+        team["id"],
+        "Unregistered Tournament Player",
+        "unregistered-tournament-player@example.com",
+    )
+    competition = client.post(
+        "/api/v1/competitions",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Eligibility Block Cup",
+            "sport": "football",
+            "competition_type": "tournament",
+            "format": "single_elimination",
+        },
+    ).json()
+
+    response = client.post(
+        f"/api/v1/competitions/{competition['id']}/eligibility-certificates",
+        headers=identity_headers,
+        json={
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "team_id": team["id"],
+            "require_transfer_clearance": False,
+            "require_medical_clearance": False,
+            "require_compliance_credential": False,
+        },
+    )
+
+    assert response.status_code == 201
+    certificate = response.json()
+    assert certificate["status"] == "ineligible"
+    assert certificate["blocker_count"] == 1
+    registration = next(check for check in certificate["checks"] if check["key"] == "team_registration")
+    assert registration["status"] == "blocker"
+
+
 def test_competition_knockout_advancement_ticketing_broadcast_and_schedule(
     client,
     identity_headers,

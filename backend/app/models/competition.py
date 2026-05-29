@@ -73,6 +73,74 @@ class CompetitionParticipant(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
 
 
+class AthleteTransferRecord(IdMixin, TimestampMixin, Base):
+    __tablename__ = "athlete_transfer_records"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("organizations.id"),
+        index=True,
+    )
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("athlete_profiles.id"),
+        index=True,
+    )
+    from_team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    to_team_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    transfer_type: Mapped[str] = mapped_column(String(80), default="permanent", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="requested", nullable=False, index=True)
+    requested_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    effective_on: Mapped[date | None] = mapped_column(Date, index=True)
+    window_label: Mapped[str | None] = mapped_column(String(120), index=True)
+    previous_registration_ref: Mapped[str | None] = mapped_column(String(180), index=True)
+    clearance_reference: Mapped[str | None] = mapped_column(String(180), index=True)
+    reviewed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    reason: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class CompetitionEligibilityCertificate(IdMixin, TimestampMixin, Base):
+    __tablename__ = "competition_eligibility_certificates"
+    __table_args__ = (
+        UniqueConstraint(
+            "competition_id",
+            "athlete_profile_id",
+            "team_id",
+            name="uq_competition_eligibility_certificates_scope",
+        ),
+        UniqueConstraint("certificate_number", name="uq_competition_eligibility_certificates_number"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("organizations.id"),
+        index=True,
+    )
+    competition_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("competitions.id"), index=True)
+    athlete_profile_id: Mapped[UUID] = mapped_column(
+        GUID(),
+        ForeignKey("athlete_profiles.id"),
+        index=True,
+    )
+    team_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    transfer_record_id: Mapped[UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("athlete_transfer_records.id"),
+        index=True,
+    )
+    issued_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    certificate_number: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    valid_from: Mapped[date | None] = mapped_column(Date, index=True)
+    valid_until: Mapped[date | None] = mapped_column(Date, index=True)
+    blocker_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    warning_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    eligibility_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    checks_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class CompetitionFixture(IdMixin, TimestampMixin, Base):
     __tablename__ = "competition_fixtures"
 

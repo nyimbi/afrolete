@@ -72,6 +72,96 @@ class CompetitionParticipantRead(BaseModel):
     status: str
 
 
+class AthleteTransferCreate(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID
+    from_team_id: UUID | None = None
+    to_team_id: UUID
+    transfer_type: str = Field(default="permanent", min_length=2, max_length=80)
+    status: str = Field(default="requested", min_length=2, max_length=40)
+    requested_on: date | None = None
+    effective_on: date | None = None
+    window_label: str | None = Field(default=None, max_length=120)
+    previous_registration_ref: str | None = Field(default=None, max_length=180)
+    clearance_reference: str | None = Field(default=None, max_length=180)
+    reason: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class AthleteTransferRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    athlete_profile_id: UUID
+    athlete_name: str
+    from_team_id: UUID | None
+    from_team_name: str | None
+    to_team_id: UUID
+    to_team_name: str
+    transfer_type: str
+    status: str
+    requested_on: date
+    effective_on: date | None
+    window_label: str | None
+    previous_registration_ref: str | None
+    clearance_reference: str | None
+    reviewed_by_person_id: UUID | None
+    decided_at: datetime | None
+    reason: str | None
+    notes: str | None
+
+
+class CompetitionEligibilityCheckCreate(BaseModel):
+    athlete_profile_id: UUID
+    team_id: UUID
+    transfer_record_id: UUID | None = None
+    min_age: int | None = Field(default=None, ge=3, le=100)
+    max_age: int | None = Field(default=None, ge=3, le=100)
+    require_active_roster: bool = True
+    require_team_registration: bool = True
+    require_transfer_clearance: bool = True
+    require_medical_clearance: bool = True
+    require_compliance_credential: bool = False
+    max_players_per_team: int | None = Field(default=None, ge=1, le=200)
+    academic_status: str | None = Field(default=None, max_length=80)
+    citizenship_status: str | None = Field(default=None, max_length=80)
+    disciplinary_status: str | None = Field(default=None, max_length=80)
+    valid_until: date | None = None
+
+    @model_validator(mode="after")
+    def valid_age_range(self) -> "CompetitionEligibilityCheckCreate":
+        if self.min_age is not None and self.max_age is not None and self.max_age < self.min_age:
+            raise ValueError("max_age must be greater than or equal to min_age")
+        return self
+
+
+class CompetitionEligibilityCheckRead(BaseModel):
+    key: str
+    label: str
+    status: str
+    severity: str
+    detail: str
+    recommendation: str
+
+
+class CompetitionEligibilityCertificateRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    competition_id: UUID
+    athlete_profile_id: UUID
+    athlete_name: str
+    team_id: UUID
+    team_name: str
+    transfer_record_id: UUID | None
+    status: str
+    certificate_number: str
+    valid_from: date | None
+    valid_until: date | None
+    blocker_count: int
+    warning_count: int
+    eligibility_summary: str
+    checks: list[CompetitionEligibilityCheckRead]
+
+
 class CompetitionFixtureCreate(BaseModel):
     home_team_id: UUID
     away_team_id: UUID

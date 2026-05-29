@@ -5342,6 +5342,56 @@ export type CompetitionParticipantRead = {
   status: string;
 };
 
+export type AthleteTransferRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  athlete_name: string;
+  from_team_id: UUID | null;
+  from_team_name: string | null;
+  to_team_id: UUID;
+  to_team_name: string;
+  transfer_type: string;
+  status: string;
+  requested_on: string;
+  effective_on: string | null;
+  window_label: string | null;
+  previous_registration_ref: string | null;
+  clearance_reference: string | null;
+  reviewed_by_person_id: UUID | null;
+  decided_at: string | null;
+  reason: string | null;
+  notes: string | null;
+};
+
+export type CompetitionEligibilityCheckRead = {
+  key: string;
+  label: string;
+  status: string;
+  severity: string;
+  detail: string;
+  recommendation: string;
+};
+
+export type CompetitionEligibilityCertificateRead = {
+  id: UUID;
+  organization_id: UUID;
+  competition_id: UUID;
+  athlete_profile_id: UUID;
+  athlete_name: string;
+  team_id: UUID;
+  team_name: string;
+  transfer_record_id: UUID | null;
+  status: string;
+  certificate_number: string;
+  valid_from: string | null;
+  valid_until: string | null;
+  blocker_count: number;
+  warning_count: number;
+  eligibility_summary: string;
+  checks: CompetitionEligibilityCheckRead[];
+};
+
 export type CompetitionFixtureRead = {
   id: UUID;
   organization_id: UUID;

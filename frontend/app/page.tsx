@@ -110,11 +110,13 @@ import type {
   CommunicationScheduledDispatchWorkerRunRead,
   CommunicationTemplateRead,
   CommercialRefundRead,
+  AthleteTransferRead,
   CompetitionAdvancementRead,
   CompetitionBracketRead,
   CompetitionBracketRoundRead,
   CompetitionBroadcastRead,
   CompetitionConflictRead,
+  CompetitionEligibilityCertificateRead,
   CompetitionFixtureRead,
   CompetitionFixtureGenerationRead,
   CompetitionFormat,
@@ -1617,6 +1619,11 @@ export default function HomePage() {
   const [competitionTicketing, setCompetitionTicketing] = useState<CompetitionTicketingRead[]>([]);
   const [competitionBracket, setCompetitionBracket] = useState<CompetitionBracketRead | null>(null);
   const [competitionConflicts, setCompetitionConflicts] = useState<CompetitionConflictRead[]>([]);
+  const [athleteTransfers, setAthleteTransfers] = useState<AthleteTransferRead[]>([]);
+  const [eligibilityCertificates, setEligibilityCertificates] =
+    useState<CompetitionEligibilityCertificateRead[]>([]);
+  const [eligibilityCertificate, setEligibilityCertificate] =
+    useState<CompetitionEligibilityCertificateRead | null>(null);
   const [matchEvents, setMatchEvents] = useState<FixtureMatchEventRead[]>([]);
   const [officialAssignments, setOfficialAssignments] = useState<FixtureOfficialAssignmentRead[]>([]);
   const [communicationTemplates, setCommunicationTemplates] = useState<CommunicationTemplateRead[]>([]);
@@ -3023,14 +3030,26 @@ export default function HomePage() {
     );
   }, []);
 
+  const loadAthleteTransfers = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<AthleteTransferRead[]>(
+      `/competitions/transfers?organization_id=${organizationId}`,
+      { identity }
+    );
+    setAthleteTransfers(data);
+  }, [identity]);
+
   const loadCompetitionWorkspace = useCallback(async (competitionId: string) => {
-    const [participants, fixtures, standings, bracket, conflicts, ticketing] = await Promise.all([
+    const [participants, fixtures, standings, bracket, conflicts, ticketing, certificates] = await Promise.all([
       apiRequest<CompetitionParticipantRead[]>(`/competitions/${competitionId}/participants`),
       apiRequest<CompetitionFixtureRead[]>(`/competitions/${competitionId}/fixtures`),
       apiRequest<CompetitionStandingRead[]>(`/competitions/${competitionId}/standings`),
       apiRequest<CompetitionBracketRead>(`/competitions/${competitionId}/bracket`),
       apiRequest<CompetitionConflictRead[]>(`/competitions/${competitionId}/conflicts`),
-      apiRequest<CompetitionTicketingRead[]>(`/competitions/${competitionId}/ticketing`)
+      apiRequest<CompetitionTicketingRead[]>(`/competitions/${competitionId}/ticketing`),
+      apiRequest<CompetitionEligibilityCertificateRead[]>(
+        `/competitions/${competitionId}/eligibility-certificates`,
+        { identity }
+      )
     ]);
     setCompetitionParticipants(participants);
     setCompetitionFixtures(fixtures);
@@ -3038,10 +3057,11 @@ export default function HomePage() {
     setCompetitionBracket(bracket);
     setCompetitionConflicts(conflicts);
     setCompetitionTicketing(ticketing);
+    setEligibilityCertificates(certificates);
     setSelectedFixtureId((current) =>
       fixtures.some((fixture) => fixture.id === current) ? current : fixtures[0]?.id ?? ""
     );
-  }, []);
+  }, [identity]);
 
   const loadFixtureEvents = useCallback(async (fixtureId: string) => {
     const data = await apiRequest<FixtureMatchEventRead[]>(`/competitions/fixtures/${fixtureId}/events`);
@@ -3525,6 +3545,9 @@ export default function HomePage() {
       setCompetitionTicketing([]);
       setCompetitionBracket(null);
       setCompetitionConflicts([]);
+      setAthleteTransfers([]);
+      setEligibilityCertificates([]);
+      setEligibilityCertificate(null);
       setMatchEvents([]);
       setOfficialAssignments([]);
       setRegistrationInquiries([]);
@@ -3671,6 +3694,7 @@ export default function HomePage() {
       await loadPerformanceBenchmarkDatasets(selectedOrganizationId);
       await loadTraining(selectedOrganizationId);
       await loadCompetitions(selectedOrganizationId);
+      await loadAthleteTransfers(selectedOrganizationId);
       await loadCommunications(selectedOrganizationId);
       await loadAssets(selectedOrganizationId);
       await loadCommercial(selectedOrganizationId);
@@ -3699,6 +3723,7 @@ export default function HomePage() {
     loadPerformanceBenchmarkDatasets,
     loadTraining,
     loadCompetitions,
+    loadAthleteTransfers,
     loadCommunications,
     loadAssets,
     loadCommercial,
@@ -3918,6 +3943,8 @@ export default function HomePage() {
       setCompetitionTicketing([]);
       setCompetitionBracket(null);
       setCompetitionConflicts([]);
+      setEligibilityCertificates([]);
+      setEligibilityCertificate(null);
       setMatchEvents([]);
       setOfficialAssignments([]);
       return;
@@ -9523,6 +9550,92 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== participant.id)
         ]);
         addLog(`${participant.team_name} registered`, "good");
+        void loadCompetitionWorkspace(selectedCompetitionId);
+      }
+    );
+  };
+
+  const createAthleteTransfer = () => {
+    if (!selectedOrganizationId || !selectedTeamId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an organization, destination team, and athlete first", "bad");
+      return;
+    }
+    const fromTeamId = competitionParticipants.find((participant) => participant.team_id !== selectedTeamId)?.team_id ?? null;
+    runAction(
+      "create-athlete-transfer",
+      () =>
+        apiRequest<AthleteTransferRead>("/competitions/transfers", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            athlete_profile_id: selectedAthlete.athleteProfileId,
+            from_team_id: fromTeamId,
+            to_team_id: selectedTeamId,
+            transfer_type: "permanent",
+            status: "approved",
+            requested_on: new Date().toISOString().slice(0, 10),
+            effective_on: selectedCompetition?.starts_on ?? new Date().toISOString().slice(0, 10),
+            window_label: selectedCompetition?.season_label ?? "Open registration",
+            clearance_reference: `AFL-${Date.now()}`,
+            reason: `Competition clearance for ${selectedCompetition?.name ?? "registration"}.`
+          }
+        }),
+      (transfer) => {
+        setAthleteTransfers((current) => [
+          transfer,
+          ...current.filter((item) => item.id !== transfer.id)
+        ]);
+        addLog(`${transfer.athlete_name} transfer cleared for ${transfer.to_team_name}`, "good");
+      }
+    );
+  };
+
+  const issueCompetitionEligibilityCertificate = () => {
+    if (!selectedCompetitionId || !selectedTeamId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select a competition, team, and athlete first", "bad");
+      return;
+    }
+    const transfer = athleteTransfers.find(
+      (item) =>
+        item.athlete_profile_id === selectedAthlete.athleteProfileId &&
+        item.to_team_id === selectedTeamId &&
+        ["approved", "cleared", "completed", "registered"].includes(item.status)
+    );
+    runAction(
+      "issue-competition-eligibility-certificate",
+      () =>
+        apiRequest<CompetitionEligibilityCertificateRead>(
+          `/competitions/${selectedCompetitionId}/eligibility-certificates`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              athlete_profile_id: selectedAthlete.athleteProfileId,
+              team_id: selectedTeamId,
+              transfer_record_id: transfer?.id ?? null,
+              require_active_roster: true,
+              require_team_registration: true,
+              require_transfer_clearance: true,
+              require_medical_clearance: false,
+              require_compliance_credential: false,
+              academic_status: "eligible",
+              citizenship_status: "verified",
+              disciplinary_status: "clear",
+              valid_until: selectedCompetition?.ends_on ?? null
+            }
+          }
+        ),
+      (certificate) => {
+        setEligibilityCertificate(certificate);
+        setEligibilityCertificates((current) => [
+          certificate,
+          ...current.filter((item) => item.id !== certificate.id)
+        ]);
+        addLog(
+          `${certificate.athlete_name} eligibility is ${certificate.status} (${certificate.blocker_count} blockers)`,
+          certificate.blocker_count ? "bad" : "good"
+        );
         void loadCompetitionWorkspace(selectedCompetitionId);
       }
     );
@@ -16409,6 +16522,8 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={reviewCompetitionConflicts} disabled={busyAction !== null}>Conflicts</button>
+                <button type="button" onClick={createAthleteTransfer} disabled={busyAction !== null}>Transfer</button>
+                <button type="button" onClick={issueCompetitionEligibilityCertificate} disabled={busyAction !== null}>Eligibility</button>
                 <button type="button" onClick={broadcastCompetitionUpdate} disabled={busyAction !== null}>Broadcast</button>
                 <button type="button" onClick={openCompetitionTicketing} disabled={busyAction !== null}>Ticketing</button>
               </div>
@@ -16438,8 +16553,24 @@ export default function HomePage() {
                 <span className="muted">Ticketed</span>
                 <strong>{competitionTicketing.length}</strong>
               </div>
+              <div>
+                <span className="muted">Transfers</span>
+                <strong>{athleteTransfers.length}</strong>
+              </div>
+              <div>
+                <span className="muted">Clearance</span>
+                <strong>{eligibilityCertificates.filter((certificate) => certificate.status === "eligible").length}/{eligibilityCertificates.length}</strong>
+              </div>
             </div>
             <div className="task-list">
+              {eligibilityCertificate ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{eligibilityCertificate.status} · {eligibilityCertificate.athlete_name}</strong>
+                    <span>{eligibilityCertificate.certificate_number} · {eligibilityCertificate.eligibility_summary}</span>
+                  </div>
+                </article>
+              ) : null}
               {competitionBracket ? (
                 <div className="bracket-lanes">
                   {competitionBracket.rounds.map((round) => (
@@ -16455,6 +16586,22 @@ export default function HomePage() {
                   <div>
                     <strong>{conflict.severity} · {conflict.title}</strong>
                     <span>{conflict.description} · {conflict.recommendation}</span>
+                  </div>
+                </article>
+              ))}
+              {eligibilityCertificates.slice(0, 3).map((certificate) => (
+                <article key={certificate.id} className="task-card">
+                  <div>
+                    <strong>{certificate.status} · {certificate.athlete_name}</strong>
+                    <span>{certificate.team_name} · {certificate.blocker_count} blockers · {certificate.warning_count} warnings</span>
+                  </div>
+                </article>
+              ))}
+              {athleteTransfers.slice(0, 3).map((transfer) => (
+                <article key={transfer.id} className="task-card">
+                  <div>
+                    <strong>{transfer.status} transfer · {transfer.athlete_name}</strong>
+                    <span>{transfer.from_team_name ?? "New registration"} -&gt; {transfer.to_team_name} · {transfer.clearance_reference ?? transfer.transfer_type}</span>
                   </div>
                 </article>
               ))}

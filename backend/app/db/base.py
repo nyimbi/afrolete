@@ -65,7 +65,9 @@ from app.models.communication import (  # noqa: F401,E402
     NotificationPreference,
 )
 from app.models.competition import (  # noqa: F401,E402
+    AthleteTransferRecord,
     Competition,
+    CompetitionEligibilityCertificate,
     CompetitionFixture,
     CompetitionParticipant,
     FixtureMatchEvent,
