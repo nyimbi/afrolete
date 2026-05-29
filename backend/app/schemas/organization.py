@@ -127,6 +127,40 @@ class PublicSiteTicketProductRead(BaseModel):
     status: str
 
 
+class PublicSiteSupporterTierRead(BaseModel):
+    id: UUID
+    name: str
+    slug: str
+    monthly_price: Decimal
+    currency: str
+    benefits: str
+    voting_weight: int
+    trial_days: int
+
+
+class PublicSiteFanChallengeRead(BaseModel):
+    id: UUID
+    title: str
+    description: str
+    challenge_type: str
+    target_activity_type: str
+    target_count: int
+    points_reward: int
+    badge_name: str | None
+    starts_at: datetime
+    ends_at: datetime | None
+    completion_count: int = 0
+
+
+class PublicSiteFanLeaderboardEntryRead(BaseModel):
+    rank: int
+    supporter_profile_id: UUID
+    supporter_name: str
+    tier_name: str | None
+    engagement_points: int
+    completed_challenge_count: int
+
+
 class OrganizationPublicSiteRead(BaseModel):
     id: UUID
     name: str
@@ -153,6 +187,50 @@ class OrganizationPublicSiteRead(BaseModel):
     sponsors: list[PublicSiteSponsorRead]
     fundraising_campaigns: list[PublicSiteFundraisingCampaignRead]
     ticket_products: list[PublicSiteTicketProductRead]
+    supporter_tiers: list[PublicSiteSupporterTierRead] = Field(default_factory=list)
+    fan_challenges: list[PublicSiteFanChallengeRead] = Field(default_factory=list)
+    fan_leaderboard: list[PublicSiteFanLeaderboardEntryRead] = Field(default_factory=list)
+
+
+class PublicSupporterSignupCreate(BaseModel):
+    tier_id: UUID | None = None
+    display_name: str = Field(min_length=2, max_length=180)
+    email: str = Field(min_length=3, max_length=320)
+    phone: str | None = Field(default=None, max_length=64)
+    interests: list[str] = Field(default_factory=list, max_length=12)
+    message: str | None = Field(default=None, max_length=2000)
+    source_url: str | None = Field(default=None, max_length=500)
+
+
+class PublicSupporterSignupRead(BaseModel):
+    supporter_profile_id: UUID
+    organization_id: UUID
+    display_name: str
+    email: str
+    tier_id: UUID | None
+    tier_name: str | None
+    engagement_points: int
+    status: str
+    signup_status: str
+    points_awarded: int
+    next_actions: list[str] = Field(default_factory=list)
+
+
+class PublicSupporterChallengeProgressCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    progress_count: int = Field(default=1, ge=1, le=10000)
+
+
+class PublicSupporterChallengeProgressRead(BaseModel):
+    supporter_profile_id: UUID
+    supporter_name: str
+    challenge_id: UUID
+    challenge_title: str
+    progress_count: int
+    target_count: int
+    points_awarded: int
+    status: str
+    completed_at: datetime | None
 
 
 class OrganizationDirectoryRead(BaseModel):

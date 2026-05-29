@@ -2632,6 +2632,54 @@ textarea:focus {
   margin-top: 5px;
 }
 
+.public-site-success small {
+  color: var(--muted);
+  display: block;
+  margin-top: 6px;
+}
+
+.public-supporter-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.public-fan-challenge-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.public-fan-challenge-grid article {
+  box-shadow: none;
+}
+
+.public-fan-challenge-grid p,
+.public-fan-challenge-grid small {
+  color: var(--muted);
+  display: block;
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+
+.public-fan-challenge-grid button {
+  width: 100%;
+}
+
+.public-challenge-meter {
+  align-items: center;
+  background: color-mix(in srgb, var(--site-primary) 8%, #fff);
+  border: 1px solid color-mix(in srgb, var(--site-primary) 24%, var(--line));
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  margin: 12px 0;
+  padding: 10px;
+}
+
+.public-challenge-meter span,
+.public-challenge-meter strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
 .registration-account-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -352,6 +352,40 @@ export type PublicSiteTicketProductRead = {
   status: string;
 };
 
+export type PublicSiteSupporterTierRead = {
+  id: UUID;
+  name: string;
+  slug: string;
+  monthly_price: string;
+  currency: string;
+  benefits: string;
+  voting_weight: number;
+  trial_days: number;
+};
+
+export type PublicSiteFanChallengeRead = {
+  id: UUID;
+  title: string;
+  description: string;
+  challenge_type: string;
+  target_activity_type: string;
+  target_count: number;
+  points_reward: number;
+  badge_name: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  completion_count: number;
+};
+
+export type PublicSiteFanLeaderboardEntryRead = {
+  rank: number;
+  supporter_profile_id: UUID;
+  supporter_name: string;
+  tier_name: string | null;
+  engagement_points: number;
+  completed_challenge_count: number;
+};
+
 export type OrganizationPublicSiteRead = {
   id: UUID;
   name: string;
@@ -378,6 +412,35 @@ export type OrganizationPublicSiteRead = {
   sponsors: PublicSiteSponsorRead[];
   fundraising_campaigns: PublicSiteFundraisingCampaignRead[];
   ticket_products: PublicSiteTicketProductRead[];
+  supporter_tiers: PublicSiteSupporterTierRead[];
+  fan_challenges: PublicSiteFanChallengeRead[];
+  fan_leaderboard: PublicSiteFanLeaderboardEntryRead[];
+};
+
+export type PublicSupporterSignupRead = {
+  supporter_profile_id: UUID;
+  organization_id: UUID;
+  display_name: string;
+  email: string;
+  tier_id: UUID | null;
+  tier_name: string | null;
+  engagement_points: number;
+  status: string;
+  signup_status: string;
+  points_awarded: number;
+  next_actions: string[];
+};
+
+export type PublicSupporterChallengeProgressRead = {
+  supporter_profile_id: UUID;
+  supporter_name: string;
+  challenge_id: UUID;
+  challenge_title: string;
+  progress_count: number;
+  target_count: number;
+  points_awarded: number;
+  status: string;
+  completed_at: string | null;
 };
 
 export type OrganizationDirectoryRead = {

@@ -30,8 +30,15 @@ from app.schemas.organization import (
     PublicSiteFundraisingCampaignRead,
     PublicSiteEventRead,
     PublicSiteSponsorRead,
+    PublicSiteFanChallengeRead,
+    PublicSiteFanLeaderboardEntryRead,
+    PublicSiteSupporterTierRead,
     PublicSiteTeamRead,
     PublicSiteTicketProductRead,
+    PublicSupporterChallengeProgressCreate,
+    PublicSupporterChallengeProgressRead,
+    PublicSupporterSignupCreate,
+    PublicSupporterSignupRead,
     RegistrationInquiryAccountReadinessRead,
     RegistrationPacketRead,
     RegistrationInquiryConversionCreate,
@@ -83,6 +90,8 @@ from app.services.organizations import (
     onboarding_checklist,
     organization_public_registration_documents,
     public_site_path,
+    public_supporter_challenge_progress,
+    public_supporter_signup,
     queue_onboarding_concierge_agent_task,
     registration_packet_summary,
     registration_inquiry_import_template,
@@ -130,7 +139,20 @@ def to_organization_read(item) -> OrganizationRead:
 
 
 def to_public_site_read(item) -> OrganizationPublicSiteRead:
-    organization, teams, events, sponsors, sponsorships, campaigns, ticket_products = item
+    (
+        organization,
+        teams,
+        events,
+        sponsors,
+        sponsorships,
+        campaigns,
+        ticket_products,
+        supporter_tiers,
+        fan_challenges,
+        fan_leaderboard,
+        challenge_completion_counts,
+        supporter_completed_challenge_counts,
+    ) = item
     events_by_id = {event.id: event for event in events}
     return OrganizationPublicSiteRead(
         id=organization.id,
@@ -230,6 +252,46 @@ def to_public_site_read(item) -> OrganizationPublicSiteRead:
                 status=product.status.value,
             )
             for product in ticket_products
+        ],
+        supporter_tiers=[
+            PublicSiteSupporterTierRead(
+                id=tier.id,
+                name=tier.name,
+                slug=tier.slug,
+                monthly_price=tier.monthly_price,
+                currency=tier.currency,
+                benefits=tier.benefits,
+                voting_weight=tier.voting_weight,
+                trial_days=tier.trial_days,
+            )
+            for tier in supporter_tiers
+        ],
+        fan_challenges=[
+            PublicSiteFanChallengeRead(
+                id=challenge.id,
+                title=challenge.title,
+                description=challenge.description,
+                challenge_type=challenge.challenge_type,
+                target_activity_type=challenge.target_activity_type,
+                target_count=challenge.target_count,
+                points_reward=challenge.points_reward,
+                badge_name=challenge.badge_name,
+                starts_at=challenge.starts_at,
+                ends_at=challenge.ends_at,
+                completion_count=challenge_completion_counts.get(challenge.id, 0),
+            )
+            for challenge in fan_challenges
+        ],
+        fan_leaderboard=[
+            PublicSiteFanLeaderboardEntryRead(
+                rank=index,
+                supporter_profile_id=supporter.id,
+                supporter_name=supporter.display_name,
+                tier_name=tier.name if tier else None,
+                engagement_points=supporter.engagement_points,
+                completed_challenge_count=supporter_completed_challenge_counts.get(supporter.id, 0),
+            )
+            for index, (supporter, tier) in enumerate(fan_leaderboard, start=1)
         ],
     )
 
@@ -627,6 +689,29 @@ async def create_public_registration_inquiry_route(
     db: AsyncSession = Depends(get_db),
 ) -> RegistrationInquiryRead:
     return to_registration_inquiry_read(await create_public_registration_inquiry(db, site, payload))
+
+
+@router.post("/public/{site}/supporters", response_model=PublicSupporterSignupRead, status_code=201)
+async def create_public_supporter_route(
+    site: str,
+    payload: PublicSupporterSignupCreate,
+    db: AsyncSession = Depends(get_db),
+) -> PublicSupporterSignupRead:
+    return await public_supporter_signup(db, site, payload)
+
+
+@router.post(
+    "/public/{site}/fan-challenges/{challenge_id}/progress",
+    response_model=PublicSupporterChallengeProgressRead,
+    status_code=201,
+)
+async def advance_public_supporter_challenge_route(
+    site: str,
+    challenge_id: UUID,
+    payload: PublicSupporterChallengeProgressCreate,
+    db: AsyncSession = Depends(get_db),
+) -> PublicSupporterChallengeProgressRead:
+    return await public_supporter_challenge_progress(db, site, challenge_id, payload)
 
 
 @router.get(

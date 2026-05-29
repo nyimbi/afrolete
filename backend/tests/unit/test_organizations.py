@@ -912,6 +912,61 @@ def test_public_site_exposes_commercial_support_opportunities(client, identity_h
             "access_zone": "East gate",
         },
     )
+    supporter_tier = client.post(
+        "/api/v1/community/supporter-tiers",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Family Stand Member",
+            "slug": "family-stand",
+            "monthly_price": "5.00",
+            "currency": "USD",
+            "benefits": "Priority updates, supporter challenges, and family stand recognition.",
+            "voting_weight": 2,
+        },
+    ).json()
+    challenge = client.post(
+        "/api/v1/community/fan-challenges",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "title": "Derby day voice",
+            "description": "Join the fan zone and record matchday support.",
+            "challenge_type": "matchday",
+            "target_activity_type": "matchday_support",
+            "target_count": 2,
+            "points_reward": 500,
+            "badge_name": "Derby Voice",
+        },
+    ).json()
+    supporter_signup = client.post(
+        "/api/v1/organizations/public/supporter-city/supporters",
+        json={
+            "tier_id": supporter_tier["id"],
+            "display_name": "Sarah Stand",
+            "email": "sarah.stand@example.com",
+            "phone": "+254700000000",
+            "interests": ["matchday", "challenges"],
+            "message": "I want to support the youth academy.",
+            "source_url": "https://supporter-city.example",
+        },
+    ).json()
+    assert supporter_signup["signup_status"] == "created"
+    assert supporter_signup["points_awarded"] == 100
+    assert supporter_signup["tier_name"] == "Family Stand Member"
+
+    in_progress = client.post(
+        f"/api/v1/organizations/public/supporter-city/fan-challenges/{challenge['id']}/progress",
+        json={"email": "sarah.stand@example.com", "progress_count": 1},
+    ).json()
+    assert in_progress["status"] == "in_progress"
+
+    completed = client.post(
+        f"/api/v1/organizations/public/supporter-city/fan-challenges/{challenge['id']}/progress",
+        json={"email": "sarah.stand@example.com", "progress_count": 1},
+    ).json()
+    assert completed["status"] == "completed"
+    assert completed["points_awarded"] == 500
 
     site_response = client.get("/api/v1/organizations/public/supporter-city")
 
@@ -925,6 +980,12 @@ def test_public_site_exposes_commercial_support_opportunities(client, identity_h
     assert site["ticket_products"][0]["name"] == "Family Stand"
     assert site["ticket_products"][0]["event_title"] == "Sponsor Showcase Derby"
     assert site["ticket_products"][0]["available_count"] == 120
+    assert site["supporter_tiers"][0]["name"] == "Family Stand Member"
+    assert site["fan_challenges"][0]["title"] == "Derby day voice"
+    assert site["fan_challenges"][0]["completion_count"] == 1
+    assert site["fan_leaderboard"][0]["supporter_name"] == "Sarah Stand"
+    assert site["fan_leaderboard"][0]["engagement_points"] == 600
+    assert site["fan_leaderboard"][0]["completed_challenge_count"] == 1
 
 
 def test_add_member_requires_manage_permission(client, identity_headers) -> None:

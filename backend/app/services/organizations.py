@@ -19,6 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.models.agent import Agent, AgentTask
 from app.models.communication import CommunicationMessage
+from app.models.community import (
+    FanChallengeProgress,
+    FanEngagementChallenge,
+    SupporterEngagementActivity,
+    SupporterMembershipTier,
+    SupporterProfile,
+    SupporterReward,
+)
 from app.models.commercial import FundraisingCampaign, Sponsor, SponsorshipAgreement, TicketProduct
 from app.models.enums import (
     AgentKind,
@@ -49,6 +57,10 @@ from app.schemas.organization import (
     PublicRegistrationDocumentUpload,
     PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
+    PublicSupporterChallengeProgressCreate,
+    PublicSupporterChallengeProgressRead,
+    PublicSupporterSignupCreate,
+    PublicSupporterSignupRead,
     RegistrationLearningModuleRead,
     RegistrationLearningPathCreate,
     RegistrationLearningPathRead,
@@ -329,6 +341,17 @@ def default_starter_team_name(organization: Organization) -> str:
     if organization.organization_type == OrganizationType.ACADEMY:
         return f"{label.title()} Academy Group"
     return f"{label.title()} Team"
+
+
+async def get_public_site_organization(db: AsyncSession, site: str) -> Organization:
+    organization = await db.scalar(
+        select(Organization).where(
+            (Organization.slug == site) | (Organization.subdomain == site)
+        )
+    )
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    return organization
 
 
 def normalize_registration_document_types(document_types: list[str]) -> list[str]:
@@ -1705,6 +1728,11 @@ async def get_public_site(
     list[SponsorshipAgreement],
     list[FundraisingCampaign],
     list[TicketProduct],
+    list[SupporterMembershipTier],
+    list[FanEngagementChallenge],
+    list[tuple[SupporterProfile, SupporterMembershipTier | None]],
+    dict[UUID, int],
+    dict[UUID, int],
 ]:
     organization = await db.scalar(
         select(Organization).where(
@@ -1777,7 +1805,330 @@ async def get_public_site(
             )
         ).all()
     )
-    return organization, teams, upcoming_events, sponsors, sponsorships, campaigns, ticket_products
+    supporter_tiers = list(
+        (
+            await db.scalars(
+                select(SupporterMembershipTier)
+                .where(SupporterMembershipTier.organization_id == organization.id)
+                .where(SupporterMembershipTier.status == "active")
+                .order_by(SupporterMembershipTier.monthly_price, SupporterMembershipTier.name)
+                .limit(6)
+            )
+        ).all()
+    )
+    fan_challenges = list(
+        (
+            await db.scalars(
+                select(FanEngagementChallenge)
+                .where(FanEngagementChallenge.organization_id == organization.id)
+                .where(FanEngagementChallenge.status == "active")
+                .where(
+                    or_(
+                        FanEngagementChallenge.ends_at.is_(None),
+                        FanEngagementChallenge.ends_at >= datetime.now(UTC),
+                    )
+                )
+                .order_by(FanEngagementChallenge.starts_at.desc())
+                .limit(6)
+            )
+        ).all()
+    )
+    fan_leaderboard = list(
+        (
+            await db.execute(
+                select(SupporterProfile, SupporterMembershipTier)
+                .outerjoin(SupporterMembershipTier, SupporterProfile.tier_id == SupporterMembershipTier.id)
+                .where(SupporterProfile.organization_id == organization.id)
+                .where(SupporterProfile.status == "active")
+                .order_by(SupporterProfile.engagement_points.desc(), SupporterProfile.joined_at)
+                .limit(8)
+            )
+        ).all()
+    )
+    challenge_completion_counts = await public_challenge_completion_counts(
+        db,
+        [challenge.id for challenge in fan_challenges],
+    )
+    supporter_completed_challenge_counts = await public_supporter_completed_challenge_counts(
+        db,
+        organization.id,
+        [supporter.id for supporter, _tier in fan_leaderboard],
+    )
+    return (
+        organization,
+        teams,
+        upcoming_events,
+        sponsors,
+        sponsorships,
+        campaigns,
+        ticket_products,
+        supporter_tiers,
+        fan_challenges,
+        fan_leaderboard,
+        challenge_completion_counts,
+        supporter_completed_challenge_counts,
+    )
+
+
+async def public_supporter_signup(
+    db: AsyncSession,
+    site: str,
+    payload: PublicSupporterSignupCreate,
+) -> PublicSupporterSignupRead:
+    organization = await get_public_site_organization(db, site)
+    tier = None
+    if payload.tier_id is not None:
+        tier = await db.get(SupporterMembershipTier, payload.tier_id)
+        if tier is None or tier.organization_id != organization.id or tier.status != "active":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supporter tier not found")
+    else:
+        tier = await db.scalar(
+            select(SupporterMembershipTier)
+            .where(SupporterMembershipTier.organization_id == organization.id)
+            .where(SupporterMembershipTier.status == "active")
+            .order_by(SupporterMembershipTier.monthly_price, SupporterMembershipTier.name)
+            .limit(1)
+        )
+
+    email = normalize_contact_email(payload.email)
+    person = await find_person_by_email(db, email)
+    if person is None:
+        person = Person(display_name=payload.display_name, primary_email=email, primary_phone=payload.phone)
+        db.add(person)
+        await db.flush()
+    else:
+        if payload.display_name and person.display_name == person.primary_email:
+            person.display_name = payload.display_name
+        if payload.phone and not person.primary_phone:
+            person.primary_phone = payload.phone
+
+    supporter = await db.scalar(
+        select(SupporterProfile).where(
+            SupporterProfile.organization_id == organization.id,
+            func.lower(SupporterProfile.email) == email.lower(),
+        )
+    )
+    created = supporter is None
+    points_awarded = 100 if created else 0
+    notes = public_supporter_notes(payload)
+    now = datetime.now(UTC)
+    if supporter is None:
+        supporter = SupporterProfile(
+            organization_id=organization.id,
+            person_id=person.id,
+            tier_id=tier.id if tier else None,
+            display_name=payload.display_name,
+            email=email,
+            engagement_points=points_awarded,
+            lifetime_value=Decimal("0"),
+            joined_at=now,
+            last_engagement_at=now,
+            notes=notes,
+        )
+        db.add(supporter)
+        await db.flush()
+        db.add(
+            SupporterEngagementActivity(
+                organization_id=organization.id,
+                supporter_profile_id=supporter.id,
+                activity_type="public_signup",
+                source="public_site",
+                description="Joined from branded public site.",
+                points=points_awarded,
+                value_amount=Decimal("0"),
+                occurred_at=now,
+            )
+        )
+    else:
+        supporter.person_id = supporter.person_id or person.id
+        supporter.display_name = payload.display_name
+        if tier is not None:
+            supporter.tier_id = tier.id
+        supporter.last_engagement_at = supporter.last_engagement_at or now
+        if notes:
+            supporter.notes = f"{supporter.notes}\n{notes}" if supporter.notes else notes
+
+    membership = await db.scalar(
+        select(Membership).where(
+            Membership.organization_id == organization.id,
+            Membership.subject_type == MemberSubjectType.PERSON,
+            Membership.subject_id == person.id,
+            Membership.role == MembershipRole.VIEWER,
+        )
+    )
+    if membership is None:
+        db.add(
+            Membership(
+                organization_id=organization.id,
+                subject_type=MemberSubjectType.PERSON,
+                subject_id=person.id,
+                role=MembershipRole.VIEWER,
+            )
+        )
+
+    await db.commit()
+    await db.refresh(supporter)
+    if supporter.tier_id:
+        tier = await db.get(SupporterMembershipTier, supporter.tier_id)
+    return PublicSupporterSignupRead(
+        supporter_profile_id=supporter.id,
+        organization_id=organization.id,
+        display_name=supporter.display_name,
+        email=supporter.email,
+        tier_id=supporter.tier_id,
+        tier_name=tier.name if tier else None,
+        engagement_points=supporter.engagement_points,
+        status=supporter.status,
+        signup_status="created" if created else "updated",
+        points_awarded=points_awarded,
+        next_actions=public_supporter_next_actions(organization, tier),
+    )
+
+
+async def public_supporter_challenge_progress(
+    db: AsyncSession,
+    site: str,
+    challenge_id: UUID,
+    payload: PublicSupporterChallengeProgressCreate,
+) -> PublicSupporterChallengeProgressRead:
+    organization = await get_public_site_organization(db, site)
+    challenge = await db.get(FanEngagementChallenge, challenge_id)
+    if challenge is None or challenge.organization_id != organization.id or challenge.status != "active":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fan challenge not found")
+    if challenge.ends_at is not None and challenge.ends_at < datetime.now(UTC):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Fan challenge has ended")
+
+    email = normalize_contact_email(payload.email)
+    supporter = await db.scalar(
+        select(SupporterProfile).where(
+            SupporterProfile.organization_id == organization.id,
+            func.lower(SupporterProfile.email) == email.lower(),
+        )
+    )
+    if supporter is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supporter profile not found")
+
+    progress = await db.scalar(
+        select(FanChallengeProgress).where(
+            FanChallengeProgress.challenge_id == challenge.id,
+            FanChallengeProgress.supporter_profile_id == supporter.id,
+        )
+    )
+    if progress is None:
+        progress = FanChallengeProgress(
+            organization_id=organization.id,
+            challenge_id=challenge.id,
+            supporter_profile_id=supporter.id,
+            progress_count=0,
+            points_awarded=0,
+            status="in_progress",
+        )
+        db.add(progress)
+    progress.progress_count += payload.progress_count
+    if progress.progress_count >= challenge.target_count and progress.status != "completed":
+        now = datetime.now(UTC)
+        progress.status = "completed"
+        progress.completed_at = now
+        progress.points_awarded = challenge.points_reward
+        supporter.engagement_points += challenge.points_reward
+        supporter.last_engagement_at = now
+        db.add(
+            SupporterEngagementActivity(
+                organization_id=organization.id,
+                supporter_profile_id=supporter.id,
+                activity_type=challenge.target_activity_type,
+                source="public_challenge",
+                description=f"Completed fan challenge: {challenge.title}",
+                points=challenge.points_reward,
+                value_amount=Decimal("0"),
+                occurred_at=now,
+            )
+        )
+        if challenge.badge_name:
+            db.add(
+                SupporterReward(
+                    organization_id=organization.id,
+                    supporter_profile_id=supporter.id,
+                    title=challenge.badge_name,
+                    reward_type="badge",
+                    threshold_points=challenge.points_reward,
+                )
+            )
+
+    await db.commit()
+    await db.refresh(progress)
+    return PublicSupporterChallengeProgressRead(
+        supporter_profile_id=supporter.id,
+        supporter_name=supporter.display_name,
+        challenge_id=challenge.id,
+        challenge_title=challenge.title,
+        progress_count=progress.progress_count,
+        target_count=challenge.target_count,
+        points_awarded=progress.points_awarded,
+        status=progress.status,
+        completed_at=progress.completed_at,
+    )
+
+
+async def public_challenge_completion_counts(db: AsyncSession, challenge_ids: list[UUID]) -> dict[UUID, int]:
+    if not challenge_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(FanChallengeProgress.challenge_id, func.count(FanChallengeProgress.id))
+            .where(
+                FanChallengeProgress.challenge_id.in_(challenge_ids),
+                FanChallengeProgress.status == "completed",
+            )
+            .group_by(FanChallengeProgress.challenge_id)
+        )
+    ).all()
+    return {challenge_id: count for challenge_id, count in rows}
+
+
+async def public_supporter_completed_challenge_counts(
+    db: AsyncSession,
+    organization_id: UUID,
+    supporter_ids: list[UUID],
+) -> dict[UUID, int]:
+    if not supporter_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(FanChallengeProgress.supporter_profile_id, func.count(FanChallengeProgress.id))
+            .where(
+                FanChallengeProgress.organization_id == organization_id,
+                FanChallengeProgress.supporter_profile_id.in_(supporter_ids),
+                FanChallengeProgress.status == "completed",
+            )
+            .group_by(FanChallengeProgress.supporter_profile_id)
+        )
+    ).all()
+    return {supporter_id: count for supporter_id, count in rows}
+
+
+def public_supporter_notes(payload: PublicSupporterSignupCreate) -> str:
+    parts = ["Public supporter signup"]
+    if payload.interests:
+        parts.append(f"Interests: {', '.join(payload.interests[:12])}")
+    if payload.message:
+        parts.append(f"Message: {payload.message}")
+    if payload.source_url:
+        parts.append(f"Source: {payload.source_url}")
+    return " | ".join(parts)
+
+
+def public_supporter_next_actions(
+    organization: Organization,
+    tier: SupporterMembershipTier | None,
+) -> list[str]:
+    actions = [
+        f"Follow {organization.public_name or organization.name} events and polls from this public site.",
+        "Join an open fan challenge to earn points and badges.",
+    ]
+    if tier is not None and tier.monthly_price > 0:
+        actions.append(f"Staff can connect payment fulfillment for the {tier.name} membership tier.")
+    return actions
 
 
 async def create_public_registration_inquiry(
@@ -1785,13 +2136,7 @@ async def create_public_registration_inquiry(
     site: str,
     payload: PublicRegistrationInquiryCreate,
 ) -> RegistrationInquiry:
-    organization = await db.scalar(
-        select(Organization).where(
-            (Organization.slug == site) | (Organization.subdomain == site)
-        )
-    )
-    if organization is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    organization = await get_public_site_organization(db, site)
     if not organization.registration_open:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Registration is closed")
     if payload.team_id is not None:

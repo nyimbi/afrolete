@@ -15,6 +15,8 @@ import { afroleteAuthMode } from "@/lib/config";
 import type {
   AgentEthicalScorecardRead,
   OrganizationPublicSiteRead,
+  PublicSupporterChallengeProgressRead,
+  PublicSupporterSignupRead,
   VolunteerGroupApplicationRead,
   PublicVolunteerSignupRead,
   VolunteerOpportunityRead,
@@ -107,6 +109,14 @@ export default function PublicOrganizationSitePage() {
     skills: "",
     message: ""
   });
+  const [supporterSignup, setSupporterSignup] = useState({
+    tier_id: "",
+    display_name: "",
+    email: "",
+    phone: "",
+    interests: "matchday updates, challenges, merchandise",
+    message: ""
+  });
   const [submittedInquiry, setSubmittedInquiry] = useState<RegistrationInquiryRead | null>(null);
   const [accountReadiness, setAccountReadiness] = useState<RegistrationInquiryAccountReadinessRead | null>(null);
   const [packetForm, setPacketForm] = useState(defaultPacketForm);
@@ -115,6 +125,9 @@ export default function PublicOrganizationSitePage() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [submittedVolunteerSignup, setSubmittedVolunteerSignup] = useState<PublicVolunteerSignupRead | null>(null);
   const [submittedVolunteerGroup, setSubmittedVolunteerGroup] = useState<VolunteerGroupApplicationRead | null>(null);
+  const [submittedSupporter, setSubmittedSupporter] = useState<PublicSupporterSignupRead | null>(null);
+  const [supporterChallengeProgress, setSupporterChallengeProgress] =
+    useState<PublicSupporterChallengeProgressRead | null>(null);
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
   const [packetError, setPacketError] = useState("");
@@ -125,6 +138,8 @@ export default function PublicOrganizationSitePage() {
   const [accountBusy, setAccountBusy] = useState("");
   const [volunteerBusy, setVolunteerBusy] = useState(false);
   const [volunteerGroupBusy, setVolunteerGroupBusy] = useState(false);
+  const [supporterBusy, setSupporterBusy] = useState("");
+  const [supporterFormError, setSupporterFormError] = useState("");
   const [loadedResumeKey, setLoadedResumeKey] = useState("");
 
   useEffect(() => {
@@ -190,6 +205,15 @@ export default function PublicOrganizationSitePage() {
     }) as CSSProperties,
     [site?.brand_primary_color, site?.brand_secondary_color]
   );
+
+  useEffect(() => {
+    if (!site?.supporter_tiers.length) {
+      return;
+    }
+    setSupporterSignup((current) => (
+      current.tier_id ? current : { ...current, tier_id: site.supporter_tiers[0]?.id ?? "" }
+    ));
+  }, [site?.supporter_tiers]);
 
   useEffect(() => {
     if (!site) {
@@ -505,6 +529,70 @@ export default function PublicOrganizationSitePage() {
     });
   };
 
+  const submitSupporterSignup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSupporterBusy("signup");
+    setSupporterFormError("");
+    try {
+      const supporter = await apiRequest<PublicSupporterSignupRead>(
+        `/organizations/public/${encodeURIComponent(site.slug)}/supporters`,
+        {
+          method: "POST",
+          body: {
+            tier_id: supporterSignup.tier_id || null,
+            display_name: supporterSignup.display_name,
+            email: supporterSignup.email,
+            phone: supporterSignup.phone || null,
+            interests: splitCsv(supporterSignup.interests),
+            message: supporterSignup.message || null,
+            source_url: window.location.href
+          }
+        }
+      );
+      setSubmittedSupporter(supporter);
+      setSupporterChallengeProgress(null);
+      setSupporterSignup((current) => ({
+        ...current,
+        display_name: supporter.display_name,
+        email: supporter.email,
+        tier_id: supporter.tier_id ?? current.tier_id,
+        phone: "",
+        message: ""
+      }));
+    } catch (caught) {
+      setSupporterFormError(caught instanceof Error ? caught.message : "Supporter signup could not be saved");
+    } finally {
+      setSupporterBusy("");
+    }
+  };
+
+  const advancePublicFanChallenge = async (challengeId: string) => {
+    const email = submittedSupporter?.email ?? supporterSignup.email;
+    if (!email.trim()) {
+      setSupporterFormError("Join with an email before recording challenge progress.");
+      return;
+    }
+    setSupporterBusy(`challenge-${challengeId}`);
+    setSupporterFormError("");
+    try {
+      const progress = await apiRequest<PublicSupporterChallengeProgressRead>(
+        `/organizations/public/${encodeURIComponent(site.slug)}/fan-challenges/${challengeId}/progress`,
+        {
+          method: "POST",
+          body: {
+            email,
+            progress_count: 1
+          }
+        }
+      );
+      setSupporterChallengeProgress(progress);
+    } catch (caught) {
+      setSupporterFormError(caught instanceof Error ? caught.message : "Challenge progress could not be saved");
+    } finally {
+      setSupporterBusy("");
+    }
+  };
+
   const submitVolunteerSignup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setVolunteerBusy(true);
@@ -710,6 +798,138 @@ export default function PublicOrganizationSitePage() {
           </div>
         </section>
       ) : null}
+
+      <section className="public-site-shell public-site-inquiry public-site-fan-zone">
+        <div>
+          <p className="section-label">Fan zone</p>
+          <h2>Support {displayName}</h2>
+          <p>Join as a supporter, pick a tier, earn points, and take part in active public challenges.</p>
+          <div className="public-registration-settings">
+            <strong>{site.fan_leaderboard.length ? "Leaderboard live" : "Supporter program ready"}</strong>
+            <span>{site.supporter_tiers.length} tiers · {site.fan_challenges.length} open challenges</span>
+            <span>Top supporters earn badges, experiences, and staff-reviewed rewards.</span>
+          </div>
+          <div className="public-site-list">
+            {site.fan_leaderboard.slice(0, 4).map((entry) => (
+              <div key={entry.supporter_profile_id}>
+                <strong>#{entry.rank} {entry.supporter_name}</strong>
+                <span>{entry.engagement_points} points · {entry.completed_challenge_count} challenges</span>
+                <small>{entry.tier_name ?? "Community supporter"}</small>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="public-supporter-workspace">
+          {submittedSupporter ? (
+            <div className="public-site-success">
+              <strong>{submittedSupporter.display_name} joined the fan zone</strong>
+              <span>
+                {submittedSupporter.tier_name ?? "Supporter"} · {submittedSupporter.engagement_points} points ·{" "}
+                {submittedSupporter.signup_status}
+              </span>
+              {submittedSupporter.next_actions.slice(0, 2).map((action) => (
+                <small key={action}>{action}</small>
+              ))}
+            </div>
+          ) : null}
+          <form onSubmit={submitSupporterSignup}>
+            <label>
+              Supporter name
+              <input
+                value={supporterSignup.display_name}
+                onChange={(event) => setSupporterSignup({ ...supporterSignup, display_name: event.target.value })}
+                required
+              />
+            </label>
+            <label>
+              Email
+              <input
+                type="email"
+                value={supporterSignup.email}
+                onChange={(event) => setSupporterSignup({ ...supporterSignup, email: event.target.value })}
+                required
+              />
+            </label>
+            <label>
+              Tier
+              <select
+                value={supporterSignup.tier_id}
+                onChange={(event) => setSupporterSignup({ ...supporterSignup, tier_id: event.target.value })}
+              >
+                <option value="">Community supporter</option>
+                {site.supporter_tiers.map((tier) => (
+                  <option value={tier.id} key={tier.id}>
+                    {tier.name} · {tier.currency} {tier.monthly_price}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Phone
+              <input
+                value={supporterSignup.phone}
+                onChange={(event) => setSupporterSignup({ ...supporterSignup, phone: event.target.value })}
+              />
+            </label>
+            <label className="public-site-wide">
+              Interests
+              <input
+                value={supporterSignup.interests}
+                onChange={(event) => setSupporterSignup({ ...supporterSignup, interests: event.target.value })}
+              />
+            </label>
+            <label className="public-site-wide">
+              Message
+              <textarea
+                value={supporterSignup.message}
+                onChange={(event) => setSupporterSignup({ ...supporterSignup, message: event.target.value })}
+              />
+            </label>
+            {supporterFormError ? <p className="form-error public-site-wide">{supporterFormError}</p> : null}
+            <button type="submit" disabled={supporterBusy !== ""}>
+              {supporterBusy === "signup" ? "Joining" : submittedSupporter ? "Update supporter profile" : "Join fan zone"}
+            </button>
+          </form>
+          <div className="public-site-support-grid public-fan-challenge-grid">
+            {site.fan_challenges.slice(0, 4).map((challenge) => (
+              <article key={challenge.id}>
+                <h3>{challenge.title}</h3>
+                <p>{challenge.description || "Complete the activity and earn supporter points."}</p>
+                <div className="public-challenge-meter">
+                  <span>{challenge.target_activity_type.replaceAll("_", " ")}</span>
+                  <strong>{challenge.completion_count}/{challenge.target_count}</strong>
+                </div>
+                <small>
+                  {challenge.points_reward} points
+                  {challenge.badge_name ? ` · ${challenge.badge_name}` : ""}
+                </small>
+                <button
+                  type="button"
+                  onClick={() => advancePublicFanChallenge(challenge.id)}
+                  disabled={supporterBusy !== "" || (!submittedSupporter && !supporterSignup.email)}
+                >
+                  {supporterBusy === `challenge-${challenge.id}` ? "Recording" : "Record progress"}
+                </button>
+              </article>
+            ))}
+            {site.fan_challenges.length === 0 ? (
+              <article>
+                <h3>Challenges opening soon</h3>
+                <p>Staff can launch matchday, referral, voting, and merch challenges from the AfroLete console.</p>
+              </article>
+            ) : null}
+          </div>
+          {supporterChallengeProgress ? (
+            <div className="public-site-success">
+              <strong>{supporterChallengeProgress.challenge_title}</strong>
+              <span>
+                {supporterChallengeProgress.progress_count}/{supporterChallengeProgress.target_count} ·{" "}
+                {supporterChallengeProgress.status} · {supporterChallengeProgress.points_awarded} points awarded
+              </span>
+            </div>
+          ) : null}
+        </div>
+      </section>
 
       {volunteerOpportunities.length > 0 ? (
         <section className="public-site-shell public-site-inquiry public-site-volunteers">
