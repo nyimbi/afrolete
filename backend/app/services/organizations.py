@@ -58,6 +58,7 @@ from app.schemas.organization import (
     RegistrationInquiryImportRowErrorRead,
     RegistrationInquiryImportTemplateRead,
     RegistrationReadinessFamilyInquiryRead,
+    RegistrationOnboardingPresetRead,
     RegistrationReadinessOrganizationRead,
     RegistrationReadinessRead,
     RegistrationReadinessStepRead,
@@ -134,6 +135,165 @@ def onboarding_checklist(organization: Organization, launch_goal: str | None = N
     if launch_goal:
         steps.insert(0, f"Confirm launch goal: {launch_goal}")
     return steps
+
+
+def registration_onboarding_presets(
+    organization_type: OrganizationType | None = None,
+) -> list[RegistrationOnboardingPresetRead]:
+    presets = [
+        RegistrationOnboardingPresetRead(
+            key="school_term_athletics",
+            label="School athletics term",
+            organization_type=OrganizationType.SCHOOL,
+            audience="School athletic director",
+            description="Launch a term-based athletics program with guardian consent, medical notes, and school clearance ready from day one.",
+            primary_sport="athletics",
+            launch_goal="Open term registration, collect guardian packets, and prepare admissions review this week",
+            starter_team_name="Term Athletics Squad",
+            starter_team_sport_format=SportFormat.INDIVIDUAL,
+            starter_team_age_group="U15",
+            starter_team_gender_category="open",
+            starter_team_season_label="Current term",
+            registration_required_documents=[
+                "proof_of_age",
+                "medical_information",
+                "guardian_consent",
+                "photo_release",
+                "school_clearance",
+            ],
+            registration_fee_currency="KES",
+            registration_payment_instructions=(
+                "Use the hosted checkout link or confirm payment with the school bursar before admissions conversion."
+            ),
+            checklist=[
+                "Confirm term dates, school medical contact, and athletics staff lead.",
+                "Publish the family registration link through school communication channels.",
+                "Review packets for guardian consent, medical notes, and school clearance.",
+            ],
+        ),
+        RegistrationOnboardingPresetRead(
+            key="school_team_sport",
+            label="School team sport",
+            organization_type=OrganizationType.SCHOOL,
+            audience="Teacher-coach or games master",
+            description="Start a school team with age group, season, eligibility, and parent packet defaults already aligned.",
+            primary_sport="football",
+            launch_goal="Register the first school team and invite guardians for roster verification",
+            starter_team_name="Junior Team",
+            starter_team_sport_format=SportFormat.TEAM,
+            starter_team_age_group="U17",
+            starter_team_gender_category="open",
+            starter_team_season_label="School season",
+            registration_required_documents=[
+                "proof_of_age",
+                "medical_information",
+                "guardian_consent",
+                "photo_release",
+                "academic_eligibility",
+            ],
+            registration_fee_currency="KES",
+            registration_payment_instructions=(
+                "Collect school activity fees through the approved school payment channel before final roster approval."
+            ),
+            checklist=[
+                "Set the teacher-coach, captain, and team administrator roles.",
+                "Confirm academic eligibility and guardian consent before fixtures.",
+                "Create the first training schedule and attendance policy.",
+            ],
+        ),
+        RegistrationOnboardingPresetRead(
+            key="club_youth_team",
+            label="Youth club team",
+            organization_type=OrganizationType.CLUB,
+            audience="Club manager",
+            description="Open youth team registration with a branded public page, guardian packet, starter roster, and admissions queue.",
+            primary_sport="football",
+            launch_goal="Recruit the first youth team, complete family packets, and convert approved players",
+            starter_team_name="U15 Development",
+            starter_team_sport_format=SportFormat.TEAM,
+            starter_team_age_group="U15",
+            starter_team_gender_category="open",
+            starter_team_season_label="2026",
+            registration_required_documents=[
+                "proof_of_age",
+                "medical_information",
+                "guardian_consent",
+                "photo_release",
+            ],
+            registration_fee_currency="KES",
+            registration_payment_instructions=(
+                "Families can pay online after completing the registration packet; staff should verify settlement before conversion."
+            ),
+            checklist=[
+                "Assign club administrators, head coach, and safeguarding contact.",
+                "Publish the public registration page and share it with families.",
+                "Review packet, payment, and consent readiness before admitting players.",
+            ],
+        ),
+        RegistrationOnboardingPresetRead(
+            key="club_individual_pathway",
+            label="Individual pathway club",
+            organization_type=OrganizationType.CLUB,
+            audience="Performance club director",
+            description="Launch an individual-sport pathway with athlete performance review, guardian consent, and first assessment defaults.",
+            primary_sport="athletics",
+            launch_goal="Register athletes for assessment, capture family packets, and start performance baselines",
+            starter_team_name="Performance Pathway",
+            starter_team_sport_format=SportFormat.INDIVIDUAL,
+            starter_team_age_group="U18",
+            starter_team_gender_category="open",
+            starter_team_season_label="2026 season",
+            registration_required_documents=[
+                "proof_of_age",
+                "medical_information",
+                "guardian_consent",
+                "photo_release",
+                "performance_history",
+            ],
+            registration_fee_currency="KES",
+            registration_payment_instructions=(
+                "Use the hosted checkout link for assessment fees, then mark waivers or verified payments before admissions."
+            ),
+            checklist=[
+                "Schedule first assessments and assign the performance coach.",
+                "Collect medical notes and performance history before baseline testing.",
+                "Convert accepted athletes into the pathway roster and performance dashboard.",
+            ],
+        ),
+        RegistrationOnboardingPresetRead(
+            key="academy_multi_sport",
+            label="Multi-sport academy",
+            organization_type=OrganizationType.ACADEMY,
+            audience="Academy operator",
+            description="Start a multi-sport academy intake with program selection, family onboarding, and flexible first group defaults.",
+            primary_sport="multi-sport",
+            launch_goal="Launch the first academy intake and route families into the right program",
+            starter_team_name="Foundation Group",
+            starter_team_sport_format=SportFormat.MIXED,
+            starter_team_age_group="U13-U17",
+            starter_team_gender_category="open",
+            starter_team_season_label="Foundation cohort",
+            registration_required_documents=[
+                "proof_of_age",
+                "medical_information",
+                "guardian_consent",
+                "photo_release",
+                "program_interest",
+            ],
+            registration_fee_currency="KES",
+            registration_payment_instructions=(
+                "Collect intake fees through the hosted checkout link or record scholarship waivers during admissions review."
+            ),
+            checklist=[
+                "Confirm program tracks and intake capacity.",
+                "Review family packets and route athletes into first groups.",
+                "Invite guardians and coaches into the first-week operating workspace.",
+            ],
+        ),
+    ]
+    if organization_type is None:
+        return presets
+    return [preset for preset in presets if preset.organization_type == organization_type]
 
 
 def default_starter_team_name(organization: Organization) -> str:

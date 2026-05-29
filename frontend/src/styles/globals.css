@@ -3463,6 +3463,75 @@ textarea:focus {
   margin: 0;
 }
 
+.registration-preset-board {
+  background: #f7faf8;
+  border: 1px solid color-mix(in srgb, var(--green) 24%, var(--line));
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.registration-preset-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.registration-preset-head span,
+.registration-preset-head small,
+.registration-presets span,
+.registration-presets small {
+  color: var(--muted);
+  display: block;
+}
+
+.registration-preset-head span,
+.registration-presets span {
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.registration-preset-head strong {
+  display: block;
+  margin-top: 2px;
+}
+
+.registration-presets {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.registration-presets button {
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--green) 24%, var(--line));
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  min-height: 132px;
+  padding: 11px;
+  text-align: left;
+}
+
+.registration-presets button:hover {
+  border-color: var(--green);
+  box-shadow: 0 10px 26px rgba(5, 122, 85, 0.12);
+}
+
+.registration-presets strong,
+.registration-presets small {
+  overflow-wrap: anywhere;
+}
+
+.registration-presets p {
+  color: var(--muted);
+  margin: 0;
+}
+
 .register-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.75fr);
@@ -4608,6 +4677,7 @@ textarea:focus {
   .registration-learning-form,
   .registration-learning-summary,
   .registration-learning-modules,
+  .registration-presets,
   .register-inline-grid,
   .register-handle-status,
   .public-ai-hero-grid,

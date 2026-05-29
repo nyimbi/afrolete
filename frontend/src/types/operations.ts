@@ -415,6 +415,25 @@ export type OrganizationOnboardingRead = {
   checklist: string[];
 };
 
+export type RegistrationOnboardingPresetRead = {
+  key: string;
+  label: string;
+  organization_type: OrganizationType;
+  audience: string;
+  description: string;
+  primary_sport: string;
+  launch_goal: string;
+  starter_team_name: string;
+  starter_team_sport_format: SportFormat;
+  starter_team_age_group: string | null;
+  starter_team_gender_category: string | null;
+  starter_team_season_label: string | null;
+  registration_required_documents: string[];
+  registration_fee_currency: string;
+  registration_payment_instructions: string;
+  checklist: string[];
+};
+
 export type RegistrationReadinessStepRead = {
   key: string;
   label: string;

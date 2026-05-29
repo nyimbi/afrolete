@@ -123,6 +123,31 @@ def test_registration_learning_path_personalizes_onboarding(client) -> None:
     assert "captions" in path["accessibility_supports"]
 
 
+def test_registration_onboarding_presets_filter_school_and_club_defaults(client) -> None:
+    school_response = client.get("/api/v1/organizations/onboarding-presets?organization_type=school")
+
+    assert school_response.status_code == 200
+    school_presets = school_response.json()
+    assert school_presets
+    assert {preset["organization_type"] for preset in school_presets} == {"school"}
+    assert any(preset["key"] == "school_term_athletics" for preset in school_presets)
+    term_preset = next(preset for preset in school_presets if preset["key"] == "school_term_athletics")
+    assert term_preset["starter_team_sport_format"] == "individual"
+    assert "school_clearance" in term_preset["registration_required_documents"]
+    assert any("school" in step.lower() for step in term_preset["checklist"])
+
+    club_response = client.get("/api/v1/organizations/onboarding-presets?organization_type=club")
+
+    assert club_response.status_code == 200
+    club_presets = club_response.json()
+    assert club_presets
+    assert {preset["organization_type"] for preset in club_presets} == {"club"}
+    assert any(preset["key"] == "club_youth_team" for preset in club_presets)
+    youth_preset = next(preset for preset in club_presets if preset["key"] == "club_youth_team")
+    assert youth_preset["starter_team_sport_format"] == "team"
+    assert "guardian_consent" in youth_preset["registration_required_documents"]
+
+
 def test_self_service_onboarding_creates_school_and_public_directory(client, identity_headers) -> None:
     response = client.post(
         "/api/v1/organizations/onboarding",

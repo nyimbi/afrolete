@@ -21,6 +21,7 @@ import type {
   OrganizationType,
   RegistrationLearningPathCreate,
   RegistrationLearningPathRead,
+  RegistrationOnboardingPresetRead,
   RegistrationReadinessRead,
   RegistrationPacketRead,
   RegistrationInquiryAccountReadinessRead,
@@ -151,6 +152,7 @@ export default function RegistrationPage() {
   const [registrationPacket, setRegistrationPacket] = useState<RegistrationPacketRead | null>(null);
   const [paymentSession, setPaymentSession] = useState<RegistrationPaymentSessionRead | null>(null);
   const [registrationReadiness, setRegistrationReadiness] = useState<RegistrationReadinessRead | null>(null);
+  const [registrationPresets, setRegistrationPresets] = useState<RegistrationOnboardingPresetRead[]>([]);
   const [learningProfile, setLearningProfile] = useState<RegistrationLearningPathCreate>(defaultLearningProfile);
   const [learningPath, setLearningPath] = useState<RegistrationLearningPathRead | null>(null);
   const [readinessError, setReadinessError] = useState("");
@@ -296,6 +298,9 @@ export default function RegistrationPage() {
   );
   const registrationJourney = mode === "organization" ? organizationJourneySteps : playerJourneySteps;
   const registrationJourneyComplete = registrationJourney.filter((step) => step.status === "done").length;
+  const visibleRegistrationPresets = registrationPresets.filter(
+    (preset) => preset.organization_type === organizationForm.organization_type
+  );
 
   useEffect(() => {
     if (!keycloakEnabled) {
@@ -331,6 +336,7 @@ export default function RegistrationPage() {
 
   useEffect(() => {
     void restoreRegistrationContext();
+    void loadRegistrationPresets();
     // Directory search and optional launch deeplink are intentionally loaded once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -428,6 +434,38 @@ export default function RegistrationPage() {
     } finally {
       setBusy("");
     }
+  }
+
+  async function loadRegistrationPresets() {
+    try {
+      const presets = await apiRequest<RegistrationOnboardingPresetRead[]>("/organizations/onboarding-presets");
+      setRegistrationPresets(presets);
+    } catch {
+      setRegistrationPresets([]);
+    }
+  }
+
+  function applyRegistrationPreset(preset: RegistrationOnboardingPresetRead) {
+    setOrganizationForm((current) => ({
+      ...current,
+      organization_type: preset.organization_type,
+      primary_sport: preset.primary_sport,
+      registration_required_documents: preset.registration_required_documents.join(", "),
+      registration_fee_currency: current.registration_fee_currency || preset.registration_fee_currency,
+      registration_payment_instructions: preset.registration_payment_instructions,
+      launch_goal: preset.launch_goal,
+      starter_team_name: preset.starter_team_name,
+      starter_team_sport: preset.primary_sport,
+      starter_team_sport_format: preset.starter_team_sport_format,
+      starter_team_age_group: preset.starter_team_age_group ?? "",
+      starter_team_gender_category: preset.starter_team_gender_category ?? "",
+      starter_team_season_label: preset.starter_team_season_label ?? ""
+    }));
+    setLearningProfile((current) => ({
+      ...current,
+      role: preset.organization_type === "school" ? "team_administrator" : "club_manager",
+      primary_goal: preset.primary_sport === "athletics" ? "track_performance" : "launch_registration"
+    }));
   }
 
   const updateOrganizationName = (name: string) => {
@@ -1174,6 +1212,33 @@ export default function RegistrationPage() {
                   </label>
                 </div>
               ) : null}
+              <div className="registration-preset-board" aria-label="Launch templates">
+                <div className="registration-preset-head">
+                  <div>
+                    <span>Launch templates</span>
+                    <strong>
+                      {organizationForm.organization_type === "school"
+                        ? "School-ready defaults"
+                        : organizationForm.organization_type === "club"
+                          ? "Club-ready defaults"
+                          : "Organization-ready defaults"}
+                    </strong>
+                  </div>
+                  <small>{visibleRegistrationPresets.length} available</small>
+                </div>
+                <div className="registration-presets">
+                  {visibleRegistrationPresets.map((preset) => (
+                    <button type="button" key={preset.key} onClick={() => applyRegistrationPreset(preset)}>
+                      <span>{preset.audience}</span>
+                      <strong>{preset.label}</strong>
+                      <small>{preset.description}</small>
+                    </button>
+                  ))}
+                  {visibleRegistrationPresets.length === 0 ? (
+                    <p>Choose club, school, or academy to apply an operating template.</p>
+                  ) : null}
+                </div>
+              </div>
               <div className="register-inline-grid">
                 <label>
                   Organization name

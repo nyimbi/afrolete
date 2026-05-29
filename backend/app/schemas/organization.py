@@ -201,6 +201,25 @@ class OrganizationOnboardingRead(BaseModel):
     checklist: list[str]
 
 
+class RegistrationOnboardingPresetRead(BaseModel):
+    key: str
+    label: str
+    organization_type: OrganizationType
+    audience: str
+    description: str
+    primary_sport: str
+    launch_goal: str
+    starter_team_name: str
+    starter_team_sport_format: SportFormat
+    starter_team_age_group: str | None = None
+    starter_team_gender_category: str | None = None
+    starter_team_season_label: str | None = None
+    registration_required_documents: list[str] = Field(default_factory=list)
+    registration_fee_currency: str
+    registration_payment_instructions: str
+    checklist: list[str] = Field(default_factory=list)
+
+
 class RegistrationReadinessStepRead(BaseModel):
     key: str
     label: str
