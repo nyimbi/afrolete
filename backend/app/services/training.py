@@ -1,12 +1,17 @@
 import hashlib
+import hmac
+import json
 import re
+import time
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.models.assets import FacilityBooking
 from app.models.competition import CompetitionFixture
 from app.models.event import Event
@@ -32,6 +37,7 @@ from app.schemas.training import (
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.secrets import resolve_secret
 
 
 async def ensure_manage_training(
@@ -174,7 +180,10 @@ async def generate_training_plan(
     identity: CurrentIdentity,
     payload: TrainingPlanGenerateCreate,
     authz: AuthorizationService,
+    *,
+    settings: Settings | None = None,
 ) -> dict[str, object]:
+    selected_settings = settings or get_settings()
     await get_organization(db, payload.organization_id)
     await ensure_manage_training(authz, identity, payload.organization_id)
     team = await get_team_for_organization(db, payload.team_id, payload.organization_id) if payload.team_id else None
@@ -192,20 +201,51 @@ async def generate_training_plan(
         f"and readiness band {readiness_band}."
     )
     load_guidance = generated_load_guidance(payload.readiness_score, payload.weekly_sessions, next_competition_at)
+    provider_result = await request_training_plan_provider(
+        selected_settings,
+        payload,
+        team,
+        assessments,
+        observations,
+        next_competition_at,
+        source_summary,
+        load_guidance,
+    )
+    provider_payload = provider_result.get("payload") if provider_result else None
+    if not isinstance(provider_payload, dict):
+        provider_payload = {}
+    focus_area = bounded_provider_text(provider_payload, "focus_area", focus_area, 160)
+    source_summary = bounded_provider_text(
+        provider_payload,
+        "source_summary",
+        bounded_provider_text(provider_payload, "rationale", source_summary, 4000),
+        4000,
+    )
+    load_guidance = bounded_provider_text(provider_payload, "load_guidance", load_guidance, 4000)
     plan = TrainingPlan(
         organization_id=payload.organization_id,
         team_id=payload.team_id,
         athlete_profile_id=payload.athlete_profile_id,
         created_by_person_id=identity.person_id,
-        title=payload.title or f"AI {focus_area} block",
+        title=bounded_provider_text(provider_payload, "title", payload.title or f"AI {focus_area} block", 240),
         focus_area=focus_area,
         period_start=payload.period_start,
         period_end=payload.period_end,
         ai_generated=True,
         source_summary=source_summary,
         load_guidance=load_guidance,
-        recovery_protocol=generated_recovery_protocol(payload.readiness_score),
-        progress_checkpoints="Review readiness after session 2; reassess after the final session; adjust load if soreness or school/work constraints increase.",
+        recovery_protocol=bounded_provider_text(
+            provider_payload,
+            "recovery_protocol",
+            generated_recovery_protocol(payload.readiness_score),
+            4000,
+        ),
+        progress_checkpoints=bounded_provider_text(
+            provider_payload,
+            "progress_checkpoints",
+            "Review readiness after session 2; reassess after the final session; adjust load if soreness or school/work constraints increase.",
+            4000,
+        ),
     )
     db.add(plan)
     await db.commit()
@@ -213,22 +253,40 @@ async def generate_training_plan(
 
     drills = await list_training_drills(db, payload.organization_id, sport=team.sport if team else None)
     selected_drills = select_training_drills(drills, focus_area, payload.weekly_sessions)
+    provider_items = provider_training_items(provider_payload, payload.weekly_sessions)
     items: list[TrainingPlanItem] = []
     for sequence in range(1, payload.weekly_sessions + 1):
         drill = selected_drills[sequence - 1] if sequence - 1 < len(selected_drills) else None
         intensity = generated_intensity(payload.readiness_score, sequence, payload.upcoming_competition_weight)
+        provider_item = provider_items[sequence - 1] if sequence - 1 < len(provider_items) else {}
         item = TrainingPlanItem(
             plan_id=plan.id,
             drill_id=drill.id if drill else None,
             sequence=sequence,
-            day_label=f"Session {sequence}",
-            title=drill.name if drill else f"{focus_area} progression {sequence}",
-            focus_area=drill.focus_area if drill else focus_area,
-            duration_minutes=drill.default_duration_minutes if drill else 45,
-            intensity=intensity,
-            notes=(
-                f"AI-generated for {readiness_band} readiness. "
-                f"Keep RPE near {intensity}; adjust if competition proximity or recovery changes."
+            day_label=bounded_provider_text(provider_item, "day_label", f"Session {sequence}", 80),
+            title=bounded_provider_text(
+                provider_item,
+                "title",
+                drill.name if drill else f"{focus_area} progression {sequence}",
+                180,
+            ),
+            focus_area=bounded_provider_text(provider_item, "focus_area", drill.focus_area if drill else focus_area, 120),
+            duration_minutes=bounded_provider_int(
+                provider_item,
+                "duration_minutes",
+                drill.default_duration_minutes if drill else 45,
+                1,
+                240,
+            ),
+            intensity=bounded_provider_int(provider_item, "intensity", intensity, 1, 10),
+            notes=bounded_provider_text(
+                provider_item,
+                "notes",
+                (
+                    f"AI-generated for {readiness_band} readiness. "
+                    f"Keep RPE near {intensity}; adjust if competition proximity or recovery changes."
+                ),
+                4000,
             ),
         )
         db.add(item)
@@ -243,7 +301,254 @@ async def generate_training_plan(
         "rationale": source_summary,
         "load_balance": load_guidance,
         "next_competition_at": next_competition_at,
+        "generation_provider": provider_result["provider"] if provider_result else "deterministic",
+        "model_policy": provider_result["model_policy"] if provider_result else selected_settings.training_plan_generation_model,
+        "provider_status_code": provider_result["status_code"] if provider_result else None,
+        "provider_reference": provider_result["provider_reference"] if provider_result else None,
+        "provider_notes": provider_result["notes"] if provider_result else None,
     }
+
+
+async def request_training_plan_provider(
+    settings: Settings,
+    payload: TrainingPlanGenerateCreate,
+    team: Team | None,
+    assessments: list[AthleteAssessment],
+    observations: list[AthletePerformanceObservation],
+    next_competition_at: datetime | None,
+    deterministic_source_summary: str,
+    deterministic_load_guidance: str,
+) -> dict[str, object] | None:
+    if settings.training_plan_generation_mode != "webhook":
+        return None
+    if not settings.training_plan_generation_webhook_url:
+        return {
+            "provider": "deterministic_fallback",
+            "model_policy": settings.training_plan_generation_model,
+            "status_code": None,
+            "provider_reference": None,
+            "notes": "Training plan generation webhook mode is enabled but no webhook URL is configured.",
+            "payload": {},
+        }
+    key_resolution = await resolve_training_plan_generation_key(settings)
+    if key_resolution["failure_reason"]:
+        return {
+            "provider": "deterministic_fallback",
+            "model_policy": settings.training_plan_generation_model,
+            "status_code": None,
+            "provider_reference": None,
+            "notes": key_resolution["failure_reason"],
+            "payload": {},
+        }
+    request_payload = training_plan_provider_payload(
+        settings,
+        payload,
+        team,
+        assessments,
+        observations,
+        next_competition_at,
+        deterministic_source_summary,
+        deterministic_load_guidance,
+    )
+    body = training_plan_generation_body(request_payload)
+    try:
+        async with httpx.AsyncClient(timeout=settings.training_plan_generation_timeout_seconds) as client:
+            response = await client.post(
+                settings.training_plan_generation_webhook_url,
+                content=body,
+                headers=training_plan_generation_headers(settings, body, str(key_resolution["key"] or "")),
+            )
+    except httpx.HTTPError as exc:
+        return {
+            "provider": "deterministic_fallback",
+            "model_policy": settings.training_plan_generation_model,
+            "status_code": None,
+            "provider_reference": None,
+            "notes": str(exc)[:600],
+            "payload": {},
+        }
+    if not 200 <= response.status_code < 300:
+        return {
+            "provider": "deterministic_fallback",
+            "model_policy": settings.training_plan_generation_model,
+            "status_code": response.status_code,
+            "provider_reference": None,
+            "notes": f"Training plan provider returned {response.status_code}: {response.text[:400]}",
+            "payload": {},
+        }
+    try:
+        response_payload = response.json()
+    except ValueError:
+        response_payload = {}
+    if not isinstance(response_payload, dict):
+        response_payload = {}
+    return {
+        "provider": "webhook",
+        "model_policy": str(response_payload.get("model_policy") or settings.training_plan_generation_model),
+        "status_code": response.status_code,
+        "provider_reference": bounded_optional_provider_text(response_payload, "provider_reference", 240),
+        "notes": bounded_optional_provider_text(response_payload, "notes", 600)
+        or bounded_optional_provider_text(response_payload, "summary", 600),
+        "payload": response_payload,
+    }
+
+
+async def resolve_training_plan_generation_key(settings: Settings) -> dict[str, str | None]:
+    source = "openbao" if settings.training_plan_generation_webhook_key_secret_path else "env"
+    try:
+        secret = await resolve_secret(
+            settings,
+            env_value=settings.training_plan_generation_webhook_key,
+            path=settings.training_plan_generation_webhook_key_secret_path,
+            field_name=settings.training_plan_generation_webhook_key_secret_field,
+            label="training plan generation webhook key",
+        )
+    except HTTPException as exc:
+        return {"key": None, "source": "openbao", "failure_reason": str(exc.detail)}
+    return {"key": secret, "source": source if secret else "unset", "failure_reason": None}
+
+
+def training_plan_provider_payload(
+    settings: Settings,
+    payload: TrainingPlanGenerateCreate,
+    team: Team | None,
+    assessments: list[AthleteAssessment],
+    observations: list[AthletePerformanceObservation],
+    next_competition_at: datetime | None,
+    deterministic_source_summary: str,
+    deterministic_load_guidance: str,
+) -> dict[str, object]:
+    return {
+        "event": "afrolete.training.plan.generate",
+        "model": settings.training_plan_generation_model,
+        "idempotency_key": (
+            f"{payload.organization_id}:{payload.team_id or 'org'}:"
+            f"{payload.athlete_profile_id or 'team'}:{payload.period_start}:{payload.period_end}"
+        ),
+        "organization_id": str(payload.organization_id),
+        "team": {"id": str(team.id), "name": team.name, "sport": team.sport} if team else None,
+        "athlete_profile_id": str(payload.athlete_profile_id) if payload.athlete_profile_id else None,
+        "request": payload.model_dump(mode="json"),
+        "context": {
+            "assessment_count": len(assessments),
+            "observation_count": len(observations),
+            "next_competition_at": next_competition_at.isoformat() if next_competition_at else None,
+            "deterministic_source_summary": deterministic_source_summary,
+            "deterministic_load_guidance": deterministic_load_guidance,
+            "recent_assessments": [
+                {
+                    "overall_score": assessment.overall_score,
+                    "rating": assessment.rating,
+                    "summary": assessment.summary,
+                    "assessed_at": assessment.assessed_at.isoformat() if assessment.assessed_at else None,
+                }
+                for assessment in assessments[:5]
+            ],
+            "recent_observations": [
+                {
+                    "metric_code": observation.metric_code,
+                    "raw_value": observation.raw_value,
+                    "source": observation.source,
+                    "confidence": observation.confidence,
+                    "observed_at": observation.observed_at.isoformat() if observation.observed_at else None,
+                    "notes": observation.notes,
+                }
+                for observation in observations[:10]
+            ],
+        },
+        "output_contract": {
+            "title": "string",
+            "focus_area": "string",
+            "source_summary": "string",
+            "load_guidance": "string",
+            "recovery_protocol": "string",
+            "progress_checkpoints": "string",
+            "items": [
+                {
+                    "day_label": "string",
+                    "title": "string",
+                    "focus_area": "string",
+                    "duration_minutes": "integer 1..240",
+                    "intensity": "integer 1..10",
+                    "notes": "string",
+                }
+            ],
+        },
+    }
+
+
+def training_plan_generation_headers(settings: Settings, body: bytes, signing_key: str = "") -> dict[str, str]:
+    headers = {
+        "User-Agent": "AfroLete-Training-Planner/1.0",
+        "Content-Type": "application/json",
+    }
+    if signing_key:
+        timestamp = str(int(time.time()))
+        headers["X-Afrolete-Training-Key-Source"] = (
+            "openbao" if settings.training_plan_generation_webhook_key_secret_path else "env"
+        )
+        headers["X-Afrolete-Training-Timestamp"] = timestamp
+        headers["X-Afrolete-Training-Signature"] = training_plan_generation_signature(
+            signing_key,
+            timestamp,
+            body,
+        )
+    return headers
+
+
+def training_plan_generation_body(payload: dict[str, object]) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+
+
+def training_plan_generation_signature(signing_key: str, timestamp: str, body: bytes) -> str:
+    digest = hmac.new(signing_key.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return f"sha256={digest}"
+
+
+def provider_training_items(provider_payload: dict[str, object], expected_count: int) -> list[dict[str, object]]:
+    raw_items = provider_payload.get("items")
+    if not isinstance(raw_items, list):
+        return []
+    items = [item for item in raw_items if isinstance(item, dict)]
+    return items[:expected_count]
+
+
+def bounded_provider_text(
+    provider_payload: dict[str, object],
+    key: str,
+    fallback: str,
+    max_length: int,
+) -> str:
+    value = provider_payload.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()[:max_length]
+    return fallback[:max_length]
+
+
+def bounded_optional_provider_text(
+    provider_payload: dict[str, object],
+    key: str,
+    max_length: int,
+) -> str | None:
+    value = provider_payload.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()[:max_length]
+    return None
+
+
+def bounded_provider_int(
+    provider_payload: dict[str, object],
+    key: str,
+    fallback: int,
+    lower: int,
+    upper: int,
+) -> int:
+    value = provider_payload.get(key)
+    if isinstance(value, int | float):
+        return min(max(int(value), lower), upper)
+    if isinstance(value, str) and value.strip().isdigit():
+        return min(max(int(value), lower), upper)
+    return min(max(fallback, lower), upper)
 
 
 async def list_training_plan_items(

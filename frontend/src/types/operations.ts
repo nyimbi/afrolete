@@ -5155,6 +5155,11 @@ export type GeneratedTrainingPlanRead = {
   rationale: string;
   load_balance: string;
   next_competition_at: string | null;
+  generation_provider: string;
+  model_policy: string;
+  provider_status_code: number | null;
+  provider_reference: string | null;
+  provider_notes: string | null;
 };
 
 export type TrainingSessionPlanRead = {

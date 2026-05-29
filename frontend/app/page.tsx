@@ -17554,8 +17554,11 @@ export default function HomePage() {
               {generatedTrainingPlan ? (
                 <article className="task-card">
                   <div>
-                    <strong>AI readiness {generatedTrainingPlan.readiness_score}</strong>
-                    <span>{generatedTrainingPlan.load_balance} · {generatedTrainingPlan.rationale}</span>
+                    <strong>
+                      AI readiness {generatedTrainingPlan.readiness_score} · {generatedTrainingPlan.generation_provider}
+                    </strong>
+                    <span>{generatedTrainingPlan.model_policy} · {generatedTrainingPlan.load_balance}</span>
+                    <span>{generatedTrainingPlan.provider_reference ?? generatedTrainingPlan.provider_notes ?? generatedTrainingPlan.rationale}</span>
                   </div>
                 </article>
               ) : null}

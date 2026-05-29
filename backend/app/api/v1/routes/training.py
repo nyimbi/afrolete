@@ -170,6 +170,11 @@ async def generate_training_plan_route(
         rationale=result["rationale"],
         load_balance=result["load_balance"],
         next_competition_at=result["next_competition_at"],
+        generation_provider=result["generation_provider"],
+        model_policy=result["model_policy"],
+        provider_status_code=result["provider_status_code"],
+        provider_reference=result["provider_reference"],
+        provider_notes=result["provider_notes"],
     )
 
 

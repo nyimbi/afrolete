@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     agent_default_model: str = "afrolete-local-planner"
     agent_execution_timeout_seconds: float = 10.0
     agent_webhook_tolerance_seconds: int = 300
+    training_plan_generation_mode: Literal["deterministic", "webhook"] = "deterministic"
+    training_plan_generation_model: str = "afrolete-training-planner-v1"
+    training_plan_generation_webhook_url: str = ""
+    training_plan_generation_webhook_key: str = ""
+    training_plan_generation_webhook_key_secret_path: str = ""
+    training_plan_generation_webhook_key_secret_field: str = "value"
+    training_plan_generation_timeout_seconds: float = 8.0
 
     openbao_addr: str = "https://vault.lindela.io"
     openbao_token: str = ""

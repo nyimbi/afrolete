@@ -113,6 +113,21 @@ Omit `--api-base-url` to store extracted samples in-process through the same
 domain service. Use bearer-token headers in Keycloak deployments and local
 `X-Afrolete-*` headers only for trusted local/demo runs.
 
+Training plan generation defaults to deterministic local planning. To hand
+planning off to a live model worker, set:
+
+```bash
+AFROLETE_TRAINING_PLAN_GENERATION_MODE=webhook
+AFROLETE_TRAINING_PLAN_GENERATION_MODEL=afrolete-training-planner-v1
+AFROLETE_TRAINING_PLAN_GENERATION_WEBHOOK_URL=https://models.example/training-plan
+AFROLETE_TRAINING_PLAN_GENERATION_WEBHOOK_KEY_SECRET_PATH=secret/data/afrolete/training
+AFROLETE_TRAINING_PLAN_GENERATION_WEBHOOK_KEY_SECRET_FIELD=webhook_key
+```
+
+The backend signs the canonical JSON payload with
+`X-Afrolete-Training-Signature` and falls back to deterministic planning with
+provider metadata in the response if the provider is unavailable.
+
 ## Responsibilities
 
 - Domain API and OpenAPI contract.

@@ -133,6 +133,11 @@ class GeneratedTrainingPlanRead(BaseModel):
     rationale: str
     load_balance: str
     next_competition_at: datetime | None
+    generation_provider: str = "deterministic"
+    model_policy: str = "afrolete-training-planner-v1"
+    provider_status_code: int | None = None
+    provider_reference: str | None = None
+    provider_notes: str | None = None
 
 
 class TrainingSessionPlanCreate(BaseModel):

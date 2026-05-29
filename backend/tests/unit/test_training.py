@@ -1,3 +1,7 @@
+from app.core.config import Settings
+from app.services import training as training_service
+
+
 def create_training_context(client, identity_headers, name="Training Club"):
     organization = client.post(
         "/api/v1/organizations",
@@ -165,6 +169,116 @@ def test_training_drill_plan_item_and_session_workflow(client, identity_headers)
     )
     assert invalid_range.status_code == 422
     assert invalid_range.json()["detail"] == "ends_at must be after starts_at"
+
+
+def test_training_plan_generation_can_use_live_model_provider(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    organization, team, _, roster = create_training_context(client, identity_headers, "Provider Training Club")
+    captured = {}
+
+    async def fake_provider(settings, payload, team_context, assessments, observations, next_competition_at, source, load):
+        captured["mode"] = settings.training_plan_generation_mode
+        captured["model"] = settings.training_plan_generation_model
+        captured["team_name"] = team_context.name
+        captured["weekly_sessions"] = payload.weekly_sessions
+        captured["source"] = source
+        captured["load"] = load
+        captured["assessment_count"] = len(assessments)
+        captured["observation_count"] = len(observations)
+        captured["next_competition_at"] = next_competition_at
+        return {
+            "provider": "webhook",
+            "model_policy": "coach-model-v9",
+            "status_code": 200,
+            "provider_reference": "provider-plan-123",
+            "notes": "Live model plan accepted.",
+            "payload": {
+                "title": "Provider match-week plan",
+                "focus_area": "Pressing transitions",
+                "source_summary": "Provider used team readiness and competition context.",
+                "load_guidance": "Two tactical sessions, one low-load rehearsal.",
+                "recovery_protocol": "Hydration, sleep check, and soreness review after every session.",
+                "progress_checkpoints": "Review pressing triggers after session 2.",
+                "items": [
+                    {
+                        "day_label": "Day 1",
+                        "title": "Pressing trigger rehearsal",
+                        "focus_area": "Pressing transitions",
+                        "duration_minutes": 70,
+                        "intensity": 7,
+                        "notes": "Small-sided pressing waves with coach stop points.",
+                    },
+                    {
+                        "day_label": "Day 3",
+                        "title": "Recovery rondo",
+                        "focus_area": "Load management",
+                        "duration_minutes": 35,
+                        "intensity": 3,
+                        "notes": "Keep it conversational and monitor soreness.",
+                    },
+                ],
+            },
+        }
+
+    monkeypatch.setattr(
+        training_service,
+        "get_settings",
+        lambda: Settings(
+            training_plan_generation_mode="webhook",
+            training_plan_generation_model="coach-model-v9",
+            training_plan_generation_webhook_url="https://model.example/training",
+            training_plan_generation_webhook_key="secret",
+        ),
+    )
+    monkeypatch.setattr(training_service, "request_training_plan_provider", fake_provider)
+
+    response = client.post(
+        "/api/v1/training/plans/generate",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-07",
+            "weekly_sessions": 2,
+            "readiness_score": 68,
+            "upcoming_competition_weight": 8,
+        },
+    )
+
+    assert response.status_code == 201
+    generated = response.json()
+    assert captured["mode"] == "webhook"
+    assert captured["team_name"] == "Provider Training Club U17"
+    assert captured["weekly_sessions"] == 2
+    assert generated["generation_provider"] == "webhook"
+    assert generated["model_policy"] == "coach-model-v9"
+    assert generated["provider_status_code"] == 200
+    assert generated["provider_reference"] == "provider-plan-123"
+    assert generated["plan"]["title"] == "Provider match-week plan"
+    assert generated["plan"]["source_summary"] == "Provider used team readiness and competition context."
+    assert generated["items"][0]["title"] == "Pressing trigger rehearsal"
+    assert generated["items"][0]["duration_minutes"] == 70
+    assert generated["items"][1]["intensity"] == 3
+
+
+def test_training_plan_generation_webhook_signature_headers() -> None:
+    body = training_service.training_plan_generation_body({"event": "afrolete.training.plan.generate"})
+    headers = training_service.training_plan_generation_headers(
+        Settings(training_plan_generation_webhook_key="secret"),
+        body,
+        "secret",
+    )
+
+    assert headers["User-Agent"] == "AfroLete-Training-Planner/1.0"
+    assert headers["X-Afrolete-Training-Key-Source"] == "env"
+    timestamp = headers["X-Afrolete-Training-Timestamp"]
+    expected = training_service.training_plan_generation_signature("secret", timestamp, body)
+    assert headers["X-Afrolete-Training-Signature"] == expected
 
 
 def test_training_plan_rejects_team_from_other_organization(client, identity_headers) -> None:
