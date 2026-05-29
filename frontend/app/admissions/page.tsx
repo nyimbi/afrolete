@@ -656,6 +656,12 @@ export default function AdmissionsPage() {
                         ? `${aiTask.governance_policy_code} · ${aiTask.governance_policy_decision ?? "governed"}`
                         : "Governance check passed without a matching policy."}
                     </span>
+                    <div className="admission-ai-approvals">
+                      <span>{agentApprovalSummary(aiTask)}</span>
+                      {aiTask.approval_pending_count > 0 ? (
+                        <small>Approval is required before staff can complete this AI review.</small>
+                      ) : null}
+                    </div>
                     {aiTask.governance_policy_rationale ? <small>{aiTask.governance_policy_rationale}</small> : null}
                     {aiTask.review_notes ? <small>{aiTask.review_notes}</small> : null}
                     {aiTask.output_ref ? <small>{aiTask.output_ref}</small> : null}
@@ -851,6 +857,18 @@ function canRunAiTask(task: AgentTaskRead): boolean {
 
 function canCloseAiTask(task: AgentTaskRead): boolean {
   return task.status === "waiting_for_review" && task.approval_pending_count === 0;
+}
+
+function agentApprovalSummary(task: AgentTaskRead): string {
+  if (task.approval_required_count === 0) {
+    return "No approval required";
+  }
+  return [
+    `${task.approval_approved_count}/${task.approval_required_count} approvals`,
+    task.approval_rejected_count > 0 ? `${task.approval_rejected_count} rejected` : null,
+    task.approval_pending_count > 0 ? `${task.approval_pending_count} pending` : "complete",
+    task.approval_status.replaceAll("_", " ")
+  ].filter(Boolean).join(" · ");
 }
 
 function aiReviewNote(task: AgentTaskRead): string {

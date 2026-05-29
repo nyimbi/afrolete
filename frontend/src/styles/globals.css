@@ -2777,6 +2777,14 @@ textarea:focus {
   justify-content: flex-start;
 }
 
+.admission-ai-approvals {
+  align-items: flex-start;
+  border-top: 1px solid rgba(15, 118, 110, 0.16);
+  display: grid;
+  gap: 3px;
+  padding-top: 8px;
+}
+
 .admission-ai-panel strong,
 .admission-ai-panel span,
 .admission-ai-panel small {
