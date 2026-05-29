@@ -1271,6 +1271,104 @@ textarea:focus {
   padding: 7px 10px;
 }
 
+.family-coordination {
+  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--teal) 22%, var(--line));
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+}
+
+.family-coordination-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.family-coordination-head h2 {
+  margin: 4px 0 0;
+}
+
+.family-coordination-head span {
+  background: #eef8f6;
+  border: 1px solid color-mix(in srgb, var(--teal) 28%, var(--line));
+  border-radius: 999px;
+  color: var(--teal);
+  font-weight: 850;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+.family-coordination-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.family-coordination-grid article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  min-height: 210px;
+  padding: 12px;
+}
+
+.family-coordination-title {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.family-coordination-title strong,
+.family-coordination-title span,
+.family-coordination-grid p,
+.family-coordination-grid a,
+.family-coordination-grid article > span {
+  overflow-wrap: anywhere;
+}
+
+.family-coordination-title span,
+.family-coordination-grid p {
+  color: var(--muted);
+}
+
+.family-coordination-stats {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.family-coordination-stats span {
+  background: #f5f7fb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px;
+}
+
+.family-coordination-stats strong {
+  color: var(--ink);
+  display: block;
+  font-size: 18px;
+}
+
+.family-coordination-grid p {
+  margin: 0;
+}
+
+.family-coordination-grid a,
+.family-coordination-grid article > span {
+  align-self: end;
+  color: var(--teal);
+  font-weight: 850;
+}
+
 .family-ai-appeals {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
@@ -4596,6 +4694,7 @@ textarea:focus {
   .family-toolbar,
   .family-layout,
   .family-athletes,
+  .family-coordination-grid,
   .family-ai-appeals,
   .family-ai-appeals form,
   .player-toolbar,
