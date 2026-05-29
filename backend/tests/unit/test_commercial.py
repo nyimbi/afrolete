@@ -99,6 +99,83 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     ).json()
     assert donation["status"] == "paid"
 
+    opportunity = client.post(
+        "/api/v1/commercial/grants/opportunities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "funder_name": "Youth Sport Foundation",
+            "program_name": "Community Coaching Grant",
+            "category": "youth_development",
+            "impact_area": "Coach education and athlete access",
+            "award_ceiling": "25000.00",
+            "matching_required": "2500.00",
+            "currency": "USD",
+            "opens_on": "2026-05-01",
+            "due_on": "2026-06-15",
+            "eligibility_summary": "Registered youth clubs with safeguarding policies.",
+            "requirements": "Board approval, budget, impact plan, and reporting calendar.",
+            "source_url": "https://grants.example/community-coaching",
+        },
+    ).json()
+    assert opportunity["status"] == "open"
+    assert opportunity["award_ceiling"] == "25000.00"
+
+    application = client.post(
+        "/api/v1/commercial/grants/applications",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "grant_opportunity_id": opportunity["id"],
+            "project_title": "Community coaching access",
+            "requested_amount": "18000.00",
+            "awarded_amount": "12000.00",
+            "currency": "USD",
+            "status": "awarded",
+            "submitted_on": "2026-06-01",
+            "decision_on": "2026-06-20",
+            "reporting_due_on": "2026-09-30",
+            "narrative": "Train volunteer coaches and subsidize athlete participation.",
+            "budget_summary": "Coaching education, equipment, travel, and safeguarding.",
+            "impact_metrics": "60 athletes served, 12 coaches certified.",
+            "external_reference": "YSF-2026-001",
+        },
+    ).json()
+    assert application["funder_name"] == "Youth Sport Foundation"
+    assert application["program_name"] == "Community Coaching Grant"
+    assert application["status"] == "awarded"
+
+    grant_report = client.post(
+        "/api/v1/commercial/grants/reports",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "grant_application_id": application["id"],
+            "report_type": "quarterly",
+            "due_on": "2026-09-30",
+            "status": "draft",
+            "narrative": "Early coach certification milestones are on track.",
+            "metrics_summary": "24 athletes enrolled; 5 coaches completed safeguarding.",
+            "artifact_url": "https://storage.example/grants/q1.pdf",
+            "external_reference": "YSF-Q1",
+        },
+    ).json()
+    assert grant_report["project_title"] == "Community coaching access"
+    assert grant_report["status"] == "draft"
+
+    grant_dashboard = client.get(
+        f"/api/v1/commercial/grants/dashboard?organization_id={organization['id']}"
+    ).json()
+    assert grant_dashboard["opportunity_count"] == 1
+    assert grant_dashboard["application_count"] == 1
+    assert grant_dashboard["awarded_application_count"] == 1
+    assert grant_dashboard["report_count"] == 1
+    assert grant_dashboard["requested_amount"] == "18000.00"
+    assert grant_dashboard["awarded_amount"] == "12000.00"
+    assert grant_dashboard["match_required_amount"] == "2500.00"
+    assert grant_dashboard["pipeline_status"] in {"ready", "attention"}
+    assert grant_dashboard["recommendations"]
+
     product = client.post(
         "/api/v1/commercial/tickets/products",
         headers=identity_headers,

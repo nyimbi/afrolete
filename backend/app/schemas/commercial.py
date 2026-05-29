@@ -77,6 +77,88 @@ class DonationRead(DonationCreate):
     status: CommercialStatus
 
 
+class GrantOpportunityCreate(BaseModel):
+    organization_id: UUID
+    funder_name: str = Field(min_length=2, max_length=180)
+    program_name: str = Field(min_length=2, max_length=220)
+    category: str = Field(min_length=2, max_length=120)
+    impact_area: str = Field(min_length=2, max_length=220)
+    award_ceiling: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    matching_required: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    opens_on: date | None = None
+    due_on: date | None = None
+    eligibility_summary: str | None = Field(default=None, max_length=4000)
+    requirements: str | None = Field(default=None, max_length=4000)
+    source_url: str | None = Field(default=None, max_length=500)
+    status: str = Field(default="open", min_length=2, max_length=40)
+
+
+class GrantOpportunityRead(GrantOpportunityCreate):
+    id: UUID
+
+
+class GrantApplicationCreate(BaseModel):
+    organization_id: UUID
+    grant_opportunity_id: UUID
+    project_title: str = Field(min_length=2, max_length=220)
+    requested_amount: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    awarded_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    status: str = Field(default="draft", min_length=2, max_length=40)
+    submitted_on: date | None = None
+    decision_on: date | None = None
+    reporting_due_on: date | None = None
+    lead_person_id: UUID | None = None
+    narrative: str | None = Field(default=None, max_length=8000)
+    budget_summary: str | None = Field(default=None, max_length=8000)
+    impact_metrics: str | None = Field(default=None, max_length=8000)
+    external_reference: str | None = Field(default=None, max_length=240)
+
+
+class GrantApplicationRead(GrantApplicationCreate):
+    id: UUID
+    funder_name: str | None = None
+    program_name: str | None = None
+
+
+class GrantReportCreate(BaseModel):
+    organization_id: UUID
+    grant_application_id: UUID
+    report_type: str = Field(min_length=2, max_length=80)
+    due_on: date
+    submitted_on: date | None = None
+    status: str = Field(default="draft", min_length=2, max_length=40)
+    narrative: str | None = Field(default=None, max_length=8000)
+    metrics_summary: str | None = Field(default=None, max_length=8000)
+    artifact_url: str | None = Field(default=None, max_length=500)
+    external_reference: str | None = Field(default=None, max_length=240)
+
+
+class GrantReportRead(GrantReportCreate):
+    id: UUID
+    project_title: str | None = None
+
+
+class GrantDashboardRead(BaseModel):
+    organization_id: UUID
+    opportunity_count: int
+    active_opportunity_count: int
+    application_count: int
+    submitted_application_count: int
+    awarded_application_count: int
+    report_count: int
+    due_soon_count: int
+    overdue_report_count: int
+    requested_amount: Decimal
+    awarded_amount: Decimal
+    match_required_amount: Decimal
+    readiness_score: int
+    pipeline_status: str
+    recommendations: list[str]
+    next_deadline_on: date | None
+
+
 class TicketProductCreate(BaseModel):
     organization_id: UUID
     event_id: UUID

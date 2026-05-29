@@ -2694,6 +2694,79 @@ export type DonationRead = {
   status: CommercialStatus;
 };
 
+export type GrantOpportunityRead = {
+  id: UUID;
+  organization_id: UUID;
+  funder_name: string;
+  program_name: string;
+  category: string;
+  impact_area: string;
+  award_ceiling: string;
+  matching_required: string;
+  currency: string;
+  opens_on: string | null;
+  due_on: string | null;
+  eligibility_summary: string | null;
+  requirements: string | null;
+  source_url: string | null;
+  status: string;
+};
+
+export type GrantApplicationRead = {
+  id: UUID;
+  organization_id: UUID;
+  grant_opportunity_id: UUID;
+  project_title: string;
+  requested_amount: string;
+  awarded_amount: string;
+  currency: string;
+  status: string;
+  submitted_on: string | null;
+  decision_on: string | null;
+  reporting_due_on: string | null;
+  lead_person_id: UUID | null;
+  narrative: string | null;
+  budget_summary: string | null;
+  impact_metrics: string | null;
+  external_reference: string | null;
+  funder_name: string | null;
+  program_name: string | null;
+};
+
+export type GrantReportRead = {
+  id: UUID;
+  organization_id: UUID;
+  grant_application_id: UUID;
+  report_type: string;
+  due_on: string;
+  submitted_on: string | null;
+  status: string;
+  narrative: string | null;
+  metrics_summary: string | null;
+  artifact_url: string | null;
+  external_reference: string | null;
+  project_title: string | null;
+};
+
+export type GrantDashboardRead = {
+  organization_id: UUID;
+  opportunity_count: number;
+  active_opportunity_count: number;
+  application_count: number;
+  submitted_application_count: number;
+  awarded_application_count: number;
+  report_count: number;
+  due_soon_count: number;
+  overdue_report_count: number;
+  requested_amount: string;
+  awarded_amount: string;
+  match_required_amount: string;
+  readiness_score: number;
+  pipeline_status: string;
+  recommendations: string[];
+  next_deadline_on: string | null;
+};
+
 export type TicketProductRead = {
   id: UUID;
   organization_id: UUID;

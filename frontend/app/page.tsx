@@ -217,6 +217,10 @@ import type {
   FixtureMatchEventRead,
   FixtureOfficialAssignmentRead,
   FundraisingCampaignRead,
+  GrantApplicationRead,
+  GrantDashboardRead,
+  GrantOpportunityRead,
+  GrantReportRead,
   GeneratedTrainingPlanRead,
   GeneratedReportRead,
   BackgroundCheckEvidenceDocumentLinkRead,
@@ -1714,6 +1718,10 @@ export default function HomePage() {
   const [sponsorships, setSponsorships] = useState<SponsorshipAgreementRead[]>([]);
   const [campaigns, setCampaigns] = useState<FundraisingCampaignRead[]>([]);
   const [donations, setDonations] = useState<DonationRead[]>([]);
+  const [grantOpportunities, setGrantOpportunities] = useState<GrantOpportunityRead[]>([]);
+  const [grantApplications, setGrantApplications] = useState<GrantApplicationRead[]>([]);
+  const [grantReports, setGrantReports] = useState<GrantReportRead[]>([]);
+  const [grantDashboard, setGrantDashboard] = useState<GrantDashboardRead | null>(null);
   const [ticketProducts, setTicketProducts] = useState<TicketProductRead[]>([]);
   const [ticketOrders, setTicketOrders] = useState<TicketOrderRead[]>([]);
   const [tickets, setTickets] = useState<TicketRead[]>([]);
@@ -1850,6 +1858,8 @@ export default function HomePage() {
   const [selectedSupplierOrderId, setSelectedSupplierOrderId] = useState("");
   const [selectedSponsorId, setSelectedSponsorId] = useState("");
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [selectedGrantOpportunityId, setSelectedGrantOpportunityId] = useState("");
+  const [selectedGrantApplicationId, setSelectedGrantApplicationId] = useState("");
   const [selectedTicketProductId, setSelectedTicketProductId] = useState("");
   const [selectedTicketId, setSelectedTicketId] = useState("");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
@@ -2439,6 +2449,29 @@ export default function HomePage() {
     donor_email: "donor@example.com",
     donation_amount: 250,
     message: "Supporting the next generation."
+  });
+  const [grantForm, setGrantForm] = useState({
+    funder_name: "Youth Sport Foundation",
+    program_name: "Community Coaching Grant",
+    category: "youth_development",
+    impact_area: "Coach education and scholarship access",
+    award_ceiling: 25000,
+    matching_required: 2500,
+    due_on: "2026-06-15",
+    eligibility_summary: "Registered youth programs with safeguarding and inclusion policies.",
+    requirements: "Board approval, project budget, impact metrics, and reporting calendar.",
+    project_title: "Community coaching access",
+    requested_amount: 18000,
+    awarded_amount: 0,
+    application_status: "draft",
+    reporting_due_on: "2026-09-30",
+    narrative: "Train volunteer coaches, subsidize participation, and expand safe access.",
+    budget_summary: "Coach education, equipment, travel support, and safeguarding.",
+    impact_metrics: "60 athletes served; 12 coaches certified; 20 scholarship places.",
+    report_type: "quarterly",
+    report_due_on: "2026-09-30",
+    report_status: "draft",
+    metrics_summary: "Athlete access, coach certification, attendance, and retention."
   });
   const [ticketForm, setTicketForm] = useState({
     name: "General admission",
@@ -3413,6 +3446,10 @@ export default function HomePage() {
       sponsorData,
       sponsorshipData,
       campaignData,
+      grantOpportunityData,
+      grantApplicationData,
+      grantReportData,
+      grantDashboardData,
       ticketProductData,
       ticketData,
       invoiceData,
@@ -3424,6 +3461,10 @@ export default function HomePage() {
       apiRequest<SponsorRead[]>(`/commercial/sponsors?organization_id=${organizationId}`),
       apiRequest<SponsorshipAgreementRead[]>(`/commercial/sponsorships?organization_id=${organizationId}`),
       apiRequest<FundraisingCampaignRead[]>(`/commercial/campaigns?organization_id=${organizationId}`),
+      apiRequest<GrantOpportunityRead[]>(`/commercial/grants/opportunities?organization_id=${organizationId}`),
+      apiRequest<GrantApplicationRead[]>(`/commercial/grants/applications?organization_id=${organizationId}`),
+      apiRequest<GrantReportRead[]>(`/commercial/grants/reports?organization_id=${organizationId}`),
+      apiRequest<GrantDashboardRead>(`/commercial/grants/dashboard?organization_id=${organizationId}`),
       apiRequest<TicketProductRead[]>(`/commercial/tickets/products?organization_id=${organizationId}`),
       apiRequest<TicketRead[]>(`/commercial/tickets?organization_id=${organizationId}`),
       apiRequest<FinanceInvoiceRead[]>(`/commercial/invoices?organization_id=${organizationId}`),
@@ -3437,6 +3478,10 @@ export default function HomePage() {
     setSponsors(sponsorData);
     setSponsorships(sponsorshipData);
     setCampaigns(campaignData);
+    setGrantOpportunities(grantOpportunityData);
+    setGrantApplications(grantApplicationData);
+    setGrantReports(grantReportData);
+    setGrantDashboard(grantDashboardData);
     setTicketProducts(ticketProductData);
     setTickets(ticketData);
     setInvoices(invoiceData);
@@ -3449,6 +3494,16 @@ export default function HomePage() {
     );
     setSelectedCampaignId((current) =>
       campaignData.some((campaign) => campaign.id === current) ? current : campaignData[0]?.id ?? ""
+    );
+    setSelectedGrantOpportunityId((current) =>
+      grantOpportunityData.some((opportunity) => opportunity.id === current)
+        ? current
+        : grantOpportunityData[0]?.id ?? ""
+    );
+    setSelectedGrantApplicationId((current) =>
+      grantApplicationData.some((application) => application.id === current)
+        ? current
+        : grantApplicationData[0]?.id ?? ""
     );
     setSelectedTicketProductId((current) =>
       ticketProductData.some((product) => product.id === current) ? current : ticketProductData[0]?.id ?? ""
@@ -3868,6 +3923,10 @@ export default function HomePage() {
       setSponsorships([]);
       setCampaigns([]);
       setDonations([]);
+      setGrantOpportunities([]);
+      setGrantApplications([]);
+      setGrantReports([]);
+      setGrantDashboard(null);
       setTicketProducts([]);
       setTicketOrders([]);
       setTickets([]);
@@ -3884,6 +3943,8 @@ export default function HomePage() {
       setAccountingSync(null);
       setCommercialRefund(null);
       setSponsorshipDashboard([]);
+      setSelectedGrantOpportunityId("");
+      setSelectedGrantApplicationId("");
       setReportDefinitions([]);
       setGeneratedReports([]);
       setScheduledReports([]);
@@ -12147,6 +12208,98 @@ export default function HomePage() {
     );
   };
 
+  const createGrantPipeline = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-grant-pipeline",
+      async () => {
+        const opportunity = await apiRequest<GrantOpportunityRead>("/commercial/grants/opportunities", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            funder_name: grantForm.funder_name,
+            program_name: grantForm.program_name,
+            category: grantForm.category,
+            impact_area: grantForm.impact_area,
+            award_ceiling: String(grantForm.award_ceiling),
+            matching_required: String(grantForm.matching_required),
+            due_on: grantForm.due_on,
+            eligibility_summary: grantForm.eligibility_summary,
+            requirements: grantForm.requirements,
+            status: "open"
+          }
+        });
+        const application = await apiRequest<GrantApplicationRead>("/commercial/grants/applications", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            grant_opportunity_id: opportunity.id,
+            project_title: grantForm.project_title,
+            requested_amount: String(grantForm.requested_amount),
+            awarded_amount: String(grantForm.awarded_amount),
+            status: grantForm.application_status,
+            reporting_due_on: grantForm.reporting_due_on,
+            narrative: grantForm.narrative,
+            budget_summary: grantForm.budget_summary,
+            impact_metrics: grantForm.impact_metrics,
+            external_reference: `GRANT-${Date.now()}`
+          }
+        });
+        return { opportunity, application };
+      },
+      ({ opportunity, application }) => {
+        setGrantOpportunities((current) => [
+          opportunity,
+          ...current.filter((item) => item.id !== opportunity.id)
+        ]);
+        setGrantApplications((current) => [
+          application,
+          ...current.filter((item) => item.id !== application.id)
+        ]);
+        setSelectedGrantOpportunityId(opportunity.id);
+        setSelectedGrantApplicationId(application.id);
+        addLog(`${opportunity.program_name} grant pipeline opened`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const createGrantReport = () => {
+    if (!selectedOrganizationId || !selectedGrantApplicationId) {
+      addLog("Create or select a grant application first", "bad");
+      return;
+    }
+    runAction(
+      "create-grant-report",
+      () =>
+        apiRequest<GrantReportRead>("/commercial/grants/reports", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            grant_application_id: selectedGrantApplicationId,
+            report_type: grantForm.report_type,
+            due_on: grantForm.report_due_on,
+            status: grantForm.report_status,
+            narrative: grantForm.narrative,
+            metrics_summary: grantForm.metrics_summary,
+            artifact_url: null,
+            external_reference: `GRANT-RPT-${Date.now()}`
+          }
+        }),
+      (report) => {
+        setGrantReports((current) => [report, ...current.filter((item) => item.id !== report.id)]);
+        addLog(`${report.report_type} grant report scheduled`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const createTicketSale = () => {
     if (!selectedOrganizationId || !selectedEventId) {
       addLog("Select an event first", "bad");
@@ -15973,12 +16126,20 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createSponsorAndAgreement} disabled={busyAction !== null}>Sponsor</button>
                 <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
+                <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
+                <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
               </div>
             </div>
             <div className="score-summary">
-              <strong>{commercialSummary?.fundraising_raised ?? "0.00"}</strong>
-              <span>Raised</span>
-              <small>{commercialSummary ? `${commercialSummary.active_sponsors} sponsors · ${commercialSummary.sponsorship_value} committed` : "No commercial summary"}</small>
+              <strong>{grantDashboard?.awarded_amount ?? commercialSummary?.fundraising_raised ?? "0.00"}</strong>
+              <span>{grantDashboard ? `${grantDashboard.pipeline_status} grant pipeline` : "Raised"}</span>
+              <small>
+                {grantDashboard
+                  ? `${grantDashboard.opportunity_count} grants · ${grantDashboard.application_count} applications · ${grantDashboard.report_count} reports`
+                  : commercialSummary
+                    ? `${commercialSummary.active_sponsors} sponsors · ${commercialSummary.sponsorship_value} committed`
+                    : "No commercial summary"}
+              </small>
             </div>
             <div className="form-grid">
               <label>
@@ -16017,8 +16178,61 @@ export default function HomePage() {
                 Amount
                 <input type="number" min="1" value={campaignForm.donation_amount} onChange={(event) => setCampaignForm({ ...campaignForm, donation_amount: Number(event.target.value) })} />
               </label>
+              <label>
+                Funder
+                <input value={grantForm.funder_name} onChange={(event) => setGrantForm({ ...grantForm, funder_name: event.target.value })} />
+              </label>
+              <label>
+                Program
+                <input value={grantForm.program_name} onChange={(event) => setGrantForm({ ...grantForm, program_name: event.target.value })} />
+              </label>
+              <label>
+                Award ceiling
+                <input type="number" min="0" value={grantForm.award_ceiling} onChange={(event) => setGrantForm({ ...grantForm, award_ceiling: Number(event.target.value) })} />
+              </label>
+              <label>
+                Deadline
+                <input type="date" value={grantForm.due_on} onChange={(event) => setGrantForm({ ...grantForm, due_on: event.target.value })} />
+              </label>
+              <label>
+                Request
+                <input type="number" min="0" value={grantForm.requested_amount} onChange={(event) => setGrantForm({ ...grantForm, requested_amount: Number(event.target.value) })} />
+              </label>
+              <label>
+                Awarded
+                <input type="number" min="0" value={grantForm.awarded_amount} onChange={(event) => setGrantForm({ ...grantForm, awarded_amount: Number(event.target.value) })} />
+              </label>
+              <label>
+                App status
+                <select value={grantForm.application_status} onChange={(event) => setGrantForm({ ...grantForm, application_status: event.target.value })}>
+                  <option value="draft">Draft</option>
+                  <option value="submitted">Submitted</option>
+                  <option value="under_review">Under review</option>
+                  <option value="awarded">Awarded</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </label>
+              <label>
+                Report due
+                <input type="date" value={grantForm.report_due_on} onChange={(event) => setGrantForm({ ...grantForm, report_due_on: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Impact metrics
+                <input value={grantForm.impact_metrics} onChange={(event) => setGrantForm({ ...grantForm, impact_metrics: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
+              {grantDashboard ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Grant readiness {grantDashboard.readiness_score} · {grantDashboard.pipeline_status}</strong>
+                    <span>
+                      {grantDashboard.requested_amount} requested · {grantDashboard.awarded_amount} awarded · {grantDashboard.match_required_amount} match
+                    </span>
+                    <span>{grantDashboard.recommendations[0] ?? "Grant pipeline ready"}</span>
+                  </div>
+                </article>
+              ) : null}
               {sponsorshipDashboard.slice(0, 3).map((dashboard) => (
                 <article key={dashboard.sponsor_id} className="task-card">
                   <div>
@@ -16047,6 +16261,40 @@ export default function HomePage() {
                     <span>{campaign.raised_amount}/{campaign.goal_amount} · {campaign.status}</span>
                   </div>
                 </button>
+              ))}
+              {grantOpportunities.slice(0, 3).map((opportunity) => (
+                <button
+                  type="button"
+                  key={opportunity.id}
+                  className={`task-card ${opportunity.id === selectedGrantOpportunityId ? "selected" : ""}`}
+                  onClick={() => setSelectedGrantOpportunityId(opportunity.id)}
+                >
+                  <div>
+                    <strong>{opportunity.program_name}</strong>
+                    <span>{opportunity.funder_name} · {opportunity.award_ceiling} · due {opportunity.due_on ?? "open"}</span>
+                  </div>
+                </button>
+              ))}
+              {grantApplications.slice(0, 3).map((application) => (
+                <button
+                  type="button"
+                  key={application.id}
+                  className={`task-card ${application.id === selectedGrantApplicationId ? "selected" : ""}`}
+                  onClick={() => setSelectedGrantApplicationId(application.id)}
+                >
+                  <div>
+                    <strong>{application.project_title}</strong>
+                    <span>{application.status} · {application.requested_amount} requested · {application.awarded_amount} awarded</span>
+                  </div>
+                </button>
+              ))}
+              {grantReports.slice(0, 2).map((report) => (
+                <article key={report.id} className="task-card">
+                  <div>
+                    <strong>{report.report_type} report · {report.status}</strong>
+                    <span>{report.project_title ?? "Grant application"} · due {report.due_on}</span>
+                  </div>
+                </article>
               ))}
             </div>
           </div>

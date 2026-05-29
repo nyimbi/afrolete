@@ -23,6 +23,9 @@ from app.models.commercial import (
     FinanceInvoice,
     FinancePayment,
     FundraisingCampaign,
+    GrantApplication,
+    GrantOpportunity,
+    GrantReport,
     Sponsor,
     SponsorshipAgreement,
     Ticket,
@@ -54,6 +57,10 @@ from app.schemas.commercial import (
     FinanceInvoiceCreate,
     FinancePaymentCreate,
     FundraisingCampaignCreate,
+    GrantApplicationCreate,
+    GrantDashboardRead,
+    GrantOpportunityCreate,
+    GrantReportCreate,
     PaymentSettlementRead,
     SponsorCreate,
     SponsorPortalAgreementRead,
@@ -152,6 +159,179 @@ async def record_donation(db: AsyncSession, identity: CurrentIdentity, payload: 
     await db.commit()
     await db.refresh(donation)
     return donation
+
+
+async def create_grant_opportunity(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GrantOpportunityCreate,
+    authz: AuthorizationService,
+) -> GrantOpportunity:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    opportunity = GrantOpportunity(**payload.model_dump())
+    db.add(opportunity)
+    await db.commit()
+    await db.refresh(opportunity)
+    return opportunity
+
+
+async def list_grant_opportunities(db: AsyncSession, organization_id: UUID) -> list[GrantOpportunity]:
+    return list(
+        (
+            await db.scalars(
+                select(GrantOpportunity)
+                .where(GrantOpportunity.organization_id == organization_id)
+                .order_by(GrantOpportunity.due_on, GrantOpportunity.created_at.desc())
+            )
+        ).all()
+    )
+
+
+async def create_grant_application(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GrantApplicationCreate,
+    authz: AuthorizationService,
+) -> GrantApplication:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    await get_grant_opportunity_for_organization(db, payload.grant_opportunity_id, payload.organization_id)
+    application = GrantApplication(**payload.model_dump())
+    db.add(application)
+    await db.commit()
+    await db.refresh(application)
+    return application
+
+
+async def list_grant_applications(db: AsyncSession, organization_id: UUID) -> list[tuple[GrantApplication, GrantOpportunity | None]]:
+    rows = (
+        await db.execute(
+            select(GrantApplication, GrantOpportunity)
+            .join(GrantOpportunity, GrantOpportunity.id == GrantApplication.grant_opportunity_id, isouter=True)
+            .where(GrantApplication.organization_id == organization_id)
+            .order_by(GrantApplication.created_at.desc())
+        )
+    ).all()
+    return [(application, opportunity) for application, opportunity in rows]
+
+
+async def create_grant_report(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GrantReportCreate,
+    authz: AuthorizationService,
+) -> GrantReport:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    await get_grant_application_for_organization(db, payload.grant_application_id, payload.organization_id)
+    report = GrantReport(**payload.model_dump())
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    return report
+
+
+async def list_grant_reports(db: AsyncSession, organization_id: UUID) -> list[tuple[GrantReport, GrantApplication | None]]:
+    rows = (
+        await db.execute(
+            select(GrantReport, GrantApplication)
+            .join(GrantApplication, GrantApplication.id == GrantReport.grant_application_id, isouter=True)
+            .where(GrantReport.organization_id == organization_id)
+            .order_by(GrantReport.due_on, GrantReport.created_at.desc())
+        )
+    ).all()
+    return [(report, application) for report, application in rows]
+
+
+async def grant_dashboard(db: AsyncSession, organization_id: UUID) -> GrantDashboardRead:
+    opportunities = await list_grant_opportunities(db, organization_id)
+    applications = [application for application, _ in await list_grant_applications(db, organization_id)]
+    reports = [report for report, _ in await list_grant_reports(db, organization_id)]
+    today = date.today()
+    soon = today.toordinal() + 45
+    due_soon = [
+        opportunity
+        for opportunity in opportunities
+        if opportunity.due_on is not None and today.toordinal() <= opportunity.due_on.toordinal() <= soon
+    ]
+    overdue_reports = [
+        report
+        for report in reports
+        if report.due_on < today and report.status not in {"submitted", "accepted", "complete", "completed"}
+    ]
+    submitted_count = sum(1 for application in applications if application.status in {"submitted", "under_review", "awarded"})
+    awarded_count = sum(1 for application in applications if application.status == "awarded" or application.awarded_amount > 0)
+    readiness_score = grant_readiness_score(
+        opportunity_count=len(opportunities),
+        application_count=len(applications),
+        submitted_count=submitted_count,
+        awarded_count=awarded_count,
+        overdue_report_count=len(overdue_reports),
+    )
+    return GrantDashboardRead(
+        organization_id=organization_id,
+        opportunity_count=len(opportunities),
+        active_opportunity_count=sum(1 for opportunity in opportunities if opportunity.status in {"open", "active"}),
+        application_count=len(applications),
+        submitted_application_count=submitted_count,
+        awarded_application_count=awarded_count,
+        report_count=len(reports),
+        due_soon_count=len(due_soon),
+        overdue_report_count=len(overdue_reports),
+        requested_amount=sum((application.requested_amount for application in applications), Decimal("0")),
+        awarded_amount=sum((application.awarded_amount for application in applications), Decimal("0")),
+        match_required_amount=sum((opportunity.matching_required for opportunity in opportunities), Decimal("0")),
+        readiness_score=readiness_score,
+        pipeline_status="ready" if readiness_score >= 80 else "attention" if readiness_score >= 50 else "blocked",
+        recommendations=grant_recommendations(opportunities, applications, reports, due_soon, overdue_reports),
+        next_deadline_on=next((opportunity.due_on for opportunity in opportunities if opportunity.due_on is not None), None),
+    )
+
+
+def grant_readiness_score(
+    *,
+    opportunity_count: int,
+    application_count: int,
+    submitted_count: int,
+    awarded_count: int,
+    overdue_report_count: int,
+) -> int:
+    score = 20
+    if opportunity_count:
+        score += 20
+    if application_count:
+        score += 20
+    if submitted_count:
+        score += 20
+    if awarded_count:
+        score += 20
+    if overdue_report_count:
+        score -= min(30, overdue_report_count * 10)
+    return max(0, min(score, 100))
+
+
+def grant_recommendations(
+    opportunities: list[GrantOpportunity],
+    applications: list[GrantApplication],
+    reports: list[GrantReport],
+    due_soon: list[GrantOpportunity],
+    overdue_reports: list[GrantReport],
+) -> list[str]:
+    recommendations: list[str] = []
+    if not opportunities:
+        recommendations.append("Add grant opportunities from federations, ministries, foundations, and corporate CSR programs.")
+    if due_soon:
+        recommendations.append(f"Prioritize {due_soon[0].program_name}; the deadline is {due_soon[0].due_on}.")
+    if not applications and opportunities:
+        recommendations.append("Draft at least one grant application with project narrative, budget summary, and impact metrics.")
+    if any(application.status == "draft" for application in applications):
+        recommendations.append("Move draft applications to submitted once board, school, or association approvals are complete.")
+    if any(application.status == "awarded" for application in applications) and not reports:
+        recommendations.append("Create funder report schedules for awarded grants before spending begins.")
+    if overdue_reports:
+        recommendations.append(f"Resolve {len(overdue_reports)} overdue grant report(s) before pursuing additional awards.")
+    if not recommendations:
+        recommendations.append("Grant pipeline is operating; keep deadlines, report evidence, and impact metrics current.")
+    return recommendations[:6]
 
 
 async def create_ticket_product(db: AsyncSession, identity: CurrentIdentity, payload: TicketProductCreate, authz: AuthorizationService) -> TicketProduct:
@@ -1272,6 +1452,28 @@ async def get_campaign_for_organization(db: AsyncSession, campaign_id: UUID, org
     if campaign is None or campaign.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
     return campaign
+
+
+async def get_grant_opportunity_for_organization(
+    db: AsyncSession,
+    grant_opportunity_id: UUID,
+    organization_id: UUID,
+) -> GrantOpportunity:
+    opportunity = await db.get(GrantOpportunity, grant_opportunity_id)
+    if opportunity is None or opportunity.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grant opportunity not found")
+    return opportunity
+
+
+async def get_grant_application_for_organization(
+    db: AsyncSession,
+    grant_application_id: UUID,
+    organization_id: UUID,
+) -> GrantApplication:
+    application = await db.get(GrantApplication, grant_application_id)
+    if application is None or application.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grant application not found")
+    return application
 
 
 async def get_ticket_product_for_organization(db: AsyncSession, ticket_product_id: UUID, organization_id: UUID) -> TicketProduct:

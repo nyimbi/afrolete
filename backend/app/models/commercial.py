@@ -86,6 +86,60 @@ class Donation(IdMixin, TimestampMixin, Base):
     )
 
 
+class GrantOpportunity(IdMixin, TimestampMixin, Base):
+    __tablename__ = "grant_opportunities"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    funder_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    program_name: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    impact_area: Mapped[str] = mapped_column(String(220), nullable=False)
+    award_ceiling: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    matching_required: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    opens_on: Mapped[date | None] = mapped_column(index=True)
+    due_on: Mapped[date | None] = mapped_column(index=True)
+    eligibility_summary: Mapped[str | None] = mapped_column(Text)
+    requirements: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
+
+
+class GrantApplication(IdMixin, TimestampMixin, Base):
+    __tablename__ = "grant_applications"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    grant_opportunity_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("grant_opportunities.id"), index=True)
+    project_title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    requested_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    awarded_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    submitted_on: Mapped[date | None] = mapped_column(index=True)
+    decision_on: Mapped[date | None] = mapped_column(index=True)
+    reporting_due_on: Mapped[date | None] = mapped_column(index=True)
+    lead_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    narrative: Mapped[str | None] = mapped_column(Text)
+    budget_summary: Mapped[str | None] = mapped_column(Text)
+    impact_metrics: Mapped[str | None] = mapped_column(Text)
+    external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+
+
+class GrantReport(IdMixin, TimestampMixin, Base):
+    __tablename__ = "grant_reports"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    grant_application_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("grant_applications.id"), index=True)
+    report_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    due_on: Mapped[date] = mapped_column(index=True)
+    submitted_on: Mapped[date | None] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    narrative: Mapped[str | None] = mapped_column(Text)
+    metrics_summary: Mapped[str | None] = mapped_column(Text)
+    artifact_url: Mapped[str | None] = mapped_column(String(500))
+    external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+
+
 class TicketProduct(IdMixin, TimestampMixin, Base):
     __tablename__ = "ticket_products"
 

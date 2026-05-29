@@ -30,6 +30,13 @@ from app.schemas.commercial import (
     FinancePaymentRead,
     FundraisingCampaignCreate,
     FundraisingCampaignRead,
+    GrantApplicationCreate,
+    GrantApplicationRead,
+    GrantDashboardRead,
+    GrantOpportunityCreate,
+    GrantOpportunityRead,
+    GrantReportCreate,
+    GrantReportRead,
     PaymentSettlementRead,
     SponsorCreate,
     SponsorPortalRead,
@@ -53,6 +60,9 @@ from app.services.commercial import (
     check_in_ticket,
     commercial_summary,
     create_campaign,
+    create_grant_application,
+    create_grant_opportunity,
+    create_grant_report,
     create_invoice,
     create_commercial_invoice_provider_checkout,
     create_sponsor,
@@ -65,12 +75,16 @@ from app.services.commercial import (
     ingest_commercial_invoice_payment_webhook,
     list_commercial_settlement_payouts,
     list_campaigns,
+    list_grant_applications,
+    list_grant_opportunities,
+    list_grant_reports,
     list_invoices,
     list_commercial_payment_sessions,
     list_sponsors,
     list_sponsorships,
     list_ticket_products,
     list_tickets,
+    grant_dashboard,
     payment_settlement,
     record_donation,
     record_payment,
@@ -103,6 +117,25 @@ def campaign_read(campaign) -> FundraisingCampaignRead:
 
 def donation_read(donation) -> DonationRead:
     return DonationRead(**fields(donation, DonationRead))
+
+
+def grant_opportunity_read(opportunity) -> GrantOpportunityRead:
+    return GrantOpportunityRead(**fields(opportunity, GrantOpportunityRead))
+
+
+def grant_application_read(application, opportunity=None) -> GrantApplicationRead:
+    return GrantApplicationRead(
+        **fields(application, GrantApplicationRead),
+        funder_name=opportunity.funder_name if opportunity else None,
+        program_name=opportunity.program_name if opportunity else None,
+    )
+
+
+def grant_report_read(report, application=None) -> GrantReportRead:
+    return GrantReportRead(
+        **fields(report, GrantReportRead),
+        project_title=application.project_title if application else None,
+    )
 
 
 def ticket_product_read(product) -> TicketProductRead:
@@ -138,7 +171,7 @@ def order_read(order, tickets) -> TicketOrderRead:
 
 
 def fields(model, schema_type) -> dict:
-    return {name: getattr(model, name) for name in schema_type.model_fields}
+    return {name: getattr(model, name) for name in schema_type.model_fields if hasattr(model, name)}
 
 
 @router.post("/sponsors", response_model=SponsorRead, status_code=status.HTTP_201_CREATED)
@@ -206,6 +239,83 @@ async def record_donation_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> DonationRead:
     return donation_read(await record_donation(db, identity, payload, authz))
+
+
+@router.post("/grants/opportunities", response_model=GrantOpportunityRead, status_code=status.HTTP_201_CREATED)
+async def create_grant_opportunity_route(
+    payload: GrantOpportunityCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantOpportunityRead:
+    return grant_opportunity_read(await create_grant_opportunity(db, identity, payload, authz))
+
+
+@router.get("/grants/opportunities", response_model=list[GrantOpportunityRead])
+async def list_grant_opportunities_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[GrantOpportunityRead]:
+    return [
+        grant_opportunity_read(opportunity)
+        for opportunity in await list_grant_opportunities(db, organization_id)
+    ]
+
+
+@router.post("/grants/applications", response_model=GrantApplicationRead, status_code=status.HTTP_201_CREATED)
+async def create_grant_application_route(
+    payload: GrantApplicationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantApplicationRead:
+    application = await create_grant_application(db, identity, payload, authz)
+    opportunity = await list_grant_opportunities(db, payload.organization_id)
+    opportunity_by_id = {item.id: item for item in opportunity}
+    return grant_application_read(application, opportunity_by_id.get(application.grant_opportunity_id))
+
+
+@router.get("/grants/applications", response_model=list[GrantApplicationRead])
+async def list_grant_applications_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[GrantApplicationRead]:
+    return [
+        grant_application_read(application, opportunity)
+        for application, opportunity in await list_grant_applications(db, organization_id)
+    ]
+
+
+@router.post("/grants/reports", response_model=GrantReportRead, status_code=status.HTTP_201_CREATED)
+async def create_grant_report_route(
+    payload: GrantReportCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantReportRead:
+    report = await create_grant_report(db, identity, payload, authz)
+    applications = await list_grant_applications(db, payload.organization_id)
+    application_by_id = {application.id: application for application, _ in applications}
+    return grant_report_read(report, application_by_id.get(report.grant_application_id))
+
+
+@router.get("/grants/reports", response_model=list[GrantReportRead])
+async def list_grant_reports_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[GrantReportRead]:
+    return [
+        grant_report_read(report, application)
+        for report, application in await list_grant_reports(db, organization_id)
+    ]
+
+
+@router.get("/grants/dashboard", response_model=GrantDashboardRead)
+async def grant_dashboard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> GrantDashboardRead:
+    return await grant_dashboard(db, organization_id)
 
 
 @router.post("/tickets/products", response_model=TicketProductRead, status_code=status.HTTP_201_CREATED)
