@@ -13544,6 +13544,7 @@ export default function HomePage() {
         <nav>
           <a href="#command" className="active">Command</a>
           <a href="/register">Register</a>
+          <a href="/admissions">Admissions</a>
           <a href="#tenant">Tenant</a>
           <a href="#roster">Roster</a>
           <a href="#events">Events</a>

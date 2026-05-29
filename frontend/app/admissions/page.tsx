@@ -1,0 +1,543 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { apiRequest } from "@/lib/api";
+import {
+  clearStoredAuthSession,
+  completeKeycloakCallbackFromUrl,
+  getStoredAuthSession,
+  startKeycloakLogin,
+  type AuthSession
+} from "@/lib/auth";
+import { afroleteAuthMode, keycloakClientId, keycloakIssuer } from "@/lib/config";
+import type {
+  LocalIdentity,
+  OrganizationRead,
+  RegistrationInquiryConversionRead,
+  RegistrationInquiryFollowUpRead,
+  RegistrationInquiryRead
+} from "@/types/operations";
+
+type AdmissionQueue = "all" | "ready" | "incomplete" | "paid" | "unpaid" | "converted";
+
+type ReviewForm = {
+  status: string;
+  review_notes: string;
+  follow_up_at: string;
+};
+
+const keycloakEnabled = afroleteAuthMode === "keycloak";
+
+const defaultIdentity: LocalIdentity = {
+  sub: "local-admissions-owner",
+  email: "owner@example.com",
+  name: "Admissions Owner"
+};
+
+const queueLabels: Record<AdmissionQueue, string> = {
+  all: "All",
+  ready: "Ready",
+  incomplete: "Incomplete",
+  paid: "Paid",
+  unpaid: "Unpaid",
+  converted: "Converted"
+};
+
+export default function AdmissionsPage() {
+  const [identity, setIdentity] = useState<LocalIdentity>(defaultIdentity);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [organizations, setOrganizations] = useState<OrganizationRead[]>([]);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
+  const [inquiries, setInquiries] = useState<RegistrationInquiryRead[]>([]);
+  const [reviewForms, setReviewForms] = useState<Record<string, ReviewForm>>({});
+  const [queue, setQueue] = useState<AdmissionQueue>("all");
+  const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [log, setLog] = useState<string[]>([]);
+
+  const requestIdentity = useMemo(() => (keycloakEnabled ? undefined : identity), [identity]);
+  const signedInLabel = authSession?.email ?? authSession?.name ?? identity.email;
+  const selectedOrganization = organizations.find((organization) => organization.id === selectedOrganizationId) ?? null;
+
+  useEffect(() => {
+    if (!keycloakEnabled) {
+      const stored = window.localStorage.getItem("afrolete.admissionsIdentity");
+      if (stored) {
+        try {
+          setIdentity(JSON.parse(stored) as LocalIdentity);
+        } catch {
+          window.localStorage.removeItem("afrolete.admissionsIdentity");
+        }
+      }
+      return;
+    }
+
+    completeKeycloakCallbackFromUrl()
+      .then((session) => setAuthSession(session ?? getStoredAuthSession()))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed"));
+  }, []);
+
+  useEffect(() => {
+    if (!keycloakEnabled) {
+      window.localStorage.setItem("afrolete.admissionsIdentity", JSON.stringify(identity));
+    }
+  }, [identity]);
+
+  useEffect(() => {
+    if (keycloakEnabled && !authSession) {
+      return;
+    }
+    void loadOrganizations();
+    // Auth session and local identity intentionally drive the reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authSession, identity.email, identity.name, identity.sub]);
+
+  useEffect(() => {
+    if (selectedOrganizationId) {
+      void loadInquiries(selectedOrganizationId);
+    }
+    // Explicit organization selection drives this load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOrganizationId]);
+
+  const metrics = useMemo(() => {
+    const ready = inquiries.filter((inquiry) => inquiry.verification_status === "ready_for_review").length;
+    const paid = inquiries.filter((inquiry) => ["paid", "waived", "not_required"].includes(inquiry.payment_status)).length;
+    const converted = inquiries.filter((inquiry) => inquiry.status === "converted").length;
+    const needsAction = inquiries.filter((inquiry) => inquiry.status !== "converted" && inquiry.verification_status !== "ready_for_review").length;
+    return { ready, paid, converted, needsAction, total: inquiries.length };
+  }, [inquiries]);
+
+  const filteredInquiries = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return inquiries.filter((inquiry) => {
+      const queueMatch =
+        queue === "all"
+          || (queue === "ready" && inquiry.verification_status === "ready_for_review")
+          || (queue === "incomplete" && inquiry.verification_status !== "ready_for_review" && inquiry.status !== "converted")
+          || (queue === "paid" && ["paid", "waived", "not_required"].includes(inquiry.payment_status))
+          || (queue === "unpaid" && !["paid", "waived", "not_required"].includes(inquiry.payment_status))
+          || (queue === "converted" && inquiry.status === "converted");
+      if (!queueMatch) {
+        return false;
+      }
+      if (!normalizedSearch) {
+        return true;
+      }
+      return [
+        inquiry.athlete_name,
+        inquiry.guardian_name,
+        inquiry.email,
+        inquiry.phone,
+        inquiry.age_group,
+        inquiry.sport_interest,
+        inquiry.status,
+        inquiry.verification_status
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalizedSearch));
+    });
+  }, [inquiries, queue, search]);
+
+  const beginKeycloakLogin = () => {
+    setBusy("keycloak");
+    void startKeycloakLogin().catch((caught) => {
+      setBusy("");
+      setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
+    });
+  };
+
+  const signOut = () => {
+    clearStoredAuthSession();
+    setAuthSession(null);
+  };
+
+  const loadOrganizations = async () => {
+    setBusy("organizations");
+    setError("");
+    try {
+      const loaded = await apiRequest<OrganizationRead[]>("/organizations", { identity: requestIdentity });
+      setOrganizations(loaded);
+      setSelectedOrganizationId((current) => current || loaded[0]?.id || "");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Organizations could not be loaded");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const loadInquiries = async (organizationId: string) => {
+    setBusy("inquiries");
+    setError("");
+    try {
+      const loaded = await apiRequest<RegistrationInquiryRead[]>(
+        `/organizations/${organizationId}/registration-inquiries`,
+        { identity: requestIdentity }
+      );
+      setInquiries(loaded);
+      setReviewForms((current) => {
+        const next = { ...current };
+        loaded.forEach((inquiry) => {
+          next[inquiry.id] = next[inquiry.id] ?? {
+            status: inquiry.status,
+            review_notes: inquiry.review_notes ?? "",
+            follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at)
+          };
+        });
+        return next;
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Registration inquiries could not be loaded");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const updateReviewForm = (inquiry: RegistrationInquiryRead, field: keyof ReviewForm, value: string) => {
+    setReviewForms((current) => ({
+      ...current,
+      [inquiry.id]: {
+        status: current[inquiry.id]?.status ?? inquiry.status,
+        review_notes: current[inquiry.id]?.review_notes ?? inquiry.review_notes ?? "",
+        follow_up_at: current[inquiry.id]?.follow_up_at ?? toDateTimeLocalValue(inquiry.follow_up_at),
+        [field]: value
+      }
+    }));
+  };
+
+  const saveReview = async (inquiry: RegistrationInquiryRead, statusOverride?: string) => {
+    if (!selectedOrganizationId) {
+      setError("Choose an organization before reviewing admissions.");
+      return;
+    }
+    const form = reviewForms[inquiry.id] ?? {
+      status: inquiry.status,
+      review_notes: inquiry.review_notes ?? "",
+      follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at)
+    };
+    const nextStatus = statusOverride ?? form.status;
+    setBusy(`review-${inquiry.id}`);
+    setError("");
+    try {
+      const body: { status?: string; review_notes: string | null; follow_up_at: string | null } = {
+        review_notes: form.review_notes || null,
+        follow_up_at: form.follow_up_at ? new Date(form.follow_up_at).toISOString() : null
+      };
+      if (nextStatus !== "converted") {
+        body.status = nextStatus;
+      }
+      const updated = await apiRequest<RegistrationInquiryRead>(
+        `/organizations/${selectedOrganizationId}/registration-inquiries/${inquiry.id}`,
+        { method: "PATCH", identity: requestIdentity, body }
+      );
+      replaceInquiry(updated);
+      addLog(`${updated.athlete_name} moved to ${updated.status}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Review could not be saved");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const sendFollowUp = async (inquiry: RegistrationInquiryRead) => {
+    if (!selectedOrganizationId) {
+      setError("Choose an organization before sending follow-up.");
+      return;
+    }
+    const form = reviewForms[inquiry.id];
+    const subject = `Registration follow-up for ${inquiry.athlete_name}`;
+    const body = [
+      `Hello ${inquiry.guardian_name || inquiry.athlete_name},`,
+      "",
+      `Thank you for your interest in ${selectedOrganization?.public_name || selectedOrganization?.name || "our program"}.`,
+      inquiry.verification_status === "ready_for_review"
+        ? "Your packet is ready for staff verification."
+        : "We still need a few details before staff can verify the packet.",
+      inquiry.payment_status ? `Payment status: ${inquiry.payment_status}.` : null,
+      form?.review_notes ? `Staff note: ${form.review_notes}` : null,
+      "",
+      "Please reply with any questions or missing information."
+    ].filter(Boolean).join("\n");
+    setBusy(`follow-up-${inquiry.id}`);
+    setError("");
+    try {
+      const result = await apiRequest<RegistrationInquiryFollowUpRead>(
+        `/organizations/${selectedOrganizationId}/registration-inquiries/${inquiry.id}/follow-up`,
+        {
+          method: "POST",
+          identity: requestIdentity,
+          body: {
+            channel: "email",
+            subject,
+            body,
+            urgent: false,
+            quiet_hours_override: false
+          }
+        }
+      );
+      replaceInquiry(result.inquiry);
+      addLog(`Follow-up queued for ${result.inquiry.athlete_name}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Follow-up could not be queued");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const convertInquiry = async (inquiry: RegistrationInquiryRead) => {
+    if (!selectedOrganizationId) {
+      setError("Choose an organization before converting admissions.");
+      return;
+    }
+    setBusy(`convert-${inquiry.id}`);
+    setError("");
+    try {
+      const conversion = await apiRequest<RegistrationInquiryConversionRead>(
+        `/organizations/${selectedOrganizationId}/registration-inquiries/${inquiry.id}/convert`,
+        {
+          method: "POST",
+          identity: requestIdentity,
+          body: {
+            team_id: inquiry.team_id,
+            role: "player",
+            create_guardian: true,
+            send_guardian_invite: true,
+            guardian_invite_channel: "email",
+            guardian_portal_url: `${window.location.origin}/family`
+          }
+        }
+      );
+      replaceInquiry(conversion.inquiry);
+      addLog(`${conversion.inquiry.athlete_name} converted to athlete profile`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Inquiry could not be converted");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const replaceInquiry = (updated: RegistrationInquiryRead) => {
+    setInquiries((current) => current.map((inquiry) => (inquiry.id === updated.id ? updated : inquiry)));
+    setReviewForms((current) => ({
+      ...current,
+      [updated.id]: {
+        status: updated.status,
+        review_notes: updated.review_notes ?? "",
+        follow_up_at: toDateTimeLocalValue(updated.follow_up_at)
+      }
+    }));
+  };
+
+  const addLog = (message: string) => {
+    setLog((current) => [message, ...current].slice(0, 5));
+  };
+
+  return (
+    <main className="admissions-page">
+      <section className="admissions-hero">
+        <div className="admissions-brand">
+          <div className="mark">AL</div>
+          <div>
+            <strong>AfroLete</strong>
+            <span>Admissions</span>
+          </div>
+        </div>
+        <div>
+          <p className="section-label">Registration review</p>
+          <h1>Move families from inquiry to verified athlete records.</h1>
+        </div>
+        <div className="admissions-auth">
+          <span>{keycloakEnabled ? "Keycloak" : "Local demo identity"}</span>
+          <strong>{keycloakEnabled && !authSession ? "No browser session" : signedInLabel}</strong>
+          {keycloakEnabled ? <small>{keycloakClientId} at {keycloakIssuer}</small> : <small>Used for local API headers.</small>}
+          {keycloakEnabled ? (
+            authSession ? <button type="button" onClick={signOut}>Sign out</button> : <button type="button" onClick={beginKeycloakLogin}>Sign in</button>
+          ) : null}
+        </div>
+      </section>
+
+      {error ? <p className="form-error admissions-error">{error}</p> : null}
+
+      <section className="admissions-toolbar">
+        {!keycloakEnabled ? (
+          <>
+            <label>
+              Staff name
+              <input value={identity.name} onChange={(event) => setIdentity({ ...identity, name: event.target.value })} />
+            </label>
+            <label>
+              Staff email
+              <input
+                type="email"
+                value={identity.email}
+                onChange={(event) =>
+                  setIdentity({
+                    ...identity,
+                    email: event.target.value,
+                    sub: event.target.value ? `local-${event.target.value}` : identity.sub
+                  })
+                }
+              />
+            </label>
+          </>
+        ) : null}
+        <label>
+          Organization
+          <select value={selectedOrganizationId} onChange={(event) => setSelectedOrganizationId(event.target.value)}>
+            <option value="">Choose organization</option>
+            {organizations.map((organization) => (
+              <option key={organization.id} value={organization.id}>
+                {organization.public_name ?? organization.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Search
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Athlete, guardian, email, sport" />
+        </label>
+        <button type="button" onClick={() => selectedOrganizationId && loadInquiries(selectedOrganizationId)} disabled={!selectedOrganizationId || busy !== ""}>
+          {busy === "inquiries" ? "Refreshing" : "Refresh"}
+        </button>
+      </section>
+
+      <section className="admissions-metrics">
+        <Metric label="Total" value={metrics.total} />
+        <Metric label="Ready" value={metrics.ready} />
+        <Metric label="Paid" value={metrics.paid} />
+        <Metric label="Needs action" value={metrics.needsAction} />
+        <Metric label="Converted" value={metrics.converted} />
+      </section>
+
+      <section className="admissions-layout">
+        <aside className="admissions-queue">
+          <p className="section-label">Queue</p>
+          {Object.entries(queueLabels).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={queue === value ? "selected" : ""}
+              onClick={() => setQueue(value as AdmissionQueue)}
+            >
+              {label}
+            </button>
+          ))}
+          <div className="admissions-log">
+            <strong>Activity</strong>
+            {log.length ? log.map((item) => <span key={item}>{item}</span>) : <span>No admissions actions yet.</span>}
+          </div>
+        </aside>
+
+        <section className="admissions-list">
+          {filteredInquiries.map((inquiry) => {
+            const form = reviewForms[inquiry.id] ?? {
+              status: inquiry.status,
+              review_notes: inquiry.review_notes ?? "",
+              follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at)
+            };
+            return (
+              <article className="admission-card" key={inquiry.id}>
+                <div className="admission-card-head">
+                  <div>
+                    <strong>{inquiry.athlete_name}</strong>
+                    <span>{inquiry.guardian_name ?? "No guardian name"} · {inquiry.email}</span>
+                  </div>
+                  <StatusPill status={inquiry.verification_status} />
+                </div>
+
+                <div className="admission-facts">
+                  <span>{inquiry.age_group ?? "age open"}</span>
+                  <span>{inquiry.sport_interest ?? "sport open"}</span>
+                  <span>{inquiry.status}</span>
+                  <span>payment {inquiry.payment_status}</span>
+                  <span>{inquiry.packet_submitted_at ? `packet ${new Date(inquiry.packet_submitted_at).toLocaleDateString()}` : "packet not submitted"}</span>
+                </div>
+
+                <div className="admission-review-grid">
+                  <label>
+                    Review
+                    <select
+                      value={form.status}
+                      onChange={(event) => updateReviewForm(inquiry, "status", event.target.value)}
+                      disabled={inquiry.status === "converted"}
+                    >
+                      <option value="new">New</option>
+                      <option value="reviewing">Reviewing</option>
+                      <option value="contacted">Contacted</option>
+                      <option value="waitlisted">Waitlisted</option>
+                      <option value="rejected">Rejected</option>
+                      {inquiry.status === "converted" ? <option value="converted">Converted</option> : null}
+                    </select>
+                  </label>
+                  <label>
+                    Follow-up
+                    <input
+                      type="datetime-local"
+                      value={form.follow_up_at}
+                      onChange={(event) => updateReviewForm(inquiry, "follow_up_at", event.target.value)}
+                    />
+                  </label>
+                  <label className="admission-wide">
+                    Notes
+                    <textarea
+                      value={form.review_notes}
+                      onChange={(event) => updateReviewForm(inquiry, "review_notes", event.target.value)}
+                      placeholder="Eligibility, missing documents, coach review, payment verification"
+                    />
+                  </label>
+                </div>
+
+                <div className="admission-actions">
+                  <button type="button" onClick={() => saveReview(inquiry)} disabled={busy !== "" || inquiry.status === "converted"}>
+                    {busy === `review-${inquiry.id}` ? "Saving" : "Save"}
+                  </button>
+                  <button type="button" onClick={() => saveReview(inquiry, "waitlisted")} disabled={busy !== "" || inquiry.status === "converted"}>
+                    Waitlist
+                  </button>
+                  <button type="button" onClick={() => sendFollowUp(inquiry)} disabled={busy !== "" || inquiry.status === "converted"}>
+                    Follow up
+                  </button>
+                  <button type="button" className="primary" onClick={() => convertInquiry(inquiry)} disabled={busy !== "" || inquiry.status === "converted"}>
+                    {busy === `convert-${inquiry.id}` ? "Converting" : "Convert"}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+          {filteredInquiries.length === 0 ? (
+            <div className="admissions-empty">
+              <strong>No admissions in this queue</strong>
+              <span>Choose another queue, refresh the organization, or publish the public registration page.</span>
+            </div>
+          ) : null}
+        </section>
+      </section>
+    </main>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const normalized = status.replaceAll("_", " ");
+  return <span className={`admission-status ${status}`}>{normalized}</span>;
+}
+
+function toDateTimeLocalValue(value: string | null): string {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}

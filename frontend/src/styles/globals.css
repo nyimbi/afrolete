@@ -2409,6 +2409,250 @@ textarea:focus {
   display: block;
 }
 
+.admissions-page {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(15, 118, 110, 0.12), transparent 28%),
+    var(--background);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.admissions-hero {
+  align-items: stretch;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 280px;
+  gap: 18px;
+  padding: 28px 28px 18px;
+}
+
+.admissions-brand,
+.admissions-auth,
+.admissions-toolbar,
+.admissions-metrics div,
+.admissions-queue,
+.admission-card,
+.admissions-empty {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.admissions-brand,
+.admissions-auth {
+  align-content: center;
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+
+.admissions-brand {
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.admissions-brand .mark {
+  align-items: center;
+  background: var(--teal);
+  border-radius: 8px;
+  color: white;
+  display: inline-flex;
+  font-weight: 800;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.admissions-brand strong,
+.admissions-brand span,
+.admissions-auth span,
+.admissions-auth strong,
+.admissions-auth small {
+  display: block;
+}
+
+.admissions-hero h1 {
+  font-size: clamp(2rem, 5vw, 4.6rem);
+  line-height: 0.95;
+  margin: 8px 0 0;
+  max-width: 900px;
+}
+
+.admissions-auth button {
+  justify-self: start;
+}
+
+.admissions-error {
+  margin: 0 28px 18px;
+}
+
+.admissions-toolbar {
+  align-items: end;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 28px 18px;
+  padding: 18px;
+}
+
+.admissions-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 28px 18px;
+}
+
+.admissions-metrics div {
+  padding: 16px;
+}
+
+.admissions-metrics span,
+.admissions-metrics strong {
+  display: block;
+}
+
+.admissions-metrics span,
+.admission-facts span,
+.admissions-log span {
+  color: var(--muted);
+}
+
+.admissions-metrics strong {
+  font-size: 2rem;
+  margin-top: 4px;
+}
+
+.admissions-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  padding: 0 28px 48px;
+}
+
+.admissions-queue {
+  align-self: start;
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  position: sticky;
+  top: 16px;
+}
+
+.admissions-queue button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text);
+  justify-content: flex-start;
+}
+
+.admissions-queue button.selected {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: white;
+}
+
+.admissions-log {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
+}
+
+.admissions-list {
+  display: grid;
+  gap: 14px;
+}
+
+.admission-card,
+.admissions-empty {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.admission-card-head {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.admission-card-head strong,
+.admission-card-head span,
+.admissions-empty strong,
+.admissions-empty span {
+  display: block;
+}
+
+.admission-card-head span {
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.admission-status {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  padding: 6px 10px;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.admission-status.ready_for_review {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.28);
+  color: var(--green);
+}
+
+.admission-status.packet_incomplete,
+.admission-status.inquiry {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.28);
+  color: var(--amber);
+}
+
+.admission-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admission-facts span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+.admission-review-grid {
+  display: grid;
+  grid-template-columns: 180px 220px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.admission-wide {
+  grid-column: auto;
+}
+
+.admission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admission-actions button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+.admission-actions button.primary {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: white;
+}
+
 .register-page {
   min-height: 100vh;
   background:
@@ -3567,6 +3811,11 @@ textarea:focus {
   .public-site-inquiry,
   .public-site-inquiry form,
   .public-registration-grid,
+  .admissions-hero,
+  .admissions-toolbar,
+  .admissions-metrics,
+  .admissions-layout,
+  .admission-review-grid,
   .register-hero,
   .register-workspace,
   .register-inline-grid,
@@ -3593,6 +3842,14 @@ textarea:focus {
   .public-registration-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .admissions-queue {
+    position: static;
+  }
+
+  .admission-card-head {
+    display: grid;
   }
 }
 
