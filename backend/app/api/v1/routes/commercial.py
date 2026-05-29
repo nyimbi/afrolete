@@ -37,6 +37,12 @@ from app.schemas.commercial import (
     GrantOpportunityRead,
     GrantReportCreate,
     GrantReportRead,
+    MerchandiseFulfillmentUpdate,
+    MerchandiseOrderCreate,
+    MerchandiseOrderRead,
+    MerchandiseProductCreate,
+    MerchandiseProductRead,
+    MerchandiseStoreDashboardRead,
     PaymentSettlementRead,
     SponsorCreate,
     SponsorPortalRead,
@@ -64,6 +70,8 @@ from app.services.commercial import (
     create_grant_opportunity,
     create_grant_report,
     create_invoice,
+    create_merchandise_order,
+    create_merchandise_product,
     create_commercial_invoice_provider_checkout,
     create_sponsor,
     create_sponsorship,
@@ -85,6 +93,8 @@ from app.services.commercial import (
     list_ticket_products,
     list_tickets,
     grant_dashboard,
+    list_merchandise_orders,
+    list_merchandise_products,
     payment_settlement,
     record_donation,
     record_payment,
@@ -96,6 +106,9 @@ from app.services.commercial import (
     sponsorship_dashboard,
     sync_accounting_export,
     tax_quote,
+    merchandise_order_read,
+    merchandise_store_dashboard,
+    update_merchandise_fulfillment,
     validate_commercial_payout_callback_signature,
     validate_commercial_invoice_payment_webhook_signature,
 )
@@ -136,6 +149,10 @@ def grant_report_read(report, application=None) -> GrantReportRead:
         **fields(report, GrantReportRead),
         project_title=application.project_title if application else None,
     )
+
+
+def merchandise_product_read(product) -> MerchandiseProductRead:
+    return MerchandiseProductRead(**fields(product, MerchandiseProductRead))
 
 
 def ticket_product_read(product) -> TicketProductRead:
@@ -316,6 +333,69 @@ async def grant_dashboard_route(
     db: AsyncSession = Depends(get_db),
 ) -> GrantDashboardRead:
     return await grant_dashboard(db, organization_id)
+
+
+@router.post("/merchandise/products", response_model=MerchandiseProductRead, status_code=status.HTTP_201_CREATED)
+async def create_merchandise_product_route(
+    payload: MerchandiseProductCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MerchandiseProductRead:
+    return merchandise_product_read(await create_merchandise_product(db, identity, payload, authz))
+
+
+@router.get("/merchandise/products", response_model=list[MerchandiseProductRead])
+async def list_merchandise_products_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[MerchandiseProductRead]:
+    return [
+        merchandise_product_read(product)
+        for product in await list_merchandise_products(db, organization_id)
+    ]
+
+
+@router.post("/merchandise/orders", response_model=MerchandiseOrderRead, status_code=status.HTTP_201_CREATED)
+async def create_merchandise_order_route(
+    payload: MerchandiseOrderCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MerchandiseOrderRead:
+    order, lines, products = await create_merchandise_order(db, identity, payload, authz)
+    return merchandise_order_read(order, lines, products)
+
+
+@router.get("/merchandise/orders", response_model=list[MerchandiseOrderRead])
+async def list_merchandise_orders_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[MerchandiseOrderRead]:
+    return [
+        merchandise_order_read(order, lines, products)
+        for order, lines, products in await list_merchandise_orders(db, organization_id)
+    ]
+
+
+@router.patch("/merchandise/orders/{order_id}/fulfillment", response_model=MerchandiseOrderRead)
+async def update_merchandise_fulfillment_route(
+    order_id: UUID,
+    payload: MerchandiseFulfillmentUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MerchandiseOrderRead:
+    order, lines, products = await update_merchandise_fulfillment(db, identity, order_id, payload, authz)
+    return merchandise_order_read(order, lines, products)
+
+
+@router.get("/merchandise/dashboard", response_model=MerchandiseStoreDashboardRead)
+async def merchandise_store_dashboard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> MerchandiseStoreDashboardRead:
+    return await merchandise_store_dashboard(db, organization_id)
 
 
 @router.post("/tickets/products", response_model=TicketProductRead, status_code=status.HTTP_201_CREATED)

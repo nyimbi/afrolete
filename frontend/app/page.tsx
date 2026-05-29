@@ -221,6 +221,9 @@ import type {
   GrantDashboardRead,
   GrantOpportunityRead,
   GrantReportRead,
+  MerchandiseOrderRead,
+  MerchandiseProductRead,
+  MerchandiseStoreDashboardRead,
   GeneratedTrainingPlanRead,
   GeneratedReportRead,
   BackgroundCheckEvidenceDocumentLinkRead,
@@ -1722,6 +1725,9 @@ export default function HomePage() {
   const [grantApplications, setGrantApplications] = useState<GrantApplicationRead[]>([]);
   const [grantReports, setGrantReports] = useState<GrantReportRead[]>([]);
   const [grantDashboard, setGrantDashboard] = useState<GrantDashboardRead | null>(null);
+  const [merchandiseProducts, setMerchandiseProducts] = useState<MerchandiseProductRead[]>([]);
+  const [merchandiseOrders, setMerchandiseOrders] = useState<MerchandiseOrderRead[]>([]);
+  const [merchandiseDashboard, setMerchandiseDashboard] = useState<MerchandiseStoreDashboardRead | null>(null);
   const [ticketProducts, setTicketProducts] = useState<TicketProductRead[]>([]);
   const [ticketOrders, setTicketOrders] = useState<TicketOrderRead[]>([]);
   const [tickets, setTickets] = useState<TicketRead[]>([]);
@@ -1860,6 +1866,8 @@ export default function HomePage() {
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [selectedGrantOpportunityId, setSelectedGrantOpportunityId] = useState("");
   const [selectedGrantApplicationId, setSelectedGrantApplicationId] = useState("");
+  const [selectedMerchandiseProductId, setSelectedMerchandiseProductId] = useState("");
+  const [selectedMerchandiseOrderId, setSelectedMerchandiseOrderId] = useState("");
   const [selectedTicketProductId, setSelectedTicketProductId] = useState("");
   const [selectedTicketId, setSelectedTicketId] = useState("");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
@@ -2472,6 +2480,27 @@ export default function HomePage() {
     report_due_on: "2026-09-30",
     report_status: "draft",
     metrics_summary: "Athlete access, coach certification, attendance, and retention."
+  });
+  const [merchandiseForm, setMerchandiseForm] = useState({
+    name: "Home jersey",
+    sku: "HOME-JERSEY-2026",
+    category: "jersey",
+    description: "Replica home jersey with optional player name and number.",
+    price: 45,
+    cost: 22,
+    inventory_count: 24,
+    reorder_point: 6,
+    personalization_enabled: true,
+    variants: "Youth S, Youth M, Youth L, Adult S, Adult M",
+    buyer_name: "Family Buyer",
+    buyer_email: "family@example.com",
+    quantity: 2,
+    size: "Youth M",
+    color: "Green",
+    personalization_name: "Amina",
+    personalization_number: "10",
+    delivery_method: "pickup",
+    delivery_address: "Collect at Saturday home match."
   });
   const [ticketForm, setTicketForm] = useState({
     name: "General admission",
@@ -3450,6 +3479,9 @@ export default function HomePage() {
       grantApplicationData,
       grantReportData,
       grantDashboardData,
+      merchandiseProductData,
+      merchandiseOrderData,
+      merchandiseDashboardData,
       ticketProductData,
       ticketData,
       invoiceData,
@@ -3465,6 +3497,9 @@ export default function HomePage() {
       apiRequest<GrantApplicationRead[]>(`/commercial/grants/applications?organization_id=${organizationId}`),
       apiRequest<GrantReportRead[]>(`/commercial/grants/reports?organization_id=${organizationId}`),
       apiRequest<GrantDashboardRead>(`/commercial/grants/dashboard?organization_id=${organizationId}`),
+      apiRequest<MerchandiseProductRead[]>(`/commercial/merchandise/products?organization_id=${organizationId}`),
+      apiRequest<MerchandiseOrderRead[]>(`/commercial/merchandise/orders?organization_id=${organizationId}`),
+      apiRequest<MerchandiseStoreDashboardRead>(`/commercial/merchandise/dashboard?organization_id=${organizationId}`),
       apiRequest<TicketProductRead[]>(`/commercial/tickets/products?organization_id=${organizationId}`),
       apiRequest<TicketRead[]>(`/commercial/tickets?organization_id=${organizationId}`),
       apiRequest<FinanceInvoiceRead[]>(`/commercial/invoices?organization_id=${organizationId}`),
@@ -3482,6 +3517,9 @@ export default function HomePage() {
     setGrantApplications(grantApplicationData);
     setGrantReports(grantReportData);
     setGrantDashboard(grantDashboardData);
+    setMerchandiseProducts(merchandiseProductData);
+    setMerchandiseOrders(merchandiseOrderData);
+    setMerchandiseDashboard(merchandiseDashboardData);
     setTicketProducts(ticketProductData);
     setTickets(ticketData);
     setInvoices(invoiceData);
@@ -3504,6 +3542,16 @@ export default function HomePage() {
       grantApplicationData.some((application) => application.id === current)
         ? current
         : grantApplicationData[0]?.id ?? ""
+    );
+    setSelectedMerchandiseProductId((current) =>
+      merchandiseProductData.some((product) => product.id === current)
+        ? current
+        : merchandiseProductData[0]?.id ?? ""
+    );
+    setSelectedMerchandiseOrderId((current) =>
+      merchandiseOrderData.some((order) => order.id === current)
+        ? current
+        : merchandiseOrderData[0]?.id ?? ""
     );
     setSelectedTicketProductId((current) =>
       ticketProductData.some((product) => product.id === current) ? current : ticketProductData[0]?.id ?? ""
@@ -3927,6 +3975,9 @@ export default function HomePage() {
       setGrantApplications([]);
       setGrantReports([]);
       setGrantDashboard(null);
+      setMerchandiseProducts([]);
+      setMerchandiseOrders([]);
+      setMerchandiseDashboard(null);
       setTicketProducts([]);
       setTicketOrders([]);
       setTickets([]);
@@ -3945,6 +3996,8 @@ export default function HomePage() {
       setSponsorshipDashboard([]);
       setSelectedGrantOpportunityId("");
       setSelectedGrantApplicationId("");
+      setSelectedMerchandiseProductId("");
+      setSelectedMerchandiseOrderId("");
       setReportDefinitions([]);
       setGeneratedReports([]);
       setScheduledReports([]);
@@ -12300,6 +12353,95 @@ export default function HomePage() {
     );
   };
 
+  const createMerchandiseProductAndOrder = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-merchandise-product-order",
+      async () => {
+        const product = await apiRequest<MerchandiseProductRead>("/commercial/merchandise/products", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            name: merchandiseForm.name,
+            sku: merchandiseForm.sku,
+            category: merchandiseForm.category,
+            description: merchandiseForm.description,
+            price: String(merchandiseForm.price),
+            cost: String(merchandiseForm.cost),
+            inventory_count: merchandiseForm.inventory_count,
+            reorder_point: merchandiseForm.reorder_point,
+            personalization_enabled: merchandiseForm.personalization_enabled,
+            variants: merchandiseForm.variants
+          }
+        });
+        const order = await apiRequest<MerchandiseOrderRead>("/commercial/merchandise/orders", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            buyer_name: merchandiseForm.buyer_name,
+            buyer_email: merchandiseForm.buyer_email,
+            delivery_method: merchandiseForm.delivery_method,
+            delivery_address: merchandiseForm.delivery_address,
+            external_payment_reference: `MERCH-${Date.now()}`,
+            notes: "Created from the operations console.",
+            lines: [
+              {
+                merchandise_product_id: product.id,
+                quantity: merchandiseForm.quantity,
+                size: merchandiseForm.size,
+                color: merchandiseForm.color,
+                personalization_name: merchandiseForm.personalization_name,
+                personalization_number: merchandiseForm.personalization_number
+              }
+            ]
+          }
+        });
+        return { product, order };
+      },
+      ({ product, order }) => {
+        setMerchandiseProducts((current) => [product, ...current.filter((item) => item.id !== product.id)]);
+        setMerchandiseOrders((current) => [order, ...current.filter((item) => item.id !== order.id)]);
+        setSelectedMerchandiseProductId(product.id);
+        setSelectedMerchandiseOrderId(order.id);
+        addLog(`${order.buyer_name} ordered ${order.lines.length} merchandise line(s)`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const fulfillSelectedMerchandiseOrder = () => {
+    if (!selectedOrganizationId || !selectedMerchandiseOrderId) {
+      addLog("Create or select a merchandise order first", "bad");
+      return;
+    }
+    runAction(
+      "fulfill-merchandise-order",
+      () =>
+        apiRequest<MerchandiseOrderRead>(
+          `/commercial/merchandise/orders/${selectedMerchandiseOrderId}/fulfillment`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              fulfillment_status: "fulfilled",
+              notes: "Packed, branded, and ready for pickup."
+            }
+          }
+        ),
+      (order) => {
+        setMerchandiseOrders((current) => [order, ...current.filter((item) => item.id !== order.id)]);
+        addLog(`Merchandise order fulfilled for ${order.buyer_name}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const createTicketSale = () => {
     if (!selectedOrganizationId || !selectedEventId) {
       addLog("Select an event first", "bad");
@@ -16128,13 +16270,17 @@ export default function HomePage() {
                 <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
+                <button type="button" onClick={createMerchandiseProductAndOrder} disabled={busyAction !== null}>Store</button>
+                <button type="button" onClick={fulfillSelectedMerchandiseOrder} disabled={busyAction !== null}>Fulfill</button>
               </div>
             </div>
             <div className="score-summary">
-              <strong>{grantDashboard?.awarded_amount ?? commercialSummary?.fundraising_raised ?? "0.00"}</strong>
-              <span>{grantDashboard ? `${grantDashboard.pipeline_status} grant pipeline` : "Raised"}</span>
+              <strong>{merchandiseDashboard?.gross_revenue ?? grantDashboard?.awarded_amount ?? commercialSummary?.fundraising_raised ?? "0.00"}</strong>
+              <span>{merchandiseDashboard ? "Store revenue" : grantDashboard ? `${grantDashboard.pipeline_status} grant pipeline` : "Raised"}</span>
               <small>
-                {grantDashboard
+                {merchandiseDashboard
+                  ? `${merchandiseDashboard.product_count} products · ${merchandiseDashboard.order_count} orders · ${merchandiseDashboard.low_stock_count} low stock`
+                  : grantDashboard
                   ? `${grantDashboard.opportunity_count} grants · ${grantDashboard.application_count} applications · ${grantDashboard.report_count} reports`
                   : commercialSummary
                     ? `${commercialSummary.active_sponsors} sponsors · ${commercialSummary.sponsorship_value} committed`
@@ -16220,8 +16366,51 @@ export default function HomePage() {
                 Impact metrics
                 <input value={grantForm.impact_metrics} onChange={(event) => setGrantForm({ ...grantForm, impact_metrics: event.target.value })} />
               </label>
+              <label>
+                Product
+                <input value={merchandiseForm.name} onChange={(event) => setMerchandiseForm({ ...merchandiseForm, name: event.target.value })} />
+              </label>
+              <label>
+                SKU
+                <input value={merchandiseForm.sku} onChange={(event) => setMerchandiseForm({ ...merchandiseForm, sku: event.target.value })} />
+              </label>
+              <label>
+                Price
+                <input type="number" min="0" value={merchandiseForm.price} onChange={(event) => setMerchandiseForm({ ...merchandiseForm, price: Number(event.target.value) })} />
+              </label>
+              <label>
+                Stock
+                <input type="number" min="0" value={merchandiseForm.inventory_count} onChange={(event) => setMerchandiseForm({ ...merchandiseForm, inventory_count: Number(event.target.value) })} />
+              </label>
+              <label>
+                Buyer
+                <input value={merchandiseForm.buyer_email} onChange={(event) => setMerchandiseForm({ ...merchandiseForm, buyer_email: event.target.value })} />
+              </label>
+              <label>
+                Quantity
+                <input type="number" min="1" value={merchandiseForm.quantity} onChange={(event) => setMerchandiseForm({ ...merchandiseForm, quantity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Size
+                <input value={merchandiseForm.size} onChange={(event) => setMerchandiseForm({ ...merchandiseForm, size: event.target.value })} />
+              </label>
+              <label>
+                Personalize
+                <input value={merchandiseForm.personalization_name} onChange={(event) => setMerchandiseForm({ ...merchandiseForm, personalization_name: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
+              {merchandiseDashboard ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Store margin {merchandiseDashboard.estimated_margin}</strong>
+                    <span>
+                      {merchandiseDashboard.units_sold} units sold · {merchandiseDashboard.queued_order_count} queued · {merchandiseDashboard.fulfilled_order_count} fulfilled
+                    </span>
+                    <span>{merchandiseDashboard.recommendations[0] ?? "Store is ready"}</span>
+                  </div>
+                </article>
+              ) : null}
               {grantDashboard ? (
                 <article className="task-card">
                   <div>
@@ -16295,6 +16484,32 @@ export default function HomePage() {
                     <span>{report.project_title ?? "Grant application"} · due {report.due_on}</span>
                   </div>
                 </article>
+              ))}
+              {merchandiseProducts.slice(0, 3).map((product) => (
+                <button
+                  type="button"
+                  key={product.id}
+                  className={`task-card ${product.id === selectedMerchandiseProductId ? "selected" : ""}`}
+                  onClick={() => setSelectedMerchandiseProductId(product.id)}
+                >
+                  <div>
+                    <strong>{product.name}</strong>
+                    <span>{product.sku} · {product.price} · stock {product.inventory_count}/{product.reorder_point}</span>
+                  </div>
+                </button>
+              ))}
+              {merchandiseOrders.slice(0, 3).map((order) => (
+                <button
+                  type="button"
+                  key={order.id}
+                  className={`task-card ${order.id === selectedMerchandiseOrderId ? "selected" : ""}`}
+                  onClick={() => setSelectedMerchandiseOrderId(order.id)}
+                >
+                  <div>
+                    <strong>{order.buyer_name} · {order.fulfillment_status}</strong>
+                    <span>{order.total_amount} · {order.lines.map((line) => `${line.quantity}x ${line.product_name ?? "item"}`).join(", ")}</span>
+                  </div>
+                </button>
               ))}
             </div>
           </div>

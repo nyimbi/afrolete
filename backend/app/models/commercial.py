@@ -140,6 +140,71 @@ class GrantReport(IdMixin, TimestampMixin, Base):
     external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
 
 
+class MerchandiseProduct(IdMixin, TimestampMixin, Base):
+    __tablename__ = "merchandise_products"
+    __table_args__ = (UniqueConstraint("organization_id", "sku"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    sku: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    inventory_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    reorder_point: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    personalization_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    variants: Mapped[str | None] = mapped_column(Text)
+    image_url: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[CommercialStatus] = mapped_column(
+        enum_type(CommercialStatus),
+        default=CommercialStatus.ACTIVE,
+        nullable=False,
+        index=True,
+    )
+
+
+class MerchandiseOrder(IdMixin, TimestampMixin, Base):
+    __tablename__ = "merchandise_orders"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    buyer_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    buyer_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    buyer_email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    delivery_method: Mapped[str] = mapped_column(String(80), default="pickup", nullable=False, index=True)
+    delivery_address: Mapped[str | None] = mapped_column(Text)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    external_payment_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    status: Mapped[CommercialStatus] = mapped_column(
+        enum_type(CommercialStatus),
+        default=CommercialStatus.PAID,
+        nullable=False,
+        index=True,
+    )
+    fulfillment_status: Mapped[str] = mapped_column(String(40), default="queued", nullable=False, index=True)
+    fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class MerchandiseOrderLine(IdMixin, TimestampMixin, Base):
+    __tablename__ = "merchandise_order_lines"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    merchandise_order_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("merchandise_orders.id"), index=True)
+    merchandise_product_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("merchandise_products.id"), index=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    size: Mapped[str | None] = mapped_column(String(40), index=True)
+    color: Mapped[str | None] = mapped_column(String(80), index=True)
+    personalization_name: Mapped[str | None] = mapped_column(String(120))
+    personalization_number: Mapped[str | None] = mapped_column(String(20))
+    fulfillment_status: Mapped[str] = mapped_column(String(40), default="queued", nullable=False, index=True)
+
+
 class TicketProduct(IdMixin, TimestampMixin, Base):
     __tablename__ = "ticket_products"
 

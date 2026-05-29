@@ -159,6 +159,103 @@ class GrantDashboardRead(BaseModel):
     next_deadline_on: date | None
 
 
+class MerchandiseProductCreate(BaseModel):
+    organization_id: UUID
+    team_id: UUID | None = None
+    name: str = Field(min_length=2, max_length=180)
+    sku: str = Field(min_length=2, max_length=80)
+    category: str = Field(min_length=2, max_length=100)
+    description: str | None = Field(default=None, max_length=4000)
+    price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    cost: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    inventory_count: int = Field(default=0, ge=0)
+    reorder_point: int = Field(default=0, ge=0)
+    personalization_enabled: bool = False
+    variants: str | None = Field(default=None, max_length=4000)
+    image_url: str | None = Field(default=None, max_length=500)
+
+
+class MerchandiseProductRead(MerchandiseProductCreate):
+    id: UUID
+    status: CommercialStatus
+
+
+class MerchandiseOrderLineCreate(BaseModel):
+    merchandise_product_id: UUID
+    quantity: int = Field(ge=1, le=100)
+    size: str | None = Field(default=None, max_length=40)
+    color: str | None = Field(default=None, max_length=80)
+    personalization_name: str | None = Field(default=None, max_length=120)
+    personalization_number: str | None = Field(default=None, max_length=20)
+
+
+class MerchandiseOrderCreate(BaseModel):
+    organization_id: UUID
+    buyer_person_id: UUID | None = None
+    buyer_name: str = Field(min_length=2, max_length=180)
+    buyer_email: str = Field(min_length=3, max_length=320)
+    delivery_method: str = Field(default="pickup", min_length=2, max_length=80)
+    delivery_address: str | None = Field(default=None, max_length=2000)
+    external_payment_reference: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=4000)
+    lines: list[MerchandiseOrderLineCreate] = Field(min_length=1)
+
+
+class MerchandiseOrderLineRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    merchandise_order_id: UUID
+    merchandise_product_id: UUID
+    product_name: str | None = None
+    sku: str | None = None
+    quantity: int
+    unit_price: Decimal
+    line_total: Decimal
+    size: str | None
+    color: str | None
+    personalization_name: str | None
+    personalization_number: str | None
+    fulfillment_status: str
+
+
+class MerchandiseOrderRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    buyer_person_id: UUID | None
+    buyer_name: str
+    buyer_email: str
+    delivery_method: str
+    delivery_address: str | None
+    total_amount: Decimal
+    currency: str
+    external_payment_reference: str | None
+    status: CommercialStatus
+    fulfillment_status: str
+    fulfilled_at: datetime | None
+    notes: str | None
+    lines: list[MerchandiseOrderLineRead]
+
+
+class MerchandiseFulfillmentUpdate(BaseModel):
+    fulfillment_status: str = Field(min_length=2, max_length=40)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class MerchandiseStoreDashboardRead(BaseModel):
+    organization_id: UUID
+    product_count: int
+    active_product_count: int
+    low_stock_count: int
+    order_count: int
+    queued_order_count: int
+    fulfilled_order_count: int
+    units_sold: int
+    gross_revenue: Decimal
+    estimated_margin: Decimal
+    recommendations: list[str]
+
+
 class TicketProductCreate(BaseModel):
     organization_id: UUID
     event_id: UUID

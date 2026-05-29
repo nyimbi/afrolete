@@ -2767,6 +2767,74 @@ export type GrantDashboardRead = {
   next_deadline_on: string | null;
 };
 
+export type MerchandiseProductRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  name: string;
+  sku: string;
+  category: string;
+  description: string | null;
+  price: string;
+  cost: string;
+  currency: string;
+  inventory_count: number;
+  reorder_point: number;
+  personalization_enabled: boolean;
+  variants: string | null;
+  image_url: string | null;
+  status: CommercialStatus;
+};
+
+export type MerchandiseOrderLineRead = {
+  id: UUID;
+  organization_id: UUID;
+  merchandise_order_id: UUID;
+  merchandise_product_id: UUID;
+  product_name: string | null;
+  sku: string | null;
+  quantity: number;
+  unit_price: string;
+  line_total: string;
+  size: string | null;
+  color: string | null;
+  personalization_name: string | null;
+  personalization_number: string | null;
+  fulfillment_status: string;
+};
+
+export type MerchandiseOrderRead = {
+  id: UUID;
+  organization_id: UUID;
+  buyer_person_id: UUID | null;
+  buyer_name: string;
+  buyer_email: string;
+  delivery_method: string;
+  delivery_address: string | null;
+  total_amount: string;
+  currency: string;
+  external_payment_reference: string | null;
+  status: CommercialStatus;
+  fulfillment_status: string;
+  fulfilled_at: string | null;
+  notes: string | null;
+  lines: MerchandiseOrderLineRead[];
+};
+
+export type MerchandiseStoreDashboardRead = {
+  organization_id: UUID;
+  product_count: number;
+  active_product_count: number;
+  low_stock_count: number;
+  order_count: number;
+  queued_order_count: number;
+  fulfilled_order_count: number;
+  units_sold: number;
+  gross_revenue: string;
+  estimated_margin: string;
+  recommendations: string[];
+};
+
 export type TicketProductRead = {
   id: UUID;
   organization_id: UUID;

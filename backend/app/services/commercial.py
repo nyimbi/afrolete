@@ -26,6 +26,9 @@ from app.models.commercial import (
     GrantApplication,
     GrantOpportunity,
     GrantReport,
+    MerchandiseOrder,
+    MerchandiseOrderLine,
+    MerchandiseProduct,
     Sponsor,
     SponsorshipAgreement,
     Ticket,
@@ -61,6 +64,12 @@ from app.schemas.commercial import (
     GrantDashboardRead,
     GrantOpportunityCreate,
     GrantReportCreate,
+    MerchandiseFulfillmentUpdate,
+    MerchandiseOrderCreate,
+    MerchandiseOrderLineRead,
+    MerchandiseOrderRead,
+    MerchandiseProductCreate,
+    MerchandiseStoreDashboardRead,
     PaymentSettlementRead,
     SponsorCreate,
     SponsorPortalAgreementRead,
@@ -331,6 +340,278 @@ def grant_recommendations(
         recommendations.append(f"Resolve {len(overdue_reports)} overdue grant report(s) before pursuing additional awards.")
     if not recommendations:
         recommendations.append("Grant pipeline is operating; keep deadlines, report evidence, and impact metrics current.")
+    return recommendations[:6]
+
+
+async def create_merchandise_product(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: MerchandiseProductCreate,
+    authz: AuthorizationService,
+) -> MerchandiseProduct:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    if payload.team_id is not None:
+        await get_team_for_organization(db, payload.team_id, payload.organization_id)
+    existing = await db.scalar(
+        select(MerchandiseProduct).where(
+            MerchandiseProduct.organization_id == payload.organization_id,
+            MerchandiseProduct.sku == payload.sku,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Merchandise SKU already exists")
+    product = MerchandiseProduct(**payload.model_dump())
+    db.add(product)
+    await db.commit()
+    await db.refresh(product)
+    return product
+
+
+async def list_merchandise_products(db: AsyncSession, organization_id: UUID) -> list[MerchandiseProduct]:
+    return list(
+        (
+            await db.scalars(
+                select(MerchandiseProduct)
+                .where(MerchandiseProduct.organization_id == organization_id)
+                .order_by(MerchandiseProduct.category, MerchandiseProduct.name)
+            )
+        ).all()
+    )
+
+
+async def create_merchandise_order(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: MerchandiseOrderCreate,
+    authz: AuthorizationService,
+) -> tuple[MerchandiseOrder, list[MerchandiseOrderLine], dict[UUID, MerchandiseProduct]]:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    product_ids = [line.merchandise_product_id for line in payload.lines]
+    products = list(
+        (
+            await db.scalars(
+                select(MerchandiseProduct).where(
+                    MerchandiseProduct.organization_id == payload.organization_id,
+                    MerchandiseProduct.id.in_(product_ids),
+                )
+            )
+        ).all()
+    )
+    products_by_id = {product.id: product for product in products}
+    if len(products_by_id) != len(set(product_ids)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merchandise product not found")
+    for line in payload.lines:
+        product = products_by_id[line.merchandise_product_id]
+        if product.status != CommercialStatus.ACTIVE:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{product.name} is not active")
+        if product.inventory_count < line.quantity:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{product.name} inventory is too low")
+        if (line.personalization_name or line.personalization_number) and not product.personalization_enabled:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{product.name} does not allow personalization")
+
+    currency = products[0].currency if products else "USD"
+    total = sum((products_by_id[line.merchandise_product_id].price * line.quantity for line in payload.lines), Decimal("0"))
+    order = MerchandiseOrder(
+        organization_id=payload.organization_id,
+        buyer_person_id=payload.buyer_person_id,
+        buyer_name=payload.buyer_name,
+        buyer_email=payload.buyer_email,
+        delivery_method=payload.delivery_method,
+        delivery_address=payload.delivery_address,
+        total_amount=total,
+        currency=currency,
+        external_payment_reference=payload.external_payment_reference,
+        notes=payload.notes,
+        status=CommercialStatus.PAID,
+        fulfillment_status="queued",
+    )
+    db.add(order)
+    await db.flush()
+    order_lines: list[MerchandiseOrderLine] = []
+    for line in payload.lines:
+        product = products_by_id[line.merchandise_product_id]
+        product.inventory_count -= line.quantity
+        order_line = MerchandiseOrderLine(
+            organization_id=payload.organization_id,
+            merchandise_order_id=order.id,
+            merchandise_product_id=product.id,
+            quantity=line.quantity,
+            unit_price=product.price,
+            line_total=product.price * line.quantity,
+            size=line.size,
+            color=line.color,
+            personalization_name=line.personalization_name,
+            personalization_number=line.personalization_number,
+            fulfillment_status="queued",
+        )
+        db.add(order_line)
+        order_lines.append(order_line)
+    await db.commit()
+    await db.refresh(order)
+    for line in order_lines:
+        await db.refresh(line)
+    return order, order_lines, products_by_id
+
+
+async def list_merchandise_orders(db: AsyncSession, organization_id: UUID) -> list[tuple[MerchandiseOrder, list[MerchandiseOrderLine], dict[UUID, MerchandiseProduct]]]:
+    orders = list(
+        (
+            await db.scalars(
+                select(MerchandiseOrder)
+                .where(MerchandiseOrder.organization_id == organization_id)
+                .order_by(MerchandiseOrder.created_at.desc())
+            )
+        ).all()
+    )
+    if not orders:
+        return []
+    order_ids = [order.id for order in orders]
+    lines = list(
+        (
+            await db.scalars(
+                select(MerchandiseOrderLine)
+                .where(MerchandiseOrderLine.merchandise_order_id.in_(order_ids))
+                .order_by(MerchandiseOrderLine.created_at)
+            )
+        ).all()
+    )
+    product_ids = list({line.merchandise_product_id for line in lines})
+    products = list(
+        (
+            await db.scalars(
+                select(MerchandiseProduct).where(MerchandiseProduct.id.in_(product_ids))
+            )
+        ).all()
+    ) if product_ids else []
+    products_by_id = {product.id: product for product in products}
+    lines_by_order: dict[UUID, list[MerchandiseOrderLine]] = {}
+    for line in lines:
+        lines_by_order.setdefault(line.merchandise_order_id, []).append(line)
+    return [(order, lines_by_order.get(order.id, []), products_by_id) for order in orders]
+
+
+async def update_merchandise_fulfillment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    merchandise_order_id: UUID,
+    payload: MerchandiseFulfillmentUpdate,
+    authz: AuthorizationService,
+) -> tuple[MerchandiseOrder, list[MerchandiseOrderLine], dict[UUID, MerchandiseProduct]]:
+    order = await db.get(MerchandiseOrder, merchandise_order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merchandise order not found")
+    await ensure_manage_commercial(authz, identity, order.organization_id)
+    lines = list(
+        (
+            await db.scalars(
+                select(MerchandiseOrderLine).where(MerchandiseOrderLine.merchandise_order_id == order.id)
+            )
+        ).all()
+    )
+    order.fulfillment_status = payload.fulfillment_status
+    order.notes = payload.notes if payload.notes is not None else order.notes
+    if payload.fulfillment_status in {"fulfilled", "shipped", "picked_up"}:
+        order.fulfilled_at = datetime.now(UTC)
+        for line in lines:
+            line.fulfillment_status = payload.fulfillment_status
+    await db.commit()
+    await db.refresh(order)
+    product_ids = [line.merchandise_product_id for line in lines]
+    products = list(
+        (
+            await db.scalars(select(MerchandiseProduct).where(MerchandiseProduct.id.in_(product_ids)))
+        ).all()
+    ) if product_ids else []
+    return order, lines, {product.id: product for product in products}
+
+
+async def merchandise_store_dashboard(db: AsyncSession, organization_id: UUID) -> MerchandiseStoreDashboardRead:
+    products = await list_merchandise_products(db, organization_id)
+    order_rows = await list_merchandise_orders(db, organization_id)
+    orders = [order for order, _, _ in order_rows]
+    lines = [line for _, order_lines, _ in order_rows for line in order_lines]
+    cost_by_product = {product.id: product.cost for product in products}
+    gross_revenue = sum((order.total_amount for order in orders), Decimal("0"))
+    estimated_cost = sum((cost_by_product.get(line.merchandise_product_id, Decimal("0")) * line.quantity for line in lines), Decimal("0"))
+    low_stock_products = [
+        product for product in products if product.inventory_count <= product.reorder_point and product.status == CommercialStatus.ACTIVE
+    ]
+    return MerchandiseStoreDashboardRead(
+        organization_id=organization_id,
+        product_count=len(products),
+        active_product_count=sum(1 for product in products if product.status == CommercialStatus.ACTIVE),
+        low_stock_count=len(low_stock_products),
+        order_count=len(orders),
+        queued_order_count=sum(1 for order in orders if order.fulfillment_status in {"queued", "processing"}),
+        fulfilled_order_count=sum(1 for order in orders if order.fulfillment_status in {"fulfilled", "shipped", "picked_up"}),
+        units_sold=sum(line.quantity for line in lines),
+        gross_revenue=gross_revenue,
+        estimated_margin=gross_revenue - estimated_cost,
+        recommendations=merchandise_recommendations(products, orders, low_stock_products),
+    )
+
+
+def merchandise_order_read(
+    order: MerchandiseOrder,
+    lines: list[MerchandiseOrderLine],
+    products_by_id: dict[UUID, MerchandiseProduct],
+) -> MerchandiseOrderRead:
+    return MerchandiseOrderRead(
+        id=order.id,
+        organization_id=order.organization_id,
+        buyer_person_id=order.buyer_person_id,
+        buyer_name=order.buyer_name,
+        buyer_email=order.buyer_email,
+        delivery_method=order.delivery_method,
+        delivery_address=order.delivery_address,
+        total_amount=order.total_amount,
+        currency=order.currency,
+        external_payment_reference=order.external_payment_reference,
+        status=order.status,
+        fulfillment_status=order.fulfillment_status,
+        fulfilled_at=order.fulfilled_at,
+        notes=order.notes,
+        lines=[
+            MerchandiseOrderLineRead(
+                id=line.id,
+                organization_id=line.organization_id,
+                merchandise_order_id=line.merchandise_order_id,
+                merchandise_product_id=line.merchandise_product_id,
+                product_name=products_by_id.get(line.merchandise_product_id).name if products_by_id.get(line.merchandise_product_id) else None,
+                sku=products_by_id.get(line.merchandise_product_id).sku if products_by_id.get(line.merchandise_product_id) else None,
+                quantity=line.quantity,
+                unit_price=line.unit_price,
+                line_total=line.line_total,
+                size=line.size,
+                color=line.color,
+                personalization_name=line.personalization_name,
+                personalization_number=line.personalization_number,
+                fulfillment_status=line.fulfillment_status,
+            )
+            for line in lines
+        ],
+    )
+
+
+def merchandise_recommendations(
+    products: list[MerchandiseProduct],
+    orders: list[MerchandiseOrder],
+    low_stock_products: list[MerchandiseProduct],
+) -> list[str]:
+    recommendations: list[str] = []
+    if not products:
+        recommendations.append("Create first store products for jerseys, training gear, supporter items, or event merchandise.")
+    if low_stock_products:
+        recommendations.append(f"Reorder {low_stock_products[0].name}; stock is at or below the reorder point.")
+    if not orders and products:
+        recommendations.append("Publish the store link through public site, family portal, and matchday QR channels.")
+    if any(order.fulfillment_status == "queued" for order in orders):
+        recommendations.append("Pack queued orders and update fulfillment status for pickup or shipping.")
+    if not any(product.personalization_enabled for product in products):
+        recommendations.append("Offer personalized jerseys or training tops to increase store conversion.")
+    if not recommendations:
+        recommendations.append("Merchandise store is active; keep stock, fulfillment, and campaign links current.")
     return recommendations[:6]
 
 

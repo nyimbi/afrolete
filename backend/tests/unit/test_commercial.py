@@ -176,6 +176,80 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     assert grant_dashboard["pipeline_status"] in {"ready", "attention"}
     assert grant_dashboard["recommendations"]
 
+    merchandise_product = client.post(
+        "/api/v1/commercial/merchandise/products",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "name": "Home jersey",
+            "sku": "HOME-JERSEY-2026",
+            "category": "jersey",
+            "description": "Replica home jersey with optional player name and number.",
+            "price": "45.00",
+            "cost": "22.00",
+            "currency": "USD",
+            "inventory_count": 12,
+            "reorder_point": 5,
+            "personalization_enabled": True,
+            "variants": "Youth S, Youth M, Youth L, Adult S, Adult M",
+            "image_url": "https://store.example/home-jersey.png",
+        },
+    ).json()
+    assert merchandise_product["status"] == "active"
+    assert merchandise_product["inventory_count"] == 12
+
+    merchandise_order = client.post(
+        "/api/v1/commercial/merchandise/orders",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "buyer_name": "Family Buyer",
+            "buyer_email": "family@example.com",
+            "delivery_method": "pickup",
+            "external_payment_reference": "MERCH-1",
+            "notes": "Pick up at Saturday match.",
+            "lines": [
+                {
+                    "merchandise_product_id": merchandise_product["id"],
+                    "quantity": 2,
+                    "size": "Youth M",
+                    "color": "Green",
+                    "personalization_name": "Amina",
+                    "personalization_number": "10",
+                }
+            ],
+        },
+    ).json()
+    assert merchandise_order["total_amount"] == "90.00"
+    assert merchandise_order["fulfillment_status"] == "queued"
+    assert merchandise_order["lines"][0]["product_name"] == "Home jersey"
+    assert merchandise_order["lines"][0]["line_total"] == "90.00"
+
+    merchandise_products = client.get(
+        f"/api/v1/commercial/merchandise/products?organization_id={organization['id']}"
+    ).json()
+    assert merchandise_products[0]["inventory_count"] == 10
+
+    fulfilled_order = client.patch(
+        f"/api/v1/commercial/merchandise/orders/{merchandise_order['id']}/fulfillment",
+        headers=identity_headers,
+        json={"fulfillment_status": "fulfilled", "notes": "Packed and picked up."},
+    ).json()
+    assert fulfilled_order["fulfillment_status"] == "fulfilled"
+    assert fulfilled_order["fulfilled_at"] is not None
+    assert fulfilled_order["lines"][0]["fulfillment_status"] == "fulfilled"
+
+    merchandise_dashboard = client.get(
+        f"/api/v1/commercial/merchandise/dashboard?organization_id={organization['id']}"
+    ).json()
+    assert merchandise_dashboard["product_count"] == 1
+    assert merchandise_dashboard["order_count"] == 1
+    assert merchandise_dashboard["fulfilled_order_count"] == 1
+    assert merchandise_dashboard["units_sold"] == 2
+    assert merchandise_dashboard["gross_revenue"] == "90.00"
+    assert merchandise_dashboard["estimated_margin"] == "46.00"
+
     product = client.post(
         "/api/v1/commercial/tickets/products",
         headers=identity_headers,
