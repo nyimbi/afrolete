@@ -26,6 +26,13 @@ import type {
 } from "@/types/operations";
 
 type RegistrationMode = "organization" | "player";
+type RegistrationJourneyStatus = "done" | "active" | "blocked" | "todo";
+
+type RegistrationJourneyStep = {
+  label: string;
+  detail: string;
+  status: RegistrationJourneyStatus;
+};
 
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -137,6 +144,142 @@ export default function RegistrationPage() {
 
   const requestIdentity = useMemo(() => (keycloakEnabled ? undefined : identity), [identity, keycloakEnabled]);
   const signedInLabel = authSession?.email ?? authSession?.name ?? identity.email;
+  const ownerAccountReady = !keycloakEnabled || authSession !== null;
+  const organizationProfileReady = organizationForm.name.trim() !== "";
+  const organizationAddressBlocked = handleAvailability?.subdomain_available === false;
+  const organizationAddressReady = organizationForm.subdomain.trim() !== "" && !organizationAddressBlocked;
+  const organizationSettingsReady = organizationForm.registration_open
+    ? organizationForm.registration_required_documents.trim() !== ""
+    : true;
+  const starterProgramReady = organizationForm.starter_team_name.trim() !== "";
+  const selectedSiteReady = selectedSite !== null;
+  const inquiryReady = submittedInquiry !== null;
+  const accountHandoffReady = !keycloakEnabled || (submittedInquiry !== null && isSessionForInquiry(authSession, submittedInquiry));
+  const packetReady = registrationPacket?.packet_complete ?? false;
+  const paymentReady =
+    (registrationPacket?.payment_complete ?? false) ||
+    ["paid", "waived", "not_required"].includes(submittedInquiry?.payment_status ?? "");
+  const organizationJourneySteps = useMemo<RegistrationJourneyStep[]>(
+    () => [
+      {
+        label: "Owner account",
+        detail: ownerAccountReady ? signedInLabel : "Keycloak account needed",
+        status: ownerAccountReady ? "done" : "active"
+      },
+      {
+        label: "Workspace profile",
+        detail: organizationProfileReady ? organizationForm.organization_type : "Name and type",
+        status: !ownerAccountReady ? "blocked" : organizationProfileReady ? "done" : "active"
+      },
+      {
+        label: "Public address",
+        detail: organizationAddressBlocked
+          ? "Choose another address"
+          : organizationForm.subdomain.trim() || "Generated from name",
+        status: !ownerAccountReady || !organizationProfileReady
+          ? "blocked"
+          : organizationAddressBlocked
+            ? "active"
+            : organizationAddressReady
+              ? "done"
+              : "todo"
+      },
+      {
+        label: "Registration rules",
+        detail: organizationForm.registration_open ? "Open to families" : "Closed",
+        status: !ownerAccountReady || organizationAddressBlocked
+          ? "blocked"
+          : organizationSettingsReady
+            ? "done"
+            : "active"
+      },
+      {
+        label: "Starter program",
+        detail: starterProgramReady ? organizationForm.starter_team_name : "Optional first team",
+        status: !ownerAccountReady || organizationAddressBlocked
+          ? "blocked"
+          : starterProgramReady
+            ? "done"
+            : "todo"
+      },
+      {
+        label: "Launch",
+        detail: onboarding ? "Workspace created" : "Create workspace",
+        status: onboarding ? "done" : ownerAccountReady && organizationProfileReady && !organizationAddressBlocked ? "active" : "blocked"
+      }
+    ],
+    [
+      onboarding,
+      organizationAddressBlocked,
+      organizationAddressReady,
+      organizationForm.organization_type,
+      organizationForm.registration_open,
+      organizationForm.starter_team_name,
+      organizationForm.subdomain,
+      organizationProfileReady,
+      organizationSettingsReady,
+      ownerAccountReady,
+      signedInLabel,
+      starterProgramReady
+    ]
+  );
+  const playerJourneySteps = useMemo<RegistrationJourneyStep[]>(
+    () => [
+      {
+        label: "Organization",
+        detail: selectedSite ? selectedSite.public_name ?? selectedSite.name : "Choose club or school",
+        status: selectedSiteReady ? "done" : "active"
+      },
+      {
+        label: "Family inquiry",
+        detail: submittedInquiry ? submittedInquiry.athlete_name : "Athlete and guardian",
+        status: !selectedSiteReady ? "blocked" : inquiryReady ? "done" : "active"
+      },
+      {
+        label: "Account handoff",
+        detail: accountReadiness ? registrationAccountStatusLabel(accountReadiness.account_status) : "Guardian account",
+        status: !inquiryReady
+          ? "blocked"
+          : accountHandoffReady
+            ? "done"
+            : accountReadiness?.can_create_account || accountReadiness?.can_sign_in
+              ? "active"
+              : "todo"
+      },
+      {
+        label: "Packet",
+        detail: registrationPacket
+          ? registrationPacket.packet_complete
+            ? "Ready"
+            : `${registrationPacket.missing_documents.length} documents missing`
+          : "Documents and consent",
+        status: !inquiryReady ? "blocked" : packetReady ? "done" : "active"
+      },
+      {
+        label: "Payment",
+        detail: submittedInquiry?.payment_status ?? "Not started",
+        status: !inquiryReady ? "blocked" : paymentReady ? "done" : packetReady ? "active" : "todo"
+      },
+      {
+        label: "Admissions",
+        detail: packetReady ? "Ready for staff" : "Waiting on packet",
+        status: packetReady ? "done" : "blocked"
+      }
+    ],
+    [
+      accountHandoffReady,
+      accountReadiness,
+      inquiryReady,
+      packetReady,
+      paymentReady,
+      registrationPacket,
+      selectedSite,
+      selectedSiteReady,
+      submittedInquiry
+    ]
+  );
+  const registrationJourney = mode === "organization" ? organizationJourneySteps : playerJourneySteps;
+  const registrationJourneyComplete = registrationJourney.filter((step) => step.status === "done").length;
 
   useEffect(() => {
     if (!keycloakEnabled) {
@@ -227,6 +370,27 @@ export default function RegistrationPage() {
   const signOut = () => {
     clearStoredAuthSession();
     setAuthSession(null);
+  };
+
+  const updateOrganizationName = (name: string) => {
+    setHandleAvailability(null);
+    setOrganizationForm((current) => {
+      const currentGeneratedSubdomain = organizationHandleFromName(current.name);
+      const shouldSyncPublicName =
+        current.public_name.trim() === "" ||
+        current.public_name === current.name ||
+        current.public_name === defaultOrganizationForm.public_name;
+      const shouldSyncSubdomain =
+        current.subdomain.trim() === "" ||
+        current.subdomain === currentGeneratedSubdomain ||
+        current.subdomain === defaultOrganizationForm.subdomain;
+      return {
+        ...current,
+        name,
+        public_name: shouldSyncPublicName ? name : current.public_name,
+        subdomain: shouldSyncSubdomain ? organizationHandleFromName(name) : current.subdomain
+      };
+    });
   };
 
   const createOrganization = async (event: FormEvent<HTMLFormElement>) => {
@@ -647,6 +811,27 @@ export default function RegistrationPage() {
 
         {error ? <p className="form-error register-error">{error}</p> : null}
 
+        <section className="register-journey" aria-label="Registration journey">
+          <div className="register-journey-head">
+            <div>
+              <p className="section-label">{mode === "organization" ? "Workspace launch" : "Family onboarding"}</p>
+              <h2>{registrationJourneyComplete}/{registrationJourney.length} stages ready</h2>
+            </div>
+            <span>{mode === "organization" ? organizationForm.subdomain || organizationForm.name : selectedSite?.slug ?? "directory"}</span>
+          </div>
+          <div className="register-journey-meter" aria-hidden="true">
+            <span style={{ width: `${(registrationJourneyComplete / registrationJourney.length) * 100}%` }} />
+          </div>
+          <ol className="register-journey-steps">
+            {registrationJourney.map((step) => (
+              <li key={step.label} data-status={step.status}>
+                <strong>{step.label}</strong>
+                <small>{step.detail}</small>
+              </li>
+            ))}
+          </ol>
+        </section>
+
         {mode === "organization" ? (
           <section className="register-workspace">
             <form className="register-panel" onSubmit={createOrganization}>
@@ -684,7 +869,7 @@ export default function RegistrationPage() {
               <div className="register-inline-grid">
                 <label>
                   Organization name
-                  <input value={organizationForm.name} onChange={(event) => setOrganizationForm({ ...organizationForm, name: event.target.value })} required />
+                  <input value={organizationForm.name} onChange={(event) => updateOrganizationName(event.target.value)} required />
                 </label>
                 <label>
                   Type
@@ -705,7 +890,13 @@ export default function RegistrationPage() {
                 </label>
                 <label>
                   Subdomain
-                  <input value={organizationForm.subdomain} onChange={(event) => setOrganizationForm({ ...organizationForm, subdomain: event.target.value })} />
+                  <input
+                    value={organizationForm.subdomain}
+                    onChange={(event) => {
+                      setHandleAvailability(null);
+                      setOrganizationForm({ ...organizationForm, subdomain: event.target.value });
+                    }}
+                  />
                 </label>
                 <div className="register-handle-status">
                   <button type="button" onClick={checkOrganizationHandles} disabled={busy !== ""}>
@@ -1243,6 +1434,15 @@ function splitCsv(value: string): string[] {
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+function organizationHandleFromName(value: string): string {
+  const handle = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return handle || "organization";
 }
 
 function subdomainSuggestionFromError(caught: unknown): string | null {

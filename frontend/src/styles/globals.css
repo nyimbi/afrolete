@@ -2939,6 +2939,126 @@ textarea:focus {
   border-color: var(--teal);
 }
 
+.register-journey {
+  border: 1px solid color-mix(in srgb, var(--teal) 18%, var(--line));
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  margin-bottom: 14px;
+  padding: 14px;
+}
+
+.register-journey-head {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.register-journey-head h2 {
+  font-size: 20px;
+  margin: 4px 0 0;
+}
+
+.register-journey-head > span {
+  background: #eef6f2;
+  border: 1px solid color-mix(in srgb, var(--teal) 24%, var(--line));
+  border-radius: 8px;
+  color: var(--teal);
+  font-size: 12px;
+  font-weight: 800;
+  max-width: 280px;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  text-align: right;
+}
+
+.register-journey-meter {
+  background: #eef2ed;
+  border-radius: 999px;
+  height: 8px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.register-journey-meter span {
+  background: linear-gradient(90deg, var(--teal), #b7791f);
+  display: block;
+  height: 100%;
+  min-width: 8px;
+  transition: width 180ms ease;
+}
+
+.register-journey-steps {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.register-journey-steps li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  min-height: 76px;
+  padding: 10px;
+  position: relative;
+}
+
+.register-journey-steps li::before {
+  border-radius: 999px;
+  content: "";
+  height: 9px;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 9px;
+}
+
+.register-journey-steps li[data-status="done"] {
+  background: color-mix(in srgb, var(--teal) 8%, #fff);
+  border-color: color-mix(in srgb, var(--teal) 30%, var(--line));
+}
+
+.register-journey-steps li[data-status="done"]::before {
+  background: var(--teal);
+}
+
+.register-journey-steps li[data-status="active"] {
+  background: color-mix(in srgb, #b7791f 9%, #fff);
+  border-color: color-mix(in srgb, #b7791f 36%, var(--line));
+}
+
+.register-journey-steps li[data-status="active"]::before {
+  background: #b7791f;
+}
+
+.register-journey-steps li[data-status="blocked"] {
+  color: var(--muted);
+}
+
+.register-journey-steps li[data-status="blocked"]::before {
+  background: #cbd5d0;
+}
+
+.register-journey-steps li[data-status="todo"]::before {
+  background: #d8c7a2;
+}
+
+.register-journey-steps strong,
+.register-journey-steps small {
+  display: block;
+  overflow-wrap: anywhere;
+  padding-right: 14px;
+}
+
+.register-journey-steps small {
+  color: var(--muted);
+}
+
 .register-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.75fr);
@@ -4039,6 +4159,7 @@ textarea:focus {
   .admission-review-grid,
   .register-hero,
   .register-workspace,
+  .register-journey-steps,
   .register-inline-grid,
   .register-handle-status,
   .public-ai-hero-grid,
@@ -4122,6 +4243,15 @@ textarea:focus {
 
   .register-mode-switch {
     grid-template-columns: 1fr;
+  }
+
+  .register-journey-head {
+    display: grid;
+  }
+
+  .register-journey-head > span {
+    max-width: none;
+    text-align: left;
   }
 
   .public-ai-copy h1 {
