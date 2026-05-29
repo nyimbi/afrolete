@@ -63,6 +63,9 @@ export default function FamilyPortalPage() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [inviteRelationshipId, setInviteRelationshipId] = useState("");
   const [loadedInviteKey, setLoadedInviteKey] = useState("");
+  const [focusedRegistrationId, setFocusedRegistrationId] = useState("");
+  const [autoloadRequested, setAutoloadRequested] = useState(false);
+  const [loadedAutoloadKey, setLoadedAutoloadKey] = useState("");
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
   const [registrations, setRegistrations] = useState<FamilyRegistrationInquiryRead[]>([]);
   const [dashboard, setDashboard] = useState<FamilyDashboardRead | null>(null);
@@ -103,6 +106,8 @@ export default function FamilyPortalPage() {
     const params = new URLSearchParams(window.location.search);
     const organizationParam = params.get("organization_id") ?? params.get("organizationId");
     const relationshipParam = params.get("relationship_id") ?? "";
+    const registrationParam = params.get("inquiry_id") ?? params.get("registration_id") ?? "";
+    const autoloadParam = params.get("autoload") === "1" || params.get("load") === "1";
     const emailParam = params.get("guardian_email") ?? params.get("email");
     const nameParam = params.get("guardian_name") ?? params.get("name") ?? emailParam;
     const subParam = params.get("guardian_sub") ?? params.get("sub");
@@ -124,6 +129,8 @@ export default function FamilyPortalPage() {
     setOrganizationId(nextOrganizationId);
     setIdentity(nextIdentity);
     setInviteRelationshipId(nextInviteRelationshipId);
+    setFocusedRegistrationId(registrationParam);
+    setAutoloadRequested(autoloadParam || Boolean(registrationParam && nextOrganizationId));
     if (keycloakEnabled) {
       completeKeycloakCallbackFromUrl()
         .then((session) => setAuthSession(session ?? getStoredAuthSession()))
@@ -254,12 +261,43 @@ export default function FamilyPortalPage() {
       setSelectedRecipientId((current) =>
         inbox.some((item) => item.recipient_id === current) ? current : inbox[0]?.recipient_id ?? ""
       );
+      if (focusedRegistrationId && registrationRows.every((registration) => registration.id !== focusedRegistrationId)) {
+        setFocusedRegistrationId("");
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Inbox load failed");
     } finally {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!autoloadRequested || !organizationId) {
+      return;
+    }
+    const key = `${organizationId}:${identity.email}:${focusedRegistrationId || "workspace"}`;
+    if (loadedAutoloadKey === key) {
+      return;
+    }
+    if (keycloakEnabled && authSession === null) {
+      return;
+    }
+    if (inviteEmailMismatch) {
+      return;
+    }
+    setLoadedAutoloadKey(key);
+    void loadWorkspace();
+  }, [
+    autoloadRequested,
+    authSession,
+    focusedRegistrationId,
+    identity.email,
+    inviteEmailMismatch,
+    keycloakEnabled,
+    loadedAutoloadKey,
+    organizationId,
+    requestIdentity
+  ]);
 
   useEffect(() => {
     if (!inviteRelationshipId || !organizationId || loadedInviteKey === inviteRelationshipId) {
@@ -583,11 +621,16 @@ export default function FamilyPortalPage() {
             <div>
               <p className="section-label">Registration</p>
               <h2>Pending player onboarding</h2>
-              <p>Track inquiries, packet readiness, missing documents, and account handoff before staff conversion.</p>
+              <p>
+                {focusedRegistrationId ? "This family portal was opened from a registration handoff." : "Track inquiries, packet readiness, missing documents, and account handoff before staff conversion."}
+              </p>
             </div>
             <div className="family-appeal-list">
               {registrations.map((registration) => (
-                <article key={registration.id}>
+                <article
+                  key={registration.id}
+                  className={registration.id === focusedRegistrationId ? "family-registration-focus" : undefined}
+                >
                   <strong>{registration.athlete_name}</strong>
                   <span>
                     {registration.organization_public_name ?? registration.organization_name} ·{" "}

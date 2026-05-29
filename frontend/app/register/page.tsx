@@ -1139,9 +1139,11 @@ function subdomainSuggestionFromError(caught: unknown): string | null {
 function familyPortalHref(organizationId: string, inquiry: RegistrationInquiryRead): string {
   const params = new URLSearchParams({
     organization_id: organizationId,
+    inquiry_id: inquiry.id,
     guardian_email: inquiry.email,
     guardian_name: inquiry.guardian_name ?? inquiry.email,
-    athlete_name: inquiry.athlete_name
+    athlete_name: inquiry.athlete_name,
+    autoload: "1"
   });
   return `/family?${params.toString()}`;
 }

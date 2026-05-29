@@ -1304,6 +1304,12 @@ textarea:focus {
   padding: 12px;
 }
 
+.family-appeal-list article.family-registration-focus {
+  border-color: color-mix(in srgb, var(--teal) 54%, var(--line));
+  background: color-mix(in srgb, var(--teal) 10%, #fff);
+  box-shadow: inset 4px 0 0 var(--teal);
+}
+
 .family-appeal-list strong,
 .family-appeal-list span,
 .family-appeal-list small {
