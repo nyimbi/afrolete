@@ -256,6 +256,10 @@ export default function AdmissionsPage() {
     }
     const form = reviewForms[inquiry.id];
     const subject = `Registration follow-up for ${inquiry.athlete_name}`;
+    const resumeLink = selectedOrganization ? registrationResumeHref(selectedOrganization, inquiry) : "";
+    const missingDocuments = inquiry.missing_documents.length
+      ? `Missing documents: ${inquiry.missing_documents.join(", ")}.`
+      : null;
     const body = [
       `Hello ${inquiry.guardian_name || inquiry.athlete_name},`,
       "",
@@ -263,7 +267,10 @@ export default function AdmissionsPage() {
       inquiry.verification_status === "ready_for_review"
         ? "Your packet is ready for staff verification."
         : "We still need a few details before staff can verify the packet.",
+      missingDocuments,
+      inquiry.next_steps.length ? `Next step: ${inquiry.next_steps[0]}` : null,
       inquiry.payment_status ? `Payment status: ${inquiry.payment_status}.` : null,
+      resumeLink ? `Continue your registration packet: ${resumeLink}` : null,
       form?.review_notes ? `Staff note: ${form.review_notes}` : null,
       "",
       "Please reply with any questions or missing information."
@@ -467,8 +474,20 @@ export default function AdmissionsPage() {
                   <span>{inquiry.sport_interest ?? "sport open"}</span>
                   <span>{inquiry.status}</span>
                   <span>payment {inquiry.payment_status}</span>
+                  <span>{inquiry.packet_complete ? "packet complete" : "packet incomplete"}</span>
                   <span>{inquiry.packet_submitted_at ? `packet ${new Date(inquiry.packet_submitted_at).toLocaleDateString()}` : "packet not submitted"}</span>
+                  <span>{inquiry.guardian_contact_status.replaceAll("_", " ")}</span>
                 </div>
+                {inquiry.missing_documents.length > 0 || inquiry.next_steps.length > 0 ? (
+                  <div className="admission-facts">
+                    {inquiry.missing_documents.length > 0 ? (
+                      <span>missing {inquiry.missing_documents.join(", ")}</span>
+                    ) : null}
+                    {inquiry.next_steps.slice(0, 2).map((step) => (
+                      <span key={step}>{step}</span>
+                    ))}
+                  </div>
+                ) : null}
 
                 <div className="admission-review-grid">
                   <label>
@@ -545,6 +564,14 @@ function Metric({ label, value }: { label: string; value: number }) {
 function StatusPill({ status }: { status: string }) {
   const normalized = status.replaceAll("_", " ");
   return <span className={`admission-status ${status}`}>{normalized}</span>;
+}
+
+function registrationResumeHref(organization: OrganizationRead, inquiry: RegistrationInquiryRead): string {
+  const params = new URLSearchParams({
+    inquiry_id: inquiry.id,
+    email: inquiry.email
+  });
+  return `${window.location.origin}/site/${organization.subdomain || organization.slug}?${params.toString()}`;
 }
 
 function toDateTimeLocalValue(value: string | null): string {

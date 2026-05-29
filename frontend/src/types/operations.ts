@@ -453,6 +453,9 @@ export type RegistrationInquiryRead = {
   payment_status: string;
   verification_status: string;
   packet_submitted_at: string | null;
+  missing_documents: string[];
+  packet_complete: boolean;
+  next_steps: string[];
   created_at: string;
 };
 

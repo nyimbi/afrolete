@@ -269,6 +269,7 @@ def _public_deliverables(sponsor_id: UUID, sponsorships) -> list[str]:
 
 
 def to_registration_inquiry_read(inquiry) -> RegistrationInquiryRead:
+    packet = registration_packet_summary(inquiry)
     return RegistrationInquiryRead(
         id=inquiry.id,
         organization_id=inquiry.organization_id,
@@ -302,6 +303,9 @@ def to_registration_inquiry_read(inquiry) -> RegistrationInquiryRead:
         payment_status=inquiry.payment_status,
         verification_status=inquiry.verification_status,
         packet_submitted_at=inquiry.packet_submitted_at,
+        missing_documents=packet["missing_documents"],
+        packet_complete=packet["packet_complete"],
+        next_steps=packet["next_steps"],
         created_at=inquiry.created_at,
     )
 

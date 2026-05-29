@@ -250,6 +250,9 @@ class RegistrationInquiryRead(BaseModel):
     payment_status: str
     verification_status: str
     packet_submitted_at: datetime | None
+    missing_documents: list[str] = Field(default_factory=list)
+    packet_complete: bool = False
+    next_steps: list[str] = Field(default_factory=list)
     created_at: datetime
 
 

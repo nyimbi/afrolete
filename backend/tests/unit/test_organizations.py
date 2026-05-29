@@ -199,6 +199,9 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert inquiry["payment_status"] == "pending"
     assert inquiry["guardian_person_id"]
     assert inquiry["guardian_contact_status"] == "pending_account"
+    assert inquiry["packet_complete"] is False
+    assert "proof_of_age" in inquiry["missing_documents"]
+    assert any("Upload missing documents" in step for step in inquiry["next_steps"])
 
     repeat_inquiry_response = client.post(
         "/api/v1/organizations/public/makini-track/registration-inquiries",
@@ -345,6 +348,8 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert packet["payment_complete"] is False
     assert packet["inquiry"]["status"] == "reviewing"
     assert packet["inquiry"]["verification_status"] == "packet_incomplete"
+    assert packet["inquiry"]["packet_complete"] is False
+    assert packet["inquiry"]["missing_documents"] == []
     assert "Record payment, waiver, or not-required status." in packet["next_steps"]
 
     payment_session_response = client.post(
