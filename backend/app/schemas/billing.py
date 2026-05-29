@@ -283,6 +283,42 @@ class BillingSubscriptionLifecycleRead(BaseModel):
     subscription: SubscriptionRead
 
 
+class BillingEntitlementEnforcementCreate(BaseModel):
+    organization_id: UUID
+    subscription_id: UUID | None = None
+    as_of: date | None = None
+    dry_run: bool = False
+
+
+class BillingEntitlementEnforcementItemRead(BaseModel):
+    entitlement_id: UUID
+    subscription_id: UUID
+    feature_key: str
+    previous_status: str
+    status: str
+    limit_value: int | None
+    used_value: int
+    remaining_value: int | None
+    subscription_status: SubscriptionStatus
+    action: str
+    reason: str
+    changed: bool
+
+
+class BillingEntitlementEnforcementRead(BaseModel):
+    organization_id: UUID
+    subscription_id: UUID | None
+    as_of: date
+    dry_run: bool
+    checked_count: int
+    would_update_count: int
+    updated_count: int
+    blocked_count: int
+    over_limit_count: int
+    active_count: int
+    items: list[BillingEntitlementEnforcementItemRead]
+
+
 class BillingDunningNoticeRead(BaseModel):
     organization_id: UUID
     invoice_id: UUID

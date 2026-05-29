@@ -26,6 +26,8 @@ from app.models.enums import BillingInvoiceStatus, SubscriptionStatus
 from app.models.organization import Organization
 from app.schemas.billing import (
     BillingEntitlementCreate,
+    BillingEntitlementEnforcementCreate,
+    BillingEntitlementEnforcementRead,
     BillingPlanChangeCreate,
     BillingDunningRunCreate,
     BillingDunningRunRead,
@@ -721,7 +723,7 @@ async def apply_plan_change(
 ) -> dict:
     await ensure_manage_billing(authz, identity, payload.organization_id)
     subscription = await get_subscription_for_organization(db, subscription_id, payload.organization_id)
-    previous_plan = await get_plan(subscription.billing_plan_id)
+    previous_plan = await get_plan(db, subscription.billing_plan_id)
     previous_price = money(subscription.negotiated_price or previous_plan.base_price)
     quote = await proration_quote(
         db,
@@ -732,7 +734,7 @@ async def apply_plan_change(
         payload.effective_on,
         authz,
     )
-    new_plan = await get_plan(payload.new_billing_plan_id) if payload.new_billing_plan_id else previous_plan
+    new_plan = await get_plan(db, payload.new_billing_plan_id) if payload.new_billing_plan_id else previous_plan
     subscription.billing_plan_id = new_plan.id
     subscription.billing_cycle = new_plan.billing_cycle
     subscription.negotiated_price = money(payload.new_price)
@@ -1732,6 +1734,96 @@ async def list_entitlements(db: AsyncSession, organization_id: UUID) -> list[Bil
     )
 
 
+async def enforce_entitlements(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: BillingEntitlementEnforcementCreate,
+    authz: AuthorizationService,
+) -> BillingEntitlementEnforcementRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_billing(authz, identity, payload.organization_id)
+    as_of = payload.as_of or date.today()
+    subscriptions = {subscription.id: subscription for subscription in await list_subscriptions(db, payload.organization_id)}
+    if payload.subscription_id is not None:
+        await get_subscription_for_organization(db, payload.subscription_id, payload.organization_id)
+    entitlements = [
+        entitlement
+        for entitlement in await list_entitlements(db, payload.organization_id)
+        if payload.subscription_id is None or entitlement.subscription_id == payload.subscription_id
+    ]
+    meters = {meter.id: meter for meter in await list_usage_meters(db)}
+    usage_by_feature = entitlement_usage_by_feature(
+        await list_usage_records(db, payload.organization_id),
+        meters,
+        subscriptions,
+        as_of,
+    )
+    items = []
+    would_update_count = 0
+    updated_count = 0
+    blocked_count = 0
+    over_limit_count = 0
+    active_count = 0
+
+    for entitlement in entitlements:
+        subscription = subscriptions.get(entitlement.subscription_id)
+        if subscription is None:
+            continue
+        previous_status = entitlement.status
+        measured_usage = max(
+            entitlement.used_value,
+            usage_by_feature.get((entitlement.subscription_id, entitlement_key(entitlement.feature_key)), 0),
+        )
+        status_value, action, reason = entitlement_enforcement_decision(subscription, entitlement, measured_usage)
+        changed = previous_status != status_value or entitlement.used_value != measured_usage
+        if changed:
+            would_update_count += 1
+        if status_value in {"cancelled", "paused", "past_due", "suspended"}:
+            blocked_count += 1
+        if status_value == "over_limit":
+            over_limit_count += 1
+        if status_value in {"active", "active_ending"}:
+            active_count += 1
+        if changed and not payload.dry_run:
+            entitlement.status = status_value
+            entitlement.used_value = measured_usage
+            updated_count += 1
+        remaining_value = None if entitlement.limit_value is None else max(entitlement.limit_value - measured_usage, 0)
+        items.append(
+            {
+                "entitlement_id": entitlement.id,
+                "subscription_id": entitlement.subscription_id,
+                "feature_key": entitlement.feature_key,
+                "previous_status": previous_status,
+                "status": status_value,
+                "limit_value": entitlement.limit_value,
+                "used_value": measured_usage,
+                "remaining_value": remaining_value,
+                "subscription_status": subscription.status,
+                "action": action,
+                "reason": reason,
+                "changed": changed,
+            }
+        )
+
+    if updated_count:
+        await db.commit()
+
+    return BillingEntitlementEnforcementRead(
+        organization_id=payload.organization_id,
+        subscription_id=payload.subscription_id,
+        as_of=as_of,
+        dry_run=payload.dry_run,
+        checked_count=len(items),
+        would_update_count=would_update_count,
+        updated_count=updated_count,
+        blocked_count=blocked_count,
+        over_limit_count=over_limit_count,
+        active_count=active_count,
+        items=items,
+    )
+
+
 async def billing_summary(db: AsyncSession, organization_id: UUID) -> dict:
     plans = await list_plans(db)
     subscriptions = await list_subscriptions(db, organization_id)
@@ -1801,6 +1893,54 @@ async def get_invoice_for_organization(db: AsyncSession, invoice_id: UUID, organ
     if invoice is None or invoice.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
     return invoice
+
+
+def entitlement_usage_by_feature(
+    records: list[UsageRecord],
+    meters: dict[UUID, UsageMeter],
+    subscriptions: dict[UUID, TenantSubscription],
+    as_of: date,
+) -> dict[tuple[UUID, str], int]:
+    totals: dict[tuple[UUID, str], int] = {}
+    for record in records:
+        subscription = subscriptions.get(record.subscription_id)
+        meter = meters.get(record.usage_meter_id)
+        if subscription is None or meter is None:
+            continue
+        record_day = record.recorded_at.date()
+        period_end = min(as_of, subscription.current_period_end)
+        if record_day < subscription.current_period_start or record_day > period_end:
+            continue
+        keys = {
+            entitlement_key(meter.code),
+            entitlement_key(meter.name),
+            entitlement_key(meter.unit.value),
+        }
+        for key in keys:
+            totals[(record.subscription_id, key)] = totals.get((record.subscription_id, key), 0) + record.quantity
+    return totals
+
+
+def entitlement_enforcement_decision(
+    subscription: TenantSubscription,
+    entitlement: BillingEntitlement,
+    measured_usage: int,
+) -> tuple[str, str, str]:
+    if subscription.status == SubscriptionStatus.CANCELLED:
+        return "cancelled", "block", "Subscription has been cancelled."
+    if subscription.status == SubscriptionStatus.PAUSED:
+        return "paused", "pause", "Subscription is paused; nonessential entitlement access should remain disabled."
+    if subscription.status == SubscriptionStatus.PAST_DUE:
+        return "past_due", "restrict", "Subscription is past due; entitlement access should be restricted until payment recovers."
+    if entitlement.limit_value is not None and measured_usage > entitlement.limit_value:
+        return "over_limit", "restrict_overage", "Usage is above the purchased entitlement limit."
+    if subscription.cancel_at_period_end:
+        return "active_ending", "allow_until_period_end", "Subscription remains active until the scheduled period-end cancellation."
+    return "active", "allow", "Subscription and usage are within entitlement policy."
+
+
+def entitlement_key(value: str) -> str:
+    return value.strip().lower().replace("-", "_").replace(" ", "_")
 
 
 def money(value: Decimal | int | str) -> Decimal:

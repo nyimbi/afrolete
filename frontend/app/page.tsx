@@ -63,6 +63,7 @@ import type {
   BillingDunningDeliveryRead,
   BillingDunningNoticeRead,
   BillingDunningRunRead,
+  BillingEntitlementEnforcementRead,
   BillingEntitlementRead,
   BillingLateFeeRunRead,
   BillingPaymentWebhookRead,
@@ -1607,6 +1608,8 @@ export default function HomePage() {
   const [billingProration, setBillingProration] = useState<BillingProrationQuoteRead | null>(null);
   const [billingPlanChange, setBillingPlanChange] = useState<BillingPlanChangeRead | null>(null);
   const [billingLifecycle, setBillingLifecycle] = useState<BillingSubscriptionLifecycleRead | null>(null);
+  const [billingEntitlementEnforcement, setBillingEntitlementEnforcement] =
+    useState<BillingEntitlementEnforcementRead | null>(null);
   const [billingDunning, setBillingDunning] = useState<BillingDunningNoticeRead | null>(null);
   const [billingDunningDelivery, setBillingDunningDelivery] =
     useState<BillingDunningDeliveryRead | null>(null);
@@ -11362,6 +11365,32 @@ export default function HomePage() {
     );
   };
 
+  const runBillingEntitlementEnforcement = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "billing-entitlement-enforcement",
+      () =>
+        apiRequest<BillingEntitlementEnforcementRead>("/billing/entitlements/enforcement/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            subscription_id: selectedSubscriptionId,
+            as_of: billingForm.period_end,
+            dry_run: false
+          }
+        }),
+      (run) => {
+        setBillingEntitlementEnforcement(run);
+        addLog(`Entitlements enforced: ${run.updated_count}/${run.checked_count} updated`, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
   const quoteBillingTax = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -14693,6 +14722,7 @@ export default function HomePage() {
                 <button type="button" onClick={() => updateBillingSubscriptionLifecycle("pause")} disabled={busyAction !== null}>Pause</button>
                 <button type="button" onClick={() => updateBillingSubscriptionLifecycle("resume")} disabled={busyAction !== null}>Resume</button>
                 <button type="button" onClick={createBillingEntitlement} disabled={busyAction !== null}>Entitle</button>
+                <button type="button" onClick={runBillingEntitlementEnforcement} disabled={busyAction !== null}>Enforce</button>
               </div>
             </div>
             <div className="score-summary">
@@ -14785,6 +14815,16 @@ export default function HomePage() {
                     <strong>{billingLifecycle.action.replaceAll("_", " ")} · {billingLifecycle.status}</strong>
                     <span>
                       {billingLifecycle.message} · cancel end {billingLifecycle.cancel_at_period_end ? "yes" : "no"}
+                    </span>
+                  </div>
+                </article>
+              ) : null}
+              {billingEntitlementEnforcement ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Entitlement guard · {billingEntitlementEnforcement.updated_count}/{billingEntitlementEnforcement.checked_count}</strong>
+                    <span>
+                      {billingEntitlementEnforcement.active_count} active · {billingEntitlementEnforcement.over_limit_count} over limit · {billingEntitlementEnforcement.blocked_count} blocked
                     </span>
                   </div>
                 </article>

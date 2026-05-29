@@ -396,3 +396,67 @@ def test_subscription_lifecycle_cancel_pause_resume_and_undo(client, identity_he
     assert resumed["previous_status"] == "paused"
     assert resumed["status"] == "active"
     assert "lifecycle resume" in resumed["subscription"]["notes"]
+
+
+def test_entitlement_enforcement_tracks_usage_limits_and_subscription_state(client, identity_headers) -> None:
+    organization, _, subscription = create_billing_context(client, identity_headers)
+    entitlement = client.post(
+        "/api/v1/billing/entitlements",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "subscription_id": subscription["id"],
+            "feature_key": "ai_agents",
+            "limit_value": 12,
+            "used_value": 15,
+            "resets_on": "2026-06-30",
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/billing/entitlements/enforcement/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "subscription_id": subscription["id"],
+            "as_of": "2026-06-20",
+        },
+    )
+
+    assert response.status_code == 200
+    run = response.json()
+    assert run["checked_count"] == 1
+    assert run["would_update_count"] == 1
+    assert run["updated_count"] == 1
+    assert run["over_limit_count"] == 1
+    assert run["items"][0]["entitlement_id"] == entitlement["id"]
+    assert run["items"][0]["previous_status"] == "active"
+    assert run["items"][0]["status"] == "over_limit"
+    assert run["items"][0]["remaining_value"] == 0
+    assert run["items"][0]["action"] == "restrict_overage"
+
+    client.post(
+        f"/api/v1/billing/subscriptions/{subscription['id']}/lifecycle",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "action": "pause",
+            "effective_on": "2026-06-21",
+        },
+    )
+    paused_response = client.post(
+        "/api/v1/billing/entitlements/enforcement/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "subscription_id": subscription["id"],
+            "as_of": "2026-06-21",
+        },
+    )
+
+    assert paused_response.status_code == 200
+    paused_run = paused_response.json()
+    assert paused_run["blocked_count"] == 1
+    assert paused_run["items"][0]["previous_status"] == "over_limit"
+    assert paused_run["items"][0]["status"] == "paused"
+    assert paused_run["items"][0]["action"] == "pause"

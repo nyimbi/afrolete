@@ -13,6 +13,8 @@ from app.schemas.billing import (
     BillingDunningNoticeRead,
     BillingDunningRunCreate,
     BillingDunningRunRead,
+    BillingEntitlementEnforcementCreate,
+    BillingEntitlementEnforcementRead,
     BillingLateFeeRunCreate,
     BillingLateFeeRunRead,
     BillingPlanChangeCreate,
@@ -61,6 +63,7 @@ from app.services.billing import (
     deliver_dunning_notice,
     deliver_tax_filing,
     dunning_notice,
+    enforce_entitlements,
     ingest_payment_webhook,
     list_entitlements,
     list_invoices,
@@ -369,6 +372,16 @@ async def list_entitlements_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[BillingEntitlementRead]:
     return [read(entitlement, BillingEntitlementRead) for entitlement in await list_entitlements(db, organization_id)]
+
+
+@router.post("/entitlements/enforcement/run", response_model=BillingEntitlementEnforcementRead)
+async def run_entitlement_enforcement_route(
+    payload: BillingEntitlementEnforcementCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BillingEntitlementEnforcementRead:
+    return await enforce_entitlements(db, identity, payload, authz)
 
 
 @router.get("/tax-quote", response_model=BillingTaxQuoteRead)

@@ -2657,6 +2657,35 @@ export type BillingSubscriptionLifecycleRead = {
   subscription: SubscriptionRead;
 };
 
+export type BillingEntitlementEnforcementItemRead = {
+  entitlement_id: UUID;
+  subscription_id: UUID;
+  feature_key: string;
+  previous_status: string;
+  status: string;
+  limit_value: number | null;
+  used_value: number;
+  remaining_value: number | null;
+  subscription_status: SubscriptionStatus;
+  action: string;
+  reason: string;
+  changed: boolean;
+};
+
+export type BillingEntitlementEnforcementRead = {
+  organization_id: UUID;
+  subscription_id: UUID | null;
+  as_of: string;
+  dry_run: boolean;
+  checked_count: number;
+  would_update_count: number;
+  updated_count: number;
+  blocked_count: number;
+  over_limit_count: number;
+  active_count: number;
+  items: BillingEntitlementEnforcementItemRead[];
+};
+
 export type BillingDunningNoticeRead = {
   organization_id: UUID;
   invoice_id: UUID;
