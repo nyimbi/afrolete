@@ -55,6 +55,15 @@ await client.teams.addMember(team.id, {
   role: "player",
 });
 
+const [event] = events;
+if (event) {
+  await client.events.attendance.record(event.id, { organizationId: organization.id }, {
+    person_id: athlete.id,
+    status: "invited",
+    note: "Imported from the matchday kiosk.",
+  });
+}
+
 const [metric] = await client.performance.metrics.list({
   organizationId: organization.id,
   sport: "football",

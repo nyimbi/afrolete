@@ -47,7 +47,14 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
             "name": "Matchday Sync",
             "app_type": "server_to_server",
             "redirect_uris": ["https://sync.example/callback"],
-            "scopes": ["read:organization", "write:events", "write:training"],
+            "scopes": [
+                "read:organization",
+                "write:events",
+                "write:people",
+                "read:attendance",
+                "write:attendance",
+                "write:training",
+            ],
             "contact_email": "integrations@example.com",
         },
         headers=identity_headers,
@@ -58,7 +65,14 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     original_secret = provisioned_application["client_secret"]
     assert application["client_id"].startswith("afrolete_")
     assert original_secret
-    assert application["scopes"] == ["read:organization", "write:events", "write:training"]
+    assert application["scopes"] == [
+        "read:organization",
+        "write:events",
+        "write:people",
+        "read:attendance",
+        "write:attendance",
+        "write:training",
+    ]
 
     application_list_response = client.get(
         f"/api/v1/developers/applications?organization_id={organization['id']}",
@@ -84,7 +98,14 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
             "organization_id": organization["id"],
             "application_id": application["id"],
             "name": "Sandbox SDK Key",
-            "scopes": ["read:organization", "write:events", "write:training"],
+            "scopes": [
+                "read:organization",
+                "write:events",
+                "write:people",
+                "read:attendance",
+                "write:attendance",
+                "write:training",
+            ],
             "environment": "sandbox",
             "rate_limit_per_minute": 120,
         },
@@ -96,7 +117,14 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     raw_key = provisioned_api_key["key"]
     assert raw_key.startswith("al_developerpla_sandbox_")
     assert api_key["key_prefix"] == raw_key.split(".", 1)[0]
-    assert api_key["scopes"] == ["read:organization", "write:events", "write:training"]
+    assert api_key["scopes"] == [
+        "read:organization",
+        "write:events",
+        "write:people",
+        "read:attendance",
+        "write:attendance",
+        "write:training",
+    ]
     assert "key_hash" not in api_key
 
     inspect_response = client.get(
@@ -367,6 +395,43 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert sdk_events_response.status_code == 200
     assert any(event["title"] == "SDK Cup Final" for event in sdk_events_response.json())
+    sdk_created_event_id = sdk_event_response.json()["id"]
+
+    sdk_person_response = client.post(
+        "/api/v1/sdk/people",
+        json={
+            "organization_id": organization["id"],
+            "display_name": "SDK Attendance Player",
+            "primary_email": "sdk-attendance-player@example.com",
+            "membership_role": "athlete",
+            "membership_title": "External roster import",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_person_response.status_code == 201
+    sdk_person = sdk_person_response.json()
+
+    sdk_attendance_response = client.post(
+        f"/api/v1/sdk/events/{sdk_created_event_id}/attendance?organization_id={organization['id']}",
+        json={
+            "person_id": sdk_person["id"],
+            "status": "invited",
+            "note": "Imported by external attendance kiosk.",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_attendance_response.status_code == 201
+    attendance = sdk_attendance_response.json()
+    assert attendance["person_id"] == sdk_person["id"]
+    assert attendance["status"] == "invited"
+    assert attendance["recorded_by_person_id"] is None
+
+    sdk_attendance_list_response = client.get(
+        f"/api/v1/sdk/events/{sdk_created_event_id}/attendance?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_attendance_list_response.status_code == 200
+    assert sdk_attendance_list_response.json()[0]["note"] == "Imported by external attendance kiosk."
 
     sdk_drill_response = client.post(
         "/api/v1/sdk/training/drills",

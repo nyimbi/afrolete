@@ -66,6 +66,7 @@ class _TeamsResource:
 @dataclass(frozen=True)
 class _EventsResource:
     client: AfroLeteClient
+    attendance: _EventAttendanceResource
 
     def list(self, *, organization_id: str, team_id: str | None = None) -> list[JsonObject]:
         return self.client.request(
@@ -76,6 +77,26 @@ class _EventsResource:
 
     def create(self, payload: JsonObject) -> JsonObject:
         return self.client.request("POST", "/events", body=payload)
+
+
+@dataclass(frozen=True)
+class _EventAttendanceResource:
+    client: AfroLeteClient
+
+    def list(self, event_id: str, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            f"/events/{event_id}/attendance",
+            query={"organization_id": organization_id},
+        )
+
+    def record(self, event_id: str, *, organization_id: str, payload: JsonObject) -> JsonObject:
+        return self.client.request(
+            "POST",
+            f"/events/{event_id}/attendance",
+            query={"organization_id": organization_id},
+            body=payload,
+        )
 
 
 @dataclass(frozen=True)
@@ -143,7 +164,7 @@ class AfroLeteClient:
         self.organization = _OrganizationResource(self)
         self.people = _PeopleResource(self)
         self.teams = _TeamsResource(self)
-        self.events = _EventsResource(self)
+        self.events = _EventsResource(self, attendance=_EventAttendanceResource(self))
         self.training = _TrainingResource(drills=_TrainingDrillsResource(self))
         self.performance = _PerformanceResource(
             metrics=_PerformanceMetricsResource(self),

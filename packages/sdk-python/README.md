@@ -53,6 +53,17 @@ client.teams.add_member(
         "role": "player",
     },
 )
+events = client.events.list(organization_id=organization["id"])
+if events:
+    client.events.attendance.record(
+        events[0]["id"],
+        organization_id=organization["id"],
+        payload={
+            "person_id": athlete["id"],
+            "status": "invited",
+            "note": "Imported from the matchday kiosk.",
+        },
+    )
 metrics = client.performance.metrics.list(
     organization_id=organization["id"],
     sport="football",

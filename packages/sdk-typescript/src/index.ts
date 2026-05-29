@@ -40,6 +40,7 @@ export interface DeveloperApiKeyInspection {
   usage_count: number;
   window_started_at: ISODateTime | null;
   window_request_count: number;
+  quota_counter_mode: string;
 }
 
 export interface Organization {
@@ -219,6 +220,38 @@ export interface EventCreate {
   notes?: string | null;
 }
 
+export type AttendanceStatus =
+  | "invited"
+  | "confirmed"
+  | "declined"
+  | "present"
+  | "absent"
+  | "late"
+  | "excused";
+
+export interface AttendanceRecordUpsert {
+  person_id: UUID;
+  status: AttendanceStatus;
+  note?: string | null;
+}
+
+export interface AttendanceRecord {
+  id: UUID;
+  event_id: UUID;
+  person_id: UUID;
+  status: AttendanceStatus;
+  recorded_by_person_id: UUID | null;
+  guardian_consent_id: UUID | null;
+  note: string | null;
+  clearance_status: string | null;
+  medical_clearance_status: string | null;
+  medical_clearance_id: UUID | null;
+  medical_clearance_reason: string | null;
+  attendance_policy_code: string | null;
+  attendance_policy_decision: string | null;
+  attendance_policy_warnings: string[];
+}
+
 export interface TrainingDrill {
   id: UUID;
   organization_id: UUID;
@@ -349,6 +382,22 @@ export class AfroLeteClient {
         method: "POST",
         body: payload,
       }),
+    attendance: {
+      list: (eventId: UUID, params: { organizationId: UUID }): Promise<AttendanceRecord[]> =>
+        this.request<AttendanceRecord[]>(`/events/${eventId}/attendance`, {
+          query: { organization_id: params.organizationId },
+        }),
+      record: (
+        eventId: UUID,
+        params: { organizationId: UUID },
+        payload: AttendanceRecordUpsert,
+      ): Promise<AttendanceRecord> =>
+        this.request<AttendanceRecord>(`/events/${eventId}/attendance`, {
+          method: "POST",
+          query: { organization_id: params.organizationId },
+          body: payload,
+        }),
+    },
   };
 
   readonly teams = {

@@ -23,7 +23,7 @@ from app.schemas.developer import (
     DeveloperPersonCreate,
     DeveloperPersonRead,
 )
-from app.schemas.event import EventCreate, EventRead
+from app.schemas.event import AttendanceRecordRead, AttendanceRecordUpsert, EventCreate, EventRead
 from app.schemas.organization import OrganizationRead
 from app.schemas.performance import (
     MetricDefinitionRead,
@@ -42,7 +42,7 @@ from app.services.developer import (
     ensure_developer_api_scope,
     inspect_developer_api_key,
 )
-from app.services.events import list_events
+from app.services.events import list_attendance, list_events, record_attendance
 from app.services.organizations import organization_member_relation
 from app.services.performance import list_metric_definitions, list_observations
 from app.services.safeguarding import consent_destination, hash_token, normalized_scope_id, utc_now
@@ -113,6 +113,25 @@ def to_event_read(event: Event) -> EventRead:
         timezone=event.timezone,
         venue_name=event.venue_name,
         notes=event.notes,
+    )
+
+
+def to_attendance_read(attendance, **policy_fields: object) -> AttendanceRecordRead:
+    return AttendanceRecordRead(
+        id=attendance.id,
+        event_id=attendance.event_id,
+        person_id=attendance.person_id,
+        status=attendance.status,
+        recorded_by_person_id=attendance.recorded_by_person_id,
+        guardian_consent_id=attendance.guardian_consent_id,
+        note=attendance.note,
+        clearance_status=policy_fields.get("clearance_status"),
+        medical_clearance_status=policy_fields.get("medical_clearance_status"),
+        medical_clearance_id=policy_fields.get("medical_clearance_id"),
+        medical_clearance_reason=policy_fields.get("medical_clearance_reason"),
+        attendance_policy_code=policy_fields.get("attendance_policy_code"),
+        attendance_policy_decision=policy_fields.get("attendance_policy_decision"),
+        attendance_policy_warnings=list(policy_fields.get("attendance_policy_warnings") or []),
     )
 
 
@@ -262,6 +281,66 @@ async def sdk_list_events(
 ) -> list[EventRead]:
     ensure_developer_api_scope(credential, organization_id, {"read:events", "write:events"})
     return [to_event_read(event) for event in await list_events(db, organization_id, team_id=team_id)]
+
+
+@router.get("/events/{event_id}/attendance", response_model=list[AttendanceRecordRead])
+async def sdk_list_event_attendance(
+    event_id: UUID,
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[AttendanceRecordRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:attendance", "write:attendance"})
+    event = await db.get(Event, event_id)
+    if event is None or event.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    return [to_attendance_read(attendance) for attendance in await list_attendance(db, event_id)]
+
+
+@router.post(
+    "/events/{event_id}/attendance",
+    response_model=AttendanceRecordRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sdk_record_event_attendance(
+    event_id: UUID,
+    payload: AttendanceRecordUpsert,
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AttendanceRecordRead:
+    ensure_developer_api_scope(credential, organization_id, {"write:attendance"})
+    event = await db.get(Event, event_id)
+    if event is None or event.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    (
+        attendance,
+        clearance_status,
+        medical_clearance_status,
+        medical_clearance_id,
+        medical_clearance_reason,
+        attendance_policy_code,
+        attendance_policy_decision,
+        attendance_policy_warnings,
+    ) = await record_attendance(
+        db,
+        None,
+        event_id,
+        payload,
+        authz,
+        enforce_manage_event=False,
+    )
+    return to_attendance_read(
+        attendance,
+        clearance_status=clearance_status,
+        medical_clearance_status=medical_clearance_status,
+        medical_clearance_id=medical_clearance_id,
+        medical_clearance_reason=medical_clearance_reason,
+        attendance_policy_code=attendance_policy_code,
+        attendance_policy_decision=attendance_policy_decision,
+        attendance_policy_warnings=attendance_policy_warnings,
+    )
 
 
 @router.get("/teams", response_model=list[TeamRead])

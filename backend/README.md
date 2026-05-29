@@ -63,19 +63,19 @@ Use `--lane agent-tasks`, `--lane billing-dunning`, `--lane billing-late-fees`, 
 `--lane event-travel-consent-reminders`, `--lane emergency-escalations`, `--lane developer-webhooks`,
 `--lane performance-achievements`, `--lane performance-forecast-validations`,
 `--lane performance-review-escalations`, `--lane performance-injury-risk-alerts`,
-or `--lane wearable-pull-retries` to run a single lane. The billing dunning
-lane sends repeat-suppressed overdue invoice notices, records invoice dunning
-state, and marks subscriptions past due. The recurring billing lane creates
-open SaaS invoices for subscriptions whose `next_billing_on` date is due,
-advances their service period, and suppresses duplicate period invoices. The
-late-fee lane applies configured fixed and/or percentage fees to overdue open
-SaaS invoices, records repeat-suppression state, appends invoice audit notes,
-and marks active/trial subscriptions past due. The payment retry lane prepares
-or dispatches provider retry attempts for overdue open invoices, records retry
-attempt state, applies webhook-reported collections, and marks subscriptions
-past due while respecting retry windows and max-attempt limits.
-communication digest lane creates daily/weekly digests for people with matching
-notification preferences and unread inbox items. The
+`--lane performance-video-pose`, or `--lane wearable-pull-retries` to run a
+single lane. The billing dunning lane sends repeat-suppressed overdue invoice
+notices, records invoice dunning state, and marks subscriptions past due. The
+recurring billing lane creates open SaaS invoices for subscriptions whose
+`next_billing_on` date is due, advances their service period, and suppresses
+duplicate period invoices. The late-fee lane applies configured fixed and/or
+percentage fees to overdue open SaaS invoices, records repeat-suppression state,
+appends invoice audit notes, and marks active/trial subscriptions past due. The
+payment retry lane prepares or dispatches provider retry attempts for overdue
+open invoices, records retry attempt state, applies webhook-reported
+collections, and marks subscriptions past due while respecting retry windows and
+max-attempt limits. The communication digest lane creates daily/weekly digests
+for people with matching notification preferences and unread inbox items. The
 communication escalation lane scans unresolved urgent messages and creates
 quiet-hours-override escalation messages with repeat suppression. The travel consent lane sends scheduled
 guardian reminders for due travel consent requests and suppresses repeats with
@@ -91,6 +91,27 @@ when run with
 `--performance-forecast-drift-channel`,
 `--performance-forecast-drift-repeat-after-hours`, and
 `--dry-run-performance-forecast-drift-alerts` to tune rollout behavior.
+
+The video pose worker decodes stored performance video files with OpenCV, runs
+the configured MediaPipe pose model, normalizes pose landmarks to the
+provider-neutral keypoint schema, and can post the resulting batch through the
+same `/api/v1/performance/videos/{video_asset_id}/pose-samples` endpoint used
+by external providers:
+
+```bash
+cd backend
+uv run python -m app.workers.video_pose \
+  --limit 10 \
+  --max-frames 45 \
+  --sample-every-seconds 0.2 \
+  --api-base-url http://127.0.0.1:8000 \
+  --local-auth-sub kc-owner-1 \
+  --local-auth-email owner@example.com
+```
+
+Omit `--api-base-url` to store extracted samples in-process through the same
+domain service. Use bearer-token headers in Keycloak deployments and local
+`X-Afrolete-*` headers only for trusted local/demo runs.
 
 ## Responsibilities
 

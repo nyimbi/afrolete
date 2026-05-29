@@ -5649,13 +5649,18 @@ def attendance_policy_decision(actions: list[str]) -> str:
 
 async def record_attendance(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     event_id: UUID,
     payload: AttendanceRecordUpsert,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
+    *,
+    enforce_manage_event: bool = True,
 ) -> AttendanceResult:
     event = await get_event(db, event_id)
-    await ensure_manage_event_scope(authz, event.organization_id, identity)
+    if enforce_manage_event:
+        if identity is None or authz is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Identity and authorization required")
+        await ensure_manage_event_scope(authz, event.organization_id, identity)
     person = await db.get(Person, payload.person_id)
     if person is None:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -5736,7 +5741,7 @@ async def record_attendance(
     )
     if existing is not None:
         existing.status = payload.status
-        existing.recorded_by_person_id = identity.person_id
+        existing.recorded_by_person_id = identity.person_id if identity is not None else None
         existing.guardian_consent_id = guardian_consent_id or existing.guardian_consent_id
         existing.note = payload.note
         await db.commit()
@@ -5756,20 +5761,21 @@ async def record_attendance(
         event_id=event_id,
         person_id=payload.person_id,
         status=payload.status,
-        recorded_by_person_id=identity.person_id,
+        recorded_by_person_id=identity.person_id if identity is not None else None,
         guardian_consent_id=guardian_consent_id,
         note=payload.note,
     )
     db.add(attendance)
-    await authz.touch(
-        Relationship(
-            resource_type="event",
-            resource_id=str(event_id),
-            relation="participant",
-            subject_type="person",
-            subject_id=str(payload.person_id),
+    if authz is not None:
+        await authz.touch(
+            Relationship(
+                resource_type="event",
+                resource_id=str(event_id),
+                relation="participant",
+                subject_type="person",
+                subject_id=str(payload.person_id),
+            )
         )
-    )
     await db.commit()
     await db.refresh(attendance)
     return (
