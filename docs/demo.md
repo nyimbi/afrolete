@@ -65,10 +65,15 @@ invoice, inbox item, notification preference, and AI agent task.
 
 The `due-worker` container runs the unified worker once per minute with local
 record-only delivery. It exercises scheduler-ready behavior such as
-scheduled SaaS dunning, automated SaaS late fees, SaaS payment retries, recurring SaaS invoices, communication digests, travel consent reminders,
+scheduled SaaS dunning, automated SaaS late fees, SaaS payment retries,
+recurring SaaS invoices, communication digests, travel consent reminders,
 performance forecast drift alerts, performance review escalations, injury-risk
 scans, achievement scans, emergency escalation timers, developer webhook
-retries, agent tasks, and wearable retry scans when matching data exists.
+retries, agent tasks, video pose extraction, and wearable retry scans when
+matching data exists. The video pose lane decodes stored clips, runs the
+MediaPipe/OpenCV pose extractor, and posts keypoint batches back to
+`/api/v1/performance/videos/{video_asset_id}/pose-samples` through the backend
+API in the Docker demo.
 
 ## Reset
 

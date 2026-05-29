@@ -257,6 +257,12 @@ class Settings(BaseSettings):
     performance_pose_worker_max_frames: int = 45
     performance_pose_worker_sample_every_seconds: float = 0.2
     performance_pose_worker_min_detection_confidence: float = 0.5
+    performance_pose_worker_api_base_url: str = ""
+    performance_pose_worker_bearer_token: str = ""
+    performance_pose_worker_local_auth_sub: str = ""
+    performance_pose_worker_local_auth_email: str = ""
+    performance_pose_worker_local_auth_name: str = ""
+    performance_pose_worker_api_timeout_seconds: float = 30.0
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"

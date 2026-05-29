@@ -46,21 +46,26 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Additional API header in 'Name: value' form. Can be repeated.",
     )
-    parser.add_argument("--api-timeout", type=float, default=30.0)
+    parser.add_argument("--api-timeout", type=float, default=None)
     parser.add_argument("--pretty", action="store_true")
     return parser.parse_args()
 
 
-def worker_api_headers(args: argparse.Namespace) -> dict[str, str]:
+def worker_api_headers(args: argparse.Namespace, settings: Settings | None = None) -> dict[str, str]:
+    selected_settings = settings or get_settings()
     headers: dict[str, str] = {}
-    if args.bearer_token:
-        headers["Authorization"] = f"Bearer {args.bearer_token}"
-    if args.local_auth_sub:
-        headers["X-Afrolete-Sub"] = args.local_auth_sub
-    if args.local_auth_email:
-        headers["X-Afrolete-Email"] = args.local_auth_email
-    if args.local_auth_name:
-        headers["X-Afrolete-Name"] = args.local_auth_name
+    bearer_token = args.bearer_token or selected_settings.performance_pose_worker_bearer_token
+    local_auth_sub = args.local_auth_sub or selected_settings.performance_pose_worker_local_auth_sub
+    local_auth_email = args.local_auth_email or selected_settings.performance_pose_worker_local_auth_email
+    local_auth_name = args.local_auth_name or selected_settings.performance_pose_worker_local_auth_name
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
+    if local_auth_sub:
+        headers["X-Afrolete-Sub"] = local_auth_sub
+    if local_auth_email:
+        headers["X-Afrolete-Email"] = local_auth_email
+    if local_auth_name:
+        headers["X-Afrolete-Name"] = local_auth_name
     for raw_header in args.api_header or []:
         name, separator, value = raw_header.partition(":")
         if not separator or not name.strip() or not value.strip():
@@ -214,17 +219,20 @@ async def run_performance_video_pose_endpoint_worker(
 
 async def run() -> None:
     args = parse_args()
+    settings = get_settings()
+    api_base_url = args.api_base_url or settings.performance_pose_worker_api_base_url
+    api_timeout_seconds = args.api_timeout or settings.performance_pose_worker_api_timeout_seconds
     async with SessionLocal() as db:
-        if args.api_base_url:
+        if api_base_url:
             result = await run_performance_video_pose_endpoint_worker(
                 db,
-                api_base_url=args.api_base_url,
+                api_base_url=api_base_url,
                 organization_id=args.organization_id,
                 limit=args.limit,
                 max_frames=args.max_frames,
                 sample_every_seconds=args.sample_every_seconds,
-                request_headers=worker_api_headers(args),
-                timeout_seconds=args.api_timeout,
+                request_headers=worker_api_headers(args, settings),
+                timeout_seconds=api_timeout_seconds,
             )
         else:
             result = await run_performance_video_pose_worker(

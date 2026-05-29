@@ -8,7 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import parse_positive_int_map
+from app.core.config import Settings, get_settings, parse_positive_int_map
 from app.db.session import SessionLocal
 from app.models.enums import CommunicationChannel, NotificationFrequency
 from app.services.agents import run_agent_task_worker
@@ -174,6 +174,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--performance-video-pose-local-auth-sub", default=None)
     parser.add_argument("--performance-video-pose-local-auth-email", default=None)
     parser.add_argument("--performance-video-pose-local-auth-name", default=None)
+    parser.add_argument("--performance-video-pose-api-timeout", type=float, default=None)
     parser.add_argument("--wearable-pull-limit", type=int, default=None)
     parser.add_argument("--wearable-pull-max-pages", type=int, default=3)
     parser.add_argument("--wearable-pull-default-retry-after-seconds", type=int, default=300)
@@ -199,16 +200,36 @@ def selected_lanes(lanes: Sequence[str]) -> set[str]:
     return set(lanes)
 
 
-def performance_video_pose_request_headers(args: argparse.Namespace) -> dict[str, str]:
+def performance_video_pose_request_headers(
+    args: argparse.Namespace,
+    settings: Settings | None = None,
+) -> dict[str, str]:
+    selected_settings = settings or get_settings()
     headers: dict[str, str] = {}
-    if args.performance_video_pose_bearer_token:
-        headers["Authorization"] = f"Bearer {args.performance_video_pose_bearer_token}"
-    if args.performance_video_pose_local_auth_sub:
-        headers["X-Afrolete-Sub"] = args.performance_video_pose_local_auth_sub
-    if args.performance_video_pose_local_auth_email:
-        headers["X-Afrolete-Email"] = args.performance_video_pose_local_auth_email
-    if args.performance_video_pose_local_auth_name:
-        headers["X-Afrolete-Name"] = args.performance_video_pose_local_auth_name
+    bearer_token = (
+        args.performance_video_pose_bearer_token
+        or selected_settings.performance_pose_worker_bearer_token
+    )
+    local_auth_sub = (
+        args.performance_video_pose_local_auth_sub
+        or selected_settings.performance_pose_worker_local_auth_sub
+    )
+    local_auth_email = (
+        args.performance_video_pose_local_auth_email
+        or selected_settings.performance_pose_worker_local_auth_email
+    )
+    local_auth_name = (
+        args.performance_video_pose_local_auth_name
+        or selected_settings.performance_pose_worker_local_auth_name
+    )
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
+    if local_auth_sub:
+        headers["X-Afrolete-Sub"] = local_auth_sub
+    if local_auth_email:
+        headers["X-Afrolete-Email"] = local_auth_email
+    if local_auth_name:
+        headers["X-Afrolete-Name"] = local_auth_name
     return headers
 
 
@@ -293,6 +314,7 @@ async def run_due_workers(
     performance_video_pose_sample_every_seconds: float | None = None,
     performance_video_pose_api_base_url: str | None = None,
     performance_video_pose_request_headers: dict[str, str] | None = None,
+    performance_video_pose_api_timeout_seconds: float = 30.0,
     wearable_pull_limit: int | None = None,
     wearable_pull_max_pages: int = 3,
     wearable_pull_default_retry_after_seconds: int = 300,
@@ -509,6 +531,7 @@ async def run_due_workers(
                 max_frames=performance_video_pose_max_frames,
                 sample_every_seconds=performance_video_pose_sample_every_seconds,
                 request_headers=performance_video_pose_request_headers,
+                timeout_seconds=performance_video_pose_api_timeout_seconds,
             )
         else:
             results["performance_video_pose"] = await run_performance_video_pose_worker(
@@ -574,6 +597,7 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
 
 async def run() -> None:
     args = parse_args()
+    settings = get_settings()
     async with SessionLocal() as db:
         result = await run_due_workers(
             db,
@@ -669,8 +693,16 @@ async def run() -> None:
             performance_video_pose_limit=args.performance_video_pose_limit,
             performance_video_pose_max_frames=args.performance_video_pose_max_frames,
             performance_video_pose_sample_every_seconds=args.performance_video_pose_sample_every_seconds,
-            performance_video_pose_api_base_url=args.performance_video_pose_api_base_url,
-            performance_video_pose_request_headers=performance_video_pose_request_headers(args),
+            performance_video_pose_api_base_url=(
+                args.performance_video_pose_api_base_url
+                or settings.performance_pose_worker_api_base_url
+                or None
+            ),
+            performance_video_pose_request_headers=performance_video_pose_request_headers(args, settings),
+            performance_video_pose_api_timeout_seconds=(
+                args.performance_video_pose_api_timeout
+                or settings.performance_pose_worker_api_timeout_seconds
+            ),
             wearable_pull_limit=args.wearable_pull_limit,
             wearable_pull_max_pages=args.wearable_pull_max_pages,
             wearable_pull_default_retry_after_seconds=args.wearable_pull_default_retry_after_seconds,

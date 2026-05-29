@@ -2,6 +2,7 @@ import hashlib
 import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 import httpx
 from sqlalchemy import func, select
@@ -55,7 +56,7 @@ from app.models.performance import (
 from app.models.team import AthleteProfile, GuardianRelationship
 from app.services import performance as performance_service
 from app.services.storage.objects import put_object
-from app.workers.due import run_due_workers, selected_lanes
+from app.workers.due import performance_video_pose_request_headers, run_due_workers, selected_lanes
 from app.workers import video_pose as video_pose_worker
 from app.workers.video_pose import run_performance_video_pose_endpoint_worker
 
@@ -166,6 +167,56 @@ def test_selected_lanes_expands_all() -> None:
         "wearable-pull-retries",
     }
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}
+
+
+def test_video_pose_worker_uses_configured_endpoint_headers() -> None:
+    settings = Settings(
+        performance_pose_worker_bearer_token="env-token",
+        performance_pose_worker_local_auth_sub="env-sub",
+        performance_pose_worker_local_auth_email="env@example.com",
+        performance_pose_worker_local_auth_name="Env Worker",
+    )
+    args = SimpleNamespace(
+        bearer_token=None,
+        local_auth_sub=None,
+        local_auth_email=None,
+        local_auth_name=None,
+        api_header=["X-Trace: pose-run"],
+    )
+
+    headers = video_pose_worker.worker_api_headers(args, settings)
+
+    assert headers == {
+        "Authorization": "Bearer env-token",
+        "X-Afrolete-Sub": "env-sub",
+        "X-Afrolete-Email": "env@example.com",
+        "X-Afrolete-Name": "Env Worker",
+        "X-Trace": "pose-run",
+    }
+
+
+def test_due_worker_pose_headers_preserve_cli_override() -> None:
+    settings = Settings(
+        performance_pose_worker_bearer_token="env-token",
+        performance_pose_worker_local_auth_sub="env-sub",
+        performance_pose_worker_local_auth_email="env@example.com",
+        performance_pose_worker_local_auth_name="Env Worker",
+    )
+    args = SimpleNamespace(
+        performance_video_pose_bearer_token="cli-token",
+        performance_video_pose_local_auth_sub="cli-sub",
+        performance_video_pose_local_auth_email=None,
+        performance_video_pose_local_auth_name=None,
+    )
+
+    headers = performance_video_pose_request_headers(args, settings)
+
+    assert headers == {
+        "Authorization": "Bearer cli-token",
+        "X-Afrolete-Sub": "cli-sub",
+        "X-Afrolete-Email": "env@example.com",
+        "X-Afrolete-Name": "Env Worker",
+    }
 
 
 async def test_video_pose_worker_posts_extracted_keypoints_to_pose_samples_endpoint(

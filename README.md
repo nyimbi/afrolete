@@ -295,8 +295,14 @@ emergency escalation, performance achievements, forecast validation, review
 escalation, injury-risk alerts, object-storage lifecycle cleanup, performance
 video pose extraction, wearable pulls, and compliance reconciliation. The video
 pose lane can run in direct in-process mode or endpoint-ingest mode, where the
-worker decodes stored media and posts normalized keypoints back through the
-existing pose-sample API.
+worker decodes stored media with OpenCV, runs the MediaPipe pose model, and
+posts normalized keypoints back through the existing pose-sample API. Endpoint
+mode is configured with `AFROLETE_PERFORMANCE_POSE_WORKER_API_BASE_URL` plus
+either `AFROLETE_PERFORMANCE_POSE_WORKER_BEARER_TOKEN` for Keycloak deployments
+or the local demo identity headers
+`AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_SUB`,
+`AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_EMAIL`, and
+`AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_NAME`.
 
 Object storage can run in local mode for demos or S3-compatible mode for MinIO.
 The same storage adapter supports retention policy enforcement: local mode
