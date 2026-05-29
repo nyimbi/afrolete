@@ -129,3 +129,146 @@ def test_community_posts_comments_reactions_polls_votes_and_summary(client, iden
     assert summary["vote_count"] == 1
     assert summary["engagement_score"] > 0
     assert summary["recommendations"]
+
+
+def test_supporter_memberships_alumni_profiles_and_mentorship(client, identity_headers) -> None:
+    organization, _team = create_community_context(client, identity_headers)
+
+    tier = client.post(
+        "/api/v1/community/supporter-tiers",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "VIP Season Holder",
+            "slug": "vip-season-holder",
+            "monthly_price": "20.00",
+            "currency": "USD",
+            "benefits": "Behind-the-scenes content, major votes, meet-and-greet access.",
+            "voting_weight": 5,
+            "trial_days": 14,
+        },
+    ).json()
+    assert tier["status"] == "active"
+    assert tier["voting_weight"] == 5
+
+    supporter = client.post(
+        "/api/v1/community/supporters",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "tier_id": tier["id"],
+            "display_name": "Sarah Supporter",
+            "email": "sarah.supporter@example.com",
+            "lifetime_value": "60.00",
+            "notes": "Family package candidate and matchday volunteer.",
+        },
+    ).json()
+    assert supporter["tier_name"] == "VIP Season Holder"
+    assert supporter["engagement_points"] == 0
+
+    activity = client.post(
+        f"/api/v1/community/supporters/{supporter['id']}/activities",
+        headers=identity_headers,
+        json={
+            "activity_type": "match_attendance",
+            "source": "ticketing",
+            "description": "Attended derby and voted in player-of-the-match poll.",
+            "points": 1250,
+            "value_amount": "15.00",
+        },
+    ).json()
+    assert activity["points"] == 1250
+    assert activity["source"] == "ticketing"
+
+    reward = client.post(
+        f"/api/v1/community/supporters/{supporter['id']}/rewards",
+        headers=identity_headers,
+        json={
+            "title": "Meet and greet ticket",
+            "reward_type": "experience",
+            "threshold_points": 1000,
+        },
+    ).json()
+    assert reward["status"] == "earned"
+
+    supporters = client.get(f"/api/v1/community/supporters?organization_id={organization['id']}").json()
+    assert supporters[0]["engagement_points"] == 1250
+    assert supporters[0]["lifetime_value"] == "75.00"
+
+    supporter_dashboard = client.get(
+        f"/api/v1/community/supporter-dashboard?organization_id={organization['id']}"
+    ).json()
+    assert supporter_dashboard["tier_count"] == 1
+    assert supporter_dashboard["supporter_count"] == 1
+    assert supporter_dashboard["total_points"] == 1250
+    assert supporter_dashboard["top_supporter_name"] == "Sarah Supporter"
+    assert supporter_dashboard["reward_count"] >= 1
+
+    alumni = client.post(
+        "/api/v1/community/alumni",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "display_name": "Michael Mentor",
+            "email": "michael.mentor@example.com",
+            "graduation_year": 2018,
+            "sports_history": "Community Club U8 to U18, college captain, youth coach.",
+            "career_industry": "Sports Management",
+            "current_company": "Community Club",
+            "current_role": "Head of Youth Development",
+            "linkedin_url": "https://linkedin.example/michael",
+            "engagement_level": "active",
+            "lifetime_donations": "5200.00",
+            "privacy_status": "network_visible",
+        },
+    ).json()
+    assert alumni["career_industry"] == "Sports Management"
+
+    program = client.post(
+        "/api/v1/community/mentorship-programs",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Future Leaders",
+            "goals": "Career guidance, professional networking, and life-after-sport planning.",
+            "industry_focus": "Sports Management",
+            "capacity": 40,
+            "starts_on": "2026-06-01",
+            "ends_on": "2026-12-15",
+        },
+    ).json()
+    assert program["match_count"] == 0
+
+    match = client.post(
+        f"/api/v1/community/mentorship-programs/{program['id']}/matches",
+        headers=identity_headers,
+        json={
+            "alumni_profile_id": alumni["id"],
+            "mentee_name": "Emma Johnson",
+            "mentee_interest": "Sports Management",
+            "goals": "Explore coaching, sports operations, and college pathway decisions.",
+            "next_meeting_at": "2026-06-10T15:00:00Z",
+        },
+    ).json()
+    assert match["alumni_name"] == "Michael Mentor"
+    assert match["match_score"] >= 90
+
+    programs = client.get(
+        f"/api/v1/community/mentorship-programs?organization_id={organization['id']}"
+    ).json()
+    assert programs[0]["match_count"] == 1
+
+    matches = client.get(
+        f"/api/v1/community/mentorship-matches?organization_id={organization['id']}"
+    ).json()
+    assert matches[0]["mentee_name"] == "Emma Johnson"
+
+    alumni_dashboard = client.get(
+        f"/api/v1/community/alumni-dashboard?organization_id={organization['id']}"
+    ).json()
+    assert alumni_dashboard["alumni_count"] == 1
+    assert alumni_dashboard["active_alumni_count"] == 1
+    assert alumni_dashboard["mentorship_program_count"] == 1
+    assert alumni_dashboard["mentorship_match_count"] == 1
+    assert alumni_dashboard["mentor_capacity"] == 40
+    assert alumni_dashboard["lifetime_donations"] == "5200.00"

@@ -6,16 +6,27 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.community import (
+    AlumniProfile,
     CommunityComment,
     CommunityPost,
     CommunityReaction,
     FanPoll,
     FanPollOption,
     FanPollVote,
+    MentorshipMatch,
+    MentorshipProgram,
+    SupporterEngagementActivity,
+    SupporterMembershipTier,
+    SupporterProfile,
+    SupporterReward,
 )
+from app.models.identity import Person
 from app.models.organization import Organization
 from app.models.team import Team
 from app.schemas.community import (
+    AlumniDashboardRead,
+    AlumniProfileCreate,
+    AlumniProfileRead,
     CommunityCommentCreate,
     CommunityEngagementSummaryRead,
     CommunityPostCreate,
@@ -25,6 +36,19 @@ from app.schemas.community import (
     FanPollOptionRead,
     FanPollRead,
     FanPollVoteCreate,
+    MentorshipMatchCreate,
+    MentorshipMatchRead,
+    MentorshipProgramCreate,
+    MentorshipProgramRead,
+    SupporterDashboardRead,
+    SupporterEngagementActivityCreate,
+    SupporterEngagementActivityRead,
+    SupporterMembershipTierCreate,
+    SupporterMembershipTierRead,
+    SupporterProfileCreate,
+    SupporterProfileRead,
+    SupporterRewardCreate,
+    SupporterRewardRead,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
@@ -301,6 +325,358 @@ async def community_engagement_summary(db: AsyncSession, organization_id: UUID) 
     )
 
 
+async def create_supporter_membership_tier(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SupporterMembershipTierCreate,
+    authz: AuthorizationService,
+) -> SupporterMembershipTier:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_community(authz, identity, payload.organization_id)
+    existing = await db.scalar(
+        select(SupporterMembershipTier).where(
+            SupporterMembershipTier.organization_id == payload.organization_id,
+            SupporterMembershipTier.slug == payload.slug,
+        )
+    )
+    if existing is not None:
+        existing.name = payload.name
+        existing.monthly_price = payload.monthly_price
+        existing.currency = payload.currency
+        existing.benefits = payload.benefits
+        existing.voting_weight = payload.voting_weight
+        existing.trial_days = payload.trial_days
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+    tier = SupporterMembershipTier(**payload.model_dump())
+    db.add(tier)
+    await db.commit()
+    await db.refresh(tier)
+    return tier
+
+
+async def list_supporter_membership_tiers(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[SupporterMembershipTier]:
+    return list(
+        (
+            await db.scalars(
+                select(SupporterMembershipTier)
+                .where(SupporterMembershipTier.organization_id == organization_id)
+                .order_by(SupporterMembershipTier.monthly_price, SupporterMembershipTier.name)
+            )
+        ).all()
+    )
+
+
+async def create_supporter_profile(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SupporterProfileCreate,
+    authz: AuthorizationService,
+) -> SupporterProfileRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_community(authz, identity, payload.organization_id)
+    tier = await get_supporter_tier_for_organization(db, payload.tier_id, payload.organization_id)
+    existing = await db.scalar(
+        select(SupporterProfile).where(
+            SupporterProfile.organization_id == payload.organization_id,
+            func.lower(SupporterProfile.email) == payload.email.lower(),
+        )
+    )
+    if existing is not None:
+        existing.person_id = payload.person_id
+        existing.tier_id = payload.tier_id
+        existing.display_name = payload.display_name
+        existing.lifetime_value = payload.lifetime_value
+        existing.notes = payload.notes
+        await db.commit()
+        await db.refresh(existing)
+        return supporter_profile_read(existing, tier)
+    supporter = SupporterProfile(
+        **payload.model_dump(),
+        joined_at=datetime.now(UTC),
+    )
+    db.add(supporter)
+    await db.commit()
+    await db.refresh(supporter)
+    return supporter_profile_read(supporter, tier)
+
+
+async def list_supporter_profiles(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[SupporterProfileRead]:
+    rows = (
+        await db.execute(
+            select(SupporterProfile, SupporterMembershipTier)
+            .outerjoin(SupporterMembershipTier, SupporterProfile.tier_id == SupporterMembershipTier.id)
+            .where(SupporterProfile.organization_id == organization_id)
+            .order_by(SupporterProfile.engagement_points.desc(), SupporterProfile.display_name)
+        )
+    ).all()
+    return [supporter_profile_read(supporter, tier) for supporter, tier in rows]
+
+
+async def record_supporter_activity(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    supporter_profile_id: UUID,
+    payload: SupporterEngagementActivityCreate,
+    authz: AuthorizationService,
+) -> tuple[SupporterEngagementActivity, list[SupporterReward]]:
+    supporter = await get_supporter_profile(db, supporter_profile_id)
+    await ensure_manage_community(authz, identity, supporter.organization_id)
+    occurred_at = payload.occurred_at or datetime.now(UTC)
+    activity = SupporterEngagementActivity(
+        organization_id=supporter.organization_id,
+        supporter_profile_id=supporter.id,
+        activity_type=payload.activity_type,
+        source=payload.source,
+        description=payload.description,
+        points=payload.points,
+        value_amount=payload.value_amount,
+        occurred_at=occurred_at,
+    )
+    supporter.engagement_points += payload.points
+    supporter.lifetime_value += payload.value_amount
+    supporter.last_engagement_at = occurred_at
+    db.add(activity)
+    rewards = earned_supporter_rewards(supporter)
+    for reward in rewards:
+        db.add(reward)
+    await db.commit()
+    await db.refresh(activity)
+    for reward in rewards:
+        await db.refresh(reward)
+    return activity, rewards
+
+
+async def create_supporter_reward(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    supporter_profile_id: UUID,
+    payload: SupporterRewardCreate,
+    authz: AuthorizationService,
+) -> SupporterReward:
+    supporter = await get_supporter_profile(db, supporter_profile_id)
+    await ensure_manage_community(authz, identity, supporter.organization_id)
+    reward = SupporterReward(
+        organization_id=supporter.organization_id,
+        supporter_profile_id=supporter.id,
+        title=payload.title,
+        reward_type=payload.reward_type,
+        threshold_points=payload.threshold_points,
+    )
+    db.add(reward)
+    await db.commit()
+    await db.refresh(reward)
+    return reward
+
+
+async def supporter_dashboard(db: AsyncSession, organization_id: UUID) -> SupporterDashboardRead:
+    tier_count = await scalar_count(db, SupporterMembershipTier, organization_id)
+    supporter_count = await scalar_count(db, SupporterProfile, organization_id)
+    active_supporter_count = await scalar_count(
+        db,
+        SupporterProfile,
+        organization_id,
+        SupporterProfile.status == "active",
+    )
+    reward_count = await scalar_count(db, SupporterReward, organization_id)
+    total_points = int(
+        await db.scalar(
+            select(func.coalesce(func.sum(SupporterProfile.engagement_points), 0)).where(
+                SupporterProfile.organization_id == organization_id
+            )
+        )
+        or 0
+    )
+    total_lifetime_value = await db.scalar(
+        select(func.coalesce(func.sum(SupporterProfile.lifetime_value), 0)).where(
+            SupporterProfile.organization_id == organization_id
+        )
+    )
+    top_supporter = await db.scalar(
+        select(SupporterProfile)
+        .where(SupporterProfile.organization_id == organization_id)
+        .order_by(SupporterProfile.engagement_points.desc())
+        .limit(1)
+    )
+    return SupporterDashboardRead(
+        organization_id=organization_id,
+        tier_count=tier_count,
+        supporter_count=supporter_count,
+        active_supporter_count=active_supporter_count,
+        total_points=total_points,
+        total_lifetime_value=total_lifetime_value or 0,
+        reward_count=reward_count,
+        top_supporter_name=top_supporter.display_name if top_supporter else None,
+        recommendations=supporter_recommendations(tier_count, supporter_count, total_points, reward_count),
+    )
+
+
+async def create_alumni_profile(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: AlumniProfileCreate,
+    authz: AuthorizationService,
+) -> AlumniProfile:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_community(authz, identity, payload.organization_id)
+    existing = await db.scalar(
+        select(AlumniProfile).where(
+            AlumniProfile.organization_id == payload.organization_id,
+            func.lower(AlumniProfile.email) == payload.email.lower(),
+        )
+    )
+    if existing is not None:
+        for key, value in payload.model_dump().items():
+            setattr(existing, key, value)
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+    alumni = AlumniProfile(**payload.model_dump())
+    db.add(alumni)
+    await db.commit()
+    await db.refresh(alumni)
+    return alumni
+
+
+async def list_alumni_profiles(db: AsyncSession, organization_id: UUID) -> list[AlumniProfile]:
+    return list(
+        (
+            await db.scalars(
+                select(AlumniProfile)
+                .where(AlumniProfile.organization_id == organization_id)
+                .order_by(AlumniProfile.engagement_level, AlumniProfile.display_name)
+            )
+        ).all()
+    )
+
+
+async def create_mentorship_program(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: MentorshipProgramCreate,
+    authz: AuthorizationService,
+) -> MentorshipProgramRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_community(authz, identity, payload.organization_id)
+    program = MentorshipProgram(**payload.model_dump())
+    db.add(program)
+    await db.commit()
+    await db.refresh(program)
+    return mentorship_program_read(program, 0)
+
+
+async def list_mentorship_programs(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[MentorshipProgramRead]:
+    programs = list(
+        (
+            await db.scalars(
+                select(MentorshipProgram)
+                .where(MentorshipProgram.organization_id == organization_id)
+                .order_by(MentorshipProgram.created_at.desc())
+            )
+        ).all()
+    )
+    if not programs:
+        return []
+    program_ids = [program.id for program in programs]
+    counts = await count_by_program(db, program_ids)
+    return [mentorship_program_read(program, counts.get(program.id, 0)) for program in programs]
+
+
+async def create_mentorship_match(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    program_id: UUID,
+    payload: MentorshipMatchCreate,
+    authz: AuthorizationService,
+) -> MentorshipMatchRead:
+    program = await get_mentorship_program(db, program_id)
+    await ensure_manage_community(authz, identity, program.organization_id)
+    alumni = await get_alumni_profile(db, payload.alumni_profile_id)
+    if alumni.organization_id != program.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alumni profile not found")
+    if payload.mentee_person_id is not None and await db.get(Person, payload.mentee_person_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mentee not found")
+    match = MentorshipMatch(
+        organization_id=program.organization_id,
+        program_id=program.id,
+        alumni_profile_id=alumni.id,
+        mentee_person_id=payload.mentee_person_id,
+        mentee_name=payload.mentee_name,
+        mentee_interest=payload.mentee_interest,
+        match_score=mentorship_match_score(program, alumni, payload),
+        goals=payload.goals,
+        next_meeting_at=payload.next_meeting_at,
+    )
+    alumni.engagement_level = "mentor"
+    alumni.last_engagement_at = datetime.now(UTC)
+    db.add(match)
+    await db.commit()
+    await db.refresh(match)
+    return mentorship_match_read(match, alumni)
+
+
+async def list_mentorship_matches(db: AsyncSession, organization_id: UUID) -> list[MentorshipMatchRead]:
+    rows = (
+        await db.execute(
+            select(MentorshipMatch, AlumniProfile)
+            .join(AlumniProfile, MentorshipMatch.alumni_profile_id == AlumniProfile.id)
+            .where(MentorshipMatch.organization_id == organization_id)
+            .order_by(MentorshipMatch.match_score.desc(), MentorshipMatch.created_at.desc())
+        )
+    ).all()
+    return [mentorship_match_read(match, alumni) for match, alumni in rows]
+
+
+async def alumni_dashboard(db: AsyncSession, organization_id: UUID) -> AlumniDashboardRead:
+    alumni_count = await scalar_count(db, AlumniProfile, organization_id)
+    active_alumni_count = await scalar_count(
+        db,
+        AlumniProfile,
+        organization_id,
+        AlumniProfile.engagement_level.in_(["active", "mentor", "donor"]),
+    )
+    mentorship_program_count = await scalar_count(db, MentorshipProgram, organization_id)
+    mentorship_match_count = await scalar_count(db, MentorshipMatch, organization_id)
+    lifetime_donations = await db.scalar(
+        select(func.coalesce(func.sum(AlumniProfile.lifetime_donations), 0)).where(
+            AlumniProfile.organization_id == organization_id
+        )
+    )
+    mentor_capacity = int(
+        await db.scalar(
+            select(func.coalesce(func.sum(MentorshipProgram.capacity), 0)).where(
+                MentorshipProgram.organization_id == organization_id
+            )
+        )
+        or 0
+    )
+    return AlumniDashboardRead(
+        organization_id=organization_id,
+        alumni_count=alumni_count,
+        active_alumni_count=active_alumni_count,
+        mentorship_program_count=mentorship_program_count,
+        mentorship_match_count=mentorship_match_count,
+        lifetime_donations=lifetime_donations or 0,
+        mentor_capacity=mentor_capacity,
+        recommendations=alumni_recommendations(
+            alumni_count,
+            active_alumni_count,
+            mentorship_program_count,
+            mentorship_match_count,
+        ),
+    )
+
+
 def community_post_read(
     post: CommunityPost,
     *,
@@ -356,6 +732,124 @@ def fan_poll_read(
     )
 
 
+def supporter_tier_read(tier: SupporterMembershipTier) -> SupporterMembershipTierRead:
+    return SupporterMembershipTierRead(
+        id=tier.id,
+        organization_id=tier.organization_id,
+        name=tier.name,
+        slug=tier.slug,
+        monthly_price=tier.monthly_price,
+        currency=tier.currency,
+        benefits=tier.benefits,
+        voting_weight=tier.voting_weight,
+        trial_days=tier.trial_days,
+        status=tier.status,
+    )
+
+
+def supporter_profile_read(
+    supporter: SupporterProfile,
+    tier: SupporterMembershipTier | None = None,
+) -> SupporterProfileRead:
+    return SupporterProfileRead(
+        id=supporter.id,
+        organization_id=supporter.organization_id,
+        person_id=supporter.person_id,
+        tier_id=supporter.tier_id,
+        display_name=supporter.display_name,
+        email=supporter.email,
+        lifetime_value=supporter.lifetime_value,
+        notes=supporter.notes,
+        engagement_points=supporter.engagement_points,
+        status=supporter.status,
+        joined_at=supporter.joined_at,
+        last_engagement_at=supporter.last_engagement_at,
+        tier_name=tier.name if tier else None,
+        tier_voting_weight=tier.voting_weight if tier else None,
+    )
+
+
+def supporter_activity_read(activity: SupporterEngagementActivity) -> SupporterEngagementActivityRead:
+    return SupporterEngagementActivityRead(
+        id=activity.id,
+        organization_id=activity.organization_id,
+        supporter_profile_id=activity.supporter_profile_id,
+        activity_type=activity.activity_type,
+        source=activity.source,
+        description=activity.description,
+        points=activity.points,
+        value_amount=activity.value_amount,
+        occurred_at=activity.occurred_at,
+    )
+
+
+def supporter_reward_read(reward: SupporterReward) -> SupporterRewardRead:
+    return SupporterRewardRead(
+        id=reward.id,
+        organization_id=reward.organization_id,
+        supporter_profile_id=reward.supporter_profile_id,
+        title=reward.title,
+        reward_type=reward.reward_type,
+        threshold_points=reward.threshold_points,
+        status=reward.status,
+        redeemed_at=reward.redeemed_at,
+    )
+
+
+def alumni_profile_read(alumni: AlumniProfile) -> AlumniProfileRead:
+    return AlumniProfileRead(
+        id=alumni.id,
+        organization_id=alumni.organization_id,
+        person_id=alumni.person_id,
+        display_name=alumni.display_name,
+        email=alumni.email,
+        graduation_year=alumni.graduation_year,
+        sports_history=alumni.sports_history,
+        career_industry=alumni.career_industry,
+        current_company=alumni.current_company,
+        current_role=alumni.current_role,
+        linkedin_url=alumni.linkedin_url,
+        engagement_level=alumni.engagement_level,
+        lifetime_donations=alumni.lifetime_donations,
+        privacy_status=alumni.privacy_status,
+        last_engagement_at=alumni.last_engagement_at,
+        notes=alumni.notes,
+    )
+
+
+def mentorship_program_read(program: MentorshipProgram, match_count: int) -> MentorshipProgramRead:
+    return MentorshipProgramRead(
+        id=program.id,
+        organization_id=program.organization_id,
+        name=program.name,
+        goals=program.goals,
+        industry_focus=program.industry_focus,
+        capacity=program.capacity,
+        starts_on=program.starts_on,
+        ends_on=program.ends_on,
+        status=program.status,
+        match_count=match_count,
+    )
+
+
+def mentorship_match_read(match: MentorshipMatch, alumni: AlumniProfile | None = None) -> MentorshipMatchRead:
+    return MentorshipMatchRead(
+        id=match.id,
+        organization_id=match.organization_id,
+        program_id=match.program_id,
+        alumni_profile_id=match.alumni_profile_id,
+        alumni_name=alumni.display_name if alumni else None,
+        mentee_person_id=match.mentee_person_id,
+        mentee_name=match.mentee_name,
+        mentee_interest=match.mentee_interest,
+        match_score=match.match_score,
+        goals=match.goals,
+        status=match.status,
+        next_meeting_at=match.next_meeting_at,
+        feedback_notes=match.feedback_notes,
+    )
+
+
 async def get_organization(db: AsyncSession, organization_id: UUID) -> Organization:
     organization = await db.get(Organization, organization_id)
     if organization is None:
@@ -377,6 +871,40 @@ async def get_community_post(db: AsyncSession, post_id: UUID) -> CommunityPost:
     return post
 
 
+async def get_supporter_tier_for_organization(
+    db: AsyncSession,
+    tier_id: UUID | None,
+    organization_id: UUID,
+) -> SupporterMembershipTier | None:
+    if tier_id is None:
+        return None
+    tier = await db.get(SupporterMembershipTier, tier_id)
+    if tier is None or tier.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supporter tier not found")
+    return tier
+
+
+async def get_supporter_profile(db: AsyncSession, supporter_profile_id: UUID) -> SupporterProfile:
+    supporter = await db.get(SupporterProfile, supporter_profile_id)
+    if supporter is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supporter profile not found")
+    return supporter
+
+
+async def get_alumni_profile(db: AsyncSession, alumni_profile_id: UUID) -> AlumniProfile:
+    alumni = await db.get(AlumniProfile, alumni_profile_id)
+    if alumni is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alumni profile not found")
+    return alumni
+
+
+async def get_mentorship_program(db: AsyncSession, program_id: UUID) -> MentorshipProgram:
+    program = await db.get(MentorshipProgram, program_id)
+    if program is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mentorship program not found")
+    return program
+
+
 async def count_by_post(db: AsyncSession, field, model, post_ids: list[UUID]) -> dict[UUID, int]:
     rows = (await db.execute(select(field, func.count(model.id)).where(field.in_(post_ids)).group_by(field))).all()
     return {post_id: count for post_id, count in rows}
@@ -393,6 +921,19 @@ async def count_by_option(db: AsyncSession, option_ids: list[UUID]) -> dict[UUID
         )
     ).all()
     return {option_id: count for option_id, count in rows}
+
+
+async def count_by_program(db: AsyncSession, program_ids: list[UUID]) -> dict[UUID, int]:
+    if not program_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(MentorshipMatch.program_id, func.count(MentorshipMatch.id))
+            .where(MentorshipMatch.program_id.in_(program_ids))
+            .group_by(MentorshipMatch.program_id)
+        )
+    ).all()
+    return {program_id: count for program_id, count in rows}
 
 
 async def scalar_count(db: AsyncSession, model, organization_id: UUID, *conditions) -> int:
@@ -422,4 +963,83 @@ def community_recommendations(
         recommendations.append("Share the poll through communications and the public site to gather supporter input.")
     if not recommendations:
         recommendations.append("Community engagement is active; keep posts, polls, and moderation current.")
+    return recommendations[:6]
+
+
+def earned_supporter_rewards(supporter: SupporterProfile) -> list[SupporterReward]:
+    reward_specs = [
+        (500, "Community regular", "badge"),
+        (1000, "Matchday insider", "experience"),
+        (2500, "Meet and greet access", "experience"),
+        (5000, "Signed merchandise eligibility", "merchandise"),
+    ]
+    return [
+        SupporterReward(
+            organization_id=supporter.organization_id,
+            supporter_profile_id=supporter.id,
+            title=title,
+            reward_type=reward_type,
+            threshold_points=threshold,
+        )
+        for threshold, title, reward_type in reward_specs
+        if supporter.engagement_points >= threshold
+    ][:1]
+
+
+def supporter_recommendations(
+    tier_count: int,
+    supporter_count: int,
+    total_points: int,
+    reward_count: int,
+) -> list[str]:
+    recommendations: list[str] = []
+    if not tier_count:
+        recommendations.append("Create Basic, Premium, and VIP supporter tiers with clear voting and merchandise benefits.")
+    if not supporter_count:
+        recommendations.append("Add the first supporters from ticket buyers, donors, families, and public-site signups.")
+    if supporter_count and not total_points:
+        recommendations.append("Record attendance, poll votes, comments, donations, and merchandise purchases as engagement activity.")
+    if total_points and not reward_count:
+        recommendations.append("Attach rewards so top supporters can redeem experiences, badges, or merchandise.")
+    if not recommendations:
+        recommendations.append("Supporter CRM is active; review top fans for tier upgrades and campaign targeting.")
+    return recommendations[:6]
+
+
+def mentorship_match_score(
+    program: MentorshipProgram,
+    alumni: AlumniProfile,
+    payload: MentorshipMatchCreate,
+) -> int:
+    score = 45
+    if program.industry_focus and alumni.career_industry:
+        if program.industry_focus.lower() in alumni.career_industry.lower():
+            score += 25
+    if payload.mentee_interest and alumni.career_industry:
+        if payload.mentee_interest.lower() in alumni.career_industry.lower():
+            score += 20
+    if alumni.engagement_level in {"active", "mentor", "donor"}:
+        score += 10
+    if alumni.privacy_status == "network_visible":
+        score += 5
+    return min(score, 100)
+
+
+def alumni_recommendations(
+    alumni_count: int,
+    active_alumni_count: int,
+    mentorship_program_count: int,
+    mentorship_match_count: int,
+) -> list[str]:
+    recommendations: list[str] = []
+    if not alumni_count:
+        recommendations.append("Import former players with graduation year, sport history, and current career path.")
+    if alumni_count and not active_alumni_count:
+        recommendations.append("Tag donors, mentors, and event attendees so the alumni network distinguishes active alumni.")
+    if not mentorship_program_count:
+        recommendations.append("Launch a structured mentorship program for career guidance and post-sport pathways.")
+    if mentorship_program_count and not mentorship_match_count:
+        recommendations.append("Match current athletes to alumni mentors by industry, goals, and availability.")
+    if not recommendations:
+        recommendations.append("Alumni mentorship is active; keep match feedback and event follow-up current.")
     return recommendations[:6]

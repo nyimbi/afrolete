@@ -102,6 +102,8 @@ import type {
   BillingTaxFilingRead,
   BillingTaxQuoteRead,
   ChannelPreference,
+  AlumniDashboardRead,
+  AlumniProfileRead,
   CommunicationDigestRead,
   CommunicationDigestRunRead,
   CommunicationDeliveryReadinessRead,
@@ -125,6 +127,8 @@ import type {
   CommercialRefundRead,
   FanPollRead,
   FanPollVoteRead,
+  MentorshipMatchRead,
+  MentorshipProgramRead,
   AthleteTransferRead,
   CompetitionAdvancementRead,
   CompetitionBracketRead,
@@ -230,6 +234,11 @@ import type {
   MerchandiseOrderRead,
   MerchandiseProductRead,
   MerchandiseStoreDashboardRead,
+  SupporterDashboardRead,
+  SupporterEngagementActivityRead,
+  SupporterMembershipTierRead,
+  SupporterProfileRead,
+  SupporterRewardRead,
   GeneratedTrainingPlanRead,
   GeneratedReportRead,
   BackgroundCheckEvidenceDocumentLinkRead,
@@ -1705,6 +1714,15 @@ export default function HomePage() {
   const [fanPolls, setFanPolls] = useState<FanPollRead[]>([]);
   const [fanPollVote, setFanPollVote] = useState<FanPollVoteRead | null>(null);
   const [communitySummary, setCommunitySummary] = useState<CommunityEngagementSummaryRead | null>(null);
+  const [supporterTiers, setSupporterTiers] = useState<SupporterMembershipTierRead[]>([]);
+  const [supporters, setSupporters] = useState<SupporterProfileRead[]>([]);
+  const [supporterActivity, setSupporterActivity] = useState<SupporterEngagementActivityRead | null>(null);
+  const [supporterReward, setSupporterReward] = useState<SupporterRewardRead | null>(null);
+  const [supporterDashboard, setSupporterDashboard] = useState<SupporterDashboardRead | null>(null);
+  const [alumniProfiles, setAlumniProfiles] = useState<AlumniProfileRead[]>([]);
+  const [mentorshipPrograms, setMentorshipPrograms] = useState<MentorshipProgramRead[]>([]);
+  const [mentorshipMatches, setMentorshipMatches] = useState<MentorshipMatchRead[]>([]);
+  const [alumniDashboard, setAlumniDashboard] = useState<AlumniDashboardRead | null>(null);
   const [facilities, setFacilities] = useState<FacilityRead[]>([]);
   const [emergencyPlans, setEmergencyPlans] = useState<EmergencyActionPlanRead[]>([]);
   const [emergencyActivations, setEmergencyActivations] = useState<EmergencyPlanActivationRead[]>([]);
@@ -1871,6 +1889,9 @@ export default function HomePage() {
   const [selectedMessageId, setSelectedMessageId] = useState("");
   const [selectedCommunityPostId, setSelectedCommunityPostId] = useState("");
   const [selectedFanPollId, setSelectedFanPollId] = useState("");
+  const [selectedSupporterId, setSelectedSupporterId] = useState("");
+  const [selectedAlumniId, setSelectedAlumniId] = useState("");
+  const [selectedMentorshipProgramId, setSelectedMentorshipProgramId] = useState("");
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
   const [selectedEquipmentId, setSelectedEquipmentId] = useState("");
   const [selectedCheckoutId, setSelectedCheckoutId] = useState("");
@@ -2528,7 +2549,46 @@ export default function HomePage() {
     poll_question: "Who was player of the match?",
     poll_audience: "supporters",
     poll_options: "Amina, Brian, Team defence",
-    vote_option_index: 0
+    vote_option_index: 0,
+    tier_name: "VIP Season Holder",
+    tier_slug: "vip-season-holder",
+    tier_price: 20,
+    tier_currency: "USD",
+    tier_benefits: "Behind-the-scenes content, premium votes, merchandise discounts, meet-and-greet access.",
+    tier_voting_weight: 5,
+    tier_trial_days: 14,
+    supporter_name: "Sarah Supporter",
+    supporter_email: "sarah.supporter@example.com",
+    supporter_lifetime_value: 60,
+    supporter_notes: "Family package candidate and matchday volunteer.",
+    activity_type: "match_attendance",
+    activity_source: "ticketing",
+    activity_description: "Attended derby, voted in player-of-the-match poll, and shared photos.",
+    activity_points: 1250,
+    activity_value: 15,
+    reward_title: "Meet and greet ticket",
+    reward_type: "experience",
+    reward_threshold: 1000,
+    alumni_name: "Michael Mentor",
+    alumni_email: "michael.mentor@example.com",
+    graduation_year: 2018,
+    sports_history: "Community Club U8 to U18, college captain, youth coach.",
+    career_industry: "Sports Management",
+    current_company: "Community Club",
+    current_role: "Head of Youth Development",
+    linkedin_url: "https://linkedin.example/michael",
+    alumni_engagement_level: "active",
+    alumni_donations: 5200,
+    mentorship_name: "Future Leaders",
+    mentorship_goals: "Career guidance, professional networking, and life-after-sport planning.",
+    mentorship_industry: "Sports Management",
+    mentorship_capacity: 40,
+    mentorship_start: "2026-06-01",
+    mentorship_end: "2026-12-15",
+    mentee_name: "Emma Johnson",
+    mentee_interest: "Sports Management",
+    mentorship_match_goals: "Explore coaching, sports operations, and college pathway decisions.",
+    next_meeting_at: "2026-06-10T15:00"
   });
   const [ticketForm, setTicketForm] = useState({
     name: "General admission",
@@ -2669,6 +2729,21 @@ export default function HomePage() {
   const selectedFanPoll = useMemo(
     () => fanPolls.find((poll) => poll.id === selectedFanPollId) ?? fanPolls[0] ?? null,
     [fanPolls, selectedFanPollId]
+  );
+  const selectedSupporter = useMemo(
+    () => supporters.find((supporter) => supporter.id === selectedSupporterId) ?? supporters[0] ?? null,
+    [supporters, selectedSupporterId]
+  );
+  const selectedAlumni = useMemo(
+    () => alumniProfiles.find((alumni) => alumni.id === selectedAlumniId) ?? alumniProfiles[0] ?? null,
+    [alumniProfiles, selectedAlumniId]
+  );
+  const selectedMentorshipProgram = useMemo(
+    () =>
+      mentorshipPrograms.find((program) => program.id === selectedMentorshipProgramId)
+      ?? mentorshipPrograms[0]
+      ?? null,
+    [mentorshipPrograms, selectedMentorshipProgramId]
   );
   const assessmentReviewQueueSummary = useMemo(() => ({
     total: assessmentReviewQueue.length,
@@ -3422,19 +3497,53 @@ export default function HomePage() {
 
   const loadCommunity = useCallback(async (organizationId: string, teamId?: string) => {
     const teamQuery = teamId ? `&team_id=${teamId}` : "";
-    const [posts, polls, summary] = await Promise.all([
+    const [
+      posts,
+      polls,
+      summary,
+      tiers,
+      supporterData,
+      supporterSummary,
+      alumniData,
+      programData,
+      matchData,
+      alumniSummary
+    ] = await Promise.all([
       apiRequest<CommunityPostRead[]>(`/community/posts?organization_id=${organizationId}${teamQuery}`),
       apiRequest<FanPollRead[]>(`/community/polls?organization_id=${organizationId}${teamQuery}`),
-      apiRequest<CommunityEngagementSummaryRead>(`/community/summary?organization_id=${organizationId}`)
+      apiRequest<CommunityEngagementSummaryRead>(`/community/summary?organization_id=${organizationId}`),
+      apiRequest<SupporterMembershipTierRead[]>(`/community/supporter-tiers?organization_id=${organizationId}`),
+      apiRequest<SupporterProfileRead[]>(`/community/supporters?organization_id=${organizationId}`),
+      apiRequest<SupporterDashboardRead>(`/community/supporter-dashboard?organization_id=${organizationId}`),
+      apiRequest<AlumniProfileRead[]>(`/community/alumni?organization_id=${organizationId}`),
+      apiRequest<MentorshipProgramRead[]>(`/community/mentorship-programs?organization_id=${organizationId}`),
+      apiRequest<MentorshipMatchRead[]>(`/community/mentorship-matches?organization_id=${organizationId}`),
+      apiRequest<AlumniDashboardRead>(`/community/alumni-dashboard?organization_id=${organizationId}`)
     ]);
     setCommunityPosts(posts);
     setFanPolls(polls);
     setCommunitySummary(summary);
+    setSupporterTiers(tiers);
+    setSupporters(supporterData);
+    setSupporterDashboard(supporterSummary);
+    setAlumniProfiles(alumniData);
+    setMentorshipPrograms(programData);
+    setMentorshipMatches(matchData);
+    setAlumniDashboard(alumniSummary);
     setSelectedCommunityPostId((current) =>
       posts.some((post) => post.id === current) ? current : posts[0]?.id ?? ""
     );
     setSelectedFanPollId((current) =>
       polls.some((poll) => poll.id === current) ? current : polls[0]?.id ?? ""
+    );
+    setSelectedSupporterId((current) =>
+      supporterData.some((supporter) => supporter.id === current) ? current : supporterData[0]?.id ?? ""
+    );
+    setSelectedAlumniId((current) =>
+      alumniData.some((alumni) => alumni.id === current) ? current : alumniData[0]?.id ?? ""
+    );
+    setSelectedMentorshipProgramId((current) =>
+      programData.some((program) => program.id === current) ? current : programData[0]?.id ?? ""
     );
   }, []);
 
@@ -4007,8 +4116,20 @@ export default function HomePage() {
       setFanPolls([]);
       setFanPollVote(null);
       setCommunitySummary(null);
+      setSupporterTiers([]);
+      setSupporters([]);
+      setSupporterActivity(null);
+      setSupporterReward(null);
+      setSupporterDashboard(null);
+      setAlumniProfiles([]);
+      setMentorshipPrograms([]);
+      setMentorshipMatches([]);
+      setAlumniDashboard(null);
       setSelectedCommunityPostId("");
       setSelectedFanPollId("");
+      setSelectedSupporterId("");
+      setSelectedAlumniId("");
+      setSelectedMentorshipProgramId("");
       setFacilities([]);
       setEquipmentItems([]);
       setEquipmentFiles([]);
@@ -12339,6 +12460,176 @@ export default function HomePage() {
     );
   };
 
+  const createSupporterTierAndProfile = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-supporter-crm",
+      async () => {
+        const tier = await apiRequest<SupporterMembershipTierRead>("/community/supporter-tiers", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: communityForm.tier_name,
+            slug: communityForm.tier_slug,
+            monthly_price: String(communityForm.tier_price),
+            currency: communityForm.tier_currency,
+            benefits: communityForm.tier_benefits,
+            voting_weight: communityForm.tier_voting_weight,
+            trial_days: communityForm.tier_trial_days
+          }
+        });
+        const supporter = await apiRequest<SupporterProfileRead>("/community/supporters", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            tier_id: tier.id,
+            display_name: communityForm.supporter_name,
+            email: communityForm.supporter_email,
+            lifetime_value: String(communityForm.supporter_lifetime_value),
+            notes: communityForm.supporter_notes
+          }
+        });
+        return { tier, supporter };
+      },
+      ({ tier, supporter }) => {
+        setSupporterTiers((current) => [tier, ...current.filter((item) => item.id !== tier.id)]);
+        setSupporters((current) => [supporter, ...current.filter((item) => item.id !== supporter.id)]);
+        setSelectedSupporterId(supporter.id);
+        addLog(`${supporter.display_name} joined ${tier.name}`, "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const recordSupporterEngagement = () => {
+    if (!selectedOrganizationId || !selectedSupporter) {
+      addLog("Create or select a supporter first", "bad");
+      return;
+    }
+    runAction(
+      "record-supporter-engagement",
+      () =>
+        apiRequest<SupporterEngagementActivityRead>(
+          `/community/supporters/${selectedSupporter.id}/activities`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              activity_type: communityForm.activity_type,
+              source: communityForm.activity_source,
+              description: communityForm.activity_description,
+              points: communityForm.activity_points,
+              value_amount: String(communityForm.activity_value)
+            }
+          }
+        ),
+      (activity) => {
+        setSupporterActivity(activity);
+        addLog(`${activity.points} supporter point(s) recorded`, "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const createSupporterReward = () => {
+    if (!selectedOrganizationId || !selectedSupporter) {
+      addLog("Create or select a supporter first", "bad");
+      return;
+    }
+    runAction(
+      "create-supporter-reward",
+      () =>
+        apiRequest<SupporterRewardRead>(`/community/supporters/${selectedSupporter.id}/rewards`, {
+          method: "POST",
+          identity,
+          body: {
+            title: communityForm.reward_title,
+            reward_type: communityForm.reward_type,
+            threshold_points: communityForm.reward_threshold
+          }
+        }),
+      (reward) => {
+        setSupporterReward(reward);
+        addLog(`${reward.title} reward attached`, "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const createAlumniAndMentorship = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-alumni-mentorship",
+      async () => {
+        const alumni = await apiRequest<AlumniProfileRead>("/community/alumni", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            display_name: communityForm.alumni_name,
+            email: communityForm.alumni_email,
+            graduation_year: communityForm.graduation_year,
+            sports_history: communityForm.sports_history,
+            career_industry: communityForm.career_industry,
+            current_company: communityForm.current_company,
+            current_role: communityForm.current_role,
+            linkedin_url: communityForm.linkedin_url,
+            engagement_level: communityForm.alumni_engagement_level,
+            lifetime_donations: String(communityForm.alumni_donations),
+            privacy_status: "network_visible"
+          }
+        });
+        const program = await apiRequest<MentorshipProgramRead>("/community/mentorship-programs", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: communityForm.mentorship_name,
+            goals: communityForm.mentorship_goals,
+            industry_focus: communityForm.mentorship_industry,
+            capacity: communityForm.mentorship_capacity,
+            starts_on: communityForm.mentorship_start || null,
+            ends_on: communityForm.mentorship_end || null
+          }
+        });
+        const match = await apiRequest<MentorshipMatchRead>(
+          `/community/mentorship-programs/${program.id}/matches`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              alumni_profile_id: alumni.id,
+              mentee_name: communityForm.mentee_name,
+              mentee_interest: communityForm.mentee_interest,
+              goals: communityForm.mentorship_match_goals,
+              next_meeting_at: communityForm.next_meeting_at
+                ? new Date(communityForm.next_meeting_at).toISOString()
+                : null
+            }
+          }
+        );
+        return { alumni, program, match };
+      },
+      ({ alumni, program, match }) => {
+        setAlumniProfiles((current) => [alumni, ...current.filter((item) => item.id !== alumni.id)]);
+        setMentorshipPrograms((current) => [program, ...current.filter((item) => item.id !== program.id)]);
+        setMentorshipMatches((current) => [match, ...current.filter((item) => item.id !== match.id)]);
+        setSelectedAlumniId(alumni.id);
+        setSelectedMentorshipProgramId(program.id);
+        addLog(`${alumni.display_name} matched with ${match.mentee_name}`, "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
   const createFacilityBooking = () => {
     if (!selectedOrganizationId || !selectedFacilityId) {
       addLog("Create or select a facility first", "bad");
@@ -18368,6 +18659,212 @@ export default function HomePage() {
                   <span>Posts, comments, reactions, and polls now persist by organization and team.</span>
                 </div>
               </article>
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Fan CRM</p>
+                <h2>Membership tiers and rewards</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createSupporterTierAndProfile} disabled={busyAction !== null}>Supporter</button>
+                <button type="button" onClick={recordSupporterEngagement} disabled={busyAction !== null || !selectedSupporter}>Activity</button>
+                <button type="button" onClick={createSupporterReward} disabled={busyAction !== null || !selectedSupporter}>Reward</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{supporterDashboard?.total_points ?? 0}</strong>
+              <span>{supporterDashboard?.top_supporter_name ?? selectedSupporter?.display_name ?? "No supporter selected"}</span>
+              <small>
+                {supporterDashboard
+                  ? `${supporterDashboard.supporter_count} supporters · ${supporterDashboard.tier_count} tiers · value ${supporterDashboard.total_lifetime_value} · ${supporterDashboard.reward_count} rewards`
+                  : "Build tiered supporter memberships, activity scoring, and reward fulfillment"}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Tier
+                <input value={communityForm.tier_name} onChange={(event) => setCommunityForm({ ...communityForm, tier_name: event.target.value })} />
+              </label>
+              <label>
+                Slug
+                <input value={communityForm.tier_slug} onChange={(event) => setCommunityForm({ ...communityForm, tier_slug: event.target.value })} />
+              </label>
+              <label>
+                Monthly price
+                <input type="number" min="0" value={communityForm.tier_price} onChange={(event) => setCommunityForm({ ...communityForm, tier_price: Number(event.target.value) })} />
+              </label>
+              <label>
+                Voting weight
+                <input type="number" min="1" value={communityForm.tier_voting_weight} onChange={(event) => setCommunityForm({ ...communityForm, tier_voting_weight: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Tier benefits
+                <input value={communityForm.tier_benefits} onChange={(event) => setCommunityForm({ ...communityForm, tier_benefits: event.target.value })} />
+              </label>
+              <label>
+                Supporter
+                <input value={communityForm.supporter_name} onChange={(event) => setCommunityForm({ ...communityForm, supporter_name: event.target.value })} />
+              </label>
+              <label>
+                Email
+                <input value={communityForm.supporter_email} onChange={(event) => setCommunityForm({ ...communityForm, supporter_email: event.target.value })} />
+              </label>
+              <label>
+                Activity
+                <input value={communityForm.activity_type} onChange={(event) => setCommunityForm({ ...communityForm, activity_type: event.target.value })} />
+              </label>
+              <label>
+                Points
+                <input type="number" min="0" value={communityForm.activity_points} onChange={(event) => setCommunityForm({ ...communityForm, activity_points: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Activity description
+                <input value={communityForm.activity_description} onChange={(event) => setCommunityForm({ ...communityForm, activity_description: event.target.value })} />
+              </label>
+              <label>
+                Reward
+                <input value={communityForm.reward_title} onChange={(event) => setCommunityForm({ ...communityForm, reward_title: event.target.value })} />
+              </label>
+              <label>
+                Threshold
+                <input type="number" min="0" value={communityForm.reward_threshold} onChange={(event) => setCommunityForm({ ...communityForm, reward_threshold: Number(event.target.value) })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {supporterDashboard?.recommendations.slice(0, 2).map((recommendation) => (
+                <article key={recommendation} className="task-card">
+                  <div>
+                    <strong>Supporter cue</strong>
+                    <span>{recommendation}</span>
+                  </div>
+                </article>
+              ))}
+              {supporters.slice(0, 4).map((supporter) => (
+                <button
+                  type="button"
+                  key={supporter.id}
+                  className={`task-card ${supporter.id === selectedSupporterId ? "selected" : ""}`}
+                  onClick={() => setSelectedSupporterId(supporter.id)}
+                >
+                  <div>
+                    <strong>{supporter.display_name}</strong>
+                    <span>{supporter.tier_name ?? "No tier"} · {supporter.engagement_points} points · value {supporter.lifetime_value}</span>
+                  </div>
+                </button>
+              ))}
+              {supporterActivity ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{supporterActivity.activity_type}</strong>
+                    <span>{supporterActivity.points} points · {supporterActivity.description}</span>
+                  </div>
+                </article>
+              ) : null}
+              {supporterReward ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{supporterReward.title}</strong>
+                    <span>{supporterReward.reward_type} · {supporterReward.status} · {supporterReward.threshold_points} points</span>
+                  </div>
+                </article>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Alumni</p>
+                <h2>Network and mentorship</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createAlumniAndMentorship} disabled={busyAction !== null}>Mentorship</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{alumniDashboard?.mentorship_match_count ?? mentorshipMatches.length}</strong>
+              <span>{selectedAlumni?.display_name ?? "No alumni profile selected"}</span>
+              <small>
+                {alumniDashboard
+                  ? `${alumniDashboard.alumni_count} alumni · ${alumniDashboard.active_alumni_count} active · donations ${alumniDashboard.lifetime_donations} · capacity ${alumniDashboard.mentor_capacity}`
+                  : "Maintain alumni profiles, career paths, mentor capacity, and current-player matches"}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Alumni
+                <input value={communityForm.alumni_name} onChange={(event) => setCommunityForm({ ...communityForm, alumni_name: event.target.value })} />
+              </label>
+              <label>
+                Email
+                <input value={communityForm.alumni_email} onChange={(event) => setCommunityForm({ ...communityForm, alumni_email: event.target.value })} />
+              </label>
+              <label>
+                Graduation
+                <input type="number" min="1900" value={communityForm.graduation_year} onChange={(event) => setCommunityForm({ ...communityForm, graduation_year: Number(event.target.value) })} />
+              </label>
+              <label>
+                Industry
+                <input value={communityForm.career_industry} onChange={(event) => setCommunityForm({ ...communityForm, career_industry: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Sports history
+                <input value={communityForm.sports_history} onChange={(event) => setCommunityForm({ ...communityForm, sports_history: event.target.value })} />
+              </label>
+              <label>
+                Program
+                <input value={communityForm.mentorship_name} onChange={(event) => setCommunityForm({ ...communityForm, mentorship_name: event.target.value })} />
+              </label>
+              <label>
+                Capacity
+                <input type="number" min="1" value={communityForm.mentorship_capacity} onChange={(event) => setCommunityForm({ ...communityForm, mentorship_capacity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Mentee
+                <input value={communityForm.mentee_name} onChange={(event) => setCommunityForm({ ...communityForm, mentee_name: event.target.value })} />
+              </label>
+              <label>
+                Interest
+                <input value={communityForm.mentee_interest} onChange={(event) => setCommunityForm({ ...communityForm, mentee_interest: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Match goals
+                <input value={communityForm.mentorship_match_goals} onChange={(event) => setCommunityForm({ ...communityForm, mentorship_match_goals: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {alumniDashboard?.recommendations.slice(0, 2).map((recommendation) => (
+                <article key={recommendation} className="task-card">
+                  <div>
+                    <strong>Alumni cue</strong>
+                    <span>{recommendation}</span>
+                  </div>
+                </article>
+              ))}
+              {mentorshipMatches.slice(0, 4).map((match) => (
+                <article key={match.id} className="task-card">
+                  <div>
+                    <strong>{match.alumni_name ?? "Alumni"} -&gt; {match.mentee_name}</strong>
+                    <span>Score {match.match_score} · {match.status} · {match.mentee_interest}</span>
+                  </div>
+                </article>
+              ))}
+              {mentorshipPrograms.slice(0, 3).map((program) => (
+                <button
+                  type="button"
+                  key={program.id}
+                  className={`task-card ${program.id === selectedMentorshipProgramId ? "selected" : ""}`}
+                  onClick={() => setSelectedMentorshipProgramId(program.id)}
+                >
+                  <div>
+                    <strong>{program.name}</strong>
+                    <span>{program.match_count}/{program.capacity} matches · {program.industry_focus ?? "all industries"}</span>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
         </section>

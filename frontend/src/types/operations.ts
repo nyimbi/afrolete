@@ -2915,6 +2915,130 @@ export type CommunityEngagementSummaryRead = {
   recommendations: string[];
 };
 
+export type SupporterMembershipTierRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  slug: string;
+  monthly_price: string;
+  currency: string;
+  benefits: string;
+  voting_weight: number;
+  trial_days: number;
+  status: string;
+};
+
+export type SupporterProfileRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID | null;
+  tier_id: UUID | null;
+  display_name: string;
+  email: string;
+  lifetime_value: string;
+  notes: string | null;
+  engagement_points: number;
+  status: string;
+  joined_at: string;
+  last_engagement_at: string | null;
+  tier_name: string | null;
+  tier_voting_weight: number | null;
+};
+
+export type SupporterEngagementActivityRead = {
+  id: UUID;
+  organization_id: UUID;
+  supporter_profile_id: UUID;
+  activity_type: string;
+  source: string;
+  description: string;
+  points: number;
+  value_amount: string;
+  occurred_at: string;
+};
+
+export type SupporterRewardRead = {
+  id: UUID;
+  organization_id: UUID;
+  supporter_profile_id: UUID;
+  title: string;
+  reward_type: string;
+  threshold_points: number;
+  status: string;
+  redeemed_at: string | null;
+};
+
+export type SupporterDashboardRead = {
+  organization_id: UUID;
+  tier_count: number;
+  supporter_count: number;
+  active_supporter_count: number;
+  total_points: number;
+  total_lifetime_value: string;
+  reward_count: number;
+  top_supporter_name: string | null;
+  recommendations: string[];
+};
+
+export type AlumniProfileRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID | null;
+  display_name: string;
+  email: string;
+  graduation_year: number | null;
+  sports_history: string;
+  career_industry: string | null;
+  current_company: string | null;
+  current_role: string | null;
+  linkedin_url: string | null;
+  engagement_level: string;
+  lifetime_donations: string;
+  privacy_status: string;
+  last_engagement_at: string | null;
+  notes: string | null;
+};
+
+export type MentorshipProgramRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  goals: string;
+  industry_focus: string | null;
+  capacity: number;
+  starts_on: string | null;
+  ends_on: string | null;
+  status: string;
+  match_count: number;
+};
+
+export type MentorshipMatchRead = {
+  id: UUID;
+  organization_id: UUID;
+  program_id: UUID;
+  alumni_profile_id: UUID;
+  alumni_name: string | null;
+  mentee_person_id: UUID | null;
+  mentee_name: string;
+  mentee_interest: string;
+  match_score: number;
+  goals: string;
+  status: string;
+  next_meeting_at: string | null;
+  feedback_notes: string | null;
+};
+
+export type AlumniDashboardRead = {
+  organization_id: UUID;
+  alumni_count: number;
+  active_alumni_count: number;
+  mentorship_program_count: number;
+  mentorship_match_count: number;
+  lifetime_donations: string;
+  mentor_capacity: number;
+  recommendations: string[];
+};
+
 export type TicketProductRead = {
   id: UUID;
   organization_id: UUID;

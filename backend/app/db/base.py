@@ -57,12 +57,19 @@ from app.models.commercial import (  # noqa: F401,E402
     TicketProduct,
 )
 from app.models.community import (  # noqa: F401,E402
+    AlumniProfile,
     CommunityComment,
     CommunityPost,
     CommunityReaction,
     FanPoll,
     FanPollOption,
     FanPollVote,
+    MentorshipMatch,
+    MentorshipProgram,
+    SupporterEngagementActivity,
+    SupporterMembershipTier,
+    SupporterProfile,
+    SupporterReward,
 )
 from app.models.developer import (  # noqa: F401,E402
     DeveloperApiKey,

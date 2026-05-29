@@ -5,6 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.community import (
+    AlumniDashboardRead,
+    AlumniProfileCreate,
+    AlumniProfileRead,
     CommunityCommentCreate,
     CommunityCommentRead,
     CommunityEngagementSummaryRead,
@@ -16,6 +19,19 @@ from app.schemas.community import (
     FanPollRead,
     FanPollVoteCreate,
     FanPollVoteRead,
+    MentorshipMatchCreate,
+    MentorshipMatchRead,
+    MentorshipProgramCreate,
+    MentorshipProgramRead,
+    SupporterDashboardRead,
+    SupporterEngagementActivityCreate,
+    SupporterEngagementActivityRead,
+    SupporterMembershipTierCreate,
+    SupporterMembershipTierRead,
+    SupporterProfileCreate,
+    SupporterProfileRead,
+    SupporterRewardCreate,
+    SupporterRewardRead,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -23,13 +39,31 @@ from app.services.authz.service import AuthorizationService, get_authorization_s
 from app.services.community import (
     add_community_comment,
     add_community_reaction,
+    alumni_dashboard,
+    alumni_profile_read,
     community_engagement_summary,
     community_post_read,
+    create_alumni_profile,
     create_community_post,
     create_fan_poll,
+    create_mentorship_match,
+    create_mentorship_program,
+    create_supporter_membership_tier,
+    create_supporter_profile,
+    create_supporter_reward,
     list_community_comments,
     list_community_posts,
+    list_alumni_profiles,
     list_fan_polls,
+    list_mentorship_matches,
+    list_mentorship_programs,
+    list_supporter_membership_tiers,
+    list_supporter_profiles,
+    record_supporter_activity,
+    supporter_activity_read,
+    supporter_dashboard,
+    supporter_reward_read,
+    supporter_tier_read,
     vote_fan_poll,
 )
 
@@ -165,3 +199,159 @@ async def summary_route(
     db: AsyncSession = Depends(get_db),
 ) -> CommunityEngagementSummaryRead:
     return await community_engagement_summary(db, organization_id)
+
+
+@router.post(
+    "/supporter-tiers",
+    response_model=SupporterMembershipTierRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_supporter_tier_route(
+    payload: SupporterMembershipTierCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SupporterMembershipTierRead:
+    tier = await create_supporter_membership_tier(db, identity, payload, authz)
+    return supporter_tier_read(tier)
+
+
+@router.get("/supporter-tiers", response_model=list[SupporterMembershipTierRead])
+async def list_supporter_tiers_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[SupporterMembershipTierRead]:
+    return [
+        supporter_tier_read(tier)
+        for tier in await list_supporter_membership_tiers(db, organization_id)
+    ]
+
+
+@router.post("/supporters", response_model=SupporterProfileRead, status_code=status.HTTP_201_CREATED)
+async def create_supporter_route(
+    payload: SupporterProfileCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SupporterProfileRead:
+    return await create_supporter_profile(db, identity, payload, authz)
+
+
+@router.get("/supporters", response_model=list[SupporterProfileRead])
+async def list_supporters_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[SupporterProfileRead]:
+    return await list_supporter_profiles(db, organization_id)
+
+
+@router.post(
+    "/supporters/{supporter_profile_id}/activities",
+    response_model=SupporterEngagementActivityRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_supporter_activity_route(
+    supporter_profile_id: UUID,
+    payload: SupporterEngagementActivityCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SupporterEngagementActivityRead:
+    activity, _ = await record_supporter_activity(db, identity, supporter_profile_id, payload, authz)
+    return supporter_activity_read(activity)
+
+
+@router.post(
+    "/supporters/{supporter_profile_id}/rewards",
+    response_model=SupporterRewardRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_supporter_reward_route(
+    supporter_profile_id: UUID,
+    payload: SupporterRewardCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SupporterRewardRead:
+    reward = await create_supporter_reward(db, identity, supporter_profile_id, payload, authz)
+    return supporter_reward_read(reward)
+
+
+@router.get("/supporter-dashboard", response_model=SupporterDashboardRead)
+async def supporter_dashboard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> SupporterDashboardRead:
+    return await supporter_dashboard(db, organization_id)
+
+
+@router.post("/alumni", response_model=AlumniProfileRead, status_code=status.HTTP_201_CREATED)
+async def create_alumni_route(
+    payload: AlumniProfileCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AlumniProfileRead:
+    alumni = await create_alumni_profile(db, identity, payload, authz)
+    return alumni_profile_read(alumni)
+
+
+@router.get("/alumni", response_model=list[AlumniProfileRead])
+async def list_alumni_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[AlumniProfileRead]:
+    return [alumni_profile_read(alumni) for alumni in await list_alumni_profiles(db, organization_id)]
+
+
+@router.post(
+    "/mentorship-programs",
+    response_model=MentorshipProgramRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_mentorship_program_route(
+    payload: MentorshipProgramCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MentorshipProgramRead:
+    return await create_mentorship_program(db, identity, payload, authz)
+
+
+@router.get("/mentorship-programs", response_model=list[MentorshipProgramRead])
+async def list_mentorship_programs_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[MentorshipProgramRead]:
+    return await list_mentorship_programs(db, organization_id)
+
+
+@router.post(
+    "/mentorship-programs/{program_id}/matches",
+    response_model=MentorshipMatchRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_mentorship_match_route(
+    program_id: UUID,
+    payload: MentorshipMatchCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MentorshipMatchRead:
+    return await create_mentorship_match(db, identity, program_id, payload, authz)
+
+
+@router.get("/mentorship-matches", response_model=list[MentorshipMatchRead])
+async def list_mentorship_matches_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[MentorshipMatchRead]:
+    return await list_mentorship_matches(db, organization_id)
+
+
+@router.get("/alumni-dashboard", response_model=AlumniDashboardRead)
+async def alumni_dashboard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> AlumniDashboardRead:
+    return await alumni_dashboard(db, organization_id)
