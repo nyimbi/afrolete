@@ -495,3 +495,136 @@ def test_team_needs_and_family_volunteer_obligations(client, identity_headers) -
     ).json()
     assert summary["open_need_requests"] == 0
     assert summary["obligation_deficit_hours"] == 0
+
+
+def test_volunteer_automation_sends_reminders_for_coverage_obligations_and_training(
+    client,
+    identity_headers,
+) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Volunteer Reminder Club",
+            "slug": "volunteer-reminder-club",
+            "organization_type": "club",
+            "primary_sport": "athletics",
+        },
+    ).json()
+    team = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Reminder Squad",
+            "sport": "athletics",
+            "sport_format": "team",
+        },
+    ).json()
+    event = client.post(
+        "/api/v1/events",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "event_type": "community",
+            "title": "Volunteer Reminder Meet",
+            "starts_at": "2026-09-12T09:00:00Z",
+            "ends_at": "2026-09-12T13:00:00Z",
+            "venue_name": "Reminder Track",
+        },
+    ).json()
+    profile = client.post(
+        "/api/v1/volunteers/profiles",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "email": "reminder.volunteer@example.com",
+            "display_name": "Reminder Volunteer",
+            "volunteer_type": "marshal",
+            "skills": ["marshal"],
+            "availability": ["weekend"],
+        },
+    ).json()
+    opportunity = client.post(
+        "/api/v1/volunteers/opportunities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "event_id": event["id"],
+            "title": "Track crossing marshal",
+            "role_type": "marshal",
+            "required_skills": ["marshal"],
+            "starts_at": "2026-09-12T08:00:00Z",
+            "ends_at": "2026-09-12T13:00:00Z",
+            "slots_required": 2,
+            "priority": "urgent",
+        },
+    ).json()
+    assert opportunity["open_slots"] == 2
+    client.post(
+        "/api/v1/volunteers/training-records",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "volunteer_profile_id": profile["id"],
+            "module_name": "Marshal safety briefing",
+            "role_type": "marshal",
+            "required": True,
+            "status": "assigned",
+        },
+    )
+    client.post(
+        "/api/v1/volunteers/obligations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "email": "reminder.family@example.com",
+            "display_name": "Reminder Family",
+            "season_label": "2026 fall",
+            "required_hours": 8,
+            "completed_hours": 2,
+            "due_on": "2026-12-15",
+        },
+    )
+
+    run_response = client.post(
+        "/api/v1/volunteers/reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "due_within_days": 365,
+            "repeat_after_hours": 48,
+            "limit": 50,
+        },
+    )
+
+    assert run_response.status_code == 200
+    run = run_response.json()
+    assert run["coverage_gap_count"] == 1
+    assert run["obligation_count"] == 1
+    assert run["training_count"] == 1
+    assert run["reminded_count"] == 3
+    assert run["recipient_count"] >= 3
+    assert len(run["message_ids"]) == 3
+
+    repeat_response = client.post(
+        "/api/v1/volunteers/reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "due_within_days": 365,
+            "repeat_after_hours": 48,
+            "limit": 50,
+        },
+    )
+
+    assert repeat_response.status_code == 200
+    repeat = repeat_response.json()
+    assert repeat["eligible_count"] == 3
+    assert repeat["reminded_count"] == 0
+    assert repeat["skipped_count"] == 3

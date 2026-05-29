@@ -39,6 +39,7 @@ from app.services.safeguarding import (
     run_guardian_portal_invite_reminder_worker,
 )
 from app.services.storage.lifecycle import run_object_storage_lifecycle
+from app.services.volunteers import run_volunteer_reminder_worker
 from app.workers.video_pose import run_performance_video_pose_endpoint_worker
 
 WORKER_LANES = (
@@ -61,6 +62,7 @@ WORKER_LANES = (
     "performance-review-escalations",
     "performance-injury-risk-alerts",
     "performance-video-pose",
+    "volunteer-reminders",
     "wearable-pull-retries",
 )
 
@@ -139,6 +141,15 @@ def parse_args() -> argparse.Namespace:
         default=CommunicationChannel.EMAIL.value,
     )
     parser.add_argument("--dry-run-family-portal-invite-reminders", action="store_true")
+    parser.add_argument("--volunteer-reminder-limit", type=int, default=None)
+    parser.add_argument("--volunteer-reminder-due-within-days", type=int, default=7)
+    parser.add_argument("--volunteer-reminder-repeat-after-hours", type=int, default=24)
+    parser.add_argument(
+        "--volunteer-reminder-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        default=CommunicationChannel.EMAIL.value,
+    )
+    parser.add_argument("--dry-run-volunteer-reminders", action="store_true")
     parser.add_argument("--object-storage-lifecycle-retention-days", type=int, default=None)
     parser.add_argument("--dry-run-object-storage-lifecycle", action="store_true")
     parser.add_argument("--performance-limit", type=int, default=None)
@@ -293,6 +304,11 @@ async def run_due_workers(
     family_portal_invite_reminder_repeat_after_hours: int = 24,
     family_portal_invite_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
     dry_run_family_portal_invite_reminders: bool = False,
+    volunteer_reminder_limit: int | None = None,
+    volunteer_reminder_due_within_days: int = 7,
+    volunteer_reminder_repeat_after_hours: int = 24,
+    volunteer_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    dry_run_volunteer_reminders: bool = False,
     object_storage_lifecycle_retention_days: int | None = None,
     dry_run_object_storage_lifecycle: bool = False,
     performance_limit: int | None = None,
@@ -450,6 +466,18 @@ async def run_due_workers(
                 repeat_after_hours=family_portal_invite_reminder_repeat_after_hours,
                 limit=family_portal_invite_reminder_limit or limit,
                 dry_run=dry_run_family_portal_invite_reminders,
+            )
+        ).model_dump(mode="json")
+    if "volunteer-reminders" in active_lanes:
+        results["volunteer_reminders"] = (
+            await run_volunteer_reminder_worker(
+                db,
+                organization_id=organization_id,
+                channel=volunteer_reminder_channel,
+                due_within_days=volunteer_reminder_due_within_days,
+                repeat_after_hours=volunteer_reminder_repeat_after_hours,
+                limit=volunteer_reminder_limit or limit,
+                dry_run=dry_run_volunteer_reminders,
             )
         ).model_dump(mode="json")
     if "developer-webhooks" in active_lanes:
@@ -669,6 +697,11 @@ async def run() -> None:
                 args.family_portal_invite_reminder_channel
             ),
             dry_run_family_portal_invite_reminders=args.dry_run_family_portal_invite_reminders,
+            volunteer_reminder_limit=args.volunteer_reminder_limit,
+            volunteer_reminder_due_within_days=args.volunteer_reminder_due_within_days,
+            volunteer_reminder_repeat_after_hours=args.volunteer_reminder_repeat_after_hours,
+            volunteer_reminder_channel=CommunicationChannel(args.volunteer_reminder_channel),
+            dry_run_volunteer_reminders=args.dry_run_volunteer_reminders,
             object_storage_lifecycle_retention_days=args.object_storage_lifecycle_retention_days,
             dry_run_object_storage_lifecycle=args.dry_run_object_storage_lifecycle,
             performance_limit=args.performance_limit,

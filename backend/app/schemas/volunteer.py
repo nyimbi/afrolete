@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.models.enums import CommunicationChannel
+
 
 class VolunteerProfileCreate(BaseModel):
     organization_id: UUID
@@ -331,3 +333,26 @@ class VolunteerSummaryRead(BaseModel):
     coverage_percent: float
     top_skills: list[str]
     shortage_roles: list[str]
+
+
+class VolunteerReminderRunCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    due_within_days: int = Field(default=7, ge=0, le=365)
+    repeat_after_hours: int = Field(default=24, ge=0, le=8760)
+    limit: int = Field(default=50, ge=1, le=500)
+    dry_run: bool = False
+
+
+class VolunteerReminderRunRead(BaseModel):
+    organization_id: UUID
+    eligible_count: int
+    reminded_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool
+    coverage_gap_count: int
+    obligation_count: int
+    training_count: int
+    recipient_count: int
+    message_ids: list[UUID]

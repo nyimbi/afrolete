@@ -592,6 +592,20 @@ export type VolunteerSummaryRead = {
   shortage_roles: string[];
 };
 
+export type VolunteerReminderRunRead = {
+  organization_id: UUID;
+  eligible_count: number;
+  reminded_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  coverage_gap_count: number;
+  obligation_count: number;
+  training_count: number;
+  recipient_count: number;
+  message_ids: UUID[];
+};
+
 export type TeamRead = {
   id: UUID;
   organization_id: UUID;

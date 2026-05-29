@@ -360,6 +360,7 @@ import type {
   VolunteerObligationRead,
   VolunteerOpportunityRead,
   VolunteerProfileRead,
+  VolunteerReminderRunRead,
   VolunteerRecognitionRead,
   VolunteerSummaryRead,
   VolunteerTrainingRecordRead,
@@ -1634,6 +1635,7 @@ export default function HomePage() {
   const [volunteerTrainingRecords, setVolunteerTrainingRecords] = useState<VolunteerTrainingRecordRead[]>([]);
   const [volunteerRecognitions, setVolunteerRecognitions] = useState<VolunteerRecognitionRead[]>([]);
   const [volunteerSummary, setVolunteerSummary] = useState<VolunteerSummaryRead | null>(null);
+  const [volunteerReminderRun, setVolunteerReminderRun] = useState<VolunteerReminderRunRead | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionRead[]>([]);
   const [competitionParticipants, setCompetitionParticipants] = useState<CompetitionParticipantRead[]>([]);
   const [competitionFixtures, setCompetitionFixtures] = useState<CompetitionFixtureRead[]>([]);
@@ -3727,6 +3729,7 @@ export default function HomePage() {
       setVolunteerTrainingRecords([]);
       setVolunteerRecognitions([]);
       setVolunteerSummary(null);
+      setVolunteerReminderRun(null);
       setSelectedVolunteerProfileId("");
       setSelectedVolunteerOpportunityId("");
       setSelectedVolunteerAssignmentId("");
@@ -9861,6 +9864,37 @@ export default function HomePage() {
       (obligation) => {
         setVolunteerObligations((current) => [obligation, ...current.filter((item) => item.id !== obligation.id)]);
         addLog(`${obligation.person_name} has ${obligation.remaining_hours} service hour(s) remaining`, "good");
+        void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const runVolunteerReminders = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "run-volunteer-reminders",
+      () =>
+        apiRequest<VolunteerReminderRunRead>("/volunteers/reminders/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            channel: "in_app",
+            due_within_days: 7,
+            repeat_after_hours: 24,
+            limit: 50,
+            dry_run: false
+          }
+        }),
+      (run) => {
+        setVolunteerReminderRun(run);
+        addLog(
+          `Volunteer reminders sent to ${run.recipient_count} recipient(s) across ${run.reminded_count} message(s)`,
+          run.failed_count ? "bad" : "good"
+        );
         void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
       }
     );
@@ -18754,6 +18788,7 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createVolunteerProfile} disabled={busyAction !== null}>Profile</button>
                 <button type="button" onClick={createVolunteerObligation} disabled={busyAction !== null}>Obligation</button>
+                <button type="button" onClick={runVolunteerReminders} disabled={busyAction !== null}>Remind</button>
                 <button type="button" onClick={createVolunteerTrainingRecord} disabled={busyAction !== null}>Training</button>
                 <button type="button" onClick={createVolunteerRecognition} disabled={busyAction !== null}>Award</button>
               </div>
@@ -18867,6 +18902,22 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {volunteerReminderRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Volunteer reminders · {volunteerReminderRun.reminded_count} sent</strong>
+                    <span>
+                      {volunteerReminderRun.coverage_gap_count} coverage gaps ·{" "}
+                      {volunteerReminderRun.obligation_count} family obligations ·{" "}
+                      {volunteerReminderRun.training_count} training items
+                    </span>
+                    <small>
+                      {volunteerReminderRun.recipient_count} recipients · {volunteerReminderRun.skipped_count} skipped ·{" "}
+                      {volunteerReminderRun.failed_count} failed
+                    </small>
+                  </div>
+                </article>
+              ) : null}
               {volunteerProfiles.slice(0, 5).map((profile) => (
                 <article
                   key={profile.id}

@@ -23,6 +23,8 @@ from app.schemas.volunteer import (
     VolunteerOpportunityRead,
     VolunteerProfileCreate,
     VolunteerProfileRead,
+    VolunteerReminderRunCreate,
+    VolunteerReminderRunRead,
     VolunteerRecognitionCreate,
     VolunteerRecognitionRead,
     VolunteerSummaryRead,
@@ -53,6 +55,7 @@ from app.services.volunteers import (
     list_volunteer_profiles,
     list_volunteer_recognitions,
     list_volunteer_training_records,
+    run_volunteer_reminders,
     update_volunteer_group_application,
     update_volunteer_need_request,
     update_volunteer_obligation,
@@ -443,6 +446,17 @@ async def update_volunteer_obligation_route(
     obligation = await update_volunteer_obligation(db, identity, obligation_id, payload, authz)
     rows = await list_volunteer_obligations(db, obligation.organization_id)
     return to_obligation_read(next(item for item in rows if item[0].id == obligation.id))
+
+
+@router.post("/reminders/run", response_model=VolunteerReminderRunRead)
+async def run_volunteer_reminders_route(
+    payload: VolunteerReminderRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> VolunteerReminderRunRead:
+    await ensure_manage_volunteers(authz, identity, payload.organization_id)
+    return await run_volunteer_reminders(db, payload)
 
 
 @router.post("/training-records", response_model=VolunteerTrainingRecordRead, status_code=status.HTTP_201_CREATED)
