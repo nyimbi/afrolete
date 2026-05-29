@@ -60,6 +60,8 @@ import type {
   AgentWorkerCallbackRead,
   AccountingExportRead,
   AccountingSyncRead,
+  AssetAccountingExportRead,
+  AssetAccountingSyncRead,
   AssessmentReviewQueueSummaryRead,
   AssetCondition,
   AssetSummaryRead,
@@ -1622,6 +1624,8 @@ export default function HomePage() {
   const [supplierScores, setSupplierScores] = useState<SupplierScoreRead[]>([]);
   const [supplierSubmission, setSupplierSubmission] = useState<SupplierOrderSubmissionRead | null>(null);
   const [supplierInvoiceSync, setSupplierInvoiceSync] = useState<SupplierInvoiceSyncRead | null>(null);
+  const [assetAccountingExport, setAssetAccountingExport] = useState<AssetAccountingExportRead | null>(null);
+  const [assetAccountingSync, setAssetAccountingSync] = useState<AssetAccountingSyncRead | null>(null);
   const [assetUtilization, setAssetUtilization] = useState<AssetUtilizationRecommendationRead[]>([]);
   const [leaseQuote, setLeaseQuote] = useState<EquipmentLeaseQuoteRead | null>(null);
   const [leaseInvoice, setLeaseInvoice] = useState<EquipmentLeaseInvoiceRead | null>(null);
@@ -10958,6 +10962,55 @@ export default function HomePage() {
     );
   };
 
+  const exportAssetAccounting = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "asset-accounting-export",
+      () =>
+        apiRequest<AssetAccountingExportRead>(
+          `/assets/accounting-export?organization_id=${selectedOrganizationId}&system=quickbooks&basis=accrual`,
+          { identity }
+        ),
+      (exportData) => {
+        setAssetAccountingExport(exportData);
+        addLog(
+          `Asset accounting export: ${exportData.rows.length} rows, debit ${exportData.debit_total}, credit ${exportData.credit_total}`,
+          exportData.debit_total === exportData.credit_total ? "good" : "bad"
+        );
+      }
+    );
+  };
+
+  const syncAssetAccounting = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "asset-accounting-sync",
+      () =>
+        apiRequest<AssetAccountingSyncRead>(
+          `/assets/accounting-export/sync?organization_id=${selectedOrganizationId}&system=quickbooks&basis=accrual`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (sync) => {
+        setAssetAccountingSync(sync);
+        addLog(
+          sync.delivered
+            ? `Asset accounting delivered: ${sync.row_count} rows`
+            : `Asset accounting prepared: ${sync.row_count} rows`,
+          sync.delivered ? "good" : "neutral"
+        );
+      }
+    );
+  };
+
   const createFacilityBooking = () => {
     if (!selectedOrganizationId || !selectedFacilityId) {
       addLog("Create or select a facility first", "bad");
@@ -14669,6 +14722,8 @@ export default function HomePage() {
                 <button type="button" onClick={() => submitSupplierOrder()} disabled={busyAction !== null}>Submit</button>
                 <button type="button" onClick={() => receiveSupplierOrder()} disabled={busyAction !== null}>Receive</button>
                 <button type="button" onClick={() => syncSupplierInvoice()} disabled={busyAction !== null}>Sync invoice</button>
+                <button type="button" onClick={exportAssetAccounting} disabled={busyAction !== null}>Export GL</button>
+                <button type="button" onClick={syncAssetAccounting} disabled={busyAction !== null}>Sync GL</button>
               </div>
             </div>
             <div className="task-list">
@@ -14685,6 +14740,31 @@ export default function HomePage() {
                   <div>
                     <strong>{supplierInvoiceSync.synced ? "Supplier invoice synced" : "Supplier invoice prepared"}</strong>
                     <span>{supplierInvoiceSync.sync_mode} · {supplierInvoiceSync.provider_status_code ?? "no provider"} · {supplierInvoiceSync.failure_reason ?? "accepted"}</span>
+                  </div>
+                </article>
+              ) : null}
+              {assetAccountingExport ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{assetAccountingExport.system} asset ledger</strong>
+                    <span>
+                      {assetAccountingExport.rows.length} rows · debit {assetAccountingExport.debit_total} · credit {assetAccountingExport.credit_total}
+                    </span>
+                    <small>
+                      {assetAccountingExport.supplier_order_count} supplier orders · {assetAccountingExport.lease_schedule_count} leases · {assetAccountingExport.payment_count} payments
+                    </small>
+                  </div>
+                </article>
+              ) : null}
+              {assetAccountingSync ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{assetAccountingSync.delivered ? "Asset ledger delivered" : "Asset ledger prepared"}</strong>
+                    <span>
+                      {assetAccountingSync.row_count} rows · {assetAccountingSync.mode}
+                      {assetAccountingSync.provider_status_code ? ` · ${assetAccountingSync.provider_status_code}` : ""}
+                    </span>
+                    {assetAccountingSync.failure_reason ? <small>{assetAccountingSync.failure_reason}</small> : null}
                   </div>
                 </article>
               ) : null}

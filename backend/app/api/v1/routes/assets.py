@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.assets import (
+    AssetAccountingExportRead,
+    AssetAccountingSyncRead,
     AssetSummaryRead,
     AssetUtilizationRecommendationRead,
     EmergencyActivationAlertCreate,
@@ -58,6 +60,7 @@ from app.schemas.assets import (
 from app.schemas.safeguarding import SafeguardingIncidentRead
 from app.services.assets import (
     activate_emergency_action_plan,
+    asset_accounting_export,
     asset_summary,
     checkout_equipment,
     create_emergency_action_plan,
@@ -73,6 +76,7 @@ from app.services.assets import (
     create_work_order,
     downloadable_equipment_file,
     equipment_lease_quote,
+    ensure_manage_assets,
     list_equipment_files,
     list_equipment_scan_events,
     list_checkouts,
@@ -93,6 +97,7 @@ from app.services.assets import (
     run_emergency_escalation_timer_scheduler,
     scan_equipment,
     submit_supplier_order,
+    sync_asset_accounting_export,
     sync_supplier_invoice,
     supplier_scorecard,
     update_emergency_action_plan,
@@ -891,6 +896,31 @@ async def sync_supplier_invoice_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> SupplierInvoiceSyncRead:
     return await sync_supplier_invoice(db, identity, supplier_order_id, authz)
+
+
+@router.get("/accounting-export", response_model=AssetAccountingExportRead)
+async def asset_accounting_export_route(
+    organization_id: UUID = Query(),
+    system: str = Query(default="quickbooks", min_length=2, max_length=80),
+    basis: str = Query(default="accrual", min_length=2, max_length=40),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AssetAccountingExportRead:
+    await ensure_manage_assets(authz, identity, organization_id)
+    return await asset_accounting_export(db, organization_id, system, basis)
+
+
+@router.post("/accounting-export/sync", response_model=AssetAccountingSyncRead)
+async def sync_asset_accounting_export_route(
+    organization_id: UUID = Query(),
+    system: str = Query(default="quickbooks", min_length=2, max_length=80),
+    basis: str = Query(default="accrual", min_length=2, max_length=40),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AssetAccountingSyncRead:
+    return await sync_asset_accounting_export(db, identity, organization_id, system, basis, authz)
 
 
 @router.get("/utilization/recommendations", response_model=list[AssetUtilizationRecommendationRead])

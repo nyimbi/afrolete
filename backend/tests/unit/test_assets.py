@@ -1,3 +1,11 @@
+import hmac
+import json
+from hashlib import sha256
+from types import SimpleNamespace
+
+from app.services import assets as assets_service
+
+
 def create_assets_context(client, identity_headers, name="Assets Club"):
     organization = client.post(
         "/api/v1/organizations",
@@ -421,6 +429,142 @@ def test_asset_procurement_scan_photo_supplier_lease_and_utilization(
         f"/api/v1/assets/utilization/recommendations?organization_id={organization['id']}"
     ).json()
     assert any(item["target_id"] == equipment["id"] for item in recommendations)
+
+
+def test_asset_accounting_export_and_signed_sync(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json, headers):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return SimpleNamespace(status_code=202, text="accepted")
+
+    monkeypatch.setenv("AFROLETE_ASSET_ACCOUNTING_SYNC_MODE", "webhook")
+    monkeypatch.setenv("AFROLETE_ASSET_ACCOUNTING_WEBHOOK_URL", "https://accounting.example/assets")
+    monkeypatch.setenv("AFROLETE_ASSET_ACCOUNTING_WEBHOOK_KEY", "asset-accounting-secret")
+    assets_service.get_settings.cache_clear()
+    monkeypatch.setattr(assets_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    organization, team, member, _ = create_assets_context(client, identity_headers, "Asset Accounting Club")
+    equipment = client.post(
+        "/api/v1/assets/equipment",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "name": "Timing Gates",
+            "category": "timing",
+            "brand": "ChronoCo",
+            "quantity_total": 4,
+            "quantity_available": 2,
+            "unit_value": "500.00",
+            "depreciation_rate": "20.00",
+        },
+    ).json()
+    order = client.post(
+        "/api/v1/assets/suppliers/orders",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "equipment_item_id": equipment["id"],
+            "supplier_name": "ChronoCo",
+            "item_name": "Timing Gate Battery Kit",
+            "quantity": 2,
+            "unit_cost": "125.00",
+            "currency": "USD",
+            "external_reference": "PO-ASSET-1",
+            "submit": True,
+        },
+    ).json()
+    assert order["total_cost"] == "250.00"
+    schedule = client.post(
+        f"/api/v1/assets/equipment/{equipment['id']}/lease-schedules",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "quantity": 1,
+            "term_months": 6,
+            "person_id": member["subject_id"],
+            "team_id": team["id"],
+            "starts_on": "2026-06-01",
+            "notes": "Lease schedule for academy timing gates.",
+        },
+    ).json()
+    payment = client.post(
+        f"/api/v1/assets/lease-schedules/{schedule['id']}/payments",
+        headers=identity_headers,
+        json={
+            "amount": schedule["monthly_amount"],
+            "method": "bank",
+            "external_reference": "LEASE-ASSET-PAY-1",
+        },
+    )
+    assert payment.status_code == 200
+
+    export_response = client.get(
+        "/api/v1/assets/accounting-export",
+        headers=identity_headers,
+        params={"organization_id": organization["id"], "system": "quickbooks", "basis": "accrual"},
+    )
+    assert export_response.status_code == 200
+    export = export_response.json()
+    assert export["supplier_order_count"] == 1
+    assert export["lease_schedule_count"] == 1
+    assert export["payment_count"] == 1
+    assert export["debit_total"] == export["credit_total"]
+    assert {row["row_type"] for row in export["rows"]} >= {
+        "supplier_equipment_purchase",
+        "supplier_accounts_payable",
+        "lease_receivable",
+        "lease_revenue",
+        "lease_cash_receipt",
+        "lease_receivable_reduction",
+    }
+
+    sync_response = client.post(
+        "/api/v1/assets/accounting-export/sync",
+        headers=identity_headers,
+        params={"organization_id": organization["id"], "system": "quickbooks", "basis": "accrual"},
+    )
+    assert sync_response.status_code == 200
+    sync = sync_response.json()
+    assert sync["mode"] == "webhook"
+    assert sync["delivered"] is True
+    assert sync["provider_status_code"] == 202
+    assert sync["row_count"] == len(export["rows"])
+    assert captured["url"] == "https://accounting.example/assets"
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["event_type"] == "assets.accounting_export"
+    assert payload["sync_reference"] == sync["sync_reference"]
+    assert payload["debit_total"] == sync["debit_total"]
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    timestamp = headers["X-Afrolete-Asset-Accounting-Timestamp"]
+    expected_signature = hmac.new(
+        b"asset-accounting-secret",
+        timestamp.encode() + b"." + json.dumps(payload, sort_keys=True, default=str).encode(),
+        sha256,
+    ).hexdigest()
+    assert headers["X-Afrolete-Asset-Accounting-Key"] == "asset-accounting-secret"
+    assert headers["X-Afrolete-Asset-Accounting-Signature"] == f"sha256={expected_signature}"
+
+    assets_service.get_settings.cache_clear()
 
 
 def test_equipment_rejects_facility_from_other_organization(client, identity_headers) -> None:

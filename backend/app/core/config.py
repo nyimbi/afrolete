@@ -302,6 +302,12 @@ class Settings(BaseSettings):
     supplier_invoice_webhook_key_secret_path: str = ""
     supplier_invoice_webhook_key_secret_field: str = "value"
     supplier_invoice_sync_timeout_seconds: float = 5.0
+    asset_accounting_sync_mode: Literal["record_only", "webhook"] = "record_only"
+    asset_accounting_webhook_url: str = ""
+    asset_accounting_webhook_key: str = ""
+    asset_accounting_webhook_key_secret_path: str = ""
+    asset_accounting_webhook_key_secret_field: str = "value"
+    asset_accounting_timeout_seconds: float = 5.0
 
     @field_validator("database_url", mode="before")
     @classmethod

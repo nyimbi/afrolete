@@ -1786,6 +1786,46 @@ export type SupplierInvoiceSyncRead = {
   failure_reason: string | null;
 };
 
+export type AssetAccountingExportRow = {
+  row_type: string;
+  source_id: UUID;
+  source_label: string;
+  account_code: string;
+  memo: string;
+  debit: string;
+  credit: string;
+  currency: string;
+  external_reference: string | null;
+};
+
+export type AssetAccountingExportRead = {
+  organization_id: UUID;
+  basis: string;
+  system: string;
+  rows: AssetAccountingExportRow[];
+  debit_total: string;
+  credit_total: string;
+  supplier_order_count: number;
+  lease_schedule_count: number;
+  payment_count: number;
+};
+
+export type AssetAccountingSyncRead = {
+  organization_id: UUID;
+  basis: string;
+  system: string;
+  mode: string;
+  delivered: boolean;
+  row_count: number;
+  debit_total: string;
+  credit_total: string;
+  sync_reference: string;
+  provider_status_code: number | null;
+  failure_reason: string | null;
+  webhook_configured: boolean;
+  synced_at: string;
+};
+
 export type EquipmentLeaseQuoteRead = {
   equipment_item_id: UUID;
   item_name: string;

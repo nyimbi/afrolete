@@ -512,6 +512,46 @@ class EquipmentLeasePaymentRead(BaseModel):
     remaining_balance: Decimal
 
 
+class AssetAccountingExportRow(BaseModel):
+    row_type: str
+    source_id: UUID
+    source_label: str
+    account_code: str
+    memo: str
+    debit: Decimal
+    credit: Decimal
+    currency: str
+    external_reference: str | None = None
+
+
+class AssetAccountingExportRead(BaseModel):
+    organization_id: UUID
+    basis: str
+    system: str
+    rows: list[AssetAccountingExportRow]
+    debit_total: Decimal
+    credit_total: Decimal
+    supplier_order_count: int
+    lease_schedule_count: int
+    payment_count: int
+
+
+class AssetAccountingSyncRead(BaseModel):
+    organization_id: UUID
+    basis: str
+    system: str
+    mode: str
+    delivered: bool
+    row_count: int
+    debit_total: Decimal
+    credit_total: Decimal
+    sync_reference: str
+    provider_status_code: int | None = None
+    failure_reason: str | None = None
+    webhook_configured: bool
+    synced_at: datetime
+
+
 class AssetUtilizationRecommendationRead(BaseModel):
     target_type: str
     target_id: UUID

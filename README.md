@@ -166,8 +166,8 @@ Major capability areas include:
   hours, urgent escalation, digests, provider callbacks, family onboarding, and
   multi-channel delivery.
 - Equipment, facilities, maintenance, bookings, RFID/QR scanning, files, object
-  storage, procurement, supplier orders, leases, utilization, and emergency
-  response.
+  storage, procurement, supplier orders, leases, asset accounting sync,
+  utilization, and emergency response.
 - Travel and logistics: manifests, offline links, consent reminders, trip fees,
   hosted payments, approvals, GPS tracking, geofences, expenses, payouts,
   carpooling, driver ratings, backup drivers, and route-risk guidance.

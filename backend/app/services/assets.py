@@ -3,6 +3,9 @@ from binascii import Error as Base64Error
 from calendar import monthrange
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+import hmac
+import json
+import time
 from hmac import compare_digest
 from hashlib import sha256
 from pathlib import Path
@@ -52,6 +55,9 @@ from app.models.organization import Membership, Organization
 from app.models.team import Team
 from app.core.config import Settings, get_settings
 from app.schemas.assets import (
+    AssetAccountingExportRead,
+    AssetAccountingExportRow,
+    AssetAccountingSyncRead,
     AssetSummaryRead,
     EmergencyActivationAlertCreate,
     EmergencyActivationIncidentCreate,
@@ -1661,6 +1667,193 @@ async def reconcile_equipment_lease_payment(
     )
 
 
+async def asset_accounting_export(
+    db: AsyncSession,
+    organization_id: UUID,
+    system: str = "quickbooks",
+    basis: str = "accrual",
+) -> AssetAccountingExportRead:
+    await get_organization(db, organization_id)
+    supplier_orders = [
+        order
+        for order in await list_supplier_orders(db, organization_id)
+        if order.status not in {"draft", "submission_failed", "invoice_sync_failed"}
+    ]
+    lease_schedule_reads = await list_equipment_lease_schedules(db, organization_id)
+    rows: list[AssetAccountingExportRow] = []
+    for order in supplier_orders:
+        label = f"{order.supplier_name} {order.item_name}"
+        rows.extend(
+            [
+                AssetAccountingExportRow(
+                    row_type="supplier_equipment_purchase",
+                    source_id=order.id,
+                    source_label=label,
+                    account_code=asset_account_code(system, "equipment_asset"),
+                    memo=f"{order.quantity} x {order.item_name} from {order.supplier_name}",
+                    debit=order.total_cost,
+                    credit=Decimal("0"),
+                    currency=order.currency,
+                    external_reference=order.external_reference,
+                ),
+                AssetAccountingExportRow(
+                    row_type="supplier_accounts_payable",
+                    source_id=order.id,
+                    source_label=label,
+                    account_code=asset_account_code(system, "accounts_payable"),
+                    memo=f"Supplier payable for {order.item_name}",
+                    debit=Decimal("0"),
+                    credit=order.total_cost,
+                    currency=order.currency,
+                    external_reference=order.external_reference,
+                ),
+            ]
+        )
+    payment_count = 0
+    for schedule_read in lease_schedule_reads:
+        rows.extend(
+            [
+                AssetAccountingExportRow(
+                    row_type="lease_receivable",
+                    source_id=schedule_read.id,
+                    source_label=schedule_read.invoice.title,
+                    account_code=asset_account_code(system, "lease_receivable"),
+                    memo=f"{schedule_read.term_months}-month equipment lease receivable",
+                    debit=schedule_read.total_amount,
+                    credit=Decimal("0"),
+                    currency=schedule_read.currency,
+                    external_reference=schedule_read.invoice.invoice_number,
+                ),
+                AssetAccountingExportRow(
+                    row_type="lease_revenue",
+                    source_id=schedule_read.id,
+                    source_label=schedule_read.invoice.title,
+                    account_code=asset_account_code(system, "lease_revenue"),
+                    memo=f"Equipment lease revenue for {schedule_read.invoice.title}",
+                    debit=Decimal("0"),
+                    credit=schedule_read.total_amount,
+                    currency=schedule_read.currency,
+                    external_reference=schedule_read.invoice.invoice_number,
+                ),
+            ]
+        )
+        payments = await db.scalars(
+            select(FinancePayment)
+            .where(FinancePayment.invoice_id == schedule_read.finance_invoice_id)
+            .order_by(FinancePayment.received_at.asc())
+        )
+        for payment in payments.all():
+            payment_count += 1
+            rows.extend(
+                [
+                    AssetAccountingExportRow(
+                        row_type="lease_cash_receipt",
+                        source_id=payment.id,
+                        source_label=schedule_read.invoice.title,
+                        account_code=asset_account_code(system, "cash"),
+                        memo=payment.notes or f"Lease payment for {schedule_read.invoice.invoice_number}",
+                        debit=payment.amount,
+                        credit=Decimal("0"),
+                        currency=payment.currency,
+                        external_reference=payment.external_reference,
+                    ),
+                    AssetAccountingExportRow(
+                        row_type="lease_receivable_reduction",
+                        source_id=payment.id,
+                        source_label=schedule_read.invoice.title,
+                        account_code=asset_account_code(system, "lease_receivable"),
+                        memo=f"Receivable reduction for {schedule_read.invoice.invoice_number}",
+                        debit=Decimal("0"),
+                        credit=payment.amount,
+                        currency=payment.currency,
+                        external_reference=payment.external_reference,
+                    ),
+                ]
+            )
+    debit_total = sum((row.debit for row in rows), Decimal("0")).quantize(Decimal("0.01"))
+    credit_total = sum((row.credit for row in rows), Decimal("0")).quantize(Decimal("0.01"))
+    return AssetAccountingExportRead(
+        organization_id=organization_id,
+        basis=basis,
+        system=system,
+        rows=rows,
+        debit_total=debit_total,
+        credit_total=credit_total,
+        supplier_order_count=len(supplier_orders),
+        lease_schedule_count=len(lease_schedule_reads),
+        payment_count=payment_count,
+    )
+
+
+async def sync_asset_accounting_export(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    system: str,
+    basis: str,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> AssetAccountingSyncRead:
+    await ensure_manage_assets(authz, identity, organization_id)
+    export = await asset_accounting_export(db, organization_id, system, basis)
+    selected_settings = settings or get_settings()
+    synced_at = datetime.now(UTC)
+    sync_reference = asset_accounting_sync_reference(export)
+    webhook_configured = bool(selected_settings.asset_accounting_webhook_url)
+    if selected_settings.asset_accounting_sync_mode != "webhook" or not webhook_configured:
+        return AssetAccountingSyncRead(
+            organization_id=organization_id,
+            basis=basis,
+            system=system,
+            mode=selected_settings.asset_accounting_sync_mode,
+            delivered=False,
+            row_count=len(export.rows),
+            debit_total=export.debit_total,
+            credit_total=export.credit_total,
+            sync_reference=sync_reference,
+            failure_reason=None if webhook_configured else "Asset accounting webhook URL is not configured.",
+            webhook_configured=webhook_configured,
+            synced_at=synced_at,
+        )
+
+    payload = asset_accounting_sync_payload(export, sync_reference, synced_at)
+    raw_body = json.dumps(payload, sort_keys=True, default=str).encode()
+    timestamp = str(int(time.time()))
+    headers = await asset_accounting_sync_headers(selected_settings, raw_body, timestamp)
+    provider_status_code: int | None = None
+    failure_reason: str | None = None
+    delivered = False
+    try:
+        async with httpx.AsyncClient(timeout=selected_settings.asset_accounting_timeout_seconds) as client:
+            response = await client.post(
+                selected_settings.asset_accounting_webhook_url,
+                json=payload,
+                headers=headers,
+            )
+        provider_status_code = response.status_code
+        delivered = 200 <= response.status_code < 300
+        if not delivered:
+            failure_reason = f"Asset accounting webhook returned {response.status_code}: {response.text[:500]}"
+    except httpx.HTTPError as error:
+        failure_reason = f"Asset accounting webhook failed: {error}"
+
+    return AssetAccountingSyncRead(
+        organization_id=organization_id,
+        basis=basis,
+        system=system,
+        mode=selected_settings.asset_accounting_sync_mode,
+        delivered=delivered,
+        row_count=len(export.rows),
+        debit_total=export.debit_total,
+        credit_total=export.credit_total,
+        sync_reference=sync_reference,
+        provider_status_code=provider_status_code,
+        failure_reason=failure_reason,
+        webhook_configured=webhook_configured,
+        synced_at=synced_at,
+    )
+
+
 async def utilization_recommendations(
     db: AsyncSession,
     organization_id: UUID,
@@ -2199,6 +2392,92 @@ async def supplier_invoice_headers(settings: Settings) -> dict[str, str]:
     )
     if key:
         headers["X-Afrolete-Supplier-Invoice-Key"] = key
+    return headers
+
+
+def asset_account_code(system: str, key: str) -> str:
+    normalized_system = system.strip().lower()
+    if normalized_system in {"quickbooks", "xero", "sage", "odoo"}:
+        return {
+            "equipment_asset": "1500:equipment-assets",
+            "accounts_payable": "2100:accounts-payable",
+            "lease_receivable": "1210:equipment-lease-receivable",
+            "lease_revenue": "4310:equipment-lease-income",
+            "cash": "1000:cash",
+        }[key]
+    return {
+        "equipment_asset": "ASSET:EQUIPMENT",
+        "accounts_payable": "LIABILITY:ACCOUNTS_PAYABLE",
+        "lease_receivable": "ASSET:LEASE_RECEIVABLE",
+        "lease_revenue": "REVENUE:EQUIPMENT_LEASE",
+        "cash": "ASSET:CASH",
+    }[key]
+
+
+def asset_accounting_sync_reference(export: AssetAccountingExportRead) -> str:
+    payload = asset_accounting_sync_payload(export, sync_reference=None, synced_at=None)
+    digest = sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+    return f"asset_acct_{export.system}_{export.basis}_{digest[:16]}"
+
+
+def asset_accounting_sync_payload(
+    export: AssetAccountingExportRead,
+    sync_reference: str | None,
+    synced_at: datetime | None,
+) -> dict:
+    return {
+        "event_type": "assets.accounting_export",
+        "organization_id": str(export.organization_id),
+        "system": export.system,
+        "basis": export.basis,
+        "sync_reference": sync_reference,
+        "synced_at": synced_at.isoformat() if synced_at else None,
+        "row_count": len(export.rows),
+        "supplier_order_count": export.supplier_order_count,
+        "lease_schedule_count": export.lease_schedule_count,
+        "payment_count": export.payment_count,
+        "debit_total": str(export.debit_total),
+        "credit_total": str(export.credit_total),
+        "rows": [
+            {
+                "row_type": row.row_type,
+                "source_id": str(row.source_id),
+                "source_label": row.source_label,
+                "account_code": row.account_code,
+                "memo": row.memo,
+                "debit": str(row.debit),
+                "credit": str(row.credit),
+                "currency": row.currency,
+                "external_reference": row.external_reference,
+            }
+            for row in export.rows
+        ],
+    }
+
+
+async def asset_accounting_sync_headers(
+    settings: Settings,
+    raw_body: bytes,
+    timestamp: str,
+) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "X-Afrolete-Asset-Accounting-Timestamp": timestamp,
+    }
+    key = await resolve_supplier_secret(
+        settings,
+        env_value=settings.asset_accounting_webhook_key,
+        path=settings.asset_accounting_webhook_key_secret_path,
+        field_name=settings.asset_accounting_webhook_key_secret_field,
+        label="asset accounting webhook key",
+    )
+    if key:
+        headers["X-Afrolete-Asset-Accounting-Key"] = key
+        headers["X-Afrolete-Asset-Accounting-Signature"] = "sha256=" + hmac.new(
+            key.encode(),
+            timestamp.encode() + b"." + raw_body,
+            sha256,
+        ).hexdigest()
     return headers
 
 
