@@ -7,6 +7,7 @@ import {
   completeKeycloakCallbackFromUrl,
   keycloakLogoutUrl,
   startKeycloakLogin,
+  startKeycloakRegistration,
   type AuthSession
 } from "@/lib/auth";
 import { afroleteAuthMode, apiBaseUrl, keycloakClientId, keycloakIssuer } from "@/lib/config";
@@ -20,7 +21,12 @@ import {
   subscribeOfflineQueue,
   type OfflineQueueSnapshot
 } from "@/lib/offline";
-import type { InfrastructureComponent, InfrastructureProbeSummary, InfrastructureStatus } from "@/types/platform";
+import type {
+  AuthReadiness,
+  InfrastructureComponent,
+  InfrastructureProbeSummary,
+  InfrastructureStatus
+} from "@/types/platform";
 import type {
   AgentAssignmentRead,
   AgentBiasAuditRead,
@@ -1853,6 +1859,7 @@ export default function HomePage() {
   const [selectedEquipmentFile, setSelectedEquipmentFile] = useState<File | null>(null);
   const [infrastructureStatus, setInfrastructureStatus] = useState<InfrastructureStatus | null>(null);
   const [infrastructureProbes, setInfrastructureProbes] = useState<InfrastructureProbeSummary | null>(null);
+  const [authReadiness, setAuthReadiness] = useState<AuthReadiness | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [offlineQueue, setOfflineQueue] = useState<OfflineQueueSnapshot>(initialOfflineQueueSnapshot);
@@ -2685,6 +2692,14 @@ export default function HomePage() {
       addLog(error instanceof Error ? error.message : "Keycloak sign-in failed", "bad");
     });
   }, [addLog]);
+
+  const beginKeycloakRegistration = useCallback(() => {
+    setBusyAction("keycloak-registration");
+    void startKeycloakRegistration({ loginHint: identity.email || undefined }).catch((error) => {
+      setBusyAction(null);
+      addLog(error instanceof Error ? error.message : "Keycloak account creation failed", "bad");
+    });
+  }, [addLog, identity.email]);
 
   const endKeycloakSession = useCallback(() => {
     const logoutUrl = keycloakEnabled ? keycloakLogoutUrl(authSession) : null;
@@ -3541,13 +3556,15 @@ export default function HomePage() {
   }, [identity]);
 
   const loadInfrastructure = useCallback(async () => {
-    const [status, probes] = await Promise.all([
+    const [status, probes, auth] = await Promise.all([
       apiRequest<InfrastructureStatus>("/infrastructure"),
-      apiRequest<InfrastructureProbeSummary>("/infrastructure/probes")
+      apiRequest<InfrastructureProbeSummary>("/infrastructure/probes"),
+      apiRequest<AuthReadiness>("/infrastructure/auth-readiness")
     ]);
     setInfrastructureStatus(status);
     setInfrastructureProbes(probes);
-    return { status, probes };
+    setAuthReadiness(auth);
+    return { status, probes, auth };
   }, []);
 
   useEffect(() => {
@@ -13580,9 +13597,14 @@ export default function HomePage() {
                   Sign out
                 </button>
               ) : (
-                <button type="button" onClick={beginKeycloakLogin} disabled={busyAction !== null}>
-                  Sign in
-                </button>
+                <>
+                  <button type="button" onClick={beginKeycloakRegistration} disabled={busyAction !== null}>
+                    Create account
+                  </button>
+                  <button type="button" onClick={beginKeycloakLogin} disabled={busyAction !== null}>
+                    Sign in
+                  </button>
+                </>
               )
             ) : null}
             <button
@@ -13693,11 +13715,34 @@ export default function HomePage() {
                       Sign out
                     </button>
                   ) : (
-                    <button type="button" onClick={beginKeycloakLogin} disabled={busyAction !== null}>
-                      Sign in with Keycloak
-                    </button>
+                    <>
+                      <button type="button" onClick={beginKeycloakRegistration} disabled={busyAction !== null}>
+                        Create Keycloak account
+                      </button>
+                      <button type="button" onClick={beginKeycloakLogin} disabled={busyAction !== null}>
+                        Sign in with Keycloak
+                      </button>
+                    </>
                   )}
                 </div>
+              ) : null}
+            </div>
+            <div className="auth-readiness-card">
+              <div>
+                <span>Identity readiness</span>
+                <strong>{authReadiness?.status.replaceAll("_", " ") ?? "checking"}</strong>
+                <small>{authReadiness?.issuer ?? keycloakIssuer}</small>
+              </div>
+              <div className="auth-endpoint-list">
+                {(authReadiness?.endpoints ?? []).slice(0, 4).map((endpoint) => (
+                  <span key={endpoint.key}>
+                    {endpoint.configured ? "ready" : "missing"} · {endpoint.name}
+                  </span>
+                ))}
+                {!authReadiness?.endpoints.length ? <span>Load infrastructure to inspect OIDC endpoints.</span> : null}
+              </div>
+              {authReadiness?.blockers[0] || authReadiness?.warnings[0] ? (
+                <small>{authReadiness.blockers[0] ?? authReadiness.warnings[0]}</small>
               ) : null}
             </div>
             <label>

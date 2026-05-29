@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas.platform import (
+    AuthEndpointRead,
+    AuthReadiness,
     Capability,
     HealthResponse,
     InfrastructureComponent,
@@ -55,6 +57,11 @@ async def platform_summary() -> PlatformSummary:
             ),
         ],
     )
+
+
+@router.get("/infrastructure/auth-readiness", response_model=AuthReadiness)
+async def auth_readiness(settings: Settings = Depends(get_settings)) -> AuthReadiness:
+    return _auth_readiness(settings)
 
 
 @router.get("/infrastructure", response_model=InfrastructureStatus)
@@ -118,6 +125,102 @@ def _keycloak_component(settings: Settings) -> InfrastructureComponent:
         endpoint=str(settings.keycloak_issuer),
         details=[f"audience={settings.keycloak_audience}"],
     )
+
+
+def _auth_readiness(settings: Settings) -> AuthReadiness:
+    if settings.auth_mode != "keycloak":
+        return AuthReadiness(
+            mode=settings.auth_mode,
+            provider="local",
+            status="standby",
+            warnings=["Production SaaS mode should use Keycloak bearer-token authentication."],
+            next_actions=["Set AFROLETE_AUTH_MODE=keycloak before deployed tenant onboarding."],
+        )
+
+    issuer = str(settings.keycloak_issuer).rstrip("/") if settings.keycloak_issuer else ""
+    endpoints = _keycloak_expected_endpoints(issuer)
+    blockers: list[str] = []
+    warnings: list[str] = []
+    next_actions: list[str] = []
+    if not issuer:
+        blockers.append("Keycloak issuer is not configured.")
+    if not settings.keycloak_audience:
+        blockers.append("Keycloak API audience is not configured.")
+    if not settings.keycloak_algorithms:
+        blockers.append("No Keycloak token signing algorithms are allowed.")
+    if issuer and not issuer.startswith("https://") and settings.env not in {"local", "demo", "test"}:
+        warnings.append("Issuer is not HTTPS outside local/demo/test mode.")
+    warnings.append("Realm self-registration must be enabled in Keycloak for the account creation entrypoint.")
+    next_actions.extend(
+        [
+            "Allow the frontend origin as a valid redirect URI for the Keycloak web client.",
+            "Enable realm self-registration or route account creation through an approved identity workflow.",
+            "Smoke test account creation, callback, token audience, and API bearer authorization together.",
+        ]
+    )
+    return AuthReadiness(
+        mode=settings.auth_mode,
+        provider="keycloak",
+        issuer=issuer or None,
+        audience=settings.keycloak_audience or None,
+        status="blocked" if blockers else "ready_with_warnings" if warnings else "ready",
+        endpoints=endpoints,
+        blockers=blockers,
+        warnings=warnings,
+        next_actions=next_actions,
+    )
+
+
+def _keycloak_expected_endpoints(issuer: str) -> list[AuthEndpointRead]:
+    if not issuer:
+        return []
+    base = issuer.rstrip("/")
+    return [
+        AuthEndpointRead(
+            key="openid-configuration",
+            name="OIDC discovery",
+            url=f"{base}/.well-known/openid-configuration",
+            configured=True,
+        ),
+        AuthEndpointRead(
+            key="authorization",
+            name="Authorization",
+            url=f"{base}/protocol/openid-connect/auth",
+            configured=True,
+        ),
+        AuthEndpointRead(
+            key="registration",
+            name="Account creation",
+            url=f"{base}/protocol/openid-connect/registrations",
+            configured=True,
+        ),
+        AuthEndpointRead(
+            key="token",
+            name="Token exchange",
+            url=f"{base}/protocol/openid-connect/token",
+            configured=True,
+        ),
+        AuthEndpointRead(
+            key="jwks",
+            name="Signing keys",
+            url=f"{base}/protocol/openid-connect/certs",
+            configured=True,
+        ),
+        AuthEndpointRead(
+            key="logout",
+            name="Logout",
+            url=f"{base}/protocol/openid-connect/logout",
+            required=False,
+            configured=True,
+        ),
+        AuthEndpointRead(
+            key="userinfo",
+            name="UserInfo",
+            url=f"{base}/protocol/openid-connect/userinfo",
+            required=False,
+            configured=True,
+        ),
+    ]
 
 
 def _spicedb_component(settings: Settings) -> InfrastructureComponent:
@@ -282,13 +385,49 @@ async def _keycloak_probe(settings: Settings) -> InfrastructureProbeResult:
     if settings.auth_mode != "keycloak":
         return _skipped_probe("keycloak", "Keycloak", "auth mode is local")
     issuer = str(settings.keycloak_issuer).rstrip("/")
-    return await _http_probe(
-        key="keycloak",
-        name="Keycloak",
-        url=f"{issuer}/.well-known/openid-configuration",
-        timeout_seconds=settings.infrastructure_probe_timeout_seconds,
-        healthy_statuses={200},
-    )
+    started = time.perf_counter()
+    checked_at = _checked_at()
+    url = f"{issuer}/.well-known/openid-configuration"
+    try:
+        async with httpx.AsyncClient(timeout=settings.infrastructure_probe_timeout_seconds, follow_redirects=False) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            discovery = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        return _probe_result("keycloak", "Keycloak", "unreachable", False, started, checked_at, [type(exc).__name__])
+    required = {
+        "authorization_endpoint",
+        "token_endpoint",
+        "jwks_uri",
+        "issuer",
+    }
+    missing = sorted(key for key in required if not discovery.get(key))
+    issuer_mismatch = discovery.get("issuer") != issuer
+    details = _keycloak_discovery_details(discovery, issuer)
+    if missing or issuer_mismatch:
+        problems = [f"missing: {', '.join(missing)}"] if missing else []
+        if issuer_mismatch:
+            problems.append("issuer mismatch")
+        return _probe_result(
+            "keycloak",
+            "Keycloak",
+            "unhealthy",
+            False,
+            started,
+            checked_at,
+            [*problems, *details],
+        )
+    return _probe_result("keycloak", "Keycloak", "healthy", True, started, checked_at, details)
+
+
+def _keycloak_discovery_details(discovery: dict[str, object], expected_issuer: str) -> list[str]:
+    details: list[str] = []
+    issuer = discovery.get("issuer")
+    details.append("issuer matched" if issuer == expected_issuer else "issuer mismatch")
+    for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
+        details.append(f"{key} {'discovered' if discovery.get(key) else 'missing'}")
+    details.append("registration endpoint derived")
+    return details
 
 
 async def _spicedb_probe(settings: Settings) -> InfrastructureProbeResult:

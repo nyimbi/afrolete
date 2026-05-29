@@ -49,3 +49,23 @@ class InfrastructureProbeSummary(BaseModel):
     environment: str
     timeout_seconds: float
     results: list[InfrastructureProbeResult]
+
+
+class AuthEndpointRead(BaseModel):
+    key: str
+    name: str
+    url: str | None = None
+    required: bool = True
+    configured: bool
+
+
+class AuthReadiness(BaseModel):
+    mode: str
+    provider: str
+    issuer: str | None = None
+    audience: str | None = None
+    status: str
+    endpoints: list[AuthEndpointRead] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)

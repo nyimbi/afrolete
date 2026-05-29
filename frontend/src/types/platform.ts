@@ -37,3 +37,23 @@ export type InfrastructureProbeSummary = {
   timeout_seconds: number;
   results: InfrastructureProbeResult[];
 };
+
+export type AuthEndpointRead = {
+  key: string;
+  name: string;
+  url: string | null;
+  required: boolean;
+  configured: boolean;
+};
+
+export type AuthReadiness = {
+  mode: string;
+  provider: string;
+  issuer: string | null;
+  audience: string | null;
+  status: string;
+  endpoints: AuthEndpointRead[];
+  blockers: string[];
+  warnings: string[];
+  next_actions: string[];
+};
