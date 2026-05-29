@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -38,6 +38,11 @@ class Organization(IdMixin, TimestampMixin, Base):
     logo_url: Mapped[str | None] = mapped_column(String(500))
     brand_primary_color: Mapped[str | None] = mapped_column(String(16))
     brand_secondary_color: Mapped[str | None] = mapped_column(String(16))
+    registration_open: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    registration_fee_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    registration_fee_currency: Mapped[str | None] = mapped_column(String(3))
+    registration_payment_instructions: Mapped[str | None] = mapped_column(Text)
+    registration_required_documents_json: Mapped[str | None] = mapped_column(Text)
 
 
 class Membership(IdMixin, TimestampMixin, Base):

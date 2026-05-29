@@ -284,6 +284,11 @@ export type OrganizationRead = {
   logo_url: string | null;
   brand_primary_color: string | null;
   brand_secondary_color: string | null;
+  registration_open: boolean;
+  registration_fee_amount: string | null;
+  registration_fee_currency: string | null;
+  registration_payment_instructions: string | null;
+  registration_required_documents: string[];
   my_roles: MembershipRole[];
 };
 
@@ -363,6 +368,11 @@ export type OrganizationPublicSiteRead = {
   logo_url: string | null;
   brand_primary_color: string | null;
   brand_secondary_color: string | null;
+  registration_open: boolean;
+  registration_fee_amount: string | null;
+  registration_fee_currency: string | null;
+  registration_payment_instructions: string | null;
+  registration_required_documents: string[];
   teams: PublicSiteTeamRead[];
   upcoming_events: PublicSiteEventRead[];
   sponsors: PublicSiteSponsorRead[];

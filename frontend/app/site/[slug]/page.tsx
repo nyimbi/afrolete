@@ -218,7 +218,11 @@ export default function PublicOrganizationSitePage() {
         emergency_contact_name: created.guardian_name ?? current.emergency_contact_name,
         emergency_contact_phone: created.phone ?? current.emergency_contact_phone,
         consent_signer_name: created.guardian_name ?? current.consent_signer_name,
-        medical_information_filename: `${created.athlete_name.replaceAll(" ", "-").toLowerCase()}-medical.pdf`
+        medical_information_filename: `${created.athlete_name.replaceAll(" ", "-").toLowerCase()}-medical.pdf`,
+        payment_amount: created.payment_amount ?? current.payment_amount,
+        payment_currency: created.payment_currency ?? current.payment_currency,
+        payment_method: created.payment_method ?? current.payment_method,
+        payment_status: created.payment_status ?? current.payment_status
       }));
       setInquiry({
         team_id: "",
@@ -836,6 +840,16 @@ export default function PublicOrganizationSitePage() {
           <p className="section-label">Registration</p>
           <h2>Join {displayName}</h2>
           <p>Send a player or family inquiry to the organization staff.</p>
+          <div className="public-registration-settings">
+            <strong>{site.registration_open ? "Registration open" : "Registration closed"}</strong>
+            <span>
+              Fee: {site.registration_fee_amount ? `${site.registration_fee_currency ?? "USD"} ${site.registration_fee_amount}` : "not required"}
+            </span>
+            {site.registration_required_documents.length ? (
+              <span>Documents: {site.registration_required_documents.map((item) => item.replaceAll("_", " ")).join(", ")}</span>
+            ) : null}
+            {site.registration_payment_instructions ? <span>{site.registration_payment_instructions}</span> : null}
+          </div>
         </div>
         {submittedInquiry ? (
           <div className="public-registration-packet">
@@ -1062,7 +1076,9 @@ export default function PublicOrganizationSitePage() {
               <textarea value={inquiry.message} onChange={(event) => setInquiry({ ...inquiry, message: event.target.value })} />
             </label>
             {formError ? <p className="form-error public-site-wide">{formError}</p> : null}
-            <button type="submit" disabled={busy}>{busy ? "Sending" : "Send inquiry"}</button>
+            <button type="submit" disabled={busy || !site.registration_open}>
+              {!site.registration_open ? "Registration closed" : busy ? "Sending" : "Send inquiry"}
+            </button>
           </form>
         )}
       </section>

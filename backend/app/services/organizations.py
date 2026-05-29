@@ -71,6 +71,7 @@ def organization_member_relation(subject_type: MemberSubjectType, role: Membersh
 
 INQUIRY_REVIEW_STATUSES = {"new", "reviewing", "contacted", "waitlisted", "rejected"}
 REGISTRATION_PAYMENT_COMPLETE_STATUSES = {"paid", "waived", "not_required"}
+DEFAULT_REGISTRATION_DOCUMENTS = ["proof_of_age", "medical_information"]
 
 
 def public_site_path(organization: Organization) -> str:
@@ -101,6 +102,32 @@ def default_starter_team_name(organization: Organization) -> str:
     if organization.organization_type == OrganizationType.ACADEMY:
         return f"{label.title()} Academy Group"
     return f"{label.title()} Team"
+
+
+def normalize_registration_document_types(document_types: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for document_type in document_types:
+        safe = re.sub(r"[^a-z0-9_]+", "_", document_type.strip().lower()).strip("_")
+        if safe and safe not in normalized:
+            normalized.append(safe[:80])
+    return normalized[:12]
+
+
+def organization_registration_required_documents(organization: Organization) -> list[str]:
+    raw = organization.registration_required_documents_json
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return normalize_registration_document_types([str(item) for item in parsed])
+
+
+def organization_public_registration_documents(organization: Organization) -> list[str]:
+    return organization_registration_required_documents(organization) or list(DEFAULT_REGISTRATION_DOCUMENTS)
 
 
 async def create_onboarding_starter_team(
@@ -144,7 +171,7 @@ def registration_required_documents(inquiry: RegistrationInquiry) -> list[str]:
     if configured:
         return [str(item["document_type"]) for item in configured if item.get("document_type")]
 
-    required = ["proof_of_age", "medical_information"]
+    required = list(DEFAULT_REGISTRATION_DOCUMENTS)
     if inquiry.guardian_name or is_youth_age_group(inquiry.age_group):
         required.extend(["guardian_consent", "photo_release"])
     return required
@@ -319,6 +346,16 @@ async def create_organization(
         logo_url=payload.logo_url,
         brand_primary_color=payload.brand_primary_color,
         brand_secondary_color=payload.brand_secondary_color,
+        registration_open=payload.registration_open,
+        registration_fee_amount=payload.registration_fee_amount,
+        registration_fee_currency=payload.registration_fee_currency.upper() if payload.registration_fee_currency else None,
+        registration_payment_instructions=payload.registration_payment_instructions,
+        registration_required_documents_json=json.dumps(
+            normalize_registration_document_types(payload.registration_required_documents),
+            sort_keys=True,
+        )
+        if payload.registration_required_documents
+        else None,
     )
     db.add(organization)
     await db.flush()
@@ -533,14 +570,30 @@ async def create_public_registration_inquiry(
     )
     if organization is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    if not organization.registration_open:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Registration is closed")
     if payload.team_id is not None:
         team = await db.get(Team, payload.team_id)
         if team is None or team.organization_id != organization.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
+    required_documents = organization_registration_required_documents(organization)
+    if not required_documents:
+        required_documents = list(DEFAULT_REGISTRATION_DOCUMENTS)
+        if payload.guardian_name or is_youth_age_group(payload.age_group):
+            required_documents.extend(["guardian_consent", "photo_release"])
+
     inquiry = RegistrationInquiry(
         organization_id=organization.id,
         **payload.model_dump(),
+        required_documents_json=json.dumps(
+            [{"document_type": document_type, "filename": document_type} for document_type in required_documents],
+            sort_keys=True,
+        ),
+        payment_amount=organization.registration_fee_amount,
+        payment_currency=organization.registration_fee_currency,
+        payment_status="pending" if organization.registration_fee_amount else "not_required",
+        payment_method="registration_checkout" if organization.registration_fee_amount else None,
     )
     db.add(inquiry)
     await db.commit()

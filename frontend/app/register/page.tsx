@@ -54,6 +54,11 @@ const defaultOrganizationForm = {
   mission: "Create a trusted, measurable development pathway for athletes.",
   brand_primary_color: "#0f766e",
   brand_secondary_color: "#b7791f",
+  registration_open: true,
+  registration_fee_amount: "1000.00",
+  registration_fee_currency: "KES",
+  registration_payment_instructions: "Pay online after completing the family packet.",
+  registration_required_documents: "proof_of_age, medical_information, guardian_consent, photo_release",
   launch_goal: "Register first athletes and invite guardians this week",
   starter_team_name: "U15 Development",
   starter_team_sport: "football",
@@ -193,7 +198,12 @@ export default function RegistrationPage() {
             website_url: organizationForm.website_url || null,
             mission: organizationForm.mission || null,
             brand_primary_color: organizationForm.brand_primary_color || null,
-            brand_secondary_color: organizationForm.brand_secondary_color || null
+            brand_secondary_color: organizationForm.brand_secondary_color || null,
+            registration_open: organizationForm.registration_open,
+            registration_fee_amount: organizationForm.registration_fee_amount || null,
+            registration_fee_currency: organizationForm.registration_fee_currency || null,
+            registration_payment_instructions: organizationForm.registration_payment_instructions || null,
+            registration_required_documents: splitCsv(organizationForm.registration_required_documents)
           }
         }
       });
@@ -240,6 +250,12 @@ export default function RegistrationPage() {
         sport_interest: current.sport_interest || site.primary_sport || "",
         team_id: ""
       }));
+      setPacketForm((current) => ({
+        ...current,
+        payment_amount: site.registration_fee_amount ?? "",
+        payment_currency: site.registration_fee_currency ?? current.payment_currency,
+        payment_status: site.registration_fee_amount ? "pending" : "not_required"
+      }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Organization site could not be loaded");
     } finally {
@@ -279,7 +295,11 @@ export default function RegistrationPage() {
         emergency_contact_name: inquiry.guardian_name ?? current.emergency_contact_name,
         emergency_contact_phone: inquiry.phone ?? current.emergency_contact_phone,
         consent_signer_name: inquiry.guardian_name ?? current.consent_signer_name,
-        medical_information_filename: `${inquiry.athlete_name.replaceAll(" ", "-").toLowerCase()}-medical.pdf`
+        medical_information_filename: `${inquiry.athlete_name.replaceAll(" ", "-").toLowerCase()}-medical.pdf`,
+        payment_amount: inquiry.payment_amount ?? current.payment_amount,
+        payment_currency: inquiry.payment_currency ?? current.payment_currency,
+        payment_method: inquiry.payment_method ?? current.payment_method,
+        payment_status: inquiry.payment_status ?? current.payment_status
       }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Registration inquiry failed");
@@ -496,6 +516,30 @@ export default function RegistrationPage() {
                 <label>
                   Accent color
                   <input value={organizationForm.brand_secondary_color} onChange={(event) => setOrganizationForm({ ...organizationForm, brand_secondary_color: event.target.value })} />
+                </label>
+                <label>
+                  Registration fee
+                  <input value={organizationForm.registration_fee_amount} onChange={(event) => setOrganizationForm({ ...organizationForm, registration_fee_amount: event.target.value })} />
+                </label>
+                <label>
+                  Fee currency
+                  <input maxLength={3} value={organizationForm.registration_fee_currency} onChange={(event) => setOrganizationForm({ ...organizationForm, registration_fee_currency: event.target.value.toUpperCase() })} />
+                </label>
+                <label className="register-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={organizationForm.registration_open}
+                    onChange={(event) => setOrganizationForm({ ...organizationForm, registration_open: event.target.checked })}
+                  />
+                  Public registration open
+                </label>
+                <label className="register-wide">
+                  Required documents
+                  <input value={organizationForm.registration_required_documents} onChange={(event) => setOrganizationForm({ ...organizationForm, registration_required_documents: event.target.value })} />
+                </label>
+                <label className="register-wide">
+                  Payment instructions
+                  <textarea value={organizationForm.registration_payment_instructions} onChange={(event) => setOrganizationForm({ ...organizationForm, registration_payment_instructions: event.target.value })} />
                 </label>
                 <label className="register-wide">
                   Launch goal
@@ -887,4 +931,11 @@ function DocumentInput({
       {value ? <small>{value}</small> : null}
     </label>
   );
+}
+
+function splitCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }

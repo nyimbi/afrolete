@@ -34,6 +34,11 @@ class OrganizationCreate(BaseModel):
     logo_url: str | None = Field(default=None, max_length=500)
     brand_primary_color: str | None = Field(default=None, max_length=16)
     brand_secondary_color: str | None = Field(default=None, max_length=16)
+    registration_open: bool = True
+    registration_fee_amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    registration_fee_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    registration_payment_instructions: str | None = Field(default=None, max_length=2000)
+    registration_required_documents: list[str] = Field(default_factory=list, max_length=12)
 
 
 class OrganizationRead(BaseModel):
@@ -53,6 +58,11 @@ class OrganizationRead(BaseModel):
     logo_url: str | None
     brand_primary_color: str | None
     brand_secondary_color: str | None
+    registration_open: bool
+    registration_fee_amount: Decimal | None
+    registration_fee_currency: str | None
+    registration_payment_instructions: str | None
+    registration_required_documents: list[str] = Field(default_factory=list)
     my_roles: list[MembershipRole] = Field(default_factory=list)
 
 
@@ -132,6 +142,11 @@ class OrganizationPublicSiteRead(BaseModel):
     logo_url: str | None
     brand_primary_color: str | None
     brand_secondary_color: str | None
+    registration_open: bool
+    registration_fee_amount: Decimal | None
+    registration_fee_currency: str | None
+    registration_payment_instructions: str | None
+    registration_required_documents: list[str] = Field(default_factory=list)
     teams: list[PublicSiteTeamRead]
     upcoming_events: list[PublicSiteEventRead]
     sponsors: list[PublicSiteSponsorRead]

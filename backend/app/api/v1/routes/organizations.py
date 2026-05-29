@@ -62,6 +62,7 @@ from app.services.organizations import (
     list_organizations_for_identity,
     list_registration_inquiries,
     onboarding_checklist,
+    organization_public_registration_documents,
     public_site_path,
     registration_packet_summary,
     search_public_organizations,
@@ -94,6 +95,11 @@ def to_organization_read(item) -> OrganizationRead:
         logo_url=organization.logo_url,
         brand_primary_color=organization.brand_primary_color,
         brand_secondary_color=organization.brand_secondary_color,
+        registration_open=organization.registration_open,
+        registration_fee_amount=organization.registration_fee_amount,
+        registration_fee_currency=organization.registration_fee_currency,
+        registration_payment_instructions=organization.registration_payment_instructions,
+        registration_required_documents=organization_public_registration_documents(organization),
         my_roles=roles,
     )
 
@@ -117,6 +123,11 @@ def to_public_site_read(item) -> OrganizationPublicSiteRead:
         logo_url=organization.logo_url,
         brand_primary_color=organization.brand_primary_color,
         brand_secondary_color=organization.brand_secondary_color,
+        registration_open=organization.registration_open,
+        registration_fee_amount=organization.registration_fee_amount,
+        registration_fee_currency=organization.registration_fee_currency,
+        registration_payment_instructions=organization.registration_payment_instructions,
+        registration_required_documents=organization_public_registration_documents(organization),
         teams=[
             PublicSiteTeamRead(
                 id=team.id,

@@ -46,6 +46,7 @@ from app.schemas.communication import (
 )
 from app.schemas.event import AttendanceRecordRead, AttendanceRecordUpsert, EventCreate, EventRead
 from app.schemas.organization import OrganizationRead
+from app.services.organizations import organization_public_registration_documents
 from app.schemas.performance import (
     MetricDefinitionRead,
     PerformanceObservationCreate,
@@ -162,6 +163,11 @@ def to_organization_read(organization: Organization) -> OrganizationRead:
         logo_url=organization.logo_url,
         brand_primary_color=organization.brand_primary_color,
         brand_secondary_color=organization.brand_secondary_color,
+        registration_open=organization.registration_open,
+        registration_fee_amount=organization.registration_fee_amount,
+        registration_fee_currency=organization.registration_fee_currency,
+        registration_payment_instructions=organization.registration_payment_instructions,
+        registration_required_documents=organization_public_registration_documents(organization),
         my_roles=[],
     )
 

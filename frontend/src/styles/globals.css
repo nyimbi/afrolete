@@ -2347,6 +2347,24 @@ textarea:focus {
   gap: 14px;
 }
 
+.public-registration-settings {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 12px;
+}
+
+.public-registration-settings strong,
+.public-registration-settings span {
+  display: block;
+}
+
+.public-registration-settings span {
+  color: var(--muted);
+}
+
 .public-registration-packet-head,
 .public-registration-actions {
   align-items: center;

@@ -66,6 +66,16 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
                 "contact_email": "sports@makini.example",
                 "subdomain": "makini-track",
                 "mission": "Run school athletics safely and transparently.",
+                "registration_open": True,
+                "registration_fee_amount": "1000.00",
+                "registration_fee_currency": "KES",
+                "registration_payment_instructions": "Use the hosted checkout link after uploading documents.",
+                "registration_required_documents": [
+                    "proof_of_age",
+                    "medical_information",
+                    "guardian_consent",
+                    "photo_release",
+                ],
             },
         },
     )
@@ -81,6 +91,14 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert onboarding["starter_team"]["sport_format"] == "individual"
     assert onboarding["starter_team"]["age_group"] == "U15"
     assert onboarding["starter_team"]["season_label"] == "Term 2"
+    assert onboarding["organization"]["registration_fee_amount"] == "1000.00"
+    assert onboarding["organization"]["registration_fee_currency"] == "KES"
+    assert onboarding["organization"]["registration_required_documents"] == [
+        "proof_of_age",
+        "medical_information",
+        "guardian_consent",
+        "photo_release",
+    ]
     assert onboarding["checklist"][0] == "Confirm launch goal: Open registration for term two athletics"
     assert any("school teams" in step for step in onboarding["checklist"])
 
@@ -98,6 +116,9 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert public_site_response.status_code == 200
     public_site = public_site_response.json()
     assert [team["name"] for team in public_site["teams"]] == ["Junior Sprint Squad"]
+    assert public_site["registration_open"] is True
+    assert public_site["registration_fee_amount"] == "1000.00"
+    assert public_site["registration_payment_instructions"] == "Use the hosted checkout link after uploading documents."
 
     inquiry_response = client.post(
         "/api/v1/organizations/public/makini-track/registration-inquiries",
@@ -121,6 +142,9 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert inquiry["organization_id"] == onboarding["organization"]["id"]
     assert inquiry["team_id"] == onboarding["starter_team"]["id"]
     assert inquiry["verification_status"] == "inquiry"
+    assert inquiry["payment_amount"] == "1000.00"
+    assert inquiry["payment_currency"] == "KES"
+    assert inquiry["payment_status"] == "pending"
 
     document_response = client.post(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/documents",
