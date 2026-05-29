@@ -2671,6 +2671,25 @@ textarea:focus {
   color: white;
 }
 
+.admissions-import {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
+}
+
+.admissions-import textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.admissions-import span,
+.admissions-import small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .admissions-log {
   border-top: 1px solid var(--line);
   display: grid;

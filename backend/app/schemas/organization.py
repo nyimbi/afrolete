@@ -261,6 +261,25 @@ class RegistrationInquiryRead(BaseModel):
     created_at: datetime
 
 
+class RegistrationInquiryImportCreate(BaseModel):
+    csv_text: str = Field(min_length=1, max_length=200_000)
+    source_url: str | None = Field(default=None, max_length=500)
+
+
+class RegistrationInquiryImportRowErrorRead(BaseModel):
+    row_number: int
+    message: str
+    row: dict[str, str | None] = Field(default_factory=dict)
+
+
+class RegistrationInquiryImportRead(BaseModel):
+    organization_id: UUID
+    created_count: int
+    error_count: int
+    inquiries: list[RegistrationInquiryRead] = Field(default_factory=list)
+    errors: list[RegistrationInquiryImportRowErrorRead] = Field(default_factory=list)
+
+
 class RegistrationInquiryAccountReadinessRead(BaseModel):
     inquiry_id: UUID
     guardian_person_id: UUID | None

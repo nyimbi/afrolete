@@ -463,6 +463,20 @@ export type RegistrationInquiryRead = {
   created_at: string;
 };
 
+export type RegistrationInquiryImportRowErrorRead = {
+  row_number: number;
+  message: string;
+  row: Record<string, string | null>;
+};
+
+export type RegistrationInquiryImportRead = {
+  organization_id: UUID;
+  created_count: number;
+  error_count: number;
+  inquiries: RegistrationInquiryRead[];
+  errors: RegistrationInquiryImportRowErrorRead[];
+};
+
 export type RegistrationInquiryAccountReadinessRead = {
   inquiry_id: UUID;
   guardian_person_id: UUID | null;

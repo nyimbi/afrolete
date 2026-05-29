@@ -206,6 +206,29 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert public_site["registration_fee_amount"] == "1000.00"
     assert public_site["registration_payment_instructions"] == "Use the hosted checkout link after uploading documents."
 
+    import_response = client.post(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/import",
+        headers=identity_headers,
+        json={
+            "csv_text": (
+                "athlete_name,guardian_name,email,phone,age_group,sport_interest,team,message\n"
+                "Brian Import,Parent Import,parent.import@example.com,+254700000010,U15,athletics,Junior Sprint Squad,CSV intake\n"
+                "Missing Email,Parent Import,,+254700000011,U13,athletics,Junior Sprint Squad,Needs email\n"
+            ),
+            "source_url": "admissions-csv-import",
+        },
+    )
+    assert import_response.status_code == 200
+    imported = import_response.json()
+    assert imported["created_count"] == 1
+    assert imported["error_count"] == 1
+    assert imported["inquiries"][0]["athlete_name"] == "Brian Import"
+    assert imported["inquiries"][0]["team_id"] == onboarding["starter_team"]["id"]
+    assert imported["inquiries"][0]["guardian_contact_status"] == "pending_account"
+    assert imported["inquiries"][0]["payment_status"] == "pending"
+    assert imported["errors"][0]["row_number"] == 3
+    assert "email" in imported["errors"][0]["message"].lower()
+
     inquiry_response = client.post(
         "/api/v1/organizations/public/makini-track/registration-inquiries",
         json={

@@ -17,6 +17,7 @@ import type {
   OrganizationRead,
   RegistrationInquiryConversionRead,
   RegistrationInquiryFollowUpRead,
+  RegistrationInquiryImportRead,
   RegistrationInquiryRead
 } from "@/types/operations";
 
@@ -67,6 +68,8 @@ export default function AdmissionsPage() {
   const [reviewForms, setReviewForms] = useState<Record<string, ReviewForm>>({});
   const [queue, setQueue] = useState<AdmissionQueue>("all");
   const [search, setSearch] = useState("");
+  const [importCsv, setImportCsv] = useState("athlete_name,guardian_name,email,phone,age_group,sport_interest,team,message\n");
+  const [importResult, setImportResult] = useState<RegistrationInquiryImportRead | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [log, setLog] = useState<string[]>([]);
@@ -243,6 +246,38 @@ export default function AdmissionsPage() {
       setAgentTasks(loaded.filter((task) => task.task_type === "registration_inquiry_review"));
     } catch {
       setAgentTasks([]);
+    }
+  };
+
+  const importRegistrationCsv = async () => {
+    if (!selectedOrganizationId) {
+      setError("Choose an organization before importing registration rows.");
+      return;
+    }
+    setBusy("registration-import");
+    setError("");
+    try {
+      const result = await apiRequest<RegistrationInquiryImportRead>(
+        `/organizations/${selectedOrganizationId}/registration-inquiries/import`,
+        {
+          method: "POST",
+          identity: requestIdentity,
+          body: {
+            csv_text: importCsv,
+            source_url: "admissions-csv-import"
+          }
+        }
+      );
+      setImportResult(result);
+      setInquiries((current) => [
+        ...result.inquiries,
+        ...current.filter((item) => !result.inquiries.some((created) => created.id === item.id))
+      ]);
+      addLog(`Imported ${result.created_count} registration rows${result.error_count ? `, ${result.error_count} need review` : ""}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Registration CSV import failed");
+    } finally {
+      setBusy("");
     }
   };
 
@@ -597,6 +632,31 @@ export default function AdmissionsPage() {
               {label}
             </button>
           ))}
+          <div className="admissions-import">
+            <strong>Bulk import</strong>
+            <textarea
+              value={importCsv}
+              onChange={(event) => setImportCsv(event.target.value)}
+              rows={7}
+              spellCheck={false}
+            />
+            <button type="button" onClick={importRegistrationCsv} disabled={!selectedOrganizationId || busy !== ""}>
+              {busy === "registration-import" ? "Importing" : "Import CSV"}
+            </button>
+            {importResult ? (
+              <span>
+                {importResult.created_count} created
+                {importResult.error_count ? ` · ${importResult.error_count} errors` : ""}
+              </span>
+            ) : (
+              <span>Headers: athlete_name, guardian_name, email, phone, age_group, sport_interest, team.</span>
+            )}
+            {importResult?.errors.slice(0, 3).map((item) => (
+              <small key={`${item.row_number}-${item.message}`}>
+                Row {item.row_number}: {item.message}
+              </small>
+            ))}
+          </div>
           <div className="admissions-log">
             <strong>Activity</strong>
             {log.length ? log.map((item) => <span key={item}>{item}</span>) : <span>No admissions actions yet.</span>}

@@ -37,6 +37,8 @@ from app.schemas.organization import (
     RegistrationInquiryConversionRead,
     RegistrationInquiryFollowUpCreate,
     RegistrationInquiryFollowUpRead,
+    RegistrationInquiryImportCreate,
+    RegistrationInquiryImportRead,
     RegistrationInquiryRead,
     RegistrationInquiryUpdate,
     RegistrationPaymentHostedCheckoutRead,
@@ -64,6 +66,7 @@ from app.services.organizations import (
     get_organization_for_identity,
     get_public_registration_inquiry,
     get_public_site,
+    import_registration_inquiries,
     organization_handle_availability,
     list_family_registration_inquiries,
     list_committees,
@@ -671,6 +674,24 @@ async def list_registration_inquiries_route(
         to_registration_inquiry_read(inquiry)
         for inquiry in await list_registration_inquiries(db, identity, organization_id, authz)
     ]
+
+
+@router.post("/{organization_id}/registration-inquiries/import", response_model=RegistrationInquiryImportRead)
+async def import_registration_inquiries_route(
+    organization_id: UUID,
+    payload: RegistrationInquiryImportCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RegistrationInquiryImportRead:
+    inquiries, errors = await import_registration_inquiries(db, identity, organization_id, payload, authz)
+    return RegistrationInquiryImportRead(
+        organization_id=organization_id,
+        created_count=len(inquiries),
+        error_count=len(errors),
+        inquiries=[to_registration_inquiry_read(inquiry) for inquiry in inquiries],
+        errors=errors,
+    )
 
 
 @router.patch("/{organization_id}/registration-inquiries/{inquiry_id}", response_model=RegistrationInquiryRead)

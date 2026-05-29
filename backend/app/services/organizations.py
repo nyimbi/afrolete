@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import re
 from base64 import b64decode
@@ -10,6 +12,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +49,8 @@ from app.schemas.organization import (
     PublicRegistrationDocumentUpload,
     PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
+    RegistrationInquiryImportCreate,
+    RegistrationInquiryImportRowErrorRead,
     RegistrationInquiryAccountReadinessRead,
     RegistrationInquiryConversionCreate,
     RegistrationInquiryFollowUpCreate,
@@ -1386,6 +1391,129 @@ async def list_registration_inquiries(
             )
         ).all()
     )
+
+
+async def import_registration_inquiries(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: RegistrationInquiryImportCreate,
+    authz: AuthorizationService,
+) -> tuple[list[RegistrationInquiry], list[RegistrationInquiryImportRowErrorRead]]:
+    if not await can_manage_registration_inquiries(identity, organization_id, authz):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+
+    rows = list(csv.DictReader(io.StringIO(payload.csv_text.strip())))
+    if not rows or not rows[0]:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="CSV headers are required")
+
+    teams_by_id = {
+        str(team.id): team
+        for team in (
+            await db.scalars(select(Team).where(Team.organization_id == organization_id))
+        ).all()
+    }
+    teams_by_name = {team.name.strip().lower(): team for team in teams_by_id.values()}
+    created: list[RegistrationInquiry] = []
+    errors: list[RegistrationInquiryImportRowErrorRead] = []
+    required_documents = organization_public_registration_documents(organization)
+
+    for row_number, raw_row in enumerate(rows, start=2):
+        row = normalize_import_row(raw_row)
+        try:
+            team_id = imported_team_id(row, teams_by_id, teams_by_name)
+            inquiry_payload = PublicRegistrationInquiryCreate.model_validate(
+                {
+                    "athlete_name": row.get("athlete_name") or row.get("player_name"),
+                    "guardian_name": row.get("guardian_name") or row.get("parent_name"),
+                    "email": row.get("email") or row.get("guardian_email"),
+                    "phone": row.get("phone") or row.get("guardian_phone"),
+                    "age_group": row.get("age_group"),
+                    "sport_interest": row.get("sport_interest") or row.get("sport"),
+                    "team_id": team_id,
+                    "message": row.get("message") or row.get("notes"),
+                    "source_url": payload.source_url or row.get("source_url") or "csv-import",
+                }
+            )
+        except (HTTPException, ValidationError, ValueError) as error:
+            errors.append(
+                RegistrationInquiryImportRowErrorRead(
+                    row_number=row_number,
+                    message=import_error_message(error),
+                    row=row,
+                )
+            )
+            continue
+
+        guardian = await ensure_registration_guardian_contact(db, organization_id, inquiry_payload)
+        inquiry_dict = inquiry_payload.model_dump()
+        inquiry_dict["email"] = normalize_contact_email(inquiry_payload.email)
+        inquiry = RegistrationInquiry(
+            organization_id=organization_id,
+            **inquiry_dict,
+            guardian_person_id=guardian.id,
+            guardian_contact_status="pending_account",
+            required_documents_json=json.dumps(
+                [{"document_type": document_type, "filename": document_type} for document_type in required_documents],
+                sort_keys=True,
+            ),
+            payment_amount=organization.registration_fee_amount,
+            payment_currency=organization.registration_fee_currency,
+            payment_status="pending" if organization.registration_fee_amount else "not_required",
+            payment_method="registration_checkout" if organization.registration_fee_amount else None,
+            review_notes=f"Imported from CSV row {row_number}.",
+            reviewed_by_person_id=identity.person_id,
+            reviewed_at=datetime.now(UTC),
+        )
+        db.add(inquiry)
+        created.append(inquiry)
+
+    await db.commit()
+    for inquiry in created:
+        await db.refresh(inquiry)
+    return created, errors
+
+
+def normalize_import_row(row: dict[str, str | None]) -> dict[str, str | None]:
+    return {
+        (key or "").strip().lower().replace(" ", "_"): value.strip() if isinstance(value, str) and value.strip() else None
+        for key, value in row.items()
+        if key is not None
+    }
+
+
+def imported_team_id(
+    row: dict[str, str | None],
+    teams_by_id: dict[str, Team],
+    teams_by_name: dict[str, Team],
+) -> UUID | None:
+    raw_team_id = row.get("team_id")
+    if raw_team_id:
+        if raw_team_id not in teams_by_id:
+            raise ValueError(f"Team id {raw_team_id} does not belong to this organization")
+        return UUID(raw_team_id)
+    raw_team_name = row.get("team") or row.get("team_name")
+    if raw_team_name:
+        team = teams_by_name.get(raw_team_name.strip().lower())
+        if team is None:
+            raise ValueError(f"Team {raw_team_name} was not found")
+        return team.id
+    return None
+
+
+def import_error_message(error: HTTPException | ValidationError | ValueError) -> str:
+    if isinstance(error, HTTPException):
+        return str(error.detail)
+    if isinstance(error, ValidationError):
+        return "; ".join(
+            f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+            for item in error.errors()
+        )
+    return str(error)
 
 
 async def update_registration_inquiry(
