@@ -635,6 +635,15 @@ const defaultIdentity: LocalIdentity = {
   name: "Owner Example"
 };
 
+const initialOfflineQueueSnapshot: OfflineQueueSnapshot = {
+  online: true,
+  pending_count: 0,
+  last_error: null,
+  last_flushed_at: null,
+  service_worker_ready: false,
+  items: []
+};
+
 type LogEntry = {
   id: string;
   tone: "good" | "bad" | "neutral";
@@ -1802,7 +1811,7 @@ export default function HomePage() {
   const [infrastructureProbes, setInfrastructureProbes] = useState<InfrastructureProbeSummary | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [offlineQueue, setOfflineQueue] = useState<OfflineQueueSnapshot>(() => getOfflineQueueSnapshot());
+  const [offlineQueue, setOfflineQueue] = useState<OfflineQueueSnapshot>(initialOfflineQueueSnapshot);
 
   const [organizationForm, setOrganizationForm] = useState({
     name: "Nairobi Rising FC",
