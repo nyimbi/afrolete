@@ -35,7 +35,9 @@ from app.models.commercial import (
     SponsorContentApprovalReview,
     SponsorContentAsset,
     SponsorCouponRedemption,
+    SponsorInteractionLog,
     SponsorshipAgreement,
+    SponsorshipDeliverableMilestone,
     Ticket,
     TicketOrder,
     TicketProduct,
@@ -90,6 +92,10 @@ from app.schemas.commercial import (
     SponsorContentDashboardRead,
     SponsorCouponRedemptionCreate,
     SponsorCouponRedemptionRead,
+    SponsorInteractionCreate,
+    SponsorInteractionRead,
+    SponsorRenewalForecastRead,
+    SponsorStewardshipDashboardRead,
     SponsorPortalAgreementRead,
     SponsorPortalInvoiceRead,
     SponsorPortalRead,
@@ -97,6 +103,8 @@ from app.schemas.commercial import (
     SponsorPortalSummaryRead,
     SponsorshipDashboardRead,
     SponsorshipAgreementCreate,
+    SponsorshipDeliverableMilestoneCreate,
+    SponsorshipDeliverableMilestoneRead,
     TaxQuoteRead,
     TicketCheckIn,
     TicketOrderCreate,
@@ -157,6 +165,127 @@ async def create_sponsorship(db: AsyncSession, identity: CurrentIdentity, payloa
 
 async def list_sponsorships(db: AsyncSession, organization_id: UUID) -> list[SponsorshipAgreement]:
     return list((await db.scalars(select(SponsorshipAgreement).where(SponsorshipAgreement.organization_id == organization_id).order_by(SponsorshipAgreement.created_at.desc()))).all())
+
+
+async def create_sponsorship_milestone(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SponsorshipDeliverableMilestoneCreate,
+    authz: AuthorizationService,
+) -> SponsorshipDeliverableMilestoneRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    await get_sponsor_for_organization(db, payload.sponsor_id, payload.organization_id)
+    agreement = await get_sponsorship_for_organization(db, payload.sponsorship_agreement_id, payload.organization_id)
+    if agreement.sponsor_id != payload.sponsor_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agreement belongs to another sponsor")
+    milestone = SponsorshipDeliverableMilestone(**payload.model_dump())
+    db.add(milestone)
+    await db.commit()
+    await db.refresh(milestone)
+    return await sponsorship_milestone_read(db, milestone)
+
+
+async def list_sponsorship_milestones(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[SponsorshipDeliverableMilestoneRead]:
+    milestones = list(
+        (
+            await db.scalars(
+                select(SponsorshipDeliverableMilestone)
+                .where(SponsorshipDeliverableMilestone.organization_id == organization_id)
+                .order_by(SponsorshipDeliverableMilestone.due_on.is_(None), SponsorshipDeliverableMilestone.due_on)
+            )
+        ).all()
+    )
+    return [await sponsorship_milestone_read(db, milestone) for milestone in milestones]
+
+
+async def create_sponsor_interaction(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SponsorInteractionCreate,
+    authz: AuthorizationService,
+) -> SponsorInteractionRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    await get_sponsor_for_organization(db, payload.sponsor_id, payload.organization_id)
+    if payload.sponsorship_agreement_id is not None:
+        agreement = await get_sponsorship_for_organization(db, payload.sponsorship_agreement_id, payload.organization_id)
+        if agreement.sponsor_id != payload.sponsor_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agreement belongs to another sponsor")
+    interaction = SponsorInteractionLog(
+        **payload.model_dump(exclude={"occurred_at", "contact_email", "sentiment"}),
+        contact_email=payload.contact_email.strip().lower() if payload.contact_email else None,
+        sentiment=payload.sentiment.strip().lower(),
+        occurred_at=payload.occurred_at or datetime.now(UTC),
+    )
+    db.add(interaction)
+    await db.commit()
+    await db.refresh(interaction)
+    return await sponsor_interaction_read(db, interaction)
+
+
+async def list_sponsor_interactions(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[SponsorInteractionRead]:
+    interactions = list(
+        (
+            await db.scalars(
+                select(SponsorInteractionLog)
+                .where(SponsorInteractionLog.organization_id == organization_id)
+                .order_by(SponsorInteractionLog.occurred_at.desc())
+            )
+        ).all()
+    )
+    return [await sponsor_interaction_read(db, interaction) for interaction in interactions]
+
+
+async def sponsor_stewardship_dashboard(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> SponsorStewardshipDashboardRead:
+    sponsors = await list_sponsors(db, organization_id)
+    agreements = await list_sponsorships(db, organization_id)
+    milestones = list(
+        (
+            await db.scalars(
+                select(SponsorshipDeliverableMilestone).where(
+                    SponsorshipDeliverableMilestone.organization_id == organization_id
+                )
+            )
+        ).all()
+    )
+    interactions = list(
+        (await db.scalars(select(SponsorInteractionLog).where(SponsorInteractionLog.organization_id == organization_id))).all()
+    )
+    activation_counts = await sponsor_activation_counts_by_sponsor(db, organization_id)
+    content_counts = await sponsor_content_counts_by_sponsor(db, organization_id)
+    today = date.today()
+    forecasts = [
+        sponsor_renewal_forecast(
+            sponsor,
+            [agreement for agreement in agreements if agreement.sponsor_id == sponsor.id],
+            [milestone for milestone in milestones if milestone.sponsor_id == sponsor.id],
+            [interaction for interaction in interactions if interaction.sponsor_id == sponsor.id],
+            activation_counts.get(sponsor.id, 0),
+            content_counts.get(sponsor.id, 0),
+            today,
+        )
+        for sponsor in sponsors
+    ]
+    follow_up_due_count = sum(1 for interaction in interactions if interaction.follow_up_on and interaction.follow_up_on <= today)
+    overdue_milestone_count = sum(1 for milestone in milestones if milestone.due_on and milestone.due_on < today and milestone.status != "completed")
+    return SponsorStewardshipDashboardRead(
+        organization_id=organization_id,
+        sponsor_count=len(sponsors),
+        milestone_count=len(milestones),
+        overdue_milestone_count=overdue_milestone_count,
+        interaction_count=len(interactions),
+        follow_up_due_count=follow_up_due_count,
+        forecasts=sorted(forecasts, key=lambda item: item.renewal_score, reverse=True),
+        recommendations=sponsor_stewardship_recommendations(forecasts, overdue_milestone_count, follow_up_due_count),
+    )
 
 
 async def create_sponsor_activation_campaign(
@@ -2070,6 +2199,17 @@ async def get_sponsor_content_asset_for_organization(
     return asset
 
 
+async def get_sponsorship_milestone_for_organization(
+    db: AsyncSession,
+    milestone_id: UUID,
+    organization_id: UUID,
+) -> SponsorshipDeliverableMilestone:
+    milestone = await db.get(SponsorshipDeliverableMilestone, milestone_id)
+    if milestone is None or milestone.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsorship milestone not found")
+    return milestone
+
+
 async def get_campaign_for_organization(db: AsyncSession, campaign_id: UUID, organization_id: UUID) -> FundraisingCampaign:
     campaign = await db.get(FundraisingCampaign, campaign_id)
     if campaign is None or campaign.organization_id != organization_id:
@@ -2896,6 +3036,144 @@ async def sponsor_activation_counts_by_sponsor(db: AsyncSession, organization_id
         )
     ).all()
     return {sponsor_id: int(count) for sponsor_id, count in rows}
+
+
+async def sponsor_content_counts_by_sponsor(db: AsyncSession, organization_id: UUID) -> dict[UUID, int]:
+    rows = (
+        await db.execute(
+            select(SponsorContentAsset.sponsor_id, func.count(SponsorContentAsset.id))
+            .where(SponsorContentAsset.organization_id == organization_id)
+            .group_by(SponsorContentAsset.sponsor_id)
+        )
+    ).all()
+    return {sponsor_id: int(count) for sponsor_id, count in rows}
+
+
+async def sponsorship_milestone_read(
+    db: AsyncSession,
+    milestone: SponsorshipDeliverableMilestone,
+) -> SponsorshipDeliverableMilestoneRead:
+    sponsor = await db.get(Sponsor, milestone.sponsor_id)
+    agreement = await db.get(SponsorshipAgreement, milestone.sponsorship_agreement_id)
+    return SponsorshipDeliverableMilestoneRead(
+        id=milestone.id,
+        organization_id=milestone.organization_id,
+        sponsor_id=milestone.sponsor_id,
+        sponsorship_agreement_id=milestone.sponsorship_agreement_id,
+        title=milestone.title,
+        deliverable_type=milestone.deliverable_type,
+        due_on=milestone.due_on,
+        completed_on=milestone.completed_on,
+        status=milestone.status,
+        owner_name=milestone.owner_name,
+        evidence_url=milestone.evidence_url,
+        notes=milestone.notes,
+        sponsor_name=sponsor.name if sponsor else None,
+        agreement_name=agreement.name if agreement else None,
+    )
+
+
+async def sponsor_interaction_read(db: AsyncSession, interaction: SponsorInteractionLog) -> SponsorInteractionRead:
+    sponsor = await db.get(Sponsor, interaction.sponsor_id)
+    agreement = (
+        await db.get(SponsorshipAgreement, interaction.sponsorship_agreement_id)
+        if interaction.sponsorship_agreement_id
+        else None
+    )
+    return SponsorInteractionRead(
+        id=interaction.id,
+        organization_id=interaction.organization_id,
+        sponsor_id=interaction.sponsor_id,
+        sponsorship_agreement_id=interaction.sponsorship_agreement_id,
+        sponsor_name=sponsor.name if sponsor else None,
+        agreement_name=agreement.name if agreement else None,
+        contact_name=interaction.contact_name,
+        contact_email=interaction.contact_email,
+        interaction_type=interaction.interaction_type,
+        subject=interaction.subject,
+        summary=interaction.summary,
+        sentiment=interaction.sentiment,
+        follow_up_on=interaction.follow_up_on,
+        occurred_at=interaction.occurred_at,
+    )
+
+
+def sponsor_renewal_forecast(
+    sponsor: Sponsor,
+    agreements: list[SponsorshipAgreement],
+    milestones: list[SponsorshipDeliverableMilestone],
+    interactions: list[SponsorInteractionLog],
+    activation_count: int,
+    content_count: int,
+    today: date,
+) -> SponsorRenewalForecastRead:
+    active_value = sum((agreement.value_amount for agreement in agreements if agreement.status == CommercialStatus.ACTIVE), Decimal("0"))
+    completed = sum(1 for milestone in milestones if milestone.status == "completed")
+    overdue = sum(1 for milestone in milestones if milestone.due_on and milestone.due_on < today and milestone.status != "completed")
+    upcoming = sum(
+        1
+        for milestone in milestones
+        if milestone.due_on and today <= milestone.due_on <= today + timedelta(days=30) and milestone.status != "completed"
+    )
+    positive_interactions = sum(1 for interaction in interactions if interaction.sentiment in {"positive", "renewal_ready"})
+    latest_interaction = max((interaction.occurred_at for interaction in interactions), default=None)
+    score = min(
+        100,
+        (35 if active_value > 0 else 0)
+        + min(completed * 12, 30)
+        + min(activation_count * 10, 15)
+        + min(content_count * 5, 10)
+        + min(positive_interactions * 5, 10)
+        - min(overdue * 15, 45),
+    )
+    signal = "renewal_ready" if score >= 80 else "nurture" if score >= 55 else "at_risk"
+    return SponsorRenewalForecastRead(
+        sponsor_id=sponsor.id,
+        sponsor_name=sponsor.name,
+        active_value=active_value.quantize(Decimal("0.01")),
+        renewal_score=max(0, score),
+        renewal_signal=signal,
+        milestone_count=len(milestones),
+        completed_milestone_count=completed,
+        overdue_milestone_count=overdue,
+        upcoming_milestone_count=upcoming,
+        interaction_count=len(interactions),
+        last_interaction_at=latest_interaction,
+        next_best_action=sponsor_next_best_action(signal, overdue, upcoming, len(interactions), activation_count),
+    )
+
+
+def sponsor_next_best_action(signal: str, overdue: int, upcoming: int, interaction_count: int, activation_count: int) -> str:
+    if overdue:
+        return "Resolve overdue sponsor deliverables before renewal outreach."
+    if interaction_count == 0:
+        return "Log a sponsor check-in and confirm success metrics."
+    if activation_count == 0:
+        return "Launch a measurable activation or coupon campaign."
+    if upcoming:
+        return "Prepare evidence for upcoming sponsor deliverables."
+    if signal == "renewal_ready":
+        return "Schedule renewal conversation with ROI proof."
+    return "Send stewardship update with content, activation, and invoice status."
+
+
+def sponsor_stewardship_recommendations(
+    forecasts: list[SponsorRenewalForecastRead],
+    overdue_milestone_count: int,
+    follow_up_due_count: int,
+) -> list[str]:
+    recommendations: list[str] = []
+    if overdue_milestone_count:
+        recommendations.append("Clear overdue sponsor milestones before pitching renewals.")
+    if follow_up_due_count:
+        recommendations.append("Complete due sponsor follow-ups and record outcomes.")
+    if any(forecast.renewal_signal == "renewal_ready" for forecast in forecasts):
+        recommendations.append("Package ROI evidence for renewal-ready sponsors.")
+    if any(forecast.interaction_count == 0 for forecast in forecasts):
+        recommendations.append("Log sponsor communication touchpoints for every active partner.")
+    if not forecasts:
+        recommendations.append("Create sponsors and agreements before stewardship forecasting.")
+    return recommendations[:5]
 
 
 def normalize_coupon_code(value: str) -> str:

@@ -57,11 +57,16 @@ from app.schemas.commercial import (
     SponsorContentDashboardRead,
     SponsorCouponRedemptionCreate,
     SponsorCouponRedemptionRead,
+    SponsorInteractionCreate,
+    SponsorInteractionRead,
     SponsorPortalRead,
     SponsorRead,
+    SponsorStewardshipDashboardRead,
     SponsorshipDashboardRead,
     SponsorshipAgreementCreate,
     SponsorshipAgreementRead,
+    SponsorshipDeliverableMilestoneCreate,
+    SponsorshipDeliverableMilestoneRead,
     TaxQuoteRead,
     TicketCheckIn,
     TicketOrderCreate,
@@ -89,6 +94,8 @@ from app.services.commercial import (
     create_sponsor_activation_campaign,
     create_sponsor_activation_placement,
     create_sponsor_content_asset,
+    create_sponsor_interaction,
+    create_sponsorship_milestone,
     create_sponsorship,
     create_ticket_order,
     create_ticket_product,
@@ -109,6 +116,8 @@ from app.services.commercial import (
     list_sponsor_content_assets,
     list_sponsor_content_reviews,
     list_sponsor_coupon_redemptions,
+    list_sponsor_interactions,
+    list_sponsorship_milestones,
     list_sponsorships,
     list_ticket_products,
     list_tickets,
@@ -128,6 +137,7 @@ from app.services.commercial import (
     sponsor_activation_dashboard,
     sponsor_content_dashboard,
     sponsorship_dashboard,
+    sponsor_stewardship_dashboard,
     sync_accounting_export,
     tax_quote,
     merchandise_order_read,
@@ -252,6 +262,58 @@ async def list_sponsorships_route(
         sponsorship_read(agreement)
         for agreement in await list_sponsorships(db, organization_id)
     ]
+
+
+@router.post(
+    "/sponsorship-milestones",
+    response_model=SponsorshipDeliverableMilestoneRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_sponsorship_milestone_route(
+    payload: SponsorshipDeliverableMilestoneCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SponsorshipDeliverableMilestoneRead:
+    return await create_sponsorship_milestone(db, identity, payload, authz)
+
+
+@router.get("/sponsorship-milestones", response_model=list[SponsorshipDeliverableMilestoneRead])
+async def list_sponsorship_milestones_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[SponsorshipDeliverableMilestoneRead]:
+    return await list_sponsorship_milestones(db, organization_id)
+
+
+@router.post(
+    "/sponsor-interactions",
+    response_model=SponsorInteractionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_sponsor_interaction_route(
+    payload: SponsorInteractionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SponsorInteractionRead:
+    return await create_sponsor_interaction(db, identity, payload, authz)
+
+
+@router.get("/sponsor-interactions", response_model=list[SponsorInteractionRead])
+async def list_sponsor_interactions_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[SponsorInteractionRead]:
+    return await list_sponsor_interactions(db, organization_id)
+
+
+@router.get("/sponsor-stewardship-dashboard", response_model=SponsorStewardshipDashboardRead)
+async def sponsor_stewardship_dashboard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> SponsorStewardshipDashboardRead:
+    return await sponsor_stewardship_dashboard(db, organization_id)
 
 
 @router.post(

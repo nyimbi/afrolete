@@ -43,6 +43,83 @@ class SponsorshipAgreementRead(SponsorshipAgreementCreate):
     status: CommercialStatus
 
 
+class SponsorshipDeliverableMilestoneCreate(BaseModel):
+    organization_id: UUID
+    sponsor_id: UUID
+    sponsorship_agreement_id: UUID
+    title: str = Field(min_length=2, max_length=220)
+    deliverable_type: str = Field(default="contract", min_length=2, max_length=80)
+    due_on: date | None = None
+    completed_on: date | None = None
+    status: str = Field(default="planned", min_length=2, max_length=40)
+    owner_name: str | None = Field(default=None, max_length=180)
+    evidence_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class SponsorshipDeliverableMilestoneRead(SponsorshipDeliverableMilestoneCreate):
+    id: UUID
+    sponsor_name: str | None = None
+    agreement_name: str | None = None
+
+
+class SponsorInteractionCreate(BaseModel):
+    organization_id: UUID
+    sponsor_id: UUID
+    sponsorship_agreement_id: UUID | None = None
+    contact_name: str = Field(min_length=2, max_length=180)
+    contact_email: str | None = Field(default=None, max_length=320)
+    interaction_type: str = Field(default="email", min_length=2, max_length=80)
+    subject: str = Field(min_length=2, max_length=220)
+    summary: str = Field(min_length=2, max_length=4000)
+    sentiment: str = Field(default="neutral", min_length=2, max_length=40)
+    follow_up_on: date | None = None
+    occurred_at: datetime | None = None
+
+
+class SponsorInteractionRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    sponsor_id: UUID
+    sponsorship_agreement_id: UUID | None
+    sponsor_name: str | None = None
+    agreement_name: str | None = None
+    contact_name: str
+    contact_email: str | None
+    interaction_type: str
+    subject: str
+    summary: str
+    sentiment: str
+    follow_up_on: date | None
+    occurred_at: datetime
+
+
+class SponsorRenewalForecastRead(BaseModel):
+    sponsor_id: UUID
+    sponsor_name: str
+    active_value: Decimal
+    renewal_score: int
+    renewal_signal: str
+    milestone_count: int
+    completed_milestone_count: int
+    overdue_milestone_count: int
+    upcoming_milestone_count: int
+    interaction_count: int
+    last_interaction_at: datetime | None
+    next_best_action: str
+
+
+class SponsorStewardshipDashboardRead(BaseModel):
+    organization_id: UUID
+    sponsor_count: int
+    milestone_count: int
+    overdue_milestone_count: int
+    interaction_count: int
+    follow_up_due_count: int
+    forecasts: list[SponsorRenewalForecastRead]
+    recommendations: list[str]
+
+
 class SponsorActivationCampaignCreate(BaseModel):
     organization_id: UUID
     sponsor_id: UUID

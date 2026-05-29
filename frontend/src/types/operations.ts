@@ -2729,6 +2729,66 @@ export type SponsorshipAgreementRead = {
   status: CommercialStatus;
 };
 
+export type SponsorshipDeliverableMilestoneRead = {
+  id: UUID;
+  organization_id: UUID;
+  sponsor_id: UUID;
+  sponsorship_agreement_id: UUID;
+  title: string;
+  deliverable_type: string;
+  due_on: string | null;
+  completed_on: string | null;
+  status: string;
+  owner_name: string | null;
+  evidence_url: string | null;
+  notes: string | null;
+  sponsor_name: string | null;
+  agreement_name: string | null;
+};
+
+export type SponsorInteractionRead = {
+  id: UUID;
+  organization_id: UUID;
+  sponsor_id: UUID;
+  sponsorship_agreement_id: UUID | null;
+  sponsor_name: string | null;
+  agreement_name: string | null;
+  contact_name: string;
+  contact_email: string | null;
+  interaction_type: string;
+  subject: string;
+  summary: string;
+  sentiment: string;
+  follow_up_on: string | null;
+  occurred_at: string;
+};
+
+export type SponsorRenewalForecastRead = {
+  sponsor_id: UUID;
+  sponsor_name: string;
+  active_value: string;
+  renewal_score: number;
+  renewal_signal: string;
+  milestone_count: number;
+  completed_milestone_count: number;
+  overdue_milestone_count: number;
+  upcoming_milestone_count: number;
+  interaction_count: number;
+  last_interaction_at: string | null;
+  next_best_action: string;
+};
+
+export type SponsorStewardshipDashboardRead = {
+  organization_id: UUID;
+  sponsor_count: number;
+  milestone_count: number;
+  overdue_milestone_count: number;
+  interaction_count: number;
+  follow_up_due_count: number;
+  forecasts: SponsorRenewalForecastRead[];
+  recommendations: string[];
+};
+
 export type SponsorActivationCampaignRead = {
   id: UUID;
   organization_id: UUID;

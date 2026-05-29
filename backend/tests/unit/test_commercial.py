@@ -195,6 +195,55 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     assert content_assets[0]["usage_count"] == 1
     assert content_assets[0]["approval_status"] == "approved"
 
+    milestone = client.post(
+        "/api/v1/commercial/sponsorship-milestones",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sponsor_id": sponsor["id"],
+            "sponsorship_agreement_id": agreement["id"],
+            "title": "Post-match sponsor ROI packet",
+            "deliverable_type": "reporting",
+            "due_on": "2026-06-30",
+            "status": "completed",
+            "completed_on": "2026-06-25",
+            "owner_name": "Commercial Manager",
+            "evidence_url": "https://reports.example/acme-roi",
+            "notes": "Includes coupon redemptions, content placement, and event photos.",
+        },
+    ).json()
+    assert milestone["sponsor_name"] == "Acme Sports"
+    assert milestone["agreement_name"] == "Derby Partner"
+    assert milestone["status"] == "completed"
+
+    interaction = client.post(
+        "/api/v1/commercial/sponsor-interactions",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sponsor_id": sponsor["id"],
+            "sponsorship_agreement_id": agreement["id"],
+            "contact_name": "Alex Sponsor",
+            "contact_email": "SPONSOR@example.com",
+            "interaction_type": "review_call",
+            "subject": "Activation results review",
+            "summary": "Sponsor was happy with the coupon conversion and requested renewal options.",
+            "sentiment": "renewal_ready",
+            "follow_up_on": "2026-07-05",
+        },
+    ).json()
+    assert interaction["contact_email"] == "sponsor@example.com"
+    assert interaction["agreement_name"] == "Derby Partner"
+
+    stewardship_dashboard = client.get(
+        f"/api/v1/commercial/sponsor-stewardship-dashboard?organization_id={organization['id']}"
+    ).json()
+    assert stewardship_dashboard["milestone_count"] == 1
+    assert stewardship_dashboard["interaction_count"] == 1
+    assert stewardship_dashboard["forecasts"][0]["sponsor_name"] == "Acme Sports"
+    assert stewardship_dashboard["forecasts"][0]["completed_milestone_count"] == 1
+    assert stewardship_dashboard["forecasts"][0]["renewal_signal"] in {"nurture", "renewal_ready"}
+
     activation_list = client.get(
         f"/api/v1/commercial/sponsor-activations?organization_id={organization['id']}"
     ).json()

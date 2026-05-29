@@ -370,9 +370,12 @@ import type {
   SponsorContentAssetRead,
   SponsorContentDashboardRead,
   SponsorCouponRedemptionRead,
+  SponsorInteractionRead,
+  SponsorStewardshipDashboardRead,
   SponsorRead,
   SponsorshipAgreementRead,
   SponsorshipDashboardRead,
+  SponsorshipDeliverableMilestoneRead,
   SupplierOrderRead,
   SupplierInvoiceSyncRead,
   SupplierOrderSubmissionRead,
@@ -1798,6 +1801,9 @@ export default function HomePage() {
   const [sponsorContentApprovals, setSponsorContentApprovals] = useState<SponsorContentApprovalRead[]>([]);
   const [sponsorPlacements, setSponsorPlacements] = useState<SponsorActivationPlacementRead[]>([]);
   const [sponsorContentDashboard, setSponsorContentDashboard] = useState<SponsorContentDashboardRead | null>(null);
+  const [sponsorMilestones, setSponsorMilestones] = useState<SponsorshipDeliverableMilestoneRead[]>([]);
+  const [sponsorInteractions, setSponsorInteractions] = useState<SponsorInteractionRead[]>([]);
+  const [sponsorStewardshipDashboard, setSponsorStewardshipDashboard] = useState<SponsorStewardshipDashboardRead | null>(null);
   const [reportDefinitions, setReportDefinitions] = useState<ReportDefinitionRead[]>([]);
   const [generatedReports, setGeneratedReports] = useState<GeneratedReportRead[]>([]);
   const [scheduledReports, setScheduledReports] = useState<ScheduledReportRead[]>([]);
@@ -2540,7 +2546,19 @@ export default function HomePage() {
     expected_impressions: 5000,
     staff_requirements: "2 setup crew, 1 photographer, 2 brand ambassadors.",
     inventory_checklist: "Banner, tablet, product samples, QR posters.",
-    weather_contingency: "Move sampling table under covered concourse."
+    weather_contingency: "Move sampling table under covered concourse.",
+    milestone_title: "Halftime sponsor activation report",
+    milestone_type: "reporting",
+    milestone_due_on: "2026-06-30",
+    milestone_status: "planned",
+    milestone_owner: "Commercial Manager",
+    milestone_notes: "Package photos, coupon redemptions, and placement impressions.",
+    interaction_contact_name: "Sponsor Lead",
+    interaction_type: "review_call",
+    interaction_subject: "Activation planning check-in",
+    interaction_summary: "Sponsor approved the matchday plan and asked for a post-event ROI packet.",
+    interaction_sentiment: "positive",
+    follow_up_on: "2026-07-02"
   });
   const [campaignForm, setCampaignForm] = useState({
     name: "New Training Facility",
@@ -3730,6 +3748,9 @@ export default function HomePage() {
       sponsorContentApprovalData,
       sponsorPlacementData,
       sponsorContentDashboardData,
+      sponsorMilestoneData,
+      sponsorInteractionData,
+      sponsorStewardshipDashboardData,
       campaignData,
       grantOpportunityData,
       grantApplicationData,
@@ -3755,6 +3776,9 @@ export default function HomePage() {
       apiRequest<SponsorContentApprovalRead[]>(`/commercial/sponsor-content-approvals?organization_id=${organizationId}`),
       apiRequest<SponsorActivationPlacementRead[]>(`/commercial/sponsor-placements?organization_id=${organizationId}`),
       apiRequest<SponsorContentDashboardRead>(`/commercial/sponsor-content-dashboard?organization_id=${organizationId}`),
+      apiRequest<SponsorshipDeliverableMilestoneRead[]>(`/commercial/sponsorship-milestones?organization_id=${organizationId}`),
+      apiRequest<SponsorInteractionRead[]>(`/commercial/sponsor-interactions?organization_id=${organizationId}`),
+      apiRequest<SponsorStewardshipDashboardRead>(`/commercial/sponsor-stewardship-dashboard?organization_id=${organizationId}`),
       apiRequest<FundraisingCampaignRead[]>(`/commercial/campaigns?organization_id=${organizationId}`),
       apiRequest<GrantOpportunityRead[]>(`/commercial/grants/opportunities?organization_id=${organizationId}`),
       apiRequest<GrantApplicationRead[]>(`/commercial/grants/applications?organization_id=${organizationId}`),
@@ -3782,6 +3806,9 @@ export default function HomePage() {
     setSponsorContentApprovals(sponsorContentApprovalData);
     setSponsorPlacements(sponsorPlacementData);
     setSponsorContentDashboard(sponsorContentDashboardData);
+    setSponsorMilestones(sponsorMilestoneData);
+    setSponsorInteractions(sponsorInteractionData);
+    setSponsorStewardshipDashboard(sponsorStewardshipDashboardData);
     setCampaigns(campaignData);
     setGrantOpportunities(grantOpportunityData);
     setGrantApplications(grantApplicationData);
@@ -4297,6 +4324,9 @@ export default function HomePage() {
       setSponsorContentApprovals([]);
       setSponsorPlacements([]);
       setSponsorContentDashboard(null);
+      setSponsorMilestones([]);
+      setSponsorInteractions([]);
+      setSponsorStewardshipDashboard(null);
       setSelectedGrantOpportunityId("");
       setSelectedGrantApplicationId("");
       setSelectedMerchandiseProductId("");
@@ -13151,6 +13181,68 @@ export default function HomePage() {
     );
   };
 
+  const createSponsorStewardshipWorkflow = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const sponsorId = selectedSponsorId || sponsors[0]?.id;
+    const agreementId = sponsorships.find((agreement) => agreement.sponsor_id === sponsorId)?.id ?? sponsorships[0]?.id;
+    if (!sponsorId || !agreementId) {
+      addLog("Create a sponsor agreement first", "bad");
+      return;
+    }
+    runAction(
+      "create-sponsor-stewardship",
+      async () => {
+        const milestone = await apiRequest<SponsorshipDeliverableMilestoneRead>("/commercial/sponsorship-milestones", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sponsor_id: sponsorId,
+            sponsorship_agreement_id: agreementId,
+            title: sponsorForm.milestone_title,
+            deliverable_type: sponsorForm.milestone_type,
+            due_on: sponsorForm.milestone_due_on || null,
+            status: sponsorForm.milestone_status,
+            owner_name: sponsorForm.milestone_owner,
+            notes: sponsorForm.milestone_notes
+          }
+        });
+        const interaction = await apiRequest<SponsorInteractionRead>("/commercial/sponsor-interactions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sponsor_id: sponsorId,
+            sponsorship_agreement_id: agreementId,
+            contact_name: sponsorForm.interaction_contact_name,
+            contact_email: sponsorForm.contact_email,
+            interaction_type: sponsorForm.interaction_type,
+            subject: sponsorForm.interaction_subject,
+            summary: sponsorForm.interaction_summary,
+            sentiment: sponsorForm.interaction_sentiment,
+            follow_up_on: sponsorForm.follow_up_on || null
+          }
+        });
+        return { milestone, interaction };
+      },
+      ({ milestone, interaction }) => {
+        setSponsorMilestones((current) => [
+          milestone,
+          ...current.filter((item) => item.id !== milestone.id)
+        ]);
+        setSponsorInteractions((current) => [
+          interaction,
+          ...current.filter((item) => item.id !== interaction.id)
+        ]);
+        addLog(`${milestone.sponsor_name ?? "Sponsor"} stewardship updated`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const createCampaignAndDonation = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -17205,6 +17297,7 @@ export default function HomePage() {
                 <button type="button" onClick={createSponsorActivationCampaign} disabled={busyAction !== null}>Activation</button>
                 <button type="button" onClick={recordSponsorCouponRedemption} disabled={busyAction !== null}>Redeem</button>
                 <button type="button" onClick={createSponsorContentWorkflow} disabled={busyAction !== null}>Content</button>
+                <button type="button" onClick={createSponsorStewardshipWorkflow} disabled={busyAction !== null}>Steward</button>
                 <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
@@ -17303,6 +17396,26 @@ export default function HomePage() {
               <label className="wide-field">
                 Rights
                 <input value={sponsorForm.rights_summary} onChange={(event) => setSponsorForm({ ...sponsorForm, rights_summary: event.target.value })} />
+              </label>
+              <label>
+                Milestone
+                <input value={sponsorForm.milestone_title} onChange={(event) => setSponsorForm({ ...sponsorForm, milestone_title: event.target.value })} />
+              </label>
+              <label>
+                Due
+                <input type="date" value={sponsorForm.milestone_due_on} onChange={(event) => setSponsorForm({ ...sponsorForm, milestone_due_on: event.target.value })} />
+              </label>
+              <label>
+                Touchpoint
+                <input value={sponsorForm.interaction_subject} onChange={(event) => setSponsorForm({ ...sponsorForm, interaction_subject: event.target.value })} />
+              </label>
+              <label>
+                Follow up
+                <input type="date" value={sponsorForm.follow_up_on} onChange={(event) => setSponsorForm({ ...sponsorForm, follow_up_on: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Touchpoint summary
+                <input value={sponsorForm.interaction_summary} onChange={(event) => setSponsorForm({ ...sponsorForm, interaction_summary: event.target.value })} />
               </label>
               <label>
                 Campaign
@@ -17440,6 +17553,41 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {sponsorStewardshipDashboard ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Sponsor stewardship · {sponsorStewardshipDashboard.milestone_count} milestones</strong>
+                    <span>
+                      {sponsorStewardshipDashboard.interaction_count} touchpoints · {sponsorStewardshipDashboard.follow_up_due_count} follow-ups due · {sponsorStewardshipDashboard.overdue_milestone_count} overdue
+                    </span>
+                    <span>{sponsorStewardshipDashboard.recommendations[0] ?? "Renewal forecasting ready"}</span>
+                  </div>
+                </article>
+              ) : null}
+              {sponsorStewardshipDashboard?.forecasts.slice(0, 3).map((forecast) => (
+                <article key={forecast.sponsor_id} className="task-card">
+                  <div>
+                    <strong>{forecast.sponsor_name} · renewal {forecast.renewal_score}</strong>
+                    <span>{forecast.renewal_signal} · {forecast.next_best_action}</span>
+                  </div>
+                </article>
+              ))}
+              {sponsorMilestones.slice(0, 2).map((milestone) => (
+                <article key={milestone.id} className="task-card">
+                  <div>
+                    <strong>{milestone.title}</strong>
+                    <span>{milestone.sponsor_name ?? "Sponsor"} · due {milestone.due_on ?? "open"} · {milestone.status}</span>
+                  </div>
+                </article>
+              ))}
+              {sponsorInteractions.slice(0, 2).map((interaction) => (
+                <article key={interaction.id} className="task-card">
+                  <div>
+                    <strong>{interaction.subject}</strong>
+                    <span>{interaction.sponsor_name ?? "Sponsor"} · {interaction.sentiment} · follow up {interaction.follow_up_on ?? "none"}</span>
+                  </div>
+                </article>
+              ))}
               {sponsorContentAssets.slice(0, 3).map((asset) => (
                 <article key={asset.id} className="task-card">
                   <div>

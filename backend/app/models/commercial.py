@@ -46,6 +46,40 @@ class SponsorshipAgreement(IdMixin, TimestampMixin, Base):
     )
 
 
+class SponsorshipDeliverableMilestone(IdMixin, TimestampMixin, Base):
+    __tablename__ = "sponsorship_deliverable_milestones"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    sponsor_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("sponsors.id"), index=True)
+    sponsorship_agreement_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("sponsorship_agreements.id"), index=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    deliverable_type: Mapped[str] = mapped_column(String(80), default="contract", nullable=False, index=True)
+    due_on: Mapped[date | None] = mapped_column(index=True)
+    completed_on: Mapped[date | None] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(String(40), default="planned", nullable=False, index=True)
+    owner_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    evidence_url: Mapped[str | None] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class SponsorInteractionLog(IdMixin, TimestampMixin, Base):
+    __tablename__ = "sponsor_interaction_logs"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    sponsor_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("sponsors.id"), index=True)
+    sponsorship_agreement_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("sponsorship_agreements.id"), index=True
+    )
+    contact_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    contact_email: Mapped[str | None] = mapped_column(String(320), index=True)
+    interaction_type: Mapped[str] = mapped_column(String(80), default="email", nullable=False, index=True)
+    subject: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    sentiment: Mapped[str] = mapped_column(String(40), default="neutral", nullable=False, index=True)
+    follow_up_on: Mapped[date | None] = mapped_column(index=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class SponsorActivationCampaign(IdMixin, TimestampMixin, Base):
     __tablename__ = "sponsor_activation_campaigns"
     __table_args__ = (UniqueConstraint("organization_id", "coupon_code"),)
