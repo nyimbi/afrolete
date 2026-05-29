@@ -276,3 +276,108 @@ def test_public_volunteer_recruitment_signup_creates_application(client, identit
     ).json()
     assert manager_list[0]["assigned_count"] == 0
     assert manager_list[0]["open_slots"] == 2
+
+
+def test_corporate_volunteer_group_application_review(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Corporate Volunteer League",
+            "slug": "corporate-volunteer-league",
+            "organization_type": "club",
+            "primary_sport": "basketball",
+        },
+    ).json()
+    opportunity = client.post(
+        "/api/v1/volunteers/opportunities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "title": "Tournament welcome crew",
+            "role_type": "event_staff",
+            "description": "Guide teams and families through the venue.",
+            "required_skills": ["wayfinding", "hospitality"],
+            "starts_at": "2026-09-12T08:00:00Z",
+            "ends_at": "2026-09-12T16:00:00Z",
+            "slots_required": 12,
+            "public_signup": True,
+        },
+    ).json()
+
+    group_response = client.post(
+        "/api/v1/volunteers/public/corporate-volunteer-league/group-signups",
+        json={
+            "opportunity_id": opportunity["id"],
+            "company_name": "AfroBank",
+            "coordinator_name": "Kamau Lead",
+            "coordinator_email": "kamau.lead@afrobank.example",
+            "coordinator_phone": "+254722000111",
+            "group_size": 18,
+            "requested_slots": 8,
+            "skills": ["hospitality", "first aid"],
+            "availability": ["saturday"],
+            "message": "Our employee volunteer group can cover registration and wayfinding.",
+            "source_url": "https://corporate-volunteer-league.afrolete.test",
+        },
+    )
+
+    assert group_response.status_code == 201
+    group = group_response.json()
+    assert group["status"] == "pending"
+    assert group["company_name"] == "AfroBank"
+    assert group["requested_slots"] == 8
+    assert group["approved_slots"] == 0
+
+    duplicate_response = client.post(
+        "/api/v1/volunteers/public/corporate-volunteer-league/group-signups",
+        json={
+            "opportunity_id": opportunity["id"],
+            "company_name": "AfroBank",
+            "coordinator_name": "Kamau Lead",
+            "coordinator_email": "kamau.lead@afrobank.example",
+            "group_size": 20,
+            "requested_slots": 10,
+            "skills": ["crowd control"],
+            "availability": ["saturday morning"],
+            "message": "We can bring two more people.",
+        },
+    )
+
+    assert duplicate_response.status_code == 201
+    assert duplicate_response.json()["id"] == group["id"]
+    assert duplicate_response.json()["requested_slots"] == 10
+    assert "crowd control" in duplicate_response.json()["skills"]
+
+    list_response = client.get(
+        f"/api/v1/volunteers/group-applications?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+
+    assert list_response.status_code == 200
+    groups = list_response.json()
+    assert groups[0]["company_name"] == "AfroBank"
+    assert groups[0]["opportunity_title"] == "Tournament welcome crew"
+
+    approval_response = client.patch(
+        f"/api/v1/volunteers/group-applications/{group['id']}",
+        headers=identity_headers,
+        json={
+            "status": "approved",
+            "approved_slots": 6,
+            "review_notes": "Approved for entrance gates and registration desk.",
+        },
+    )
+
+    assert approval_response.status_code == 200
+    approved = approval_response.json()
+    assert approved["status"] == "approved"
+    assert approved["approved_slots"] == 6
+    assert approved["reviewed_by_person_id"] is not None
+
+    summary = client.get(
+        f"/api/v1/volunteers/summary?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert summary["pending_group_applications"] == 0
+    assert summary["approved_group_slots"] == 6

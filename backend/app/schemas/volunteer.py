@@ -111,6 +111,48 @@ class PublicVolunteerSignupRead(BaseModel):
     message: str | None
 
 
+class PublicVolunteerGroupSignupCreate(BaseModel):
+    opportunity_id: UUID
+    company_name: str = Field(min_length=2, max_length=240)
+    coordinator_name: str = Field(min_length=2, max_length=240)
+    coordinator_email: str = Field(min_length=3, max_length=320)
+    coordinator_phone: str | None = Field(default=None, max_length=64)
+    group_size: int = Field(ge=2, le=500)
+    requested_slots: int = Field(ge=1, le=500)
+    skills: list[str] = Field(default_factory=list, max_length=40)
+    availability: list[str] = Field(default_factory=list, max_length=30)
+    message: str | None = Field(default=None, max_length=4000)
+    source_url: str | None = Field(default=None, max_length=500)
+
+
+class VolunteerGroupApplicationUpdate(BaseModel):
+    status: str | None = Field(default=None, max_length=40)
+    approved_slots: int | None = Field(default=None, ge=0, le=500)
+    review_notes: str | None = Field(default=None, max_length=4000)
+
+
+class VolunteerGroupApplicationRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    opportunity_id: UUID
+    opportunity_title: str
+    company_name: str
+    coordinator_name: str
+    coordinator_email: str
+    coordinator_phone: str | None
+    group_size: int
+    requested_slots: int
+    approved_slots: int
+    skills: list[str]
+    availability: list[str]
+    message: str | None
+    source_url: str | None
+    status: str
+    reviewed_by_person_id: UUID | None
+    reviewed_at: datetime | None
+    review_notes: str | None
+
+
 class VolunteerAssignmentCreate(BaseModel):
     organization_id: UUID
     opportunity_id: UUID
@@ -203,6 +245,8 @@ class VolunteerSummaryRead(BaseModel):
     open_slots: int
     assigned_shifts: int
     confirmed_shifts: int
+    pending_group_applications: int
+    approved_group_slots: int
     completed_hours: float
     training_compliance_percent: float
     coverage_percent: float

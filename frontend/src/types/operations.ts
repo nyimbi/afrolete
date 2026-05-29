@@ -472,6 +472,28 @@ export type PublicVolunteerSignupRead = {
   message: string | null;
 };
 
+export type VolunteerGroupApplicationRead = {
+  id: UUID;
+  organization_id: UUID;
+  opportunity_id: UUID;
+  opportunity_title: string;
+  company_name: string;
+  coordinator_name: string;
+  coordinator_email: string;
+  coordinator_phone: string | null;
+  group_size: number;
+  requested_slots: number;
+  approved_slots: number;
+  skills: string[];
+  availability: string[];
+  message: string | null;
+  source_url: string | null;
+  status: string;
+  reviewed_by_person_id: UUID | null;
+  reviewed_at: string | null;
+  review_notes: string | null;
+};
+
 export type VolunteerAssignmentRead = {
   id: UUID;
   organization_id: UUID;
@@ -524,6 +546,8 @@ export type VolunteerSummaryRead = {
   open_slots: number;
   assigned_shifts: number;
   confirmed_shifts: number;
+  pending_group_applications: number;
+  approved_group_slots: number;
   completed_hours: number;
   training_compliance_percent: number;
   coverage_percent: number;

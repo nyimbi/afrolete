@@ -7,6 +7,7 @@ import { apiRequest } from "@/lib/api";
 import type {
   AgentEthicalScorecardRead,
   OrganizationPublicSiteRead,
+  VolunteerGroupApplicationRead,
   PublicVolunteerSignupRead,
   VolunteerOpportunityRead,
   RegistrationInquiryRead
@@ -38,13 +39,28 @@ export default function PublicOrganizationSitePage() {
     emergency_contact: "",
     message: ""
   });
+  const [volunteerGroupSignup, setVolunteerGroupSignup] = useState({
+    opportunity_id: "",
+    company_name: "",
+    coordinator_name: "",
+    coordinator_email: "",
+    coordinator_phone: "",
+    group_size: 8,
+    requested_slots: 4,
+    availability: "",
+    skills: "",
+    message: ""
+  });
   const [submittedInquiry, setSubmittedInquiry] = useState<RegistrationInquiryRead | null>(null);
   const [submittedVolunteerSignup, setSubmittedVolunteerSignup] = useState<PublicVolunteerSignupRead | null>(null);
+  const [submittedVolunteerGroup, setSubmittedVolunteerGroup] = useState<VolunteerGroupApplicationRead | null>(null);
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
   const [volunteerFormError, setVolunteerFormError] = useState("");
+  const [volunteerGroupFormError, setVolunteerGroupFormError] = useState("");
   const [busy, setBusy] = useState(false);
   const [volunteerBusy, setVolunteerBusy] = useState(false);
+  const [volunteerGroupBusy, setVolunteerGroupBusy] = useState(false);
 
   useEffect(() => {
     if (!slug) {
@@ -211,6 +227,50 @@ export default function PublicOrganizationSitePage() {
       setVolunteerFormError(caught instanceof Error ? caught.message : "Volunteer signup could not be sent");
     } finally {
       setVolunteerBusy(false);
+    }
+  };
+
+  const submitVolunteerGroupSignup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setVolunteerGroupBusy(true);
+    setVolunteerGroupFormError("");
+    try {
+      const created = await apiRequest<VolunteerGroupApplicationRead>(
+        `/volunteers/public/${encodeURIComponent(site.slug)}/group-signups`,
+        {
+          method: "POST",
+          body: {
+            opportunity_id: volunteerGroupSignup.opportunity_id,
+            company_name: volunteerGroupSignup.company_name,
+            coordinator_name: volunteerGroupSignup.coordinator_name,
+            coordinator_email: volunteerGroupSignup.coordinator_email,
+            coordinator_phone: volunteerGroupSignup.coordinator_phone || null,
+            group_size: volunteerGroupSignup.group_size,
+            requested_slots: volunteerGroupSignup.requested_slots,
+            availability: splitCsv(volunteerGroupSignup.availability),
+            skills: splitCsv(volunteerGroupSignup.skills),
+            message: volunteerGroupSignup.message || null,
+            source_url: window.location.href
+          }
+        }
+      );
+      setSubmittedVolunteerGroup(created);
+      setVolunteerGroupSignup({
+        opportunity_id: "",
+        company_name: "",
+        coordinator_name: "",
+        coordinator_email: "",
+        coordinator_phone: "",
+        group_size: 8,
+        requested_slots: 4,
+        availability: "",
+        skills: "",
+        message: ""
+      });
+    } catch (caught) {
+      setVolunteerGroupFormError(caught instanceof Error ? caught.message : "Group volunteer signup could not be sent");
+    } finally {
+      setVolunteerGroupBusy(false);
     }
   };
 
@@ -439,6 +499,130 @@ export default function PublicOrganizationSitePage() {
               </label>
               {volunteerFormError ? <p className="form-error public-site-wide">{volunteerFormError}</p> : null}
               <button type="submit" disabled={volunteerBusy}>{volunteerBusy ? "Sending" : "Apply to volunteer"}</button>
+            </form>
+          )}
+          {submittedVolunteerGroup ? (
+            <div className="public-site-success">
+              <strong>Group application received</strong>
+              <span>
+                {submittedVolunteerGroup.company_name} · {submittedVolunteerGroup.requested_slots} requested ·{" "}
+                {submittedVolunteerGroup.status}
+              </span>
+            </div>
+          ) : (
+            <form onSubmit={submitVolunteerGroupSignup}>
+              <label className="public-site-wide">
+                Group role
+                <select
+                  value={volunteerGroupSignup.opportunity_id}
+                  onChange={(event) =>
+                    setVolunteerGroupSignup({ ...volunteerGroupSignup, opportunity_id: event.target.value })
+                  }
+                  required
+                >
+                  <option value="">Choose a volunteer role</option>
+                  {volunteerOpportunities.map((opportunity) => (
+                    <option value={opportunity.id} key={opportunity.id}>
+                      {opportunity.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Company
+                <input
+                  value={volunteerGroupSignup.company_name}
+                  onChange={(event) =>
+                    setVolunteerGroupSignup({ ...volunteerGroupSignup, company_name: event.target.value })
+                  }
+                  required
+                />
+              </label>
+              <label>
+                Coordinator
+                <input
+                  value={volunteerGroupSignup.coordinator_name}
+                  onChange={(event) =>
+                    setVolunteerGroupSignup({ ...volunteerGroupSignup, coordinator_name: event.target.value })
+                  }
+                  required
+                />
+              </label>
+              <label>
+                Coordinator email
+                <input
+                  type="email"
+                  value={volunteerGroupSignup.coordinator_email}
+                  onChange={(event) =>
+                    setVolunteerGroupSignup({ ...volunteerGroupSignup, coordinator_email: event.target.value })
+                  }
+                  required
+                />
+              </label>
+              <label>
+                Coordinator phone
+                <input
+                  value={volunteerGroupSignup.coordinator_phone}
+                  onChange={(event) =>
+                    setVolunteerGroupSignup({ ...volunteerGroupSignup, coordinator_phone: event.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Group size
+                <input
+                  type="number"
+                  min="2"
+                  value={volunteerGroupSignup.group_size}
+                  onChange={(event) =>
+                    setVolunteerGroupSignup({ ...volunteerGroupSignup, group_size: Number(event.target.value) })
+                  }
+                />
+              </label>
+              <label>
+                Slots requested
+                <input
+                  type="number"
+                  min="1"
+                  value={volunteerGroupSignup.requested_slots}
+                  onChange={(event) =>
+                    setVolunteerGroupSignup({ ...volunteerGroupSignup, requested_slots: Number(event.target.value) })
+                  }
+                />
+              </label>
+              <label>
+                Group skills
+                <input
+                  value={volunteerGroupSignup.skills}
+                  onChange={(event) => setVolunteerGroupSignup({ ...volunteerGroupSignup, skills: event.target.value })}
+                  placeholder="Wayfinding, hospitality"
+                />
+              </label>
+              <label>
+                Group availability
+                <input
+                  value={volunteerGroupSignup.availability}
+                  onChange={(event) =>
+                    setVolunteerGroupSignup({ ...volunteerGroupSignup, availability: event.target.value })
+                  }
+                  placeholder="Saturday morning"
+                />
+              </label>
+              <label className="public-site-wide">
+                Group message
+                <textarea
+                  value={volunteerGroupSignup.message}
+                  onChange={(event) =>
+                    setVolunteerGroupSignup({ ...volunteerGroupSignup, message: event.target.value })
+                  }
+                />
+              </label>
+              {volunteerGroupFormError ? (
+                <p className="form-error public-site-wide">{volunteerGroupFormError}</p>
+              ) : null}
+              <button type="submit" disabled={volunteerGroupBusy}>
+                {volunteerGroupBusy ? "Sending" : "Apply as a group"}
+              </button>
             </form>
           )}
         </section>

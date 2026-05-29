@@ -5,11 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.volunteer import (
+    PublicVolunteerGroupSignupCreate,
     PublicVolunteerSignupCreate,
     PublicVolunteerSignupRead,
     VolunteerAssignmentCreate,
     VolunteerAssignmentRead,
     VolunteerAssignmentUpdate,
+    VolunteerGroupApplicationRead,
+    VolunteerGroupApplicationUpdate,
     VolunteerOpportunityCreate,
     VolunteerOpportunityRead,
     VolunteerProfileCreate,
@@ -24,6 +27,7 @@ from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.volunteers import (
+    create_public_volunteer_group_application,
     create_public_volunteer_signup,
     create_volunteer_assignment,
     create_volunteer_opportunity,
@@ -31,12 +35,15 @@ from app.services.volunteers import (
     create_volunteer_recognition,
     create_volunteer_training_record,
     decode_list,
+    ensure_manage_volunteers,
     list_public_volunteer_opportunities,
+    list_volunteer_group_applications,
     list_volunteer_assignments,
     list_volunteer_opportunities,
     list_volunteer_profiles,
     list_volunteer_recognitions,
     list_volunteer_training_records,
+    update_volunteer_group_application,
     update_volunteer_assignment,
     volunteer_summary,
 )
@@ -161,6 +168,31 @@ def to_public_signup_read(item) -> PublicVolunteerSignupRead:
     )
 
 
+def to_group_application_read(item) -> VolunteerGroupApplicationRead:
+    application, opportunity = item
+    return VolunteerGroupApplicationRead(
+        id=application.id,
+        organization_id=application.organization_id,
+        opportunity_id=application.opportunity_id,
+        opportunity_title=opportunity.title,
+        company_name=application.company_name,
+        coordinator_name=application.coordinator_name,
+        coordinator_email=application.coordinator_email,
+        coordinator_phone=application.coordinator_phone,
+        group_size=application.group_size,
+        requested_slots=application.requested_slots,
+        approved_slots=application.approved_slots,
+        skills=decode_list(application.skills_json),
+        availability=decode_list(application.availability_json),
+        message=application.message,
+        source_url=application.source_url,
+        status=application.status,
+        reviewed_by_person_id=application.reviewed_by_person_id,
+        reviewed_at=application.reviewed_at,
+        review_notes=application.review_notes,
+    )
+
+
 @router.get("/public/{site}/opportunities", response_model=list[VolunteerOpportunityRead])
 async def list_public_volunteer_opportunities_route(
     site: str,
@@ -177,6 +209,19 @@ async def create_public_volunteer_signup_route(
     db: AsyncSession = Depends(get_db),
 ) -> PublicVolunteerSignupRead:
     return to_public_signup_read(await create_public_volunteer_signup(db, site, payload))
+
+
+@router.post(
+    "/public/{site}/group-signups",
+    response_model=VolunteerGroupApplicationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_public_volunteer_group_signup_route(
+    site: str,
+    payload: PublicVolunteerGroupSignupCreate,
+    db: AsyncSession = Depends(get_db),
+) -> VolunteerGroupApplicationRead:
+    return to_group_application_read(await create_public_volunteer_group_application(db, site, payload))
 
 
 @router.post("/profiles", response_model=VolunteerProfileRead, status_code=status.HTTP_201_CREATED)
@@ -254,6 +299,30 @@ async def list_volunteer_assignments_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[VolunteerAssignmentRead]:
     return [to_assignment_read(item) for item in await list_volunteer_assignments(db, organization_id)]
+
+
+@router.get("/group-applications", response_model=list[VolunteerGroupApplicationRead])
+async def list_volunteer_group_applications_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[VolunteerGroupApplicationRead]:
+    await ensure_manage_volunteers(authz, identity, organization_id)
+    return [to_group_application_read(item) for item in await list_volunteer_group_applications(db, organization_id)]
+
+
+@router.patch("/group-applications/{application_id}", response_model=VolunteerGroupApplicationRead)
+async def update_volunteer_group_application_route(
+    application_id: UUID,
+    payload: VolunteerGroupApplicationUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> VolunteerGroupApplicationRead:
+    application = await update_volunteer_group_application(db, identity, application_id, payload, authz)
+    rows = await list_volunteer_group_applications(db, application.organization_id)
+    return to_group_application_read(next(item for item in rows if item[0].id == application.id))
 
 
 @router.post("/training-records", response_model=VolunteerTrainingRecordRead, status_code=status.HTTP_201_CREATED)

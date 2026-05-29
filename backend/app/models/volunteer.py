@@ -71,6 +71,28 @@ class VolunteerAssignment(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class VolunteerGroupApplication(IdMixin, TimestampMixin, Base):
+    __tablename__ = "volunteer_group_applications"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), nullable=False, index=True)
+    opportunity_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("volunteer_opportunities.id"), nullable=False, index=True)
+    company_name: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    coordinator_name: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    coordinator_email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    coordinator_phone: Mapped[str | None] = mapped_column(String(64))
+    group_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    requested_slots: Mapped[int] = mapped_column(Integer, nullable=False)
+    approved_slots: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    skills_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    availability_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    message: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    reviewed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    review_notes: Mapped[str | None] = mapped_column(Text)
+
+
 class VolunteerTrainingRecord(IdMixin, TimestampMixin, Base):
     __tablename__ = "volunteer_training_records"
 

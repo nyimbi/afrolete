@@ -14,15 +14,18 @@ from app.models.enums import MemberSubjectType, MembershipRole
 from app.models.team import Team
 from app.models.volunteer import (
     VolunteerAssignment,
+    VolunteerGroupApplication,
     VolunteerOpportunity,
     VolunteerProfile,
     VolunteerRecognition,
     VolunteerTrainingRecord,
 )
 from app.schemas.volunteer import (
+    PublicVolunteerGroupSignupCreate,
     PublicVolunteerSignupCreate,
     VolunteerAssignmentCreate,
     VolunteerAssignmentUpdate,
+    VolunteerGroupApplicationUpdate,
     VolunteerOpportunityCreate,
     VolunteerProfileCreate,
     VolunteerRecognitionCreate,
@@ -450,6 +453,67 @@ async def create_public_volunteer_signup(
     return assignment, profile, person, opportunity
 
 
+async def create_public_volunteer_group_application(
+    db: AsyncSession,
+    site: str,
+    payload: PublicVolunteerGroupSignupCreate,
+) -> tuple[VolunteerGroupApplication, VolunteerOpportunity]:
+    organization = await get_public_volunteer_organization(db, site)
+    opportunity = await get_volunteer_opportunity(db, payload.opportunity_id)
+    if opportunity.organization_id != organization.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opportunity not found")
+    if (
+        not opportunity.public_signup
+        or opportunity.status != "open"
+        or opportunity.starts_at < now_for_datetime_column(opportunity.starts_at)
+    ):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Opportunity is not accepting group signups")
+    existing = await db.scalar(
+        select(VolunteerGroupApplication).where(
+            VolunteerGroupApplication.opportunity_id == opportunity.id,
+            VolunteerGroupApplication.coordinator_email == payload.coordinator_email.lower(),
+            VolunteerGroupApplication.company_name == payload.company_name,
+        )
+    )
+    if existing is not None:
+        existing.coordinator_name = payload.coordinator_name
+        existing.coordinator_phone = payload.coordinator_phone
+        existing.group_size = payload.group_size
+        existing.requested_slots = payload.requested_slots
+        existing.skills_json = merge_encoded_lists(existing.skills_json, payload.skills)
+        existing.availability_json = merge_encoded_lists(existing.availability_json, payload.availability)
+        existing.message = payload.message
+        existing.source_url = payload.source_url
+        if existing.status in {"declined", "cancelled"}:
+            existing.status = "pending"
+            existing.approved_slots = 0
+            existing.reviewed_by_person_id = None
+            existing.reviewed_at = None
+            existing.review_notes = None
+        await db.commit()
+        await db.refresh(existing)
+        return existing, opportunity
+    application = VolunteerGroupApplication(
+        organization_id=organization.id,
+        opportunity_id=opportunity.id,
+        company_name=payload.company_name,
+        coordinator_name=payload.coordinator_name,
+        coordinator_email=payload.coordinator_email.lower(),
+        coordinator_phone=payload.coordinator_phone,
+        group_size=payload.group_size,
+        requested_slots=payload.requested_slots,
+        approved_slots=0,
+        skills_json=encode_list(payload.skills),
+        availability_json=encode_list(payload.availability),
+        message=payload.message,
+        source_url=payload.source_url,
+    )
+    db.add(application)
+    await db.commit()
+    await db.refresh(application)
+    return application, opportunity
+
+
 async def create_volunteer_assignment(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -543,6 +607,51 @@ async def list_volunteer_assignments(db: AsyncSession, organization_id: UUID) ->
             )
         ).all()
     )
+
+
+async def list_volunteer_group_applications(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[tuple[VolunteerGroupApplication, VolunteerOpportunity]]:
+    return list(
+        (
+            await db.execute(
+                select(VolunteerGroupApplication, VolunteerOpportunity)
+                .join(VolunteerOpportunity, VolunteerOpportunity.id == VolunteerGroupApplication.opportunity_id)
+                .where(VolunteerGroupApplication.organization_id == organization_id)
+                .order_by(VolunteerGroupApplication.created_at.desc())
+            )
+        ).all()
+    )
+
+
+async def update_volunteer_group_application(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    application_id: UUID,
+    payload: VolunteerGroupApplicationUpdate,
+    authz: AuthorizationService,
+) -> VolunteerGroupApplication:
+    application = await db.get(VolunteerGroupApplication, application_id)
+    if application is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group application not found")
+    await ensure_manage_volunteers(authz, identity, application.organization_id)
+    if payload.approved_slots is not None and payload.approved_slots > application.requested_slots:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Approved slots exceed request")
+    if payload.status is not None:
+        application.status = payload.status
+    if payload.approved_slots is not None:
+        application.approved_slots = payload.approved_slots
+        if payload.approved_slots > 0 and application.status == "pending":
+            application.status = "approved"
+    if payload.review_notes is not None:
+        application.review_notes = payload.review_notes
+    if payload.status is not None or payload.approved_slots is not None or payload.review_notes is not None:
+        application.reviewed_by_person_id = identity.person_id
+        application.reviewed_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(application)
+    return application
 
 
 async def create_volunteer_training_record(
@@ -642,6 +751,13 @@ async def volunteer_summary(db: AsyncSession, organization_id: UUID) -> dict[str
             )
         ).all()
     )
+    group_applications = list(
+        (
+            await db.scalars(
+                select(VolunteerGroupApplication).where(VolunteerGroupApplication.organization_id == organization_id)
+            )
+        ).all()
+    )
     training = await list_volunteer_training_records(db, organization_id)
     total_slots = sum(opportunity.slots_required for opportunity, _ in opportunities if opportunity.status == "open")
     assigned_slots = sum(count for opportunity, count in opportunities if opportunity.status == "open")
@@ -660,6 +776,10 @@ async def volunteer_summary(db: AsyncSession, organization_id: UUID) -> dict[str
         "open_slots": max(total_slots - assigned_slots, 0),
         "assigned_shifts": sum(1 for assignment in assignments if assignment.status in {"assigned", "confirmed", "checked_in"}),
         "confirmed_shifts": sum(1 for assignment in assignments if assignment.status in {"confirmed", "checked_in"}),
+        "pending_group_applications": sum(1 for application in group_applications if application.status == "pending"),
+        "approved_group_slots": sum(
+            application.approved_slots for application in group_applications if application.status == "approved"
+        ),
         "completed_hours": round(sum(assignment.hours_logged for assignment in assignments), 2),
         "training_compliance_percent": round((len(completed_required) / len(required_training) * 100) if required_training else 100, 2),
         "coverage_percent": round((assigned_slots / total_slots * 100) if total_slots else 100, 2),

@@ -355,6 +355,7 @@ import type {
   UsageRecordRead,
   UsageUnit,
   VolunteerAssignmentRead,
+  VolunteerGroupApplicationRead,
   VolunteerOpportunityRead,
   VolunteerProfileRead,
   VolunteerRecognitionRead,
@@ -1625,6 +1626,7 @@ export default function HomePage() {
   const [volunteerProfiles, setVolunteerProfiles] = useState<VolunteerProfileRead[]>([]);
   const [volunteerOpportunities, setVolunteerOpportunities] = useState<VolunteerOpportunityRead[]>([]);
   const [volunteerAssignments, setVolunteerAssignments] = useState<VolunteerAssignmentRead[]>([]);
+  const [volunteerGroupApplications, setVolunteerGroupApplications] = useState<VolunteerGroupApplicationRead[]>([]);
   const [volunteerTrainingRecords, setVolunteerTrainingRecords] = useState<VolunteerTrainingRecordRead[]>([]);
   const [volunteerRecognitions, setVolunteerRecognitions] = useState<VolunteerRecognitionRead[]>([]);
   const [volunteerSummary, setVolunteerSummary] = useState<VolunteerSummaryRead | null>(null);
@@ -3138,6 +3140,7 @@ export default function HomePage() {
       profiles,
       opportunities,
       assignments,
+      groupApplications,
       trainingRecords,
       recognitions,
       summary
@@ -3145,6 +3148,7 @@ export default function HomePage() {
       apiRequest<VolunteerProfileRead[]>(`/volunteers/profiles?organization_id=${organizationId}`),
       apiRequest<VolunteerOpportunityRead[]>(`/volunteers/opportunities?organization_id=${organizationId}${teamQuery}`),
       apiRequest<VolunteerAssignmentRead[]>(`/volunteers/assignments?organization_id=${organizationId}`),
+      apiRequest<VolunteerGroupApplicationRead[]>(`/volunteers/group-applications?organization_id=${organizationId}`),
       apiRequest<VolunteerTrainingRecordRead[]>(`/volunteers/training-records?organization_id=${organizationId}`),
       apiRequest<VolunteerRecognitionRead[]>(`/volunteers/recognitions?organization_id=${organizationId}`),
       apiRequest<VolunteerSummaryRead>(`/volunteers/summary?organization_id=${organizationId}`)
@@ -3152,6 +3156,7 @@ export default function HomePage() {
     setVolunteerProfiles(profiles);
     setVolunteerOpportunities(opportunities);
     setVolunteerAssignments(assignments);
+    setVolunteerGroupApplications(groupApplications);
     setVolunteerTrainingRecords(trainingRecords);
     setVolunteerRecognitions(recognitions);
     setVolunteerSummary(summary);
@@ -3686,6 +3691,7 @@ export default function HomePage() {
       setVolunteerProfiles([]);
       setVolunteerOpportunities([]);
       setVolunteerAssignments([]);
+      setVolunteerGroupApplications([]);
       setVolunteerTrainingRecords([]);
       setVolunteerRecognitions([]);
       setVolunteerSummary(null);
@@ -9821,6 +9827,32 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== assignment.id)
         ]);
         addLog(`${assignment.person_name} logged ${assignment.hours_logged} volunteer hours`, "good");
+        if (selectedOrganizationId) {
+          void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+        }
+      }
+    );
+  };
+
+  const approveVolunteerGroupApplication = (application: VolunteerGroupApplicationRead) => {
+    runAction(
+      `approve-volunteer-group-${application.id}`,
+      () =>
+        apiRequest<VolunteerGroupApplicationRead>(`/volunteers/group-applications/${application.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: "approved",
+            approved_slots: application.approved_slots || application.requested_slots,
+            review_notes: "Approved from the operations console."
+          }
+        }),
+      (updated) => {
+        setVolunteerGroupApplications((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.company_name} approved for ${updated.approved_slots} volunteer slot(s)`, "good");
         if (selectedOrganizationId) {
           void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
         }
@@ -18635,6 +18667,12 @@ export default function HomePage() {
                   ? `${volunteerSummary.training_compliance_percent}% training compliance · ${volunteerSummary.completed_hours} hours logged`
                   : "Create volunteer profiles to staff matches, travel, events, and operations."}
               </small>
+              {volunteerSummary ? (
+                <small>
+                  {volunteerSummary.pending_group_applications} group applications ·{" "}
+                  {volunteerSummary.approved_group_slots} corporate slots approved
+                </small>
+              ) : null}
             </div>
             <div className="form-grid">
               <label>
@@ -18808,6 +18846,27 @@ export default function HomePage() {
                     <span>{assignment.opportunity_title} · {Math.round(assignment.match_score * 100)}% match</span>
                     <small>{assignment.hours_logged} hours logged · {assignment.notes ?? "No notes"}</small>
                   </div>
+                </article>
+              ))}
+              {volunteerGroupApplications.slice(0, 4).map((application) => (
+                <article key={application.id} className="task-card">
+                  <div>
+                    <strong>{application.company_name} · {application.status}</strong>
+                    <span>
+                      {application.requested_slots} requested · {application.approved_slots} approved ·{" "}
+                      {application.opportunity_title}
+                    </span>
+                    <small>{application.coordinator_name} · {application.skills.join(", ") || "No skills shared"}</small>
+                  </div>
+                  {application.status === "pending" ? (
+                    <button
+                      type="button"
+                      onClick={() => approveVolunteerGroupApplication(application)}
+                      disabled={busyAction !== null}
+                    >
+                      Approve
+                    </button>
+                  ) : null}
                 </article>
               ))}
             </div>
