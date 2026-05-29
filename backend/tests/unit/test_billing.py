@@ -1,3 +1,13 @@
+import hmac
+import json
+from hashlib import sha256
+
+import httpx
+
+from app.core.config import Settings
+from app.services import billing as billing_service
+
+
 def create_billing_context(client, identity_headers):
     organization = client.post(
         "/api/v1/organizations",
@@ -336,6 +346,173 @@ def test_saas_invoice_hosted_checkout_settles_invoice(client, identity_headers) 
     paid = next(item for item in invoices if item["id"] == invoice["id"])
     assert paid["status"] == "paid"
     assert paid["amount_paid"] == "249.00"
+
+
+def test_plan_change_applies_proration_and_updates_subscription(client, identity_headers) -> None:
+    organization, plan, subscription = create_billing_context(client, identity_headers)
+    upgraded_plan = client.post(
+        "/api/v1/billing/plans",
+        headers=identity_headers,
+        json={
+            "code": "automation-elite",
+            "name": "Automation Elite",
+            "base_price": "499.00",
+            "currency": "USD",
+            "billing_cycle": "annual",
+            "included_athletes": 500,
+            "included_teams": 40,
+            "included_agent_tasks": 5000,
+            "included_storage_gb": 1000,
+            "per_athlete_price": "0.00",
+            "per_agent_task_price": "0.00",
+            "features": "Advanced AI agents, enterprise billing, and reporting.",
+        },
+    ).json()
+
+    quote_response = client.get(
+        (
+            f"/api/v1/billing/subscriptions/{subscription['id']}/proration"
+            f"?organization_id={organization['id']}&new_price=399.00&effective_on=2026-06-16"
+        ),
+        headers=identity_headers,
+    )
+    assert quote_response.status_code == 200
+    quote = quote_response.json()
+    assert quote["current_price"] == "249.00"
+    assert quote["new_price"] == "399.00"
+    assert quote["remaining_days"] == 15
+    assert quote["total_days"] == 30
+    assert quote["unused_credit"] == "124.50"
+    assert quote["new_charge"] == "199.50"
+    assert quote["net_amount"] == "75.00"
+    assert "charge" in quote["recommendation"].lower()
+
+    apply_response = client.post(
+        f"/api/v1/billing/subscriptions/{subscription['id']}/plan-change",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "new_billing_plan_id": upgraded_plan["id"],
+            "new_price": "399.00",
+            "effective_on": "2026-06-16",
+            "note": "Customer upgraded for academy expansion.",
+        },
+    )
+    assert apply_response.status_code == 200
+    applied = apply_response.json()
+    assert applied["previous_billing_plan_id"] == plan["id"]
+    assert applied["new_billing_plan_id"] == upgraded_plan["id"]
+    assert applied["previous_price"] == "249.00"
+    assert applied["applied_price"] == "399.00"
+    assert applied["net_amount"] == "75.00"
+    assert applied["subscription_status"] == "active"
+
+    subscriptions = client.get(
+        f"/api/v1/billing/subscriptions?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    changed = next(item for item in subscriptions if item["id"] == subscription["id"])
+    assert changed["billing_plan_id"] == upgraded_plan["id"]
+    assert changed["billing_cycle"] == "annual"
+    assert changed["negotiated_price"] == "399.00"
+    assert "plan change" in changed["notes"]
+    assert "Customer upgraded for academy expansion." in changed["notes"]
+
+
+def test_tax_filing_delivery_posts_aggregated_package(client, identity_headers, monkeypatch) -> None:
+    organization, _, subscription = create_billing_context(client, identity_headers)
+    invoice = client.post(
+        "/api/v1/billing/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "subscription_id": subscription["id"],
+            "invoice_number": "TAX-2026-001",
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-30",
+            "tax_amount": "40.00",
+            "discount_amount": "10.00",
+            "due_on": "2026-06-30",
+        },
+    ).json()
+    payment_response = client.post(
+        "/api/v1/billing/payments",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "invoice_id": invoice["id"],
+            "amount": "100.00",
+            "provider": "manual",
+            "external_payment_id": "tax-filing-partial-payment",
+        },
+    )
+    assert payment_response.status_code == 201
+
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, *, timeout: float) -> None:
+            captured["timeout"] = timeout
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def post(self, url: str, *, json: dict[str, object], headers: dict[str, str]) -> httpx.Response:
+            captured["url"] = url
+            captured["payload"] = json
+            captured["headers"] = headers
+            return httpx.Response(status_code=202, text="accepted")
+
+    monkeypatch.setattr(
+        billing_service,
+        "get_settings",
+        lambda: Settings(
+            billing_tax_filing_delivery_mode="webhook",
+            billing_tax_filing_webhook_url="https://tax.example/filings",
+            billing_tax_filing_webhook_key="tax-secret",
+            billing_tax_filing_timeout_seconds=9.0,
+        ),
+    )
+    monkeypatch.setattr(billing_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        (
+            f"/api/v1/billing/tax-filing/deliver?organization_id={organization['id']}"
+            "&period_start=2026-06-01&period_end=2026-06-30&jurisdiction=ke"
+        ),
+        headers=identity_headers,
+    )
+
+    assert response.status_code == 200
+    filing = response.json()
+    assert filing["jurisdiction"] == "KE"
+    assert filing["invoice_count"] == 1
+    assert filing["taxable_subtotal"] == "249.00"
+    assert filing["tax_amount"] == "40.00"
+    assert filing["gross_total"] == "279.00"
+    assert filing["outstanding_total"] == "179.00"
+    assert filing["delivery_mode"] == "webhook"
+    assert filing["delivery_attempted"] is True
+    assert filing["delivered"] is True
+    assert filing["provider_status_code"] == 202
+    assert filing["failure_reason"] is None
+    assert captured["timeout"] == 9.0
+    assert captured["url"] == "https://tax.example/filings"
+    assert captured["payload"]["event_type"] == "billing.tax_filing"
+    assert captured["payload"]["filing_reference"] == filing["filing_reference"]
+    headers = captured["headers"]
+    timestamp = headers["X-Afrolete-Billing-Tax-Timestamp"]
+    raw_body = json.dumps(captured["payload"], sort_keys=True, default=str).encode()
+    expected_signature = hmac.new(
+        b"tax-secret",
+        timestamp.encode() + b"." + raw_body,
+        sha256,
+    ).hexdigest()
+    assert headers["X-Afrolete-Billing-Tax-Filing-Key"] == "tax-secret"
+    assert headers["X-Afrolete-Billing-Tax-Signature"] == f"sha256={expected_signature}"
 
 
 def test_subscription_lifecycle_cancel_pause_resume_and_undo(client, identity_headers) -> None:

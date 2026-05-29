@@ -1,4 +1,5 @@
 import hmac
+import json
 import time
 from calendar import monthrange
 from datetime import UTC, date, datetime, timedelta
@@ -669,12 +670,15 @@ async def deliver_tax_filing(
         "filing_reference": result["filing_reference"],
         "filed_at": filed_at.isoformat(),
     }
+    raw_body = json.dumps(payload, sort_keys=True, default=str).encode()
+    timestamp = str(int(time.time()))
+    headers = await billing_tax_filing_headers(selected_settings, raw_body, timestamp)
     try:
         async with httpx.AsyncClient(timeout=selected_settings.billing_tax_filing_timeout_seconds) as client:
             response = await client.post(
                 selected_settings.billing_tax_filing_webhook_url,
                 json=payload,
-                headers=await billing_tax_filing_headers(selected_settings),
+                headers=headers,
             )
         result["provider_status_code"] = response.status_code
         result["delivered"] = 200 <= response.status_code < 300
@@ -1521,8 +1525,15 @@ async def billing_dunning_headers(settings: Settings) -> dict[str, str]:
     return headers
 
 
-async def billing_tax_filing_headers(settings: Settings) -> dict[str, str]:
-    headers = {"Content-Type": "application/json"}
+async def billing_tax_filing_headers(
+    settings: Settings,
+    raw_body: bytes,
+    timestamp: str,
+) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "X-Afrolete-Billing-Tax-Timestamp": timestamp,
+    }
     key = await resolve_billing_secret(
         settings,
         env_value=settings.billing_tax_filing_webhook_key,
@@ -1532,6 +1543,11 @@ async def billing_tax_filing_headers(settings: Settings) -> dict[str, str]:
     )
     if key:
         headers["X-Afrolete-Billing-Tax-Filing-Key"] = key
+        headers["X-Afrolete-Billing-Tax-Signature"] = "sha256=" + hmac.new(
+            key.encode(),
+            timestamp.encode() + b"." + raw_body,
+            sha256,
+        ).hexdigest()
     return headers
 
 

@@ -184,8 +184,8 @@ Major capability areas include:
   Redis-backed quotas, and integration catalogs.
 - SaaS billing and subscriptions: plans, tenant subscriptions, lifecycle
   actions, entitlements, enforcement, metering, recurring invoices, dunning,
-  late fees, payment retries, checkout links, tax, provider webhooks, and
-  billing summaries.
+  late fees, payment retries, checkout links, signed tax filing packages,
+  provider webhooks, and billing summaries.
 - Offline/PWA operation: installable frontend shell, service worker caching,
   encrypted travel-manifest cache, signed offline artifacts, offline mutation
   outbox, and replay controls.
