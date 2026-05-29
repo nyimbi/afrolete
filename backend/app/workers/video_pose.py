@@ -119,6 +119,17 @@ async def run_performance_video_pose_endpoint_worker(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, object]:
     selected_settings = settings or get_settings()
+    if selected_settings.performance_pose_worker_provider == "disabled":
+        return {
+            "organization_id": str(organization_id) if organization_id else None,
+            "eligible_count": 0,
+            "processed_count": 0,
+            "failed_count": 0,
+            "skipped_count": 0,
+            "ingest_mode": "api_endpoint",
+            "provider_status": "disabled",
+            "results": [],
+        }
     statement = select(PerformanceVideoAsset).where(
         PerformanceVideoAsset.status.in_(["uploaded", "pose_failed", "pose_no_subject"])
     )
@@ -213,6 +224,7 @@ async def run_performance_video_pose_endpoint_worker(
         "failed_count": failed_count,
         "skipped_count": skipped_count,
         "ingest_mode": "api_endpoint",
+        "provider_status": selected_settings.performance_pose_worker_provider,
         "results": results,
     }
 

@@ -302,7 +302,10 @@ either `AFROLETE_PERFORMANCE_POSE_WORKER_BEARER_TOKEN` for Keycloak deployments
 or the local demo identity headers
 `AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_SUB`,
 `AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_EMAIL`, and
-`AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_NAME`.
+`AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_NAME`. Docker demo deployments
+mount the local performance-video directory into both the API and due-worker
+containers, so uploaded clips are available to the worker before the extracted
+keypoints are posted back to the API.
 
 Object storage can run in local mode for demos or S3-compatible mode for MinIO.
 The same storage adapter supports retention policy enforcement: local mode

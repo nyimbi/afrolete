@@ -30,8 +30,11 @@ services:
       AFROLETE_PERFORMANCE_FORECAST_MODE: deterministic
       AFROLETE_COMMUNICATION_DELIVERY_MODE: record_only
       AFROLETE_AGENT_EXECUTION_MODE: deterministic
+      AFROLETE_PERFORMANCE_VIDEO_FILE_DIR: /app/data/performance-videos
     ports:
       - "8000:8000"
+    volumes:
+      - afrolete-performance-videos:/app/data/performance-videos
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,6 +80,9 @@ services:
       AFROLETE_PERFORMANCE_FORECAST_MODE: deterministic
       AFROLETE_COMMUNICATION_DELIVERY_MODE: record_only
       AFROLETE_AGENT_EXECUTION_MODE: deterministic
+      AFROLETE_PERFORMANCE_VIDEO_FILE_DIR: /app/data/performance-videos
+    volumes:
+      - afrolete-performance-videos:/app/data/performance-videos
     depends_on:
       backend:
         condition: service_healthy
@@ -89,3 +95,4 @@ services:
 
 volumes:
   afrolete-postgres:
+  afrolete-performance-videos:

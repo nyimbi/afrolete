@@ -338,6 +338,70 @@ async def test_video_pose_worker_posts_extracted_keypoints_to_pose_samples_endpo
     assert json.loads(video.pose_analysis_json)["endpoint_sample_count"] == 1
 
 
+async def test_video_pose_endpoint_worker_skips_when_pose_provider_disabled(
+    db_session,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    organization = Organization(
+        name="Disabled Pose Worker Club",
+        slug="disabled-pose-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="athletics",
+    )
+    person = Person(display_name="Disabled Worker Athlete", primary_email="disabled-worker@example.com")
+    db_session.add_all([organization, person])
+    await db_session.flush()
+    athlete = AthleteProfile(organization_id=organization.id, person_id=person.id)
+    db_session.add(athlete)
+    await db_session.flush()
+    video = PerformanceVideoAsset(
+        organization_id=organization.id,
+        athlete_profile_id=athlete.id,
+        uploaded_by_person_id=person.id,
+        sport="athletics",
+        filename="disabled-worker.mp4",
+        content_type="video/mp4",
+        size_bytes=12,
+        checksum=hashlib.sha256(b"not-read").hexdigest(),
+        storage_url="local://performance-videos/disabled-worker.mp4",
+        storage_path=str(tmp_path / "disabled-worker.mp4"),
+        video_uri=f"performance-video://{organization.id}/{athlete.id}/disabled-worker",
+        status="uploaded",
+    )
+    db_session.add(video)
+    await db_session.commit()
+
+    def fail_extract(*_: object, **__: object) -> dict[str, object]:
+        raise AssertionError("disabled pose provider should not decode video frames")
+
+    monkeypatch.setattr(video_pose_worker, "extract_pose_samples_from_video_content", fail_extract)
+
+    result = await run_performance_video_pose_endpoint_worker(
+        db_session,
+        api_base_url="http://api.test",
+        organization_id=organization.id,
+        settings=Settings(
+            performance_pose_worker_provider="disabled",
+            performance_video_file_dir=str(tmp_path / "videos"),
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(status_code=500)),
+    )
+
+    assert result == {
+        "organization_id": str(organization.id),
+        "eligible_count": 0,
+        "processed_count": 0,
+        "failed_count": 0,
+        "skipped_count": 0,
+        "ingest_mode": "api_endpoint",
+        "provider_status": "disabled",
+        "results": [],
+    }
+    await db_session.refresh(video)
+    assert video.status == "uploaded"
+
+
 async def test_due_worker_sends_dunning_for_overdue_saas_invoice(db_session) -> None:
     organization = Organization(
         name="Dunning Worker Club",
