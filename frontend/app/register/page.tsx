@@ -21,7 +21,8 @@ import type {
   OrganizationType,
   RegistrationPacketRead,
   RegistrationInquiryAccountReadinessRead,
-  RegistrationInquiryRead
+  RegistrationInquiryRead,
+  RegistrationPaymentSessionRead
 } from "@/types/operations";
 
 type RegistrationMode = "organization" | "player";
@@ -130,6 +131,7 @@ export default function RegistrationPage() {
   const [accountReadiness, setAccountReadiness] = useState<RegistrationInquiryAccountReadinessRead | null>(null);
   const [packetForm, setPacketForm] = useState(defaultPacketForm);
   const [registrationPacket, setRegistrationPacket] = useState<RegistrationPacketRead | null>(null);
+  const [paymentSession, setPaymentSession] = useState<RegistrationPaymentSessionRead | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
@@ -336,6 +338,7 @@ export default function RegistrationPage() {
     setSubmittedInquiry(null);
     setAccountReadiness(null);
     setRegistrationPacket(null);
+    setPaymentSession(null);
     try {
       const site = await apiRequest<OrganizationPublicSiteRead>(`/organizations/public/${encodeURIComponent(siteIdentifier)}`);
       setSelectedSite(site);
@@ -463,6 +466,7 @@ export default function RegistrationPage() {
         }
       );
       setSubmittedInquiry(inquiry);
+      setPaymentSession(null);
       await loadAccountReadiness(selectedSite.slug, inquiry);
       setPacketForm((current) => ({
         ...current,
@@ -528,6 +532,7 @@ export default function RegistrationPage() {
       );
       setRegistrationPacket(packet);
       setSubmittedInquiry(packet.inquiry);
+      setPaymentSession(null);
       await loadAccountReadiness(selectedSite.slug, packet.inquiry);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Registration packet failed");
@@ -561,8 +566,39 @@ export default function RegistrationPage() {
       );
       setRegistrationPacket(packet);
       setSubmittedInquiry(packet.inquiry);
+      setPaymentSession(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Document upload failed");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const createRegistrationPaymentSession = async () => {
+    if (!selectedSite || !submittedInquiry) {
+      setError("Send the registration inquiry before creating a payment link.");
+      return;
+    }
+    setBusy("payment");
+    setError("");
+    try {
+      const session = await apiRequest<RegistrationPaymentSessionRead>(
+        `/organizations/public/${encodeURIComponent(selectedSite.slug)}/registration-inquiries/${submittedInquiry.id}/payment-session`,
+        {
+          method: "POST",
+          body: {
+            email: submittedInquiry.email,
+            checkout_base_url: `${window.location.origin}/pay/sessions`,
+            provider: "manual_gateway",
+            payment_method: packetForm.payment_method || "mobile_money"
+          }
+        }
+      );
+      setPaymentSession(session);
+      setSubmittedInquiry(session.inquiry);
+      window.open(session.checkout_url, "_blank", "noopener,noreferrer");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Registration payment link could not be created");
     } finally {
       setBusy("");
     }
@@ -1072,9 +1108,29 @@ export default function RegistrationPage() {
                       Guardian consent acknowledged
                     </label>
                   </div>
-                  <button type="button" onClick={submitRegistrationPacket} disabled={busy !== ""}>
-                    {busy === "packet" ? "Saving packet" : "Submit packet"}
-                  </button>
+                  <div className="public-registration-actions">
+                    <button type="button" onClick={submitRegistrationPacket} disabled={busy !== ""}>
+                      {busy === "packet" ? "Saving packet" : "Submit packet"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={createRegistrationPaymentSession}
+                      disabled={busy !== "" || !packetForm.payment_amount}
+                    >
+                      {busy === "payment" ? "Preparing link" : "Open payment link"}
+                    </button>
+                  </div>
+                  {paymentSession ? (
+                    <div className="register-packet-result">
+                      <strong>Payment link ready</strong>
+                      <a href={paymentSession.checkout_url}>{paymentSession.hosted_checkout.registration_reference}</a>
+                      <small>
+                        {paymentSession.hosted_checkout.currency} {paymentSession.hosted_checkout.open_amount} ·{" "}
+                        {paymentSession.hosted_checkout.session_status}
+                      </small>
+                    </div>
+                  ) : null}
                   {registrationPacket ? (
                     <div className="register-packet-result">
                       <strong>{registrationPacket.packet_complete ? "Ready for verification" : "Packet needs attention"}</strong>
