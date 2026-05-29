@@ -19,6 +19,7 @@ from app.models.communication import CommunicationMessage
 from app.models.commercial import FundraisingCampaign, Sponsor, SponsorshipAgreement, TicketProduct
 from app.models.enums import (
     AgentKind,
+    AgentTaskStatus,
     CommercialStatus,
     CommunicationChannel,
     CommunicationMessageType,
@@ -1466,6 +1467,27 @@ async def queue_registration_inquiry_agent_review(
         )
 
     packet = registration_packet_summary(inquiry)
+    input_ref = (
+        f"registration-inquiry:{inquiry.id};"
+        f"status:{inquiry.status};"
+        f"verification:{inquiry.verification_status};"
+        f"payment:{inquiry.payment_status};"
+        f"packet_complete:{packet['packet_complete']}"
+    )
+    existing_task = await db.scalar(
+        select(AgentTask)
+        .where(
+            AgentTask.organization_id == organization_id,
+            AgentTask.task_type == "registration_inquiry_review",
+            AgentTask.input_ref.like(f"registration-inquiry:{inquiry.id};%"),
+            AgentTask.status.not_in([AgentTaskStatus.FAILED, AgentTaskStatus.CANCELLED]),
+        )
+        .order_by(AgentTask.created_at.desc())
+        .limit(1)
+    )
+    if existing_task is not None:
+        return existing_task
+
     task = await queue_agent_task(
         db,
         identity,
@@ -1474,13 +1496,7 @@ async def queue_registration_inquiry_agent_review(
             organization_id=organization_id,
             task_type="registration_inquiry_review",
             title=f"Review registration packet for {inquiry.athlete_name}",
-            input_ref=(
-                f"registration-inquiry:{inquiry.id};"
-                f"status:{inquiry.status};"
-                f"verification:{inquiry.verification_status};"
-                f"payment:{inquiry.payment_status};"
-                f"packet_complete:{packet['packet_complete']}"
-            ),
+            input_ref=input_ref,
         ),
         authz,
     )

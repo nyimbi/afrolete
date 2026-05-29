@@ -414,11 +414,19 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert agent_review["input_ref"].startswith(f"registration-inquiry:{inquiry['id']};")
     assert "packet_complete:False" in agent_review["input_ref"]
 
+    duplicate_agent_review_response = client.post(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/{inquiry['id']}/agent-review",
+        headers=identity_headers,
+    )
+    assert duplicate_agent_review_response.status_code == 201
+    assert duplicate_agent_review_response.json()["id"] == agent_review["id"]
+
     agent_tasks_response = client.get(
         f"/api/v1/agents/tasks?organization_id={onboarding['organization']['id']}",
         headers=identity_headers,
     )
     assert agent_tasks_response.status_code == 200
+    assert len(agent_tasks_response.json()) == 1
     assert agent_tasks_response.json()[0]["id"] == agent_review["id"]
 
     payment_session_response = client.post(

@@ -774,8 +774,12 @@ export default function AdmissionsPage() {
                   <button type="button" onClick={() => sendFollowUp(inquiry)} disabled={busy !== "" || inquiry.status === "converted"}>
                     Follow up
                   </button>
-                  <button type="button" onClick={() => queueAiReview(inquiry)} disabled={busy !== "" || inquiry.status === "converted"}>
-                    {busy === `ai-review-${inquiry.id}` ? "Queueing AI" : "AI review"}
+                  <button
+                    type="button"
+                    onClick={() => queueAiReview(inquiry)}
+                    disabled={busy !== "" || inquiry.status === "converted" || aiTask !== null}
+                  >
+                    {aiTask ? "AI queued" : busy === `ai-review-${inquiry.id}` ? "Queueing AI" : "AI review"}
                   </button>
                   <button
                     type="button"
