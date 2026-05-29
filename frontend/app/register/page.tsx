@@ -19,6 +19,7 @@ import type {
   OrganizationPublicSiteRead,
   SportFormat,
   OrganizationType,
+  RegistrationReadinessRead,
   RegistrationPacketRead,
   RegistrationInquiryAccountReadinessRead,
   RegistrationInquiryRead,
@@ -139,12 +140,15 @@ export default function RegistrationPage() {
   const [packetForm, setPacketForm] = useState(defaultPacketForm);
   const [registrationPacket, setRegistrationPacket] = useState<RegistrationPacketRead | null>(null);
   const [paymentSession, setPaymentSession] = useState<RegistrationPaymentSessionRead | null>(null);
+  const [registrationReadiness, setRegistrationReadiness] = useState<RegistrationReadinessRead | null>(null);
+  const [readinessError, setReadinessError] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
   const requestIdentity = useMemo(() => (keycloakEnabled ? undefined : identity), [identity, keycloakEnabled]);
   const signedInLabel = authSession?.email ?? authSession?.name ?? identity.email;
   const ownerAccountReady = !keycloakEnabled || authSession !== null;
+  const readinessAvailable = !keycloakEnabled || authSession !== null;
   const organizationProfileReady = organizationForm.name.trim() !== "";
   const organizationAddressBlocked = handleAvailability?.subdomain_available === false;
   const organizationAddressReady = organizationForm.subdomain.trim() !== "" && !organizationAddressBlocked;
@@ -319,6 +323,15 @@ export default function RegistrationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!readinessAvailable) {
+      setRegistrationReadiness(null);
+      return;
+    }
+    void loadRegistrationReadiness();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readinessAvailable, authSession?.accessToken, identity.email, identity.sub]);
+
   const beginKeycloakLogin = () => {
     setBusy("keycloak");
     void startKeycloakLogin({ returnTo: currentRegistrationReturnTo(mode, selectedSite, submittedInquiry) }).catch((caught) => {
@@ -370,7 +383,24 @@ export default function RegistrationPage() {
   const signOut = () => {
     clearStoredAuthSession();
     setAuthSession(null);
+    setRegistrationReadiness(null);
   };
+
+  async function loadRegistrationReadiness() {
+    if (!readinessAvailable) {
+      setRegistrationReadiness(null);
+      return;
+    }
+    try {
+      const readiness = await apiRequest<RegistrationReadinessRead>("/organizations/registration-readiness", {
+        identity: requestIdentity
+      });
+      setRegistrationReadiness(readiness);
+      setReadinessError("");
+    } catch (caught) {
+      setReadinessError(caught instanceof Error ? caught.message : "Registration readiness could not be loaded");
+    }
+  }
 
   const updateOrganizationName = (name: string) => {
     setHandleAvailability(null);
@@ -437,6 +467,7 @@ export default function RegistrationPage() {
       setOnboarding(created);
       setHandleAvailability(null);
       await searchDirectory(organizationForm.name);
+      await loadRegistrationReadiness();
     } catch (caught) {
       const suggestion = subdomainSuggestionFromError(caught);
       if (suggestion) {
@@ -632,6 +663,7 @@ export default function RegistrationPage() {
       setSubmittedInquiry(inquiry);
       setPaymentSession(null);
       await loadAccountReadiness(selectedSite.slug, inquiry);
+      await loadRegistrationReadiness();
       setPacketForm((current) => ({
         ...current,
         emergency_contact_name: inquiry.guardian_name ?? current.emergency_contact_name,
@@ -698,6 +730,7 @@ export default function RegistrationPage() {
       setSubmittedInquiry(packet.inquiry);
       setPaymentSession(null);
       await loadAccountReadiness(selectedSite.slug, packet.inquiry);
+      await loadRegistrationReadiness();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Registration packet failed");
     } finally {
@@ -731,6 +764,7 @@ export default function RegistrationPage() {
       setRegistrationPacket(packet);
       setSubmittedInquiry(packet.inquiry);
       setPaymentSession(null);
+      await loadRegistrationReadiness();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Document upload failed");
     } finally {
@@ -760,6 +794,7 @@ export default function RegistrationPage() {
       );
       setPaymentSession(session);
       setSubmittedInquiry(session.inquiry);
+      await loadRegistrationReadiness();
       window.open(session.checkout_url, "_blank", "noopener,noreferrer");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Registration payment link could not be created");
@@ -882,6 +917,78 @@ export default function RegistrationPage() {
               </li>
             ))}
           </ol>
+        </section>
+
+        <section className="registration-readiness-panel" aria-label="Registration readiness">
+          <div className="registration-readiness-head">
+            <div>
+              <p className="section-label">Live readiness</p>
+              <h2>
+                {registrationReadiness
+                  ? `${registrationReadiness.identity_display_name} · ${registrationReadiness.auth_mode}`
+                  : readinessAvailable
+                    ? "Loading registration state"
+                    : "Account required"}
+              </h2>
+            </div>
+            <button type="button" onClick={loadRegistrationReadiness} disabled={!readinessAvailable || busy !== ""}>
+              Refresh
+            </button>
+          </div>
+          {registrationReadiness ? (
+            <>
+              <div className="registration-readiness-stats">
+                <span>
+                  <strong>{registrationReadiness.managed_organization_count}</strong>
+                  workspaces
+                </span>
+                <span>
+                  <strong>{registrationReadiness.registration_open_count}</strong>
+                  open
+                </span>
+                <span>
+                  <strong>{registrationReadiness.admissions_ready_count}/{registrationReadiness.admissions_inquiry_count}</strong>
+                  admissions
+                </span>
+                <span>
+                  <strong>{registrationReadiness.family_packet_complete_count}/{registrationReadiness.family_registration_count}</strong>
+                  family packets
+                </span>
+              </div>
+              <div className="registration-readiness-steps">
+                {registrationReadiness.steps.map((step) => (
+                  <article key={step.key} data-status={step.status}>
+                    <div>
+                      <strong>{step.label}</strong>
+                      <small>{step.detail}</small>
+                    </div>
+                    {step.href && step.action_label ? <a href={step.href}>{step.action_label}</a> : <span>{step.action_label}</span>}
+                  </article>
+                ))}
+              </div>
+              {registrationReadiness.organizations.length || registrationReadiness.family_registrations.length ? (
+                <div className="registration-readiness-mini">
+                  {registrationReadiness.organizations.slice(0, 2).map((organization) => (
+                    <a key={organization.id} href={organization.registration_page_path}>
+                      {organization.public_name ?? organization.name} · {organization.registration_open ? "open" : "closed"}
+                    </a>
+                  ))}
+                  {registrationReadiness.family_registrations.slice(0, 2).map((inquiry) => (
+                    <a key={inquiry.id} href={`${inquiry.public_site_path}?inquiry_id=${inquiry.id}&email=${encodeURIComponent(registrationReadiness.identity_email)}`}>
+                      {inquiry.athlete_name} · {inquiry.packet_complete ? "ready" : inquiry.next_steps[0] ?? "in progress"}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <p>
+              {readinessAvailable
+                ? readinessError || "Registration state is being prepared."
+                : "Create or sign in to an account to see workspace, admissions, and family packet readiness."}
+            </p>
+          )}
+          {readinessError && registrationReadiness ? <small className="form-error">{readinessError}</small> : null}
         </section>
 
         {mode === "organization" ? (

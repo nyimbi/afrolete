@@ -415,6 +415,53 @@ export type OrganizationOnboardingRead = {
   checklist: string[];
 };
 
+export type RegistrationReadinessStepRead = {
+  key: string;
+  label: string;
+  status: string;
+  detail: string;
+  action_label: string | null;
+  href: string | null;
+};
+
+export type RegistrationReadinessOrganizationRead = {
+  id: UUID;
+  name: string;
+  public_name: string | null;
+  organization_type: OrganizationType;
+  registration_open: boolean;
+  public_site_path: string;
+  registration_page_path: string;
+  admissions_path: string;
+};
+
+export type RegistrationReadinessFamilyInquiryRead = {
+  id: UUID;
+  organization_id: UUID;
+  organization_public_name: string | null;
+  athlete_name: string;
+  packet_complete: boolean;
+  payment_status: string;
+  next_steps: string[];
+  public_site_path: string;
+};
+
+export type RegistrationReadinessRead = {
+  auth_mode: string;
+  identity_email: string;
+  identity_display_name: string;
+  managed_organization_count: number;
+  registration_open_count: number;
+  public_directory_count: number;
+  admissions_inquiry_count: number;
+  admissions_ready_count: number;
+  family_registration_count: number;
+  family_packet_complete_count: number;
+  steps: RegistrationReadinessStepRead[];
+  organizations: RegistrationReadinessOrganizationRead[];
+  family_registrations: RegistrationReadinessFamilyInquiryRead[];
+};
+
 export type OrganizationHandleAvailabilityRead = {
   desired_slug: string;
   slug_available: boolean;

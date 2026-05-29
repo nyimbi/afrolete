@@ -3084,6 +3084,132 @@ textarea:focus {
   color: var(--muted);
 }
 
+.registration-readiness-panel {
+  background:
+    linear-gradient(135deg, #12211e 0%, #173d35 48%, #24321b 100%);
+  border: 1px solid color-mix(in srgb, var(--teal) 36%, #0b1714);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  color: #fff;
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 16px;
+}
+
+.registration-readiness-head {
+  align-items: start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.registration-readiness-head .section-label {
+  color: #9be0c9;
+}
+
+.registration-readiness-head h2 {
+  font-size: 20px;
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.registration-readiness-head button,
+.registration-readiness-steps a {
+  background: #fff;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ink);
+  font-weight: 800;
+  padding: 9px 11px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.registration-readiness-stats {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.registration-readiness-stats span {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.76);
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+}
+
+.registration-readiness-stats strong {
+  color: #fff;
+  display: block;
+  font-size: 20px;
+}
+
+.registration-readiness-steps {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.registration-readiness-steps article {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  min-height: 132px;
+  padding: 11px;
+}
+
+.registration-readiness-steps article[data-status="ready"] {
+  border-color: rgba(155, 224, 201, 0.68);
+}
+
+.registration-readiness-steps article[data-status="action"] {
+  border-color: rgba(242, 190, 100, 0.76);
+}
+
+.registration-readiness-steps article[data-status="blocked"] {
+  opacity: 0.68;
+}
+
+.registration-readiness-steps strong,
+.registration-readiness-steps small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.registration-readiness-steps small {
+  color: rgba(255, 255, 255, 0.72);
+  margin-top: 4px;
+}
+
+.registration-readiness-steps span {
+  align-self: end;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 13px;
+}
+
+.registration-readiness-mini {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.registration-readiness-mini a {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  color: #fff;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 7px 10px;
+  text-decoration: none;
+}
+
 .register-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.75fr);
@@ -4223,6 +4349,8 @@ textarea:focus {
   .register-hero,
   .register-workspace,
   .register-journey-steps,
+  .registration-readiness-stats,
+  .registration-readiness-steps,
   .register-inline-grid,
   .register-handle-status,
   .public-ai-hero-grid,

@@ -201,6 +201,53 @@ class OrganizationOnboardingRead(BaseModel):
     checklist: list[str]
 
 
+class RegistrationReadinessStepRead(BaseModel):
+    key: str
+    label: str
+    status: str
+    detail: str
+    action_label: str | None = None
+    href: str | None = None
+
+
+class RegistrationReadinessOrganizationRead(BaseModel):
+    id: UUID
+    name: str
+    public_name: str | None
+    organization_type: OrganizationType
+    registration_open: bool
+    public_site_path: str
+    registration_page_path: str
+    admissions_path: str
+
+
+class RegistrationReadinessFamilyInquiryRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    organization_public_name: str | None
+    athlete_name: str
+    packet_complete: bool
+    payment_status: str
+    next_steps: list[str]
+    public_site_path: str
+
+
+class RegistrationReadinessRead(BaseModel):
+    auth_mode: str
+    identity_email: str
+    identity_display_name: str
+    managed_organization_count: int
+    registration_open_count: int
+    public_directory_count: int
+    admissions_inquiry_count: int
+    admissions_ready_count: int
+    family_registration_count: int
+    family_packet_complete_count: int
+    steps: list[RegistrationReadinessStepRead]
+    organizations: list[RegistrationReadinessOrganizationRead] = Field(default_factory=list)
+    family_registrations: list[RegistrationReadinessFamilyInquiryRead] = Field(default_factory=list)
+
+
 class OrganizationHandleAvailabilityRead(BaseModel):
     desired_slug: str
     slug_available: bool

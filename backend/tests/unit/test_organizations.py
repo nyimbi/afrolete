@@ -206,6 +206,22 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert public_site["registration_fee_amount"] == "1000.00"
     assert public_site["registration_payment_instructions"] == "Use the hosted checkout link after uploading documents."
 
+    owner_readiness_response = client.get("/api/v1/organizations/registration-readiness", headers=identity_headers)
+    assert owner_readiness_response.status_code == 200
+    owner_readiness = owner_readiness_response.json()
+    assert owner_readiness["auth_mode"] == "local"
+    assert owner_readiness["identity_email"] == identity_headers["X-Afrolete-Email"]
+    assert owner_readiness["managed_organization_count"] == 1
+    assert owner_readiness["registration_open_count"] == 1
+    assert owner_readiness["public_directory_count"] == 1
+    assert owner_readiness["admissions_inquiry_count"] == 0
+    assert owner_readiness["family_registration_count"] == 0
+    assert owner_readiness["organizations"][0]["registration_page_path"] == "/register?mode=player&site=makini-track"
+    owner_steps = {step["key"]: step for step in owner_readiness["steps"]}
+    assert owner_steps["identity"]["status"] == "ready"
+    assert owner_steps["workspace"]["href"] == f"/admissions?organization_id={onboarding['organization']['id']}"
+    assert owner_steps["public_registration"]["href"] == "/site/makini-track"
+
     template_response = client.get(
         f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/import-template",
         headers=identity_headers,
@@ -375,6 +391,16 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert amina_registration["account_status"] == "linked"
     assert amina_registration["packet_complete"] is False
     assert "proof_of_age" in amina_registration["missing_documents"]
+    guardian_readiness_response = client.get("/api/v1/organizations/registration-readiness", headers=guardian_identity_headers)
+    assert guardian_readiness_response.status_code == 200
+    guardian_readiness = guardian_readiness_response.json()
+    assert guardian_readiness["managed_organization_count"] == 0
+    assert guardian_readiness["family_registration_count"] == 2
+    assert guardian_readiness["family_packet_complete_count"] == 0
+    assert guardian_readiness["family_registrations"][0]["organization_public_name"] == "Makini Track"
+    guardian_steps = {step["key"]: step for step in guardian_readiness["steps"]}
+    assert guardian_steps["family_registration"]["status"] == "action"
+    assert guardian_steps["family_registration"]["action_label"] == "Resume family registration"
     resume_packet_response = client.get(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/packet"
         "?email=parent.runner@example.com"
@@ -483,6 +509,12 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert waiver["verification_status"] == "ready_for_review"
     assert waiver["packet_complete"] is True
     assert waiver["next_steps"] == ["Registration packet is ready for staff verification."]
+    owner_ready_queue_response = client.get("/api/v1/organizations/registration-readiness", headers=identity_headers)
+    assert owner_ready_queue_response.status_code == 200
+    owner_ready_queue = owner_ready_queue_response.json()
+    assert owner_ready_queue["admissions_inquiry_count"] == 3
+    assert owner_ready_queue["admissions_ready_count"] == 1
+    assert {step["key"]: step for step in owner_ready_queue["steps"]}["admissions"]["status"] == "ready"
 
     pending_payment_response = client.patch(
         f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/{inquiry['id']}",

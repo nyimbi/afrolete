@@ -4,6 +4,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.enums import OrganizationType
 from app.schemas.communication import CommunicationMessageRead
@@ -47,6 +48,7 @@ from app.schemas.organization import (
     RegistrationPaymentSessionRead,
     RegistrationPaymentSettlementCreate,
     RegistrationPaymentSettlementRead,
+    RegistrationReadinessRead,
 )
 from app.schemas.team import TeamRead
 from app.services.auth.dependencies import get_current_identity
@@ -79,6 +81,7 @@ from app.services.organizations import (
     queue_onboarding_concierge_agent_task,
     registration_packet_summary,
     registration_inquiry_import_template,
+    registration_readiness,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
     settle_registration_payment_checkout,
@@ -488,6 +491,15 @@ async def organization_handle_availability_route(
     db: AsyncSession = Depends(get_db),
 ) -> OrganizationHandleAvailabilityRead:
     return await organization_handle_availability(db, name=name, slug=slug, subdomain=subdomain)
+
+
+@router.get("/registration-readiness", response_model=RegistrationReadinessRead)
+async def registration_readiness_route(
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> RegistrationReadinessRead:
+    return await registration_readiness(db, identity, settings)
 
 
 @router.post("/onboarding", response_model=OrganizationOnboardingRead, status_code=status.HTTP_201_CREATED)

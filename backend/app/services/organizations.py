@@ -53,6 +53,10 @@ from app.schemas.organization import (
     RegistrationInquiryImportPreviewRowRead,
     RegistrationInquiryImportRowErrorRead,
     RegistrationInquiryImportTemplateRead,
+    RegistrationReadinessFamilyInquiryRead,
+    RegistrationReadinessOrganizationRead,
+    RegistrationReadinessRead,
+    RegistrationReadinessStepRead,
     RegistrationInquiryAccountReadinessRead,
     RegistrationInquiryConversionCreate,
     RegistrationInquiryFollowUpCreate,
@@ -622,6 +626,155 @@ async def list_organizations_for_identity(
             grouped[organization.id] = (organization, [])
         grouped[organization.id][1].append(role)
     return list(grouped.values())
+
+
+async def registration_readiness(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    settings: Settings | None = None,
+) -> RegistrationReadinessRead:
+    settings = settings or get_settings()
+    manageable_roles = {MembershipRole.OWNER, MembershipRole.ADMIN, MembershipRole.STAFF}
+    managed_items = [
+        item
+        for item in await list_organizations_for_identity(db, identity)
+        if any(role in manageable_roles for role in item[1])
+    ]
+    managed_organizations = [organization for organization, _roles in managed_items]
+    managed_ids = [organization.id for organization in managed_organizations]
+    public_directory_count = int(
+        await db.scalar(
+            select(func.count(Organization.id)).where(Organization.registration_open.is_(True))
+        )
+        or 0
+    )
+    admissions_inquiries: list[RegistrationInquiry] = []
+    if managed_ids:
+        admissions_inquiries = list(
+            (
+                await db.scalars(
+                    select(RegistrationInquiry)
+                    .where(RegistrationInquiry.organization_id.in_(managed_ids))
+                    .order_by(RegistrationInquiry.created_at.desc())
+                    .limit(200)
+                )
+            ).all()
+        )
+    family_registrations = await list_family_registration_inquiries(db, identity)
+    registration_open_count = sum(1 for organization in managed_organizations if organization.registration_open)
+    admissions_ready_count = sum(
+        1 for inquiry in admissions_inquiries if bool(registration_packet_summary(inquiry)["packet_complete"])
+    )
+    family_packet_complete_count = sum(1 for inquiry in family_registrations if inquiry.packet_complete)
+    first_managed = managed_organizations[0] if managed_organizations else None
+    first_family = family_registrations[0] if family_registrations else None
+    steps = [
+        RegistrationReadinessStepRead(
+            key="identity",
+            label="User account",
+            status="ready",
+            detail=f"{identity.display_name} <{identity.email}>",
+            action_label="Signed in",
+        ),
+        RegistrationReadinessStepRead(
+            key="workspace",
+            label="Club or school workspace",
+            status="ready" if managed_organizations else "action",
+            detail=(
+                f"{len(managed_organizations)} managed workspace"
+                f"{'' if len(managed_organizations) == 1 else 's'}"
+                if managed_organizations
+                else "Create a club, school, or academy workspace"
+            ),
+            action_label="Open admissions" if first_managed is not None else "Create workspace",
+            href=f"/admissions?organization_id={first_managed.id}" if first_managed is not None else "/register?mode=organization",
+        ),
+        RegistrationReadinessStepRead(
+            key="public_registration",
+            label="Public registration",
+            status="ready" if registration_open_count else ("action" if managed_organizations else "blocked"),
+            detail=(
+                f"{registration_open_count} workspace"
+                f"{'' if registration_open_count == 1 else 's'} accepting families"
+                if registration_open_count
+                else "Open registration settings after creating the workspace"
+            ),
+            action_label="Open public page" if first_managed is not None else "Create workspace first",
+            href=public_site_path(first_managed) if first_managed is not None else "/register?mode=organization",
+        ),
+        RegistrationReadinessStepRead(
+            key="admissions",
+            label="Admissions queue",
+            status="ready" if admissions_ready_count else ("action" if admissions_inquiries else "todo"),
+            detail=(
+                f"{admissions_ready_count} ready packet"
+                f"{'' if admissions_ready_count == 1 else 's'} from {len(admissions_inquiries)} intake"
+                f"{'' if len(admissions_inquiries) == 1 else 's'}"
+                if admissions_inquiries
+                else "No family intakes yet"
+            ),
+            action_label="Review admissions" if first_managed is not None else "Create workspace first",
+            href=f"/admissions?organization_id={first_managed.id}" if first_managed is not None else "/register?mode=organization",
+        ),
+        RegistrationReadinessStepRead(
+            key="family_registration",
+            label="Family registration",
+            status="ready" if family_packet_complete_count else ("action" if family_registrations else "todo"),
+            detail=(
+                f"{family_packet_complete_count} complete packet"
+                f"{'' if family_packet_complete_count == 1 else 's'} from {len(family_registrations)} registration"
+                f"{'' if len(family_registrations) == 1 else 's'}"
+                if family_registrations
+                else f"{public_directory_count} open organization"
+                f"{'' if public_directory_count == 1 else 's'} available"
+            ),
+            action_label="Resume family registration" if first_family is not None else "Find organization",
+            href=(
+                f"{first_family.public_site_path}?inquiry_id={first_family.id}&email={quote(first_family.email)}"
+                if first_family is not None
+                else "/register?mode=player"
+            ),
+        ),
+    ]
+    return RegistrationReadinessRead(
+        auth_mode=settings.auth_mode,
+        identity_email=identity.email,
+        identity_display_name=identity.display_name,
+        managed_organization_count=len(managed_organizations),
+        registration_open_count=registration_open_count,
+        public_directory_count=public_directory_count,
+        admissions_inquiry_count=len(admissions_inquiries),
+        admissions_ready_count=admissions_ready_count,
+        family_registration_count=len(family_registrations),
+        family_packet_complete_count=family_packet_complete_count,
+        steps=steps,
+        organizations=[
+            RegistrationReadinessOrganizationRead(
+                id=organization.id,
+                name=organization.name,
+                public_name=organization.public_name,
+                organization_type=organization.organization_type,
+                registration_open=organization.registration_open,
+                public_site_path=public_site_path(organization),
+                registration_page_path=f"/register?mode=player&site={organization.subdomain or organization.slug}",
+                admissions_path=f"/admissions?organization_id={organization.id}",
+            )
+            for organization in managed_organizations[:6]
+        ],
+        family_registrations=[
+            RegistrationReadinessFamilyInquiryRead(
+                id=inquiry.id,
+                organization_id=inquiry.organization_id,
+                organization_public_name=inquiry.organization_public_name,
+                athlete_name=inquiry.athlete_name,
+                packet_complete=inquiry.packet_complete,
+                payment_status=inquiry.payment_status,
+                next_steps=inquiry.next_steps,
+                public_site_path=inquiry.public_site_path,
+            )
+            for inquiry in family_registrations[:6]
+        ],
+    )
 
 
 async def get_organization_for_identity(
