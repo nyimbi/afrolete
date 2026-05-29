@@ -49,6 +49,7 @@ from app.schemas.organization import (
     PublicRegistrationDocumentUpload,
     PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
+    RegistrationOnboardingMissionRead,
     RegistrationInquiryImportCreate,
     RegistrationInquiryImportPreviewRowRead,
     RegistrationInquiryImportRowErrorRead,
@@ -748,6 +749,15 @@ async def registration_readiness(
         family_registration_count=len(family_registrations),
         family_packet_complete_count=family_packet_complete_count,
         steps=steps,
+        missions=registration_onboarding_missions(
+            managed_organizations=managed_organizations,
+            registration_open_count=registration_open_count,
+            admissions_inquiries=admissions_inquiries,
+            admissions_ready_count=admissions_ready_count,
+            family_registrations=family_registrations,
+            family_packet_complete_count=family_packet_complete_count,
+            public_directory_count=public_directory_count,
+        ),
         organizations=[
             RegistrationReadinessOrganizationRead(
                 id=organization.id,
@@ -775,6 +785,93 @@ async def registration_readiness(
             for inquiry in family_registrations[:6]
         ],
     )
+
+
+def registration_onboarding_missions(
+    *,
+    managed_organizations: list[Organization],
+    registration_open_count: int,
+    admissions_inquiries: list[RegistrationInquiry],
+    admissions_ready_count: int,
+    family_registrations: list[FamilyRegistrationInquiryRead],
+    family_packet_complete_count: int,
+    public_directory_count: int,
+) -> list[RegistrationOnboardingMissionRead]:
+    first_managed = managed_organizations[0] if managed_organizations else None
+    first_family = family_registrations[0] if family_registrations else None
+    return [
+        RegistrationOnboardingMissionRead(
+            key="launch_workspace",
+            audience="owner",
+            title="Launch the operating workspace",
+            status="complete" if managed_organizations else "active",
+            progress_percent=100 if managed_organizations else 35,
+            xp=150,
+            detail=(
+                f"{len(managed_organizations)} workspace"
+                f"{'' if len(managed_organizations) == 1 else 's'} ready for setup."
+                if managed_organizations
+                else "Create the first club, school, or academy workspace with owner access."
+            ),
+            action_label="Open admissions" if first_managed is not None else "Create workspace",
+            href=f"/admissions?organization_id={first_managed.id}" if first_managed is not None else "/register?mode=organization",
+        ),
+        RegistrationOnboardingMissionRead(
+            key="publish_family_intake",
+            audience="owner",
+            title="Publish family registration",
+            status="complete" if registration_open_count else ("active" if managed_organizations else "locked"),
+            progress_percent=100 if registration_open_count else (55 if managed_organizations else 0),
+            xp=120,
+            detail=(
+                f"{registration_open_count} workspace"
+                f"{'' if registration_open_count == 1 else 's'} accepting public registration."
+                if registration_open_count
+                else "Open registration, documents, fees, and public site routing."
+            ),
+            action_label="Open public site" if first_managed is not None else "Create workspace first",
+            href=public_site_path(first_managed) if first_managed is not None else "/register?mode=organization",
+        ),
+        RegistrationOnboardingMissionRead(
+            key="complete_family_packet",
+            audience="family",
+            title="Complete an athlete packet",
+            status="complete" if family_packet_complete_count else ("active" if family_registrations else "available"),
+            progress_percent=100 if family_packet_complete_count else (60 if family_registrations else 20),
+            xp=100,
+            detail=(
+                f"{family_packet_complete_count} complete packet"
+                f"{'' if family_packet_complete_count == 1 else 's'} from {len(family_registrations)} registration"
+                f"{'' if len(family_registrations) == 1 else 's'}."
+                if family_registrations
+                else f"{public_directory_count} open organization"
+                f"{'' if public_directory_count == 1 else 's'} available for family registration."
+            ),
+            action_label="Resume packet" if first_family is not None else "Find organization",
+            href=(
+                f"{first_family.public_site_path}?inquiry_id={first_family.id}&email={quote(first_family.email)}"
+                if first_family is not None
+                else "/register?mode=player"
+            ),
+        ),
+        RegistrationOnboardingMissionRead(
+            key="review_admissions",
+            audience="staff",
+            title="Review admissions with AI support",
+            status="complete" if admissions_ready_count else ("active" if admissions_inquiries else "locked"),
+            progress_percent=100 if admissions_ready_count else (65 if admissions_inquiries else 0),
+            xp=130,
+            detail=(
+                f"{admissions_ready_count} ready packet"
+                f"{'' if admissions_ready_count == 1 else 's'} from {len(admissions_inquiries)} intake"
+                f"{'' if len(admissions_inquiries) == 1 else 's'}."
+                if admissions_inquiries
+                else "Collect family intakes, then use admissions AI review and conversion."
+            ),
+            action_label="Review admissions" if first_managed is not None else "Create workspace first",
+            href=f"/admissions?organization_id={first_managed.id}" if first_managed is not None else "/register?mode=organization",
+        ),
+    ]
 
 
 async def get_organization_for_identity(

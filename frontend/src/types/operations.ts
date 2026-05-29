@@ -446,6 +446,18 @@ export type RegistrationReadinessFamilyInquiryRead = {
   public_site_path: string;
 };
 
+export type RegistrationOnboardingMissionRead = {
+  key: string;
+  audience: string;
+  title: string;
+  status: string;
+  progress_percent: number;
+  xp: number;
+  detail: string;
+  action_label: string;
+  href: string;
+};
+
 export type RegistrationReadinessRead = {
   auth_mode: string;
   identity_email: string;
@@ -458,6 +470,7 @@ export type RegistrationReadinessRead = {
   family_registration_count: number;
   family_packet_complete_count: number;
   steps: RegistrationReadinessStepRead[];
+  missions: RegistrationOnboardingMissionRead[];
   organizations: RegistrationReadinessOrganizationRead[];
   family_registrations: RegistrationReadinessFamilyInquiryRead[];
 };

@@ -221,6 +221,11 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert owner_steps["identity"]["status"] == "ready"
     assert owner_steps["workspace"]["href"] == f"/admissions?organization_id={onboarding['organization']['id']}"
     assert owner_steps["public_registration"]["href"] == "/site/makini-track"
+    owner_missions = {mission["key"]: mission for mission in owner_readiness["missions"]}
+    assert owner_missions["launch_workspace"]["status"] == "complete"
+    assert owner_missions["publish_family_intake"]["progress_percent"] == 100
+    assert owner_missions["complete_family_packet"]["status"] == "available"
+    assert owner_missions["review_admissions"]["status"] == "locked"
 
     template_response = client.get(
         f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/import-template",
@@ -401,6 +406,10 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     guardian_steps = {step["key"]: step for step in guardian_readiness["steps"]}
     assert guardian_steps["family_registration"]["status"] == "action"
     assert guardian_steps["family_registration"]["action_label"] == "Resume family registration"
+    guardian_missions = {mission["key"]: mission for mission in guardian_readiness["missions"]}
+    assert guardian_missions["complete_family_packet"]["status"] == "active"
+    assert guardian_missions["complete_family_packet"]["progress_percent"] == 60
+    assert guardian_missions["complete_family_packet"]["action_label"] == "Resume packet"
     resume_packet_response = client.get(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/packet"
         "?email=parent.runner@example.com"
@@ -515,6 +524,9 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert owner_ready_queue["admissions_inquiry_count"] == 3
     assert owner_ready_queue["admissions_ready_count"] == 1
     assert {step["key"]: step for step in owner_ready_queue["steps"]}["admissions"]["status"] == "ready"
+    owner_ready_missions = {mission["key"]: mission for mission in owner_ready_queue["missions"]}
+    assert owner_ready_missions["review_admissions"]["status"] == "complete"
+    assert owner_ready_missions["review_admissions"]["progress_percent"] == 100
 
     pending_payment_response = client.patch(
         f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/{inquiry['id']}",

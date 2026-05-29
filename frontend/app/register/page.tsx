@@ -966,6 +966,33 @@ export default function RegistrationPage() {
                   </article>
                 ))}
               </div>
+              <div className="registration-mission-board" aria-label="Onboarding missions">
+                <div className="registration-mission-head">
+                  <div>
+                    <span>Guided launch missions</span>
+                    <strong>{registrationReadiness.missions.reduce((total, mission) => total + mission.xp, 0)} XP path</strong>
+                  </div>
+                  <small>{registrationReadiness.missions.filter((mission) => mission.status === "complete").length}/{registrationReadiness.missions.length} complete</small>
+                </div>
+                <div className="registration-missions">
+                  {registrationReadiness.missions.map((mission) => (
+                    <article key={mission.key} data-status={mission.status}>
+                      <div className="registration-mission-title">
+                        <span>{mission.audience}</span>
+                        <strong>{mission.title}</strong>
+                      </div>
+                      <p>{mission.detail}</p>
+                      <div className="registration-mission-meter" aria-hidden="true">
+                        <span style={{ width: `${mission.progress_percent}%` }} />
+                      </div>
+                      <div className="registration-mission-foot">
+                        <small>{mission.progress_percent}% · {mission.xp} XP</small>
+                        <a href={mission.href}>{mission.action_label}</a>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
               {registrationReadiness.organizations.length || registrationReadiness.family_registrations.length ? (
                 <div className="registration-readiness-mini">
                   {registrationReadiness.organizations.slice(0, 2).map((organization) => (

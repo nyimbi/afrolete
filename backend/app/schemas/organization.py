@@ -232,6 +232,18 @@ class RegistrationReadinessFamilyInquiryRead(BaseModel):
     public_site_path: str
 
 
+class RegistrationOnboardingMissionRead(BaseModel):
+    key: str
+    audience: str
+    title: str
+    status: str
+    progress_percent: int
+    xp: int
+    detail: str
+    action_label: str
+    href: str
+
+
 class RegistrationReadinessRead(BaseModel):
     auth_mode: str
     identity_email: str
@@ -244,6 +256,7 @@ class RegistrationReadinessRead(BaseModel):
     family_registration_count: int
     family_packet_complete_count: int
     steps: list[RegistrationReadinessStepRead]
+    missions: list[RegistrationOnboardingMissionRead] = Field(default_factory=list)
     organizations: list[RegistrationReadinessOrganizationRead] = Field(default_factory=list)
     family_registrations: list[RegistrationReadinessFamilyInquiryRead] = Field(default_factory=list)
 
