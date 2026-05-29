@@ -15,6 +15,7 @@ import type {
   OrganizationDirectoryRead,
   OrganizationOnboardingRead,
   OrganizationPublicSiteRead,
+  SportFormat,
   OrganizationType,
   RegistrationPacketRead,
   RegistrationInquiryRead
@@ -53,7 +54,13 @@ const defaultOrganizationForm = {
   mission: "Create a trusted, measurable development pathway for athletes.",
   brand_primary_color: "#0f766e",
   brand_secondary_color: "#b7791f",
-  launch_goal: "Register first athletes and invite guardians this week"
+  launch_goal: "Register first athletes and invite guardians this week",
+  starter_team_name: "U15 Development",
+  starter_team_sport: "football",
+  starter_team_sport_format: "team" as SportFormat,
+  starter_team_age_group: "U15",
+  starter_team_gender_category: "open",
+  starter_team_season_label: "2026"
 };
 
 const defaultInquiryForm = {
@@ -168,6 +175,12 @@ export default function RegistrationPage() {
         identity: requestIdentity,
         body: {
           launch_goal: organizationForm.launch_goal || null,
+          starter_team_name: organizationForm.starter_team_name || null,
+          starter_team_sport: organizationForm.starter_team_sport || organizationForm.primary_sport || null,
+          starter_team_sport_format: organizationForm.starter_team_sport_format,
+          starter_team_age_group: organizationForm.starter_team_age_group || null,
+          starter_team_gender_category: organizationForm.starter_team_gender_category || null,
+          starter_team_season_label: organizationForm.starter_team_season_label || null,
           organization: {
             name: organizationForm.name,
             organization_type: organizationForm.organization_type,
@@ -488,6 +501,42 @@ export default function RegistrationPage() {
                   Launch goal
                   <input value={organizationForm.launch_goal} onChange={(event) => setOrganizationForm({ ...organizationForm, launch_goal: event.target.value })} />
                 </label>
+                <label>
+                  First team/program
+                  <input value={organizationForm.starter_team_name} onChange={(event) => setOrganizationForm({ ...organizationForm, starter_team_name: event.target.value })} />
+                </label>
+                <label>
+                  Team sport
+                  <input value={organizationForm.starter_team_sport} onChange={(event) => setOrganizationForm({ ...organizationForm, starter_team_sport: event.target.value })} />
+                </label>
+                <label>
+                  Format
+                  <select
+                    value={organizationForm.starter_team_sport_format}
+                    onChange={(event) =>
+                      setOrganizationForm({
+                        ...organizationForm,
+                        starter_team_sport_format: event.target.value as SportFormat
+                      })
+                    }
+                  >
+                    <option value="team">Team sport</option>
+                    <option value="individual">Individual sport</option>
+                    <option value="mixed">Mixed program</option>
+                  </select>
+                </label>
+                <label>
+                  Age group
+                  <input value={organizationForm.starter_team_age_group} onChange={(event) => setOrganizationForm({ ...organizationForm, starter_team_age_group: event.target.value })} />
+                </label>
+                <label>
+                  Gender/category
+                  <input value={organizationForm.starter_team_gender_category} onChange={(event) => setOrganizationForm({ ...organizationForm, starter_team_gender_category: event.target.value })} />
+                </label>
+                <label>
+                  Season
+                  <input value={organizationForm.starter_team_season_label} onChange={(event) => setOrganizationForm({ ...organizationForm, starter_team_season_label: event.target.value })} />
+                </label>
                 <label className="register-wide">
                   Mission
                   <textarea value={organizationForm.mission} onChange={(event) => setOrganizationForm({ ...organizationForm, mission: event.target.value })} />
@@ -504,6 +553,12 @@ export default function RegistrationPage() {
                     <a href={onboarding.dashboard_path}>Open console</a>
                     <a href={onboarding.public_site_path}>Open public site</a>
                   </div>
+                  {onboarding.starter_team ? (
+                    <p>
+                      Starter program: {onboarding.starter_team.name} · {onboarding.starter_team.sport} ·{" "}
+                      {onboarding.starter_team.age_group ?? "all ages"}
+                    </p>
+                  ) : null}
                   <ol>
                     {onboarding.checklist.map((item) => (
                       <li key={item}>{item}</li>

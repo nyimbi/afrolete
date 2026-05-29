@@ -393,6 +393,7 @@ export type OrganizationDirectoryRead = {
 
 export type OrganizationOnboardingRead = {
   organization: OrganizationRead;
+  starter_team: TeamRead | null;
   public_site_path: string;
   dashboard_path: string;
   owner_email: string;

@@ -25,6 +25,7 @@ from app.models.enums import (
     MembershipRole,
     OrganizationType,
     RosterStatus,
+    SportFormat,
     TeamRole,
 )
 from app.models.event import Event
@@ -86,6 +87,51 @@ def onboarding_checklist(organization: Organization, launch_goal: str | None = N
     if launch_goal:
         steps.insert(0, f"Confirm launch goal: {launch_goal}")
     return steps
+
+
+def default_starter_team_name(organization: Organization) -> str:
+    label = organization.primary_sport or "Multi-sport"
+    if organization.organization_type == OrganizationType.SCHOOL:
+        return f"{label.title()} Program"
+    if organization.organization_type == OrganizationType.ACADEMY:
+        return f"{label.title()} Academy Group"
+    return f"{label.title()} Team"
+
+
+async def create_onboarding_starter_team(
+    db: AsyncSession,
+    organization: Organization,
+    payload_name: str | None,
+    payload_sport: str | None,
+    sport_format: SportFormat,
+    age_group: str | None,
+    gender_category: str | None,
+    season_label: str | None,
+    authz: AuthorizationService,
+) -> Team:
+    team = Team(
+        organization_id=organization.id,
+        name=payload_name or default_starter_team_name(organization),
+        sport=payload_sport or organization.primary_sport or "multi-sport",
+        sport_format=sport_format,
+        age_group=age_group,
+        gender_category=gender_category,
+        season_label=season_label,
+    )
+    db.add(team)
+    await db.flush()
+    await authz.touch(
+        Relationship(
+            resource_type="organization",
+            resource_id=str(organization.id),
+            relation="member_team",
+            subject_type="team",
+            subject_id=str(team.id),
+        )
+    )
+    await db.commit()
+    await db.refresh(team)
+    return team
 
 
 def registration_required_documents(inquiry: RegistrationInquiry) -> list[str]:

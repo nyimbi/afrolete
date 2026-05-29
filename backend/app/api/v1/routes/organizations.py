@@ -36,6 +36,7 @@ from app.schemas.organization import (
     RegistrationInquiryRead,
     RegistrationInquiryUpdate,
 )
+from app.schemas.team import TeamRead
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
@@ -46,6 +47,7 @@ from app.services.organizations import (
     create_registration_inquiry_follow_up,
     create_public_registration_inquiry,
     create_committee,
+    create_onboarding_starter_team,
     create_organization,
     get_organization_for_identity,
     get_public_site,
@@ -297,6 +299,19 @@ def to_registration_conversion_read(item) -> RegistrationInquiryConversionRead:
     )
 
 
+def to_team_read(team) -> TeamRead:
+    return TeamRead(
+        id=team.id,
+        organization_id=team.organization_id,
+        name=team.name,
+        sport=team.sport,
+        sport_format=team.sport_format,
+        age_group=team.age_group,
+        gender_category=team.gender_category,
+        season_label=team.season_label,
+    )
+
+
 def to_communication_message_read(message, recipient_count: int = 0) -> CommunicationMessageRead:
     return CommunicationMessageRead(
         id=message.id,
@@ -377,8 +392,20 @@ async def create_organization_onboarding_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> OrganizationOnboardingRead:
     organization, roles = await create_organization(db, identity, payload.organization, authz)
+    starter_team = await create_onboarding_starter_team(
+        db,
+        organization,
+        payload.starter_team_name,
+        payload.starter_team_sport,
+        payload.starter_team_sport_format,
+        payload.starter_team_age_group,
+        payload.starter_team_gender_category,
+        payload.starter_team_season_label,
+        authz,
+    )
     return OrganizationOnboardingRead(
         organization=to_organization_read((organization, roles)),
+        starter_team=to_team_read(starter_team),
         public_site_path=public_site_path(organization),
         dashboard_path=f"/?organization_id={organization.id}",
         owner_email=identity.email,

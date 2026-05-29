@@ -11,8 +11,10 @@ from app.models.enums import (
     MemberSubjectType,
     MembershipRole,
     OrganizationType,
+    SportFormat,
     TeamRole,
 )
+from app.schemas.team import TeamRead
 from app.schemas.communication import CommunicationMessageRead
 
 
@@ -161,10 +163,17 @@ class OrganizationDirectoryRead(BaseModel):
 class OrganizationOnboardingCreate(BaseModel):
     organization: OrganizationCreate
     launch_goal: str | None = Field(default=None, max_length=500)
+    starter_team_name: str | None = Field(default=None, min_length=2, max_length=180)
+    starter_team_sport: str | None = Field(default=None, min_length=2, max_length=80)
+    starter_team_sport_format: SportFormat = SportFormat.TEAM
+    starter_team_age_group: str | None = Field(default=None, max_length=80)
+    starter_team_gender_category: str | None = Field(default=None, max_length=80)
+    starter_team_season_label: str | None = Field(default=None, max_length=80)
 
 
 class OrganizationOnboardingRead(BaseModel):
     organization: OrganizationRead
+    starter_team: TeamRead | None = None
     public_site_path: str
     dashboard_path: str
     owner_email: str

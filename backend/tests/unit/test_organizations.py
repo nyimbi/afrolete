@@ -51,6 +51,12 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
         headers=identity_headers,
         json={
             "launch_goal": "Open registration for term two athletics",
+            "starter_team_name": "Junior Sprint Squad",
+            "starter_team_sport": "athletics",
+            "starter_team_sport_format": "individual",
+            "starter_team_age_group": "U15",
+            "starter_team_gender_category": "open",
+            "starter_team_season_label": "Term 2",
             "organization": {
                 "name": "Makini Track School",
                 "organization_type": "school",
@@ -71,6 +77,10 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert onboarding["owner_email"] == identity_headers["X-Afrolete-Email"]
     assert onboarding["public_site_path"] == "/site/makini-track"
     assert onboarding["dashboard_path"].startswith("/?organization_id=")
+    assert onboarding["starter_team"]["name"] == "Junior Sprint Squad"
+    assert onboarding["starter_team"]["sport_format"] == "individual"
+    assert onboarding["starter_team"]["age_group"] == "U15"
+    assert onboarding["starter_team"]["season_label"] == "Term 2"
     assert onboarding["checklist"][0] == "Confirm launch goal: Open registration for term two athletics"
     assert any("school teams" in step for step in onboarding["checklist"])
 
@@ -82,7 +92,12 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     directory = directory_response.json()
     assert [item["slug"] for item in directory] == ["makini-track-school"]
     assert directory[0]["public_site_path"] == "/site/makini-track"
-    assert directory[0]["team_count"] == 0
+    assert directory[0]["team_count"] == 1
+
+    public_site_response = client.get("/api/v1/organizations/public/makini-track")
+    assert public_site_response.status_code == 200
+    public_site = public_site_response.json()
+    assert [team["name"] for team in public_site["teams"]] == ["Junior Sprint Squad"]
 
     inquiry_response = client.post(
         "/api/v1/organizations/public/makini-track/registration-inquiries",
@@ -93,6 +108,7 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
             "phone": "+254700000001",
             "age_group": "U15",
             "sport_interest": "athletics",
+            "team_id": onboarding["starter_team"]["id"],
             "message": "Interested in sprint training.",
             "source_url": "https://makini-track.afrolete.local/register",
         },
@@ -103,6 +119,7 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert inquiry["athlete_name"] == "Amina Runner"
     assert inquiry["status"] == "new"
     assert inquiry["organization_id"] == onboarding["organization"]["id"]
+    assert inquiry["team_id"] == onboarding["starter_team"]["id"]
     assert inquiry["verification_status"] == "inquiry"
 
     document_response = client.post(
