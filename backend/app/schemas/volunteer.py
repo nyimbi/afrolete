@@ -356,3 +356,53 @@ class VolunteerReminderRunRead(BaseModel):
     training_count: int
     recipient_count: int
     message_ids: list[UUID]
+
+
+class VolunteerSubstitutePoolMemberCreate(BaseModel):
+    organization_id: UUID
+    volunteer_profile_id: UUID
+    team_id: UUID | None = None
+    role_type: str = Field(min_length=2, max_length=80)
+    availability: list[str] = Field(default_factory=list, max_length=30)
+    priority: int = Field(default=50, ge=0, le=100)
+    max_dispatches_per_month: int = Field(default=4, ge=1, le=100)
+    status: str = Field(default="available", max_length=40)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class VolunteerSubstitutePoolMemberRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    volunteer_profile_id: UUID
+    person_id: UUID
+    person_name: str
+    person_email: str | None
+    team_id: UUID | None
+    role_type: str
+    availability: list[str]
+    priority: int
+    max_dispatches_per_month: int
+    status: str
+    last_contacted_at: datetime | None
+    notes: str | None
+
+
+class VolunteerSubstituteDispatchCreate(BaseModel):
+    organization_id: UUID
+    opportunity_id: UUID
+    limit: int = Field(default=3, ge=1, le=50)
+    channel: CommunicationChannel = CommunicationChannel.IN_APP
+    message: str | None = Field(default=None, max_length=2000)
+
+
+class VolunteerSubstituteDispatchRead(BaseModel):
+    organization_id: UUID
+    opportunity_id: UUID
+    opportunity_title: str
+    open_slots_before: int
+    candidate_count: int
+    dispatched_count: int
+    assignment_ids: list[UUID]
+    message_id: UUID | None
+    recipient_count: int
+    skipped_reasons: list[str]

@@ -152,6 +152,32 @@ class VolunteerObligation(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class VolunteerSubstitutePoolMember(IdMixin, TimestampMixin, Base):
+    __tablename__ = "volunteer_substitute_pool_members"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "volunteer_profile_id",
+            "team_id",
+            "role_type",
+            name="uq_volunteer_substitute_pool_org_profile_team_role",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), nullable=False, index=True)
+    volunteer_profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("volunteer_profiles.id"), nullable=False, index=True
+    )
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    role_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    availability_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, default=50, nullable=False, index=True)
+    max_dispatches_per_month: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="available", nullable=False, index=True)
+    last_contacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class VolunteerRecognition(IdMixin, TimestampMixin, Base):
     __tablename__ = "volunteer_recognitions"
 

@@ -628,3 +628,127 @@ def test_volunteer_automation_sends_reminders_for_coverage_obligations_and_train
     assert repeat["eligible_count"] == 3
     assert repeat["reminded_count"] == 0
     assert repeat["skipped_count"] == 3
+
+
+def test_volunteer_substitute_pool_dispatches_emergency_backups(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Substitute Volunteer Club",
+            "slug": "substitute-volunteer-club",
+            "organization_type": "club",
+            "primary_sport": "football",
+        },
+    ).json()
+    team = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Emergency Cover Team",
+            "sport": "football",
+            "sport_format": "team",
+        },
+    ).json()
+    event = client.post(
+        "/api/v1/events",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "event_type": "match",
+            "title": "Emergency Volunteer Match",
+            "starts_at": "2026-11-08T09:00:00Z",
+            "ends_at": "2026-11-08T12:00:00Z",
+            "venue_name": "Cover Ground",
+        },
+    ).json()
+    profile = client.post(
+        "/api/v1/volunteers/profiles",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "email": "sub.cover@example.com",
+            "display_name": "Sub Cover",
+            "volunteer_type": "first_aid",
+            "skills": ["first aid", "safeguarding"],
+            "availability": ["sunday"],
+            "background_check_status": "cleared",
+            "training_status": "complete",
+            "reliability_score": 0.98,
+        },
+    ).json()
+    opportunity = client.post(
+        "/api/v1/volunteers/opportunities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "event_id": event["id"],
+            "title": "Emergency first aid cover",
+            "role_type": "first_aid",
+            "required_skills": ["first aid"],
+            "starts_at": "2026-11-08T08:00:00Z",
+            "ends_at": "2026-11-08T13:00:00Z",
+            "slots_required": 1,
+            "background_check_required": True,
+            "training_required": True,
+            "priority": "urgent",
+        },
+    ).json()
+
+    pool_response = client.post(
+        "/api/v1/volunteers/substitute-pool",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "volunteer_profile_id": profile["id"],
+            "role_type": "first_aid",
+            "availability": ["sunday", "emergency"],
+            "priority": 95,
+            "max_dispatches_per_month": 6,
+            "notes": "Available for emergency medical cover.",
+        },
+    )
+
+    assert pool_response.status_code == 201
+    pool_member = pool_response.json()
+    assert pool_member["person_name"] == "Sub Cover"
+    assert pool_member["priority"] == 95
+
+    dispatch_response = client.post(
+        "/api/v1/volunteers/substitute-dispatches",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "opportunity_id": opportunity["id"],
+            "limit": 3,
+            "channel": "in_app",
+            "message": "Can you cover emergency first aid on Sunday?",
+        },
+    )
+
+    assert dispatch_response.status_code == 200
+    dispatch = dispatch_response.json()
+    assert dispatch["open_slots_before"] == 1
+    assert dispatch["candidate_count"] == 1
+    assert dispatch["dispatched_count"] == 1
+    assert dispatch["recipient_count"] == 1
+    assert dispatch["message_id"] is not None
+
+    assignments = client.get(
+        f"/api/v1/volunteers/assignments?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    invited = next(item for item in assignments if item["id"] == dispatch["assignment_ids"][0])
+    assert invited["status"] == "invited"
+    assert invited["person_name"] == "Sub Cover"
+    assert invited["match_score"] >= 0.9
+
+    pool = client.get(
+        f"/api/v1/volunteers/substitute-pool?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert pool[0]["last_contacted_at"] is not None

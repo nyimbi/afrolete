@@ -157,6 +157,7 @@ from app.models.volunteer import (  # noqa: F401,E402
     VolunteerOpportunity,
     VolunteerProfile,
     VolunteerRecognition,
+    VolunteerSubstitutePoolMember,
     VolunteerTrainingRecord,
 )
 

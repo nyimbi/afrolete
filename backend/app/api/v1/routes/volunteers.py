@@ -27,6 +27,10 @@ from app.schemas.volunteer import (
     VolunteerReminderRunRead,
     VolunteerRecognitionCreate,
     VolunteerRecognitionRead,
+    VolunteerSubstituteDispatchCreate,
+    VolunteerSubstituteDispatchRead,
+    VolunteerSubstitutePoolMemberCreate,
+    VolunteerSubstitutePoolMemberRead,
     VolunteerSummaryRead,
     VolunteerTrainingRecordCreate,
     VolunteerTrainingRecordRead,
@@ -43,8 +47,10 @@ from app.services.volunteers import (
     create_volunteer_opportunity,
     create_volunteer_profile,
     create_volunteer_recognition,
+    create_volunteer_substitute_pool_member,
     create_volunteer_training_record,
     decode_list,
+    dispatch_volunteer_substitutes,
     ensure_manage_volunteers,
     list_public_volunteer_opportunities,
     list_volunteer_group_applications,
@@ -54,6 +60,7 @@ from app.services.volunteers import (
     list_volunteer_obligations,
     list_volunteer_profiles,
     list_volunteer_recognitions,
+    list_volunteer_substitute_pool_members,
     list_volunteer_training_records,
     run_volunteer_reminders,
     update_volunteer_group_application,
@@ -188,6 +195,26 @@ def to_obligation_read(item) -> VolunteerObligationRead:
         due_on=obligation.due_on,
         status=obligation.status,
         notes=obligation.notes,
+    )
+
+
+def to_substitute_pool_read(item) -> VolunteerSubstitutePoolMemberRead:
+    pool_member, profile, person = item
+    return VolunteerSubstitutePoolMemberRead(
+        id=pool_member.id,
+        organization_id=pool_member.organization_id,
+        volunteer_profile_id=pool_member.volunteer_profile_id,
+        person_id=profile.person_id,
+        person_name=person.display_name,
+        person_email=person.primary_email,
+        team_id=pool_member.team_id,
+        role_type=pool_member.role_type,
+        availability=decode_list(pool_member.availability_json),
+        priority=pool_member.priority,
+        max_dispatches_per_month=pool_member.max_dispatches_per_month,
+        status=pool_member.status,
+        last_contacted_at=pool_member.last_contacted_at,
+        notes=pool_member.notes,
     )
 
 
@@ -457,6 +484,46 @@ async def run_volunteer_reminders_route(
 ) -> VolunteerReminderRunRead:
     await ensure_manage_volunteers(authz, identity, payload.organization_id)
     return await run_volunteer_reminders(db, payload)
+
+
+@router.post(
+    "/substitute-pool",
+    response_model=VolunteerSubstitutePoolMemberRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_volunteer_substitute_pool_member_route(
+    payload: VolunteerSubstitutePoolMemberCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> VolunteerSubstitutePoolMemberRead:
+    pool_member = await create_volunteer_substitute_pool_member(db, identity, payload, authz)
+    rows = await list_volunteer_substitute_pool_members(db, payload.organization_id)
+    return to_substitute_pool_read(next(item for item in rows if item[0].id == pool_member.id))
+
+
+@router.get("/substitute-pool", response_model=list[VolunteerSubstitutePoolMemberRead])
+async def list_volunteer_substitute_pool_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[VolunteerSubstitutePoolMemberRead]:
+    await ensure_manage_volunteers(authz, identity, organization_id)
+    return [
+        to_substitute_pool_read(item)
+        for item in await list_volunteer_substitute_pool_members(db, organization_id)
+    ]
+
+
+@router.post("/substitute-dispatches", response_model=VolunteerSubstituteDispatchRead)
+async def dispatch_volunteer_substitutes_route(
+    payload: VolunteerSubstituteDispatchCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> VolunteerSubstituteDispatchRead:
+    return await dispatch_volunteer_substitutes(db, identity, payload, authz)
 
 
 @router.post("/training-records", response_model=VolunteerTrainingRecordRead, status_code=status.HTTP_201_CREATED)

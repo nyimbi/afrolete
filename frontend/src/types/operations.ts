@@ -606,6 +606,36 @@ export type VolunteerReminderRunRead = {
   message_ids: UUID[];
 };
 
+export type VolunteerSubstitutePoolMemberRead = {
+  id: UUID;
+  organization_id: UUID;
+  volunteer_profile_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  person_email: string | null;
+  team_id: UUID | null;
+  role_type: string;
+  availability: string[];
+  priority: number;
+  max_dispatches_per_month: number;
+  status: string;
+  last_contacted_at: string | null;
+  notes: string | null;
+};
+
+export type VolunteerSubstituteDispatchRead = {
+  organization_id: UUID;
+  opportunity_id: UUID;
+  opportunity_title: string;
+  open_slots_before: number;
+  candidate_count: number;
+  dispatched_count: number;
+  assignment_ids: UUID[];
+  message_id: UUID | null;
+  recipient_count: number;
+  skipped_reasons: string[];
+};
+
 export type TeamRead = {
   id: UUID;
   organization_id: UUID;

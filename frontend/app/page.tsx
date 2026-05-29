@@ -362,6 +362,8 @@ import type {
   VolunteerProfileRead,
   VolunteerReminderRunRead,
   VolunteerRecognitionRead,
+  VolunteerSubstituteDispatchRead,
+  VolunteerSubstitutePoolMemberRead,
   VolunteerSummaryRead,
   VolunteerTrainingRecordRead,
   WorkOrderPriority,
@@ -1636,6 +1638,9 @@ export default function HomePage() {
   const [volunteerRecognitions, setVolunteerRecognitions] = useState<VolunteerRecognitionRead[]>([]);
   const [volunteerSummary, setVolunteerSummary] = useState<VolunteerSummaryRead | null>(null);
   const [volunteerReminderRun, setVolunteerReminderRun] = useState<VolunteerReminderRunRead | null>(null);
+  const [volunteerSubstitutePool, setVolunteerSubstitutePool] = useState<VolunteerSubstitutePoolMemberRead[]>([]);
+  const [volunteerSubstituteDispatch, setVolunteerSubstituteDispatch] =
+    useState<VolunteerSubstituteDispatchRead | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionRead[]>([]);
   const [competitionParticipants, setCompetitionParticipants] = useState<CompetitionParticipantRead[]>([]);
   const [competitionFixtures, setCompetitionFixtures] = useState<CompetitionFixtureRead[]>([]);
@@ -2237,6 +2242,14 @@ export default function HomePage() {
     waived_hours: 0,
     due_on: "2026-12-15",
     notes: "Family volunteer service obligation."
+  });
+  const [volunteerSubstituteForm, setVolunteerSubstituteForm] = useState({
+    role_type: "first_aid",
+    availability: "saturday,sunday,emergency",
+    priority: 90,
+    max_dispatches_per_month: 6,
+    notes: "Available for emergency substitute cover.",
+    dispatch_message: "Can you cover this emergency volunteer assignment?"
   });
   const [volunteerTrainingForm, setVolunteerTrainingForm] = useState({
     module_name: "Safeguarding for Matchday Volunteers",
@@ -3169,6 +3182,7 @@ export default function HomePage() {
       groupApplications,
       needRequests,
       obligations,
+      substitutePool,
       trainingRecords,
       recognitions,
       summary
@@ -3179,6 +3193,7 @@ export default function HomePage() {
       apiRequest<VolunteerGroupApplicationRead[]>(`/volunteers/group-applications?organization_id=${organizationId}`),
       apiRequest<VolunteerNeedRequestRead[]>(`/volunteers/need-requests?organization_id=${organizationId}`),
       apiRequest<VolunteerObligationRead[]>(`/volunteers/obligations?organization_id=${organizationId}`),
+      apiRequest<VolunteerSubstitutePoolMemberRead[]>(`/volunteers/substitute-pool?organization_id=${organizationId}`),
       apiRequest<VolunteerTrainingRecordRead[]>(`/volunteers/training-records?organization_id=${organizationId}`),
       apiRequest<VolunteerRecognitionRead[]>(`/volunteers/recognitions?organization_id=${organizationId}`),
       apiRequest<VolunteerSummaryRead>(`/volunteers/summary?organization_id=${organizationId}`)
@@ -3189,6 +3204,7 @@ export default function HomePage() {
     setVolunteerGroupApplications(groupApplications);
     setVolunteerNeedRequests(needRequests);
     setVolunteerObligations(obligations);
+    setVolunteerSubstitutePool(substitutePool);
     setVolunteerTrainingRecords(trainingRecords);
     setVolunteerRecognitions(recognitions);
     setVolunteerSummary(summary);
@@ -3730,6 +3746,8 @@ export default function HomePage() {
       setVolunteerRecognitions([]);
       setVolunteerSummary(null);
       setVolunteerReminderRun(null);
+      setVolunteerSubstitutePool([]);
+      setVolunteerSubstituteDispatch(null);
       setSelectedVolunteerProfileId("");
       setSelectedVolunteerOpportunityId("");
       setSelectedVolunteerAssignmentId("");
@@ -9894,6 +9912,70 @@ export default function HomePage() {
         addLog(
           `Volunteer reminders sent to ${run.recipient_count} recipient(s) across ${run.reminded_count} message(s)`,
           run.failed_count ? "bad" : "good"
+        );
+        void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const addVolunteerSubstitutePoolMember = () => {
+    if (!selectedOrganizationId || !selectedVolunteerProfileId) {
+      addLog("Select a volunteer before adding substitute cover", "bad");
+      return;
+    }
+    runAction(
+      "add-volunteer-substitute",
+      () =>
+        apiRequest<VolunteerSubstitutePoolMemberRead>("/volunteers/substitute-pool", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            volunteer_profile_id: selectedVolunteerProfileId,
+            team_id: selectedTeamId || null,
+            role_type: volunteerSubstituteForm.role_type,
+            availability: parseCommaList(volunteerSubstituteForm.availability),
+            priority: volunteerSubstituteForm.priority,
+            max_dispatches_per_month: volunteerSubstituteForm.max_dispatches_per_month,
+            status: "available",
+            notes: volunteerSubstituteForm.notes
+          }
+        }),
+      (poolMember) => {
+        setVolunteerSubstitutePool((current) => [
+          poolMember,
+          ...current.filter((item) => item.id !== poolMember.id)
+        ]);
+        addLog(`${poolMember.person_name} is now in the ${poolMember.role_type} substitute pool`, "good");
+        void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const dispatchVolunteerSubstitutes = () => {
+    if (!selectedOrganizationId || !selectedVolunteerOpportunityId) {
+      addLog("Select a volunteer opportunity before dispatching substitutes", "bad");
+      return;
+    }
+    runAction(
+      "dispatch-volunteer-substitutes",
+      () =>
+        apiRequest<VolunteerSubstituteDispatchRead>("/volunteers/substitute-dispatches", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            opportunity_id: selectedVolunteerOpportunityId,
+            limit: Math.max(selectedVolunteerOpportunity?.open_slots ?? 1, 1),
+            channel: "in_app",
+            message: volunteerSubstituteForm.dispatch_message
+          }
+        }),
+      (dispatch) => {
+        setVolunteerSubstituteDispatch(dispatch);
+        addLog(
+          `Dispatched ${dispatch.dispatched_count} substitute volunteer(s) for ${dispatch.opportunity_title}`,
+          dispatch.dispatched_count ? "good" : "bad"
         );
         void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
       }
@@ -18788,6 +18870,7 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createVolunteerProfile} disabled={busyAction !== null}>Profile</button>
                 <button type="button" onClick={createVolunteerObligation} disabled={busyAction !== null}>Obligation</button>
+                <button type="button" onClick={addVolunteerSubstitutePoolMember} disabled={busyAction !== null}>Pool</button>
                 <button type="button" onClick={runVolunteerReminders} disabled={busyAction !== null}>Remind</button>
                 <button type="button" onClick={createVolunteerTrainingRecord} disabled={busyAction !== null}>Training</button>
                 <button type="button" onClick={createVolunteerRecognition} disabled={busyAction !== null}>Award</button>
@@ -18885,6 +18968,26 @@ export default function HomePage() {
                 <input value={volunteerObligationForm.notes} onChange={(event) => setVolunteerObligationForm({ ...volunteerObligationForm, notes: event.target.value })} />
               </label>
               <label>
+                Substitute role
+                <input value={volunteerSubstituteForm.role_type} onChange={(event) => setVolunteerSubstituteForm({ ...volunteerSubstituteForm, role_type: event.target.value })} />
+              </label>
+              <label>
+                Substitute priority
+                <input type="number" min="0" max="100" value={volunteerSubstituteForm.priority} onChange={(event) => setVolunteerSubstituteForm({ ...volunteerSubstituteForm, priority: Number(event.target.value) })} />
+              </label>
+              <label>
+                Monthly dispatch cap
+                <input type="number" min="1" value={volunteerSubstituteForm.max_dispatches_per_month} onChange={(event) => setVolunteerSubstituteForm({ ...volunteerSubstituteForm, max_dispatches_per_month: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Substitute availability
+                <input value={volunteerSubstituteForm.availability} onChange={(event) => setVolunteerSubstituteForm({ ...volunteerSubstituteForm, availability: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Substitute notes
+                <input value={volunteerSubstituteForm.notes} onChange={(event) => setVolunteerSubstituteForm({ ...volunteerSubstituteForm, notes: event.target.value })} />
+              </label>
+              <label>
                 Training module
                 <input value={volunteerTrainingForm.module_name} onChange={(event) => setVolunteerTrainingForm({ ...volunteerTrainingForm, module_name: event.target.value })} />
               </label>
@@ -18956,6 +19059,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {volunteerSubstitutePool.slice(0, 4).map((poolMember) => (
+                <article key={poolMember.id} className="task-card">
+                  <div>
+                    <strong>{poolMember.person_name} · {poolMember.role_type.replaceAll("_", " ")}</strong>
+                    <span>{poolMember.status} · priority {poolMember.priority} · cap {poolMember.max_dispatches_per_month}/month</span>
+                    <small>{poolMember.availability.join(", ") || "No substitute availability"}</small>
+                  </div>
+                </article>
+              ))}
             </div>
           </div>
 
@@ -18969,6 +19081,7 @@ export default function HomePage() {
                 <button type="button" onClick={createVolunteerOpportunity} disabled={busyAction !== null}>Shift</button>
                 <button type="button" onClick={createVolunteerNeedRequest} disabled={busyAction !== null}>Need</button>
                 <button type="button" onClick={assignVolunteer} disabled={busyAction !== null}>Assign</button>
+                <button type="button" onClick={dispatchVolunteerSubstitutes} disabled={busyAction !== null}>Dispatch</button>
                 <button type="button" onClick={completeVolunteerAssignment} disabled={busyAction !== null}>Complete</button>
               </div>
             </div>
@@ -19054,8 +19167,27 @@ export default function HomePage() {
                 Need notes
                 <input value={volunteerNeedForm.notes} onChange={(event) => setVolunteerNeedForm({ ...volunteerNeedForm, notes: event.target.value })} />
               </label>
+              <label className="wide-field">
+                Dispatch message
+                <input value={volunteerSubstituteForm.dispatch_message} onChange={(event) => setVolunteerSubstituteForm({ ...volunteerSubstituteForm, dispatch_message: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
+              {volunteerSubstituteDispatch ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Substitute dispatch · {volunteerSubstituteDispatch.dispatched_count} invited</strong>
+                    <span>
+                      {volunteerSubstituteDispatch.candidate_count} candidates ·{" "}
+                      {volunteerSubstituteDispatch.open_slots_before} open slots ·{" "}
+                      {volunteerSubstituteDispatch.recipient_count} recipients
+                    </span>
+                    <small>
+                      {volunteerSubstituteDispatch.skipped_reasons.join(", ") || volunteerSubstituteDispatch.opportunity_title}
+                    </small>
+                  </div>
+                </article>
+              ) : null}
               {volunteerNeedRequests.slice(0, 4).map((request) => (
                 <article key={request.id} className="task-card">
                   <div>

@@ -27,6 +27,7 @@ from app.models.volunteer import (
     VolunteerOpportunity,
     VolunteerProfile,
     VolunteerRecognition,
+    VolunteerSubstitutePoolMember,
     VolunteerTrainingRecord,
 )
 from app.schemas.volunteer import (
@@ -44,6 +45,9 @@ from app.schemas.volunteer import (
     VolunteerReminderRunCreate,
     VolunteerReminderRunRead,
     VolunteerRecognitionCreate,
+    VolunteerSubstituteDispatchCreate,
+    VolunteerSubstituteDispatchRead,
+    VolunteerSubstitutePoolMemberCreate,
     VolunteerTrainingRecordCreate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -481,6 +485,234 @@ def compute_match_score(profile: VolunteerProfile, opportunity: VolunteerOpportu
         readiness_score -= 0.25
     score = (skill_score * 0.4) + (availability_score * 0.25) + (role_score * 0.2) + (profile.reliability_score * 0.15)
     return round(max(0.0, min(score * readiness_score, 1.0)), 3)
+
+
+def substitute_candidate_score(
+    pool_member: VolunteerSubstitutePoolMember,
+    profile: VolunteerProfile,
+    opportunity: VolunteerOpportunity,
+) -> float:
+    base_score = compute_match_score(profile, opportunity)
+    priority_bonus = min(max(pool_member.priority, 0), 100) / 1000
+    status_bonus = 0.05 if pool_member.status == "available" else 0
+    return round(min(base_score + priority_bonus + status_bonus, 1.0), 3)
+
+
+async def active_assignment_count(db: AsyncSession, opportunity_id: UUID) -> int:
+    return int(
+        await db.scalar(
+            select(func.count(VolunteerAssignment.id)).where(
+                VolunteerAssignment.opportunity_id == opportunity_id,
+                VolunteerAssignment.status.in_(["assigned", "confirmed", "checked_in", "completed"]),
+            )
+        )
+        or 0
+    )
+
+
+async def create_volunteer_substitute_pool_member(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: VolunteerSubstitutePoolMemberCreate,
+    authz: AuthorizationService,
+) -> VolunteerSubstitutePoolMember:
+    await ensure_manage_volunteers(authz, identity, payload.organization_id)
+    await ensure_volunteer_scope(db, payload.organization_id, payload.team_id)
+    profile = await get_volunteer_profile(db, payload.volunteer_profile_id)
+    if profile.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    existing = await db.scalar(
+        select(VolunteerSubstitutePoolMember).where(
+            VolunteerSubstitutePoolMember.organization_id == payload.organization_id,
+            VolunteerSubstitutePoolMember.volunteer_profile_id == profile.id,
+            VolunteerSubstitutePoolMember.team_id == payload.team_id,
+            VolunteerSubstitutePoolMember.role_type == payload.role_type,
+        )
+    )
+    if existing is not None:
+        existing.availability_json = encode_list(payload.availability)
+        existing.priority = payload.priority
+        existing.max_dispatches_per_month = payload.max_dispatches_per_month
+        existing.status = payload.status
+        existing.notes = payload.notes
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+    pool_member = VolunteerSubstitutePoolMember(
+        organization_id=payload.organization_id,
+        volunteer_profile_id=profile.id,
+        team_id=payload.team_id,
+        role_type=payload.role_type,
+        availability_json=encode_list(payload.availability),
+        priority=payload.priority,
+        max_dispatches_per_month=payload.max_dispatches_per_month,
+        status=payload.status,
+        notes=payload.notes,
+    )
+    db.add(pool_member)
+    await db.commit()
+    await db.refresh(pool_member)
+    return pool_member
+
+
+async def list_volunteer_substitute_pool_members(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[tuple[VolunteerSubstitutePoolMember, VolunteerProfile, Person]]:
+    return list(
+        (
+            await db.execute(
+                select(VolunteerSubstitutePoolMember, VolunteerProfile, Person)
+                .join(VolunteerProfile, VolunteerProfile.id == VolunteerSubstitutePoolMember.volunteer_profile_id)
+                .join(Person, Person.id == VolunteerProfile.person_id)
+                .where(VolunteerSubstitutePoolMember.organization_id == organization_id)
+                .order_by(
+                    VolunteerSubstitutePoolMember.status,
+                    VolunteerSubstitutePoolMember.priority.desc(),
+                    Person.display_name,
+                )
+            )
+        ).all()
+    )
+
+
+async def volunteer_substitute_candidates(
+    db: AsyncSession,
+    opportunity: VolunteerOpportunity,
+) -> list[tuple[VolunteerSubstitutePoolMember, VolunteerProfile, Person, float]]:
+    rows = await db.execute(
+        select(VolunteerSubstitutePoolMember, VolunteerProfile, Person)
+        .join(VolunteerProfile, VolunteerProfile.id == VolunteerSubstitutePoolMember.volunteer_profile_id)
+        .join(Person, Person.id == VolunteerProfile.person_id)
+        .where(VolunteerSubstitutePoolMember.organization_id == opportunity.organization_id)
+        .where(VolunteerSubstitutePoolMember.status == "available")
+        .where(VolunteerSubstitutePoolMember.role_type == opportunity.role_type)
+        .where(
+            or_(
+                VolunteerSubstitutePoolMember.team_id.is_(None),
+                VolunteerSubstitutePoolMember.team_id == opportunity.team_id,
+            )
+        )
+    )
+    candidates: list[tuple[VolunteerSubstitutePoolMember, VolunteerProfile, Person, float]] = []
+    for pool_member, profile, person in rows.all():
+        existing = await db.scalar(
+            select(VolunteerAssignment.id)
+            .join(VolunteerOpportunity, VolunteerOpportunity.id == VolunteerAssignment.opportunity_id)
+            .where(
+                VolunteerAssignment.volunteer_profile_id == profile.id,
+                VolunteerAssignment.status.in_(["invited", "assigned", "confirmed", "checked_in"]),
+                VolunteerOpportunity.starts_at < (opportunity.ends_at or opportunity.starts_at),
+                or_(VolunteerOpportunity.ends_at.is_(None), VolunteerOpportunity.ends_at > opportunity.starts_at),
+            )
+            .limit(1)
+        )
+        if existing is not None:
+            continue
+        if opportunity.background_check_required and profile.background_check_status not in {"cleared", "approved"}:
+            continue
+        if opportunity.training_required and profile.training_status != "complete":
+            continue
+        candidates.append((pool_member, profile, person, substitute_candidate_score(pool_member, profile, opportunity)))
+    return sorted(candidates, key=lambda row: (row[3], row[0].priority, row[2].display_name), reverse=True)
+
+
+async def dispatch_volunteer_substitutes(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: VolunteerSubstituteDispatchCreate,
+    authz: AuthorizationService,
+) -> VolunteerSubstituteDispatchRead:
+    await ensure_manage_volunteers(authz, identity, payload.organization_id)
+    opportunity = await get_volunteer_opportunity(db, payload.opportunity_id)
+    if opportunity.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    assigned_count = await active_assignment_count(db, opportunity.id)
+    open_slots = max(opportunity.slots_required - assigned_count, 0)
+    if open_slots <= 0:
+        return VolunteerSubstituteDispatchRead(
+            organization_id=payload.organization_id,
+            opportunity_id=opportunity.id,
+            opportunity_title=opportunity.title,
+            open_slots_before=0,
+            candidate_count=0,
+            dispatched_count=0,
+            assignment_ids=[],
+            message_id=None,
+            recipient_count=0,
+            skipped_reasons=["Opportunity is already fully staffed."],
+        )
+    candidates = await volunteer_substitute_candidates(db, opportunity)
+    selected = candidates[: min(payload.limit, open_slots)]
+    assignment_ids: list[UUID] = []
+    recipient_ids: list[UUID] = []
+    now = datetime.now(UTC)
+    for pool_member, profile, person, match_score in selected:
+        assignment = await db.scalar(
+            select(VolunteerAssignment).where(
+                VolunteerAssignment.opportunity_id == opportunity.id,
+                VolunteerAssignment.volunteer_profile_id == profile.id,
+            )
+        )
+        if assignment is None:
+            assignment = VolunteerAssignment(
+                organization_id=payload.organization_id,
+                opportunity_id=opportunity.id,
+                volunteer_profile_id=profile.id,
+                person_id=profile.person_id,
+                assigned_by_person_id=identity.person_id,
+                status="invited",
+                match_score=match_score,
+                notes="Emergency substitute dispatch invitation.",
+            )
+            db.add(assignment)
+            await db.flush()
+        else:
+            assignment.status = "invited"
+            assignment.match_score = match_score
+            assignment.notes = payload.message or assignment.notes
+        pool_member.last_contacted_at = now
+        assignment_ids.append(assignment.id)
+        recipient_ids.append(person.id)
+    message_id: UUID | None = None
+    recipient_count = 0
+    if recipient_ids:
+        message = await create_message_for_recipients(
+            db,
+            organization_id=payload.organization_id,
+            message_type=CommunicationMessageType.REMINDER,
+            channel=payload.channel,
+            scope_type=CommunicationScopeType.ORGANIZATION,
+            scope_id=payload.organization_id,
+            recipient_person_ids=recipient_ids,
+            subject=f"Emergency substitute request: {opportunity.title}",
+            body=payload.message
+            or (
+                f"{opportunity.title} needs emergency substitute volunteer coverage.\n\n"
+                f"Role: {opportunity.role_type}\n"
+                f"Starts: {opportunity.starts_at.isoformat()}\n"
+                "Please confirm if you can cover this assignment."
+            ),
+            created_by_person_id=identity.person_id,
+        )
+        message_id = message.id
+        recipient_count = int(
+            await db.scalar(select(func.count(MessageRecipient.id)).where(MessageRecipient.message_id == message.id))
+            or 0
+        )
+    await db.commit()
+    return VolunteerSubstituteDispatchRead(
+        organization_id=payload.organization_id,
+        opportunity_id=opportunity.id,
+        opportunity_title=opportunity.title,
+        open_slots_before=open_slots,
+        candidate_count=len(candidates),
+        dispatched_count=len(assignment_ids),
+        assignment_ids=assignment_ids,
+        message_id=message_id,
+        recipient_count=recipient_count,
+        skipped_reasons=[] if selected else ["No available substitute pool members matched this opportunity."],
+    )
 
 
 async def create_public_volunteer_signup(
