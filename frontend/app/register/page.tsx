@@ -768,6 +768,27 @@ export default function RegistrationPage() {
     }
   };
 
+  const runOnboardingConcierge = async () => {
+    const task = onboarding?.concierge_task;
+    if (!task) {
+      setError("Create the workspace before running the onboarding concierge.");
+      return;
+    }
+    setBusy("onboarding-concierge");
+    setError("");
+    try {
+      const executed = await apiRequest<OrganizationOnboardingRead["concierge_task"]>(
+        `/agents/tasks/${task.id}/execute`,
+        { method: "POST", identity: requestIdentity }
+      );
+      setOnboarding((current) => current ? { ...current, concierge_task: executed } : current);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Onboarding concierge could not be run");
+    } finally {
+      setBusy("");
+    }
+  };
+
   return (
     <main className="register-page">
       <section className="register-hero">
@@ -1045,6 +1066,15 @@ export default function RegistrationPage() {
                       <small>
                         {onboarding.concierge_task.status.replaceAll("_", " ")} · {onboarding.concierge_task.task_type}
                       </small>
+                      {onboarding.concierge_task.review_notes ? <small>{onboarding.concierge_task.review_notes}</small> : null}
+                      {onboarding.concierge_task.output_ref ? <small>{onboarding.concierge_task.output_ref}</small> : null}
+                      <button
+                        type="button"
+                        onClick={runOnboardingConcierge}
+                        disabled={busy !== "" || !canRunOnboardingConcierge(onboarding.concierge_task)}
+                      >
+                        {busy === "onboarding-concierge" ? "Running concierge" : "Run concierge"}
+                      </button>
                     </div>
                   ) : null}
                   <ol>
@@ -1495,6 +1525,10 @@ function registrationReturnTo(siteSlug: string, inquiry: RegistrationInquiryRead
 
 function documentFilename(packet: RegistrationPacketRead, documentType: string): string | null {
   return packet.submitted_documents.find((document) => document.document_type === documentType)?.filename ?? null;
+}
+
+function canRunOnboardingConcierge(task: OrganizationOnboardingRead["concierge_task"]): boolean {
+  return task !== null && ["queued", "failed"].includes(task.status);
 }
 
 function isSessionForInquiry(session: AuthSession | null, inquiry: RegistrationInquiryRead): boolean {

@@ -3165,6 +3165,11 @@ textarea:focus {
   color: var(--muted);
 }
 
+.register-agent-card button {
+  justify-self: start;
+  margin-top: 4px;
+}
+
 .register-directory {
   display: grid;
   gap: 8px;

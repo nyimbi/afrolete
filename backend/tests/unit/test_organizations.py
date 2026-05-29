@@ -151,6 +151,15 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert onboarding["concierge_task"]["organization_id"] == onboarding["organization"]["id"]
     assert "Makini Track" in onboarding["concierge_task"]["title"]
     assert "Open registration for term two athletics" in onboarding["concierge_task"]["input_ref"]
+    concierge_run_response = client.post(
+        f"/api/v1/agents/tasks/{onboarding['concierge_task']['id']}/execute",
+        headers=identity_headers,
+    )
+    assert concierge_run_response.status_code == 200
+    concierge_run = concierge_run_response.json()
+    assert concierge_run["status"] == "waiting_for_review"
+    assert concierge_run["output_ref"].startswith("agent://tasks/")
+    assert "Onboarding Concierge Agent prepared" in concierge_run["review_notes"]
     assert onboarding["organization"]["registration_fee_amount"] == "1000.00"
     assert onboarding["organization"]["registration_fee_currency"] == "KES"
     assert onboarding["organization"]["registration_required_documents"] == [
