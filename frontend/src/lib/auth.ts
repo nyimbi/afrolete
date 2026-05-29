@@ -14,6 +14,11 @@ export type AuthSession = {
   name?: string;
 };
 
+export type KeycloakLoginOptions = {
+  loginHint?: string;
+  prompt?: "consent" | "login" | "none" | "select_account";
+};
+
 type TokenResponse = {
   access_token: string;
   id_token?: string;
@@ -60,7 +65,7 @@ export function clearStoredAuthSession(): void {
   window.sessionStorage.removeItem(VERIFIER_KEY);
 }
 
-export async function startKeycloakLogin(): Promise<void> {
+export async function startKeycloakLogin(options: KeycloakLoginOptions = {}): Promise<void> {
   assertBrowser();
 
   const verifier = randomString(64);
@@ -78,6 +83,12 @@ export async function startKeycloakLogin(): Promise<void> {
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
+  if (options.loginHint) {
+    url.searchParams.set("login_hint", options.loginHint);
+  }
+  if (options.prompt) {
+    url.searchParams.set("prompt", options.prompt);
+  }
 
   window.location.assign(url.toString());
 }

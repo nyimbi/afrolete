@@ -1058,6 +1058,24 @@ textarea:focus {
   margin-top: 26px;
 }
 
+.family-auth-summary {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  min-height: 70px;
+  padding: 9px 10px;
+}
+
+.family-auth-summary span,
+.family-auth-summary small {
+  color: var(--muted);
+}
+
+.family-auth-summary strong {
+  overflow-wrap: anywhere;
+}
+
 .family-metrics {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

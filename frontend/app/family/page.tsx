@@ -2,6 +2,14 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
+import {
+  clearStoredAuthSession,
+  completeKeycloakCallbackFromUrl,
+  getStoredAuthSession,
+  startKeycloakLogin,
+  type AuthSession
+} from "@/lib/auth";
+import { afroleteAuthMode, keycloakClientId, keycloakIssuer } from "@/lib/config";
 import type {
   ActivityConsentRead,
   AgentDecisionAppealFormRead,
@@ -25,9 +33,13 @@ const defaultFamilyIdentity: LocalIdentity = {
   name: "Parent Example"
 };
 
+const keycloakEnabled = afroleteAuthMode === "keycloak";
+
 export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [inviteRelationshipId, setInviteRelationshipId] = useState("");
   const [loadedInviteKey, setLoadedInviteKey] = useState("");
   const [family, setFamily] = useState<FamilyAthleteSummaryRead[]>([]);
   const [dashboard, setDashboard] = useState<FamilyDashboardRead | null>(null);
@@ -48,12 +60,18 @@ export default function FamilyPortalPage() {
   useEffect(() => {
     let nextOrganizationId = "";
     let nextIdentity = defaultFamilyIdentity;
+    let nextInviteRelationshipId = "";
     const stored = window.localStorage.getItem("afrolete.familyPortal");
     if (stored) {
       try {
-        const parsed = JSON.parse(stored) as { organizationId?: string; identity?: LocalIdentity };
+        const parsed = JSON.parse(stored) as {
+          organizationId?: string;
+          identity?: LocalIdentity;
+          relationshipId?: string;
+        };
         nextOrganizationId = parsed.organizationId ?? "";
         nextIdentity = parsed.identity ?? defaultFamilyIdentity;
+        nextInviteRelationshipId = parsed.relationshipId ?? "";
       } catch {
         window.localStorage.removeItem("afrolete.familyPortal");
       }
@@ -61,12 +79,16 @@ export default function FamilyPortalPage() {
 
     const params = new URLSearchParams(window.location.search);
     const organizationParam = params.get("organization_id") ?? params.get("organizationId");
+    const relationshipParam = params.get("relationship_id") ?? "";
     const emailParam = params.get("guardian_email") ?? params.get("email");
     const nameParam = params.get("guardian_name") ?? params.get("name") ?? emailParam;
     const subParam = params.get("guardian_sub") ?? params.get("sub");
 
     if (organizationParam) {
       nextOrganizationId = organizationParam;
+    }
+    if (relationshipParam) {
+      nextInviteRelationshipId = relationshipParam;
     }
     if (emailParam || nameParam || subParam) {
       nextIdentity = {
@@ -78,11 +100,45 @@ export default function FamilyPortalPage() {
 
     setOrganizationId(nextOrganizationId);
     setIdentity(nextIdentity);
+    setInviteRelationshipId(nextInviteRelationshipId);
+    if (keycloakEnabled) {
+      completeKeycloakCallbackFromUrl()
+        .then((session) => setAuthSession(session ?? getStoredAuthSession()))
+        .catch((caught) => {
+          setAuthSession(null);
+          setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
+        });
+    }
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("afrolete.familyPortal", JSON.stringify({ organizationId, identity }));
-  }, [identity, organizationId]);
+    window.localStorage.setItem(
+      "afrolete.familyPortal",
+      JSON.stringify({ organizationId, identity, relationshipId: inviteRelationshipId })
+    );
+  }, [identity, inviteRelationshipId, organizationId]);
+
+  const requestIdentity = useMemo(() => (keycloakEnabled ? undefined : identity), [identity]);
+  const signedInLabel = authSession?.email ?? authSession?.name ?? identity.email;
+  const inviteEmailMismatch =
+    keycloakEnabled &&
+    authSession?.email !== undefined &&
+    identity.email !== "" &&
+    authSession.email.toLowerCase() !== identity.email.toLowerCase();
+
+  const beginKeycloakLogin = () => {
+    setBusy(true);
+    setError("");
+    void startKeycloakLogin({ loginHint: identity.email || undefined, prompt: "login" }).catch((caught) => {
+      setBusy(false);
+      setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
+    });
+  };
+
+  const signOut = () => {
+    clearStoredAuthSession();
+    setAuthSession(null);
+  };
 
   const selectedItem = useMemo(
     () => items.find((item) => item.recipient_id === selectedRecipientId) ?? items[0] ?? null,
@@ -98,36 +154,44 @@ export default function FamilyPortalPage() {
       setError("Organization id is required");
       return;
     }
+    if (keycloakEnabled && authSession === null) {
+      setError("Sign in with Keycloak to open the family portal.");
+      return;
+    }
+    if (inviteEmailMismatch) {
+      setError("The signed-in Keycloak email does not match this guardian invitation.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       const organizationQuery = encodeURIComponent(organizationId);
       const [dashboardSummary, familyRows, performanceRows, eventRows, pendingRequests, appeals, aiTaskRows, inbox] = await Promise.all([
         apiRequest<FamilyDashboardRead>(`/safeguarding/my-family/dashboard?organization_id=${organizationQuery}`, {
-          identity
+          identity: requestIdentity
         }),
         apiRequest<FamilyAthleteSummaryRead[]>(`/safeguarding/my-family?organization_id=${organizationQuery}`, {
-          identity
+          identity: requestIdentity
         }),
         apiRequest<FamilyPerformanceSummaryRead[]>(
           `/safeguarding/my-family/performance?organization_id=${organizationQuery}`,
-          { identity }
+          { identity: requestIdentity }
         ),
         apiRequest<FamilyEventSummaryRead[]>(`/safeguarding/my-family/events?organization_id=${organizationQuery}`, {
-          identity
+          identity: requestIdentity
         }),
         apiRequest<FamilyConsentRequestRead[]>(
           `/safeguarding/my-family/consent-requests?organization_id=${organizationQuery}`,
-          { identity }
+          { identity: requestIdentity }
         ),
         apiRequest<AgentDecisionAppealRead[]>(`/agents/my-appeals?organization_id=${organizationQuery}`, {
-          identity
+          identity: requestIdentity
         }),
         apiRequest<AgentFamilyTaskRead[]>(`/agents/my-family-tasks?organization_id=${organizationQuery}`, {
-          identity
+          identity: requestIdentity
         }),
         apiRequest<CommunicationInboxItemRead[]>(`/communications/my-inbox?organization_id=${organizationQuery}`, {
-          identity
+          identity: requestIdentity
         })
       ]);
       setDashboard(dashboardSummary);
@@ -149,14 +213,18 @@ export default function FamilyPortalPage() {
   };
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const inviteKey = params.get("relationship_id") ?? "";
-    if (!inviteKey || !organizationId || loadedInviteKey === inviteKey) {
+    if (!inviteRelationshipId || !organizationId || loadedInviteKey === inviteRelationshipId) {
       return;
     }
-    setLoadedInviteKey(inviteKey);
+    if (keycloakEnabled && authSession === null) {
+      return;
+    }
+    if (inviteEmailMismatch) {
+      return;
+    }
+    setLoadedInviteKey(inviteRelationshipId);
     void loadWorkspace();
-  }, [identity, loadedInviteKey, organizationId]);
+  }, [authSession, identity, inviteEmailMismatch, inviteRelationshipId, loadedInviteKey, organizationId, requestIdentity]);
 
   const markRead = async (recipientId: string) => {
     setBusy(true);
@@ -164,7 +232,7 @@ export default function FamilyPortalPage() {
     try {
       const recipient = await apiRequest<MessageRecipientRead>(`/communications/inbox/${recipientId}/read`, {
         method: "POST",
-        identity
+        identity: requestIdentity
       });
       setItems((current) =>
         current.map((item) =>
@@ -194,7 +262,7 @@ export default function FamilyPortalPage() {
         `/safeguarding/my-family/events/${event.event_id}/athletes/${event.athlete_person_id}/rsvp`,
         {
           method: "POST",
-          identity,
+          identity: requestIdentity,
           body: {
             organization_id: organizationId,
             status
@@ -223,7 +291,7 @@ export default function FamilyPortalPage() {
         `/safeguarding/my-family/consent-requests/${request.id}/response`,
         {
           method: "POST",
-          identity,
+          identity: requestIdentity,
           body: {
             status,
             notes: `Family portal response: ${status}`
@@ -232,7 +300,7 @@ export default function FamilyPortalPage() {
       );
       const eventRows = await apiRequest<FamilyEventSummaryRead[]>(
         `/safeguarding/my-family/events?organization_id=${encodeURIComponent(organizationId)}`,
-        { identity }
+        { identity: requestIdentity }
       );
       setConsentRequests((current) => current.filter((item) => item.id !== request.id));
       setEvents(eventRows);
@@ -267,13 +335,13 @@ export default function FamilyPortalPage() {
     try {
       const appeal = await apiRequest<AgentDecisionAppealRead>("/agents/my-appeals", {
         method: "POST",
-        identity,
+        identity: requestIdentity,
         body: {
           organization_id: organizationId,
           task_id: appealForm.task_id,
           reason: "family_review",
           question: appealForm.question,
-          supporting_evidence_ref: `family-portal:${identity.email}`
+          supporting_evidence_ref: `family-portal:${signedInLabel}`
         }
       });
       setAiAppeals((current) => [appeal, ...current.filter((item) => item.id !== appeal.id)]);
@@ -307,7 +375,7 @@ export default function FamilyPortalPage() {
     try {
       const form = await apiRequest<AgentDecisionAppealFormRead>(
         `/agents/my-family-tasks/${taskId}/appeal-form?organization_id=${encodeURIComponent(organizationId)}&artifact_format=${artifactFormat}`,
-        { identity }
+        { identity: requestIdentity }
       );
       const blob =
         form.content_base64 !== null
@@ -344,21 +412,42 @@ export default function FamilyPortalPage() {
             Organization
             <input value={organizationId} onChange={(event) => setOrganizationId(event.target.value)} />
           </label>
-          <label>
-            Name
-            <input value={identity.name} onChange={(event) => setIdentity({ ...identity, name: event.target.value })} />
-          </label>
-          <label>
-            Email
-            <input
-              value={identity.email}
-              onChange={(event) => setIdentity({ ...identity, email: event.target.value })}
-            />
-          </label>
-          <label>
-            Account
-            <input value={identity.sub} onChange={(event) => setIdentity({ ...identity, sub: event.target.value })} />
-          </label>
+          {keycloakEnabled ? (
+            <div className="family-auth-summary">
+              <span>Keycloak</span>
+              <strong>{authSession ? signedInLabel : "No browser session"}</strong>
+              <small>{keycloakClientId} at {keycloakIssuer}</small>
+              {identity.email ? <small>Invitation email: {identity.email}</small> : null}
+              {inviteEmailMismatch ? <small className="form-error">Signed in with a different email.</small> : null}
+            </div>
+          ) : (
+            <>
+              <label>
+                Name
+                <input value={identity.name} onChange={(event) => setIdentity({ ...identity, name: event.target.value })} />
+              </label>
+              <label>
+                Email
+                <input
+                  value={identity.email}
+                  onChange={(event) => setIdentity({ ...identity, email: event.target.value })}
+                />
+              </label>
+              <label>
+                Account
+                <input value={identity.sub} onChange={(event) => setIdentity({ ...identity, sub: event.target.value })} />
+              </label>
+            </>
+          )}
+          {keycloakEnabled ? (
+            authSession ? (
+              <button type="button" onClick={signOut} disabled={busy}>Sign out</button>
+            ) : (
+              <button type="button" onClick={beginKeycloakLogin} disabled={busy}>
+                Sign in
+              </button>
+            )
+          ) : null}
           <button type="submit" disabled={busy}>{busy ? "Loading" : "Load"}</button>
         </form>
 
