@@ -10,8 +10,10 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-JsonObject = dict[str, Any]
-QueryParams = dict[str, str | int | float | bool | None]
+from . import types as t
+
+JsonObject = t.JsonObject
+QueryParams = t.QueryParams
 
 
 class AfroLeteRequestError(RuntimeError):
@@ -64,7 +66,7 @@ def verify_webhook_signature(
 class _OrganizationResource:
     client: AfroLeteClient
 
-    def get(self, *, organization_id: str) -> JsonObject:
+    def get(self, *, organization_id: str) -> t.Organization:
         return self.client.request("GET", "/organization", query={"organization_id": organization_id})
 
 
@@ -72,17 +74,25 @@ class _OrganizationResource:
 class _PeopleResource:
     client: AfroLeteClient
 
-    def create(self, payload: JsonObject) -> JsonObject:
+    def create(self, payload: t.PersonCreate) -> t.Person:
         return self.client.request("POST", "/people", body=payload)
 
-    def link_guardian(self, athlete_person_id: str, payload: JsonObject) -> JsonObject:
+    def link_guardian(
+        self,
+        athlete_person_id: str,
+        payload: t.GuardianLinkCreate,
+    ) -> t.GuardianRelationship:
         return self.client.request(
             "POST",
             f"/people/{athlete_person_id}/guardians",
             body=payload,
         )
 
-    def create_consent_request(self, athlete_person_id: str, payload: JsonObject) -> JsonObject:
+    def create_consent_request(
+        self,
+        athlete_person_id: str,
+        payload: t.ConsentRequestCreate,
+    ) -> t.ConsentRequest:
         return self.client.request(
             "POST",
             f"/people/{athlete_person_id}/consent-requests",
@@ -94,13 +104,13 @@ class _PeopleResource:
 class _TeamsResource:
     client: AfroLeteClient
 
-    def list(self, *, organization_id: str) -> list[JsonObject]:
+    def list(self, *, organization_id: str) -> list[t.Team]:
         return self.client.request("GET", "/teams", query={"organization_id": organization_id})
 
-    def create(self, payload: JsonObject) -> JsonObject:
+    def create(self, payload: t.TeamCreate) -> t.Team:
         return self.client.request("POST", "/teams", body=payload)
 
-    def add_member(self, team_id: str, payload: JsonObject) -> JsonObject:
+    def add_member(self, team_id: str, payload: t.TeamMemberAdd) -> t.TeamRosterEntry:
         return self.client.request("POST", f"/teams/{team_id}/members", body=payload)
 
 
@@ -109,14 +119,14 @@ class _EventsResource:
     client: AfroLeteClient
     attendance: _EventAttendanceResource
 
-    def list(self, *, organization_id: str, team_id: str | None = None) -> list[JsonObject]:
+    def list(self, *, organization_id: str, team_id: str | None = None) -> list[t.Event]:
         return self.client.request(
             "GET",
             "/events",
             query={"organization_id": organization_id, "team_id": team_id},
         )
 
-    def create(self, payload: JsonObject) -> JsonObject:
+    def create(self, payload: t.EventCreate) -> t.Event:
         return self.client.request("POST", "/events", body=payload)
 
 
@@ -124,14 +134,20 @@ class _EventsResource:
 class _EventAttendanceResource:
     client: AfroLeteClient
 
-    def list(self, event_id: str, *, organization_id: str) -> list[JsonObject]:
+    def list(self, event_id: str, *, organization_id: str) -> list[t.AttendanceRecord]:
         return self.client.request(
             "GET",
             f"/events/{event_id}/attendance",
             query={"organization_id": organization_id},
         )
 
-    def record(self, event_id: str, *, organization_id: str, payload: JsonObject) -> JsonObject:
+    def record(
+        self,
+        event_id: str,
+        *,
+        organization_id: str,
+        payload: t.AttendanceRecordUpsert,
+    ) -> t.AttendanceRecord:
         return self.client.request(
             "POST",
             f"/events/{event_id}/attendance",
@@ -144,14 +160,14 @@ class _EventAttendanceResource:
 class _AgentTasksResource:
     client: AfroLeteClient
 
-    def list(self, *, organization_id: str, agent_id: str | None = None) -> list[JsonObject]:
+    def list(self, *, organization_id: str, agent_id: str | None = None) -> list[t.AgentTask]:
         return self.client.request(
             "GET",
             "/agents/tasks",
             query={"organization_id": organization_id, "agent_id": agent_id},
         )
 
-    def queue(self, agent_id: str, payload: JsonObject) -> JsonObject:
+    def queue(self, agent_id: str, payload: t.AgentTaskCreate) -> t.AgentTask:
         return self.client.request("POST", f"/agents/{agent_id}/tasks", body=payload)
 
 
@@ -160,7 +176,7 @@ class _AgentsResource:
     client: AfroLeteClient
     tasks: _AgentTasksResource
 
-    def list(self, *, organization_id: str) -> list[JsonObject]:
+    def list(self, *, organization_id: str) -> list[t.Agent]:
         return self.client.request("GET", "/agents", query={"organization_id": organization_id})
 
 
@@ -168,14 +184,14 @@ class _AgentsResource:
 class _CommunicationTemplatesResource:
     client: AfroLeteClient
 
-    def list(self, *, organization_id: str) -> list[JsonObject]:
+    def list(self, *, organization_id: str) -> list[t.CommunicationTemplate]:
         return self.client.request(
             "GET",
             "/communications/templates",
             query={"organization_id": organization_id},
         )
 
-    def create(self, payload: JsonObject) -> JsonObject:
+    def create(self, payload: t.CommunicationTemplateCreate) -> t.CommunicationTemplate:
         return self.client.request("POST", "/communications/templates", body=payload)
 
 
@@ -183,24 +199,24 @@ class _CommunicationTemplatesResource:
 class _CommunicationMessagesResource:
     client: AfroLeteClient
 
-    def list(self, *, organization_id: str) -> list[JsonObject]:
+    def list(self, *, organization_id: str) -> list[t.CommunicationMessage]:
         return self.client.request(
             "GET",
             "/communications/messages",
             query={"organization_id": organization_id},
         )
 
-    def create(self, payload: JsonObject) -> JsonObject:
+    def create(self, payload: t.CommunicationMessageCreate) -> t.CommunicationMessage:
         return self.client.request("POST", "/communications/messages", body=payload)
 
-    def recipients(self, message_id: str, *, organization_id: str) -> list[JsonObject]:
+    def recipients(self, message_id: str, *, organization_id: str) -> list[t.MessageRecipient]:
         return self.client.request(
             "GET",
             f"/communications/messages/{message_id}/recipients",
             query={"organization_id": organization_id},
         )
 
-    def dispatch(self, message_id: str, *, organization_id: str) -> JsonObject:
+    def dispatch(self, message_id: str, *, organization_id: str) -> t.CommunicationDispatchSummary:
         return self.client.request(
             "POST",
             f"/communications/messages/{message_id}/dispatch",
@@ -218,7 +234,7 @@ class _CommunicationsResource:
 class _BillingPlansResource:
     client: AfroLeteClient
 
-    def list(self) -> list[JsonObject]:
+    def list(self) -> list[t.BillingPlan]:
         return self.client.request("GET", "/billing/plans")
 
 
@@ -226,7 +242,7 @@ class _BillingPlansResource:
 class _BillingSubscriptionsResource:
     client: AfroLeteClient
 
-    def list(self, *, organization_id: str) -> list[JsonObject]:
+    def list(self, *, organization_id: str) -> list[t.BillingSubscription]:
         return self.client.request(
             "GET",
             "/billing/subscriptions",
@@ -238,7 +254,7 @@ class _BillingSubscriptionsResource:
 class _BillingMetersResource:
     client: AfroLeteClient
 
-    def list(self) -> list[JsonObject]:
+    def list(self) -> list[t.BillingUsageMeter]:
         return self.client.request("GET", "/billing/meters")
 
 
@@ -246,14 +262,14 @@ class _BillingMetersResource:
 class _BillingUsageResource:
     client: AfroLeteClient
 
-    def list(self, *, organization_id: str) -> list[JsonObject]:
+    def list(self, *, organization_id: str) -> list[t.BillingUsageRecord]:
         return self.client.request(
             "GET",
             "/billing/usage",
             query={"organization_id": organization_id},
         )
 
-    def record(self, payload: JsonObject) -> JsonObject:
+    def record(self, payload: t.BillingUsageRecordCreate) -> t.BillingUsageRecord:
         return self.client.request("POST", "/billing/usage", body=payload)
 
 
@@ -261,7 +277,7 @@ class _BillingUsageResource:
 class _BillingInvoicesResource:
     client: AfroLeteClient
 
-    def list(self, *, organization_id: str) -> list[JsonObject]:
+    def list(self, *, organization_id: str) -> list[t.BillingInvoice]:
         return self.client.request(
             "GET",
             "/billing/invoices",
@@ -273,7 +289,7 @@ class _BillingInvoicesResource:
 class _BillingEntitlementsResource:
     client: AfroLeteClient
 
-    def list(self, *, organization_id: str) -> list[JsonObject]:
+    def list(self, *, organization_id: str) -> list[t.BillingEntitlement]:
         return self.client.request(
             "GET",
             "/billing/entitlements",
@@ -285,7 +301,7 @@ class _BillingEntitlementsResource:
 class _BillingSummaryResource:
     client: AfroLeteClient
 
-    def get(self, *, organization_id: str) -> JsonObject:
+    def get(self, *, organization_id: str) -> t.BillingSummary:
         return self.client.request(
             "GET",
             "/billing/summary",
@@ -308,14 +324,14 @@ class _BillingResource:
 class _TrainingDrillsResource:
     client: AfroLeteClient
 
-    def list(self, *, organization_id: str, sport: str | None = None) -> list[JsonObject]:
+    def list(self, *, organization_id: str, sport: str | None = None) -> list[t.TrainingDrill]:
         return self.client.request(
             "GET",
             "/training/drills",
             query={"organization_id": organization_id, "sport": sport},
         )
 
-    def create(self, payload: JsonObject) -> JsonObject:
+    def create(self, payload: t.TrainingDrillCreate) -> t.TrainingDrill:
         return self.client.request("POST", "/training/drills", body=payload)
 
 
@@ -323,14 +339,20 @@ class _TrainingDrillsResource:
 class _TrainingPlanItemsResource:
     client: AfroLeteClient
 
-    def list(self, plan_id: str, *, organization_id: str) -> list[JsonObject]:
+    def list(self, plan_id: str, *, organization_id: str) -> list[t.TrainingPlanItem]:
         return self.client.request(
             "GET",
             f"/training/plans/{plan_id}/items",
             query={"organization_id": organization_id},
         )
 
-    def add(self, plan_id: str, *, organization_id: str, payload: JsonObject) -> JsonObject:
+    def add(
+        self,
+        plan_id: str,
+        *,
+        organization_id: str,
+        payload: t.TrainingPlanItemCreate,
+    ) -> t.TrainingPlanItem:
         return self.client.request(
             "POST",
             f"/training/plans/{plan_id}/items",
@@ -350,7 +372,7 @@ class _TrainingPlansResource:
         organization_id: str,
         team_id: str | None = None,
         athlete_profile_id: str | None = None,
-    ) -> list[JsonObject]:
+    ) -> list[t.TrainingPlan]:
         return self.client.request(
             "GET",
             "/training/plans",
@@ -361,7 +383,7 @@ class _TrainingPlansResource:
             },
         )
 
-    def create(self, payload: JsonObject) -> JsonObject:
+    def create(self, payload: t.TrainingPlanCreate) -> t.TrainingPlan:
         return self.client.request("POST", "/training/plans", body=payload)
 
 
@@ -369,14 +391,20 @@ class _TrainingPlansResource:
 class _TrainingSessionFeedbackResource:
     client: AfroLeteClient
 
-    def list(self, session_plan_id: str, *, organization_id: str) -> list[JsonObject]:
+    def list(self, session_plan_id: str, *, organization_id: str) -> list[t.TrainingSessionFeedback]:
         return self.client.request(
             "GET",
             f"/training/sessions/{session_plan_id}/feedback",
             query={"organization_id": organization_id},
         )
 
-    def record(self, session_plan_id: str, *, organization_id: str, payload: JsonObject) -> JsonObject:
+    def record(
+        self,
+        session_plan_id: str,
+        *,
+        organization_id: str,
+        payload: t.TrainingSessionFeedbackCreate,
+    ) -> t.TrainingSessionFeedback:
         return self.client.request(
             "POST",
             f"/training/sessions/{session_plan_id}/feedback",
@@ -390,14 +418,14 @@ class _TrainingSessionsResource:
     client: AfroLeteClient
     feedback: _TrainingSessionFeedbackResource
 
-    def list(self, *, organization_id: str, team_id: str | None = None) -> list[JsonObject]:
+    def list(self, *, organization_id: str, team_id: str | None = None) -> list[t.TrainingSession]:
         return self.client.request(
             "GET",
             "/training/sessions",
             query={"organization_id": organization_id, "team_id": team_id},
         )
 
-    def create(self, payload: JsonObject) -> JsonObject:
+    def create(self, payload: t.TrainingSessionCreate) -> t.TrainingSession:
         return self.client.request("POST", "/training/sessions", body=payload)
 
 
@@ -405,7 +433,7 @@ class _TrainingSessionsResource:
 class _TrainingAvailabilityResource:
     client: AfroLeteClient
 
-    def suggest(self, payload: JsonObject) -> JsonObject:
+    def suggest(self, payload: t.TrainingAvailabilityCreate) -> t.TrainingAvailability:
         return self.client.request("POST", "/training/availability", body=payload)
 
 
@@ -420,7 +448,7 @@ class _TrainingCalendarResource:
         team_id: str | None = None,
         starts_at: str | None = None,
         ends_at: str | None = None,
-    ) -> JsonObject:
+    ) -> t.TrainingCalendarArtifact:
         return self.client.request(
             "GET",
             "/training/calendar-artifact",
@@ -446,7 +474,12 @@ class _TrainingResource:
 class _PerformanceMetricsResource:
     client: AfroLeteClient
 
-    def list(self, *, organization_id: str, sport: str | None = None) -> list[JsonObject]:
+    def list(
+        self,
+        *,
+        organization_id: str,
+        sport: str | None = None,
+    ) -> list[t.PerformanceMetricDefinition]:
         return self.client.request(
             "GET",
             "/performance/metrics",
@@ -458,14 +491,18 @@ class _PerformanceMetricsResource:
 class _PerformanceObservationsResource:
     client: AfroLeteClient
 
-    def list(self, athlete_profile_id: str, *, organization_id: str) -> list[JsonObject]:
+    def list(self, athlete_profile_id: str, *, organization_id: str) -> list[t.PerformanceObservation]:
         return self.client.request(
             "GET",
             f"/performance/athletes/{athlete_profile_id}/observations",
             query={"organization_id": organization_id},
         )
 
-    def create(self, athlete_profile_id: str, payload: JsonObject) -> JsonObject:
+    def create(
+        self,
+        athlete_profile_id: str,
+        payload: t.PerformanceObservationCreate,
+    ) -> t.PerformanceObservation:
         return self.client.request(
             "POST",
             f"/performance/athletes/{athlete_profile_id}/observations",
@@ -517,7 +554,7 @@ class AfroLeteClient:
             observations=_PerformanceObservationsResource(self),
         )
 
-    def me(self) -> JsonObject:
+    def me(self) -> t.DeveloperApiKeyInspection:
         return self.request("GET", "/me")
 
     def request(

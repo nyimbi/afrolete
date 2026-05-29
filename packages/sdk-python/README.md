@@ -3,15 +3,15 @@
 Repository package for server-side AfroLete developer API integrations.
 
 ```python
-from afrolete_sdk import AfroLeteClient, verify_webhook_signature
+from afrolete_sdk import AfroLeteClient, types, verify_webhook_signature
 
 client = AfroLeteClient(
     base_url="https://api.afrolete.example",
     api_key="afl_live_example",
 )
 
-organization = client.organization.get(organization_id="tenant-uuid")
-teams = client.teams.list(organization_id=organization["id"])
+organization: types.Organization = client.organization.get(organization_id="tenant-uuid")
+teams: list[types.Team] = client.teams.list(organization_id=organization["id"])
 athlete = client.people.create(
     {
         "organization_id": organization["id"],
@@ -216,3 +216,7 @@ uses only the Python standard library, so it can run in small worker jobs,
 serverless functions, and integration scripts without extra runtime packages.
 Webhook helpers verify the same timestamped HMAC-SHA256 contract used by
 AfroLete developer webhook deliveries.
+
+The package is PEP 561 typed. Import `afrolete_sdk.types` for `TypedDict`
+request and response contracts such as `Organization`, `PersonCreate`,
+`TrainingPlanCreate`, `BillingUsageRecord`, and `PerformanceObservation`.
