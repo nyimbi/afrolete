@@ -377,6 +377,21 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert training_event["emission_status"] == "active"
     assert "write:training" in training_event["recommended_scopes"]
+    training_plan_event = next(
+        event for event in catalog["webhook_events"] if event["event_type"] == "training.plan.created"
+    )
+    assert training_plan_event["emission_status"] == "active"
+    assert "write:training" in training_plan_event["recommended_scopes"]
+    training_session_event = next(
+        event for event in catalog["webhook_events"] if event["event_type"] == "training.session.created"
+    )
+    assert training_session_event["emission_status"] == "active"
+    assert "write:training" in training_session_event["recommended_scopes"]
+    training_feedback_event = next(
+        event for event in catalog["webhook_events"] if event["event_type"] == "training.feedback.recorded"
+    )
+    assert training_feedback_event["emission_status"] == "active"
+    assert "write:training" in training_feedback_event["recommended_scopes"]
     sdk_event_created = next(
         event for event in catalog["webhook_events"] if event["event_type"] == "events.created"
     )
@@ -391,6 +406,16 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         "client.agents.tasks.queue" in sdk["entry_points"]
         for sdk in catalog["sdks"]
         if sdk["language"] == "TypeScript"
+    )
+    assert any(
+        "client.training.sessions.feedback.record" in sdk["entry_points"]
+        for sdk in catalog["sdks"]
+        if sdk["language"] == "Python"
+    )
+    assert any(
+        "GET /sdk/training/calendar-artifact" in sdk["entry_points"]
+        for sdk in catalog["sdks"]
+        if sdk["language"] == "Raw HTTP"
     )
     assert any(sdk["language"] == "Raw HTTP" and sdk["status"] == "active" for sdk in catalog["sdks"])
 
@@ -423,6 +448,18 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         headers=identity_headers,
     )
     assert policy_response.status_code == 201
+    team_response = client.post(
+        "/api/v1/teams",
+        json={
+            "organization_id": organization["id"],
+            "name": "SDK Training Team",
+            "sport": "football",
+            "sport_format": "team",
+        },
+        headers=identity_headers,
+    )
+    assert team_response.status_code == 201
+    team = team_response.json()
 
     event_start = (datetime.now(UTC) + timedelta(days=7)).isoformat()
     sdk_event_response = client.post(
@@ -540,6 +577,127 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
     )
     assert sdk_drills_response.status_code == 200
     assert sdk_drills_response.json()[0]["name"] == "Advanced Passing Circuit"
+
+    sdk_plan_response = client.post(
+        "/api/v1/sdk/training/plans",
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "title": "SDK imported training block",
+            "focus_area": "Passing and decision speed",
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-14",
+            "source_summary": "Imported from an external coaching workspace.",
+            "load_guidance": "Keep the first week moderate before matchday.",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_plan_response.status_code == 201
+    sdk_plan = sdk_plan_response.json()
+    assert sdk_plan["created_by_person_id"] is None
+    assert sdk_plan["team_id"] == team["id"]
+
+    sdk_plan_item_response = client.post(
+        f"/api/v1/sdk/training/plans/{sdk_plan['id']}/items?organization_id={organization['id']}",
+        json={
+            "drill_id": sdk_drill_response.json()["id"],
+            "sequence": 1,
+            "day_label": "Week 1 Day 1",
+            "title": "Passing circuit progression",
+            "focus_area": "Passing",
+            "duration_minutes": 20,
+            "intensity": 6,
+            "notes": "Imported from partner coach planning software.",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_plan_item_response.status_code == 201
+    assert sdk_plan_item_response.json()["plan_id"] == sdk_plan["id"]
+
+    sdk_plan_items_response = client.get(
+        f"/api/v1/sdk/training/plans/{sdk_plan['id']}/items?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_plan_items_response.status_code == 200
+    assert sdk_plan_items_response.json()[0]["title"] == "Passing circuit progression"
+
+    sdk_session_response = client.post(
+        "/api/v1/sdk/training/sessions",
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "plan_id": sdk_plan["id"],
+            "title": "SDK partner session",
+            "scheduled_for": "2026-06-03T15:00:00Z",
+            "duration_minutes": 75,
+            "rpe_target": 6,
+            "objectives": "Translate partner plan into an AfroLete-managed session.",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_session_response.status_code == 201
+    sdk_session = sdk_session_response.json()
+    assert sdk_session["load_score"] == 450.0
+
+    sdk_sessions_response = client.get(
+        f"/api/v1/sdk/training/sessions?organization_id={organization['id']}&team_id={team['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_sessions_response.status_code == 200
+    assert sdk_sessions_response.json()[0]["id"] == sdk_session["id"]
+
+    sdk_availability_response = client.post(
+        "/api/v1/sdk/training/availability",
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "starts_at": "2026-06-01T06:00:00Z",
+            "days": 3,
+            "duration_minutes": 75,
+            "earliest_hour": 8,
+            "latest_hour": 18,
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_availability_response.status_code == 200
+    assert sdk_availability_response.json()["slots"]
+
+    sdk_calendar_response = client.get(
+        (
+            f"/api/v1/sdk/training/calendar-artifact?organization_id={organization['id']}"
+            f"&team_id={team['id']}&starts_at=2026-06-01T00:00:00Z&ends_at=2026-06-30T00:00:00Z"
+        ),
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_calendar_response.status_code == 200
+    assert sdk_calendar_response.json()["session_count"] == 1
+    assert "SUMMARY:SDK partner session" in sdk_calendar_response.json()["content"]
+
+    sdk_feedback_response = client.post(
+        f"/api/v1/sdk/training/sessions/{sdk_session['id']}/feedback?organization_id={organization['id']}",
+        json={
+            "readiness_score": 72,
+            "soreness_score": 2,
+            "sleep_quality": 8,
+            "mood_score": 7,
+            "actual_rpe": 6,
+            "actual_duration_minutes": 74,
+            "completed": True,
+            "feedback": "Partner app synced post-session feedback.",
+        },
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_feedback_response.status_code == 201
+    sdk_feedback = sdk_feedback_response.json()
+    assert sdk_feedback["recorded_by_person_id"] is None
+    assert sdk_feedback["completed"] is True
+
+    sdk_feedback_list_response = client.get(
+        f"/api/v1/sdk/training/sessions/{sdk_session['id']}/feedback?organization_id={organization['id']}",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert sdk_feedback_list_response.status_code == 200
+    assert sdk_feedback_list_response.json()[0]["id"] == sdk_feedback["id"]
 
     webhook_deliveries_response = client.get(
         f"/api/v1/developers/webhook-deliveries?organization_id={organization['id']}",

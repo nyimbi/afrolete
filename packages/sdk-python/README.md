@@ -91,6 +91,75 @@ if metrics:
             "verification_status": "pending_review",
         },
     )
+drill = client.training.drills.create(
+    {
+        "organization_id": organization["id"],
+        "sport": "football",
+        "name": "Advanced Passing Circuit",
+        "focus_area": "Passing",
+        "category": "technical",
+        "description": "One-touch passing square with timed support angles.",
+    }
+)
+plan = client.training.plans.create(
+    {
+        "organization_id": organization["id"],
+        "team_id": team["id"],
+        "title": "Match-week training block",
+        "focus_area": "Transition speed",
+        "period_start": "2026-06-01",
+        "period_end": "2026-06-07",
+        "source_summary": "Imported from a partner coaching workspace.",
+    }
+)
+client.training.plans.items.add(
+    plan["id"],
+    organization_id=organization["id"],
+    payload={
+        "drill_id": drill["id"],
+        "day_label": "Day 1",
+        "title": "Passing circuit progression",
+        "focus_area": "Passing",
+        "duration_minutes": 20,
+        "intensity": 6,
+    },
+)
+session = client.training.sessions.create(
+    {
+        "organization_id": organization["id"],
+        "team_id": team["id"],
+        "plan_id": plan["id"],
+        "title": "Partner synced session",
+        "scheduled_for": "2026-06-03T15:00:00Z",
+        "duration_minutes": 75,
+        "rpe_target": 6,
+    }
+)
+client.training.sessions.feedback.record(
+    session["id"],
+    organization_id=organization["id"],
+    payload={
+        "readiness_score": 72,
+        "actual_rpe": 6,
+        "actual_duration_minutes": 74,
+        "completed": True,
+        "feedback": "Synced from the partner app after training.",
+    },
+)
+calendar = client.training.calendar.export(
+    organization_id=organization["id"],
+    team_id=team["id"],
+    starts_at="2026-06-01T00:00:00Z",
+    ends_at="2026-06-30T00:00:00Z",
+)
+availability = client.training.availability.suggest(
+    {
+        "organization_id": organization["id"],
+        "team_id": team["id"],
+        "starts_at": "2026-06-01T06:00:00Z",
+        "duration_minutes": 75,
+    }
+)
 ```
 
 The client sends `X-Afrolete-API-Key` and targets `/api/v1/sdk/*` routes. It

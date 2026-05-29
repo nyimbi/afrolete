@@ -1444,13 +1444,13 @@ def developer_scope_catalog() -> list[DeveloperApiScopeCatalogRead]:
         DeveloperApiScopeCatalogRead(
             scope="read:training",
             category="training",
-            description="Read training drill library records through SDK routes.",
+            description="Read training drill, plan, session, feedback, availability, and calendar records through SDK routes.",
             recommended_for=["training libraries", "AI coaching tools", "session planners"],
         ),
         DeveloperApiScopeCatalogRead(
             scope="write:training",
             category="training",
-            description="Create training drills and coaching-plan inputs through SDK routes.",
+            description="Create training drills, plans, sessions, and post-session feedback through SDK routes.",
             recommended_for=["training libraries", "AI coaching tools", "session planners"],
         ),
         DeveloperApiScopeCatalogRead(
@@ -1526,6 +1526,81 @@ def developer_webhook_event_catalog() -> list[DeveloperWebhookEventCatalogRead]:
                 "name": "Advanced Passing Circuit",
                 "focus_area": "Passing",
                 "source": "developer_api",
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="training.plan.created",
+            category="training",
+            description="A developer API key created a tenant training plan.",
+            emission_status="active",
+            payload_fields=[
+                "organization_id",
+                "id",
+                "team_id",
+                "athlete_profile_id",
+                "title",
+                "focus_area",
+                "origin",
+            ],
+            recommended_scopes=["write:training"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "id": "plan-uuid",
+                "team_id": "team-uuid",
+                "athlete_profile_id": None,
+                "title": "U17 match-week training block",
+                "focus_area": "Transition play",
+                "origin": "developer_api",
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="training.session.created",
+            category="training",
+            description="A developer API key created a scheduled tenant training session.",
+            emission_status="active",
+            payload_fields=[
+                "organization_id",
+                "id",
+                "team_id",
+                "plan_id",
+                "title",
+                "scheduled_for",
+                "origin",
+            ],
+            recommended_scopes=["write:training"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "id": "session-plan-uuid",
+                "team_id": "team-uuid",
+                "plan_id": "plan-uuid",
+                "title": "Partner synced recovery session",
+                "scheduled_for": "2026-06-03T15:00:00Z",
+                "origin": "developer_api",
+            },
+        ),
+        DeveloperWebhookEventCatalogRead(
+            event_type="training.feedback.recorded",
+            category="training",
+            description="A developer API key recorded athlete or team feedback for a tenant training session.",
+            emission_status="active",
+            payload_fields=[
+                "organization_id",
+                "id",
+                "session_plan_id",
+                "athlete_profile_id",
+                "readiness_score",
+                "completed",
+                "origin",
+            ],
+            recommended_scopes=["write:training"],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "id": "feedback-uuid",
+                "session_plan_id": "session-plan-uuid",
+                "athlete_profile_id": "athlete-profile-uuid",
+                "readiness_score": 72,
+                "completed": True,
+                "origin": "developer_api",
             },
         ),
         DeveloperWebhookEventCatalogRead(
@@ -1687,6 +1762,16 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "client.performance.observations.create",
                 "client.training.drills.list",
                 "client.training.drills.create",
+                "client.training.plans.list",
+                "client.training.plans.create",
+                "client.training.plans.items.list",
+                "client.training.plans.items.add",
+                "client.training.sessions.list",
+                "client.training.sessions.create",
+                "client.training.sessions.feedback.list",
+                "client.training.sessions.feedback.record",
+                "client.training.availability.suggest",
+                "client.training.calendar.export",
             ],
         ),
         DeveloperSdkCatalogRead(
@@ -1715,6 +1800,16 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "client.performance.observations.create",
                 "client.training.drills.list",
                 "client.training.drills.create",
+                "client.training.plans.list",
+                "client.training.plans.create",
+                "client.training.plans.items.list",
+                "client.training.plans.items.add",
+                "client.training.sessions.list",
+                "client.training.sessions.create",
+                "client.training.sessions.feedback.list",
+                "client.training.sessions.feedback.record",
+                "client.training.availability.suggest",
+                "client.training.calendar.export",
             ],
         ),
         DeveloperSdkCatalogRead(
@@ -1743,6 +1838,16 @@ def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
                 "POST /sdk/performance/athletes/{athlete_profile_id}/observations",
                 "GET /sdk/training/drills",
                 "POST /sdk/training/drills",
+                "GET /sdk/training/plans",
+                "POST /sdk/training/plans",
+                "GET /sdk/training/plans/{plan_id}/items",
+                "POST /sdk/training/plans/{plan_id}/items",
+                "GET /sdk/training/sessions",
+                "POST /sdk/training/sessions",
+                "GET /sdk/training/sessions/{session_plan_id}/feedback",
+                "POST /sdk/training/sessions/{session_plan_id}/feedback",
+                "POST /sdk/training/availability",
+                "GET /sdk/training/calendar-artifact",
             ],
         ),
     ]
@@ -1784,6 +1889,25 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
             ),
         ),
         DeveloperQuickstartRead(
+            title="Create a coaching plan",
+            language="HTTP",
+            description="Sync a tenant training plan from a partner coaching system using write:training.",
+            steps=[
+                "Grant the API key write:training for the tenant.",
+                "POST a plan payload to /api/v1/sdk/training/plans with a tenant team or athlete target.",
+                "Add plan items, create scheduled sessions, and record post-session feedback through the matching SDK routes.",
+                "Subscribe to training.plan.created, training.session.created, or training.feedback.recorded as needed.",
+            ],
+            code_sample=(
+                "curl -s \"$AFROLETE_API/api/v1/sdk/training/plans\" \\\n"
+                "  -H \"Content-Type: application/json\" \\\n"
+                "  -H \"X-Afrolete-API-Key: $AFROLETE_API_KEY\" \\\n"
+                "  -d '{\"organization_id\":\"'$ORG_ID'\",\"team_id\":\"'$TEAM_ID'\","
+                "\"title\":\"Match-week training block\",\"focus_area\":\"Transition speed\","
+                "\"period_start\":\"2026-06-01\",\"period_end\":\"2026-06-07\"}'"
+            ),
+        ),
+        DeveloperQuickstartRead(
             title="Create a tenant event",
             language="HTTP",
             description="Create a tenant schedule item through the SDK route protected by write:events.",
@@ -1807,7 +1931,7 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
             steps=[
                 "Install @afrolete/sdk from the repository package or future registry package.",
                 "Create an AfroLeteClient with baseUrl and a tenant-issued API key.",
-                "Call organization, event, or training drill helpers instead of hand-building SDK URLs.",
+                "Call organization, event, training workflow, or governed AI-agent helpers instead of hand-building SDK URLs.",
             ],
             code_sample=(
                 "import { AfroLeteClient } from \"@afrolete/sdk\";\n\n"
@@ -1825,7 +1949,7 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
             steps=[
                 "Install afrolete-sdk from the repository package or future registry package.",
                 "Create an AfroLeteClient with base_url and a tenant-issued API key.",
-                "Call organization, teams, events, or training drill helpers from integration jobs.",
+                "Call organization, teams, events, training workflow, or governed AI-agent helpers from integration jobs.",
             ],
             code_sample=(
                 "from afrolete_sdk import AfroLeteClient\n\n"

@@ -92,6 +92,66 @@ if (metric) {
     verification_status: "pending_review",
   });
 }
+
+const drill = await client.training.drills.create({
+  organization_id: organization.id,
+  sport: "football",
+  name: "Advanced Passing Circuit",
+  focus_area: "Passing",
+  category: "technical",
+  description: "One-touch passing square with timed support angles.",
+});
+
+const plan = await client.training.plans.create({
+  organization_id: organization.id,
+  team_id: team.id,
+  title: "Match-week training block",
+  focus_area: "Transition speed",
+  period_start: "2026-06-01",
+  period_end: "2026-06-07",
+  source_summary: "Imported from a partner coaching workspace.",
+});
+
+await client.training.plans.items.add(plan.id, { organizationId: organization.id }, {
+  drill_id: drill.id,
+  day_label: "Day 1",
+  title: "Passing circuit progression",
+  focus_area: "Passing",
+  duration_minutes: 20,
+  intensity: 6,
+});
+
+const session = await client.training.sessions.create({
+  organization_id: organization.id,
+  team_id: team.id,
+  plan_id: plan.id,
+  title: "Partner synced session",
+  scheduled_for: "2026-06-03T15:00:00Z",
+  duration_minutes: 75,
+  rpe_target: 6,
+});
+
+await client.training.sessions.feedback.record(session.id, { organizationId: organization.id }, {
+  readiness_score: 72,
+  actual_rpe: 6,
+  actual_duration_minutes: 74,
+  completed: true,
+  feedback: "Synced from the partner app after training.",
+});
+
+const calendar = await client.training.calendar.export({
+  organizationId: organization.id,
+  teamId: team.id,
+  startsAt: "2026-06-01T00:00:00Z",
+  endsAt: "2026-06-30T00:00:00Z",
+});
+
+const availability = await client.training.availability.suggest({
+  organization_id: organization.id,
+  team_id: team.id,
+  starts_at: "2026-06-01T06:00:00Z",
+  duration_minutes: 75,
+});
 ```
 
 The client sends `X-Afrolete-API-Key` and targets `/api/v1/sdk/*` routes. It is

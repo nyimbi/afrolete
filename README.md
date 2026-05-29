@@ -177,7 +177,8 @@ Major capability areas include:
   delivery, artifact storage, signed links, chart-ready summaries, deterministic
   AI insights, and export jobs.
 - Integrations and developer platform: API keys, OAuth-style consent grants,
-  SDK routes for roster, events, attendance, performance, training, and
+  SDK routes for roster, events, attendance, performance, training drills,
+  training plans, sessions, feedback, availability, calendar exports, and
   governed AI-agent tasks, marketplace listings, webhooks, replay, retry
   workers, database or Redis-backed quotas, and integration catalogs.
 - SaaS billing and subscriptions: plans, tenant subscriptions, lifecycle

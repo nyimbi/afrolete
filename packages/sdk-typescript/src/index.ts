@@ -1,5 +1,6 @@
 export type UUID = string;
 export type ISODateTime = string;
+export type ISODate = string;
 
 export interface AfroLeteClientOptions {
   baseUrl: string;
@@ -330,6 +331,164 @@ export interface TrainingDrillCreate {
   status?: string;
 }
 
+export interface TrainingPlan {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  athlete_profile_id: UUID | null;
+  created_by_person_id: UUID | null;
+  title: string;
+  focus_area: string;
+  period_start: ISODate;
+  period_end: ISODate;
+  status: string;
+  ai_generated: boolean;
+  source_summary: string | null;
+  load_guidance: string | null;
+  recovery_protocol: string | null;
+  progress_checkpoints: string | null;
+}
+
+export interface TrainingPlanCreate {
+  organization_id: UUID;
+  team_id?: UUID | null;
+  athlete_profile_id?: UUID | null;
+  title: string;
+  focus_area: string;
+  period_start: ISODate;
+  period_end: ISODate;
+  ai_generated?: boolean;
+  source_summary?: string | null;
+  load_guidance?: string | null;
+  recovery_protocol?: string | null;
+  progress_checkpoints?: string | null;
+}
+
+export interface TrainingPlanItem {
+  id: UUID;
+  plan_id: UUID;
+  drill_id: UUID | null;
+  sequence: number;
+  day_label: string;
+  title: string;
+  focus_area: string;
+  duration_minutes: number;
+  intensity: number;
+  notes: string | null;
+}
+
+export interface TrainingPlanItemCreate {
+  drill_id?: UUID | null;
+  sequence?: number;
+  day_label: string;
+  title: string;
+  focus_area: string;
+  duration_minutes: number;
+  intensity: number;
+  notes?: string | null;
+}
+
+export interface TrainingSession {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID;
+  plan_id: UUID | null;
+  event_id: UUID | null;
+  title: string;
+  scheduled_for: ISODateTime;
+  duration_minutes: number;
+  rpe_target: number;
+  load_score: number;
+  objectives: string | null;
+  status: string;
+}
+
+export interface TrainingSessionCreate {
+  organization_id: UUID;
+  team_id: UUID;
+  plan_id?: UUID | null;
+  event_id?: UUID | null;
+  title: string;
+  scheduled_for: ISODateTime;
+  duration_minutes: number;
+  rpe_target: number;
+  objectives?: string | null;
+}
+
+export interface TrainingSessionFeedback {
+  id: UUID;
+  organization_id: UUID;
+  session_plan_id: UUID;
+  athlete_profile_id: UUID | null;
+  recorded_by_person_id: UUID | null;
+  readiness_score: number;
+  soreness_score: number;
+  sleep_quality: number;
+  mood_score: number;
+  actual_rpe: number | null;
+  actual_duration_minutes: number | null;
+  completed: boolean;
+  feedback: string | null;
+  coach_notes: string | null;
+  recorded_at: ISODateTime;
+  readiness_band: string;
+  load_delta: number | null;
+  recommendation: string;
+}
+
+export interface TrainingSessionFeedbackCreate {
+  athlete_profile_id?: UUID | null;
+  readiness_score: number;
+  soreness_score?: number;
+  sleep_quality?: number;
+  mood_score?: number;
+  actual_rpe?: number | null;
+  actual_duration_minutes?: number | null;
+  completed?: boolean;
+  feedback?: string | null;
+  coach_notes?: string | null;
+}
+
+export interface TrainingAvailabilityCreate {
+  organization_id: UUID;
+  team_id: UUID;
+  starts_at: ISODateTime;
+  days?: number;
+  duration_minutes?: number;
+  earliest_hour?: number;
+  latest_hour?: number;
+}
+
+export interface TrainingAvailabilitySlot {
+  starts_at: ISODateTime;
+  ends_at: ISODateTime;
+  conflict_count: number;
+  conflicts: string[];
+  score: number;
+  recommendation: string;
+}
+
+export interface TrainingAvailability {
+  organization_id: UUID;
+  team_id: UUID;
+  duration_minutes: number;
+  slots: TrainingAvailabilitySlot[];
+}
+
+export interface TrainingCalendarArtifact {
+  organization_id: UUID;
+  team_id: UUID | null;
+  generated_at: ISODateTime;
+  starts_at: ISODateTime;
+  ends_at: ISODateTime;
+  session_count: number;
+  content_type: string;
+  download_filename: string;
+  content: string;
+  checksum: string;
+  size_bytes: number;
+}
+
 export interface PerformanceMetricDefinition {
   id: UUID;
   organization_id: UUID;
@@ -490,6 +649,94 @@ export class AfroLeteClient {
         this.request<TrainingDrill>("/training/drills", {
           method: "POST",
           body: payload,
+        }),
+    },
+    plans: {
+      list: (params: {
+        organizationId: UUID;
+        teamId?: UUID | null;
+        athleteProfileId?: UUID | null;
+      }): Promise<TrainingPlan[]> =>
+        this.request<TrainingPlan[]>("/training/plans", {
+          query: {
+            organization_id: params.organizationId,
+            team_id: params.teamId,
+            athlete_profile_id: params.athleteProfileId,
+          },
+        }),
+      create: (payload: TrainingPlanCreate): Promise<TrainingPlan> =>
+        this.request<TrainingPlan>("/training/plans", {
+          method: "POST",
+          body: payload,
+        }),
+      items: {
+        list: (planId: UUID, params: { organizationId: UUID }): Promise<TrainingPlanItem[]> =>
+          this.request<TrainingPlanItem[]>(`/training/plans/${planId}/items`, {
+            query: { organization_id: params.organizationId },
+          }),
+        add: (
+          planId: UUID,
+          params: { organizationId: UUID },
+          payload: TrainingPlanItemCreate,
+        ): Promise<TrainingPlanItem> =>
+          this.request<TrainingPlanItem>(`/training/plans/${planId}/items`, {
+            method: "POST",
+            query: { organization_id: params.organizationId },
+            body: payload,
+          }),
+      },
+    },
+    sessions: {
+      list: (params: { organizationId: UUID; teamId?: UUID | null }): Promise<TrainingSession[]> =>
+        this.request<TrainingSession[]>("/training/sessions", {
+          query: { organization_id: params.organizationId, team_id: params.teamId },
+        }),
+      create: (payload: TrainingSessionCreate): Promise<TrainingSession> =>
+        this.request<TrainingSession>("/training/sessions", {
+          method: "POST",
+          body: payload,
+        }),
+      feedback: {
+        list: (
+          sessionPlanId: UUID,
+          params: { organizationId: UUID },
+        ): Promise<TrainingSessionFeedback[]> =>
+          this.request<TrainingSessionFeedback[]>(`/training/sessions/${sessionPlanId}/feedback`, {
+            query: { organization_id: params.organizationId },
+          }),
+        record: (
+          sessionPlanId: UUID,
+          params: { organizationId: UUID },
+          payload: TrainingSessionFeedbackCreate,
+        ): Promise<TrainingSessionFeedback> =>
+          this.request<TrainingSessionFeedback>(`/training/sessions/${sessionPlanId}/feedback`, {
+            method: "POST",
+            query: { organization_id: params.organizationId },
+            body: payload,
+          }),
+      },
+    },
+    availability: {
+      suggest: (payload: TrainingAvailabilityCreate): Promise<TrainingAvailability> =>
+        this.request<TrainingAvailability>("/training/availability", {
+          method: "POST",
+          body: payload,
+        }),
+    },
+    calendar: {
+      export: (params: {
+        organizationId: UUID;
+        teamId?: UUID | null;
+        startsAt?: ISODateTime | null;
+        endsAt?: ISODateTime | null;
+      }): Promise<TrainingCalendarArtifact> =>
+        this.request<TrainingCalendarArtifact>("/training/calendar-artifact", {
+          query: {
+            organization_id: params.organizationId,
+            team_id: params.teamId,
+            starts_at: params.startsAt,
+            ends_at: params.endsAt,
+          },
         }),
     },
   };

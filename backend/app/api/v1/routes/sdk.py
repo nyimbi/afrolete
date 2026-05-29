@@ -14,7 +14,7 @@ from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.performance import AthletePerformanceObservation, PerformanceMetricDefinition
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
-from app.models.training import TrainingDrill
+from app.models.training import TrainingDrill, TrainingPlan, TrainingSessionPlan
 from app.schemas.developer import (
     DeveloperApiKeyInspectionRead,
     DeveloperConsentRequestCreate,
@@ -33,7 +33,21 @@ from app.schemas.performance import (
     PerformanceObservationRead,
 )
 from app.schemas.team import TeamCreate, TeamMemberAdd, TeamRead, TeamRosterEntryRead
-from app.schemas.training import TrainingDrillCreate, TrainingDrillRead
+from app.schemas.training import (
+    TrainingAvailabilityCreate,
+    TrainingAvailabilityRead,
+    TrainingCalendarArtifactRead,
+    TrainingDrillCreate,
+    TrainingDrillRead,
+    TrainingPlanCreate,
+    TrainingPlanItemCreate,
+    TrainingPlanItemRead,
+    TrainingPlanRead,
+    TrainingSessionFeedbackCreate,
+    TrainingSessionFeedbackRead,
+    TrainingSessionPlanCreate,
+    TrainingSessionPlanRead,
+)
 from app.services.authz.service import (
     AuthorizationService,
     Relationship,
@@ -54,7 +68,19 @@ from app.services.organizations import organization_member_relation
 from app.services.performance import list_metric_definitions, list_observations
 from app.services.safeguarding import consent_destination, hash_token, normalized_scope_id, utc_now
 from app.services.teams import list_teams_for_organization, team_member_relation
-from app.services.training import list_training_drills
+from app.services.training import (
+    add_training_plan_item,
+    create_training_plan,
+    create_training_session_plan,
+    export_training_calendar_artifact,
+    list_training_drills,
+    list_training_plan_items,
+    list_training_plans,
+    list_training_session_feedback,
+    list_training_session_plans,
+    record_training_session_feedback,
+    suggest_training_availability,
+)
 
 router = APIRouter(prefix="/sdk", tags=["sdk"])
 
@@ -106,6 +132,62 @@ def to_drill_read(drill: TrainingDrill) -> TrainingDrillRead:
         default_intensity=drill.default_intensity,
         status=drill.status,
     )
+
+
+def to_training_plan_read(plan: TrainingPlan) -> TrainingPlanRead:
+    return TrainingPlanRead(
+        id=plan.id,
+        organization_id=plan.organization_id,
+        team_id=plan.team_id,
+        athlete_profile_id=plan.athlete_profile_id,
+        created_by_person_id=plan.created_by_person_id,
+        title=plan.title,
+        focus_area=plan.focus_area,
+        period_start=plan.period_start,
+        period_end=plan.period_end,
+        status=plan.status,
+        ai_generated=plan.ai_generated,
+        source_summary=plan.source_summary,
+        load_guidance=plan.load_guidance,
+        recovery_protocol=plan.recovery_protocol,
+        progress_checkpoints=plan.progress_checkpoints,
+    )
+
+
+def to_training_plan_item_read(item) -> TrainingPlanItemRead:
+    return TrainingPlanItemRead(
+        id=item.id,
+        plan_id=item.plan_id,
+        drill_id=item.drill_id,
+        sequence=item.sequence,
+        day_label=item.day_label,
+        title=item.title,
+        focus_area=item.focus_area,
+        duration_minutes=item.duration_minutes,
+        intensity=item.intensity,
+        notes=item.notes,
+    )
+
+
+def to_training_session_plan_read(session_plan: TrainingSessionPlan) -> TrainingSessionPlanRead:
+    return TrainingSessionPlanRead(
+        id=session_plan.id,
+        organization_id=session_plan.organization_id,
+        team_id=session_plan.team_id,
+        plan_id=session_plan.plan_id,
+        event_id=session_plan.event_id,
+        title=session_plan.title,
+        scheduled_for=session_plan.scheduled_for,
+        duration_minutes=session_plan.duration_minutes,
+        rpe_target=session_plan.rpe_target,
+        load_score=session_plan.load_score,
+        objectives=session_plan.objectives,
+        status=session_plan.status,
+    )
+
+
+def to_training_session_feedback_read(row: dict[str, object]) -> TrainingSessionFeedbackRead:
+    return TrainingSessionFeedbackRead(**row)
 
 
 def to_event_read(event: Event) -> EventRead:
@@ -1018,3 +1100,243 @@ async def sdk_create_training_drill(
         },
     )
     return to_drill_read(drill)
+
+
+@router.get("/training/plans", response_model=list[TrainingPlanRead])
+async def sdk_list_training_plans(
+    organization_id: UUID = Query(),
+    team_id: UUID | None = Query(default=None),
+    athlete_profile_id: UUID | None = Query(default=None),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrainingPlanRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:training", "write:training"})
+    return [
+        to_training_plan_read(plan)
+        for plan in await list_training_plans(
+            db,
+            organization_id,
+            team_id=team_id,
+            athlete_profile_id=athlete_profile_id,
+        )
+    ]
+
+
+@router.post("/training/plans", response_model=TrainingPlanRead, status_code=status.HTTP_201_CREATED)
+async def sdk_create_training_plan(
+    payload: TrainingPlanCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> TrainingPlanRead:
+    ensure_developer_api_scope(credential, payload.organization_id, {"write:training"})
+    plan = await create_training_plan(
+        db,
+        None,
+        payload,
+        None,
+        enforce_manage_training_scope=False,
+    )
+    await deliver_developer_webhook_event(
+        db,
+        payload.organization_id,
+        "training.plan.created",
+        str(plan.id),
+        {
+            "id": str(plan.id),
+            "organization_id": str(plan.organization_id),
+            "team_id": str(plan.team_id) if plan.team_id else None,
+            "athlete_profile_id": str(plan.athlete_profile_id) if plan.athlete_profile_id else None,
+            "title": plan.title,
+            "focus_area": plan.focus_area,
+            "origin": "developer_api",
+        },
+    )
+    return to_training_plan_read(plan)
+
+
+@router.get("/training/plans/{plan_id}/items", response_model=list[TrainingPlanItemRead])
+async def sdk_list_training_plan_items(
+    plan_id: UUID,
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrainingPlanItemRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:training", "write:training"})
+    plan = await db.get(TrainingPlan, plan_id)
+    if plan is None or plan.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    return [
+        to_training_plan_item_read(item)
+        for item in await list_training_plan_items(db, plan_id)
+    ]
+
+
+@router.post(
+    "/training/plans/{plan_id}/items",
+    response_model=TrainingPlanItemRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sdk_add_training_plan_item(
+    plan_id: UUID,
+    payload: TrainingPlanItemCreate,
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> TrainingPlanItemRead:
+    ensure_developer_api_scope(credential, organization_id, {"write:training"})
+    plan = await db.get(TrainingPlan, plan_id)
+    if plan is None or plan.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    item = await add_training_plan_item(
+        db,
+        None,
+        plan_id,
+        payload,
+        None,
+        enforce_manage_training_scope=False,
+    )
+    return to_training_plan_item_read(item)
+
+
+@router.get("/training/sessions", response_model=list[TrainingSessionPlanRead])
+async def sdk_list_training_sessions(
+    organization_id: UUID = Query(),
+    team_id: UUID | None = Query(default=None),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrainingSessionPlanRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:training", "write:training"})
+    return [
+        to_training_session_plan_read(session_plan)
+        for session_plan in await list_training_session_plans(db, organization_id, team_id=team_id)
+    ]
+
+
+@router.post("/training/sessions", response_model=TrainingSessionPlanRead, status_code=status.HTTP_201_CREATED)
+async def sdk_create_training_session(
+    payload: TrainingSessionPlanCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> TrainingSessionPlanRead:
+    ensure_developer_api_scope(credential, payload.organization_id, {"write:training"})
+    session_plan = await create_training_session_plan(
+        db,
+        None,
+        payload,
+        None,
+        enforce_manage_training_scope=False,
+    )
+    await deliver_developer_webhook_event(
+        db,
+        payload.organization_id,
+        "training.session.created",
+        str(session_plan.id),
+        {
+            "id": str(session_plan.id),
+            "organization_id": str(session_plan.organization_id),
+            "team_id": str(session_plan.team_id),
+            "plan_id": str(session_plan.plan_id) if session_plan.plan_id else None,
+            "title": session_plan.title,
+            "scheduled_for": session_plan.scheduled_for.isoformat(),
+            "origin": "developer_api",
+        },
+    )
+    return to_training_session_plan_read(session_plan)
+
+
+@router.get("/training/calendar-artifact", response_model=TrainingCalendarArtifactRead)
+async def sdk_export_training_calendar_artifact(
+    organization_id: UUID = Query(),
+    team_id: UUID | None = Query(default=None),
+    starts_at: datetime | None = Query(default=None),
+    ends_at: datetime | None = Query(default=None),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> TrainingCalendarArtifactRead:
+    ensure_developer_api_scope(credential, organization_id, {"read:training", "write:training"})
+    return TrainingCalendarArtifactRead(
+        **await export_training_calendar_artifact(
+            db,
+            None,
+            organization_id,
+            None,
+            team_id=team_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            enforce_manage_training_scope=False,
+        )
+    )
+
+
+@router.post("/training/availability", response_model=TrainingAvailabilityRead)
+async def sdk_suggest_training_availability(
+    payload: TrainingAvailabilityCreate,
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> TrainingAvailabilityRead:
+    ensure_developer_api_scope(credential, payload.organization_id, {"read:training", "write:training"})
+    return TrainingAvailabilityRead(**await suggest_training_availability(db, payload))
+
+
+@router.get(
+    "/training/sessions/{session_plan_id}/feedback",
+    response_model=list[TrainingSessionFeedbackRead],
+)
+async def sdk_list_training_session_feedback(
+    session_plan_id: UUID,
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrainingSessionFeedbackRead]:
+    ensure_developer_api_scope(credential, organization_id, {"read:training", "write:training"})
+    session_plan = await db.get(TrainingSessionPlan, session_plan_id)
+    if session_plan is None or session_plan.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session plan not found")
+    return [
+        to_training_session_feedback_read(row)
+        for row in await list_training_session_feedback(db, session_plan_id)
+    ]
+
+
+@router.post(
+    "/training/sessions/{session_plan_id}/feedback",
+    response_model=TrainingSessionFeedbackRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sdk_record_training_session_feedback(
+    session_plan_id: UUID,
+    payload: TrainingSessionFeedbackCreate,
+    organization_id: UUID = Query(),
+    credential: DeveloperApiKeyInspectionRead = Depends(get_sdk_credential),
+    db: AsyncSession = Depends(get_db),
+) -> TrainingSessionFeedbackRead:
+    ensure_developer_api_scope(credential, organization_id, {"write:training"})
+    session_plan = await db.get(TrainingSessionPlan, session_plan_id)
+    if session_plan is None or session_plan.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session plan not found")
+    feedback = await record_training_session_feedback(
+        db,
+        None,
+        session_plan_id,
+        payload,
+        None,
+        enforce_manage_training_scope=False,
+    )
+    await deliver_developer_webhook_event(
+        db,
+        organization_id,
+        "training.feedback.recorded",
+        str(feedback["id"]),
+        {
+            "id": str(feedback["id"]),
+            "organization_id": str(feedback["organization_id"]),
+            "session_plan_id": str(feedback["session_plan_id"]),
+            "athlete_profile_id": (
+                str(feedback["athlete_profile_id"]) if feedback["athlete_profile_id"] else None
+            ),
+            "readiness_score": feedback["readiness_score"],
+            "completed": feedback["completed"],
+            "origin": "developer_api",
+        },
+    )
+    return to_training_session_feedback_read(feedback)

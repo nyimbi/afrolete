@@ -139,8 +139,126 @@ class _TrainingDrillsResource:
 
 
 @dataclass(frozen=True)
+class _TrainingPlanItemsResource:
+    client: AfroLeteClient
+
+    def list(self, plan_id: str, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            f"/training/plans/{plan_id}/items",
+            query={"organization_id": organization_id},
+        )
+
+    def add(self, plan_id: str, *, organization_id: str, payload: JsonObject) -> JsonObject:
+        return self.client.request(
+            "POST",
+            f"/training/plans/{plan_id}/items",
+            query={"organization_id": organization_id},
+            body=payload,
+        )
+
+
+@dataclass(frozen=True)
+class _TrainingPlansResource:
+    client: AfroLeteClient
+    items: _TrainingPlanItemsResource
+
+    def list(
+        self,
+        *,
+        organization_id: str,
+        team_id: str | None = None,
+        athlete_profile_id: str | None = None,
+    ) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            "/training/plans",
+            query={
+                "organization_id": organization_id,
+                "team_id": team_id,
+                "athlete_profile_id": athlete_profile_id,
+            },
+        )
+
+    def create(self, payload: JsonObject) -> JsonObject:
+        return self.client.request("POST", "/training/plans", body=payload)
+
+
+@dataclass(frozen=True)
+class _TrainingSessionFeedbackResource:
+    client: AfroLeteClient
+
+    def list(self, session_plan_id: str, *, organization_id: str) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            f"/training/sessions/{session_plan_id}/feedback",
+            query={"organization_id": organization_id},
+        )
+
+    def record(self, session_plan_id: str, *, organization_id: str, payload: JsonObject) -> JsonObject:
+        return self.client.request(
+            "POST",
+            f"/training/sessions/{session_plan_id}/feedback",
+            query={"organization_id": organization_id},
+            body=payload,
+        )
+
+
+@dataclass(frozen=True)
+class _TrainingSessionsResource:
+    client: AfroLeteClient
+    feedback: _TrainingSessionFeedbackResource
+
+    def list(self, *, organization_id: str, team_id: str | None = None) -> list[JsonObject]:
+        return self.client.request(
+            "GET",
+            "/training/sessions",
+            query={"organization_id": organization_id, "team_id": team_id},
+        )
+
+    def create(self, payload: JsonObject) -> JsonObject:
+        return self.client.request("POST", "/training/sessions", body=payload)
+
+
+@dataclass(frozen=True)
+class _TrainingAvailabilityResource:
+    client: AfroLeteClient
+
+    def suggest(self, payload: JsonObject) -> JsonObject:
+        return self.client.request("POST", "/training/availability", body=payload)
+
+
+@dataclass(frozen=True)
+class _TrainingCalendarResource:
+    client: AfroLeteClient
+
+    def export(
+        self,
+        *,
+        organization_id: str,
+        team_id: str | None = None,
+        starts_at: str | None = None,
+        ends_at: str | None = None,
+    ) -> JsonObject:
+        return self.client.request(
+            "GET",
+            "/training/calendar-artifact",
+            query={
+                "organization_id": organization_id,
+                "team_id": team_id,
+                "starts_at": starts_at,
+                "ends_at": ends_at,
+            },
+        )
+
+
+@dataclass(frozen=True)
 class _TrainingResource:
     drills: _TrainingDrillsResource
+    plans: _TrainingPlansResource
+    sessions: _TrainingSessionsResource
+    availability: _TrainingAvailabilityResource
+    calendar: _TrainingCalendarResource
 
 
 @dataclass(frozen=True)
@@ -190,7 +308,16 @@ class AfroLeteClient:
         self.teams = _TeamsResource(self)
         self.events = _EventsResource(self, attendance=_EventAttendanceResource(self))
         self.agents = _AgentsResource(self, tasks=_AgentTasksResource(self))
-        self.training = _TrainingResource(drills=_TrainingDrillsResource(self))
+        self.training = _TrainingResource(
+            drills=_TrainingDrillsResource(self),
+            plans=_TrainingPlansResource(self, items=_TrainingPlanItemsResource(self)),
+            sessions=_TrainingSessionsResource(
+                self,
+                feedback=_TrainingSessionFeedbackResource(self),
+            ),
+            availability=_TrainingAvailabilityResource(self),
+            calendar=_TrainingCalendarResource(self),
+        )
         self.performance = _PerformanceResource(
             metrics=_PerformanceMetricsResource(self),
             observations=_PerformanceObservationsResource(self),

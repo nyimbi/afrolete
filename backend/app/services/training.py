@@ -91,19 +91,27 @@ async def list_training_drills(
 
 async def create_training_plan(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     payload: TrainingPlanCreate,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
+    *,
+    enforce_manage_training_scope: bool = True,
 ) -> TrainingPlan:
     await get_organization(db, payload.organization_id)
-    await ensure_manage_training(authz, identity, payload.organization_id)
+    if enforce_manage_training_scope:
+        if identity is None or authz is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Identity and authorization required",
+            )
+        await ensure_manage_training(authz, identity, payload.organization_id)
     if payload.team_id is not None:
         await get_team_for_organization(db, payload.team_id, payload.organization_id)
     if payload.athlete_profile_id is not None:
         await get_athlete_for_organization(db, payload.athlete_profile_id, payload.organization_id)
 
     plan = TrainingPlan(
-        created_by_person_id=identity.person_id,
+        created_by_person_id=identity.person_id if identity is not None else None,
         **payload.model_dump(),
     )
     db.add(plan)
@@ -134,13 +142,21 @@ async def list_training_plans(
 
 async def add_training_plan_item(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     plan_id: UUID,
     payload: TrainingPlanItemCreate,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
+    *,
+    enforce_manage_training_scope: bool = True,
 ) -> TrainingPlanItem:
     plan = await get_training_plan(db, plan_id)
-    await ensure_manage_training(authz, identity, plan.organization_id)
+    if enforce_manage_training_scope:
+        if identity is None or authz is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Identity and authorization required",
+            )
+        await ensure_manage_training(authz, identity, plan.organization_id)
     if payload.drill_id is not None:
         drill = await db.get(TrainingDrill, payload.drill_id)
         if drill is None or drill.organization_id != plan.organization_id:
@@ -296,12 +312,20 @@ async def next_competition_datetime(
 
 async def create_training_session_plan(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     payload: TrainingSessionPlanCreate,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
+    *,
+    enforce_manage_training_scope: bool = True,
 ) -> TrainingSessionPlan:
     await get_organization(db, payload.organization_id)
-    await ensure_manage_training(authz, identity, payload.organization_id)
+    if enforce_manage_training_scope:
+        if identity is None or authz is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Identity and authorization required",
+            )
+        await ensure_manage_training(authz, identity, payload.organization_id)
     await get_team_for_organization(db, payload.team_id, payload.organization_id)
     if payload.plan_id is not None:
         plan = await get_training_plan_for_organization(db, payload.plan_id, payload.organization_id)
@@ -345,15 +369,23 @@ async def list_training_session_plans(
 
 async def export_training_calendar_artifact(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     organization_id: UUID,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
     team_id: UUID | None = None,
     starts_at: datetime | None = None,
     ends_at: datetime | None = None,
+    *,
+    enforce_manage_training_scope: bool = True,
 ) -> dict[str, object]:
     organization = await get_organization(db, organization_id)
-    await ensure_manage_training(authz, identity, organization_id)
+    if enforce_manage_training_scope:
+        if identity is None or authz is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Identity and authorization required",
+            )
+        await ensure_manage_training(authz, identity, organization_id)
     team = await get_team_for_organization(db, team_id, organization_id) if team_id else None
     generated_at = datetime.now(UTC)
     range_start = ensure_utc(starts_at) if starts_at else generated_at - timedelta(days=1)
@@ -390,20 +422,28 @@ async def export_training_calendar_artifact(
 
 async def record_training_session_feedback(
     db: AsyncSession,
-    identity: CurrentIdentity,
+    identity: CurrentIdentity | None,
     session_plan_id: UUID,
     payload: TrainingSessionFeedbackCreate,
-    authz: AuthorizationService,
+    authz: AuthorizationService | None,
+    *,
+    enforce_manage_training_scope: bool = True,
 ) -> dict[str, object]:
     session_plan = await get_training_session_plan(db, session_plan_id)
-    await ensure_manage_training(authz, identity, session_plan.organization_id)
+    if enforce_manage_training_scope:
+        if identity is None or authz is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Identity and authorization required",
+            )
+        await ensure_manage_training(authz, identity, session_plan.organization_id)
     if payload.athlete_profile_id is not None:
         await get_athlete_for_organization(db, payload.athlete_profile_id, session_plan.organization_id)
 
     feedback = TrainingSessionFeedback(
         organization_id=session_plan.organization_id,
         session_plan_id=session_plan.id,
-        recorded_by_person_id=identity.person_id,
+        recorded_by_person_id=identity.person_id if identity is not None else None,
         recorded_at=datetime.now(UTC),
         **payload.model_dump(),
     )
@@ -439,15 +479,15 @@ async def suggest_training_availability(
 ) -> dict[str, object]:
     await get_organization(db, payload.organization_id)
     await get_team_for_organization(db, payload.team_id, payload.organization_id)
-    search_start = payload.starts_at
-    search_end = payload.starts_at + timedelta(days=payload.days)
+    search_start = ensure_utc(payload.starts_at)
+    search_end = search_start + timedelta(days=payload.days)
     busy_windows = await team_busy_windows(db, payload.organization_id, payload.team_id, search_start, search_end)
     slots = []
     for day_offset in range(payload.days):
-        day = payload.starts_at + timedelta(days=day_offset)
+        day = search_start + timedelta(days=day_offset)
         for hour in range(payload.earliest_hour, payload.latest_hour, 2):
             candidate_start = day.replace(hour=hour, minute=0, second=0, microsecond=0)
-            if candidate_start < payload.starts_at:
+            if candidate_start < search_start:
                 continue
             candidate_end = candidate_start + timedelta(minutes=payload.duration_minutes)
             conflicts = [
@@ -482,6 +522,8 @@ async def team_busy_windows(
     starts_at: datetime,
     ends_at: datetime,
 ) -> list[tuple[datetime, datetime, str]]:
+    starts_at = ensure_utc(starts_at)
+    ends_at = ensure_utc(ends_at)
     windows: list[tuple[datetime, datetime, str]] = []
     events = (
         await db.scalars(
@@ -493,9 +535,10 @@ async def team_busy_windows(
         )
     ).all()
     for event in events:
-        event_end = event.ends_at or event.starts_at + timedelta(hours=2)
+        event_start = ensure_utc(event.starts_at)
+        event_end = ensure_utc(event.ends_at) if event.ends_at else event_start + timedelta(hours=2)
         if event_end > starts_at:
-            windows.append((event.starts_at, event_end, f"event:{event.title}"))
+            windows.append((event_start, event_end, f"event:{event.title}"))
 
     sessions = (
         await db.scalars(
@@ -507,9 +550,10 @@ async def team_busy_windows(
         )
     ).all()
     for session_plan in sessions:
-        session_end = session_plan.scheduled_for + timedelta(minutes=session_plan.duration_minutes)
+        session_start = ensure_utc(session_plan.scheduled_for)
+        session_end = session_start + timedelta(minutes=session_plan.duration_minutes)
         if session_end > starts_at:
-            windows.append((session_plan.scheduled_for, session_end, f"training:{session_plan.title}"))
+            windows.append((session_start, session_end, f"training:{session_plan.title}"))
 
     fixtures = (
         await db.scalars(
@@ -521,9 +565,10 @@ async def team_busy_windows(
         )
     ).all()
     for fixture in fixtures:
-        fixture_end = fixture.scheduled_at + timedelta(hours=2)
+        fixture_start = ensure_utc(fixture.scheduled_at)
+        fixture_end = fixture_start + timedelta(hours=2)
         if fixture_end > starts_at:
-            windows.append((fixture.scheduled_at, fixture_end, f"fixture:{fixture.round_label or 'match'}"))
+            windows.append((fixture_start, fixture_end, f"fixture:{fixture.round_label or 'match'}"))
 
     bookings = (
         await db.scalars(
@@ -543,8 +588,10 @@ async def team_busy_windows(
         )
     ).all()
     for booking in bookings:
-        if booking.ends_at > starts_at:
-            windows.append((booking.starts_at, booking.ends_at, f"facility:{booking.title}"))
+        booking_start = ensure_utc(booking.starts_at)
+        booking_end = ensure_utc(booking.ends_at)
+        if booking_end > starts_at:
+            windows.append((booking_start, booking_end, f"facility:{booking.title}"))
     return windows
 
 
