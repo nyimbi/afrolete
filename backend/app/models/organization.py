@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -88,6 +89,22 @@ class RegistrationInquiry(IdMixin, TimestampMixin, Base):
     follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     reviewed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    date_of_birth: Mapped[date | None] = mapped_column(Date, index=True)
+    emergency_contact_name: Mapped[str | None] = mapped_column(String(240))
+    emergency_contact_phone: Mapped[str | None] = mapped_column(String(64))
+    medical_notes: Mapped[str | None] = mapped_column(Text)
+    consent_signer_name: Mapped[str | None] = mapped_column(String(240))
+    guardian_consent_acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    privacy_acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    required_documents_json: Mapped[str | None] = mapped_column(Text)
+    submitted_documents_json: Mapped[str | None] = mapped_column(Text)
+    payment_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    payment_currency: Mapped[str | None] = mapped_column(String(3))
+    payment_method: Mapped[str | None] = mapped_column(String(80))
+    payment_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    payment_status: Mapped[str] = mapped_column(String(40), default="not_required", nullable=False, index=True)
+    verification_status: Mapped[str] = mapped_column(String(40), default="inquiry", nullable=False, index=True)
+    packet_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class Committee(IdMixin, TimestampMixin, Base):

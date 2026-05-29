@@ -16,6 +16,7 @@ import type {
   OrganizationOnboardingRead,
   OrganizationPublicSiteRead,
   OrganizationType,
+  RegistrationPacketRead,
   RegistrationInquiryRead
 } from "@/types/operations";
 
@@ -54,6 +55,25 @@ const defaultInquiryForm = {
   message: ""
 };
 
+const defaultPacketForm = {
+  date_of_birth: "",
+  emergency_contact_name: "",
+  emergency_contact_phone: "",
+  medical_notes: "",
+  consent_signer_name: "",
+  guardian_consent_acknowledged: false,
+  privacy_acknowledged: false,
+  proof_of_age_filename: "",
+  medical_information_filename: "",
+  guardian_consent_filename: "",
+  photo_release_filename: "",
+  payment_amount: "",
+  payment_currency: "KES",
+  payment_method: "mpesa",
+  payment_reference: "",
+  payment_status: "pending_verification"
+};
+
 export default function RegistrationPage() {
   const keycloakEnabled = afroleteAuthMode === "keycloak";
   const [mode, setMode] = useState<RegistrationMode>("organization");
@@ -67,6 +87,8 @@ export default function RegistrationPage() {
   const [selectedSite, setSelectedSite] = useState<OrganizationPublicSiteRead | null>(null);
   const [inquiryForm, setInquiryForm] = useState(defaultInquiryForm);
   const [submittedInquiry, setSubmittedInquiry] = useState<RegistrationInquiryRead | null>(null);
+  const [packetForm, setPacketForm] = useState(defaultPacketForm);
+  const [registrationPacket, setRegistrationPacket] = useState<RegistrationPacketRead | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
@@ -184,6 +206,7 @@ export default function RegistrationPage() {
     setBusy(`site-${item.id}`);
     setError("");
     setSubmittedInquiry(null);
+    setRegistrationPacket(null);
     try {
       const site = await apiRequest<OrganizationPublicSiteRead>(`/organizations/public/${encodeURIComponent(item.slug)}`);
       setSelectedSite(site);
@@ -226,9 +249,68 @@ export default function RegistrationPage() {
         }
       );
       setSubmittedInquiry(inquiry);
-      setInquiryForm(defaultInquiryForm);
+      setPacketForm((current) => ({
+        ...current,
+        emergency_contact_name: inquiry.guardian_name ?? current.emergency_contact_name,
+        emergency_contact_phone: inquiry.phone ?? current.emergency_contact_phone,
+        consent_signer_name: inquiry.guardian_name ?? current.consent_signer_name,
+        medical_information_filename: `${inquiry.athlete_name.replaceAll(" ", "-").toLowerCase()}-medical.pdf`
+      }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Registration inquiry failed");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const submitRegistrationPacket = async () => {
+    if (!selectedSite || !submittedInquiry) {
+      setError("Send the registration inquiry before completing the packet.");
+      return;
+    }
+    setBusy("packet");
+    setError("");
+    try {
+      const documents = [
+        { document_type: "proof_of_age", filename: packetForm.proof_of_age_filename },
+        { document_type: "medical_information", filename: packetForm.medical_information_filename },
+        { document_type: "guardian_consent", filename: packetForm.guardian_consent_filename },
+        { document_type: "photo_release", filename: packetForm.photo_release_filename }
+      ]
+        .filter((item) => item.filename.trim())
+        .map((item) => ({
+          document_type: item.document_type,
+          filename: item.filename.trim(),
+          storage_url: null,
+          checksum: null,
+          notes: null
+        }));
+      const packet = await apiRequest<RegistrationPacketRead>(
+        `/organizations/public/${encodeURIComponent(selectedSite.slug)}/registration-inquiries/${submittedInquiry.id}/packet`,
+        {
+          method: "PATCH",
+          body: {
+            email: submittedInquiry.email,
+            date_of_birth: packetForm.date_of_birth || null,
+            emergency_contact_name: packetForm.emergency_contact_name || null,
+            emergency_contact_phone: packetForm.emergency_contact_phone || null,
+            medical_notes: packetForm.medical_notes || null,
+            consent_signer_name: packetForm.consent_signer_name || null,
+            guardian_consent_acknowledged: packetForm.guardian_consent_acknowledged,
+            privacy_acknowledged: packetForm.privacy_acknowledged,
+            documents,
+            payment_amount: packetForm.payment_amount || null,
+            payment_currency: packetForm.payment_currency || null,
+            payment_method: packetForm.payment_method || null,
+            payment_reference: packetForm.payment_reference || null,
+            payment_status: packetForm.payment_status || null
+          }
+        }
+      );
+      setRegistrationPacket(packet);
+      setSubmittedInquiry(packet.inquiry);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Registration packet failed");
     } finally {
       setBusy("");
     }
@@ -443,55 +525,218 @@ export default function RegistrationPage() {
                   <p className="section-label">Player or family</p>
                   <h2>{selectedSite ? `Join ${selectedSite.public_name ?? selectedSite.name}` : "Send registration details"}</h2>
                 </div>
-                <button type="submit" disabled={busy !== "" || !selectedSite}>
-                  {busy === "inquiry" ? "Sending" : "Send inquiry"}
+                <button type="submit" disabled={busy !== "" || !selectedSite || submittedInquiry !== null}>
+                  {submittedInquiry ? "Inquiry sent" : busy === "inquiry" ? "Sending" : "Send inquiry"}
                 </button>
               </div>
               {submittedInquiry ? (
                 <div className="register-success">
                   <strong>Inquiry received</strong>
-                  <span>{submittedInquiry.athlete_name} · {submittedInquiry.status}</span>
+                  <span>
+                    {submittedInquiry.athlete_name} · {submittedInquiry.status} · {submittedInquiry.verification_status}
+                  </span>
                 </div>
               ) : null}
-              <div className="register-inline-grid">
-                <label>
-                  Athlete name
-                  <input value={inquiryForm.athlete_name} onChange={(event) => setInquiryForm({ ...inquiryForm, athlete_name: event.target.value })} required />
-                </label>
-                <label>
-                  Guardian name
-                  <input value={inquiryForm.guardian_name} onChange={(event) => setInquiryForm({ ...inquiryForm, guardian_name: event.target.value })} />
-                </label>
-                <label>
-                  Email
-                  <input type="email" value={inquiryForm.email} onChange={(event) => setInquiryForm({ ...inquiryForm, email: event.target.value })} required />
-                </label>
-                <label>
-                  Phone
-                  <input value={inquiryForm.phone} onChange={(event) => setInquiryForm({ ...inquiryForm, phone: event.target.value })} />
-                </label>
-                <label>
-                  Age group
-                  <input value={inquiryForm.age_group} onChange={(event) => setInquiryForm({ ...inquiryForm, age_group: event.target.value })} />
-                </label>
-                <label>
-                  Sport
-                  <input value={inquiryForm.sport_interest} onChange={(event) => setInquiryForm({ ...inquiryForm, sport_interest: event.target.value })} />
-                </label>
-                <label className="register-wide">
-                  Team
-                  <select value={inquiryForm.team_id} onChange={(event) => setInquiryForm({ ...inquiryForm, team_id: event.target.value })}>
-                    <option value="">Any suitable team</option>
-                    {selectedSite?.teams.map((team) => (
-                      <option key={team.id} value={team.id}>{team.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="register-wide">
-                  Message
-                  <textarea value={inquiryForm.message} onChange={(event) => setInquiryForm({ ...inquiryForm, message: event.target.value })} />
-                </label>
-              </div>
+              {submittedInquiry ? (
+                <div className="registration-packet">
+                  <div>
+                    <p className="section-label">Onboarding packet</p>
+                    <h3>Documents, consent, payment, and verification</h3>
+                  </div>
+                  <div className="register-inline-grid">
+                    <label>
+                      Date of birth
+                      <input
+                        type="date"
+                        value={packetForm.date_of_birth}
+                        onChange={(event) => setPacketForm({ ...packetForm, date_of_birth: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Emergency contact
+                      <input
+                        value={packetForm.emergency_contact_name}
+                        onChange={(event) => setPacketForm({ ...packetForm, emergency_contact_name: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Emergency phone
+                      <input
+                        value={packetForm.emergency_contact_phone}
+                        onChange={(event) => setPacketForm({ ...packetForm, emergency_contact_phone: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Consent signer
+                      <input
+                        value={packetForm.consent_signer_name}
+                        onChange={(event) => setPacketForm({ ...packetForm, consent_signer_name: event.target.value })}
+                      />
+                    </label>
+                    <label className="register-wide">
+                      Medical notes
+                      <textarea
+                        value={packetForm.medical_notes}
+                        onChange={(event) => setPacketForm({ ...packetForm, medical_notes: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Proof of age file
+                      <input
+                        value={packetForm.proof_of_age_filename}
+                        onChange={(event) => setPacketForm({ ...packetForm, proof_of_age_filename: event.target.value })}
+                        placeholder="birth-certificate.pdf"
+                      />
+                    </label>
+                    <label>
+                      Medical file
+                      <input
+                        value={packetForm.medical_information_filename}
+                        onChange={(event) => setPacketForm({ ...packetForm, medical_information_filename: event.target.value })}
+                        placeholder="medical-form.pdf"
+                      />
+                    </label>
+                    <label>
+                      Guardian consent file
+                      <input
+                        value={packetForm.guardian_consent_filename}
+                        onChange={(event) => setPacketForm({ ...packetForm, guardian_consent_filename: event.target.value })}
+                        placeholder="guardian-consent.pdf"
+                      />
+                    </label>
+                    <label>
+                      Photo release file
+                      <input
+                        value={packetForm.photo_release_filename}
+                        onChange={(event) => setPacketForm({ ...packetForm, photo_release_filename: event.target.value })}
+                        placeholder="photo-release.pdf"
+                      />
+                    </label>
+                    <label>
+                      Amount
+                      <input
+                        value={packetForm.payment_amount}
+                        onChange={(event) => setPacketForm({ ...packetForm, payment_amount: event.target.value })}
+                        placeholder="1000.00"
+                      />
+                    </label>
+                    <label>
+                      Currency
+                      <input
+                        value={packetForm.payment_currency}
+                        onChange={(event) => setPacketForm({ ...packetForm, payment_currency: event.target.value.toUpperCase() })}
+                        maxLength={3}
+                      />
+                    </label>
+                    <label>
+                      Payment method
+                      <select
+                        value={packetForm.payment_method}
+                        onChange={(event) => setPacketForm({ ...packetForm, payment_method: event.target.value })}
+                      >
+                        <option value="mpesa">M-Pesa</option>
+                        <option value="card">Card</option>
+                        <option value="bank_transfer">Bank transfer</option>
+                        <option value="cash">Cash</option>
+                        <option value="waiver">Waiver</option>
+                      </select>
+                    </label>
+                    <label>
+                      Payment reference
+                      <input
+                        value={packetForm.payment_reference}
+                        onChange={(event) => setPacketForm({ ...packetForm, payment_reference: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Payment status
+                      <select
+                        value={packetForm.payment_status}
+                        onChange={(event) => setPacketForm({ ...packetForm, payment_status: event.target.value })}
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="pending_verification">Pending verification</option>
+                        <option value="paid">Paid</option>
+                        <option value="waived">Waived</option>
+                        <option value="not_required">Not required</option>
+                      </select>
+                    </label>
+                    <label className="register-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={packetForm.privacy_acknowledged}
+                        onChange={(event) => setPacketForm({ ...packetForm, privacy_acknowledged: event.target.checked })}
+                      />
+                      Privacy consent acknowledged
+                    </label>
+                    <label className="register-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={packetForm.guardian_consent_acknowledged}
+                        onChange={(event) =>
+                          setPacketForm({ ...packetForm, guardian_consent_acknowledged: event.target.checked })
+                        }
+                      />
+                      Guardian consent acknowledged
+                    </label>
+                  </div>
+                  <button type="button" onClick={submitRegistrationPacket} disabled={busy !== ""}>
+                    {busy === "packet" ? "Saving packet" : "Submit packet"}
+                  </button>
+                  {registrationPacket ? (
+                    <div className="register-packet-result">
+                      <strong>{registrationPacket.packet_complete ? "Ready for verification" : "Packet needs attention"}</strong>
+                      <span>
+                        Missing: {registrationPacket.missing_documents.length ? registrationPacket.missing_documents.join(", ") : "none"}
+                      </span>
+                      {registrationPacket.next_steps.map((step) => (
+                        <small key={step}>{step}</small>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {!submittedInquiry ? (
+                <div className="register-inline-grid">
+                  <label>
+                    Athlete name
+                    <input value={inquiryForm.athlete_name} onChange={(event) => setInquiryForm({ ...inquiryForm, athlete_name: event.target.value })} required />
+                  </label>
+                  <label>
+                    Guardian name
+                    <input value={inquiryForm.guardian_name} onChange={(event) => setInquiryForm({ ...inquiryForm, guardian_name: event.target.value })} />
+                  </label>
+                  <label>
+                    Email
+                    <input type="email" value={inquiryForm.email} onChange={(event) => setInquiryForm({ ...inquiryForm, email: event.target.value })} required />
+                  </label>
+                  <label>
+                    Phone
+                    <input value={inquiryForm.phone} onChange={(event) => setInquiryForm({ ...inquiryForm, phone: event.target.value })} />
+                  </label>
+                  <label>
+                    Age group
+                    <input value={inquiryForm.age_group} onChange={(event) => setInquiryForm({ ...inquiryForm, age_group: event.target.value })} />
+                  </label>
+                  <label>
+                    Sport
+                    <input value={inquiryForm.sport_interest} onChange={(event) => setInquiryForm({ ...inquiryForm, sport_interest: event.target.value })} />
+                  </label>
+                  <label className="register-wide">
+                    Team
+                    <select value={inquiryForm.team_id} onChange={(event) => setInquiryForm({ ...inquiryForm, team_id: event.target.value })}>
+                      <option value="">Any suitable team</option>
+                      {selectedSite?.teams.map((team) => (
+                        <option key={team.id} value={team.id}>{team.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="register-wide">
+                    Message
+                    <textarea value={inquiryForm.message} onChange={(event) => setInquiryForm({ ...inquiryForm, message: event.target.value })} />
+                  </label>
+                </div>
+              ) : null}
             </form>
           </section>
         )}

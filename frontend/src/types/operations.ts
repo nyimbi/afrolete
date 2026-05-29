@@ -417,7 +417,42 @@ export type RegistrationInquiryRead = {
   follow_up_at: string | null;
   reviewed_by_person_id: UUID | null;
   reviewed_at: string | null;
+  date_of_birth: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  medical_notes: string | null;
+  consent_signer_name: string | null;
+  guardian_consent_acknowledged_at: string | null;
+  privacy_acknowledged_at: string | null;
+  payment_amount: string | null;
+  payment_currency: string | null;
+  payment_method: string | null;
+  payment_reference: string | null;
+  payment_status: string;
+  verification_status: string;
+  packet_submitted_at: string | null;
   created_at: string;
+};
+
+export type RegistrationDocumentSubmission = {
+  document_type: string;
+  filename: string;
+  storage_url: string | null;
+  checksum: string | null;
+  notes: string | null;
+};
+
+export type RegistrationPacketRead = {
+  inquiry: RegistrationInquiryRead;
+  required_documents: string[];
+  submitted_documents: RegistrationDocumentSubmission[];
+  missing_documents: string[];
+  consent_complete: boolean;
+  medical_complete: boolean;
+  emergency_contact_complete: boolean;
+  payment_complete: boolean;
+  packet_complete: boolean;
+  next_steps: string[];
 };
 
 export type RegistrationInquiryConversionRead = {

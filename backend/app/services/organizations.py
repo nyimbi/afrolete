@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import UTC, datetime
 from uuid import UUID
@@ -28,6 +29,7 @@ from app.schemas.organization import (
     CommitteeMemberAdd,
     MemberAdd,
     OrganizationCreate,
+    PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
     RegistrationInquiryConversionCreate,
     RegistrationInquiryFollowUpCreate,
@@ -53,6 +55,7 @@ def organization_member_relation(subject_type: MemberSubjectType, role: Membersh
 
 
 INQUIRY_REVIEW_STATUSES = {"new", "reviewing", "contacted", "waitlisted", "rejected"}
+REGISTRATION_PAYMENT_COMPLETE_STATUSES = {"paid", "waived", "not_required"}
 
 
 def public_site_path(organization: Organization) -> str:
@@ -74,6 +77,98 @@ def onboarding_checklist(organization: Organization, launch_goal: str | None = N
     if launch_goal:
         steps.insert(0, f"Confirm launch goal: {launch_goal}")
     return steps
+
+
+def registration_required_documents(inquiry: RegistrationInquiry) -> list[str]:
+    configured = parse_registration_documents(inquiry.required_documents_json)
+    if configured:
+        return [str(item["document_type"]) for item in configured if item.get("document_type")]
+
+    required = ["proof_of_age", "medical_information"]
+    if inquiry.guardian_name or is_youth_age_group(inquiry.age_group):
+        required.extend(["guardian_consent", "photo_release"])
+    return required
+
+
+def parse_registration_documents(raw: str | None) -> list[dict[str, str | None]]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    documents: list[dict[str, str | None]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        document_type = item.get("document_type")
+        filename = item.get("filename")
+        if not isinstance(document_type, str):
+            continue
+        documents.append(
+            {
+                "document_type": document_type,
+                "filename": filename if isinstance(filename, str) else document_type,
+                "storage_url": item.get("storage_url") if isinstance(item.get("storage_url"), str) else None,
+                "checksum": item.get("checksum") if isinstance(item.get("checksum"), str) else None,
+                "notes": item.get("notes") if isinstance(item.get("notes"), str) else None,
+            }
+        )
+    return documents
+
+
+def registration_packet_summary(inquiry: RegistrationInquiry) -> dict:
+    required_documents = registration_required_documents(inquiry)
+    submitted_documents = parse_registration_documents(inquiry.submitted_documents_json)
+    submitted_types = {item["document_type"] for item in submitted_documents}
+    missing_documents = [item for item in required_documents if item not in submitted_types]
+    consent_complete = inquiry.privacy_acknowledged_at is not None and (
+        not (inquiry.guardian_name or is_youth_age_group(inquiry.age_group))
+        or inquiry.guardian_consent_acknowledged_at is not None
+    )
+    emergency_contact_complete = bool(inquiry.emergency_contact_name and inquiry.emergency_contact_phone)
+    medical_complete = bool(inquiry.medical_notes or "medical_information" in submitted_types)
+    payment_complete = inquiry.payment_status in REGISTRATION_PAYMENT_COMPLETE_STATUSES
+    packet_complete = (
+        consent_complete
+        and emergency_contact_complete
+        and medical_complete
+        and not missing_documents
+        and payment_complete
+    )
+    next_steps: list[str] = []
+    if missing_documents:
+        next_steps.append(f"Upload missing documents: {', '.join(missing_documents)}.")
+    if not consent_complete:
+        next_steps.append("Complete privacy and guardian consent acknowledgements.")
+    if not emergency_contact_complete:
+        next_steps.append("Add emergency contact name and phone.")
+    if not medical_complete:
+        next_steps.append("Add medical notes or a medical information document.")
+    if not payment_complete:
+        next_steps.append("Record payment, waiver, or not-required status.")
+    if packet_complete:
+        next_steps.append("Registration packet is ready for staff verification.")
+    return {
+        "required_documents": required_documents,
+        "submitted_documents": submitted_documents,
+        "missing_documents": missing_documents,
+        "consent_complete": consent_complete,
+        "medical_complete": medical_complete,
+        "emergency_contact_complete": emergency_contact_complete,
+        "payment_complete": payment_complete,
+        "packet_complete": packet_complete,
+        "next_steps": next_steps,
+    }
+
+
+def is_youth_age_group(age_group: str | None) -> bool:
+    if not age_group:
+        return False
+    normalized = age_group.lower().replace(" ", "")
+    return normalized.startswith("u") or "under" in normalized or "youth" in normalized
 
 
 async def can_manage_registration_inquiries(
@@ -365,6 +460,77 @@ async def create_public_registration_inquiry(
     await db.commit()
     await db.refresh(inquiry)
     return inquiry
+
+
+async def update_public_registration_packet(
+    db: AsyncSession,
+    site: str,
+    inquiry_id: UUID,
+    payload: PublicRegistrationPacketUpdate,
+) -> RegistrationInquiry:
+    organization = await db.scalar(
+        select(Organization).where(
+            (Organization.slug == site) | (Organization.subdomain == site)
+        )
+    )
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    inquiry = await db.get(RegistrationInquiry, inquiry_id)
+    if inquiry is None or inquiry.organization_id != organization.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry not found")
+    if inquiry.email.lower() != payload.email.lower():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inquiry email mismatch")
+    if inquiry.status == "converted":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Converted inquiry cannot be updated")
+
+    now = datetime.now(UTC)
+    inquiry.date_of_birth = payload.date_of_birth
+    inquiry.emergency_contact_name = payload.emergency_contact_name
+    inquiry.emergency_contact_phone = payload.emergency_contact_phone
+    inquiry.medical_notes = payload.medical_notes
+    inquiry.consent_signer_name = payload.consent_signer_name
+    if payload.guardian_consent_acknowledged:
+        inquiry.guardian_consent_acknowledged_at = inquiry.guardian_consent_acknowledged_at or now
+    if payload.privacy_acknowledged:
+        inquiry.privacy_acknowledged_at = inquiry.privacy_acknowledged_at or now
+
+    required_documents = registration_required_documents(inquiry)
+    inquiry.required_documents_json = json.dumps(
+        [{"document_type": document_type, "filename": document_type} for document_type in required_documents],
+        sort_keys=True,
+    )
+    inquiry.submitted_documents_json = json.dumps(
+        [document.model_dump() for document in payload.documents],
+        sort_keys=True,
+    )
+    inquiry.payment_amount = payload.payment_amount
+    inquiry.payment_currency = payload.payment_currency.upper() if payload.payment_currency else None
+    inquiry.payment_method = payload.payment_method
+    inquiry.payment_reference = payload.payment_reference
+    inquiry.payment_status = normalized_registration_payment_status(payload, inquiry)
+
+    summary = registration_packet_summary(inquiry)
+    inquiry.verification_status = "ready_for_review" if summary["packet_complete"] else "packet_incomplete"
+    inquiry.packet_submitted_at = now
+    if inquiry.status == "new":
+        inquiry.status = "reviewing"
+
+    await db.commit()
+    await db.refresh(inquiry)
+    return inquiry
+
+
+def normalized_registration_payment_status(
+    payload: PublicRegistrationPacketUpdate,
+    inquiry: RegistrationInquiry,
+) -> str:
+    if payload.payment_status:
+        return payload.payment_status
+    if payload.payment_amount is None:
+        return "not_required"
+    if payload.payment_reference:
+        return "pending_verification"
+    return inquiry.payment_status if inquiry.payment_status != "not_required" else "pending"
 
 
 async def list_registration_inquiries(

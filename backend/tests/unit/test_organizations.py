@@ -101,6 +101,43 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert inquiry["athlete_name"] == "Amina Runner"
     assert inquiry["status"] == "new"
     assert inquiry["organization_id"] == onboarding["organization"]["id"]
+    assert inquiry["verification_status"] == "inquiry"
+
+    packet_response = client.patch(
+        f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/packet",
+        json={
+            "email": "parent.runner@example.com",
+            "date_of_birth": "2012-03-04",
+            "emergency_contact_name": "Parent Runner",
+            "emergency_contact_phone": "+254700000001",
+            "medical_notes": "No known allergies.",
+            "consent_signer_name": "Parent Runner",
+            "guardian_consent_acknowledged": True,
+            "privacy_acknowledged": True,
+            "documents": [
+                {"document_type": "proof_of_age", "filename": "birth-certificate.pdf"},
+                {"document_type": "medical_information", "filename": "medical-form.pdf"},
+                {"document_type": "guardian_consent", "filename": "guardian-consent.pdf"},
+                {"document_type": "photo_release", "filename": "photo-release.pdf"},
+            ],
+            "payment_amount": "1000.00",
+            "payment_currency": "KES",
+            "payment_method": "mpesa",
+            "payment_reference": "MPESA-ABC123",
+            "payment_status": "paid",
+        },
+    )
+
+    assert packet_response.status_code == 200
+    packet = packet_response.json()
+    assert packet["packet_complete"] is True
+    assert packet["missing_documents"] == []
+    assert packet["consent_complete"] is True
+    assert packet["payment_complete"] is True
+    assert packet["inquiry"]["status"] == "reviewing"
+    assert packet["inquiry"]["verification_status"] == "ready_for_review"
+    assert packet["inquiry"]["payment_reference"] == "MPESA-ABC123"
+    assert packet["next_steps"] == ["Registration packet is ready for staff verification."]
 
 
 def test_public_site_exposes_commercial_support_opportunities(client, identity_headers) -> None:

@@ -13855,6 +13855,10 @@ export default function HomePage() {
                     <div>
                       <strong>{inquiry.athlete_name}</strong>
                       <span>{inquiry.email} · {inquiry.age_group ?? "age open"} · {inquiry.status}</span>
+                      <small>
+                        {inquiry.verification_status} · payment {inquiry.payment_status}
+                        {inquiry.packet_submitted_at ? ` · packet ${new Date(inquiry.packet_submitted_at).toLocaleDateString()}` : ""}
+                      </small>
                       {inquiry.phone ? <small>{inquiry.phone}</small> : null}
                       {inquiry.message ? <small>{inquiry.message}</small> : null}
                     </div>

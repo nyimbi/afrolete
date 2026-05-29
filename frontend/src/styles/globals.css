@@ -2526,6 +2526,51 @@ textarea:focus {
   margin: 0 0 14px;
 }
 
+.registration-packet {
+  border: 1px solid color-mix(in srgb, var(--teal) 26%, var(--line));
+  border-radius: 8px;
+  background: #fbfcfb;
+  margin-bottom: 14px;
+  padding: 14px;
+}
+
+.registration-packet h3 {
+  margin: 4px 0 0;
+}
+
+.register-checkbox {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+}
+
+.register-checkbox input {
+  width: auto;
+}
+
+.register-packet-result {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.register-packet-result strong,
+.register-packet-result span,
+.register-packet-result small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.register-packet-result span,
+.register-packet-result small {
+  color: var(--muted);
+}
+
 .register-error {
   border: 1px solid color-mix(in srgb, var(--red) 40%, var(--line));
   border-radius: 8px;

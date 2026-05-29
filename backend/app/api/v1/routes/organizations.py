@@ -20,12 +20,14 @@ from app.schemas.organization import (
     OrganizationOnboardingRead,
     OrganizationPublicSiteRead,
     OrganizationRead,
+    PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
     PublicSiteFundraisingCampaignRead,
     PublicSiteEventRead,
     PublicSiteSponsorRead,
     PublicSiteTeamRead,
     PublicSiteTicketProductRead,
+    RegistrationPacketRead,
     RegistrationInquiryConversionCreate,
     RegistrationInquiryConversionRead,
     RegistrationInquiryFollowUpCreate,
@@ -51,7 +53,9 @@ from app.services.organizations import (
     list_registration_inquiries,
     onboarding_checklist,
     public_site_path,
+    registration_packet_summary,
     search_public_organizations,
+    update_public_registration_packet,
     update_registration_inquiry,
 )
 from app.services.communications import list_recipients
@@ -252,7 +256,29 @@ def to_registration_inquiry_read(inquiry) -> RegistrationInquiryRead:
         follow_up_at=inquiry.follow_up_at,
         reviewed_by_person_id=inquiry.reviewed_by_person_id,
         reviewed_at=inquiry.reviewed_at,
+        date_of_birth=inquiry.date_of_birth,
+        emergency_contact_name=inquiry.emergency_contact_name,
+        emergency_contact_phone=inquiry.emergency_contact_phone,
+        medical_notes=inquiry.medical_notes,
+        consent_signer_name=inquiry.consent_signer_name,
+        guardian_consent_acknowledged_at=inquiry.guardian_consent_acknowledged_at,
+        privacy_acknowledged_at=inquiry.privacy_acknowledged_at,
+        payment_amount=inquiry.payment_amount,
+        payment_currency=inquiry.payment_currency,
+        payment_method=inquiry.payment_method,
+        payment_reference=inquiry.payment_reference,
+        payment_status=inquiry.payment_status,
+        verification_status=inquiry.verification_status,
+        packet_submitted_at=inquiry.packet_submitted_at,
         created_at=inquiry.created_at,
+    )
+
+
+def to_registration_packet_read(inquiry) -> RegistrationPacketRead:
+    summary = registration_packet_summary(inquiry)
+    return RegistrationPacketRead(
+        inquiry=to_registration_inquiry_read(inquiry),
+        **summary,
     )
 
 
@@ -372,6 +398,21 @@ async def create_public_registration_inquiry_route(
     db: AsyncSession = Depends(get_db),
 ) -> RegistrationInquiryRead:
     return to_registration_inquiry_read(await create_public_registration_inquiry(db, site, payload))
+
+
+@router.patch(
+    "/public/{site}/registration-inquiries/{inquiry_id}/packet",
+    response_model=RegistrationPacketRead,
+)
+async def update_public_registration_packet_route(
+    site: str,
+    inquiry_id: UUID,
+    payload: PublicRegistrationPacketUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> RegistrationPacketRead:
+    return to_registration_packet_read(
+        await update_public_registration_packet(db, site, inquiry_id, payload)
+    )
 
 
 @router.get("/{organization_id}", response_model=OrganizationRead)

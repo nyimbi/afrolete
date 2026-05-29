@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -201,7 +201,59 @@ class RegistrationInquiryRead(BaseModel):
     follow_up_at: datetime | None
     reviewed_by_person_id: UUID | None
     reviewed_at: datetime | None
+    date_of_birth: date | None
+    emergency_contact_name: str | None
+    emergency_contact_phone: str | None
+    medical_notes: str | None
+    consent_signer_name: str | None
+    guardian_consent_acknowledged_at: datetime | None
+    privacy_acknowledged_at: datetime | None
+    payment_amount: Decimal | None
+    payment_currency: str | None
+    payment_method: str | None
+    payment_reference: str | None
+    payment_status: str
+    verification_status: str
+    packet_submitted_at: datetime | None
     created_at: datetime
+
+
+class RegistrationDocumentSubmission(BaseModel):
+    document_type: str = Field(min_length=2, max_length=80)
+    filename: str = Field(min_length=2, max_length=240)
+    storage_url: str | None = Field(default=None, max_length=500)
+    checksum: str | None = Field(default=None, max_length=128)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class PublicRegistrationPacketUpdate(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    date_of_birth: date | None = None
+    emergency_contact_name: str | None = Field(default=None, max_length=240)
+    emergency_contact_phone: str | None = Field(default=None, max_length=64)
+    medical_notes: str | None = Field(default=None, max_length=2000)
+    consent_signer_name: str | None = Field(default=None, max_length=240)
+    guardian_consent_acknowledged: bool = False
+    privacy_acknowledged: bool = False
+    documents: list[RegistrationDocumentSubmission] = Field(default_factory=list, max_length=12)
+    payment_amount: Decimal | None = None
+    payment_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    payment_method: str | None = Field(default=None, max_length=80)
+    payment_reference: str | None = Field(default=None, max_length=240)
+    payment_status: str | None = Field(default=None, max_length=40)
+
+
+class RegistrationPacketRead(BaseModel):
+    inquiry: RegistrationInquiryRead
+    required_documents: list[str]
+    submitted_documents: list[RegistrationDocumentSubmission]
+    missing_documents: list[str]
+    consent_complete: bool
+    medical_complete: bool
+    emergency_contact_complete: bool
+    payment_complete: bool
+    packet_complete: bool
+    next_steps: list[str]
 
 
 class RegistrationInquiryUpdate(BaseModel):
