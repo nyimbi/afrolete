@@ -16,6 +16,11 @@ from app.schemas.performance import (
     AthletePerformanceSummaryRead,
     MetricDefinitionCreate,
     MetricDefinitionRead,
+    OppositionScoutingFindingRead,
+    OppositionScoutingReportCreate,
+    OppositionScoutingReportRead,
+    OppositionScoutingVideoAssetRead,
+    OppositionScoutingVideoUploadCreate,
     PerformanceCohortComparisonRead,
     PerformanceAchievementAwardRead,
     PerformanceAchievementRunRead,
@@ -89,6 +94,7 @@ from app.services.performance import (
     create_metric_definition,
     create_movement_reference_profile,
     create_observation,
+    create_opposition_scouting_report,
     create_performance_video_annotation,
     create_performance_video_pose_samples,
     create_performance_goal,
@@ -144,8 +150,12 @@ from app.services.performance import (
     decode_pose_keypoints,
     decode_reference_metric_targets,
     decode_reference_pose_samples,
+    decode_scouting_findings,
     downloadable_performance_video_asset,
     upload_performance_video_asset,
+    upload_opposition_scouting_video_asset,
+    list_opposition_scouting_reports,
+    list_opposition_scouting_videos,
     video_slow_motion_rates,
 )
 
@@ -316,6 +326,68 @@ def to_video_asset_read(video_asset) -> PerformanceVideoAssetRead:
         analyzed_at=video_asset.analyzed_at,
         slow_motion_rates=video_slow_motion_rates(),
         review_default_rate=0.5,
+    )
+
+
+def to_opposition_scouting_video_read(video_asset) -> OppositionScoutingVideoAssetRead:
+    return OppositionScoutingVideoAssetRead(
+        id=video_asset.id,
+        organization_id=video_asset.organization_id,
+        team_id=video_asset.team_id,
+        competition_id=video_asset.competition_id,
+        event_id=video_asset.event_id,
+        uploaded_by_person_id=video_asset.uploaded_by_person_id,
+        opponent_name=video_asset.opponent_name,
+        sport=video_asset.sport,
+        filename=video_asset.filename,
+        content_type=video_asset.content_type,
+        size_bytes=video_asset.size_bytes,
+        checksum=video_asset.checksum,
+        storage_url=video_asset.storage_url,
+        video_uri=video_asset.video_uri,
+        clip_label=video_asset.clip_label,
+        match_context=video_asset.match_context,
+        analysis_focus=video_asset.analysis_focus,
+        status=video_asset.status,
+        analyzed_at=video_asset.analyzed_at,
+    )
+
+
+def to_opposition_scouting_report_read(report) -> OppositionScoutingReportRead:
+    return OppositionScoutingReportRead(
+        id=report.id,
+        organization_id=report.organization_id,
+        video_asset_id=report.video_asset_id,
+        team_id=report.team_id,
+        competition_id=report.competition_id,
+        event_id=report.event_id,
+        created_by_person_id=report.created_by_person_id,
+        opponent_name=report.opponent_name,
+        sport=report.sport,
+        match_context=report.match_context,
+        analysis_focus=report.analysis_focus,
+        model_policy=report.model_policy,
+        confidence=report.confidence,
+        formation_detected=report.formation_detected,
+        tactical_summary=report.tactical_summary,
+        weaknesses=[
+            OppositionScoutingFindingRead(**finding)
+            for finding in decode_scouting_findings(report.weaknesses_json)
+        ],
+        threats=[
+            OppositionScoutingFindingRead(**finding)
+            for finding in decode_scouting_findings(report.threats_json)
+        ],
+        recommendations=[
+            OppositionScoutingFindingRead(**finding)
+            for finding in decode_scouting_findings(report.recommendations_json)
+        ],
+        set_pieces=[
+            OppositionScoutingFindingRead(**finding)
+            for finding in decode_scouting_findings(report.set_pieces_json)
+        ],
+        status=report.status,
+        generated_at=report.generated_at,
     )
 
 
@@ -661,6 +733,79 @@ async def analyze_video_for_coaching_route(
         authz,
     )
     return to_video_coaching_read(result)
+
+
+@router.post(
+    "/scouting/videos",
+    response_model=OppositionScoutingVideoAssetRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_opposition_scouting_video_route(
+    payload: OppositionScoutingVideoUploadCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OppositionScoutingVideoAssetRead:
+    return to_opposition_scouting_video_read(
+        await upload_opposition_scouting_video_asset(db, identity, payload, authz)
+    )
+
+
+@router.get("/scouting/videos", response_model=list[OppositionScoutingVideoAssetRead])
+async def list_opposition_scouting_videos_route(
+    organization_id: UUID = Query(),
+    team_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OppositionScoutingVideoAssetRead]:
+    return [
+        to_opposition_scouting_video_read(video_asset)
+        for video_asset in await list_opposition_scouting_videos(
+            db,
+            identity,
+            organization_id,
+            authz,
+            team_id=team_id,
+        )
+    ]
+
+
+@router.post(
+    "/scouting/videos/{video_asset_id}/reports",
+    response_model=OppositionScoutingReportRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_opposition_scouting_report_route(
+    video_asset_id: UUID,
+    payload: OppositionScoutingReportCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OppositionScoutingReportRead:
+    return to_opposition_scouting_report_read(
+        await create_opposition_scouting_report(db, identity, video_asset_id, payload, authz)
+    )
+
+
+@router.get("/scouting/reports", response_model=list[OppositionScoutingReportRead])
+async def list_opposition_scouting_reports_route(
+    organization_id: UUID = Query(),
+    team_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OppositionScoutingReportRead]:
+    return [
+        to_opposition_scouting_report_read(report)
+        for report in await list_opposition_scouting_reports(
+            db,
+            identity,
+            organization_id,
+            authz,
+            team_id=team_id,
+        )
+    ]
 
 
 @router.post(

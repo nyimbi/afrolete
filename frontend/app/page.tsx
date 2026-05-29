@@ -261,6 +261,8 @@ import type {
   CommercialInvoiceProviderCheckoutRead,
   CommercialSettlementPayoutRead,
   CommercialSettlementPayoutCallbackRead,
+  OppositionScoutingReportRead,
+  OppositionScoutingVideoAssetRead,
   PerformanceAchievementAwardRead,
   PerformanceAchievementRunRead,
   PerformanceAssessmentReviewEscalationRunRead,
@@ -1537,6 +1539,12 @@ export default function HomePage() {
     useState<PerformanceVideoCoachingRead | null>(null);
   const [performanceVideoAsset, setPerformanceVideoAsset] = useState<PerformanceVideoAssetRead | null>(null);
   const [performanceVideoPreviewUrl, setPerformanceVideoPreviewUrl] = useState("");
+  const [oppositionScoutingVideos, setOppositionScoutingVideos] = useState<OppositionScoutingVideoAssetRead[]>([]);
+  const [oppositionScoutingReports, setOppositionScoutingReports] = useState<OppositionScoutingReportRead[]>([]);
+  const [oppositionScoutingVideo, setOppositionScoutingVideo] =
+    useState<OppositionScoutingVideoAssetRead | null>(null);
+  const [oppositionScoutingReport, setOppositionScoutingReport] =
+    useState<OppositionScoutingReportRead | null>(null);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -1549,6 +1557,7 @@ export default function HomePage() {
     useState<PerformanceMovementReferenceProfileRead[]>([]);
   const [selectedMovementReferenceProfileId, setSelectedMovementReferenceProfileId] = useState("");
   const [selectedPerformanceVideoFile, setSelectedPerformanceVideoFile] = useState<File | null>(null);
+  const [selectedOppositionScoutingFile, setSelectedOppositionScoutingFile] = useState<File | null>(null);
   const [performanceModelBenchmark, setPerformanceModelBenchmark] =
     useState<PerformanceModelExtractionBenchmarkRunRead | null>(null);
   const [performanceModelBenchmarkDatasets, setPerformanceModelBenchmarkDatasets] =
@@ -2064,6 +2073,16 @@ export default function HomePage() {
     analysis_focus: "stride mechanics, posture, arm drive, ground contact, rhythm",
     evidence_text:
       "Stride efficiency 8.1. Posture control 6.4 due to late torso collapse. Ground contact control 7.2. Arm drive 6.8 with cross-body swing. Rhythm consistency 7.5."
+  });
+  const [oppositionScoutingForm, setOppositionScoutingForm] = useState({
+    opponent_name: "Pressing City",
+    sport: "football",
+    clip_label: "Opponent matchday press sample",
+    observed_formation: "4-2-3-1",
+    match_context: "Upcoming league fixture against a high-press opponent with aggressive fullback overlaps.",
+    analysis_focus: "formation, pressing triggers, transition defense, set pieces, chance creation, and tactical weaknesses",
+    evidence_text:
+      "Opponent uses a 4-2-3-1 high press, jumps on back passes, leaves weak-side fullback space, and uses zonal corner marking that loses runners on the second phase."
   });
   const [poseGaitEvidenceText, setPoseGaitEvidenceText] = useState(
     "Torso lean angle 18 degrees with late torso collapse. Front knee drive 64 degrees. Ground contact time 138 ms. Arm swing symmetry 6.5 with cross-body movement. Stride frequency 4.1 Hz."
@@ -2866,6 +2885,31 @@ export default function HomePage() {
     );
   }, [identity]);
 
+  const loadOppositionScouting = useCallback(async (organizationId: string, teamId?: string) => {
+    const params = new URLSearchParams({ organization_id: organizationId });
+    if (teamId) {
+      params.set("team_id", teamId);
+    }
+    const [videoData, reportData] = await Promise.all([
+      apiRequest<OppositionScoutingVideoAssetRead[]>(
+        `/performance/scouting/videos?${params.toString()}`,
+        { identity }
+      ),
+      apiRequest<OppositionScoutingReportRead[]>(
+        `/performance/scouting/reports?${params.toString()}`,
+        { identity }
+      )
+    ]);
+    setOppositionScoutingVideos(videoData);
+    setOppositionScoutingReports(reportData);
+    setOppositionScoutingVideo((current) =>
+      current && videoData.some((video) => video.id === current.id) ? current : videoData[0] ?? null
+    );
+    setOppositionScoutingReport((current) =>
+      current && reportData.some((report) => report.id === current.id) ? current : reportData[0] ?? null
+    );
+  }, [identity]);
+
   const loadPerformanceForecastValidationRuns = useCallback(async (organizationId: string, athleteProfileId?: string) => {
     const params = new URLSearchParams({ organization_id: organizationId, limit: "5" });
     if (athleteProfileId) {
@@ -3504,12 +3548,17 @@ export default function HomePage() {
       setPerformanceVideoCoaching(null);
       setPerformanceVideoAsset(null);
       setPerformanceVideoPreviewUrl("");
+      setOppositionScoutingVideos([]);
+      setOppositionScoutingReports([]);
+      setOppositionScoutingVideo(null);
+      setOppositionScoutingReport(null);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
       setMovementReferenceProfiles([]);
       setSelectedMovementReferenceProfileId("");
       setSelectedPerformanceVideoFile(null);
+      setSelectedOppositionScoutingFile(null);
       setPerformanceModelBenchmark(null);
       setPerformanceModelBenchmarkDatasets([]);
       setPerformanceForecastValidationRun(null);
@@ -3692,6 +3741,7 @@ export default function HomePage() {
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
       await loadPerformanceBenchmarkDatasets(selectedOrganizationId);
+      await loadOppositionScouting(selectedOrganizationId);
       await loadTraining(selectedOrganizationId);
       await loadCompetitions(selectedOrganizationId);
       await loadAthleteTransfers(selectedOrganizationId);
@@ -3721,6 +3771,7 @@ export default function HomePage() {
     loadAgentTasks,
     loadMetricDefinitions,
     loadPerformanceBenchmarkDatasets,
+    loadOppositionScouting,
     loadTraining,
     loadCompetitions,
     loadAthleteTransfers,
@@ -3763,10 +3814,11 @@ export default function HomePage() {
       async () => {
         await loadEvents(selectedOrganizationId, selectedTeamId || undefined);
         await loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+        await loadOppositionScouting(selectedOrganizationId, selectedTeamId || undefined);
       },
       () => addLog("Team lanes refreshed", "good")
     );
-  }, [selectedTeamId, selectedOrganizationId, loadEvents, loadTraining, runAction, addLog]);
+  }, [selectedTeamId, selectedOrganizationId, loadEvents, loadTraining, loadOppositionScouting, runAction, addLog]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -3870,6 +3922,7 @@ export default function HomePage() {
       setMovementReferenceProfiles([]);
       setSelectedMovementReferenceProfileId("");
       setSelectedPerformanceVideoFile(null);
+      setSelectedOppositionScoutingFile(null);
       setPerformanceBenchmarks([]);
       setPerformanceCohortComparisons([]);
       setPerformanceTrends([]);
@@ -8268,6 +8321,93 @@ export default function HomePage() {
         const previewUrl = URL.createObjectURL(selectedPerformanceVideoFile);
         setPerformanceVideoPreviewUrl(previewUrl);
         addLog(`${videoAsset.filename} stored for slow-motion pose review`, "good");
+      }
+    );
+  };
+
+  const uploadOppositionScoutingVideo = () => {
+    if (!selectedOrganizationId || !selectedOppositionScoutingFile) {
+      addLog("Select an organization and choose an opponent video first", "bad");
+      return;
+    }
+    runAction(
+      "upload-opposition-scouting-video",
+      async () => {
+        const contentBase64 = await fileToBase64(selectedOppositionScoutingFile);
+        return apiRequest<OppositionScoutingVideoAssetRead>("/performance/scouting/videos", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            competition_id: selectedCompetitionId || null,
+            event_id: selectedEventId || null,
+            opponent_name: oppositionScoutingForm.opponent_name,
+            sport: oppositionScoutingForm.sport,
+            filename: selectedOppositionScoutingFile.name,
+            content_type: selectedOppositionScoutingFile.type || "video/mp4",
+            content_base64: contentBase64,
+            clip_label: oppositionScoutingForm.clip_label || selectedOppositionScoutingFile.name,
+            match_context: oppositionScoutingForm.match_context,
+            analysis_focus: oppositionScoutingForm.analysis_focus
+          }
+        });
+      },
+      (videoAsset) => {
+        setOppositionScoutingVideo(videoAsset);
+        setOppositionScoutingVideos((current) => [
+          videoAsset,
+          ...current.filter((item) => item.id !== videoAsset.id)
+        ]);
+        addLog(`${videoAsset.opponent_name} scouting video stored`, "good");
+      }
+    );
+  };
+
+  const generateOppositionScoutingReport = () => {
+    if (!selectedOrganizationId || !oppositionScoutingVideo) {
+      addLog("Upload or select an opponent video before generating a scout report", "bad");
+      return;
+    }
+    runAction(
+      "generate-opposition-scouting-report",
+      () =>
+        apiRequest<OppositionScoutingReportRead>(
+          `/performance/scouting/videos/${oppositionScoutingVideo.id}/reports`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              team_id: selectedTeamId || oppositionScoutingVideo.team_id,
+              competition_id: selectedCompetitionId || oppositionScoutingVideo.competition_id,
+              event_id: selectedEventId || oppositionScoutingVideo.event_id,
+              observed_formation: oppositionScoutingForm.observed_formation,
+              match_context: oppositionScoutingForm.match_context || oppositionScoutingVideo.match_context,
+              analysis_focus: oppositionScoutingForm.analysis_focus || oppositionScoutingVideo.analysis_focus,
+              evidence_text: oppositionScoutingForm.evidence_text
+            }
+          }
+        ),
+      (report) => {
+        setOppositionScoutingReport(report);
+        setOppositionScoutingReports((current) => [
+          report,
+          ...current.filter((item) => item.id !== report.id)
+        ]);
+        setOppositionScoutingVideos((current) =>
+          current.map((video) =>
+            video.id === report.video_asset_id
+              ? { ...video, status: "scouted", analyzed_at: report.generated_at }
+              : video
+          )
+        );
+        setOppositionScoutingVideo((current) =>
+          current && current.id === report.video_asset_id
+            ? { ...current, status: "scouted", analyzed_at: report.generated_at }
+            : current
+        );
+        addLog(`${report.opponent_name} scout report generated`, "good");
       }
     );
   };
@@ -16915,6 +17055,8 @@ export default function HomePage() {
                 <button type="button" onClick={processPerformanceVideoPose} disabled={busyAction !== null}>Process video</button>
                 <button type="button" onClick={analyzePerformancePoseGait} disabled={busyAction !== null}>Analyze gait</button>
                 <button type="button" onClick={annotatePerformanceVideo} disabled={busyAction !== null}>Annotate</button>
+                <button type="button" onClick={uploadOppositionScoutingVideo} disabled={busyAction !== null}>Scout video</button>
+                <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Scout report</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
                 <button type="button" onClick={runPerformanceForecastValidation} disabled={busyAction !== null}>Forecast QA</button>
@@ -17023,6 +17165,59 @@ export default function HomePage() {
               <label className="wide-field">
                 Upload video
                 <input type="file" accept="video/*" onChange={(event) => setSelectedPerformanceVideoFile(event.target.files?.[0] ?? null)} />
+              </label>
+              <label>
+                Opponent
+                <input
+                  value={oppositionScoutingForm.opponent_name}
+                  onChange={(event) => setOppositionScoutingForm({ ...oppositionScoutingForm, opponent_name: event.target.value })}
+                />
+              </label>
+              <label>
+                Scout sport
+                <input
+                  value={oppositionScoutingForm.sport}
+                  onChange={(event) => setOppositionScoutingForm({ ...oppositionScoutingForm, sport: event.target.value })}
+                />
+              </label>
+              <label>
+                Formation
+                <input
+                  value={oppositionScoutingForm.observed_formation}
+                  onChange={(event) => setOppositionScoutingForm({ ...oppositionScoutingForm, observed_formation: event.target.value })}
+                />
+              </label>
+              <label className="wide-field">
+                Scout clip label
+                <input
+                  value={oppositionScoutingForm.clip_label}
+                  onChange={(event) => setOppositionScoutingForm({ ...oppositionScoutingForm, clip_label: event.target.value })}
+                />
+              </label>
+              <label className="wide-field">
+                Scout focus
+                <input
+                  value={oppositionScoutingForm.analysis_focus}
+                  onChange={(event) => setOppositionScoutingForm({ ...oppositionScoutingForm, analysis_focus: event.target.value })}
+                />
+              </label>
+              <label className="wide-field">
+                Match context
+                <textarea
+                  value={oppositionScoutingForm.match_context}
+                  onChange={(event) => setOppositionScoutingForm({ ...oppositionScoutingForm, match_context: event.target.value })}
+                />
+              </label>
+              <label className="wide-field">
+                Scout evidence
+                <textarea
+                  value={oppositionScoutingForm.evidence_text}
+                  onChange={(event) => setOppositionScoutingForm({ ...oppositionScoutingForm, evidence_text: event.target.value })}
+                />
+              </label>
+              <label className="wide-field">
+                Opponent video
+                <input type="file" accept="video/*" onChange={(event) => setSelectedOppositionScoutingFile(event.target.files?.[0] ?? null)} />
               </label>
               <label className="wide-field">
                 Pose/gait evidence
@@ -17285,6 +17480,83 @@ export default function HomePage() {
                 ) : null}
               </div>
             ) : null}
+            <div className="video-analysis-panel">
+              <div className="panel-head">
+                <div>
+                  <p className="section-label">Opposition scouting</p>
+                  <h3>{oppositionScoutingReport?.opponent_name ?? oppositionScoutingVideo?.opponent_name ?? "Opponent match video"}</h3>
+                </div>
+                <div className="event-toolbar">
+                  <button type="button" onClick={uploadOppositionScoutingVideo} disabled={busyAction !== null}>Upload scout video</button>
+                  <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Generate report</button>
+                </div>
+              </div>
+              <div className="mini-grid">
+                <article className="mini-card">
+                  <span className="muted">Video library</span>
+                  <strong>{oppositionScoutingVideos.length} clip(s)</strong>
+                  <p>{oppositionScoutingVideo?.filename ?? "Upload opponent match footage for tactical analysis."}</p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Latest report</span>
+                  <strong>{oppositionScoutingReport?.formation_detected ?? "No formation yet"}</strong>
+                  <p>
+                    {oppositionScoutingReport
+                      ? `${Math.round(oppositionScoutingReport.confidence * 100)}% confidence · ${oppositionScoutingReport.status}`
+                      : "Generate a report after choosing a clip."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Scope</span>
+                  <strong>{selectedTeam?.name ?? "Organization-wide"}</strong>
+                  <p>{selectedCompetition?.name ?? selectedEvent?.title ?? "Team, competition, and event context are attached when selected."}</p>
+                </article>
+              </div>
+              {oppositionScoutingVideo ? (
+                <div className="task-list">
+                  {oppositionScoutingVideos.slice(0, 3).map((video) => (
+                    <article key={video.id} className="task-card">
+                      <div>
+                        <strong>{video.opponent_name} · {video.status}</strong>
+                        <span>{video.clip_label ?? video.filename} · {Math.round(video.size_bytes / 1024)} KB</span>
+                        <small>{video.analysis_focus ?? "Tactical scout video"}</small>
+                      </div>
+                      <span>
+                        <button type="button" onClick={() => setOppositionScoutingVideo(video)} disabled={busyAction !== null}>Select</button>
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+              {oppositionScoutingReport ? (
+                <div className="task-list">
+                  <article className="task-card">
+                    <div>
+                      <strong>{oppositionScoutingReport.model_policy}</strong>
+                      <span>{oppositionScoutingReport.tactical_summary}</span>
+                      <small>
+                        {oppositionScoutingReport.analysis_focus ?? "Opponent tactical scouting"} ·{" "}
+                        {new Date(oppositionScoutingReport.generated_at).toLocaleString()}
+                      </small>
+                    </div>
+                  </article>
+                  {[
+                    ...oppositionScoutingReport.weaknesses,
+                    ...oppositionScoutingReport.threats,
+                    ...oppositionScoutingReport.recommendations,
+                    ...oppositionScoutingReport.set_pieces
+                  ].slice(0, 8).map((finding, index) => (
+                    <article key={`${finding.category}-${finding.title}-${index}`} className="task-card">
+                      <div>
+                        <strong>{finding.title} · {finding.severity}</strong>
+                        <span>{finding.category.replaceAll("_", " ")} · {finding.evidence}</span>
+                        <small>{finding.recommendation}</small>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <PerformanceInjuryRiskCard
               risk={performanceInjuryRisk}
               alert={performanceInjuryRiskAlert}

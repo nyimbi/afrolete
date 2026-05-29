@@ -194,6 +194,89 @@ class PerformanceVideoAssetRead(BaseModel):
     review_default_rate: float
 
 
+class OppositionScoutingVideoUploadCreate(BaseModel):
+    organization_id: UUID
+    team_id: UUID | None = None
+    competition_id: UUID | None = None
+    event_id: UUID | None = None
+    opponent_name: str = Field(min_length=2, max_length=180)
+    sport: str = Field(default="football", min_length=2, max_length=80)
+    filename: str = Field(min_length=1, max_length=240)
+    content_type: str = Field(default="video/mp4", max_length=120)
+    content_base64: str = Field(min_length=1)
+    clip_label: str | None = Field(default=None, max_length=180)
+    match_context: str | None = Field(default=None, max_length=4000)
+    analysis_focus: str = Field(
+        default="formation, pressing triggers, transition defense, set pieces, chance creation, and tactical weaknesses",
+        max_length=1000,
+    )
+
+
+class OppositionScoutingVideoAssetRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    team_id: UUID | None
+    competition_id: UUID | None
+    event_id: UUID | None
+    uploaded_by_person_id: UUID | None
+    opponent_name: str
+    sport: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    checksum: str
+    storage_url: str
+    video_uri: str
+    clip_label: str | None
+    match_context: str | None
+    analysis_focus: str | None
+    status: str
+    analyzed_at: datetime | None
+
+
+class OppositionScoutingReportCreate(BaseModel):
+    organization_id: UUID
+    team_id: UUID | None = None
+    competition_id: UUID | None = None
+    event_id: UUID | None = None
+    observed_formation: str | None = Field(default=None, max_length=80)
+    match_context: str | None = Field(default=None, max_length=4000)
+    analysis_focus: str | None = Field(default=None, max_length=1000)
+    evidence_text: str | None = Field(default=None, max_length=12000)
+
+
+class OppositionScoutingFindingRead(BaseModel):
+    category: str
+    title: str
+    severity: str
+    evidence: str
+    recommendation: str
+
+
+class OppositionScoutingReportRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    team_id: UUID | None
+    competition_id: UUID | None
+    event_id: UUID | None
+    created_by_person_id: UUID | None
+    opponent_name: str
+    sport: str
+    match_context: str | None
+    analysis_focus: str | None
+    model_policy: str
+    confidence: float
+    formation_detected: str | None
+    tactical_summary: str
+    weaknesses: list[OppositionScoutingFindingRead]
+    threats: list[OppositionScoutingFindingRead]
+    recommendations: list[OppositionScoutingFindingRead]
+    set_pieces: list[OppositionScoutingFindingRead]
+    status: str
+    generated_at: datetime
+
+
 class PerformanceVideoAnnotationCreate(BaseModel):
     timestamp_seconds: float = Field(ge=0)
     playback_rate: float = Field(default=0.5, ge=0.05, le=2)

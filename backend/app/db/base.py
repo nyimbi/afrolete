@@ -110,6 +110,8 @@ from app.models.organization import (  # noqa: F401,E402
 from app.models.performance import (  # noqa: F401,E402
     AthleteAssessment,
     AthletePerformanceObservation,
+    OppositionScoutingReport,
+    OppositionScoutingVideoAsset,
     PerformanceAchievementAward,
     PerformanceGoal,
     PerformanceMetricDefinition,

@@ -2779,6 +2779,65 @@ def test_video_coaching_analysis_creates_pending_review_outputs(
     assert coaching["next_actions"]
 
 
+def test_opposition_scouting_video_generates_tactical_report(client, identity_headers) -> None:
+    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    video_bytes = b"opponent tactical match video"
+    upload_response = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Pressing City",
+            "sport": "football",
+            "filename": "pressing-city.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(video_bytes).decode(),
+            "clip_label": "Round 3 opponent full match",
+            "match_context": "4-2-3-1 high press with corners and fast counter attacks.",
+            "analysis_focus": "formation, high press, set pieces, transition defense",
+        },
+    )
+    assert upload_response.status_code == 201
+    video_asset = upload_response.json()
+    assert video_asset["opponent_name"] == "Pressing City"
+    assert video_asset["status"] == "uploaded"
+
+    report_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/reports",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "observed_formation": "4-2-3-1",
+            "evidence_text": (
+                "Opponent presses after back passes, attacks set pieces with zonal screens, "
+                "and leaves space behind fullbacks."
+            ),
+        },
+    )
+    assert report_response.status_code == 201
+    report = report_response.json()
+    assert report["model_policy"] == "afrolete-opposition-scout-v1"
+    assert report["formation_detected"] == "4-2-3-1"
+    assert report["confidence"] >= 0.8
+    assert any(finding["category"] == "set_piece" for finding in report["weaknesses"])
+    assert any("weak-side" in finding["title"].lower() for finding in report["recommendations"])
+
+    videos = client.get(
+        f"/api/v1/performance/scouting/videos?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert videos.status_code == 200
+    assert videos.json()[0]["status"] == "scouted"
+    reports = client.get(
+        f"/api/v1/performance/scouting/reports?organization_id={organization['id']}&team_id={team['id']}",
+        headers=identity_headers,
+    )
+    assert reports.status_code == 200
+    assert reports.json()[0]["id"] == report["id"]
+
+
 def test_performance_video_upload_pose_gait_analysis_and_annotations(
     client,
     identity_headers,

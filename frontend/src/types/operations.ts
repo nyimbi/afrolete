@@ -4668,6 +4668,60 @@ export type PerformanceVideoAssetRead = {
   review_default_rate: number;
 };
 
+export type OppositionScoutingVideoAssetRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  competition_id: UUID | null;
+  event_id: UUID | null;
+  uploaded_by_person_id: UUID | null;
+  opponent_name: string;
+  sport: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  checksum: string;
+  storage_url: string;
+  video_uri: string;
+  clip_label: string | null;
+  match_context: string | null;
+  analysis_focus: string | null;
+  status: string;
+  analyzed_at: string | null;
+};
+
+export type OppositionScoutingFindingRead = {
+  category: string;
+  title: string;
+  severity: string;
+  evidence: string;
+  recommendation: string;
+};
+
+export type OppositionScoutingReportRead = {
+  id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  team_id: UUID | null;
+  competition_id: UUID | null;
+  event_id: UUID | null;
+  created_by_person_id: UUID | null;
+  opponent_name: string;
+  sport: string;
+  match_context: string | null;
+  analysis_focus: string | null;
+  model_policy: string;
+  confidence: number;
+  formation_detected: string | null;
+  tactical_summary: string;
+  weaknesses: OppositionScoutingFindingRead[];
+  threats: OppositionScoutingFindingRead[];
+  recommendations: OppositionScoutingFindingRead[];
+  set_pieces: OppositionScoutingFindingRead[];
+  status: string;
+  generated_at: string;
+};
+
 export type PerformanceVideoAnnotationRead = {
   id: UUID;
   organization_id: UUID;

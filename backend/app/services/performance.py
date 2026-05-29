@@ -37,12 +37,15 @@ from app.models.enums import (
     WeatherAlertLevel,
 )
 from app.models.assets import Facility
+from app.models.competition import Competition
 from app.models.event import Event, EventWeatherAssessment, SafeguardingIncident
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.performance import (
     AthleteAssessment,
     AthletePerformanceObservation,
+    OppositionScoutingReport,
+    OppositionScoutingVideoAsset,
     PerformanceAchievementAward,
     PerformanceGoal,
     PerformanceMetricDefinition,
@@ -68,6 +71,8 @@ from app.schemas.performance import (
     PerformanceAssessmentReviewEscalationRunRead,
     PerformanceInjuryRiskAlertRunRead,
     MetricDefinitionCreate,
+    OppositionScoutingReportCreate,
+    OppositionScoutingVideoUploadCreate,
     PerformanceAchievementWorkerRunRead,
     PerformanceForecastValidationWorkerRunRead,
     PerformanceGoalCreate,
@@ -517,6 +522,175 @@ async def upload_performance_video_asset(
     await db.commit()
     await db.refresh(video_asset)
     return video_asset
+
+
+async def upload_opposition_scouting_video_asset(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: OppositionScoutingVideoUploadCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> OppositionScoutingVideoAsset:
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    await ensure_scouting_scope(db, payload.organization_id, payload.team_id, payload.competition_id, payload.event_id)
+    if not payload.content_type.startswith("video/"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Upload must be a video file")
+    content = decode_performance_upload_content(payload.content_base64)
+    if not content:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Video file is empty")
+    selected_settings = settings or get_settings()
+    if len(content) > selected_settings.performance_video_max_upload_bytes:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Video upload exceeds tenant limit")
+    checksum = hashlib.sha256(content).hexdigest()
+    existing = await db.scalar(
+        select(OppositionScoutingVideoAsset).where(
+            OppositionScoutingVideoAsset.organization_id == payload.organization_id,
+            OppositionScoutingVideoAsset.checksum == checksum,
+        )
+    )
+    if existing is not None:
+        return existing
+    safe_name = safe_performance_upload_filename(payload.filename)
+    storage_name = f"{checksum[:16]}-{safe_name}"
+    relative_path = (Path(str(payload.organization_id)) / "scouting" / storage_name).as_posix()
+    stored = put_object(
+        selected_settings,
+        local_root=selected_settings.performance_video_file_dir,
+        local_url_prefix=selected_settings.performance_video_file_url_prefix,
+        key=relative_path,
+        content=content,
+        content_type=payload.content_type,
+    )
+    video_asset = OppositionScoutingVideoAsset(
+        organization_id=payload.organization_id,
+        team_id=payload.team_id,
+        competition_id=payload.competition_id,
+        event_id=payload.event_id,
+        uploaded_by_person_id=identity.person_id,
+        opponent_name=payload.opponent_name.strip(),
+        sport=payload.sport.strip().lower(),
+        filename=safe_name,
+        content_type=payload.content_type,
+        size_bytes=len(content),
+        checksum=checksum,
+        storage_url=stored.url,
+        storage_path=stored.path,
+        video_uri=f"opposition-scouting-video://{payload.organization_id}/{checksum[:16]}",
+        clip_label=payload.clip_label,
+        match_context=payload.match_context,
+        analysis_focus=payload.analysis_focus,
+        status="uploaded",
+    )
+    db.add(video_asset)
+    await db.commit()
+    await db.refresh(video_asset)
+    return video_asset
+
+
+async def list_opposition_scouting_videos(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    team_id: UUID | None = None,
+) -> list[OppositionScoutingVideoAsset]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(OppositionScoutingVideoAsset).where(
+        OppositionScoutingVideoAsset.organization_id == organization_id
+    )
+    if team_id is not None:
+        statement = statement.where(OppositionScoutingVideoAsset.team_id == team_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    OppositionScoutingVideoAsset.analyzed_at.desc().nullslast(),
+                    OppositionScoutingVideoAsset.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+
+
+async def create_opposition_scouting_report(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    video_asset_id: UUID,
+    payload: OppositionScoutingReportCreate,
+    authz: AuthorizationService,
+) -> OppositionScoutingReport:
+    video_asset = await get_opposition_scouting_video_asset(db, video_asset_id)
+    if video_asset.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    await ensure_scouting_scope(
+        db,
+        video_asset.organization_id,
+        payload.team_id or video_asset.team_id,
+        payload.competition_id or video_asset.competition_id,
+        payload.event_id or video_asset.event_id,
+    )
+    analysis = deterministic_opposition_scouting_analysis(
+        opponent_name=video_asset.opponent_name,
+        sport=video_asset.sport,
+        formation=payload.observed_formation,
+        match_context=payload.match_context or video_asset.match_context,
+        analysis_focus=payload.analysis_focus or video_asset.analysis_focus,
+        evidence_text=payload.evidence_text,
+    )
+    now = datetime.now(UTC)
+    report = OppositionScoutingReport(
+        organization_id=video_asset.organization_id,
+        video_asset_id=video_asset.id,
+        team_id=payload.team_id or video_asset.team_id,
+        competition_id=payload.competition_id or video_asset.competition_id,
+        event_id=payload.event_id or video_asset.event_id,
+        created_by_person_id=identity.person_id,
+        opponent_name=video_asset.opponent_name,
+        sport=video_asset.sport,
+        match_context=payload.match_context or video_asset.match_context,
+        analysis_focus=payload.analysis_focus or video_asset.analysis_focus,
+        model_policy="afrolete-opposition-scout-v1",
+        confidence=float(analysis["confidence"]),
+        formation_detected=str(analysis["formation_detected"]),
+        tactical_summary=str(analysis["tactical_summary"]),
+        weaknesses_json=json.dumps(analysis["weaknesses"]),
+        threats_json=json.dumps(analysis["threats"]),
+        recommendations_json=json.dumps(analysis["recommendations"]),
+        set_pieces_json=json.dumps(analysis["set_pieces"]),
+        status="generated",
+        generated_at=now,
+    )
+    video_asset.status = "scouted"
+    video_asset.analyzed_at = now
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    await db.refresh(video_asset)
+    return report
+
+
+async def list_opposition_scouting_reports(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    team_id: UUID | None = None,
+) -> list[OppositionScoutingReport]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(OppositionScoutingReport).where(OppositionScoutingReport.organization_id == organization_id)
+    if team_id is not None:
+        statement = statement.where(OppositionScoutingReport.team_id == team_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    OppositionScoutingReport.generated_at.desc(),
+                    OppositionScoutingReport.created_at.desc(),
+                )
+            )
+        ).all()
+    )
 
 
 async def downloadable_performance_video_asset(
@@ -5796,6 +5970,178 @@ def decode_string_list(value: str | None) -> list[str]:
     return [str(item) for item in items if str(item)]
 
 
+def decode_scouting_findings(value: str | None) -> list[dict[str, str]]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    findings: list[dict[str, str]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        findings.append(
+            {
+                "category": str(item.get("category") or "tactical"),
+                "title": str(item.get("title") or "Scouting note"),
+                "severity": str(item.get("severity") or "medium"),
+                "evidence": str(item.get("evidence") or ""),
+                "recommendation": str(item.get("recommendation") or ""),
+            }
+        )
+    return findings
+
+
+def deterministic_opposition_scouting_analysis(
+    *,
+    opponent_name: str,
+    sport: str,
+    formation: str | None,
+    match_context: str | None,
+    analysis_focus: str | None,
+    evidence_text: str | None,
+) -> dict[str, object]:
+    corpus = " ".join(
+        part.lower()
+        for part in [opponent_name, sport, formation, match_context, analysis_focus, evidence_text]
+        if part
+    )
+    formation_detected = formation or detected_formation(corpus)
+    weaknesses = [
+        scouting_finding(
+            "weakness",
+            "Space behind wide defenders",
+            "high" if any(word in corpus for word in ["high press", "overlap", "fullback"]) else "medium",
+            f"{opponent_name} can be stretched when their wide players step high.",
+            "Use early diagonal switches and blind-side winger runs after drawing the press.",
+        ),
+        scouting_finding(
+            "weakness",
+            "Second-ball exposure",
+            "medium",
+            "Their defensive midfield line leaves recoverable space after aerial or cleared balls.",
+            "Station a late-arriving midfielder at the top of the box and recycle quickly.",
+        ),
+    ]
+    if any(word in corpus for word in ["set piece", "corner", "free kick", "zonal"]):
+        weaknesses.append(
+            scouting_finding(
+                "set_piece",
+                "Set-piece marking confusion",
+                "high",
+                "Evidence mentions set-piece or zonal defending pressure points.",
+                "Stack near-post runners, screen the central marker, and attack the far-post second phase.",
+            )
+        )
+    if any(word in corpus for word in ["fatigue", "late", "tired", "drop off"]):
+        weaknesses.append(
+            scouting_finding(
+                "conditioning",
+                "Late-game intensity drop",
+                "medium",
+                "Evidence suggests performance drops after sustained pressure.",
+                "Raise tempo after halftime with fresh runners and repeated wide switches.",
+            )
+        )
+    threats = [
+        scouting_finding(
+            "threat",
+            "Fast attacking transition",
+            "high" if any(word in corpus for word in ["counter", "transition", "pace"]) else "medium",
+            f"{opponent_name} can break quickly when possession turns over.",
+            "Keep rest-defense coverage with two staggered players behind the ball.",
+        ),
+        scouting_finding(
+            "threat",
+            "Pressing trigger after back passes",
+            "medium",
+            "The scouting focus includes pressing and tactical pressure cues.",
+            "Prepare a third-player outlet and avoid square passes into the first pressing lane.",
+        ),
+    ]
+    recommendations = [
+        scouting_finding(
+            "game_plan",
+            "Build through the weak-side channel",
+            "high",
+            f"Detected shape: {formation_detected}. Wide recovery is the most exploitable pattern.",
+            "Overload one side, switch early, and isolate the far-side winger against the recovering fullback.",
+        ),
+        scouting_finding(
+            "game_plan",
+            "Protect central turnovers",
+            "high",
+            "Transition threat appears in the tactical profile.",
+            "Use a conservative six/eight rest-defense pair whenever both fullbacks advance.",
+        ),
+        scouting_finding(
+            "training",
+            "Rehearse first 15-minute pressure escape",
+            "medium",
+            "Opening pressure is likely if the opponent presses from the front.",
+            "Run rondo-to-breakout patterns and scripted goalkeeper release options before match day.",
+        ),
+    ]
+    set_pieces = [
+        scouting_finding(
+            "set_piece",
+            "Near-post decoy and far-post attack",
+            "medium",
+            "Default set-piece recommendation generated from opponent scouting profile.",
+            "Send the strongest aerial player to the back post while a decoy run screens the near-post zone.",
+        )
+    ]
+    confidence = 0.74
+    if evidence_text and len(evidence_text) > 80:
+        confidence += 0.08
+    if formation:
+        confidence += 0.06
+    confidence = min(confidence, 0.92)
+    return {
+        "formation_detected": formation_detected,
+        "tactical_summary": (
+            f"{opponent_name} profiles as a {formation_detected} opponent with transition threat, "
+            "recoverable weak-side space, and set-piece second-phase risk. The match plan should "
+            "pull pressure to one side, switch quickly, and keep rest-defense protection central."
+        ),
+        "weaknesses": weaknesses,
+        "threats": threats,
+        "recommendations": recommendations,
+        "set_pieces": set_pieces,
+        "confidence": round(confidence, 2),
+    }
+
+
+def detected_formation(corpus: str) -> str:
+    for candidate in ["4-3-3", "4-2-3-1", "4-4-2", "3-5-2", "3-4-3", "5-3-2"]:
+        if candidate in corpus:
+            return candidate
+    if "back three" in corpus or "three center" in corpus:
+        return "3-5-2"
+    if "double pivot" in corpus:
+        return "4-2-3-1"
+    return "4-3-3"
+
+
+def scouting_finding(
+    category: str,
+    title: str,
+    severity: str,
+    evidence: str,
+    recommendation: str,
+) -> dict[str, str]:
+    return {
+        "category": category,
+        "title": title,
+        "severity": severity,
+        "evidence": evidence,
+        "recommendation": recommendation,
+    }
+
+
 def video_slow_motion_rates() -> list[float]:
     return [0.125, 0.25, 0.5, 0.75, 1.0]
 
@@ -5821,6 +6167,37 @@ async def get_performance_video_asset(
     if video_asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Performance video not found")
     return video_asset
+
+
+async def get_opposition_scouting_video_asset(
+    db: AsyncSession,
+    video_asset_id: UUID,
+) -> OppositionScoutingVideoAsset:
+    video_asset = await db.get(OppositionScoutingVideoAsset, video_asset_id)
+    if video_asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scouting video not found")
+    return video_asset
+
+
+async def ensure_scouting_scope(
+    db: AsyncSession,
+    organization_id: UUID,
+    team_id: UUID | None,
+    competition_id: UUID | None,
+    event_id: UUID | None,
+) -> None:
+    if team_id is not None:
+        team = await db.get(Team, team_id)
+        if team is None or team.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if competition_id is not None:
+        competition = await db.get(Competition, competition_id)
+        if competition is None or competition.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Competition not found")
+    if event_id is not None:
+        event = await db.get(Event, event_id)
+        if event is None or event.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
 
 
 def performance_video_object_key(video_asset: PerformanceVideoAsset, settings: Settings) -> str:
