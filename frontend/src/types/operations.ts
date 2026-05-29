@@ -1767,6 +1767,7 @@ export type SupplierOrderRead = {
 export type SupplierOrderSubmissionRead = {
   order: SupplierOrderRead;
   submission_mode: string;
+  adapter_profile: string;
   delivery_attempted: boolean;
   delivered: boolean;
   destination: string | null;
@@ -1778,6 +1779,7 @@ export type SupplierOrderSubmissionRead = {
 export type SupplierInvoiceSyncRead = {
   order: SupplierOrderRead;
   sync_mode: string;
+  adapter_profile: string;
   sync_attempted: boolean;
   synced: boolean;
   destination: string | null;

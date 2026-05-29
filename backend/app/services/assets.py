@@ -1336,6 +1336,7 @@ async def submit_supplier_order(
     submitted_at = datetime.now(UTC)
     result = {
         "submission_mode": selected_settings.supplier_order_submission_mode,
+        "adapter_profile": supplier_order_adapter_profile(selected_settings, order),
         "delivery_attempted": False,
         "delivered": False,
         "destination": selected_settings.supplier_order_webhook_url or None,
@@ -1358,7 +1359,7 @@ async def submit_supplier_order(
             async with httpx.AsyncClient(timeout=selected_settings.supplier_order_submission_timeout_seconds) as client:
                 response = await client.post(
                     selected_settings.supplier_order_webhook_url,
-                    json=supplier_order_payload(order, submitted_at),
+                    json=supplier_order_payload(order, submitted_at, str(result["adapter_profile"])),
                     headers=await supplier_order_headers(selected_settings),
                 )
             result["provider_status_code"] = response.status_code
@@ -1394,6 +1395,7 @@ async def sync_supplier_invoice(
     synced_at = datetime.now(UTC)
     result = {
         "sync_mode": selected_settings.supplier_invoice_sync_mode,
+        "adapter_profile": supplier_invoice_adapter_profile(selected_settings, order),
         "sync_attempted": False,
         "synced": False,
         "destination": selected_settings.supplier_invoice_webhook_url or None,
@@ -1413,7 +1415,7 @@ async def sync_supplier_invoice(
             async with httpx.AsyncClient(timeout=selected_settings.supplier_invoice_sync_timeout_seconds) as client:
                 response = await client.post(
                     selected_settings.supplier_invoice_webhook_url,
-                    json=supplier_invoice_sync_payload(order, synced_at),
+                    json=supplier_invoice_sync_payload(order, synced_at, str(result["adapter_profile"])),
                     headers=await supplier_invoice_headers(selected_settings),
                 )
             result["provider_status_code"] = response.status_code
@@ -2327,9 +2329,10 @@ def supplier_recommendation(score: int) -> str:
     return "Review supplier before assigning critical work."
 
 
-def supplier_order_payload(order: SupplierOrder, submitted_at: datetime) -> dict:
-    return {
+def supplier_order_payload(order: SupplierOrder, submitted_at: datetime, adapter_profile: str = "generic") -> dict:
+    base_payload = {
         "event_type": "assets.supplier_order",
+        "adapter_profile": adapter_profile,
         "order_id": str(order.id),
         "organization_id": str(order.organization_id),
         "equipment_item_id": str(order.equipment_item_id) if order.equipment_item_id else None,
@@ -2345,11 +2348,56 @@ def supplier_order_payload(order: SupplierOrder, submitted_at: datetime) -> dict
         "submitted_at": submitted_at.isoformat(),
         "notes": order.notes,
     }
+    if adapter_profile == "teamwear":
+        base_payload["teamwear_purchase_order"] = {
+            "purchase_order_number": order.external_reference or f"AFROLETE-{str(order.id)[:8]}",
+            "supplier": order.supplier_name,
+            "requested_delivery_at": order.expected_delivery_at.isoformat() if order.expected_delivery_at else None,
+            "lines": [
+                {
+                    "product_name": order.item_name,
+                    "category": "team_equipment",
+                    "quantity": order.quantity,
+                    "unit_price": str(order.unit_cost),
+                    "line_total": str(order.total_cost),
+                    "currency": order.currency,
+                }
+            ],
+            "delivery_instructions": order.notes,
+        }
+    elif adapter_profile == "decathlon_club":
+        base_payload["decathlon_club_cart"] = {
+            "customer_reference": order.external_reference or str(order.id),
+            "currency": order.currency,
+            "items": [
+                {
+                    "sku_or_description": order.item_name,
+                    "quantity": order.quantity,
+                    "expected_unit_price": str(order.unit_cost),
+                    "sport_use": "club_equipment",
+                }
+            ],
+            "requested_fulfillment": {
+                "expected_delivery_at": order.expected_delivery_at.isoformat() if order.expected_delivery_at else None,
+                "allow_substitutions": True,
+            },
+        }
+    elif adapter_profile == "local_sports_vendor":
+        base_payload["vendor_order_request"] = {
+            "reference": order.external_reference or f"LOCAL-{str(order.id)[:8]}",
+            "vendor_name": order.supplier_name,
+            "description": f"{order.quantity} x {order.item_name}",
+            "max_authorized_total": str(order.total_cost),
+            "currency": order.currency,
+            "delivery_deadline": order.expected_delivery_at.isoformat() if order.expected_delivery_at else None,
+        }
+    return base_payload
 
 
-def supplier_invoice_sync_payload(order: SupplierOrder, synced_at: datetime) -> dict:
-    return {
+def supplier_invoice_sync_payload(order: SupplierOrder, synced_at: datetime, adapter_profile: str = "generic") -> dict:
+    base_payload = {
         "event_type": "assets.supplier_invoice",
+        "adapter_profile": adapter_profile,
         "order_id": str(order.id),
         "organization_id": str(order.organization_id),
         "equipment_item_id": str(order.equipment_item_id) if order.equipment_item_id else None,
@@ -2365,6 +2413,76 @@ def supplier_invoice_sync_payload(order: SupplierOrder, synced_at: datetime) -> 
         "synced_at": synced_at.isoformat(),
         "notes": order.notes,
     }
+    if adapter_profile == "quickbooks_bill":
+        base_payload["quickbooks_bill"] = {
+            "vendor_ref": order.supplier_name,
+            "doc_number": order.external_reference or f"BILL-{str(order.id)[:8]}",
+            "currency_ref": order.currency,
+            "line": [
+                {
+                    "description": order.item_name,
+                    "amount": str(order.total_cost),
+                    "detail_type": "AccountBasedExpenseLineDetail",
+                    "account_ref": "1500:equipment-assets",
+                    "quantity": order.quantity,
+                    "unit_price": str(order.unit_cost),
+                }
+            ],
+        }
+    elif adapter_profile == "xero_bill":
+        base_payload["xero_bill"] = {
+            "contact": {"name": order.supplier_name},
+            "type": "ACCPAY",
+            "reference": order.external_reference or str(order.id),
+            "currency_code": order.currency,
+            "line_items": [
+                {
+                    "description": order.item_name,
+                    "quantity": order.quantity,
+                    "unit_amount": str(order.unit_cost),
+                    "account_code": "1500",
+                    "line_amount": str(order.total_cost),
+                }
+            ],
+        }
+    elif adapter_profile == "sage_bill":
+        base_payload["sage_bill"] = {
+            "supplier": order.supplier_name,
+            "reference": order.external_reference or str(order.id),
+            "currency": order.currency,
+            "nominal_code": "1500",
+            "net_amount": str(order.total_cost),
+            "description": order.item_name,
+        }
+    return base_payload
+
+
+def supplier_order_adapter_profile(settings: Settings, order: SupplierOrder) -> str:
+    configured = settings.supplier_order_adapter_profile
+    if configured != "auto":
+        return configured
+    haystack = f"{order.supplier_name} {order.item_name}".lower()
+    if "decathlon" in haystack:
+        return "decathlon_club"
+    if any(term in haystack for term in ["kit", "jersey", "uniform", "teamwear"]):
+        return "teamwear"
+    return "local_sports_vendor"
+
+
+def supplier_invoice_adapter_profile(settings: Settings, order: SupplierOrder) -> str:
+    configured = settings.supplier_invoice_adapter_profile
+    if configured != "auto":
+        return configured
+    destination = settings.supplier_invoice_webhook_url.lower()
+    if "quickbooks" in destination or "intuit" in destination:
+        return "quickbooks_bill"
+    if "xero" in destination:
+        return "xero_bill"
+    if "sage" in destination:
+        return "sage_bill"
+    if "quickbooks" in order.supplier_name.lower():
+        return "quickbooks_bill"
+    return "generic"
 
 
 async def supplier_order_headers(settings: Settings) -> dict[str, str]:

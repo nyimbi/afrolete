@@ -409,6 +409,7 @@ class SupplierOrderRead(BaseModel):
 class SupplierOrderSubmissionRead(BaseModel):
     order: SupplierOrderRead
     submission_mode: str
+    adapter_profile: str
     delivery_attempted: bool
     delivered: bool
     destination: str | None
@@ -420,6 +421,7 @@ class SupplierOrderSubmissionRead(BaseModel):
 class SupplierInvoiceSyncRead(BaseModel):
     order: SupplierOrderRead
     sync_mode: str
+    adapter_profile: str
     sync_attempted: bool
     synced: bool
     destination: str | None

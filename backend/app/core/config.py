@@ -291,12 +291,26 @@ class Settings(BaseSettings):
         ]
     )
     supplier_order_submission_mode: Literal["record_only", "webhook"] = "record_only"
+    supplier_order_adapter_profile: Literal[
+        "generic",
+        "auto",
+        "teamwear",
+        "decathlon_club",
+        "local_sports_vendor",
+    ] = "generic"
     supplier_order_webhook_url: str = ""
     supplier_order_webhook_key: str = ""
     supplier_order_webhook_key_secret_path: str = ""
     supplier_order_webhook_key_secret_field: str = "value"
     supplier_order_submission_timeout_seconds: float = 5.0
     supplier_invoice_sync_mode: Literal["record_only", "webhook"] = "record_only"
+    supplier_invoice_adapter_profile: Literal[
+        "generic",
+        "auto",
+        "quickbooks_bill",
+        "xero_bill",
+        "sage_bill",
+    ] = "generic"
     supplier_invoice_webhook_url: str = ""
     supplier_invoice_webhook_key: str = ""
     supplier_invoice_webhook_key_secret_path: str = ""

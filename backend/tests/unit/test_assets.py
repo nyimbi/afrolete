@@ -431,6 +431,79 @@ def test_asset_procurement_scan_photo_supplier_lease_and_utilization(
     assert any(item["target_id"] == equipment["id"] for item in recommendations)
 
 
+def test_supplier_order_and_invoice_use_adapter_profiles(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    captured: list[dict[str, object]] = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json, headers):
+            captured.append({"url": url, "json": json, "headers": headers, "timeout": self.timeout})
+            return SimpleNamespace(status_code=202, text="accepted")
+
+    monkeypatch.setenv("AFROLETE_SUPPLIER_ORDER_SUBMISSION_MODE", "webhook")
+    monkeypatch.setenv("AFROLETE_SUPPLIER_ORDER_ADAPTER_PROFILE", "teamwear")
+    monkeypatch.setenv("AFROLETE_SUPPLIER_ORDER_WEBHOOK_URL", "https://teamwear.example/orders")
+    monkeypatch.setenv("AFROLETE_SUPPLIER_INVOICE_SYNC_MODE", "webhook")
+    monkeypatch.setenv("AFROLETE_SUPPLIER_INVOICE_ADAPTER_PROFILE", "quickbooks_bill")
+    monkeypatch.setenv("AFROLETE_SUPPLIER_INVOICE_WEBHOOK_URL", "https://quickbooks.example/bills")
+    assets_service.get_settings.cache_clear()
+    monkeypatch.setattr(assets_service.httpx, "AsyncClient", FakeAsyncClient)
+
+    organization, _, _, _ = create_assets_context(client, identity_headers, "Supplier Adapter Club")
+    order = client.post(
+        "/api/v1/assets/suppliers/orders",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "supplier_name": "Pro Teamwear",
+            "item_name": "Home jersey kit",
+            "quantity": 20,
+            "unit_cost": "35.00",
+            "currency": "USD",
+            "external_reference": "PO-KIT-1",
+            "submit": True,
+        },
+    ).json()
+
+    submission = client.post(
+        f"/api/v1/assets/suppliers/orders/{order['id']}/submit",
+        headers=identity_headers,
+    )
+    assert submission.status_code == 200
+    assert submission.json()["adapter_profile"] == "teamwear"
+    invoice_sync = client.post(
+        f"/api/v1/assets/suppliers/orders/{order['id']}/invoice-sync",
+        headers=identity_headers,
+    )
+    assert invoice_sync.status_code == 200
+    assert invoice_sync.json()["adapter_profile"] == "quickbooks_bill"
+    assert len(captured) == 2
+    order_payload = captured[0]["json"]
+    assert isinstance(order_payload, dict)
+    assert order_payload["adapter_profile"] == "teamwear"
+    assert order_payload["teamwear_purchase_order"]["purchase_order_number"] == "PO-KIT-1"
+    assert order_payload["teamwear_purchase_order"]["lines"][0]["product_name"] == "Home jersey kit"
+    invoice_payload = captured[1]["json"]
+    assert isinstance(invoice_payload, dict)
+    assert invoice_payload["adapter_profile"] == "quickbooks_bill"
+    assert invoice_payload["quickbooks_bill"]["vendor_ref"] == "Pro Teamwear"
+    assert invoice_payload["quickbooks_bill"]["line"][0]["amount"] == "700.00"
+
+    assets_service.get_settings.cache_clear()
+
+
 def test_asset_accounting_export_and_signed_sync(
     client,
     identity_headers,

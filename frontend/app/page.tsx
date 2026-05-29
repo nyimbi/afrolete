@@ -14731,7 +14731,10 @@ export default function HomePage() {
                 <article className="task-card">
                   <div>
                     <strong>{supplierSubmission.delivered ? "Supplier delivered" : "Supplier prepared"}</strong>
-                    <span>{supplierSubmission.submission_mode} · {supplierSubmission.provider_status_code ?? "no provider"} · {supplierSubmission.failure_reason ?? "accepted"}</span>
+                    <span>
+                      {supplierSubmission.submission_mode} · {supplierSubmission.adapter_profile} ·{" "}
+                      {supplierSubmission.provider_status_code ?? "no provider"} · {supplierSubmission.failure_reason ?? "accepted"}
+                    </span>
                   </div>
                 </article>
               ) : null}
@@ -14739,7 +14742,10 @@ export default function HomePage() {
                 <article className="task-card">
                   <div>
                     <strong>{supplierInvoiceSync.synced ? "Supplier invoice synced" : "Supplier invoice prepared"}</strong>
-                    <span>{supplierInvoiceSync.sync_mode} · {supplierInvoiceSync.provider_status_code ?? "no provider"} · {supplierInvoiceSync.failure_reason ?? "accepted"}</span>
+                    <span>
+                      {supplierInvoiceSync.sync_mode} · {supplierInvoiceSync.adapter_profile} ·{" "}
+                      {supplierInvoiceSync.provider_status_code ?? "no provider"} · {supplierInvoiceSync.failure_reason ?? "accepted"}
+                    </span>
                   </div>
                 </article>
               ) : null}
