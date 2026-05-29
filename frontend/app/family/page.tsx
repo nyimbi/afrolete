@@ -21,6 +21,7 @@ import type {
   ConsentStatus,
   FamilyAthleteSummaryRead,
   FamilyConsentRequestRead,
+  FamilyCoordinationDigestRead,
   FamilyCoordinationRowRead,
   FamilyDashboardRead,
   FamilyEventSummaryRead,
@@ -79,6 +80,7 @@ export default function FamilyPortalPage() {
   const [registrations, setRegistrations] = useState<FamilyRegistrationInquiryRead[]>([]);
   const [dashboard, setDashboard] = useState<FamilyDashboardRead | null>(null);
   const [coordinationRows, setCoordinationRows] = useState<FamilyCoordinationRowRead[]>([]);
+  const [coordinationDigest, setCoordinationDigest] = useState<FamilyCoordinationDigestRead | null>(null);
   const [performance, setPerformance] = useState<FamilyPerformanceSummaryRead[]>([]);
   const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
   const [consentRequests, setConsentRequests] = useState<FamilyConsentRequestRead[]>([]);
@@ -275,6 +277,7 @@ export default function FamilyPortalPage() {
       setDashboard(dashboardSummary);
       setFamily(familyRows);
       setRegistrations(registrationRows);
+      setCoordinationDigest(null);
       setPerformance(performanceRows);
       setEvents(eventRows);
       setCoordinationRows(coordination);
@@ -390,6 +393,39 @@ export default function FamilyPortalPage() {
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "RSVP update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendCoordinationDigest = async () => {
+    if (!organizationId) {
+      setError("Organization id is required");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const digest = await apiRequest<FamilyCoordinationDigestRead>("/safeguarding/my-family/coordination/digest", {
+        method: "POST",
+        identity: requestIdentity,
+        body: {
+          organization_id: organizationId,
+          channel: "in_app",
+          portal_url: `${window.location.origin}/family`,
+          dispatch_now: true,
+          max_rows: 5
+        }
+      });
+      setCoordinationDigest(digest);
+      const inbox = await apiRequest<CommunicationInboxItemRead[]>(
+        `/communications/my-inbox?organization_id=${encodeURIComponent(organizationId)}`,
+        { identity: requestIdentity }
+      );
+      setItems(inbox);
+      setSelectedRecipientId(digest.recipient_id ?? inbox[0]?.recipient_id ?? "");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Family digest could not be sent");
     } finally {
       setBusy(false);
     }
@@ -648,8 +684,20 @@ export default function FamilyPortalPage() {
                 <p className="section-label">Multi-child coordination</p>
                 <h2>One board for every child and registration</h2>
               </div>
-              <span>{coordinationRows.filter((row) => row.next_action_label !== "Current").length} action rows</span>
+              <div className="family-coordination-actions">
+                <span>{coordinationRows.filter((row) => row.next_action_label !== "Current").length} action rows</span>
+                <button type="button" onClick={sendCoordinationDigest} disabled={busy}>Send digest</button>
+              </div>
             </div>
+            {coordinationDigest ? (
+              <div className="family-coordination-digest">
+                <strong>{coordinationDigest.subject}</strong>
+                <span>
+                  {coordinationDigest.action_count} actions · {coordinationDigest.delivery_status ?? "queued"} · urgency{" "}
+                  {coordinationDigest.top_urgency_score}
+                </span>
+              </div>
+            ) : null}
             <div className="family-coordination-grid">
               {coordinationRows.map((row) => (
                 <article key={row.key}>

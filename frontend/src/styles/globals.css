@@ -1303,6 +1303,42 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.family-coordination-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.family-coordination-actions button {
+  background: var(--teal);
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 850;
+  min-height: 34px;
+  padding: 8px 11px;
+}
+
+.family-coordination-digest {
+  background: #f3fbf9;
+  border: 1px solid color-mix(in srgb, var(--teal) 24%, var(--line));
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.family-coordination-digest strong,
+.family-coordination-digest span {
+  overflow-wrap: anywhere;
+}
+
+.family-coordination-digest span {
+  color: var(--muted);
+}
+
 .family-coordination-grid {
   display: grid;
   gap: 10px;

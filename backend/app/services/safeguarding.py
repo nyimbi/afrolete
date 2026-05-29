@@ -80,6 +80,8 @@ from app.schemas.safeguarding import (
     ComplianceCredentialUpdate,
     ConsentRequestCreate,
     FamilyAthleteSummaryRead,
+    FamilyCoordinationDigestCreate,
+    FamilyCoordinationDigestRead,
     FamilyCoordinationRowRead,
     FamilyDashboardActionRead,
     FamilyDashboardRead,
@@ -5879,6 +5881,110 @@ async def get_my_family_coordination(
         row.urgency_score = family_coordination_urgency(row)
 
     return sorted(rows.values(), key=lambda item: (-item.urgency_score, item.athlete_name))
+
+
+async def create_family_coordination_digest(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FamilyCoordinationDigestCreate,
+    authz: AuthorizationService | None = None,
+) -> FamilyCoordinationDigestRead:
+    rows = await get_my_family_coordination(db, identity, payload.organization_id)
+    organization = await db.get(Organization, payload.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+
+    action_rows = [row for row in rows if row.urgency_score > 0]
+    selected_rows = (action_rows or rows)[: payload.max_rows]
+    subject = f"{organization.public_name or organization.name} family action digest"
+    body = family_coordination_digest_body(
+        organization_name=organization.public_name or organization.name,
+        guardian_name=identity.display_name,
+        rows=selected_rows,
+        portal_url=family_coordination_digest_portal_url(payload.portal_url, payload.organization_id),
+    )
+    message = await create_message_for_recipients(
+        db,
+        organization_id=payload.organization_id,
+        message_type=CommunicationMessageType.REMINDER,
+        channel=payload.channel,
+        scope_type=CommunicationScopeType.PERSON,
+        scope_id=identity.person_id,
+        recipient_person_ids=[identity.person_id],
+        subject=subject,
+        body=body,
+        urgent=any(row.urgency_score >= 10 for row in selected_rows),
+        created_by_person_id=identity.person_id,
+    )
+    dispatch_summary = None
+    if payload.dispatch_now:
+        dispatch_summary = await dispatch_message(
+            db,
+            identity,
+            message.id,
+            authz,
+            enforce_manage_communications_scope=False,
+        )
+    recipient = await db.scalar(
+        select(MessageRecipient).where(
+            MessageRecipient.message_id == message.id,
+            MessageRecipient.person_id == identity.person_id,
+        )
+    )
+    return FamilyCoordinationDigestRead(
+        organization_id=payload.organization_id,
+        guardian_person_id=identity.person_id,
+        channel=payload.channel,
+        message_id=message.id,
+        recipient_id=recipient.id if recipient else None,
+        delivery_status=recipient.delivery_status.value if recipient else None,
+        action_count=len(action_rows),
+        top_urgency_score=selected_rows[0].urgency_score if selected_rows else 0,
+        subject=subject,
+        body=body,
+        dispatch_attempted=dispatch_summary.attempted if dispatch_summary else 0,
+        dispatch_sent=dispatch_summary.sent if dispatch_summary else 0,
+        dispatch_delivered=dispatch_summary.delivered if dispatch_summary else 0,
+        dispatch_failed=dispatch_summary.failed if dispatch_summary else 0,
+        dispatch_suppressed=dispatch_summary.suppressed if dispatch_summary else 0,
+        dispatch_queued=dispatch_summary.queued if dispatch_summary else 0,
+    )
+
+
+def family_coordination_digest_body(
+    *,
+    organization_name: str,
+    guardian_name: str,
+    rows: list[FamilyCoordinationRowRead],
+    portal_url: str,
+) -> str:
+    if not rows:
+        summary = "Your family workspace is current. No urgent coordination actions are pending."
+    else:
+        summary = "\n".join(
+            (
+                f"- {row.athlete_name}: {row.next_action_label} "
+                f"({row.next_action_detail})"
+            )
+            for row in rows
+        )
+    return "\n\n".join(
+        [
+            f"Hello {guardian_name},",
+            f"Here is your {organization_name} family coordination digest.",
+            summary,
+            f"Open the family portal: {portal_url}",
+            "AfroLete ranks these items from registration packets, consent requests, RSVP needs, clearance blockers, goals, and AI recommendations.",
+        ]
+    )
+
+
+def family_coordination_digest_portal_url(base_url: str, organization_id: UUID) -> str:
+    parts = urlsplit(base_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("organization_id", str(organization_id))
+    query.setdefault("autoload", "1")
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def ensure_family_coordination_row(

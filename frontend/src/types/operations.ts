@@ -2060,6 +2060,33 @@ export type FamilyCoordinationRowRead = {
   urgency_score: number;
 };
 
+export type FamilyCoordinationDigestCreate = {
+  organization_id: UUID;
+  channel: CommunicationChannel;
+  portal_url: string;
+  dispatch_now?: boolean;
+  max_rows?: number;
+};
+
+export type FamilyCoordinationDigestRead = {
+  organization_id: UUID;
+  guardian_person_id: UUID;
+  channel: CommunicationChannel;
+  message_id: UUID;
+  recipient_id: UUID | null;
+  delivery_status: string | null;
+  action_count: number;
+  top_urgency_score: number;
+  subject: string;
+  body: string;
+  dispatch_attempted: number;
+  dispatch_sent: number;
+  dispatch_delivered: number;
+  dispatch_failed: number;
+  dispatch_suppressed: number;
+  dispatch_queued: number;
+};
+
 export type FamilyScheduleConflictRead = {
   starts_at: string;
   ends_at: string;

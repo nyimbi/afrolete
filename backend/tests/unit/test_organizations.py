@@ -476,6 +476,24 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert amina_coordination["action_href"].startswith("/site/makini-track?inquiry_id=")
     assert "email=parent.runner%40example.com" in amina_coordination["action_href"]
     assert amina_coordination["urgency_score"] > 0
+    digest_response = client.post(
+        "/api/v1/safeguarding/my-family/coordination/digest",
+        headers=guardian_identity_headers,
+        json={
+            "organization_id": onboarding["organization"]["id"],
+            "channel": "in_app",
+            "portal_url": "http://localhost:3000/family",
+            "max_rows": 2,
+        },
+    )
+    assert digest_response.status_code == 200
+    digest = digest_response.json()
+    assert digest["guardian_person_id"]
+    assert digest["action_count"] >= 2
+    assert digest["top_urgency_score"] >= amina_coordination["urgency_score"]
+    assert digest["delivery_status"] == "delivered"
+    assert "Amina Runner" in digest["body"]
+    assert "Open the family portal: http://localhost:3000/family?organization_id=" in digest["body"]
     resume_packet_response = client.get(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/packet"
         "?email=parent.runner@example.com"

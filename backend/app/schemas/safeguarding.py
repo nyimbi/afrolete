@@ -238,6 +238,33 @@ class FamilyCoordinationRowRead(BaseModel):
     urgency_score: int
 
 
+class FamilyCoordinationDigestCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.IN_APP
+    portal_url: str = Field(default="https://afrolete.lindela.io/family", max_length=500)
+    dispatch_now: bool = True
+    max_rows: int = Field(default=5, ge=1, le=12)
+
+
+class FamilyCoordinationDigestRead(BaseModel):
+    organization_id: UUID
+    guardian_person_id: UUID
+    channel: CommunicationChannel
+    message_id: UUID
+    recipient_id: UUID | None = None
+    delivery_status: str | None = None
+    action_count: int
+    top_urgency_score: int
+    subject: str
+    body: str
+    dispatch_attempted: int = 0
+    dispatch_sent: int = 0
+    dispatch_delivered: int = 0
+    dispatch_failed: int = 0
+    dispatch_suppressed: int = 0
+    dispatch_queued: int = 0
+
+
 class FamilyScheduleConflictRead(BaseModel):
     starts_at: datetime
     ends_at: datetime

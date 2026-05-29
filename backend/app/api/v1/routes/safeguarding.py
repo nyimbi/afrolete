@@ -36,6 +36,8 @@ from app.schemas.safeguarding import (
     ConsentRequestCreate,
     ConsentRequestRead,
     FamilyAthleteSummaryRead,
+    FamilyCoordinationDigestCreate,
+    FamilyCoordinationDigestRead,
     FamilyCoordinationRowRead,
     FamilyDashboardRead,
     FamilyConsentRequestRead,
@@ -103,6 +105,7 @@ from app.services.safeguarding import (
     create_compliance_credential,
     create_consent_request,
     create_guardian_relationship,
+    create_family_coordination_digest,
     create_guardian_portal_invite,
     create_guardian_portal_invite_batch,
     create_signed_incident_report_package_artifact_link,
@@ -456,6 +459,16 @@ async def get_my_family_coordination_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[FamilyCoordinationRowRead]:
     return await get_my_family_coordination(db, identity, organization_id)
+
+
+@router.post("/my-family/coordination/digest", response_model=FamilyCoordinationDigestRead)
+async def create_family_coordination_digest_route(
+    payload: FamilyCoordinationDigestCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FamilyCoordinationDigestRead:
+    return await create_family_coordination_digest(db, identity, payload, authz)
 
 
 @router.post("/incidents", response_model=SafeguardingIncidentRead, status_code=201)
