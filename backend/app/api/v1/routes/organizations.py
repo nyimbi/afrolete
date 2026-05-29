@@ -29,6 +29,7 @@ from app.schemas.organization import (
     PublicSiteSponsorRead,
     PublicSiteTeamRead,
     PublicSiteTicketProductRead,
+    RegistrationInquiryAccountReadinessRead,
     RegistrationPacketRead,
     RegistrationInquiryConversionCreate,
     RegistrationInquiryConversionRead,
@@ -56,6 +57,7 @@ from app.services.organizations import (
     create_committee,
     create_onboarding_starter_team,
     create_organization,
+    get_public_registration_account_readiness,
     get_registration_payment_hosted_checkout,
     get_organization_for_identity,
     get_public_site,
@@ -473,6 +475,19 @@ async def create_public_registration_inquiry_route(
     db: AsyncSession = Depends(get_db),
 ) -> RegistrationInquiryRead:
     return to_registration_inquiry_read(await create_public_registration_inquiry(db, site, payload))
+
+
+@router.get(
+    "/public/{site}/registration-inquiries/{inquiry_id}/account-readiness",
+    response_model=RegistrationInquiryAccountReadinessRead,
+)
+async def get_public_registration_account_readiness_route(
+    site: str,
+    inquiry_id: UUID,
+    email: str = Query(min_length=3, max_length=320),
+    db: AsyncSession = Depends(get_db),
+) -> RegistrationInquiryAccountReadinessRead:
+    return await get_public_registration_account_readiness(db, site, inquiry_id, email)
 
 
 @router.patch(

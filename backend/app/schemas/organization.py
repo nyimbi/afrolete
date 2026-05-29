@@ -253,6 +253,17 @@ class RegistrationInquiryRead(BaseModel):
     created_at: datetime
 
 
+class RegistrationInquiryAccountReadinessRead(BaseModel):
+    inquiry_id: UUID
+    guardian_person_id: UUID | None
+    guardian_email: str | None
+    guardian_contact_status: str
+    account_status: str
+    can_create_account: bool
+    can_sign_in: bool
+    recommended_action: str
+
+
 class RegistrationDocumentSubmission(BaseModel):
     document_type: str = Field(min_length=2, max_length=80)
     filename: str = Field(min_length=2, max_length=240)

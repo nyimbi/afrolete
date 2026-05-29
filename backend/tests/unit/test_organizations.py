@@ -218,6 +218,43 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert repeat_inquiry["guardian_person_id"] == inquiry["guardian_person_id"]
     assert repeat_inquiry["guardian_contact_status"] == "pending_account"
 
+    readiness_response = client.get(
+        f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/account-readiness"
+        "?email=parent.runner@example.com"
+    )
+    assert readiness_response.status_code == 200
+    readiness = readiness_response.json()
+    assert readiness["guardian_person_id"] == inquiry["guardian_person_id"]
+    assert readiness["account_status"] == "invite_ready"
+    assert readiness["can_create_account"] is True
+    assert readiness["can_sign_in"] is True
+
+    mismatch_readiness_response = client.get(
+        f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/account-readiness"
+        "?email=other.parent@example.com"
+    )
+    assert mismatch_readiness_response.status_code == 403
+
+    guardian_identity_headers = {
+        "X-Afrolete-Sub": "kc-parent-runner",
+        "X-Afrolete-Email": "parent.runner@example.com",
+        "X-Afrolete-Name": "Parent Runner",
+    }
+    family_response = client.get(
+        f"/api/v1/safeguarding/my-family?organization_id={onboarding['organization']['id']}",
+        headers=guardian_identity_headers,
+    )
+    assert family_response.status_code == 200
+    linked_readiness_response = client.get(
+        f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/account-readiness"
+        "?email=parent.runner@example.com"
+    )
+    assert linked_readiness_response.status_code == 200
+    linked_readiness = linked_readiness_response.json()
+    assert linked_readiness["account_status"] == "linked"
+    assert linked_readiness["can_create_account"] is False
+    assert linked_readiness["can_sign_in"] is True
+
     document_response = client.post(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/documents",
         json={

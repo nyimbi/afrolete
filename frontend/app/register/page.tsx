@@ -20,6 +20,7 @@ import type {
   SportFormat,
   OrganizationType,
   RegistrationPacketRead,
+  RegistrationInquiryAccountReadinessRead,
   RegistrationInquiryRead
 } from "@/types/operations";
 
@@ -100,6 +101,18 @@ const defaultPacketForm = {
   payment_status: "pending_verification"
 };
 
+function registrationAccountStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    linked: "account linked",
+    pending_link: "sign-in ready",
+    invite_ready: "account ready",
+    account_review_required: "account review needed",
+    phone_only: "email needed",
+    missing_contact: "contact pending"
+  };
+  return labels[status] ?? status.replaceAll("_", " ");
+}
+
 export default function RegistrationPage() {
   const keycloakEnabled = afroleteAuthMode === "keycloak";
   const [mode, setMode] = useState<RegistrationMode>("organization");
@@ -114,6 +127,7 @@ export default function RegistrationPage() {
   const [selectedSite, setSelectedSite] = useState<OrganizationPublicSiteRead | null>(null);
   const [inquiryForm, setInquiryForm] = useState(defaultInquiryForm);
   const [submittedInquiry, setSubmittedInquiry] = useState<RegistrationInquiryRead | null>(null);
+  const [accountReadiness, setAccountReadiness] = useState<RegistrationInquiryAccountReadinessRead | null>(null);
   const [packetForm, setPacketForm] = useState(defaultPacketForm);
   const [registrationPacket, setRegistrationPacket] = useState<RegistrationPacketRead | null>(null);
   const [busy, setBusy] = useState("");
@@ -308,6 +322,7 @@ export default function RegistrationPage() {
     setBusy(`site-${item.id}`);
     setError("");
     setSubmittedInquiry(null);
+    setAccountReadiness(null);
     setRegistrationPacket(null);
     try {
       const site = await apiRequest<OrganizationPublicSiteRead>(`/organizations/public/${encodeURIComponent(item.slug)}`);
@@ -327,6 +342,19 @@ export default function RegistrationPage() {
       setError(caught instanceof Error ? caught.message : "Organization site could not be loaded");
     } finally {
       setBusy("");
+    }
+  };
+
+  const loadAccountReadiness = async (siteSlug: string, inquiry: RegistrationInquiryRead) => {
+    setAccountReadiness(null);
+    try {
+      const params = new URLSearchParams({ email: inquiry.email });
+      const readiness = await apiRequest<RegistrationInquiryAccountReadinessRead>(
+        `/organizations/public/${encodeURIComponent(siteSlug)}/registration-inquiries/${inquiry.id}/account-readiness?${params.toString()}`
+      );
+      setAccountReadiness(readiness);
+    } catch {
+      setAccountReadiness(null);
     }
   };
 
@@ -357,6 +385,7 @@ export default function RegistrationPage() {
         }
       );
       setSubmittedInquiry(inquiry);
+      await loadAccountReadiness(selectedSite.slug, inquiry);
       setPacketForm((current) => ({
         ...current,
         emergency_contact_name: inquiry.guardian_name ?? current.emergency_contact_name,
@@ -421,6 +450,7 @@ export default function RegistrationPage() {
       );
       setRegistrationPacket(packet);
       setSubmittedInquiry(packet.inquiry);
+      await loadAccountReadiness(selectedSite.slug, packet.inquiry);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Registration packet failed");
     } finally {
@@ -783,15 +813,27 @@ export default function RegistrationPage() {
                     <strong>{submittedInquiry.email}</strong>
                     <span>
                       {keycloakEnabled ? "Family account" : "Family portal"} ·{" "}
-                      {submittedInquiry.guardian_person_id ? "contact ready" : submittedInquiry.guardian_contact_status}
+                      {accountReadiness
+                        ? registrationAccountStatusLabel(accountReadiness.account_status)
+                        : submittedInquiry.guardian_person_id
+                          ? "contact ready"
+                          : submittedInquiry.guardian_contact_status}
                     </span>
                   </div>
                   {keycloakEnabled ? (
                     <div>
-                      <button type="button" onClick={beginFamilyKeycloakRegistration} disabled={busy !== ""}>
+                      <button
+                        type="button"
+                        onClick={beginFamilyKeycloakRegistration}
+                        disabled={busy !== "" || (accountReadiness !== null && !accountReadiness.can_create_account)}
+                      >
                         Create account
                       </button>
-                      <button type="button" onClick={beginFamilyKeycloakLogin} disabled={busy !== ""}>
+                      <button
+                        type="button"
+                        onClick={beginFamilyKeycloakLogin}
+                        disabled={busy !== "" || (accountReadiness !== null && !accountReadiness.can_sign_in)}
+                      >
                         Sign in
                       </button>
                     </div>

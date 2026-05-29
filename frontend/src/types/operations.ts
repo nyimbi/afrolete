@@ -456,6 +456,17 @@ export type RegistrationInquiryRead = {
   created_at: string;
 };
 
+export type RegistrationInquiryAccountReadinessRead = {
+  inquiry_id: UUID;
+  guardian_person_id: UUID | null;
+  guardian_email: string | null;
+  guardian_contact_status: string;
+  account_status: string;
+  can_create_account: boolean;
+  can_sign_in: boolean;
+  recommended_action: string;
+};
+
 export type RegistrationDocumentSubmission = {
   document_type: string;
   filename: string;

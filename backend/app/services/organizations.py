@@ -30,7 +30,7 @@ from app.models.enums import (
     TeamRole,
 )
 from app.models.event import Event
-from app.models.identity import Person
+from app.models.identity import AppUser, Person
 from app.models.organization import Committee, CommitteeMembership, Membership, Organization, RegistrationInquiry
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.organization import (
@@ -42,6 +42,7 @@ from app.schemas.organization import (
     PublicRegistrationDocumentUpload,
     PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
+    RegistrationInquiryAccountReadinessRead,
     RegistrationInquiryConversionCreate,
     RegistrationInquiryFollowUpCreate,
     RegistrationPaymentHostedCheckoutRead,
@@ -731,6 +732,92 @@ async def ensure_registration_guardian_contact(
             )
         )
     return guardian
+
+
+async def get_public_registration_account_readiness(
+    db: AsyncSession,
+    site: str,
+    inquiry_id: UUID,
+    email: str,
+) -> RegistrationInquiryAccountReadinessRead:
+    _organization, inquiry = await get_public_registration_inquiry(db, site, inquiry_id)
+    if normalize_contact_email(inquiry.email) != normalize_contact_email(email):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inquiry email mismatch")
+
+    guardian = await db.get(Person, inquiry.guardian_person_id) if inquiry.guardian_person_id else None
+    linked_user = None
+    email_user = None
+    guardian_email = guardian.primary_email if guardian is not None else inquiry.email
+    if guardian is not None:
+        linked_user = await db.scalar(
+            select(AppUser)
+            .where(AppUser.person_id == guardian.id)
+            .order_by(AppUser.created_at.desc())
+            .limit(1)
+        )
+    if guardian_email:
+        email_user = await db.scalar(
+            select(AppUser)
+            .where(func.lower(AppUser.email) == normalize_contact_email(guardian_email))
+            .order_by(AppUser.created_at.desc())
+            .limit(1)
+        )
+    account_status, recommended_action = registration_guardian_account_status(
+        guardian,
+        linked_user,
+        email_user,
+    )
+    return RegistrationInquiryAccountReadinessRead(
+        inquiry_id=inquiry.id,
+        guardian_person_id=guardian.id if guardian else inquiry.guardian_person_id,
+        guardian_email=guardian_email,
+        guardian_contact_status=inquiry.guardian_contact_status,
+        account_status=account_status,
+        can_create_account=account_status == "invite_ready",
+        can_sign_in=account_status in {"linked", "pending_link", "invite_ready"},
+        recommended_action=recommended_action,
+    )
+
+
+def registration_guardian_account_status(
+    guardian: Person | None,
+    linked_user: AppUser | None,
+    email_user: AppUser | None,
+) -> tuple[str, str]:
+    if guardian is None:
+        return (
+            "missing_contact",
+            "Submit guardian contact details before creating a family account.",
+        )
+    if linked_user is not None:
+        return (
+            "linked",
+            "This guardian contact is linked to an AfroLete account; sign in to continue family onboarding.",
+        )
+    if email_user is not None and email_user.person_id is None:
+        return (
+            "pending_link",
+            "Sign in once with this email so AfroLete can attach the existing account to the guardian contact.",
+        )
+    if email_user is not None and email_user.person_id != guardian.id:
+        return (
+            "account_review_required",
+            "This email is already attached to another account; staff should review the account link before onboarding.",
+        )
+    if guardian.primary_email:
+        return (
+            "invite_ready",
+            "Create an account or sign in with this email; AfroLete will link it to the guardian contact.",
+        )
+    if guardian.primary_phone:
+        return (
+            "phone_only",
+            "Add an email address before Keycloak account onboarding.",
+        )
+    return (
+        "missing_contact",
+        "Add guardian email or phone contact details before creating a family account.",
+    )
 
 
 async def update_public_registration_packet(
