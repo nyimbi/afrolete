@@ -220,3 +220,15 @@ AfroLete developer webhook deliveries.
 The package is PEP 561 typed. Import `afrolete_sdk.types` for `TypedDict`
 request and response contracts such as `Organization`, `PersonCreate`,
 `TrainingPlanCreate`, `BillingUsageRecord`, and `PerformanceObservation`.
+
+## Release Verification
+
+Build and inspect the Python package from the repository root:
+
+```bash
+python scripts/verify_sdk_release.py --out-dir dist/sdk-release
+```
+
+The release verifier compiles the SDK package, builds one wheel and one source
+distribution with `uv build`, and checks that `client.py`, `types.py`, and the
+PEP 561 `py.typed` marker are present in the wheel before publication.

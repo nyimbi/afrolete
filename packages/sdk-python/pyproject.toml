@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Python SDK for AfroLete tenant developer APIs."
 requires-python = ">=3.11"
 readme = "README.md"
-license = { text = "UNLICENSED" }
+license = "LicenseRef-Proprietary"
 authors = [
   { name = "AfroLete" }
 ]

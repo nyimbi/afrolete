@@ -213,3 +213,15 @@ The client sends `X-Afrolete-API-Key` and targets `/api/v1/sdk/*` routes. It is
 dependency-free and works in modern browsers, Node.js runtimes with `fetch`, and
 edge runtimes. Webhook helpers verify the same timestamped HMAC-SHA256 contract
 used by AfroLete developer webhook deliveries.
+
+## Release Verification
+
+Build and inspect the npm package from the repository root:
+
+```bash
+python scripts/verify_sdk_release.py --out-dir dist/sdk-release
+```
+
+The release verifier runs `pnpm --filter @afrolete/sdk build`, creates the npm
+tarball, and checks that `dist/index.js`, `dist/index.d.ts`, `README.md`, and
+package metadata are present before publication.

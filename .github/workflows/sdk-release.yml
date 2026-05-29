@@ -1,0 +1,115 @@
+name: SDK Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish packages to npm and PyPI"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  push:
+    tags:
+      - "sdk-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build SDK release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install frontend and SDK dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify release artifacts
+        run: python scripts/verify_sdk_release.py --out-dir dist/sdk-release
+
+      - name: Upload TypeScript package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: afrolete-sdk-npm
+          path: dist/sdk-release/*.tgz
+
+      - name: Upload Python package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: afrolete-sdk-python
+          path: |
+            dist/sdk-release/*.whl
+            dist/sdk-release/*.tar.gz
+
+  publish:
+    name: Publish SDK packages
+    needs: verify
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          cache: pnpm
+
+      - name: Install frontend and SDK dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify release artifacts
+        run: python scripts/verify_sdk_release.py --out-dir dist/sdk-release
+
+      - name: Publish TypeScript SDK
+        working-directory: packages/sdk-typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+      - name: Publish Python SDK
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: uv publish dist/sdk-release/*.whl dist/sdk-release/*.tar.gz

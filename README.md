@@ -413,6 +413,26 @@ Frontend package versions are pinned. The project currently uses:
 
 This pinning is intentional. Do not downgrade framework packages casually.
 
+### SDK Release Verification
+
+AfroLete ships repository SDK packages for trusted tenant integrations:
+
+- TypeScript: `@afrolete/sdk` in `packages/sdk-typescript`.
+- Python: `afrolete-sdk` in `packages/sdk-python`.
+
+Before publishing either SDK, run:
+
+```bash
+python scripts/verify_sdk_release.py --out-dir dist/sdk-release
+```
+
+The verifier builds the TypeScript package, creates the npm tarball, builds the
+Python wheel and source distribution, and checks that typed entry points,
+README files, generated `dist/` files, and the Python `py.typed` marker are
+present in the release artifacts. The `SDK Release` GitHub Actions workflow
+runs the same verifier on `sdk-v*` tags and supports manual publishing when
+registry tokens are configured.
+
 ### Docker
 
 ```bash
