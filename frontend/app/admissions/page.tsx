@@ -381,6 +381,23 @@ export default function AdmissionsPage() {
     }
   };
 
+  const runAiReview = async (task: AgentTaskRead, inquiry: RegistrationInquiryRead) => {
+    setBusy(`run-ai-${inquiry.id}`);
+    setError("");
+    try {
+      const executed = await apiRequest<AgentTaskRead>(
+        `/agents/tasks/${task.id}/execute`,
+        { method: "POST", identity: requestIdentity }
+      );
+      setAgentTasks((current) => current.map((item) => (item.id === executed.id ? executed : item)));
+      addLog(`AI review ready for ${inquiry.athlete_name}: ${executed.status.replaceAll("_", " ")}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "AI review could not be run");
+    } finally {
+      setBusy("");
+    }
+  };
+
   const convertInquiry = async (inquiry: RegistrationInquiryRead) => {
     if (!selectedOrganizationId) {
       setError("Choose an organization before converting admissions.");
@@ -575,13 +592,22 @@ export default function AdmissionsPage() {
                 </div>
                 {aiTask ? (
                   <div className="admission-ai-panel">
-                    <strong>{aiTask.title}</strong>
+                    <div>
+                      <strong>{aiTask.title}</strong>
+                      {canRunAiTask(aiTask) ? (
+                        <button type="button" onClick={() => runAiReview(aiTask, inquiry)} disabled={busy !== ""}>
+                          {busy === `run-ai-${inquiry.id}` ? "Running AI" : "Run AI"}
+                        </button>
+                      ) : null}
+                    </div>
                     <span>
                       {aiTask.governance_policy_code
                         ? `${aiTask.governance_policy_code} · ${aiTask.governance_policy_decision ?? "governed"}`
                         : "Governance check passed without a matching policy."}
                     </span>
                     {aiTask.governance_policy_rationale ? <small>{aiTask.governance_policy_rationale}</small> : null}
+                    {aiTask.review_notes ? <small>{aiTask.review_notes}</small> : null}
+                    {aiTask.output_ref ? <small>{aiTask.output_ref}</small> : null}
                   </div>
                 ) : null}
                 {inquiry.missing_documents.length > 0 || inquiry.next_steps.length > 0 ? (
@@ -748,6 +774,10 @@ function familyPortalHref(inquiry: RegistrationInquiryRead): string {
 function agentTaskForInquiry(tasks: AgentTaskRead[], inquiry: RegistrationInquiryRead): AgentTaskRead | null {
   const marker = `registration-inquiry:${inquiry.id};`;
   return tasks.find((task) => task.input_ref?.includes(marker)) ?? null;
+}
+
+function canRunAiTask(task: AgentTaskRead): boolean {
+  return task.status === "queued" || task.status === "failed";
 }
 
 function toDateTimeLocalValue(value: string | null): string {

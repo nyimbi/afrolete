@@ -2765,6 +2765,13 @@ textarea:focus {
   padding: 12px;
 }
 
+.admission-ai-panel > div {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
 .admission-ai-panel strong,
 .admission-ai-panel span,
 .admission-ai-panel small {
@@ -2774,6 +2781,13 @@ textarea:focus {
 .admission-ai-panel span,
 .admission-ai-panel small {
   color: var(--muted);
+}
+
+.admission-ai-panel button {
+  background: var(--teal);
+  border: 0;
+  color: white;
+  padding: 8px 11px;
 }
 
 .admission-review-grid {
