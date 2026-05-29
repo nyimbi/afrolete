@@ -15,6 +15,7 @@ Open:
 - Mobile emergency console: http://localhost:3000/emergency?slug=demo-city-fc
 - Public branded site: http://localhost:3000/site/demo-city-fc
 - Sponsor portal: http://localhost:3000/sponsors
+- Hosted payment page: generated invoice links open under http://localhost:3000/pay/sessions/...
 - Backend health: http://localhost:8000/api/v1/healthz
 - OpenAPI: http://localhost:8000/api/v1/openapi.json
 

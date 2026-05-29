@@ -265,3 +265,74 @@ def test_payment_retry_run_records_attempt_and_marks_subscription_past_due(clien
     ).json()
     renewed = next(item for item in subscriptions if item["id"] == subscription["id"])
     assert renewed["status"] == "past_due"
+
+
+def test_saas_invoice_hosted_checkout_settles_invoice(client, identity_headers) -> None:
+    organization, _, subscription = create_billing_context(client, identity_headers)
+    invoice = client.post(
+        "/api/v1/billing/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "subscription_id": subscription["id"],
+            "invoice_number": "CHECKOUT-2026-001",
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-30",
+            "tax_amount": "0.00",
+            "discount_amount": "0.00",
+            "due_on": "2026-06-30",
+        },
+    ).json()
+
+    link_response = client.post(
+        (
+            f"/api/v1/billing/invoices/{invoice['id']}/checkout-link"
+            f"?organization_id={organization['id']}&provider=manual_gateway&checkout_base_url=/pay/sessions"
+        ),
+        headers=identity_headers,
+    )
+
+    assert link_response.status_code == 200
+    link = link_response.json()
+    assert link["hosted_checkout"]["open_amount"] == "249.00"
+    assert link["hosted_checkout"]["session_status"] == "ready"
+    assert "kind=saas" in link["checkout_url"]
+
+    checkout_response = client.get(
+        (
+            f"/api/v1/billing/invoice-checkout-sessions/{link['session_id']}"
+            f"?invoice_id={invoice['id']}&provider=manual_gateway"
+        )
+    )
+    assert checkout_response.status_code == 200
+    checkout = checkout_response.json()
+    assert checkout["client_reference"] == f"saas-invoice-checkout:{invoice['id']}"
+
+    settlement_response = client.post(
+        f"/api/v1/billing/invoice-checkout-sessions/{link['session_id']}/settle",
+        json={
+            "invoice_id": invoice["id"],
+            "provider": "manual_gateway",
+            "amount": "249.00",
+            "currency": "USD",
+            "method": "hosted_payment_page",
+            "external_payment_id": "hosted_saas_checkout_001",
+            "status": "succeeded",
+            "raw_reference": "Hosted SaaS checkout test.",
+        },
+    )
+    assert settlement_response.status_code == 200
+    settlement = settlement_response.json()
+    assert settlement["accepted"] is True
+    assert settlement["invoice_status"] == "paid"
+    assert settlement["amount_paid"] == "249.00"
+    assert settlement["open_amount"] == "0.00"
+    assert settlement["session_status"] == "paid"
+
+    invoices = client.get(
+        f"/api/v1/billing/invoices?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    paid = next(item for item in invoices if item["id"] == invoice["id"])
+    assert paid["status"] == "paid"
+    assert paid["amount_paid"] == "249.00"

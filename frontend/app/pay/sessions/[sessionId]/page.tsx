@@ -8,12 +8,17 @@ import type {
   CommercialInvoiceHostedCheckoutRead,
   CommercialInvoiceProviderCheckoutRead,
   EventTravelFeeCheckoutSettlementRead,
-  EventTravelFeeHostedCheckoutRead
+  EventTravelFeeHostedCheckoutRead,
+  SaaSInvoiceCheckoutSettlementRead,
+  SaaSInvoiceHostedCheckoutRead
 } from "@/types/operations";
 
-type HostedCheckoutRead = EventTravelFeeHostedCheckoutRead | CommercialInvoiceHostedCheckoutRead;
-type HostedCheckoutSettlementRead = EventTravelFeeCheckoutSettlementRead | CommercialInvoiceCheckoutSettlementRead;
-type CheckoutKind = "travel" | "commercial";
+type HostedCheckoutRead = EventTravelFeeHostedCheckoutRead | CommercialInvoiceHostedCheckoutRead | SaaSInvoiceHostedCheckoutRead;
+type HostedCheckoutSettlementRead =
+  | EventTravelFeeCheckoutSettlementRead
+  | CommercialInvoiceCheckoutSettlementRead
+  | SaaSInvoiceCheckoutSettlementRead;
+type CheckoutKind = "travel" | "commercial" | "saas";
 
 export default function HostedPaymentPage() {
   return (
@@ -28,7 +33,8 @@ function HostedPaymentExperience() {
   const searchParams = useSearchParams();
   const invoiceId = searchParams.get("invoice_id") ?? "";
   const provider = searchParams.get("provider") ?? "manual_gateway";
-  const checkoutKind: CheckoutKind = searchParams.get("kind") === "commercial" ? "commercial" : "travel";
+  const requestedKind = searchParams.get("kind");
+  const checkoutKind: CheckoutKind = requestedKind === "commercial" || requestedKind === "saas" ? requestedKind : "travel";
   const [checkout, setCheckout] = useState<HostedCheckoutRead | null>(null);
   const [providerSession, setProviderSession] = useState<CommercialInvoiceProviderCheckoutRead | null>(null);
   const [settlement, setSettlement] = useState<HostedCheckoutSettlementRead | null>(null);
@@ -45,7 +51,9 @@ function HostedPaymentExperience() {
     const checkoutPath =
       checkoutKind === "commercial"
         ? `/commercial/invoice-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`
-        : `/events/travel-fee-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`;
+        : checkoutKind === "saas"
+          ? `/billing/invoice-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`
+          : `/events/travel-fee-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`;
     apiRequest<HostedCheckoutRead>(
       checkoutPath
     )
@@ -85,7 +93,9 @@ function HostedPaymentExperience() {
       const settlementPath =
         checkoutKind === "commercial"
           ? `/commercial/invoice-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`
-          : `/events/travel-fee-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`;
+          : checkoutKind === "saas"
+            ? `/billing/invoice-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`
+            : `/events/travel-fee-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`;
       const result = await apiRequest<HostedCheckoutSettlementRead>(
         settlementPath,
         {
@@ -153,7 +163,13 @@ function HostedPaymentExperience() {
           <div className="mark">AL</div>
           <div>
             <strong>AfroLete</strong>
-            <span>{checkoutKind === "commercial" ? "Secure sponsor invoice portal" : "Secure travel fee portal"}</span>
+            <span>
+              {checkoutKind === "commercial"
+                ? "Secure sponsor invoice portal"
+                : checkoutKind === "saas"
+                  ? "Secure subscription invoice portal"
+                  : "Secure travel fee portal"}
+            </span>
           </div>
         </div>
 

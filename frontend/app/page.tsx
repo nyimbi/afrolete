@@ -286,6 +286,7 @@ import type {
   ReportingBenchmarkRead,
   ReportingSummaryRead,
   SaaSInvoiceRead,
+  SaaSInvoiceCheckoutLinkRead,
   SaaSPaymentRead,
   SafeguardingIncidentRead,
   SafeguardingIncidentSeverity,
@@ -1612,6 +1613,7 @@ export default function HomePage() {
   const [billingPaymentRetryRun, setBillingPaymentRetryRun] = useState<BillingPaymentRetryRunRead | null>(null);
   const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
   const [billingRecurringRun, setBillingRecurringRun] = useState<BillingRecurringInvoiceRunRead | null>(null);
+  const [saasCheckoutLink, setSaasCheckoutLink] = useState<SaaSInvoiceCheckoutLinkRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
   const [developerApplications, setDeveloperApplications] = useState<DeveloperApplicationRead[]>([]);
   const [developerApiKeys, setDeveloperApiKeys] = useState<DeveloperApiKeyRead[]>([]);
@@ -11580,6 +11582,29 @@ export default function HomePage() {
     );
   };
 
+  const prepareSaaSCheckoutLink = () => {
+    if (!selectedOrganizationId || !selectedSaasInvoiceId) {
+      addLog("Create or select a SaaS invoice first", "bad");
+      return;
+    }
+    const checkoutBaseUrl = typeof window === "undefined" ? "/pay/sessions" : `${window.location.origin}/pay/sessions`;
+    runAction(
+      "billing-saas-checkout-link",
+      () =>
+        apiRequest<SaaSInvoiceCheckoutLinkRead>(
+          `/billing/invoices/${selectedSaasInvoiceId}/checkout-link?organization_id=${selectedOrganizationId}&provider=${encodeURIComponent(billingForm.webhook_provider || "manual_gateway")}&checkout_base_url=${encodeURIComponent(checkoutBaseUrl)}`,
+          { method: "POST", identity }
+        ),
+      (link) => {
+        setSaasCheckoutLink(link);
+        addLog(`SaaS checkout ready: ${link.hosted_checkout.open_amount}`, "good");
+        if (typeof window !== "undefined") {
+          window.open(link.checkout_url, "_blank", "noopener,noreferrer");
+        }
+      }
+    );
+  };
+
   const ingestBillingWebhook = () => {
     if (!selectedOrganizationId || !selectedSaasInvoiceId) {
       addLog("Create or select a SaaS invoice first", "bad");
@@ -14751,6 +14776,7 @@ export default function HomePage() {
                 <button type="button" onClick={runBillingDunning} disabled={busyAction !== null}>Run dunning</button>
                 <button type="button" onClick={runBillingLateFees} disabled={busyAction !== null}>Run fees</button>
                 <button type="button" onClick={runBillingPaymentRetries} disabled={busyAction !== null}>Retry pay</button>
+                <button type="button" onClick={prepareSaaSCheckoutLink} disabled={busyAction !== null}>Checkout</button>
                 <button type="button" onClick={deliverBillingDunningNotice} disabled={busyAction !== null}>Deliver</button>
                 <button type="button" onClick={ingestBillingWebhook} disabled={busyAction !== null}>Webhook</button>
               </div>
@@ -14879,6 +14905,16 @@ export default function HomePage() {
                     <strong>{billingPaymentRetryRun.retry_count} payment retries</strong>
                     <span>
                       {billingPaymentRetryRun.total_attempted} attempted · {billingPaymentRetryRun.total_collected} collected · {billingPaymentRetryRun.delivery_mode}
+                    </span>
+                  </div>
+                </article>
+              ) : null}
+              {saasCheckoutLink ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Checkout · {saasCheckoutLink.hosted_checkout.session_status}</strong>
+                    <span>
+                      {saasCheckoutLink.hosted_checkout.open_amount} open · {saasCheckoutLink.provider} · {saasCheckoutLink.session_id}
                     </span>
                   </div>
                 </article>

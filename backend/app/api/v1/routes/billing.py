@@ -29,7 +29,11 @@ from app.schemas.billing import (
     BillingSummaryRead,
     BillingTaxFilingRead,
     BillingTaxQuoteRead,
+    SaaSInvoiceCheckoutLinkRead,
+    SaaSInvoiceCheckoutSettlementCreate,
+    SaaSInvoiceCheckoutSettlementRead,
     SaaSInvoiceCreate,
+    SaaSInvoiceHostedCheckoutRead,
     SaaSInvoiceRead,
     SaaSPaymentCreate,
     SaaSPaymentRead,
@@ -62,6 +66,8 @@ from app.services.billing import (
     list_subscriptions,
     list_usage_meters,
     list_usage_records,
+    get_saas_invoice_hosted_checkout,
+    prepare_saas_invoice_checkout_link,
     record_payment,
     record_usage,
     proration_quote,
@@ -69,6 +75,7 @@ from app.services.billing import (
     run_late_fee_scheduler,
     run_payment_retry_scheduler,
     run_recurring_invoice_scheduler,
+    settle_saas_invoice_checkout,
     validate_payment_webhook_signature,
 )
 
@@ -179,6 +186,52 @@ async def list_invoices_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[SaaSInvoiceRead]:
     return [read(invoice, SaaSInvoiceRead) for invoice in await list_invoices(db, organization_id)]
+
+
+@router.post("/invoices/{invoice_id}/checkout-link", response_model=SaaSInvoiceCheckoutLinkRead)
+async def prepare_invoice_checkout_link_route(
+    invoice_id: UUID,
+    organization_id: UUID = Query(),
+    provider: str = Query(default="manual_gateway", min_length=2, max_length=80),
+    checkout_base_url: str = Query(default="/pay/sessions", min_length=1, max_length=800),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SaaSInvoiceCheckoutLinkRead:
+    return await prepare_saas_invoice_checkout_link(
+        db,
+        identity,
+        organization_id,
+        invoice_id,
+        provider,
+        checkout_base_url,
+        authz,
+    )
+
+
+@router.get(
+    "/invoice-checkout-sessions/{session_id}",
+    response_model=SaaSInvoiceHostedCheckoutRead,
+)
+async def get_invoice_checkout_session_route(
+    session_id: str,
+    invoice_id: UUID = Query(),
+    provider: str = Query(default="manual_gateway"),
+    db: AsyncSession = Depends(get_db),
+) -> SaaSInvoiceHostedCheckoutRead:
+    return await get_saas_invoice_hosted_checkout(db, session_id, invoice_id, provider)
+
+
+@router.post(
+    "/invoice-checkout-sessions/{session_id}/settle",
+    response_model=SaaSInvoiceCheckoutSettlementRead,
+)
+async def settle_invoice_checkout_session_route(
+    session_id: str,
+    payload: SaaSInvoiceCheckoutSettlementCreate,
+    db: AsyncSession = Depends(get_db),
+) -> SaaSInvoiceCheckoutSettlementRead:
+    return await settle_saas_invoice_checkout(db, session_id, payload)
 
 
 @router.post("/recurring-invoices/run", response_model=BillingRecurringInvoiceRunRead)

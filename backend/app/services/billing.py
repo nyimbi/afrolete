@@ -4,6 +4,7 @@ from calendar import monthrange
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -36,7 +37,11 @@ from app.schemas.billing import (
     BillingPlanCreate,
     BillingRecurringInvoiceRunCreate,
     BillingRecurringInvoiceRunRead,
+    SaaSInvoiceCheckoutLinkRead,
+    SaaSInvoiceCheckoutSettlementCreate,
+    SaaSInvoiceCheckoutSettlementRead,
     SaaSInvoiceCreate,
+    SaaSInvoiceHostedCheckoutRead,
     SaaSPaymentCreate,
     SubscriptionCreate,
     UsageMeterCreate,
@@ -449,6 +454,120 @@ async def record_payment(
     await db.commit()
     await db.refresh(payment)
     return payment
+
+
+async def prepare_saas_invoice_checkout_link(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    invoice_id: UUID,
+    provider: str,
+    checkout_base_url: str,
+    authz: AuthorizationService,
+) -> SaaSInvoiceCheckoutLinkRead:
+    await ensure_manage_billing(authz, identity, organization_id)
+    invoice = await get_invoice_for_organization(db, invoice_id, organization_id)
+    session_id = saas_invoice_checkout_session_id(invoice, provider)
+    return SaaSInvoiceCheckoutLinkRead(
+        invoice_id=invoice.id,
+        provider=provider,
+        session_id=session_id,
+        checkout_url=saas_invoice_checkout_session_url(checkout_base_url, session_id, invoice, provider),
+        hosted_checkout=saas_invoice_hosted_checkout_read(invoice, provider, session_id),
+    )
+
+
+async def get_saas_invoice_hosted_checkout(
+    db: AsyncSession,
+    session_id: str,
+    invoice_id: UUID,
+    provider: str,
+) -> SaaSInvoiceHostedCheckoutRead:
+    invoice = await db.get(SaaSInvoice, invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SaaS invoice checkout session not found")
+    expected_session_id = saas_invoice_checkout_session_id(invoice, provider)
+    if not hmac.compare_digest(expected_session_id, session_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid checkout session")
+    return saas_invoice_hosted_checkout_read(invoice, provider, session_id)
+
+
+async def settle_saas_invoice_checkout(
+    db: AsyncSession,
+    session_id: str,
+    payload: SaaSInvoiceCheckoutSettlementCreate,
+    signature_required: bool = False,
+    signature_validated: bool = False,
+) -> SaaSInvoiceCheckoutSettlementRead:
+    invoice = await db.get(SaaSInvoice, payload.invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SaaS invoice checkout session not found")
+    expected_session_id = saas_invoice_checkout_session_id(invoice, payload.provider)
+    if not hmac.compare_digest(expected_session_id, session_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid checkout session")
+    if payload.currency is not None and payload.currency.upper() != invoice.currency:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment currency mismatch")
+
+    open_amount = saas_invoice_open_amount(invoice)
+    accepted = payload.status == "succeeded" and open_amount > 0
+    payment: SaaSPayment | None = None
+    message = "Checkout event recorded as non-settling."
+    if accepted:
+        amount = money(payload.amount or open_amount)
+        if amount > open_amount:
+            amount = open_amount
+        external_reference = payload.external_payment_id or f"{payload.provider}:{session_id}"
+        existing_payment = await db.scalar(
+            select(SaaSPayment).where(
+                SaaSPayment.organization_id == invoice.organization_id,
+                SaaSPayment.provider == payload.provider,
+                SaaSPayment.external_payment_id == external_reference,
+            )
+        )
+        if existing_payment is not None:
+            payment = existing_payment
+            message = "Payment event was already applied."
+        else:
+            payment = SaaSPayment(
+                organization_id=invoice.organization_id,
+                invoice_id=invoice.id,
+                amount=amount,
+                currency=invoice.currency,
+                provider=payload.provider,
+                external_payment_id=external_reference,
+                received_at=datetime.now(UTC),
+                status="succeeded",
+                notes=payload.raw_reference or f"SaaS invoice checkout settled via {payload.provider}.",
+            )
+            invoice.amount_paid = money(invoice.amount_paid + amount)
+            invoice.status = (
+                BillingInvoiceStatus.PAID
+                if invoice.amount_paid >= invoice.total
+                else BillingInvoiceStatus.PARTIAL
+            )
+            invoice.line_items = append_note(
+                invoice.line_items,
+                f"Hosted checkout payment {amount} {invoice.currency} via {payload.provider}.",
+            )
+            db.add(payment)
+            await db.commit()
+            await db.refresh(payment)
+            await db.refresh(invoice)
+            message = "SaaS invoice payment applied."
+
+    return SaaSInvoiceCheckoutSettlementRead(
+        invoice_id=invoice.id,
+        provider=payload.provider,
+        accepted=accepted,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        payment_id=payment.id if payment is not None else None,
+        invoice_status=invoice.status,
+        amount_paid=invoice.amount_paid,
+        open_amount=saas_invoice_open_amount(invoice),
+        session_status=saas_invoice_checkout_session_status(invoice),
+        message=message,
+    )
 
 
 async def billing_tax_quote(
@@ -1430,6 +1549,63 @@ async def resolve_billing_secret(
         path=path,
         field_name=field_name,
         label=label,
+    )
+
+
+def saas_invoice_checkout_session_id(invoice: SaaSInvoice, provider: str) -> str:
+    token = sha256(f"saas-session:{invoice.id}:{invoice.invoice_number}:{invoice.total}:{provider}".encode()).hexdigest()
+    provider_token = "".join(character if character.isalnum() else "-" for character in provider.lower()).strip("-")[:24]
+    return f"sbcs_{provider_token or 'processor'}_{token[:24]}"
+
+
+def saas_invoice_checkout_session_url(
+    base_url: str,
+    session_id: str,
+    invoice: SaaSInvoice,
+    provider: str,
+) -> str:
+    provider_token = quote(provider, safe="")
+    return f"{base_url.rstrip('/')}/{session_id}?invoice_id={invoice.id}&provider={provider_token}&kind=saas"
+
+
+def saas_invoice_open_amount(invoice: SaaSInvoice) -> Decimal:
+    return money(max(invoice.total - invoice.amount_paid, Decimal("0.00")))
+
+
+def saas_invoice_checkout_session_status(invoice: SaaSInvoice) -> str:
+    return "paid" if saas_invoice_open_amount(invoice) <= 0 else "ready"
+
+
+def saas_invoice_hosted_checkout_read(
+    invoice: SaaSInvoice,
+    provider: str,
+    session_id: str,
+) -> SaaSInvoiceHostedCheckoutRead:
+    open_amount = saas_invoice_open_amount(invoice)
+    return SaaSInvoiceHostedCheckoutRead(
+        invoice_id=invoice.id,
+        invoice_number=invoice.invoice_number,
+        organization_id=invoice.organization_id,
+        subscription_id=invoice.subscription_id,
+        title=f"AfroLete subscription invoice {invoice.invoice_number}",
+        memo=invoice.line_items,
+        due_on=invoice.due_on,
+        amount_due=invoice.total,
+        amount_paid=invoice.amount_paid,
+        open_amount=open_amount,
+        currency=invoice.currency,
+        status=invoice.status.value,
+        provider=provider,
+        session_id=session_id,
+        session_status=saas_invoice_checkout_session_status(invoice),
+        client_reference=f"saas-invoice-checkout:{invoice.id}",
+        payment_methods=["card", "mobile_money", "bank_transfer"],
+        settlement_endpoint=f"/api/v1/billing/invoice-checkout-sessions/{session_id}/settle",
+        checkout_summary=(
+            f"{invoice.invoice_number} has {open_amount} {invoice.currency} outstanding."
+            if open_amount > 0
+            else f"{invoice.invoice_number} is fully paid."
+        ),
     )
 
 
