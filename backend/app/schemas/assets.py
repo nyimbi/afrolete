@@ -158,6 +158,26 @@ class EmergencyActivationAlertRead(BaseModel):
     urgent: bool
 
 
+class EmergencyEscalationTimerRunCreate(BaseModel):
+    organization_id: UUID
+    unresolved_after_minutes: int = Field(default=15, ge=0, le=10080)
+    repeat_after_minutes: int = Field(default=15, ge=1, le=10080)
+    limit: int = Field(default=50, ge=1, le=500)
+    dry_run: bool = False
+
+
+class EmergencyEscalationTimerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    executed_count: int
+    escalated_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool = False
+    activation_ids: list[UUID]
+    max_level_count: int
+
+
 class EmergencyActivationIncidentCreate(BaseModel):
     incident_type: SafeguardingIncidentType | None = None
     severity: SafeguardingIncidentSeverity = SafeguardingIncidentSeverity.HIGH

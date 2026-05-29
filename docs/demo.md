@@ -66,8 +66,8 @@ The `due-worker` container runs the unified worker once per minute with local
 record-only delivery. It exercises scheduler-ready behavior such as
 communication digests, travel consent reminders, performance forecast drift
 alerts, performance review escalations, injury-risk scans, achievement scans,
-developer webhook retries, agent tasks, and wearable retry scans when matching
-data exists.
+emergency escalation timers, developer webhook retries, agent tasks, and
+wearable retry scans when matching data exists.
 
 ## Reset
 

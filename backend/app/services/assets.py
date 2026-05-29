@@ -1,7 +1,7 @@
 from base64 import b64decode
 from binascii import Error as Base64Error
 from calendar import monthrange
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hmac import compare_digest
 from hashlib import sha256
@@ -57,6 +57,8 @@ from app.schemas.assets import (
     EmergencyActivationIncidentCreate,
     EmergencyActionPlanCreate,
     EmergencyActionPlanUpdate,
+    EmergencyEscalationTimerRunCreate,
+    EmergencyEscalationTimerRunRead,
     EmergencyPlanActivationCreate,
     EmergencyPlanActivationUpdate,
     EquipmentCheckoutCreate,
@@ -315,6 +317,132 @@ async def update_emergency_plan_activation(
     await db.commit()
     await db.refresh(activation)
     return activation
+
+
+async def run_emergency_escalation_timer_scheduler(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: EmergencyEscalationTimerRunCreate,
+    authz: AuthorizationService,
+) -> EmergencyEscalationTimerRunRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    return await run_emergency_escalation_timer_worker(
+        db,
+        organization_id=payload.organization_id,
+        unresolved_after_minutes=payload.unresolved_after_minutes,
+        repeat_after_minutes=payload.repeat_after_minutes,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+    )
+
+
+async def run_emergency_escalation_timer_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    unresolved_after_minutes: int = 15,
+    repeat_after_minutes: int = 15,
+    limit: int = 50,
+    dry_run: bool = False,
+) -> EmergencyEscalationTimerRunRead:
+    due_activations = await emergency_activations_due_for_escalation(
+        db,
+        organization_id,
+        unresolved_after_minutes=unresolved_after_minutes,
+        repeat_after_minutes=repeat_after_minutes,
+        limit=limit,
+    )
+    escalated_ids: list[UUID] = []
+    skipped_count = 0
+    failed_count = 0
+    max_level_count = 0
+    now = datetime.now(UTC)
+
+    for activation in due_activations:
+        if activation.escalation_level >= 5:
+            max_level_count += 1
+            skipped_count += 1
+            continue
+        if dry_run:
+            skipped_count += 1
+            continue
+        try:
+            activation.escalation_level = min(5, activation.escalation_level + 1)
+            activation.communication_log = append_emergency_escalation_log(
+                activation.communication_log,
+                activation.escalation_level,
+                now,
+            )
+            activation.notes = "Automated emergency escalation timer advanced this activation."
+            escalated_ids.append(activation.id)
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    if escalated_ids:
+        await db.commit()
+
+    return EmergencyEscalationTimerRunRead(
+        organization_id=organization_id,
+        eligible_count=len(due_activations),
+        executed_count=len(due_activations) - skipped_count,
+        escalated_count=len(escalated_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        activation_ids=escalated_ids,
+        max_level_count=max_level_count,
+    )
+
+
+async def emergency_activations_due_for_escalation(
+    db: AsyncSession,
+    organization_id: UUID | None,
+    *,
+    unresolved_after_minutes: int,
+    repeat_after_minutes: int,
+    limit: int,
+) -> list[EmergencyPlanActivation]:
+    now = datetime.now(UTC)
+    statement = (
+        select(EmergencyPlanActivation)
+        .where(EmergencyPlanActivation.status == EmergencyActivationStatus.ACTIVE)
+        .where(EmergencyPlanActivation.activated_at <= now - timedelta(minutes=unresolved_after_minutes))
+        .where(EmergencyPlanActivation.escalation_level < 5)
+        .order_by(EmergencyPlanActivation.activated_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(EmergencyPlanActivation.organization_id == organization_id)
+    rows = list((await db.scalars(statement)).all())
+    repeat_window = timedelta(minutes=repeat_after_minutes)
+    return [
+        activation
+        for activation in rows
+        if normalize_datetime(
+            activation.activated_at if activation.escalation_level <= 1 else activation.updated_at
+        )
+        <= now - repeat_window
+    ]
+
+
+def append_emergency_escalation_log(
+    existing_log: str | None,
+    escalation_level: int,
+    escalated_at: datetime,
+) -> str:
+    line = (
+        f"{escalated_at.isoformat()}: automated emergency escalation timer "
+        f"raised response to level {escalation_level}."
+    )
+    return f"{existing_log}\n{line}" if existing_log else line
+
+
+def normalize_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 async def dispatch_emergency_activation_alert(

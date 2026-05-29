@@ -1630,6 +1630,18 @@ export type EmergencyActivationAlertRead = {
   urgent: boolean;
 };
 
+export type EmergencyEscalationTimerRunRead = {
+  organization_id: UUID | null;
+  eligible_count: number;
+  executed_count: number;
+  escalated_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  activation_ids: UUID[];
+  max_level_count: number;
+};
+
 export type EquipmentItemRead = {
   id: UUID;
   organization_id: UUID;

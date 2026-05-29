@@ -13,6 +13,8 @@ from app.schemas.assets import (
     EmergencyActionPlanCreate,
     EmergencyActionPlanRead,
     EmergencyActionPlanUpdate,
+    EmergencyEscalationTimerRunCreate,
+    EmergencyEscalationTimerRunRead,
     EmergencyPlanActivationCreate,
     EmergencyPlanActivationRead,
     EmergencyPlanActivationUpdate,
@@ -88,6 +90,7 @@ from app.services.assets import (
     record_gateway_equipment_scan,
     record_equipment_scan_event,
     return_equipment,
+    run_emergency_escalation_timer_scheduler,
     scan_equipment,
     submit_supplier_order,
     sync_supplier_invoice,
@@ -461,6 +464,16 @@ async def dispatch_emergency_activation_alert_route(
         authz,
     )
     return to_emergency_activation_alert_read(message, recipient_count, activation_id)
+
+
+@router.post("/emergency-escalations/run", response_model=EmergencyEscalationTimerRunRead)
+async def run_emergency_escalation_timer_route(
+    payload: EmergencyEscalationTimerRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> EmergencyEscalationTimerRunRead:
+    return await run_emergency_escalation_timer_scheduler(db, identity, payload, authz)
 
 
 @router.post(

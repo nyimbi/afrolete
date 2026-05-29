@@ -60,7 +60,7 @@ uv run python -m app.workers.due --limit 25
 
 Use `--lane agent-tasks`, `--lane communication-digests`,
 `--lane communication-escalations`,
-`--lane event-travel-consent-reminders`, `--lane developer-webhooks`,
+`--lane event-travel-consent-reminders`, `--lane emergency-escalations`, `--lane developer-webhooks`,
 `--lane performance-achievements`, `--lane performance-forecast-validations`,
 `--lane performance-review-escalations`, `--lane performance-injury-risk-alerts`,
 or `--lane wearable-pull-retries` to run a single lane. The communication
@@ -69,7 +69,10 @@ preferences and unread inbox items. The communication escalation lane scans
 unresolved urgent messages and creates quiet-hours-override escalation messages
 with repeat suppression. The travel consent lane sends scheduled
 guardian reminders for due travel consent requests and suppresses repeats with
-`--event-travel-consent-reminder-repeat-after-hours`. The performance
+`--event-travel-consent-reminder-repeat-after-hours`. The emergency escalation
+lane advances active emergency activations after
+`--emergency-escalation-unresolved-after-minutes` and suppresses repeats with
+`--emergency-escalation-repeat-after-minutes`. The performance
 achievement lane evaluates active athlete goals and recent observations so
 goal-achieved and personal-best awards are created without a coach click.
 Forecast validation can also send scheduled manager alerts for watch/high drift

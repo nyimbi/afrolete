@@ -10,6 +10,7 @@ from app.core.config import parse_positive_int_map
 from app.db.session import SessionLocal
 from app.models.enums import CommunicationChannel, NotificationFrequency
 from app.services.agents import run_agent_task_worker
+from app.services.assets import run_emergency_escalation_timer_worker
 from app.services.communications import (
     run_digest_scheduler_worker,
     run_message_escalation_worker,
@@ -36,6 +37,7 @@ WORKER_LANES = (
     "communication-scheduled-dispatch",
     "compliance-reconciliation",
     "developer-webhooks",
+    "emergency-escalations",
     "event-travel-consent-reminders",
     "family-portal-invite-reminders",
     "performance-achievements",
@@ -73,6 +75,10 @@ def parse_args() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument("--webhook-limit", type=int, default=None)
+    parser.add_argument("--emergency-escalation-limit", type=int, default=None)
+    parser.add_argument("--emergency-escalation-unresolved-after-minutes", type=int, default=15)
+    parser.add_argument("--emergency-escalation-repeat-after-minutes", type=int, default=15)
+    parser.add_argument("--dry-run-emergency-escalations", action="store_true")
     parser.add_argument("--event-travel-consent-reminder-limit", type=int, default=None)
     parser.add_argument("--event-travel-consent-reminder-due-within-hours", type=int, default=48)
     parser.add_argument("--event-travel-consent-reminder-repeat-after-hours", type=int, default=24)
@@ -161,6 +167,10 @@ async def run_due_workers(
     dry_run_communication_scheduled_dispatch: bool = False,
     compliance_reconciliation_limit: int | None = None,
     webhook_limit: int | None = None,
+    emergency_escalation_limit: int | None = None,
+    emergency_escalation_unresolved_after_minutes: int = 15,
+    emergency_escalation_repeat_after_minutes: int = 15,
+    dry_run_emergency_escalations: bool = False,
     event_travel_consent_reminder_limit: int | None = None,
     event_travel_consent_reminder_due_within_hours: int = 48,
     event_travel_consent_reminder_repeat_after_hours: int = 24,
@@ -276,6 +286,17 @@ async def run_due_workers(
                 max_attempts=webhook_max_attempts,
                 limit=webhook_limit or limit,
                 include_recorded=include_recorded_webhooks,
+            )
+        ).model_dump(mode="json")
+    if "emergency-escalations" in active_lanes:
+        results["emergency_escalations"] = (
+            await run_emergency_escalation_timer_worker(
+                db,
+                organization_id=organization_id,
+                unresolved_after_minutes=emergency_escalation_unresolved_after_minutes,
+                repeat_after_minutes=emergency_escalation_repeat_after_minutes,
+                limit=emergency_escalation_limit or limit,
+                dry_run=dry_run_emergency_escalations,
             )
         ).model_dump(mode="json")
     if "performance-achievements" in active_lanes:
@@ -398,6 +419,10 @@ async def run() -> None:
             dry_run_communication_scheduled_dispatch=args.dry_run_communication_scheduled_dispatch,
             compliance_reconciliation_limit=args.compliance_reconciliation_limit,
             webhook_limit=args.webhook_limit,
+            emergency_escalation_limit=args.emergency_escalation_limit,
+            emergency_escalation_unresolved_after_minutes=args.emergency_escalation_unresolved_after_minutes,
+            emergency_escalation_repeat_after_minutes=args.emergency_escalation_repeat_after_minutes,
+            dry_run_emergency_escalations=args.dry_run_emergency_escalations,
             event_travel_consent_reminder_limit=args.event_travel_consent_reminder_limit,
             event_travel_consent_reminder_due_within_hours=args.event_travel_consent_reminder_due_within_hours,
             event_travel_consent_reminder_repeat_after_hours=args.event_travel_consent_reminder_repeat_after_hours,

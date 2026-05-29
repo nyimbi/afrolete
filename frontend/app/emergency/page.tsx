@@ -7,6 +7,7 @@ import type {
   EmergencyActivationAlertRead,
   EmergencyActivationStatus,
   EmergencyActionPlanRead,
+  EmergencyEscalationTimerRunRead,
   EmergencyPlanActivationRead,
   EmergencyType,
   LocalIdentity,
@@ -49,6 +50,7 @@ export default function EmergencyConsolePage() {
   const [alertBody, setAlertBody] = useState("Emergency response is active. Follow staff instructions and keep access routes clear.");
   const [lastAlert, setLastAlert] = useState<EmergencyActivationAlertRead | null>(null);
   const [lastIncident, setLastIncident] = useState<SafeguardingIncidentRead | null>(null);
+  const [timerRun, setTimerRun] = useState<EmergencyEscalationTimerRunRead | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -198,6 +200,32 @@ export default function EmergencyConsolePage() {
     }, "Emergency alert failed");
   };
 
+  const runEscalationTimers = async () => {
+    if (!organizationId) {
+      setError("Load an organization first");
+      return;
+    }
+    await withBusy(async () => {
+      const run = await apiRequest<EmergencyEscalationTimerRunRead>("/assets/emergency-escalations/run", {
+        method: "POST",
+        identity,
+        body: {
+          organization_id: organizationId,
+          unresolved_after_minutes: 15,
+          repeat_after_minutes: 15,
+          limit: 50,
+          dry_run: false
+        }
+      });
+      setTimerRun(run);
+      const refreshed = await apiRequest<EmergencyPlanActivationRead[]>(
+        `/assets/emergency-activations?organization_id=${organizationId}`
+      );
+      setActivations(refreshed);
+      setNotice(`Timers escalated ${run.escalated_count}/${run.eligible_count} active emergencies`);
+    }, "Emergency timers failed");
+  };
+
   const logIncident = async (activation: EmergencyPlanActivationRead) => {
     await withBusy(async () => {
       const incident = await apiRequest<SafeguardingIncidentRead>(
@@ -319,6 +347,7 @@ export default function EmergencyConsolePage() {
           <div className="emergency-actions">
             <button type="button" onClick={createStarterPlan} disabled={busy || !organizationId}>Starter EAP</button>
             <button type="button" className="danger" onClick={activatePlan} disabled={busy || !selectedPlan}>Activate</button>
+            <button type="button" onClick={runEscalationTimers} disabled={busy || !organizationId}>Run timers</button>
           </div>
         </section>
 
@@ -363,8 +392,15 @@ export default function EmergencyConsolePage() {
           {activations.length === 0 ? <span className="emergency-empty">No emergency activations yet.</span> : null}
         </section>
 
-        {lastAlert || lastIncident ? (
+        {timerRun || lastAlert || lastIncident ? (
           <section className="emergency-receipts">
+            {timerRun ? (
+              <article>
+                <span>Timer run</span>
+                <strong>{timerRun.escalated_count} escalated</strong>
+                <small>{timerRun.eligible_count} eligible · {timerRun.failed_count} failed</small>
+              </article>
+            ) : null}
             {lastAlert ? (
               <article>
                 <span>Last alert</span>

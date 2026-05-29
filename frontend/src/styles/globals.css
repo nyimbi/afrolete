@@ -1412,7 +1412,7 @@ textarea:focus {
 
 .emergency-actions {
   display: grid;
-  grid-template-columns: 1fr 1.2fr;
+  grid-template-columns: 1fr 1.2fr 1fr;
   gap: 10px;
   grid-column: 1 / -1;
 }

@@ -58,6 +58,9 @@ a systemd drop-in when a tenant needs different throughput or alert policy:
 | `AFROLETE_DUE_WORKER_EVENT_TRAVEL_CONSENT_REMINDER_DUE_WITHIN_HOURS` | `48` | Reminder horizon for travel plans with approaching consent deadlines. |
 | `AFROLETE_DUE_WORKER_EVENT_TRAVEL_CONSENT_REMINDER_REPEAT_AFTER_HOURS` | `24` | Suppression window for repeated scheduled travel consent reminders. |
 | `AFROLETE_DUE_WORKER_EVENT_TRAVEL_CONSENT_REMINDER_CHANNEL` | `email` | Default scheduled travel consent reminder channel. |
+| `AFROLETE_DUE_WORKER_EMERGENCY_ESCALATION_LIMIT` | `50` | Active emergency activations scanned for timer escalation. |
+| `AFROLETE_DUE_WORKER_EMERGENCY_ESCALATION_UNRESOLVED_AFTER_MINUTES` | `15` | Time an emergency activation may remain active before timer escalation. |
+| `AFROLETE_DUE_WORKER_EMERGENCY_ESCALATION_REPEAT_AFTER_MINUTES` | `15` | Suppression window for repeated escalation of the same emergency activation. |
 | `AFROLETE_DUE_WORKER_WEBHOOK_MAX_ATTEMPTS` | `5` | Developer webhook retry ceiling. |
 | `AFROLETE_DUE_WORKER_PERFORMANCE_LIMIT` | `25` | Shared performance-lane fallback limit. |
 | `AFROLETE_DUE_WORKER_PERFORMANCE_FORECAST_VALIDATION_LIMIT` | `25` | Forecast validation organizations per run. |
@@ -76,6 +79,7 @@ a systemd drop-in when a tenant needs different throughput or alert policy:
 
 For a deployment smoke without sending messages, run the command manually with
 `--dry-run-communication-escalations`,
+`--dry-run-emergency-escalations`,
 `--dry-run-performance-forecast-drift-alerts`,
 `--dry-run-performance-injury-risk-alerts`, and
 `--dry-run-performance-review-escalations`, then inspect the JSON summary and

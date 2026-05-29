@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import func, select
 
 from app.models.agent import Agent, AgentRunRecord, AgentTask
+from app.models.assets import EmergencyActionPlan, EmergencyPlanActivation
 from app.models.communication import CommunicationMessage, MessageRecipient, NotificationPreference
 from app.models.enums import (
     AgentKind,
@@ -17,6 +18,9 @@ from app.models.enums import (
     ConsentCaptureChannel,
     ConsentRequestStatus,
     ConsentScopeType,
+    EmergencyActionPlanStatus,
+    EmergencyActivationStatus,
+    EmergencyType,
     EventType,
     GuardianRelationshipKind,
     MemberSubjectType,
@@ -80,6 +84,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
         "communication-scheduled-dispatch",
         "compliance-reconciliation",
         "developer-webhooks",
+        "emergency-escalations",
         "event-travel-consent-reminders",
         "family-portal-invite-reminders",
         "performance-achievements",
@@ -96,6 +101,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["results"]["compliance_reconciliation"]["eligible_count"] == 1
     assert result["results"]["compliance_reconciliation"]["executed_count"] == 1
     assert result["results"]["developer_webhooks"]["eligible_count"] == 0
+    assert result["results"]["emergency_escalations"]["eligible_count"] == 0
     assert result["results"]["event_travel_consent_reminders"]["eligible_count"] == 0
     assert result["results"]["family_portal_invite_reminders"]["eligible_count"] == 0
     assert result["results"]["performance_achievements"]["eligible_count"] == 0
@@ -119,6 +125,7 @@ def test_selected_lanes_expands_all() -> None:
         "communication-scheduled-dispatch",
         "compliance-reconciliation",
         "developer-webhooks",
+        "emergency-escalations",
         "event-travel-consent-reminders",
         "family-portal-invite-reminders",
         "performance-achievements",
@@ -128,6 +135,56 @@ def test_selected_lanes_expands_all() -> None:
         "wearable-pull-retries",
     }
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}
+
+
+async def test_due_worker_escalates_overdue_emergency_activation(db_session) -> None:
+    organization = Organization(
+        name="Emergency Worker Club",
+        slug="emergency-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    plan = EmergencyActionPlan(
+        organization_id=organization.id,
+        title="Worker emergency plan",
+        emergency_type=EmergencyType.MEDICAL,
+        status=EmergencyActionPlanStatus.ACTIVE,
+        emergency_contacts="Safety lead and medic.",
+        communication_protocols="Notify staff and guardians.",
+        escalation_matrix="Escalate while unresolved.",
+    )
+    db_session.add(plan)
+    await db_session.flush()
+    activation = EmergencyPlanActivation(
+        organization_id=organization.id,
+        plan_id=plan.id,
+        emergency_type=EmergencyType.MEDICAL,
+        status=EmergencyActivationStatus.ACTIVE,
+        location_detail="Main field",
+        activated_at=datetime.now(UTC) - timedelta(hours=1),
+        escalation_level=1,
+        communication_log="Initial response opened.",
+    )
+    db_session.add(activation)
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("emergency-escalations",),
+        emergency_escalation_unresolved_after_minutes=0,
+        emergency_escalation_repeat_after_minutes=1,
+        limit=10,
+    )
+
+    assert result["results"]["emergency_escalations"]["eligible_count"] == 1
+    assert result["results"]["emergency_escalations"]["escalated_count"] == 1
+    assert result["summary"]["processed_count"] == 1
+    await db_session.refresh(activation)
+    assert activation.escalation_level == 2
+    assert "automated emergency escalation timer" in (activation.communication_log or "")
 
 
 async def test_due_worker_dispatches_due_scheduled_messages(db_session) -> None:

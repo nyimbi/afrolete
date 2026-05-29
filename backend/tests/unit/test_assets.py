@@ -263,6 +263,64 @@ def test_facility_booking_rejects_overlap(client, identity_headers) -> None:
     assert overlap.json()["detail"] == "Facility is already booked"
 
 
+def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
+    organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
+    plan = client.post(
+        "/api/v1/assets/emergency-plans",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "title": "Main field emergency response",
+            "emergency_type": "medical",
+            "emergency_contacts": "Safety officer; medical lead; venue security.",
+            "medical_protocols": "Stabilize, clear access, assign first aid, document actions.",
+            "communication_protocols": "Notify staff, guardians, and venue operations.",
+            "incident_command_roles": "Incident lead, medic, family liaison.",
+            "escalation_matrix": "Escalate every 15 minutes while active.",
+        },
+    ).json()
+    activation = client.post(
+        "/api/v1/assets/emergency-activations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "plan_id": plan["id"],
+            "emergency_type": "medical",
+            "location_detail": "Main field touchline",
+            "activated_at": "2026-01-01T08:00:00Z",
+            "escalation_level": 1,
+            "assigned_responders": "Coach and medic",
+        },
+    ).json()
+
+    run_response = client.post(
+        "/api/v1/assets/emergency-escalations/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "unresolved_after_minutes": 0,
+            "repeat_after_minutes": 1,
+            "limit": 10,
+        },
+    )
+
+    assert run_response.status_code == 200
+    run = run_response.json()
+    assert run["eligible_count"] == 1
+    assert run["executed_count"] == 1
+    assert run["escalated_count"] == 1
+    assert run["failed_count"] == 0
+    assert run["activation_ids"] == [activation["id"]]
+
+    activations = client.get(
+        f"/api/v1/assets/emergency-activations?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    escalated = next(item for item in activations if item["id"] == activation["id"])
+    assert escalated["escalation_level"] == 2
+    assert "automated emergency escalation timer" in escalated["communication_log"]
+
+
 def test_asset_procurement_scan_photo_supplier_lease_and_utilization(
     client,
     identity_headers,
