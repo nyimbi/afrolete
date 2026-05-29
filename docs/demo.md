@@ -64,10 +64,10 @@ invoice, inbox item, notification preference, and AI agent task.
 
 The `due-worker` container runs the unified worker once per minute with local
 record-only delivery. It exercises scheduler-ready behavior such as
-communication digests, travel consent reminders, performance forecast drift
-alerts, performance review escalations, injury-risk scans, achievement scans,
-emergency escalation timers, developer webhook retries, agent tasks, and
-wearable retry scans when matching data exists.
+recurring SaaS invoices, communication digests, travel consent reminders,
+performance forecast drift alerts, performance review escalations, injury-risk
+scans, achievement scans, emergency escalation timers, developer webhook
+retries, agent tasks, and wearable retry scans when matching data exists.
 
 ## Reset
 

@@ -67,6 +67,7 @@ import type {
   BillingPlanChangeRead,
   BillingPlanRead,
   BillingProrationQuoteRead,
+  BillingRecurringInvoiceRunRead,
   BillingSummaryRead,
   BillingTaxFilingRead,
   BillingTaxQuoteRead,
@@ -1604,6 +1605,7 @@ export default function HomePage() {
   const [billingDunningDelivery, setBillingDunningDelivery] =
     useState<BillingDunningDeliveryRead | null>(null);
   const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
+  const [billingRecurringRun, setBillingRecurringRun] = useState<BillingRecurringInvoiceRunRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
   const [developerApplications, setDeveloperApplications] = useState<DeveloperApplicationRead[]>([]);
   const [developerApiKeys, setDeveloperApiKeys] = useState<DeveloperApiKeyRead[]>([]);
@@ -3397,6 +3399,7 @@ export default function HomePage() {
       setBillingDunning(null);
       setBillingDunningDelivery(null);
       setBillingWebhook(null);
+      setBillingRecurringRun(null);
       setBillingSummary(null);
       setDeveloperApplications([]);
       setDeveloperApiKeys([]);
@@ -11283,6 +11286,34 @@ export default function HomePage() {
     );
   };
 
+  const runRecurringBilling = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "billing-recurring-invoices",
+      () =>
+        apiRequest<BillingRecurringInvoiceRunRead>("/billing/recurring-invoices/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            bill_on: billingForm.period_end,
+            due_in_days: 14,
+            limit: 100,
+            dry_run: false,
+            invoice_prefix: "SAAS"
+          }
+        }),
+      (run) => {
+        setBillingRecurringRun(run);
+        addLog(`Recurring billing created ${run.invoiced_count}/${run.eligible_count} invoices`, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
   const createBillingEntitlement = () => {
     if (!selectedOrganizationId || !selectedSubscriptionId) {
       addLog("Create or select a subscription first", "bad");
@@ -14612,6 +14643,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createUsageMeterAndRecord} disabled={busyAction !== null}>Usage</button>
+                <button type="button" onClick={runRecurringBilling} disabled={busyAction !== null}>Run billing</button>
                 <button type="button" onClick={createSaaSInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
                 <button type="button" onClick={prepareDunningNotice} disabled={busyAction !== null}>Dunning</button>
                 <button type="button" onClick={deliverBillingDunningNotice} disabled={busyAction !== null}>Deliver</button>
@@ -14682,6 +14714,16 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {billingRecurringRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{billingRecurringRun.invoiced_count} recurring invoices</strong>
+                    <span>
+                      {billingRecurringRun.total_invoiced} total · {billingRecurringRun.eligible_count} eligible · due from {billingRecurringRun.bill_on}
+                    </span>
+                  </div>
+                </article>
+              ) : null}
               {billingDunning ? (
                 <article className="task-card">
                   <div>

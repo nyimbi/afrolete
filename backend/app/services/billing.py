@@ -1,6 +1,7 @@
 import hmac
 import time
-from datetime import UTC, date, datetime
+from calendar import monthrange
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 from uuid import UUID
@@ -27,6 +28,8 @@ from app.schemas.billing import (
     BillingPlanChangeCreate,
     BillingPaymentWebhookCreate,
     BillingPlanCreate,
+    BillingRecurringInvoiceRunCreate,
+    BillingRecurringInvoiceRunRead,
     SaaSInvoiceCreate,
     SaaSPaymentCreate,
     SubscriptionCreate,
@@ -170,6 +173,237 @@ async def create_invoice(
     await db.commit()
     await db.refresh(invoice)
     return invoice
+
+
+async def run_recurring_invoice_scheduler(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: BillingRecurringInvoiceRunCreate,
+    authz: AuthorizationService,
+) -> BillingRecurringInvoiceRunRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_billing(authz, identity, payload.organization_id)
+    return await run_recurring_invoice_worker(
+        db,
+        organization_id=payload.organization_id,
+        bill_on=payload.bill_on,
+        due_in_days=payload.due_in_days,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+        invoice_prefix=payload.invoice_prefix,
+    )
+
+
+async def run_recurring_invoice_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    bill_on: date | None = None,
+    due_in_days: int = 14,
+    limit: int = 100,
+    dry_run: bool = False,
+    invoice_prefix: str = "SAAS",
+) -> BillingRecurringInvoiceRunRead:
+    effective_bill_on = bill_on or date.today()
+    subscriptions = await subscriptions_due_for_recurring_invoice(
+        db,
+        organization_id=organization_id,
+        bill_on=effective_bill_on,
+        limit=limit,
+    )
+    invoice_ids: list[UUID] = []
+    subscription_ids: list[UUID] = []
+    skipped_count = 0
+    failed_count = 0
+    total_invoiced = Decimal("0")
+
+    for subscription in subscriptions:
+        if dry_run:
+            skipped_count += 1
+            continue
+        try:
+            if await has_invoice_for_subscription_period(db, subscription):
+                skipped_count += 1
+                continue
+            plan = await get_plan(db, subscription.billing_plan_id)
+            invoice = await create_recurring_invoice_for_subscription(
+                db,
+                subscription,
+                plan,
+                bill_on=effective_bill_on,
+                due_in_days=due_in_days,
+                invoice_prefix=invoice_prefix,
+            )
+            advance_subscription_period(subscription)
+            await db.commit()
+            await db.refresh(invoice)
+            invoice_ids.append(invoice.id)
+            subscription_ids.append(subscription.id)
+            total_invoiced += invoice.total
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return BillingRecurringInvoiceRunRead(
+        organization_id=organization_id,
+        bill_on=effective_bill_on,
+        eligible_count=len(subscriptions),
+        executed_count=len(subscriptions) - skipped_count,
+        invoiced_count=len(invoice_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        invoice_ids=invoice_ids,
+        subscription_ids=subscription_ids,
+        total_invoiced=money(total_invoiced),
+    )
+
+
+async def subscriptions_due_for_recurring_invoice(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    bill_on: date,
+    limit: int,
+) -> list[TenantSubscription]:
+    statement = (
+        select(TenantSubscription)
+        .where(TenantSubscription.next_billing_on.is_not(None))
+        .where(TenantSubscription.next_billing_on <= bill_on)
+        .where(TenantSubscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]))
+        .order_by(TenantSubscription.next_billing_on.asc(), TenantSubscription.created_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(TenantSubscription.organization_id == organization_id)
+    rows = list((await db.scalars(statement)).all())
+    return [
+        subscription
+        for subscription in rows
+        if subscription.trial_ends_on is None or subscription.trial_ends_on < bill_on
+    ]
+
+
+async def has_invoice_for_subscription_period(
+    db: AsyncSession,
+    subscription: TenantSubscription,
+) -> bool:
+    existing = await db.scalar(
+        select(SaaSInvoice.id)
+        .where(SaaSInvoice.subscription_id == subscription.id)
+        .where(SaaSInvoice.period_start == subscription.current_period_start)
+        .where(SaaSInvoice.period_end == subscription.current_period_end)
+        .limit(1)
+    )
+    return existing is not None
+
+
+async def create_recurring_invoice_for_subscription(
+    db: AsyncSession,
+    subscription: TenantSubscription,
+    plan: BillingPlan,
+    *,
+    bill_on: date,
+    due_in_days: int,
+    invoice_prefix: str,
+) -> SaaSInvoice:
+    usage_by_meter = await recurring_usage_by_meter(db, subscription)
+    meters = {meter.id: meter for meter in await list_usage_meters(db)}
+    usage_total = Decimal("0")
+    base_price = subscription.negotiated_price or plan.base_price
+    line_parts = [
+        (
+            f"Recurring {enum_value(subscription.billing_cycle)} subscription {plan.name}: "
+            f"{money(base_price)} {plan.currency}"
+        )
+    ]
+    for meter_id, quantity in usage_by_meter.items():
+        meter = meters.get(meter_id)
+        if meter is None:
+            continue
+        overage_quantity = max(quantity - meter.included_quantity, 0)
+        overage = money(Decimal(overage_quantity) * meter.overage_price)
+        usage_total += overage
+        line_parts.append(
+            f"{meter.name}: {quantity} {meter.unit.value}, included {meter.included_quantity}, overage {overage}"
+        )
+
+    subtotal = money(base_price + usage_total)
+    invoice = SaaSInvoice(
+        organization_id=subscription.organization_id,
+        subscription_id=subscription.id,
+        invoice_number=recurring_invoice_number(invoice_prefix, subscription, bill_on),
+        period_start=subscription.current_period_start,
+        period_end=subscription.current_period_end,
+        subtotal=subtotal,
+        tax_amount=Decimal("0"),
+        discount_amount=Decimal("0"),
+        total=subtotal,
+        amount_paid=Decimal("0"),
+        currency=plan.currency,
+        due_on=bill_on + timedelta(days=due_in_days),
+        status=BillingInvoiceStatus.OPEN,
+        line_items="\n".join(line_parts),
+    )
+    db.add(invoice)
+    return invoice
+
+
+async def recurring_usage_by_meter(
+    db: AsyncSession,
+    subscription: TenantSubscription,
+) -> dict[UUID, int]:
+    records = [
+        record
+        for record in await list_usage_records(db, subscription.organization_id)
+        if record.subscription_id == subscription.id
+        and subscription.current_period_start <= record.recorded_at.date() <= subscription.current_period_end
+    ]
+    totals: dict[UUID, int] = {}
+    for record in records:
+        totals[record.usage_meter_id] = totals.get(record.usage_meter_id, 0) + record.quantity
+    return totals
+
+
+def advance_subscription_period(subscription: TenantSubscription) -> None:
+    if subscription.cancel_at_period_end:
+        subscription.status = SubscriptionStatus.CANCELLED
+        subscription.next_billing_on = None
+        subscription.notes = append_note(subscription.notes, "Cancelled at period end after final recurring invoice.")
+        return
+    next_start = subscription.current_period_end + timedelta(days=1)
+    next_end = period_end_for_cycle(next_start, subscription.billing_cycle)
+    subscription.current_period_start = next_start
+    subscription.current_period_end = next_end
+    subscription.next_billing_on = next_end
+    if subscription.status == SubscriptionStatus.TRIALING:
+        subscription.status = SubscriptionStatus.ACTIVE
+
+
+def period_end_for_cycle(period_start: date, cycle) -> date:
+    months = {"monthly": 1, "quarterly": 3, "annual": 12}[enum_value(cycle)]
+    end_month_index = period_start.month + months
+    end_year = period_start.year + (end_month_index - 1) // 12
+    end_month = ((end_month_index - 1) % 12) + 1
+    day = min(period_start.day, monthrange(end_year, end_month)[1])
+    return date(end_year, end_month, day) - timedelta(days=1)
+
+
+def recurring_invoice_number(
+    prefix: str,
+    subscription: TenantSubscription,
+    bill_on: date,
+) -> str:
+    normalized_prefix = "".join(character for character in prefix.upper() if character.isalnum() or character == "-")
+    return f"{normalized_prefix}-{bill_on.strftime('%Y%m%d')}-{str(subscription.id)[:8]}"
+
+
+def append_note(existing: str | None, note: str) -> str:
+    return f"{existing}\n{note}" if existing else note
+
+
+def enum_value(value) -> str:
+    return getattr(value, "value", value)
 
 
 async def list_invoices(db: AsyncSession, organization_id: UUID) -> list[SaaSInvoice]:
@@ -711,8 +945,8 @@ async def get_invoice_for_organization(db: AsyncSession, invoice_id: UUID, organ
     return invoice
 
 
-def money(value: Decimal) -> Decimal:
-    return value.quantize(Decimal("0.01"))
+def money(value: Decimal | int | str) -> Decimal:
+    return Decimal(str(value)).quantize(Decimal("0.01"))
 
 
 def localized_tax_rate(jurisdiction: str) -> Decimal:

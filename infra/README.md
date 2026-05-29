@@ -47,6 +47,9 @@ a systemd drop-in when a tenant needs different throughput or alert policy:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AFROLETE_DUE_WORKER_LIMIT` | `25` | Default batch size for lanes without a narrower limit. |
+| `AFROLETE_DUE_WORKER_BILLING_RECURRING_INVOICE_LIMIT` | `100` | Subscriptions scanned for due recurring SaaS invoices. |
+| `AFROLETE_DUE_WORKER_BILLING_RECURRING_INVOICE_DUE_IN_DAYS` | `14` | Payment due-date offset for generated recurring SaaS invoices. |
+| `AFROLETE_DUE_WORKER_BILLING_RECURRING_INVOICE_PREFIX` | `SAAS` | Invoice-number prefix for scheduler-generated SaaS invoices. |
 | `AFROLETE_DUE_WORKER_COMMUNICATION_DIGEST_LIMIT` | `100` | Daily/weekly notification preferences processed per digest run. |
 | `AFROLETE_DUE_WORKER_COMMUNICATION_ESCALATION_LIMIT` | `100` | Urgent communication messages scanned for scheduled escalation. |
 | `AFROLETE_DUE_WORKER_COMMUNICATION_ESCALATION_UNRESOLVED_AFTER_MINUTES` | `15` | Time an urgent message may remain queued, failed, or suppressed before escalation. |
@@ -79,6 +82,7 @@ a systemd drop-in when a tenant needs different throughput or alert policy:
 
 For a deployment smoke without sending messages, run the command manually with
 `--dry-run-communication-escalations`,
+`--dry-run-billing-recurring-invoices`,
 `--dry-run-emergency-escalations`,
 `--dry-run-performance-forecast-drift-alerts`,
 `--dry-run-performance-injury-risk-alerts`, and

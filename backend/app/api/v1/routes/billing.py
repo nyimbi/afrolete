@@ -18,6 +18,8 @@ from app.schemas.billing import (
     BillingPlanCreate,
     BillingPlanRead,
     BillingProrationQuoteRead,
+    BillingRecurringInvoiceRunCreate,
+    BillingRecurringInvoiceRunRead,
     BillingSummaryRead,
     BillingTaxFilingRead,
     BillingTaxQuoteRead,
@@ -57,6 +59,7 @@ from app.services.billing import (
     record_payment,
     record_usage,
     proration_quote,
+    run_recurring_invoice_scheduler,
     validate_payment_webhook_signature,
 )
 
@@ -167,6 +170,16 @@ async def list_invoices_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[SaaSInvoiceRead]:
     return [read(invoice, SaaSInvoiceRead) for invoice in await list_invoices(db, organization_id)]
+
+
+@router.post("/recurring-invoices/run", response_model=BillingRecurringInvoiceRunRead)
+async def run_recurring_invoices_route(
+    payload: BillingRecurringInvoiceRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BillingRecurringInvoiceRunRead:
+    return await run_recurring_invoice_scheduler(db, identity, payload, authz)
 
 
 @router.post("/invoices/{invoice_id}/dunning", response_model=BillingDunningNoticeRead)

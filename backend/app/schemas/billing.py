@@ -243,6 +243,29 @@ class BillingPaymentWebhookRead(BaseModel):
     message: str
 
 
+class BillingRecurringInvoiceRunCreate(BaseModel):
+    organization_id: UUID
+    bill_on: date | None = None
+    due_in_days: int = Field(default=14, ge=0, le=120)
+    limit: int = Field(default=100, ge=1, le=1000)
+    dry_run: bool = False
+    invoice_prefix: str = Field(default="SAAS", min_length=2, max_length=20)
+
+
+class BillingRecurringInvoiceRunRead(BaseModel):
+    organization_id: UUID | None
+    bill_on: date
+    eligible_count: int
+    executed_count: int
+    invoiced_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool = False
+    invoice_ids: list[UUID]
+    subscription_ids: list[UUID]
+    total_invoiced: Decimal
+
+
 class BillingEntitlementCreate(BaseModel):
     organization_id: UUID
     subscription_id: UUID

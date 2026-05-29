@@ -2625,6 +2625,20 @@ export type BillingPaymentWebhookRead = {
   message: string;
 };
 
+export type BillingRecurringInvoiceRunRead = {
+  organization_id: UUID | null;
+  bill_on: string;
+  eligible_count: number;
+  executed_count: number;
+  invoiced_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  invoice_ids: UUID[];
+  subscription_ids: UUID[];
+  total_invoiced: string;
+};
+
 export type BillingEntitlementRead = {
   id: UUID;
   organization_id: UUID;

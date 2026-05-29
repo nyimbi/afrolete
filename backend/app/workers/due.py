@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 from collections.abc import Sequence
+from datetime import date
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from app.db.session import SessionLocal
 from app.models.enums import CommunicationChannel, NotificationFrequency
 from app.services.agents import run_agent_task_worker
 from app.services.assets import run_emergency_escalation_timer_worker
+from app.services.billing import run_recurring_invoice_worker
 from app.services.communications import (
     run_digest_scheduler_worker,
     run_message_escalation_worker,
@@ -32,6 +34,7 @@ from app.services.safeguarding import (
 
 WORKER_LANES = (
     "agent-tasks",
+    "billing-recurring-invoices",
     "communication-digests",
     "communication-escalations",
     "communication-scheduled-dispatch",
@@ -54,6 +57,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lane", choices=(*WORKER_LANES, "all"), action="append", default=None)
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--agent-limit", type=int, default=None)
+    parser.add_argument("--billing-recurring-invoice-limit", type=int, default=None)
+    parser.add_argument("--billing-recurring-invoice-bill-on", type=date_from_isoformat, default=None)
+    parser.add_argument("--billing-recurring-invoice-due-in-days", type=int, default=14)
+    parser.add_argument("--billing-recurring-invoice-prefix", default="SAAS")
+    parser.add_argument("--dry-run-billing-recurring-invoices", action="store_true")
     parser.add_argument("--communication-digest-limit", type=int, default=None)
     parser.add_argument("--communication-escalation-limit", type=int, default=None)
     parser.add_argument("--communication-escalation-unresolved-after-minutes", type=int, default=15)
@@ -154,6 +162,11 @@ async def run_due_workers(
     lanes: Sequence[str] = ("all",),
     limit: int = 25,
     agent_limit: int | None = None,
+    billing_recurring_invoice_limit: int | None = None,
+    billing_recurring_invoice_bill_on: date | None = None,
+    billing_recurring_invoice_due_in_days: int = 14,
+    billing_recurring_invoice_prefix: str = "SAAS",
+    dry_run_billing_recurring_invoices: bool = False,
     communication_digest_limit: int | None = None,
     communication_digest_frequency: NotificationFrequency | None = None,
     communication_escalation_limit: int | None = None,
@@ -212,6 +225,18 @@ async def run_due_workers(
                 db,
                 organization_id=organization_id,
                 limit=agent_limit or limit,
+            )
+        ).model_dump(mode="json")
+    if "billing-recurring-invoices" in active_lanes:
+        results["billing_recurring_invoices"] = (
+            await run_recurring_invoice_worker(
+                db,
+                organization_id=organization_id,
+                bill_on=billing_recurring_invoice_bill_on,
+                due_in_days=billing_recurring_invoice_due_in_days,
+                limit=billing_recurring_invoice_limit or limit,
+                dry_run=dry_run_billing_recurring_invoices,
+                invoice_prefix=billing_recurring_invoice_prefix,
             )
         ).model_dump(mode="json")
     if "communication-digests" in active_lanes:
@@ -382,6 +407,7 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             or result.get("escalated_count")
             or result.get("dispatched_count")
             or result.get("alerted_count")
+            or result.get("invoiced_count")
             or result.get("reminded_count")
             or result.get("retried_count")
             or 0
@@ -402,6 +428,11 @@ async def run() -> None:
             lanes=args.lane or ("all",),
             limit=args.limit,
             agent_limit=args.agent_limit,
+            billing_recurring_invoice_limit=args.billing_recurring_invoice_limit,
+            billing_recurring_invoice_bill_on=args.billing_recurring_invoice_bill_on,
+            billing_recurring_invoice_due_in_days=args.billing_recurring_invoice_due_in_days,
+            billing_recurring_invoice_prefix=args.billing_recurring_invoice_prefix,
+            dry_run_billing_recurring_invoices=args.dry_run_billing_recurring_invoices,
             communication_digest_limit=args.communication_digest_limit,
             communication_digest_frequency=NotificationFrequency(args.communication_digest_frequency)
             if args.communication_digest_frequency
@@ -475,6 +506,10 @@ async def run() -> None:
             include_recorded_webhooks=args.include_recorded_webhooks,
         )
     print(json.dumps(result, indent=2 if args.pretty else None))
+
+
+def date_from_isoformat(value: str) -> date:
+    return date.fromisoformat(value)
 
 
 def main() -> None:

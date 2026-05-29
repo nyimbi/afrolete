@@ -1,14 +1,18 @@
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import func, select
 
 from app.models.agent import Agent, AgentRunRecord, AgentTask
 from app.models.assets import EmergencyActionPlan, EmergencyPlanActivation
+from app.models.billing import BillingPlan, SaaSInvoice, TenantSubscription
 from app.models.communication import CommunicationMessage, MessageRecipient, NotificationPreference
 from app.models.enums import (
     AgentKind,
     AgentTaskStatus,
     BackgroundCheckStatus,
+    BillingCycle,
+    BillingInvoiceStatus,
     ChannelPreference,
     CommunicationChannel,
     CommunicationMessageType,
@@ -30,6 +34,7 @@ from app.models.enums import (
     MetricSource,
     NotificationFrequency,
     OrganizationType,
+    SubscriptionStatus,
     TravelPlanStatus,
 )
 from app.models.event import BackgroundCheck, ComplianceCredential, ConsentRequest, Event, EventTravelPlan
@@ -79,6 +84,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
 
     assert result["lanes"] == [
         "agent-tasks",
+        "billing-recurring-invoices",
         "communication-digests",
         "communication-escalations",
         "communication-scheduled-dispatch",
@@ -95,6 +101,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     ]
     assert result["summary"]["eligible_count"] == 2
     assert result["summary"]["processed_count"] == 2
+    assert result["results"]["billing_recurring_invoices"]["eligible_count"] == 0
     assert result["results"]["communication_digests"]["eligible_count"] == 0
     assert result["results"]["communication_escalations"]["eligible_count"] == 0
     assert result["results"]["communication_scheduled_dispatch"]["eligible_count"] == 0
@@ -120,6 +127,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
 def test_selected_lanes_expands_all() -> None:
     assert selected_lanes(("all",)) == {
         "agent-tasks",
+        "billing-recurring-invoices",
         "communication-digests",
         "communication-escalations",
         "communication-scheduled-dispatch",
@@ -135,6 +143,71 @@ def test_selected_lanes_expands_all() -> None:
         "wearable-pull-retries",
     }
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}
+
+
+async def test_due_worker_generates_recurring_subscription_invoice(db_session) -> None:
+    organization = Organization(
+        name="Recurring Billing Club",
+        slug="recurring-billing-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    plan = BillingPlan(
+        code="recurring-growth",
+        name="Recurring Growth",
+        base_price=250,
+        currency="USD",
+        billing_cycle=BillingCycle.MONTHLY,
+        included_athletes=100,
+        included_teams=8,
+        included_agent_tasks=500,
+        included_storage_gb=50,
+        per_athlete_price=0,
+        per_agent_task_price=0,
+    )
+    db_session.add(plan)
+    await db_session.flush()
+    subscription = TenantSubscription(
+        organization_id=organization.id,
+        billing_plan_id=plan.id,
+        status=SubscriptionStatus.ACTIVE,
+        billing_cycle=BillingCycle.MONTHLY,
+        current_period_start=date(2026, 6, 1),
+        current_period_end=date(2026, 6, 30),
+        next_billing_on=date(2026, 6, 30),
+        seats_purchased=100,
+        negotiated_price=199,
+    )
+    db_session.add(subscription)
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("billing-recurring-invoices",),
+        billing_recurring_invoice_bill_on=date(2026, 6, 30),
+        billing_recurring_invoice_due_in_days=10,
+        billing_recurring_invoice_prefix="AUTO",
+        limit=10,
+    )
+
+    assert result["results"]["billing_recurring_invoices"]["eligible_count"] == 1
+    assert result["results"]["billing_recurring_invoices"]["invoiced_count"] == 1
+    assert result["summary"]["processed_count"] == 1
+    invoice = await db_session.scalar(
+        select(SaaSInvoice).where(SaaSInvoice.subscription_id == subscription.id)
+    )
+    assert invoice is not None
+    assert invoice.invoice_number.startswith("AUTO-")
+    assert invoice.status == BillingInvoiceStatus.OPEN
+    assert invoice.total == Decimal("199.00")
+    assert invoice.due_on == date(2026, 7, 10)
+    await db_session.refresh(subscription)
+    assert subscription.current_period_start == date(2026, 7, 1)
+    assert subscription.current_period_end == date(2026, 7, 31)
+    assert subscription.next_billing_on == date(2026, 7, 31)
 
 
 async def test_due_worker_escalates_overdue_emergency_activation(db_session) -> None:
