@@ -2765,11 +2765,16 @@ textarea:focus {
   padding: 12px;
 }
 
-.admission-ai-panel > div {
+.admission-ai-panel > div,
+.admission-ai-actions {
   align-items: center;
   display: flex;
   gap: 10px;
   justify-content: space-between;
+}
+
+.admission-ai-actions {
+  justify-content: flex-start;
 }
 
 .admission-ai-panel strong,
@@ -2788,6 +2793,10 @@ textarea:focus {
   border: 0;
   color: white;
   padding: 8px 11px;
+}
+
+.admission-ai-actions button:last-child {
+  background: var(--ink);
 }
 
 .admission-review-grid {

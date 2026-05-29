@@ -398,6 +398,57 @@ export default function AdmissionsPage() {
     }
   };
 
+  const applyAiReviewNotes = (task: AgentTaskRead, inquiry: RegistrationInquiryRead) => {
+    const note = aiReviewNote(task);
+    if (!note) {
+      setError("Run the AI review before applying notes.");
+      return;
+    }
+    setReviewForms((current) => {
+      const existing = current[inquiry.id] ?? {
+        status: inquiry.status,
+        review_notes: inquiry.review_notes ?? "",
+        follow_up_at: toDateTimeLocalValue(inquiry.follow_up_at),
+        payment_status: inquiry.payment_status,
+        payment_method: inquiry.payment_method ?? "",
+        payment_reference: inquiry.payment_reference ?? ""
+      };
+      return {
+        ...current,
+        [inquiry.id]: {
+          ...existing,
+          review_notes: appendUniqueNote(existing.review_notes, note)
+        }
+      };
+    });
+    addLog(`AI notes staged for ${inquiry.athlete_name}`);
+  };
+
+  const closeAiReview = async (task: AgentTaskRead, inquiry: RegistrationInquiryRead) => {
+    setBusy(`close-ai-${inquiry.id}`);
+    setError("");
+    try {
+      const updated = await apiRequest<AgentTaskRead>(
+        `/agents/tasks/${task.id}`,
+        {
+          method: "PATCH",
+          identity: requestIdentity,
+          body: {
+            status: "completed",
+            review_notes: task.review_notes || "Admissions staff reviewed the AI admissions recommendation.",
+            output_ref: task.output_ref
+          }
+        }
+      );
+      setAgentTasks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      addLog(`AI review completed for ${inquiry.athlete_name}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "AI review could not be completed");
+    } finally {
+      setBusy("");
+    }
+  };
+
   const convertInquiry = async (inquiry: RegistrationInquiryRead) => {
     if (!selectedOrganizationId) {
       setError("Choose an organization before converting admissions.");
@@ -608,6 +659,20 @@ export default function AdmissionsPage() {
                     {aiTask.governance_policy_rationale ? <small>{aiTask.governance_policy_rationale}</small> : null}
                     {aiTask.review_notes ? <small>{aiTask.review_notes}</small> : null}
                     {aiTask.output_ref ? <small>{aiTask.output_ref}</small> : null}
+                    {aiTask.review_notes || canCloseAiTask(aiTask) ? (
+                      <div className="admission-ai-actions">
+                        {aiTask.review_notes ? (
+                          <button type="button" onClick={() => applyAiReviewNotes(aiTask, inquiry)} disabled={busy !== ""}>
+                            Use notes
+                          </button>
+                        ) : null}
+                        {canCloseAiTask(aiTask) ? (
+                          <button type="button" onClick={() => closeAiReview(aiTask, inquiry)} disabled={busy !== ""}>
+                            {busy === `close-ai-${inquiry.id}` ? "Closing AI" : "Complete AI"}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
                 {inquiry.missing_documents.length > 0 || inquiry.next_steps.length > 0 ? (
@@ -778,6 +843,32 @@ function agentTaskForInquiry(tasks: AgentTaskRead[], inquiry: RegistrationInquir
 
 function canRunAiTask(task: AgentTaskRead): boolean {
   return task.status === "queued" || task.status === "failed";
+}
+
+function canCloseAiTask(task: AgentTaskRead): boolean {
+  return task.status === "waiting_for_review" && task.approval_pending_count === 0;
+}
+
+function aiReviewNote(task: AgentTaskRead): string {
+  if (!task.review_notes && !task.output_ref) {
+    return "";
+  }
+  return [
+    task.review_notes ? `AI review: ${task.review_notes}` : null,
+    task.output_ref ? `AI output: ${task.output_ref}` : null
+  ].filter(Boolean).join("\n");
+}
+
+function appendUniqueNote(existing: string, note: string): string {
+  const trimmedExisting = existing.trim();
+  const trimmedNote = note.trim();
+  if (!trimmedExisting) {
+    return trimmedNote;
+  }
+  if (trimmedExisting.includes(trimmedNote)) {
+    return trimmedExisting;
+  }
+  return `${trimmedExisting}\n\n${trimmedNote}`;
 }
 
 function toDateTimeLocalValue(value: string | null): string {
