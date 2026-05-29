@@ -187,10 +187,65 @@ class OrganizationOnboardingCreate(BaseModel):
     starter_team_season_label: str | None = Field(default=None, max_length=80)
 
 
+class RegistrationLaunchLinkRead(BaseModel):
+    key: str
+    label: str
+    url: str
+    qr_payload: str
+    description: str
+
+
+class RegistrationLaunchCopyRead(BaseModel):
+    channel: str
+    label: str
+    subject: str | None = None
+    body: str
+    share_url: str
+    character_count: int
+
+
+class RegistrationLaunchMetricRead(BaseModel):
+    key: str
+    label: str
+    value: int
+    detail: str
+    status: str
+
+
+class RegistrationLaunchReadinessCheckRead(BaseModel):
+    key: str
+    label: str
+    status: str
+    detail: str
+    action_label: str | None = None
+    href: str | None = None
+
+
+class RegistrationLaunchCommandCenterRead(BaseModel):
+    organization_id: UUID
+    organization_name: str
+    organization_type: OrganizationType
+    public_name: str | None
+    launch_status: str
+    readiness_score: int
+    public_site_path: str
+    registration_page_path: str
+    admissions_path: str
+    family_portal_path: str
+    dashboard_path: str
+    launch_links: list[RegistrationLaunchLinkRead] = Field(default_factory=list)
+    channel_copies: list[RegistrationLaunchCopyRead] = Field(default_factory=list)
+    metrics: list[RegistrationLaunchMetricRead] = Field(default_factory=list)
+    readiness_checks: list[RegistrationLaunchReadinessCheckRead] = Field(default_factory=list)
+    staff_actions: list[str] = Field(default_factory=list)
+    agent_task: AgentTaskRead | None = None
+
+
 class OrganizationOnboardingRead(BaseModel):
     organization: OrganizationRead
     starter_team: TeamRead | None = None
     concierge_task: AgentTaskRead | None = None
+    launch_center: RegistrationLaunchCommandCenterRead | None = None
     public_site_path: str
     registration_page_path: str
     admissions_path: str

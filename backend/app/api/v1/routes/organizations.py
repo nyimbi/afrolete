@@ -43,6 +43,7 @@ from app.schemas.organization import (
     RegistrationInquiryImportTemplateRead,
     RegistrationInquiryRead,
     RegistrationInquiryUpdate,
+    RegistrationLaunchCommandCenterRead,
     RegistrationLearningPathCreate,
     RegistrationLearningPathRead,
     RegistrationOnboardingPresetRead,
@@ -67,6 +68,7 @@ from app.services.organizations import (
     create_committee,
     create_onboarding_starter_team,
     create_organization,
+    registration_launch_command_center,
     get_public_registration_account_readiness,
     get_registration_payment_hosted_checkout,
     get_organization_for_identity,
@@ -548,19 +550,66 @@ async def create_organization_onboarding_route(
         payload.launch_goal,
         authz,
     )
+    launch_center, launch_agent_task = await registration_launch_command_center(
+        db,
+        identity,
+        organization.id,
+        authz,
+    )
+    launch_center.agent_task = to_agent_task_read(launch_agent_task) if launch_agent_task else None
     return OrganizationOnboardingRead(
         organization=to_organization_read((organization, roles)),
         starter_team=to_team_read(starter_team),
         concierge_task=to_agent_task_read(concierge_task),
+        launch_center=launch_center,
         public_site_path=public_site_path(organization),
-        registration_page_path=f"/register?mode=player&site={organization.subdomain or organization.slug}",
-        admissions_path=f"/admissions?organization_id={organization.id}",
-        family_portal_path=f"/family?organization_id={organization.id}",
-        dashboard_path=f"/?organization_id={organization.id}",
+        registration_page_path=launch_center.registration_page_path,
+        admissions_path=launch_center.admissions_path,
+        family_portal_path=launch_center.family_portal_path,
+        dashboard_path=launch_center.dashboard_path,
         owner_email=identity.email,
         owner_display_name=identity.display_name,
         checklist=onboarding_checklist(organization, payload.launch_goal),
     )
+
+
+@router.get("/{organization_id}/registration-launch-center", response_model=RegistrationLaunchCommandCenterRead)
+async def get_registration_launch_center_route(
+    organization_id: UUID,
+    base_url: str = Query(default="https://afrolete.lindela.io", max_length=500),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RegistrationLaunchCommandCenterRead:
+    launch_center, launch_agent_task = await registration_launch_command_center(
+        db,
+        identity,
+        organization_id,
+        authz,
+        base_url=base_url,
+    )
+    launch_center.agent_task = to_agent_task_read(launch_agent_task) if launch_agent_task else None
+    return launch_center
+
+
+@router.post("/{organization_id}/registration-launch-center/agent-task", response_model=RegistrationLaunchCommandCenterRead)
+async def queue_registration_launch_center_agent_task_route(
+    organization_id: UUID,
+    base_url: str = Query(default="https://afrolete.lindela.io", max_length=500),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RegistrationLaunchCommandCenterRead:
+    launch_center, launch_agent_task = await registration_launch_command_center(
+        db,
+        identity,
+        organization_id,
+        authz,
+        base_url=base_url,
+        ensure_agent_task=True,
+    )
+    launch_center.agent_task = to_agent_task_read(launch_agent_task) if launch_agent_task else None
+    return launch_center
 
 
 @router.get("/public/{site}", response_model=OrganizationPublicSiteRead)

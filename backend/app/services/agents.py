@@ -3706,6 +3706,9 @@ def execute_with_deterministic_planner(
     if task.task_type == "registration_inquiry_review":
         task.review_notes = deterministic_registration_inquiry_notes(agent, task, model_name)
         return
+    if task.task_type == "registration_launch_campaign":
+        task.review_notes = deterministic_registration_launch_campaign_notes(agent, task, model_name)
+        return
     task.review_notes = (
         f"{agent.name} prepared a deterministic draft using {model_name}. "
         f"Task: {task.title}. Input: {task.input_ref or 'none'}. "
@@ -3766,6 +3769,34 @@ def deterministic_registration_inquiry_notes(agent: Agent, task: AgentTask, mode
             *[f"- {blocker}" for blocker in blockers],
             "- Keep guardian account handoff visible so the family can resume without re-entering details.",
             "Human review: confirm safeguarding, eligibility, payment evidence, and roster fit before conversion.",
+        ]
+    )
+
+
+def deterministic_registration_launch_campaign_notes(agent: Agent, task: AgentTask, model_name: str) -> str:
+    context = parse_agent_input_ref(task.input_ref)
+    score = context.get("score", "unknown")
+    org_type = context.get("type", "organization")
+    registration_open = context.get("open", "").lower() == "true"
+    inquiry_count = context.get("inquiries", "0")
+    ready_packets = context.get("ready_packets", "0")
+    pending_payments = context.get("pending_payments", "0")
+    launch_action = (
+        "Send the registration link through email, SMS, WhatsApp, and noticeboard QR channels."
+        if registration_open
+        else "Open public registration before publishing the campaign outside the staff team."
+    )
+    return "\n".join(
+        [
+            f"{agent.name} prepared a deterministic registration launch campaign using {model_name}.",
+            f"Operating context: {org_type} registration launch; readiness score {score}.",
+            f"Current funnel: {inquiry_count} inquiries, {ready_packets} ready packets, {pending_payments} pending payments.",
+            "Recommended campaign actions:",
+            f"- {launch_action}",
+            "- Use the launch command center copy blocks without changing the tracked registration URL.",
+            "- Assign one owner each for family questions, payment reconciliation, admissions conversion, and guardian invites.",
+            "- Review admissions every operating day and convert ready packets into roster and guardian records.",
+            "Human review: confirm safeguarding, eligibility, fee, and school or club communication policies before mass outreach.",
         ]
     )
 

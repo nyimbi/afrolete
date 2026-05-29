@@ -26,6 +26,7 @@ import type {
   RegistrationPacketRead,
   RegistrationInquiryAccountReadinessRead,
   RegistrationInquiryRead,
+  RegistrationLaunchCommandCenterRead,
   RegistrationPaymentSessionRead
 } from "@/types/operations";
 
@@ -921,6 +922,28 @@ export default function RegistrationPage() {
     }
   };
 
+  const queueRegistrationLaunchAgent = async () => {
+    if (!onboarding) {
+      setError("Create the workspace before queuing the launch campaign agent.");
+      return;
+    }
+    setBusy("registration-launch-agent");
+    setError("");
+    try {
+      const launchCenter = await apiRequest<RegistrationLaunchCommandCenterRead>(
+        `/organizations/${onboarding.organization.id}/registration-launch-center/agent-task?${new URLSearchParams({
+          base_url: window.location.origin
+        }).toString()}`,
+        { method: "POST", identity: requestIdentity }
+      );
+      setOnboarding((current) => current ? { ...current, launch_center: launchCenter } : current);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Registration launch agent could not be queued");
+    } finally {
+      setBusy("");
+    }
+  };
+
   return (
     <main className="register-page">
       <section className="register-hero">
@@ -1405,6 +1428,13 @@ export default function RegistrationPage() {
                     <a href={onboarding.admissions_path}>Review admissions</a>
                     <a href={onboarding.family_portal_path}>Family portal</a>
                   </div>
+                  {onboarding.launch_center ? (
+                    <RegistrationLaunchCenter
+                      launchCenter={onboarding.launch_center}
+                      busy={busy}
+                      onQueueAgent={queueRegistrationLaunchAgent}
+                    />
+                  ) : null}
                   {onboarding.starter_team ? (
                     <p>
                       Starter program: {onboarding.starter_team.name} · {onboarding.starter_team.sport} ·{" "}
@@ -1791,6 +1821,77 @@ export default function RegistrationPage() {
         )}
       </section>
     </main>
+  );
+}
+
+function RegistrationLaunchCenter({
+  launchCenter,
+  busy,
+  onQueueAgent
+}: {
+  launchCenter: RegistrationLaunchCommandCenterRead;
+  busy: string;
+  onQueueAgent: () => void;
+}) {
+  const registrationCopy = launchCenter.channel_copies.find((copy) => copy.channel === "whatsapp") ??
+    launchCenter.channel_copies[0];
+  const publicLink = launchCenter.launch_links.find((link) => link.key === "registration") ??
+    launchCenter.launch_links[0];
+  const actionMetrics = launchCenter.metrics.filter((metric) => metric.status === "action");
+
+  return (
+    <section className="registration-launch-center" aria-label="Registration launch command center">
+      <div className="registration-launch-head">
+        <div>
+          <span>{launchCenter.launch_status}</span>
+          <strong>{launchCenter.readiness_score}% launch ready</strong>
+        </div>
+        {launchCenter.agent_task ? (
+          <small>{launchCenter.agent_task.status.replaceAll("_", " ")} · {launchCenter.agent_task.title}</small>
+        ) : (
+          <button type="button" onClick={onQueueAgent} disabled={busy !== ""}>
+            {busy === "registration-launch-agent" ? "Queuing agent" : "Queue launch agent"}
+          </button>
+        )}
+      </div>
+      <div className="registration-launch-metrics">
+        {launchCenter.metrics.slice(0, 6).map((metric) => (
+          <span key={metric.key} data-status={metric.status}>
+            <strong>{metric.value}</strong>
+            {metric.label}
+          </span>
+        ))}
+      </div>
+      <div className="registration-launch-links">
+        {launchCenter.launch_links.slice(0, 4).map((link) => (
+          <a key={link.key} href={link.url}>
+            {link.label}
+          </a>
+        ))}
+      </div>
+      {registrationCopy && publicLink ? (
+        <div className="registration-launch-copy">
+          <span>{registrationCopy.label} · {registrationCopy.character_count} chars</span>
+          {registrationCopy.subject ? <strong>{registrationCopy.subject}</strong> : null}
+          <p>{registrationCopy.body}</p>
+          <small>QR payload: {publicLink.qr_payload}</small>
+        </div>
+      ) : null}
+      <div className="registration-launch-checks">
+        {launchCenter.readiness_checks.map((check) => (
+          <article key={check.key} data-status={check.status}>
+            <strong>{check.label}</strong>
+            <small>{check.detail}</small>
+            {check.href && check.action_label ? <a href={check.href}>{check.action_label}</a> : null}
+          </article>
+        ))}
+      </div>
+      <ol className="registration-launch-actions">
+        {(actionMetrics.length ? launchCenter.staff_actions : launchCenter.staff_actions.slice(0, 4)).map((action) => (
+          <li key={action}>{action}</li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

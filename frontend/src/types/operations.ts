@@ -405,6 +405,7 @@ export type OrganizationOnboardingRead = {
   organization: OrganizationRead;
   starter_team: TeamRead | null;
   concierge_task: AgentTaskRead | null;
+  launch_center: RegistrationLaunchCommandCenterRead | null;
   public_site_path: string;
   registration_page_path: string;
   admissions_path: string;
@@ -413,6 +414,60 @@ export type OrganizationOnboardingRead = {
   owner_email: string;
   owner_display_name: string;
   checklist: string[];
+};
+
+export type RegistrationLaunchLinkRead = {
+  key: string;
+  label: string;
+  url: string;
+  qr_payload: string;
+  description: string;
+};
+
+export type RegistrationLaunchCopyRead = {
+  channel: string;
+  label: string;
+  subject: string | null;
+  body: string;
+  share_url: string;
+  character_count: number;
+};
+
+export type RegistrationLaunchMetricRead = {
+  key: string;
+  label: string;
+  value: number;
+  detail: string;
+  status: string;
+};
+
+export type RegistrationLaunchReadinessCheckRead = {
+  key: string;
+  label: string;
+  status: string;
+  detail: string;
+  action_label: string | null;
+  href: string | null;
+};
+
+export type RegistrationLaunchCommandCenterRead = {
+  organization_id: UUID;
+  organization_name: string;
+  organization_type: OrganizationType;
+  public_name: string | null;
+  launch_status: string;
+  readiness_score: number;
+  public_site_path: string;
+  registration_page_path: string;
+  admissions_path: string;
+  family_portal_path: string;
+  dashboard_path: string;
+  launch_links: RegistrationLaunchLinkRead[];
+  channel_copies: RegistrationLaunchCopyRead[];
+  metrics: RegistrationLaunchMetricRead[];
+  readiness_checks: RegistrationLaunchReadinessCheckRead[];
+  staff_actions: string[];
+  agent_task: AgentTaskRead | null;
 };
 
 export type RegistrationOnboardingPresetRead = {

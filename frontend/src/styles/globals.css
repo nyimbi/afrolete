@@ -3783,6 +3783,116 @@ textarea:focus {
   justify-self: start;
 }
 
+.registration-launch-center {
+  border: 1px solid color-mix(in srgb, var(--amber) 34%, var(--line));
+  border-radius: 8px;
+  background: #fffbeb;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.registration-launch-head,
+.registration-launch-metrics,
+.registration-launch-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.registration-launch-head div,
+.registration-launch-head span,
+.registration-launch-head strong,
+.registration-launch-head small,
+.registration-launch-copy span,
+.registration-launch-copy strong,
+.registration-launch-copy p,
+.registration-launch-copy small,
+.registration-launch-checks strong,
+.registration-launch-checks small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.registration-launch-head span,
+.registration-launch-copy span {
+  color: #8a4b0a;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.registration-launch-head button,
+.registration-launch-links a,
+.registration-launch-checks a {
+  white-space: normal;
+}
+
+.registration-launch-metrics span {
+  border: 1px solid color-mix(in srgb, var(--amber) 24%, var(--line));
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  display: grid;
+  min-width: 94px;
+  padding: 8px;
+}
+
+.registration-launch-metrics span[data-status="action"] {
+  border-color: #d97706;
+  color: #8a4b0a;
+}
+
+.registration-launch-metrics strong {
+  color: var(--ink);
+  font-size: 20px;
+}
+
+.registration-launch-copy {
+  border: 1px solid color-mix(in srgb, var(--teal) 22%, var(--line));
+  border-radius: 8px;
+  background: #fff;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.registration-launch-copy p {
+  color: var(--ink);
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.registration-launch-checks {
+  display: grid;
+  gap: 8px;
+}
+
+.registration-launch-checks article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+}
+
+.registration-launch-checks article[data-status="ready"] {
+  border-color: color-mix(in srgb, var(--teal) 34%, var(--line));
+}
+
+.registration-launch-checks article[data-status="blocked"],
+.registration-launch-checks article[data-status="action"] {
+  border-color: #d97706;
+}
+
+.registration-launch-actions {
+  margin: 0;
+  padding-left: 20px;
+}
+
 .register-directory {
   display: grid;
   gap: 8px;

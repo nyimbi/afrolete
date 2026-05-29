@@ -202,6 +202,20 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert onboarding["concierge_task"]["organization_id"] == onboarding["organization"]["id"]
     assert "Makini Track" in onboarding["concierge_task"]["title"]
     assert "Open registration for term two athletics" in onboarding["concierge_task"]["input_ref"]
+    launch_center = onboarding["launch_center"]
+    assert launch_center["organization_id"] == onboarding["organization"]["id"]
+    assert launch_center["launch_status"] == "ready"
+    assert launch_center["readiness_score"] >= 80
+    assert launch_center["agent_task"] is None
+    assert {link["key"] for link in launch_center["launch_links"]} >= {
+        "public_site",
+        "registration",
+        "admissions",
+        "family_portal",
+    }
+    assert any(copy["channel"] == "whatsapp" and "Makini Track" in copy["body"] for copy in launch_center["channel_copies"])
+    assert any(metric["key"] == "teams" and metric["value"] == 1 for metric in launch_center["metrics"])
+    assert any(action.startswith("Queue the Registration Growth Agent") for action in launch_center["staff_actions"])
     concierge_run_response = client.post(
         f"/api/v1/agents/tasks/{onboarding['concierge_task']['id']}/execute",
         headers=identity_headers,
@@ -277,6 +291,45 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert owner_missions["publish_family_intake"]["progress_percent"] == 100
     assert owner_missions["complete_family_packet"]["status"] == "available"
     assert owner_missions["review_admissions"]["status"] == "locked"
+
+    launch_get_response = client.get(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-launch-center"
+        "?base_url=http://localhost:3000",
+        headers=identity_headers,
+    )
+    assert launch_get_response.status_code == 200
+    launch_get = launch_get_response.json()
+    assert launch_get["launch_links"][1]["url"].startswith("http://localhost:3000/register?")
+    assert launch_get["metrics"][0]["label"] == "Teams/programs"
+
+    launch_agent_response = client.post(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-launch-center/agent-task"
+        "?base_url=http://localhost:3000",
+        headers=identity_headers,
+    )
+    assert launch_agent_response.status_code == 200
+    launch_agent_center = launch_agent_response.json()
+    assert launch_agent_center["agent_task"]["task_type"] == "registration_launch_campaign"
+    assert launch_agent_center["agent_task"]["status"] == "queued"
+    assert f"registration-launch:{onboarding['organization']['id']};" in launch_agent_center["agent_task"]["input_ref"]
+    assert any("Review Registration Growth Agent task" in action for action in launch_agent_center["staff_actions"])
+
+    duplicate_launch_agent_response = client.post(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-launch-center/agent-task",
+        headers=identity_headers,
+    )
+    assert duplicate_launch_agent_response.status_code == 200
+    assert duplicate_launch_agent_response.json()["agent_task"]["id"] == launch_agent_center["agent_task"]["id"]
+
+    launch_agent_run_response = client.post(
+        f"/api/v1/agents/tasks/{launch_agent_center['agent_task']['id']}/execute",
+        headers=identity_headers,
+    )
+    assert launch_agent_run_response.status_code == 200
+    launch_agent_run = launch_agent_run_response.json()
+    assert launch_agent_run["status"] == "waiting_for_review"
+    assert "Registration Growth Agent prepared a deterministic registration launch campaign" in launch_agent_run["review_notes"]
+    assert "Current funnel: 0 inquiries, 0 ready packets, 0 pending payments" in launch_agent_run["review_notes"]
 
     template_response = client.get(
         f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/import-template",
@@ -660,6 +713,7 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     agent_tasks_by_type = {task["task_type"]: task for task in agent_tasks_response.json()}
     assert agent_tasks_by_type["registration_inquiry_review"]["id"] == agent_review["id"]
     assert agent_tasks_by_type["organization_onboarding_concierge"]["id"] == onboarding["concierge_task"]["id"]
+    assert agent_tasks_by_type["registration_launch_campaign"]["id"] == launch_agent_center["agent_task"]["id"]
 
     payment_session_response = client.post(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/payment-session",

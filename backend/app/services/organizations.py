@@ -52,6 +52,11 @@ from app.schemas.organization import (
     RegistrationLearningModuleRead,
     RegistrationLearningPathCreate,
     RegistrationLearningPathRead,
+    RegistrationLaunchCommandCenterRead,
+    RegistrationLaunchCopyRead,
+    RegistrationLaunchLinkRead,
+    RegistrationLaunchMetricRead,
+    RegistrationLaunchReadinessCheckRead,
     RegistrationOnboardingMissionRead,
     RegistrationInquiryImportCreate,
     RegistrationInquiryImportPreviewRowRead,
@@ -118,6 +123,27 @@ DEFAULT_REGISTRATION_DOCUMENTS = ["proof_of_age", "medical_information"]
 
 def public_site_path(organization: Organization) -> str:
     return f"/site/{organization.subdomain or organization.slug}"
+
+
+def registration_page_path(organization: Organization) -> str:
+    return f"/register?mode=player&site={organization.subdomain or organization.slug}"
+
+
+def admissions_path(organization: Organization) -> str:
+    return f"/admissions?organization_id={organization.id}"
+
+
+def family_portal_path(organization: Organization) -> str:
+    return f"/family?organization_id={organization.id}"
+
+
+def dashboard_path(organization: Organization) -> str:
+    return f"/?organization_id={organization.id}"
+
+
+def absolute_launch_url(base_url: str, path: str) -> str:
+    base = (base_url or "https://afrolete.lindela.io").rstrip("/")
+    return f"{base}{path if path.startswith('/') else f'/{path}'}"
 
 
 def onboarding_checklist(organization: Organization, launch_goal: str | None = None) -> list[str]:
@@ -430,6 +456,473 @@ async def queue_onboarding_concierge_agent_task(
     )
     await db.refresh(task)
     return task
+
+
+async def registration_launch_command_center(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    *,
+    base_url: str = "https://afrolete.lindela.io",
+    ensure_agent_task: bool = False,
+) -> tuple[RegistrationLaunchCommandCenterRead, AgentTask | None]:
+    if not await can_manage_registration_inquiries(identity, organization_id, authz):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+
+    inquiries = list(
+        (
+            await db.scalars(
+                select(RegistrationInquiry)
+                .where(RegistrationInquiry.organization_id == organization_id)
+                .order_by(RegistrationInquiry.created_at.desc())
+                .limit(500)
+            )
+        ).all()
+    )
+    team_count = int(
+        await db.scalar(select(func.count(Team.id)).where(Team.organization_id == organization_id))
+        or 0
+    )
+    registration_docs = organization_public_registration_documents(organization)
+    ready_packets = [inquiry for inquiry in inquiries if registration_packet_summary(inquiry)["packet_complete"]]
+    incomplete_packets = [inquiry for inquiry in inquiries if not registration_packet_summary(inquiry)["packet_complete"]]
+    pending_payments = [
+        inquiry
+        for inquiry in inquiries
+        if inquiry.payment_status not in REGISTRATION_PAYMENT_COMPLETE_STATUSES
+    ]
+    linked_guardian_ids = {
+        inquiry.guardian_person_id
+        for inquiry in inquiries
+        if inquiry.guardian_person_id is not None
+    }
+    converted_count = sum(1 for inquiry in inquiries if inquiry.status == "converted")
+
+    checks = registration_launch_readiness_checks(
+        organization=organization,
+        team_count=team_count,
+        inquiry_count=len(inquiries),
+        ready_packet_count=len(ready_packets),
+        registration_docs=registration_docs,
+    )
+    readiness_score = round(
+        (sum(1 for check in checks if check.status == "ready") / max(len(checks), 1)) * 100
+    )
+    launch_status = "ready" if readiness_score >= 80 else "attention" if readiness_score >= 50 else "blocked"
+    links = registration_launch_links(organization, base_url)
+    channel_copies = registration_launch_channel_copies(
+        organization=organization,
+        registration_url=next(link.url for link in links if link.key == "registration"),
+        public_site_url=next(link.url for link in links if link.key == "public_site"),
+        registration_docs=registration_docs,
+    )
+    metrics = [
+        RegistrationLaunchMetricRead(
+            key="teams",
+            label="Teams/programs",
+            value=team_count,
+            detail="Starter destinations families can choose during registration.",
+            status="ready" if team_count else "action",
+        ),
+        RegistrationLaunchMetricRead(
+            key="inquiries",
+            label="Family inquiries",
+            value=len(inquiries),
+            detail="Public and imported registration intakes in the admissions queue.",
+            status="ready" if inquiries else "action",
+        ),
+        RegistrationLaunchMetricRead(
+            key="ready_packets",
+            label="Ready packets",
+            value=len(ready_packets),
+            detail="Registrations ready for staff verification and conversion.",
+            status="ready" if ready_packets else "todo",
+        ),
+        RegistrationLaunchMetricRead(
+            key="incomplete_packets",
+            label="Needs family action",
+            value=len(incomplete_packets),
+            detail="Families still missing documents, consent, emergency, medical, or payment evidence.",
+            status="action" if incomplete_packets else "ready",
+        ),
+        RegistrationLaunchMetricRead(
+            key="pending_payments",
+            label="Pending payments",
+            value=len(pending_payments),
+            detail="Registration payments not yet paid, waived, or marked not required.",
+            status="action" if pending_payments else "ready",
+        ),
+        RegistrationLaunchMetricRead(
+            key="linked_guardians",
+            label="Linked guardians",
+            value=len(linked_guardian_ids),
+            detail="Reusable guardian contacts connected to family registration records.",
+            status="ready" if linked_guardian_ids else "todo",
+        ),
+        RegistrationLaunchMetricRead(
+            key="converted",
+            label="Converted athletes",
+            value=converted_count,
+            detail="Accepted registrations converted into athlete, guardian, and roster records.",
+            status="ready" if converted_count else "todo",
+        ),
+    ]
+    agent_task = await find_registration_launch_agent_task(db, organization_id)
+    if ensure_agent_task and agent_task is None:
+        agent_task = await queue_registration_launch_agent_task(
+            db,
+            identity,
+            organization,
+            authz,
+            readiness_score=readiness_score,
+            inquiry_count=len(inquiries),
+            ready_packet_count=len(ready_packets),
+            pending_payment_count=len(pending_payments),
+        )
+    return (
+        RegistrationLaunchCommandCenterRead(
+            organization_id=organization.id,
+            organization_name=organization.name,
+            organization_type=organization.organization_type,
+            public_name=organization.public_name,
+            launch_status=launch_status,
+            readiness_score=readiness_score,
+            public_site_path=public_site_path(organization),
+            registration_page_path=registration_page_path(organization),
+            admissions_path=admissions_path(organization),
+            family_portal_path=family_portal_path(organization),
+            dashboard_path=dashboard_path(organization),
+            launch_links=links,
+            channel_copies=channel_copies,
+            metrics=metrics,
+            readiness_checks=checks,
+            staff_actions=registration_launch_staff_actions(
+                organization=organization,
+                checks=checks,
+                inquiry_count=len(inquiries),
+                ready_packet_count=len(ready_packets),
+                pending_payment_count=len(pending_payments),
+                agent_task=agent_task,
+            ),
+        ),
+        agent_task,
+    )
+
+
+def registration_launch_readiness_checks(
+    *,
+    organization: Organization,
+    team_count: int,
+    inquiry_count: int,
+    ready_packet_count: int,
+    registration_docs: list[str],
+) -> list[RegistrationLaunchReadinessCheckRead]:
+    checks = [
+        RegistrationLaunchReadinessCheckRead(
+            key="workspace",
+            label="Workspace ownership",
+            status="ready",
+            detail=f"{organization.organization_type.value.title()} workspace is created and manageable.",
+            action_label="Open console",
+            href=dashboard_path(organization),
+        ),
+        RegistrationLaunchReadinessCheckRead(
+            key="public_profile",
+            label="Public identity",
+            status="ready" if organization.public_name and organization.contact_email else "action",
+            detail=(
+                f"{organization.public_name or organization.name} has contact details for families."
+                if organization.public_name and organization.contact_email
+                else "Add public name and contact email before broad family promotion."
+            ),
+            action_label="Review public page",
+            href=public_site_path(organization),
+        ),
+        RegistrationLaunchReadinessCheckRead(
+            key="public_address",
+            label="Shareable address",
+            status="ready" if organization.subdomain or organization.slug else "blocked",
+            detail=f"Public handle: {organization.subdomain or organization.slug}.",
+            action_label="Open public site",
+            href=public_site_path(organization),
+        ),
+        RegistrationLaunchReadinessCheckRead(
+            key="registration_window",
+            label="Registration window",
+            status="ready" if organization.registration_open else "blocked",
+            detail="Public family registration is open." if organization.registration_open else "Open registration before sharing links.",
+            action_label="Open registration",
+            href=registration_page_path(organization),
+        ),
+        RegistrationLaunchReadinessCheckRead(
+            key="document_policy",
+            label="Document policy",
+            status="ready" if registration_docs else "action",
+            detail=(
+                f"Required documents: {', '.join(registration_docs)}."
+                if registration_docs
+                else "Define required documents so families know what to upload."
+            ),
+            action_label="Review registration",
+            href=registration_page_path(organization),
+        ),
+        RegistrationLaunchReadinessCheckRead(
+            key="payment_policy",
+            label="Payment policy",
+            status=(
+                "ready"
+                if not organization.registration_fee_amount
+                or (organization.registration_fee_currency and organization.registration_payment_instructions)
+                else "action"
+            ),
+            detail=(
+                "No registration fee configured."
+                if not organization.registration_fee_amount
+                else f"{organization.registration_fee_currency or 'Currency'} {organization.registration_fee_amount} fee policy is configured."
+                if organization.registration_fee_currency and organization.registration_payment_instructions
+                else "Add fee currency and payment instructions before collecting fees."
+            ),
+            action_label="Review packet",
+            href=registration_page_path(organization),
+        ),
+        RegistrationLaunchReadinessCheckRead(
+            key="starter_program",
+            label="Starter team/program",
+            status="ready" if team_count else "action",
+            detail=(
+                f"{team_count} team/program destination{'' if team_count == 1 else 's'} available."
+                if team_count
+                else "Create at least one team, squad, or individual sport program."
+            ),
+            action_label="Open console",
+            href=dashboard_path(organization),
+        ),
+        RegistrationLaunchReadinessCheckRead(
+            key="admissions_pipeline",
+            label="Admissions pipeline",
+            status="ready" if ready_packet_count else "action" if inquiry_count else "todo",
+            detail=(
+                f"{ready_packet_count} packet{'' if ready_packet_count == 1 else 's'} ready for review."
+                if ready_packet_count
+                else f"{inquiry_count} intake{'' if inquiry_count == 1 else 's'} waiting for family action."
+                if inquiry_count
+                else "Share the registration link to start the admissions queue."
+            ),
+            action_label="Review admissions",
+            href=admissions_path(organization),
+        ),
+    ]
+    return checks
+
+
+def registration_launch_links(
+    organization: Organization,
+    base_url: str,
+) -> list[RegistrationLaunchLinkRead]:
+    paths = [
+        ("public_site", "Public site", public_site_path(organization), "Families can inspect the branded organization page."),
+        ("registration", "Registration form", registration_page_path(organization), "Primary share link for player and family onboarding."),
+        ("admissions", "Admissions queue", admissions_path(organization), "Staff workspace for packet review and conversion."),
+        ("family_portal", "Family portal", family_portal_path(organization), "Guardian workspace after account handoff or invite."),
+        ("dashboard", "Operations console", dashboard_path(organization), "Owner and staff command surface."),
+    ]
+    return [
+        RegistrationLaunchLinkRead(
+            key=key,
+            label=label,
+            url=absolute_launch_url(base_url, path),
+            qr_payload=absolute_launch_url(base_url, path),
+            description=description,
+        )
+        for key, label, path, description in paths
+    ]
+
+
+def registration_launch_channel_copies(
+    *,
+    organization: Organization,
+    registration_url: str,
+    public_site_url: str,
+    registration_docs: list[str],
+) -> list[RegistrationLaunchCopyRead]:
+    name = organization.public_name or organization.name
+    sport = organization.primary_sport or "sports"
+    fee_line = (
+        f"Registration fee: {organization.registration_fee_currency or ''} {organization.registration_fee_amount}."
+        if organization.registration_fee_amount
+        else "Registration fee: not required."
+    )
+    document_line = (
+        f"Please prepare: {', '.join(registration_docs)}."
+        if registration_docs
+        else "Please prepare age, medical, and guardian details."
+    )
+    email_body = "\n".join(
+        [
+            f"{name} is now accepting {sport} registrations on AfroLete.",
+            document_line,
+            fee_line,
+            f"Start here: {registration_url}",
+            f"Organization page: {public_site_url}",
+        ]
+    )
+    sms_body = f"{name} registration is open. {document_line} Start: {registration_url}"
+    whatsapp_body = "\n".join(
+        [
+            f"*{name} registration is open*",
+            document_line,
+            fee_line,
+            f"Register: {registration_url}",
+        ]
+    )
+    poster_body = "\n".join(
+        [
+            f"{name} {sport} registration",
+            "Scan the QR code or open the link to complete athlete, guardian, consent, document, and payment details.",
+            registration_url,
+        ]
+    )
+    copies = [
+        ("email", "Email announcement", f"{name} registration is open", email_body, registration_url),
+        ("sms", "SMS nudge", None, sms_body, registration_url),
+        ("whatsapp", "WhatsApp broadcast", None, whatsapp_body, registration_url),
+        ("poster", "Noticeboard poster copy", f"{name} registration", poster_body, registration_url),
+    ]
+    return [
+        RegistrationLaunchCopyRead(
+            channel=channel,
+            label=label,
+            subject=subject,
+            body=body,
+            share_url=share_url,
+            character_count=len(body),
+        )
+        for channel, label, subject, body, share_url in copies
+    ]
+
+
+def registration_launch_staff_actions(
+    *,
+    organization: Organization,
+    checks: list[RegistrationLaunchReadinessCheckRead],
+    inquiry_count: int,
+    ready_packet_count: int,
+    pending_payment_count: int,
+    agent_task: AgentTask | None,
+) -> list[str]:
+    actions: list[str] = []
+    for check in checks:
+        if check.status in {"blocked", "action"}:
+            actions.append(f"{check.label}: {check.detail}")
+    if inquiry_count == 0:
+        actions.append("Share the registration link through email, SMS, WhatsApp, school notices, and team chats.")
+    if ready_packet_count:
+        actions.append("Review ready packets and convert accepted athletes into rosters with guardian invites.")
+    if pending_payment_count:
+        actions.append("Reconcile pending registration payments or record approved waivers before conversion.")
+    if agent_task is None:
+        actions.append("Queue the Registration Growth Agent to draft the campaign and first-week operating plan.")
+    else:
+        actions.append(f"Review Registration Growth Agent task {agent_task.id} before broad outreach.")
+    if organization.organization_type == OrganizationType.SCHOOL:
+        actions.append("Confirm school clearance, academic eligibility, and term calendar ownership before fixtures.")
+    elif organization.organization_type == OrganizationType.CLUB:
+        actions.append("Confirm safeguarding contact, coach assignment, and first training schedule before publishing widely.")
+    return actions[:10]
+
+
+async def find_registration_launch_agent_task(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> AgentTask | None:
+    return await db.scalar(
+        select(AgentTask)
+        .where(
+            AgentTask.organization_id == organization_id,
+            AgentTask.task_type == "registration_launch_campaign",
+            AgentTask.input_ref.like(f"registration-launch:{organization_id};%"),
+            AgentTask.status.not_in([AgentTaskStatus.FAILED, AgentTaskStatus.CANCELLED]),
+        )
+        .order_by(AgentTask.created_at.desc())
+        .limit(1)
+    )
+
+
+async def queue_registration_launch_agent_task(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization: Organization,
+    authz: AuthorizationService,
+    *,
+    readiness_score: int,
+    inquiry_count: int,
+    ready_packet_count: int,
+    pending_payment_count: int,
+) -> AgentTask:
+    existing_task = await find_registration_launch_agent_task(db, organization.id)
+    if existing_task is not None:
+        return existing_task
+
+    agent = await db.scalar(
+        select(Agent)
+        .where(
+            Agent.organization_id == organization.id,
+            Agent.kind == AgentKind.OPERATIONS,
+            Agent.name == "Registration Growth Agent",
+        )
+        .order_by(Agent.created_at)
+        .limit(1)
+    )
+    if agent is None:
+        agent = Agent(
+            organization_id=organization.id,
+            name="Registration Growth Agent",
+            kind=AgentKind.OPERATIONS,
+            purpose=(
+                "Turn club and school onboarding state into family outreach campaigns, "
+                "admissions operating rhythm, and first-week conversion actions."
+            ),
+            status="active",
+            model_policy="human_review_required",
+        )
+        db.add(agent)
+        await db.flush()
+        await authz.touch(
+            Relationship(
+                resource_type="agent",
+                resource_id=str(agent.id),
+                relation="owner",
+                subject_type="user",
+                subject_id=str(identity.user_id),
+            )
+        )
+
+    input_ref = (
+        f"registration-launch:{organization.id};"
+        f"type:{organization.organization_type.value};"
+        f"score:{readiness_score};"
+        f"open:{organization.registration_open};"
+        f"inquiries:{inquiry_count};"
+        f"ready_packets:{ready_packet_count};"
+        f"pending_payments:{pending_payment_count}"
+    )
+    return await queue_agent_task(
+        db,
+        identity,
+        agent.id,
+        AgentTaskCreate(
+            organization_id=organization.id,
+            task_type="registration_launch_campaign",
+            title=f"Launch registration campaign for {organization.public_name or organization.name}",
+            input_ref=input_ref,
+        ),
+        authz,
+    )
 
 
 def bounded_input_ref_segment(value: str, max_length: int = 160) -> str:
