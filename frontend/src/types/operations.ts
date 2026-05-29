@@ -469,11 +469,28 @@ export type RegistrationInquiryImportRowErrorRead = {
   row: Record<string, string | null>;
 };
 
+export type RegistrationInquiryImportPreviewRowRead = {
+  row_number: number;
+  athlete_name: string;
+  guardian_name: string | null;
+  email: string;
+  phone: string | null;
+  age_group: string | null;
+  sport_interest: string | null;
+  team_id: UUID | null;
+  team_name: string | null;
+  payment_status: string;
+  required_documents: string[];
+};
+
 export type RegistrationInquiryImportRead = {
   organization_id: UUID;
+  dry_run: boolean;
   created_count: number;
+  preview_count: number;
   error_count: number;
   inquiries: RegistrationInquiryRead[];
+  preview_rows: RegistrationInquiryImportPreviewRowRead[];
   errors: RegistrationInquiryImportRowErrorRead[];
 };
 

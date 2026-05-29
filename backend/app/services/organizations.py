@@ -50,6 +50,7 @@ from app.schemas.organization import (
     PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
     RegistrationInquiryImportCreate,
+    RegistrationInquiryImportPreviewRowRead,
     RegistrationInquiryImportRowErrorRead,
     RegistrationInquiryAccountReadinessRead,
     RegistrationInquiryConversionCreate,
@@ -1399,7 +1400,11 @@ async def import_registration_inquiries(
     organization_id: UUID,
     payload: RegistrationInquiryImportCreate,
     authz: AuthorizationService,
-) -> tuple[list[RegistrationInquiry], list[RegistrationInquiryImportRowErrorRead]]:
+) -> tuple[
+    list[RegistrationInquiry],
+    list[RegistrationInquiryImportPreviewRowRead],
+    list[RegistrationInquiryImportRowErrorRead],
+]:
     if not await can_manage_registration_inquiries(identity, organization_id, authz):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
@@ -1419,6 +1424,7 @@ async def import_registration_inquiries(
     }
     teams_by_name = {team.name.strip().lower(): team for team in teams_by_id.values()}
     created: list[RegistrationInquiry] = []
+    preview_rows: list[RegistrationInquiryImportPreviewRowRead] = []
     errors: list[RegistrationInquiryImportRowErrorRead] = []
     required_documents = organization_public_registration_documents(organization)
 
@@ -1449,6 +1455,25 @@ async def import_registration_inquiries(
             )
             continue
 
+        team = teams_by_id.get(str(inquiry_payload.team_id)) if inquiry_payload.team_id else None
+        preview_rows.append(
+            RegistrationInquiryImportPreviewRowRead(
+                row_number=row_number,
+                athlete_name=inquiry_payload.athlete_name,
+                guardian_name=inquiry_payload.guardian_name,
+                email=normalize_contact_email(inquiry_payload.email),
+                phone=inquiry_payload.phone,
+                age_group=inquiry_payload.age_group,
+                sport_interest=inquiry_payload.sport_interest,
+                team_id=inquiry_payload.team_id,
+                team_name=team.name if team is not None else None,
+                payment_status="pending" if organization.registration_fee_amount else "not_required",
+                required_documents=required_documents,
+            )
+        )
+        if payload.dry_run:
+            continue
+
         guardian = await ensure_registration_guardian_contact(db, organization_id, inquiry_payload)
         inquiry_dict = inquiry_payload.model_dump()
         inquiry_dict["email"] = normalize_contact_email(inquiry_payload.email)
@@ -1472,10 +1497,11 @@ async def import_registration_inquiries(
         db.add(inquiry)
         created.append(inquiry)
 
-    await db.commit()
-    for inquiry in created:
-        await db.refresh(inquiry)
-    return created, errors
+    if created:
+        await db.commit()
+        for inquiry in created:
+            await db.refresh(inquiry)
+    return created, preview_rows, errors
 
 
 def normalize_import_row(row: dict[str, str | None]) -> dict[str, str | None]:

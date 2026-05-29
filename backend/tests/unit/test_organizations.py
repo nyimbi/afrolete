@@ -206,21 +206,42 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert public_site["registration_fee_amount"] == "1000.00"
     assert public_site["registration_payment_instructions"] == "Use the hosted checkout link after uploading documents."
 
+    import_csv = (
+        "athlete_name,guardian_name,email,phone,age_group,sport_interest,team,message\n"
+        "Brian Import,Parent Import,parent.import@example.com,+254700000010,U15,athletics,Junior Sprint Squad,CSV intake\n"
+        "Missing Email,Parent Import,,+254700000011,U13,athletics,Junior Sprint Squad,Needs email\n"
+    )
+    import_preview_response = client.post(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/import",
+        headers=identity_headers,
+        json={
+            "csv_text": import_csv,
+            "source_url": "admissions-csv-import",
+            "dry_run": True,
+        },
+    )
+    assert import_preview_response.status_code == 200
+    import_preview = import_preview_response.json()
+    assert import_preview["dry_run"] is True
+    assert import_preview["created_count"] == 0
+    assert import_preview["preview_count"] == 1
+    assert import_preview["error_count"] == 1
+    assert import_preview["preview_rows"][0]["athlete_name"] == "Brian Import"
+    assert import_preview["preview_rows"][0]["team_name"] == "Junior Sprint Squad"
+
     import_response = client.post(
         f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/import",
         headers=identity_headers,
         json={
-            "csv_text": (
-                "athlete_name,guardian_name,email,phone,age_group,sport_interest,team,message\n"
-                "Brian Import,Parent Import,parent.import@example.com,+254700000010,U15,athletics,Junior Sprint Squad,CSV intake\n"
-                "Missing Email,Parent Import,,+254700000011,U13,athletics,Junior Sprint Squad,Needs email\n"
-            ),
+            "csv_text": import_csv,
             "source_url": "admissions-csv-import",
         },
     )
     assert import_response.status_code == 200
     imported = import_response.json()
+    assert imported["dry_run"] is False
     assert imported["created_count"] == 1
+    assert imported["preview_count"] == 1
     assert imported["error_count"] == 1
     assert imported["inquiries"][0]["athlete_name"] == "Brian Import"
     assert imported["inquiries"][0]["team_id"] == onboarding["starter_team"]["id"]

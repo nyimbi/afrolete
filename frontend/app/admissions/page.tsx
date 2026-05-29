@@ -249,12 +249,12 @@ export default function AdmissionsPage() {
     }
   };
 
-  const importRegistrationCsv = async () => {
+  const importRegistrationCsv = async (dryRun: boolean) => {
     if (!selectedOrganizationId) {
       setError("Choose an organization before importing registration rows.");
       return;
     }
-    setBusy("registration-import");
+    setBusy(dryRun ? "registration-preview" : "registration-import");
     setError("");
     try {
       const result = await apiRequest<RegistrationInquiryImportRead>(
@@ -264,16 +264,23 @@ export default function AdmissionsPage() {
           identity: requestIdentity,
           body: {
             csv_text: importCsv,
-            source_url: "admissions-csv-import"
+            source_url: "admissions-csv-import",
+            dry_run: dryRun
           }
         }
       );
       setImportResult(result);
-      setInquiries((current) => [
-        ...result.inquiries,
-        ...current.filter((item) => !result.inquiries.some((created) => created.id === item.id))
-      ]);
-      addLog(`Imported ${result.created_count} registration rows${result.error_count ? `, ${result.error_count} need review` : ""}`);
+      if (!dryRun) {
+        setInquiries((current) => [
+          ...result.inquiries,
+          ...current.filter((item) => !result.inquiries.some((created) => created.id === item.id))
+        ]);
+      }
+      addLog(
+        dryRun
+          ? `Previewed ${result.preview_count} registration rows${result.error_count ? `, ${result.error_count} need fixes` : ""}`
+          : `Imported ${result.created_count} registration rows${result.error_count ? `, ${result.error_count} need review` : ""}`
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Registration CSV import failed");
     } finally {
@@ -640,17 +647,27 @@ export default function AdmissionsPage() {
               rows={7}
               spellCheck={false}
             />
-            <button type="button" onClick={importRegistrationCsv} disabled={!selectedOrganizationId || busy !== ""}>
-              {busy === "registration-import" ? "Importing" : "Import CSV"}
-            </button>
+            <div className="admissions-import-actions">
+              <button type="button" onClick={() => importRegistrationCsv(true)} disabled={!selectedOrganizationId || busy !== ""}>
+                {busy === "registration-preview" ? "Previewing" : "Preview"}
+              </button>
+              <button type="button" onClick={() => importRegistrationCsv(false)} disabled={!selectedOrganizationId || busy !== ""}>
+                {busy === "registration-import" ? "Importing" : "Import CSV"}
+              </button>
+            </div>
             {importResult ? (
               <span>
-                {importResult.created_count} created
+                {importResult.dry_run ? `${importResult.preview_count} valid` : `${importResult.created_count} created`}
                 {importResult.error_count ? ` · ${importResult.error_count} errors` : ""}
               </span>
             ) : (
               <span>Headers: athlete_name, guardian_name, email, phone, age_group, sport_interest, team.</span>
             )}
+            {importResult?.preview_rows.slice(0, 3).map((item) => (
+              <small key={`${item.row_number}-${item.email}`}>
+                Row {item.row_number}: {item.athlete_name} · {item.email} · {item.team_name ?? "no team"} · {item.payment_status}
+              </small>
+            ))}
             {importResult?.errors.slice(0, 3).map((item) => (
               <small key={`${item.row_number}-${item.message}`}>
                 Row {item.row_number}: {item.message}

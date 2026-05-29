@@ -684,12 +684,15 @@ async def import_registration_inquiries_route(
     db: AsyncSession = Depends(get_db),
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> RegistrationInquiryImportRead:
-    inquiries, errors = await import_registration_inquiries(db, identity, organization_id, payload, authz)
+    inquiries, preview_rows, errors = await import_registration_inquiries(db, identity, organization_id, payload, authz)
     return RegistrationInquiryImportRead(
         organization_id=organization_id,
+        dry_run=payload.dry_run,
         created_count=len(inquiries),
+        preview_count=len(preview_rows),
         error_count=len(errors),
         inquiries=[to_registration_inquiry_read(inquiry) for inquiry in inquiries],
+        preview_rows=preview_rows,
         errors=errors,
     )
 

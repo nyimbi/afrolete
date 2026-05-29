@@ -264,6 +264,7 @@ class RegistrationInquiryRead(BaseModel):
 class RegistrationInquiryImportCreate(BaseModel):
     csv_text: str = Field(min_length=1, max_length=200_000)
     source_url: str | None = Field(default=None, max_length=500)
+    dry_run: bool = False
 
 
 class RegistrationInquiryImportRowErrorRead(BaseModel):
@@ -272,11 +273,28 @@ class RegistrationInquiryImportRowErrorRead(BaseModel):
     row: dict[str, str | None] = Field(default_factory=dict)
 
 
+class RegistrationInquiryImportPreviewRowRead(BaseModel):
+    row_number: int
+    athlete_name: str
+    guardian_name: str | None
+    email: str
+    phone: str | None
+    age_group: str | None
+    sport_interest: str | None
+    team_id: UUID | None
+    team_name: str | None
+    payment_status: str
+    required_documents: list[str] = Field(default_factory=list)
+
+
 class RegistrationInquiryImportRead(BaseModel):
     organization_id: UUID
+    dry_run: bool = False
     created_count: int
+    preview_count: int = 0
     error_count: int
     inquiries: list[RegistrationInquiryRead] = Field(default_factory=list)
+    preview_rows: list[RegistrationInquiryImportPreviewRowRead] = Field(default_factory=list)
     errors: list[RegistrationInquiryImportRowErrorRead] = Field(default_factory=list)
 
 
