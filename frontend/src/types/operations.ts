@@ -3020,6 +3020,17 @@ export type DeveloperSdkCatalogRead = {
   entry_points: string[];
 };
 
+export type DeveloperSdkEndpointCatalogRead = {
+  method: string;
+  path: string;
+  category: string;
+  summary: string;
+  required_scopes: string[];
+  typescript_entry_point: string | null;
+  python_entry_point: string | null;
+  webhook_events: string[];
+};
+
 export type DeveloperQuickstartRead = {
   title: string;
   language: string;
@@ -3036,6 +3047,7 @@ export type DeveloperIntegrationCatalogRead = {
   scopes: DeveloperApiScopeCatalogRead[];
   webhook_events: DeveloperWebhookEventCatalogRead[];
   sdks: DeveloperSdkCatalogRead[];
+  sdk_endpoints: DeveloperSdkEndpointCatalogRead[];
   configured_event_types: string[];
 };
 
@@ -3053,6 +3065,7 @@ export type DeveloperPublicDocsRead = {
   scopes: DeveloperApiScopeCatalogRead[];
   webhook_events: DeveloperWebhookEventCatalogRead[];
   sdks: DeveloperSdkCatalogRead[];
+  sdk_endpoints: DeveloperSdkEndpointCatalogRead[];
   marketplace_categories: string[];
   security_requirements: string[];
 };

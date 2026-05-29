@@ -350,6 +350,17 @@ class DeveloperSdkCatalogRead(BaseModel):
     entry_points: list[str]
 
 
+class DeveloperSdkEndpointCatalogRead(BaseModel):
+    method: str
+    path: str
+    category: str
+    summary: str
+    required_scopes: list[str]
+    typescript_entry_point: str | None = None
+    python_entry_point: str | None = None
+    webhook_events: list[str] = Field(default_factory=list)
+
+
 class DeveloperQuickstartRead(BaseModel):
     title: str
     language: str
@@ -366,6 +377,7 @@ class DeveloperIntegrationCatalogRead(BaseModel):
     scopes: list[DeveloperApiScopeCatalogRead]
     webhook_events: list[DeveloperWebhookEventCatalogRead]
     sdks: list[DeveloperSdkCatalogRead]
+    sdk_endpoints: list[DeveloperSdkEndpointCatalogRead]
     configured_event_types: list[str]
 
 
@@ -383,6 +395,7 @@ class DeveloperPublicDocsRead(BaseModel):
     scopes: list[DeveloperApiScopeCatalogRead]
     webhook_events: list[DeveloperWebhookEventCatalogRead]
     sdks: list[DeveloperSdkCatalogRead]
+    sdk_endpoints: list[DeveloperSdkEndpointCatalogRead]
     marketplace_categories: list[str]
     security_requirements: list[str]
 

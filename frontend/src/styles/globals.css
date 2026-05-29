@@ -2616,6 +2616,7 @@ textarea:focus {
 .developer-docs-empty,
 .developer-docs-quickstarts article,
 .developer-docs-two-column article,
+.developer-docs-endpoints article,
 .developer-docs-events article,
 .developer-docs-footer,
 .developer-docs-error {
@@ -2661,6 +2662,9 @@ textarea:focus {
 .developer-docs-metrics span,
 .developer-docs-list strong,
 .developer-docs-list span,
+.developer-docs-endpoints strong,
+.developer-docs-endpoints span,
+.developer-docs-endpoints small,
 .developer-docs-events strong,
 .developer-docs-events span,
 .developer-docs-events small,
@@ -2679,6 +2683,8 @@ textarea:focus {
 
 .developer-docs-metrics span,
 .developer-docs-list span,
+.developer-docs-endpoints span,
+.developer-docs-endpoints small,
 .developer-docs-events span,
 .developer-docs-events small,
 .developer-docs-search span,
@@ -2785,6 +2791,7 @@ textarea:focus {
 }
 
 .developer-docs-list,
+.developer-docs-endpoints,
 .developer-docs-events,
 .developer-docs-footer div:last-child {
   display: grid;
@@ -2792,10 +2799,52 @@ textarea:focus {
 }
 
 .developer-docs-list div,
+.developer-docs-endpoints article,
 .developer-docs-events article,
 .developer-docs-footer span {
   border-top: 1px solid var(--line);
   padding-top: 10px;
+}
+
+.developer-docs-endpoints {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.developer-docs-endpoints article {
+  border-top: 0;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.developer-docs-endpoints p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.developer-docs-endpoint-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.developer-docs-endpoint-meta b {
+  border-radius: 6px;
+  background: #173f35;
+  color: #fff;
+  font-size: 12px;
+  letter-spacing: 0;
+  padding: 5px 8px;
+}
+
+.developer-docs-endpoint-meta span {
+  border-radius: 6px;
+  background: #edf4ef;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 5px 8px;
 }
 
 .developer-docs-events {
@@ -3177,6 +3226,7 @@ textarea:focus {
   .developer-docs-search,
   .developer-docs-quickstarts,
   .developer-docs-two-column,
+  .developer-docs-endpoints,
   .developer-docs-events,
   .developer-docs-footer,
   .developer-oauth-grid,

@@ -34,6 +34,10 @@ export default function DeveloperDocsPage() {
     () => docs?.webhook_events.filter((event) => event.emission_status === "active") ?? [],
     [docs?.webhook_events]
   );
+  const endpointCategoryCount = useMemo(
+    () => new Set(docs?.sdk_endpoints.map((endpoint) => endpoint.category) ?? []).size,
+    [docs?.sdk_endpoints]
+  );
 
   if (error) {
     return (
@@ -95,9 +99,10 @@ export default function DeveloperDocsPage() {
 
       <section className="developer-docs-shell developer-docs-metrics">
         <Metric label="Scopes" value={docs.scopes.length} />
+        <Metric label="SDK routes" value={docs.sdk_endpoints.length} />
         <Metric label="Webhook events" value={docs.webhook_events.length} />
         <Metric label="SDK surfaces" value={docs.sdks.length} />
-        <Metric label="Marketplace lanes" value={docs.marketplace_categories.length} />
+        <Metric label="Route groups" value={endpointCategoryCount} />
       </section>
 
       <section className="developer-docs-shell developer-docs-search">
@@ -174,6 +179,37 @@ export default function DeveloperDocsPage() {
             ))}
           </div>
         </article>
+      </section>
+
+      <section className="developer-docs-shell developer-docs-section">
+        <div>
+          <p className="section-label">SDK route manifest</p>
+          <h2>Generated-client contract</h2>
+          <p className="developer-docs-muted">
+            Method, path, scope, SDK helper, and webhook side effects are cataloged together.
+          </p>
+        </div>
+        <div className="developer-docs-endpoints">
+          {docs.sdk_endpoints.map((endpoint) => (
+            <article key={`${endpoint.method}-${endpoint.path}`}>
+              <div>
+                <strong>{endpoint.path}</strong>
+                <span>{endpoint.category}</span>
+              </div>
+              <p>{endpoint.summary}</p>
+              <div className="developer-docs-endpoint-meta">
+                <b>{endpoint.method}</b>
+                <span>{endpoint.required_scopes.length ? endpoint.required_scopes.join(", ") : "valid API key"}</span>
+              </div>
+              <small>
+                {[endpoint.typescript_entry_point, endpoint.python_entry_point]
+                  .filter(Boolean)
+                  .join(" · ")}
+                {endpoint.webhook_events.length ? ` · emits ${endpoint.webhook_events.join(", ")}` : ""}
+              </small>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="developer-docs-shell developer-docs-section">

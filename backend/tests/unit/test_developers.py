@@ -32,12 +32,31 @@ def test_public_developer_docs(client) -> None:
     assert docs["auth_header"] == "X-Afrolete-API-Key"
     assert docs["webhook_signature_header"] == "X-Afrolete-Webhook-Signature"
     assert len(docs["quickstarts"]) >= 5
+    assert len(docs["sdk_endpoints"]) >= 40
     assert "read:organization" in {scope["scope"] for scope in docs["scopes"]}
     assert "read:agents" in {scope["scope"] for scope in docs["scopes"]}
     assert "write:agents" in {scope["scope"] for scope in docs["scopes"]}
     assert any(event["event_type"] == "training.drill.created" for event in docs["webhook_events"])
     assert any(event["event_type"] == "agents.task.queued" for event in docs["webhook_events"])
+    assert any(
+        endpoint["method"] == "POST"
+        and endpoint["path"] == "/sdk/agents/{agent_id}/tasks"
+        and endpoint["typescript_entry_point"] == "client.agents.tasks.queue"
+        and endpoint["webhook_events"] == ["agents.task.queued"]
+        for endpoint in docs["sdk_endpoints"]
+    )
+    assert any(
+        endpoint["method"] == "GET"
+        and endpoint["path"] == "/sdk/training/calendar-artifact"
+        and "read:training" in endpoint["required_scopes"]
+        for endpoint in docs["sdk_endpoints"]
+    )
     assert any(sdk["language"] == "Raw HTTP" and sdk["status"] == "active" for sdk in docs["sdks"])
+    raw_http_sdk = next(sdk for sdk in docs["sdks"] if sdk["language"] == "Raw HTTP")
+    assert {
+        f"{endpoint['method']} {endpoint['path']}"
+        for endpoint in docs["sdk_endpoints"]
+    } == set(raw_http_sdk["entry_points"])
     assert any(
         "verifyAfroLeteWebhookSignature" in sdk["entry_points"]
         for sdk in docs["sdks"]
@@ -68,6 +87,8 @@ def test_public_developer_docs_search(client) -> None:
     assert all("billing" in str(item).lower() for item in docs["quickstarts"])
     assert {scope["scope"] for scope in docs["scopes"]} >= {"read:billing", "write:billing"}
     assert all("billing" in str(event).lower() for event in docs["webhook_events"])
+    assert docs["sdk_endpoints"]
+    assert all("billing" in str(endpoint).lower() for endpoint in docs["sdk_endpoints"])
     assert docs["marketplace_categories"] == ["billing"]
 
 
