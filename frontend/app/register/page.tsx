@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import { ApiError, apiRequest } from "@/lib/api";
 import {
   clearStoredAuthSession,
   completeKeycloakCallbackFromUrl,
@@ -14,6 +14,7 @@ import { afroleteAuthMode, keycloakClientId, keycloakIssuer } from "@/lib/config
 import type {
   LocalIdentity,
   OrganizationDirectoryRead,
+  OrganizationHandleAvailabilityRead,
   OrganizationOnboardingRead,
   OrganizationPublicSiteRead,
   SportFormat,
@@ -105,6 +106,7 @@ export default function RegistrationPage() {
   const [identity, setIdentity] = useState<LocalIdentity>(defaultIdentity);
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [organizationForm, setOrganizationForm] = useState(defaultOrganizationForm);
+  const [handleAvailability, setHandleAvailability] = useState<OrganizationHandleAvailabilityRead | null>(null);
   const [onboarding, setOnboarding] = useState<OrganizationOnboardingRead | null>(null);
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [directoryType, setDirectoryType] = useState<OrganizationType | "">("");
@@ -219,9 +221,41 @@ export default function RegistrationPage() {
         }
       });
       setOnboarding(created);
+      setHandleAvailability(null);
       await searchDirectory(organizationForm.name);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Organization onboarding failed");
+      const suggestion = subdomainSuggestionFromError(caught);
+      if (suggestion) {
+        setOrganizationForm((current) => ({ ...current, subdomain: suggestion }));
+        setError(`That public address is already taken. Suggested address ${suggestion} has been applied; submit again.`);
+      } else {
+        setError(caught instanceof Error ? caught.message : "Organization onboarding failed");
+      }
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const checkOrganizationHandles = async () => {
+    setBusy("handles");
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      if (organizationForm.name.trim()) {
+        params.set("name", organizationForm.name.trim());
+      }
+      if (organizationForm.subdomain.trim()) {
+        params.set("subdomain", organizationForm.subdomain.trim());
+      }
+      const availability = await apiRequest<OrganizationHandleAvailabilityRead>(
+        `/organizations/handles/availability?${params.toString()}`
+      );
+      setHandleAvailability(availability);
+      if (availability.subdomain_available === false && availability.subdomain_suggestions[0]) {
+        setError(`Public address is already taken. Use ${availability.subdomain_suggestions[0]} or choose another.`);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Address availability check failed");
     } finally {
       setBusy("");
     }
@@ -507,6 +541,33 @@ export default function RegistrationPage() {
                   Subdomain
                   <input value={organizationForm.subdomain} onChange={(event) => setOrganizationForm({ ...organizationForm, subdomain: event.target.value })} />
                 </label>
+                <div className="register-handle-status">
+                  <button type="button" onClick={checkOrganizationHandles} disabled={busy !== ""}>
+                    {busy === "handles" ? "Checking" : "Check address"}
+                  </button>
+                  {handleAvailability ? (
+                    <span>
+                      {handleAvailability.subdomain_available === false
+                        ? `Taken · try ${handleAvailability.subdomain_suggestions[0] ?? "another address"}`
+                        : `Available · ${handleAvailability.desired_subdomain ?? handleAvailability.desired_slug}`}
+                    </span>
+                  ) : (
+                    <span>Preflight the public site address before creating the workspace.</span>
+                  )}
+                  {handleAvailability?.subdomain_available === false && handleAvailability.subdomain_suggestions[0] ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOrganizationForm({
+                          ...organizationForm,
+                          subdomain: handleAvailability.subdomain_suggestions[0]
+                        })
+                      }
+                    >
+                      Use suggestion
+                    </button>
+                  ) : null}
+                </div>
                 <label>
                   Primary sport
                   <input value={organizationForm.primary_sport} onChange={(event) => setOrganizationForm({ ...organizationForm, primary_sport: event.target.value })} />
@@ -952,4 +1013,20 @@ function splitCsv(value: string): string[] {
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+function subdomainSuggestionFromError(caught: unknown): string | null {
+  if (!(caught instanceof ApiError) || caught.status !== 409) {
+    return null;
+  }
+  const detail = caught.detail;
+  if (!detail || typeof detail !== "object" || !("detail" in detail)) {
+    return null;
+  }
+  const inner = (detail as { detail: unknown }).detail;
+  if (!inner || typeof inner !== "object" || !("subdomain_suggestions" in inner)) {
+    return null;
+  }
+  const suggestions = (inner as { subdomain_suggestions: unknown }).subdomain_suggestions;
+  return Array.isArray(suggestions) && typeof suggestions[0] === "string" ? suggestions[0] : null;
 }

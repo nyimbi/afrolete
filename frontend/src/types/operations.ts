@@ -411,6 +411,15 @@ export type OrganizationOnboardingRead = {
   checklist: string[];
 };
 
+export type OrganizationHandleAvailabilityRead = {
+  desired_slug: string;
+  slug_available: boolean;
+  slug_suggestions: string[];
+  desired_subdomain: string | null;
+  subdomain_available: boolean | null;
+  subdomain_suggestions: string[];
+};
+
 export type RegistrationInquiryRead = {
   id: UUID;
   organization_id: UUID;

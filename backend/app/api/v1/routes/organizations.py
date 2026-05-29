@@ -16,6 +16,7 @@ from app.schemas.organization import (
     MembershipRead,
     OrganizationCreate,
     OrganizationDirectoryRead,
+    OrganizationHandleAvailabilityRead,
     OrganizationOnboardingCreate,
     OrganizationOnboardingRead,
     OrganizationPublicSiteRead,
@@ -58,6 +59,7 @@ from app.services.organizations import (
     get_registration_payment_hosted_checkout,
     get_organization_for_identity,
     get_public_site,
+    organization_handle_availability,
     list_committees,
     list_organizations_for_identity,
     list_registration_inquiries,
@@ -412,6 +414,16 @@ async def search_public_organizations_route(
             limit=limit,
         )
     ]
+
+
+@router.get("/handles/availability", response_model=OrganizationHandleAvailabilityRead)
+async def organization_handle_availability_route(
+    name: str | None = Query(default=None, min_length=2, max_length=240),
+    slug: str | None = Query(default=None, min_length=2, max_length=120),
+    subdomain: str | None = Query(default=None, min_length=2, max_length=120),
+    db: AsyncSession = Depends(get_db),
+) -> OrganizationHandleAvailabilityRead:
+    return await organization_handle_availability(db, name=name, slug=slug, subdomain=subdomain)
 
 
 @router.post("/onboarding", response_model=OrganizationOnboardingRead, status_code=status.HTTP_201_CREATED)

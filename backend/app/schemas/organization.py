@@ -196,6 +196,15 @@ class OrganizationOnboardingRead(BaseModel):
     checklist: list[str]
 
 
+class OrganizationHandleAvailabilityRead(BaseModel):
+    desired_slug: str
+    slug_available: bool
+    slug_suggestions: list[str] = Field(default_factory=list)
+    desired_subdomain: str | None = None
+    subdomain_available: bool | None = None
+    subdomain_suggestions: list[str] = Field(default_factory=list)
+
+
 class PublicRegistrationInquiryCreate(BaseModel):
     team_id: UUID | None = None
     athlete_name: str = Field(min_length=2, max_length=240)

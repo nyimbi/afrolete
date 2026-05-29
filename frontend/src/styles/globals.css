@@ -2846,6 +2846,24 @@ textarea:focus {
   margin-top: 14px;
 }
 
+.register-handle-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 8px;
+}
+
+.register-handle-status span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .register-wide {
   grid-column: 1 / -1;
 }
@@ -3890,6 +3908,7 @@ textarea:focus {
   .register-hero,
   .register-workspace,
   .register-inline-grid,
+  .register-handle-status,
   .public-ai-hero-grid,
   .public-ai-metrics,
   .public-ai-actions,

@@ -45,6 +45,58 @@ def test_create_and_list_organization(client, identity_headers) -> None:
     )
 
 
+def test_organization_handle_availability_suggests_conflict_recovery(client, identity_headers) -> None:
+    created = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Harbor Youth Club",
+            "organization_type": "club",
+            "subdomain": "harbor-youth",
+        },
+    ).json()
+
+    availability_response = client.get(
+        "/api/v1/organizations/handles/availability?name=Harbor%20Youth%20Club&subdomain=harbor-youth"
+    )
+
+    assert availability_response.status_code == 200
+    availability = availability_response.json()
+    assert availability["desired_slug"] == created["slug"]
+    assert availability["slug_available"] is False
+    assert availability["slug_suggestions"][0] == "harbor-youth-club-2"
+    assert availability["desired_subdomain"] == "harbor-youth"
+    assert availability["subdomain_available"] is False
+    assert availability["subdomain_suggestions"][0] == "harbor-youth-2"
+
+    duplicate_name_response = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Harbor Youth Club",
+            "organization_type": "club",
+        },
+    )
+
+    assert duplicate_name_response.status_code == 201
+    assert duplicate_name_response.json()["slug"] == "harbor-youth-club-2"
+
+    conflicting_subdomain_response = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Harbor Youth Academy",
+            "organization_type": "academy",
+            "subdomain": "harbor-youth",
+        },
+    )
+
+    assert conflicting_subdomain_response.status_code == 409
+    detail = conflicting_subdomain_response.json()["detail"]
+    assert detail["message"] == "Organization subdomain exists"
+    assert detail["subdomain_suggestions"][0] == "harbor-youth-2"
+
+
 def test_self_service_onboarding_creates_school_and_public_directory(client, identity_headers) -> None:
     response = client.post(
         "/api/v1/organizations/onboarding",

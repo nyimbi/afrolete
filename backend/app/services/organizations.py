@@ -37,6 +37,7 @@ from app.schemas.organization import (
     CommitteeCreate,
     CommitteeMemberAdd,
     MemberAdd,
+    OrganizationHandleAvailabilityRead,
     OrganizationCreate,
     PublicRegistrationDocumentUpload,
     PublicRegistrationPacketUpdate,
@@ -59,6 +60,18 @@ from app.services.storage.objects import put_object
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "organization"
+
+
+def bounded_handle(value: str, max_length: int = 120) -> str:
+    return slugify(value)[:max_length].strip("-") or "organization"
+
+
+def handle_candidate(base: str, suffix: int | None = None, max_length: int = 120) -> str:
+    clean_base = bounded_handle(base, max_length=max_length)
+    if suffix is None:
+        return clean_base
+    suffix_text = f"-{suffix}"
+    return f"{clean_base[: max_length - len(suffix_text)].strip('-')}{suffix_text}"
 
 
 def organization_member_relation(subject_type: MemberSubjectType, role: MembershipRole) -> str:
@@ -316,19 +329,34 @@ async def create_organization(
     payload: OrganizationCreate,
     authz: AuthorizationService,
 ) -> tuple[Organization, list[MembershipRole]]:
-    slug = payload.slug or slugify(payload.name)
+    slug = bounded_handle(payload.slug or payload.name)
     existing = await db.scalar(select(Organization).where(Organization.slug == slug))
     if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Organization slug exists")
+        if payload.slug is None:
+            slug = (await available_handle_suggestions(db, slug, Organization.slug, limit=1))[0]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": "Organization slug exists",
+                    "slug_suggestions": await available_handle_suggestions(db, slug, Organization.slug),
+                },
+            )
     if payload.subdomain is not None:
+        subdomain = bounded_handle(payload.subdomain)
         existing_subdomain = await db.scalar(
-            select(Organization).where(Organization.subdomain == payload.subdomain)
+            select(Organization).where(Organization.subdomain == subdomain)
         )
         if existing_subdomain is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Organization subdomain exists",
+                detail={
+                    "message": "Organization subdomain exists",
+                    "subdomain_suggestions": await available_handle_suggestions(db, subdomain, Organization.subdomain),
+                },
             )
+    else:
+        subdomain = None
 
     organization = Organization(
         name=payload.name,
@@ -342,7 +370,7 @@ async def create_organization(
         contact_email=payload.contact_email,
         contact_phone=payload.contact_phone,
         website_url=payload.website_url,
-        subdomain=payload.subdomain,
+        subdomain=subdomain,
         logo_url=payload.logo_url,
         brand_primary_color=payload.brand_primary_color,
         brand_secondary_color=payload.brand_secondary_color,
@@ -381,6 +409,49 @@ async def create_organization(
     await db.commit()
     await db.refresh(organization)
     return organization, [MembershipRole.OWNER]
+
+
+async def organization_handle_availability(
+    db: AsyncSession,
+    name: str | None = None,
+    slug: str | None = None,
+    subdomain: str | None = None,
+) -> OrganizationHandleAvailabilityRead:
+    desired_slug = bounded_handle(slug or name or "organization")
+    slug_available = not await organization_handle_exists(db, Organization.slug, desired_slug)
+    desired_subdomain = bounded_handle(subdomain) if subdomain else None
+    subdomain_available = (
+        None
+        if desired_subdomain is None
+        else not await organization_handle_exists(db, Organization.subdomain, desired_subdomain)
+    )
+    return OrganizationHandleAvailabilityRead(
+        desired_slug=desired_slug,
+        slug_available=slug_available,
+        slug_suggestions=[]
+        if slug_available
+        else await available_handle_suggestions(db, desired_slug, Organization.slug),
+        desired_subdomain=desired_subdomain,
+        subdomain_available=subdomain_available,
+        subdomain_suggestions=[]
+        if subdomain_available is not False or desired_subdomain is None
+        else await available_handle_suggestions(db, desired_subdomain, Organization.subdomain),
+    )
+
+
+async def organization_handle_exists(db: AsyncSession, column, candidate: str) -> bool:
+    return bool(await db.scalar(select(Organization.id).where(column == candidate).limit(1)))
+
+
+async def available_handle_suggestions(db: AsyncSession, base: str, column, limit: int = 5) -> list[str]:
+    candidates = [handle_candidate(base, suffix) for suffix in range(2, 80)]
+    existing = {
+        value
+        for value in (await db.scalars(select(column).where(column.in_(candidates)))).all()
+        if value is not None
+    }
+    suggestions = [candidate for candidate in candidates if candidate not in existing]
+    return suggestions[:limit]
 
 
 async def search_public_organizations(
