@@ -146,6 +146,11 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert onboarding["starter_team"]["sport_format"] == "individual"
     assert onboarding["starter_team"]["age_group"] == "U15"
     assert onboarding["starter_team"]["season_label"] == "Term 2"
+    assert onboarding["concierge_task"]["task_type"] == "organization_onboarding_concierge"
+    assert onboarding["concierge_task"]["status"] == "queued"
+    assert onboarding["concierge_task"]["organization_id"] == onboarding["organization"]["id"]
+    assert "Makini Track" in onboarding["concierge_task"]["title"]
+    assert "Open registration for term two athletics" in onboarding["concierge_task"]["input_ref"]
     assert onboarding["organization"]["registration_fee_amount"] == "1000.00"
     assert onboarding["organization"]["registration_fee_currency"] == "KES"
     assert onboarding["organization"]["registration_required_documents"] == [
@@ -426,8 +431,9 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
         headers=identity_headers,
     )
     assert agent_tasks_response.status_code == 200
-    assert len(agent_tasks_response.json()) == 1
-    assert agent_tasks_response.json()[0]["id"] == agent_review["id"]
+    agent_tasks_by_type = {task["task_type"]: task for task in agent_tasks_response.json()}
+    assert agent_tasks_by_type["registration_inquiry_review"]["id"] == agent_review["id"]
+    assert agent_tasks_by_type["organization_onboarding_concierge"]["id"] == onboarding["concierge_task"]["id"]
 
     payment_session_response = client.post(
         f"/api/v1/organizations/public/makini-track/registration-inquiries/{inquiry['id']}/payment-session",

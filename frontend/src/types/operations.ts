@@ -404,6 +404,7 @@ export type OrganizationDirectoryRead = {
 export type OrganizationOnboardingRead = {
   organization: OrganizationRead;
   starter_team: TeamRead | null;
+  concierge_task: AgentTaskRead | null;
   public_site_path: string;
   registration_page_path: string;
   admissions_path: string;

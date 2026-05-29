@@ -1038,6 +1038,15 @@ export default function RegistrationPage() {
                       {onboarding.starter_team.age_group ?? "all ages"}
                     </p>
                   ) : null}
+                  {onboarding.concierge_task ? (
+                    <div className="register-agent-card">
+                      <span>AI launch concierge</span>
+                      <strong>{onboarding.concierge_task.title}</strong>
+                      <small>
+                        {onboarding.concierge_task.status.replaceAll("_", " ")} · {onboarding.concierge_task.task_type}
+                      </small>
+                    </div>
+                  ) : null}
                   <ol>
                     {onboarding.checklist.map((item) => (
                       <li key={item}>{item}</li>

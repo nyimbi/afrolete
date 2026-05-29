@@ -3138,6 +3138,33 @@ textarea:focus {
   background: var(--teal);
 }
 
+.register-agent-card {
+  border: 1px solid color-mix(in srgb, var(--teal) 28%, var(--line));
+  border-radius: 8px;
+  background: #f4fbf7;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.register-agent-card span,
+.register-agent-card strong,
+.register-agent-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.register-agent-card span {
+  color: var(--teal);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.register-agent-card small {
+  color: var(--muted);
+}
+
 .register-directory {
   display: grid;
   gap: 8px;

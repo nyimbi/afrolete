@@ -16,6 +16,7 @@ from app.models.enums import (
 )
 from app.schemas.team import TeamRead
 from app.schemas.communication import CommunicationMessageRead
+from app.schemas.agent import AgentTaskRead
 
 
 class OrganizationCreate(BaseModel):
@@ -189,6 +190,7 @@ class OrganizationOnboardingCreate(BaseModel):
 class OrganizationOnboardingRead(BaseModel):
     organization: OrganizationRead
     starter_team: TeamRead | None = None
+    concierge_task: AgentTaskRead | None = None
     public_site_path: str
     registration_page_path: str
     admissions_path: str

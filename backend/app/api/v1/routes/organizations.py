@@ -72,6 +72,7 @@ from app.services.organizations import (
     onboarding_checklist,
     organization_public_registration_documents,
     public_site_path,
+    queue_onboarding_concierge_agent_task,
     registration_packet_summary,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
@@ -503,9 +504,18 @@ async def create_organization_onboarding_route(
         payload.starter_team_season_label,
         authz,
     )
+    concierge_task = await queue_onboarding_concierge_agent_task(
+        db,
+        identity,
+        organization,
+        starter_team,
+        payload.launch_goal,
+        authz,
+    )
     return OrganizationOnboardingRead(
         organization=to_organization_read((organization, roles)),
         starter_team=to_team_read(starter_team),
+        concierge_task=to_agent_task_read(concierge_task),
         public_site_path=public_site_path(organization),
         registration_page_path=f"/register?mode=player&site={organization.subdomain or organization.slug}",
         admissions_path=f"/admissions?organization_id={organization.id}",

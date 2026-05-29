@@ -192,6 +192,75 @@ async def create_onboarding_starter_team(
     return team
 
 
+async def queue_onboarding_concierge_agent_task(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization: Organization,
+    starter_team: Team | None,
+    launch_goal: str | None,
+    authz: AuthorizationService,
+) -> AgentTask:
+    agent = await db.scalar(
+        select(Agent)
+        .where(
+            Agent.organization_id == organization.id,
+            Agent.kind == AgentKind.OPERATIONS,
+            Agent.name == "Onboarding Concierge Agent",
+        )
+        .order_by(Agent.created_at)
+        .limit(1)
+    )
+    if agent is None:
+        agent = Agent(
+            organization_id=organization.id,
+            name="Onboarding Concierge Agent",
+            kind=AgentKind.OPERATIONS,
+            purpose=(
+                "Guide newly launched clubs and schools through public registration, "
+                "family onboarding, admissions setup, and first-week operating readiness."
+            ),
+            status="active",
+            model_policy="human_review_required",
+        )
+        db.add(agent)
+        await db.flush()
+        await authz.touch(
+            Relationship(
+                resource_type="agent",
+                resource_id=str(agent.id),
+                relation="owner",
+                subject_type="user",
+                subject_id=str(identity.user_id),
+            )
+        )
+
+    input_ref = (
+        f"organization:{organization.id};"
+        f"type:{organization.organization_type};"
+        f"registration_open:{organization.registration_open};"
+        f"starter_team:{starter_team.id if starter_team is not None else 'none'};"
+        f"goal:{bounded_input_ref_segment(launch_goal or 'launch')}"
+    )
+    task = await queue_agent_task(
+        db,
+        identity,
+        agent.id,
+        AgentTaskCreate(
+            organization_id=organization.id,
+            task_type="organization_onboarding_concierge",
+            title=f"Guide launch readiness for {organization.public_name or organization.name}",
+            input_ref=input_ref,
+        ),
+        authz,
+    )
+    await db.refresh(task)
+    return task
+
+
+def bounded_input_ref_segment(value: str, max_length: int = 160) -> str:
+    return re.sub(r"\s+", " ", value).strip().replace(";", ",")[:max_length]
+
+
 def registration_required_documents(inquiry: RegistrationInquiry) -> list[str]:
     configured = parse_registration_documents(inquiry.required_documents_json)
     if configured:
