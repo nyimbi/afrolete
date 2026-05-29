@@ -11772,6 +11772,7 @@ export default function HomePage() {
           <a href="#roster">Roster</a>
           <a href="#events">Events</a>
           <a href="#assets">Assets</a>
+          <a href="/emergency">Emergency</a>
           <a href="#commercial">Commerce</a>
           <a href="#reports">Reports</a>
           <a href="#billing">Billing</a>

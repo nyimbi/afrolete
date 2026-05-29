@@ -1291,6 +1291,206 @@ textarea:focus {
   margin: 0;
 }
 
+.emergency-page {
+  min-height: 100vh;
+  background: #f1f4ef;
+  padding: 16px;
+}
+
+.emergency-shell {
+  width: min(860px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 12px;
+}
+
+.emergency-header,
+.emergency-load,
+.emergency-status-grid article,
+.emergency-command,
+.emergency-guidance article,
+.emergency-activations article,
+.emergency-empty,
+.emergency-receipts article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.emergency-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 76px;
+  gap: 14px;
+  align-items: center;
+  padding: 18px;
+}
+
+.emergency-header h1 {
+  font-size: 34px;
+  margin-bottom: 6px;
+}
+
+.emergency-header p:not(.section-label) {
+  color: var(--muted);
+  margin-bottom: 0;
+}
+
+.emergency-header > strong {
+  display: grid;
+  place-items: center;
+  min-height: 76px;
+  border-radius: 8px;
+  background: var(--red);
+  color: #fff;
+  font-size: 36px;
+}
+
+.emergency-load {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 14px;
+}
+
+.emergency-load button,
+.emergency-actions button,
+.emergency-action-row button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  padding: 0 14px;
+}
+
+.emergency-status-grid,
+.emergency-guidance,
+.emergency-receipts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.emergency-status-grid article,
+.emergency-guidance article,
+.emergency-receipts article {
+  padding: 14px;
+}
+
+.emergency-status-grid span,
+.emergency-guidance span,
+.emergency-receipts span,
+.emergency-activations span,
+.emergency-activations small,
+.emergency-empty {
+  color: var(--muted);
+}
+
+.emergency-status-grid span,
+.emergency-guidance span,
+.emergency-receipts span {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.emergency-status-grid strong {
+  display: block;
+  font-size: 32px;
+  margin-top: 4px;
+}
+
+.emergency-command {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px;
+}
+
+.emergency-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 10px;
+  grid-column: 1 / -1;
+}
+
+.emergency-actions .danger {
+  min-height: 58px;
+  background: var(--red);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.emergency-guidance {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.emergency-guidance strong,
+.emergency-receipts strong,
+.emergency-activations strong,
+.emergency-activations span,
+.emergency-activations small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.emergency-guidance strong,
+.emergency-receipts strong {
+  margin-top: 5px;
+}
+
+.emergency-activations {
+  display: grid;
+  gap: 10px;
+}
+
+.emergency-activations article {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.emergency-activations article.active {
+  border-color: var(--red);
+  box-shadow: inset 4px 0 0 var(--red), var(--shadow);
+}
+
+.emergency-activations span,
+.emergency-activations small {
+  margin-top: 4px;
+}
+
+.emergency-action-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.emergency-action-row button {
+  background: var(--wash-strong);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 0 8px;
+}
+
+.emergency-action-row button:first-child {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #fff;
+}
+
+.emergency-empty {
+  display: block;
+  padding: 14px;
+}
+
+.emergency-receipts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .player-page {
   min-height: 100vh;
   background: #eef3ee;
@@ -2803,6 +3003,28 @@ textarea:focus {
   }
 
   .family-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .emergency-page {
+    padding: 10px;
+  }
+
+  .emergency-header,
+  .emergency-load,
+  .emergency-command,
+  .emergency-status-grid,
+  .emergency-guidance,
+  .emergency-receipts,
+  .emergency-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .emergency-header h1 {
+    font-size: 30px;
+  }
+
+  .emergency-actions {
     grid-template-columns: 1fr;
   }
 

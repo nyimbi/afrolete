@@ -78,6 +78,8 @@ docker compose up --build
 Then open http://localhost:3000. The backend runs migrations and seeds a local
 Demo City FC tenant for the default local identity `owner@example.com`. See
 [docs/demo.md](docs/demo.md) for reset, health-check, and seeded-data details.
+The demo also includes a phone-oriented emergency response console at
+http://localhost:3000/emergency?slug=demo-city-fc.
 
 ## Product Scope
 

@@ -12,6 +12,7 @@ docker compose up --build
 Open:
 
 - Frontend: http://localhost:3000
+- Mobile emergency console: http://localhost:3000/emergency?slug=demo-city-fc
 - Public branded site: http://localhost:3000/site/demo-city-fc
 - Sponsor portal: http://localhost:3000/sponsors
 - Backend health: http://localhost:8000/api/v1/healthz
