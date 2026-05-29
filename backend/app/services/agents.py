@@ -3700,11 +3700,86 @@ def execute_with_deterministic_planner(
     model_name = agent.model_policy or settings.agent_default_model
     task.status = AgentTaskStatus.WAITING_FOR_REVIEW
     task.output_ref = f"agent://tasks/{task.id}/outputs/deterministic"
+    if task.task_type == "organization_onboarding_concierge":
+        task.review_notes = deterministic_onboarding_concierge_notes(agent, task, model_name)
+        return
+    if task.task_type == "registration_inquiry_review":
+        task.review_notes = deterministic_registration_inquiry_notes(agent, task, model_name)
+        return
     task.review_notes = (
         f"{agent.name} prepared a deterministic draft using {model_name}. "
         f"Task: {task.title}. Input: {task.input_ref or 'none'}. "
         "Review before applying the recommendation."
     )
+
+
+def deterministic_onboarding_concierge_notes(agent: Agent, task: AgentTask, model_name: str) -> str:
+    context = parse_agent_input_ref(task.input_ref)
+    registration_open = context.get("registration_open", "").lower() == "true"
+    launch_goal = context.get("goal") or "first operating week"
+    starter_team = context.get("starter_team")
+    org_type = context.get("type", "organization")
+    registration_action = (
+        "Publish the player/family registration link and send it to the first guardian cohort."
+        if registration_open
+        else "Confirm registration policy and open the public registration window when staff are ready."
+    )
+    starter_action = (
+        "Use the starter program as the initial admissions destination."
+        if starter_team and starter_team != "none"
+        else "Create the first team or individual-sport program before inviting families."
+    )
+    return "\n".join(
+        [
+            f"{agent.name} prepared a deterministic launch readiness draft using {model_name}.",
+            f"Launch goal: {launch_goal}.",
+            f"Operating context: {org_type} workspace; registration is {'open' if registration_open else 'closed'}.",
+            "Recommended next actions:",
+            f"- {registration_action}",
+            f"- {starter_action}",
+            "- Review the admissions queue daily until the first family packet is converted.",
+            "- Run the onboarding checklist from the console and assign owners for payments, consent, and communications.",
+            "Human review: confirm local policies, fees, and safeguarding requirements before sending families live links.",
+        ]
+    )
+
+
+def deterministic_registration_inquiry_notes(agent: Agent, task: AgentTask, model_name: str) -> str:
+    context = parse_agent_input_ref(task.input_ref)
+    payment = context.get("payment", "unknown")
+    verification = context.get("verification", "unknown")
+    packet_complete = context.get("packet_complete", "").lower() == "true"
+    blockers: list[str] = []
+    if not packet_complete:
+        blockers.append("Packet is not complete; request missing documents or consent before conversion.")
+    if payment not in {"paid", "waived", "not_required"}:
+        blockers.append(f"Payment is {payment}; record settlement, waiver, or not-required status.")
+    if verification != "ready_for_review":
+        blockers.append(f"Verification state is {verification}; keep staff review open.")
+    if not blockers:
+        blockers.append("No deterministic blockers found; staff can proceed with final conversion review.")
+    return "\n".join(
+        [
+            f"{agent.name} prepared a deterministic admissions intake draft using {model_name}.",
+            f"Task: {task.title}.",
+            "Recommended staff actions:",
+            *[f"- {blocker}" for blocker in blockers],
+            "- Keep guardian account handoff visible so the family can resume without re-entering details.",
+            "Human review: confirm safeguarding, eligibility, payment evidence, and roster fit before conversion.",
+        ]
+    )
+
+
+def parse_agent_input_ref(input_ref: str | None) -> dict[str, str]:
+    if not input_ref:
+        return {}
+    parsed: dict[str, str] = {}
+    for segment in input_ref.split(";"):
+        if ":" not in segment:
+            continue
+        key, value = segment.split(":", 1)
+        parsed[key.strip()] = value.strip()
+    return parsed
 
 
 async def execute_with_webhook(

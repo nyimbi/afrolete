@@ -159,7 +159,9 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     concierge_run = concierge_run_response.json()
     assert concierge_run["status"] == "waiting_for_review"
     assert concierge_run["output_ref"].startswith("agent://tasks/")
-    assert "Onboarding Concierge Agent prepared" in concierge_run["review_notes"]
+    assert "Onboarding Concierge Agent prepared a deterministic launch readiness draft" in concierge_run["review_notes"]
+    assert "Open registration for term two athletics" in concierge_run["review_notes"]
+    assert "Publish the player/family registration link" in concierge_run["review_notes"]
     assert onboarding["organization"]["registration_fee_amount"] == "1000.00"
     assert onboarding["organization"]["registration_fee_currency"] == "KES"
     assert onboarding["organization"]["registration_required_documents"] == [
@@ -427,6 +429,15 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert agent_review["title"] == "Review registration packet for Amina Runner"
     assert agent_review["input_ref"].startswith(f"registration-inquiry:{inquiry['id']};")
     assert "packet_complete:False" in agent_review["input_ref"]
+    agent_review_run_response = client.post(
+        f"/api/v1/agents/tasks/{agent_review['id']}/execute",
+        headers=identity_headers,
+    )
+    assert agent_review_run_response.status_code == 200
+    agent_review_run = agent_review_run_response.json()
+    assert "Admissions Intake Agent prepared a deterministic admissions intake draft" in agent_review_run["review_notes"]
+    assert "Payment is pending" in agent_review_run["review_notes"]
+    assert "Packet is not complete" in agent_review_run["review_notes"]
 
     duplicate_agent_review_response = client.post(
         f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/{inquiry['id']}/agent-review",
