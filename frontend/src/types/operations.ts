@@ -2968,6 +2968,45 @@ export type SupporterRewardRead = {
   redeemed_at: string | null;
 };
 
+export type FanEngagementChallengeRead = {
+  id: UUID;
+  organization_id: UUID;
+  title: string;
+  description: string;
+  challenge_type: string;
+  target_activity_type: string;
+  target_count: number;
+  points_reward: number;
+  badge_name: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  status: string;
+  completion_count: number;
+};
+
+export type FanChallengeProgressRead = {
+  id: UUID;
+  organization_id: UUID;
+  challenge_id: UUID;
+  supporter_profile_id: UUID;
+  supporter_name: string | null;
+  progress_count: number;
+  points_awarded: number;
+  status: string;
+  completed_at: string | null;
+};
+
+export type FanLeaderboardEntryRead = {
+  rank: number;
+  supporter_profile_id: UUID;
+  supporter_name: string;
+  tier_name: string | null;
+  engagement_points: number;
+  lifetime_value: string;
+  reward_count: number;
+  completed_challenge_count: number;
+};
+
 export type SupporterDashboardRead = {
   organization_id: UUID;
   tier_count: number;
@@ -2976,6 +3015,8 @@ export type SupporterDashboardRead = {
   total_points: number;
   total_lifetime_value: string;
   reward_count: number;
+  challenge_count: number;
+  completed_challenge_count: number;
   top_supporter_name: string | null;
   recommendations: string[];
 };

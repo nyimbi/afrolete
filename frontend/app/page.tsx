@@ -125,6 +125,9 @@ import type {
   CommunityPostRead,
   CommunityReactionRead,
   CommercialRefundRead,
+  FanChallengeProgressRead,
+  FanEngagementChallengeRead,
+  FanLeaderboardEntryRead,
   FanPollRead,
   FanPollVoteRead,
   MentorshipMatchRead,
@@ -1719,6 +1722,9 @@ export default function HomePage() {
   const [supporterActivity, setSupporterActivity] = useState<SupporterEngagementActivityRead | null>(null);
   const [supporterReward, setSupporterReward] = useState<SupporterRewardRead | null>(null);
   const [supporterDashboard, setSupporterDashboard] = useState<SupporterDashboardRead | null>(null);
+  const [fanChallenges, setFanChallenges] = useState<FanEngagementChallengeRead[]>([]);
+  const [fanChallengeProgress, setFanChallengeProgress] = useState<FanChallengeProgressRead | null>(null);
+  const [fanLeaderboard, setFanLeaderboard] = useState<FanLeaderboardEntryRead[]>([]);
   const [alumniProfiles, setAlumniProfiles] = useState<AlumniProfileRead[]>([]);
   const [mentorshipPrograms, setMentorshipPrograms] = useState<MentorshipProgramRead[]>([]);
   const [mentorshipMatches, setMentorshipMatches] = useState<MentorshipMatchRead[]>([]);
@@ -1890,6 +1896,7 @@ export default function HomePage() {
   const [selectedCommunityPostId, setSelectedCommunityPostId] = useState("");
   const [selectedFanPollId, setSelectedFanPollId] = useState("");
   const [selectedSupporterId, setSelectedSupporterId] = useState("");
+  const [selectedFanChallengeId, setSelectedFanChallengeId] = useState("");
   const [selectedAlumniId, setSelectedAlumniId] = useState("");
   const [selectedMentorshipProgramId, setSelectedMentorshipProgramId] = useState("");
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
@@ -2569,6 +2576,14 @@ export default function HomePage() {
     reward_title: "Meet and greet ticket",
     reward_type: "experience",
     reward_threshold: 1000,
+    challenge_title: "Derby week superfan",
+    challenge_description: "Attend, vote, comment, and share during derby week.",
+    challenge_type: "matchday",
+    challenge_activity_type: "match_attendance",
+    challenge_target_count: 2,
+    challenge_points_reward: 750,
+    challenge_badge_name: "Derby Superfan",
+    challenge_progress_count: 1,
     alumni_name: "Michael Mentor",
     alumni_email: "michael.mentor@example.com",
     graduation_year: 2018,
@@ -2733,6 +2748,10 @@ export default function HomePage() {
   const selectedSupporter = useMemo(
     () => supporters.find((supporter) => supporter.id === selectedSupporterId) ?? supporters[0] ?? null,
     [supporters, selectedSupporterId]
+  );
+  const selectedFanChallenge = useMemo(
+    () => fanChallenges.find((challenge) => challenge.id === selectedFanChallengeId) ?? fanChallenges[0] ?? null,
+    [fanChallenges, selectedFanChallengeId]
   );
   const selectedAlumni = useMemo(
     () => alumniProfiles.find((alumni) => alumni.id === selectedAlumniId) ?? alumniProfiles[0] ?? null,
@@ -3504,6 +3523,8 @@ export default function HomePage() {
       tiers,
       supporterData,
       supporterSummary,
+      challengeData,
+      leaderboardData,
       alumniData,
       programData,
       matchData,
@@ -3515,6 +3536,8 @@ export default function HomePage() {
       apiRequest<SupporterMembershipTierRead[]>(`/community/supporter-tiers?organization_id=${organizationId}`),
       apiRequest<SupporterProfileRead[]>(`/community/supporters?organization_id=${organizationId}`),
       apiRequest<SupporterDashboardRead>(`/community/supporter-dashboard?organization_id=${organizationId}`),
+      apiRequest<FanEngagementChallengeRead[]>(`/community/fan-challenges?organization_id=${organizationId}`),
+      apiRequest<FanLeaderboardEntryRead[]>(`/community/fan-leaderboard?organization_id=${organizationId}&limit=10`),
       apiRequest<AlumniProfileRead[]>(`/community/alumni?organization_id=${organizationId}`),
       apiRequest<MentorshipProgramRead[]>(`/community/mentorship-programs?organization_id=${organizationId}`),
       apiRequest<MentorshipMatchRead[]>(`/community/mentorship-matches?organization_id=${organizationId}`),
@@ -3526,6 +3549,8 @@ export default function HomePage() {
     setSupporterTiers(tiers);
     setSupporters(supporterData);
     setSupporterDashboard(supporterSummary);
+    setFanChallenges(challengeData);
+    setFanLeaderboard(leaderboardData);
     setAlumniProfiles(alumniData);
     setMentorshipPrograms(programData);
     setMentorshipMatches(matchData);
@@ -3538,6 +3563,9 @@ export default function HomePage() {
     );
     setSelectedSupporterId((current) =>
       supporterData.some((supporter) => supporter.id === current) ? current : supporterData[0]?.id ?? ""
+    );
+    setSelectedFanChallengeId((current) =>
+      challengeData.some((challenge) => challenge.id === current) ? current : challengeData[0]?.id ?? ""
     );
     setSelectedAlumniId((current) =>
       alumniData.some((alumni) => alumni.id === current) ? current : alumniData[0]?.id ?? ""
@@ -4121,6 +4149,9 @@ export default function HomePage() {
       setSupporterActivity(null);
       setSupporterReward(null);
       setSupporterDashboard(null);
+      setFanChallenges([]);
+      setFanChallengeProgress(null);
+      setFanLeaderboard([]);
       setAlumniProfiles([]);
       setMentorshipPrograms([]);
       setMentorshipMatches([]);
@@ -4128,6 +4159,7 @@ export default function HomePage() {
       setSelectedCommunityPostId("");
       setSelectedFanPollId("");
       setSelectedSupporterId("");
+      setSelectedFanChallengeId("");
       setSelectedAlumniId("");
       setSelectedMentorshipProgramId("");
       setFacilities([]);
@@ -12561,6 +12593,87 @@ export default function HomePage() {
     );
   };
 
+  const redeemSupporterReward = () => {
+    if (!selectedOrganizationId || !supporterReward) {
+      addLog("Create or select a supporter reward first", "bad");
+      return;
+    }
+    runAction(
+      "redeem-supporter-reward",
+      () =>
+        apiRequest<SupporterRewardRead>(`/community/supporter-rewards/${supporterReward.id}/redeem`, {
+          method: "POST",
+          identity
+        }),
+      (reward) => {
+        setSupporterReward(reward);
+        addLog(`${reward.title} redeemed`, "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const createFanChallenge = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-fan-challenge",
+      () =>
+        apiRequest<FanEngagementChallengeRead>("/community/fan-challenges", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            title: communityForm.challenge_title,
+            description: communityForm.challenge_description,
+            challenge_type: communityForm.challenge_type,
+            target_activity_type: communityForm.challenge_activity_type,
+            target_count: communityForm.challenge_target_count,
+            points_reward: communityForm.challenge_points_reward,
+            badge_name: communityForm.challenge_badge_name,
+            starts_at: new Date().toISOString()
+          }
+        }),
+      (challenge) => {
+        setFanChallenges((current) => [challenge, ...current.filter((item) => item.id !== challenge.id)]);
+        setSelectedFanChallengeId(challenge.id);
+        addLog(`${challenge.title} challenge launched`, "good");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const advanceFanChallenge = () => {
+    if (!selectedOrganizationId || !selectedSupporter || !selectedFanChallenge) {
+      addLog("Create or select a supporter and challenge first", "bad");
+      return;
+    }
+    runAction(
+      "advance-fan-challenge",
+      () =>
+        apiRequest<FanChallengeProgressRead>(`/community/fan-challenges/${selectedFanChallenge.id}/progress`, {
+          method: "POST",
+          identity,
+          body: {
+            supporter_profile_id: selectedSupporter.id,
+            progress_count: communityForm.challenge_progress_count
+          }
+        }),
+      (progress) => {
+        setFanChallengeProgress(progress);
+        addLog(
+          progress.status === "completed"
+            ? `${selectedFanChallenge.title} completed for ${progress.supporter_name ?? selectedSupporter.display_name}`
+            : `${selectedFanChallenge.title} progress updated`,
+          progress.status === "completed" ? "good" : "neutral"
+        );
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
   const createAlumniAndMentorship = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -18672,6 +18785,15 @@ export default function HomePage() {
                 <button type="button" onClick={createSupporterTierAndProfile} disabled={busyAction !== null}>Supporter</button>
                 <button type="button" onClick={recordSupporterEngagement} disabled={busyAction !== null || !selectedSupporter}>Activity</button>
                 <button type="button" onClick={createSupporterReward} disabled={busyAction !== null || !selectedSupporter}>Reward</button>
+                <button type="button" onClick={redeemSupporterReward} disabled={busyAction !== null || !supporterReward}>Redeem</button>
+                <button type="button" onClick={createFanChallenge} disabled={busyAction !== null}>Challenge</button>
+                <button
+                  type="button"
+                  onClick={advanceFanChallenge}
+                  disabled={busyAction !== null || !selectedSupporter || !selectedFanChallenge}
+                >
+                  Advance
+                </button>
               </div>
             </div>
             <div className="score-summary">
@@ -18679,7 +18801,7 @@ export default function HomePage() {
               <span>{supporterDashboard?.top_supporter_name ?? selectedSupporter?.display_name ?? "No supporter selected"}</span>
               <small>
                 {supporterDashboard
-                  ? `${supporterDashboard.supporter_count} supporters · ${supporterDashboard.tier_count} tiers · value ${supporterDashboard.total_lifetime_value} · ${supporterDashboard.reward_count} rewards`
+                  ? `${supporterDashboard.supporter_count} supporters · ${supporterDashboard.tier_count} tiers · value ${supporterDashboard.total_lifetime_value} · ${supporterDashboard.reward_count} rewards · ${supporterDashboard.completed_challenge_count}/${supporterDashboard.challenge_count} challenges`
                   : "Build tiered supporter memberships, activity scoring, and reward fulfillment"}
               </small>
             </div>
@@ -18732,6 +18854,38 @@ export default function HomePage() {
                 Threshold
                 <input type="number" min="0" value={communityForm.reward_threshold} onChange={(event) => setCommunityForm({ ...communityForm, reward_threshold: Number(event.target.value) })} />
               </label>
+              <label>
+                Challenge
+                <input value={communityForm.challenge_title} onChange={(event) => setCommunityForm({ ...communityForm, challenge_title: event.target.value })} />
+              </label>
+              <label>
+                Challenge type
+                <input value={communityForm.challenge_type} onChange={(event) => setCommunityForm({ ...communityForm, challenge_type: event.target.value })} />
+              </label>
+              <label>
+                Target activity
+                <input value={communityForm.challenge_activity_type} onChange={(event) => setCommunityForm({ ...communityForm, challenge_activity_type: event.target.value })} />
+              </label>
+              <label>
+                Target count
+                <input type="number" min="1" value={communityForm.challenge_target_count} onChange={(event) => setCommunityForm({ ...communityForm, challenge_target_count: Number(event.target.value) })} />
+              </label>
+              <label>
+                Challenge points
+                <input type="number" min="0" value={communityForm.challenge_points_reward} onChange={(event) => setCommunityForm({ ...communityForm, challenge_points_reward: Number(event.target.value) })} />
+              </label>
+              <label>
+                Badge
+                <input value={communityForm.challenge_badge_name} onChange={(event) => setCommunityForm({ ...communityForm, challenge_badge_name: event.target.value })} />
+              </label>
+              <label>
+                Progress step
+                <input type="number" min="1" value={communityForm.challenge_progress_count} onChange={(event) => setCommunityForm({ ...communityForm, challenge_progress_count: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Challenge description
+                <input value={communityForm.challenge_description} onChange={(event) => setCommunityForm({ ...communityForm, challenge_description: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
               {supporterDashboard?.recommendations.slice(0, 2).map((recommendation) => (
@@ -18755,6 +18909,27 @@ export default function HomePage() {
                   </div>
                 </button>
               ))}
+              {fanLeaderboard.slice(0, 3).map((entry) => (
+                <article key={entry.supporter_profile_id} className="task-card">
+                  <div>
+                    <strong>#{entry.rank} {entry.supporter_name}</strong>
+                    <span>{entry.engagement_points} points · {entry.completed_challenge_count} challenges · {entry.reward_count} rewards</span>
+                  </div>
+                </article>
+              ))}
+              {fanChallenges.slice(0, 3).map((challenge) => (
+                <button
+                  type="button"
+                  key={challenge.id}
+                  className={`task-card ${challenge.id === selectedFanChallengeId ? "selected" : ""}`}
+                  onClick={() => setSelectedFanChallengeId(challenge.id)}
+                >
+                  <div>
+                    <strong>{challenge.title}</strong>
+                    <span>{challenge.target_activity_type} {challenge.completion_count}/{challenge.target_count} · {challenge.points_reward} points · {challenge.status}</span>
+                  </div>
+                </button>
+              ))}
               {supporterActivity ? (
                 <article className="task-card">
                   <div>
@@ -18768,6 +18943,14 @@ export default function HomePage() {
                   <div>
                     <strong>{supporterReward.title}</strong>
                     <span>{supporterReward.reward_type} · {supporterReward.status} · {supporterReward.threshold_points} points</span>
+                  </div>
+                </article>
+              ) : null}
+              {fanChallengeProgress ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{fanChallengeProgress.supporter_name ?? "Challenge progress"}</strong>
+                    <span>{fanChallengeProgress.progress_count} steps · {fanChallengeProgress.points_awarded} awarded · {fanChallengeProgress.status}</span>
                   </div>
                 </article>
               ) : null}

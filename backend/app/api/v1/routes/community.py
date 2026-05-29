@@ -15,6 +15,11 @@ from app.schemas.community import (
     CommunityPostRead,
     CommunityReactionCreate,
     CommunityReactionRead,
+    FanChallengeProgressCreate,
+    FanChallengeProgressRead,
+    FanEngagementChallengeCreate,
+    FanEngagementChallengeRead,
+    FanLeaderboardEntryRead,
     FanPollCreate,
     FanPollRead,
     FanPollVoteCreate,
@@ -46,11 +51,13 @@ from app.services.community import (
     create_alumni_profile,
     create_community_post,
     create_fan_poll,
+    create_fan_challenge,
     create_mentorship_match,
     create_mentorship_program,
     create_supporter_membership_tier,
     create_supporter_profile,
     create_supporter_reward,
+    fan_leaderboard,
     list_community_comments,
     list_community_posts,
     list_alumni_profiles,
@@ -60,6 +67,9 @@ from app.services.community import (
     list_supporter_membership_tiers,
     list_supporter_profiles,
     record_supporter_activity,
+    advance_fan_challenge,
+    list_fan_challenges,
+    redeem_supporter_reward,
     supporter_activity_read,
     supporter_dashboard,
     supporter_reward_read,
@@ -275,6 +285,66 @@ async def create_supporter_reward_route(
 ) -> SupporterRewardRead:
     reward = await create_supporter_reward(db, identity, supporter_profile_id, payload, authz)
     return supporter_reward_read(reward)
+
+
+@router.post(
+    "/supporter-rewards/{reward_id}/redeem",
+    response_model=SupporterRewardRead,
+)
+async def redeem_supporter_reward_route(
+    reward_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SupporterRewardRead:
+    reward = await redeem_supporter_reward(db, identity, reward_id, authz)
+    return supporter_reward_read(reward)
+
+
+@router.post(
+    "/fan-challenges",
+    response_model=FanEngagementChallengeRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_fan_challenge_route(
+    payload: FanEngagementChallengeCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FanEngagementChallengeRead:
+    return await create_fan_challenge(db, identity, payload, authz)
+
+
+@router.get("/fan-challenges", response_model=list[FanEngagementChallengeRead])
+async def list_fan_challenges_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[FanEngagementChallengeRead]:
+    return await list_fan_challenges(db, organization_id)
+
+
+@router.post(
+    "/fan-challenges/{challenge_id}/progress",
+    response_model=FanChallengeProgressRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def advance_fan_challenge_route(
+    challenge_id: UUID,
+    payload: FanChallengeProgressCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FanChallengeProgressRead:
+    return await advance_fan_challenge(db, identity, challenge_id, payload, authz)
+
+
+@router.get("/fan-leaderboard", response_model=list[FanLeaderboardEntryRead])
+async def fan_leaderboard_route(
+    organization_id: UUID = Query(),
+    limit: int = Query(default=10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> list[FanLeaderboardEntryRead]:
+    return await fan_leaderboard(db, organization_id, limit=limit)
 
 
 @router.get("/supporter-dashboard", response_model=SupporterDashboardRead)

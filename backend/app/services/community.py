@@ -10,6 +10,8 @@ from app.models.community import (
     CommunityComment,
     CommunityPost,
     CommunityReaction,
+    FanChallengeProgress,
+    FanEngagementChallenge,
     FanPoll,
     FanPollOption,
     FanPollVote,
@@ -32,6 +34,11 @@ from app.schemas.community import (
     CommunityPostCreate,
     CommunityPostRead,
     CommunityReactionCreate,
+    FanChallengeProgressCreate,
+    FanChallengeProgressRead,
+    FanEngagementChallengeCreate,
+    FanEngagementChallengeRead,
+    FanLeaderboardEntryRead,
     FanPollCreate,
     FanPollOptionRead,
     FanPollRead,
@@ -476,6 +483,151 @@ async def create_supporter_reward(
     return reward
 
 
+async def redeem_supporter_reward(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    reward_id: UUID,
+    authz: AuthorizationService,
+) -> SupporterReward:
+    reward = await db.get(SupporterReward, reward_id)
+    if reward is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supporter reward not found")
+    await ensure_manage_community(authz, identity, reward.organization_id)
+    reward.status = "redeemed"
+    reward.redeemed_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(reward)
+    return reward
+
+
+async def create_fan_challenge(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FanEngagementChallengeCreate,
+    authz: AuthorizationService,
+) -> FanEngagementChallengeRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_community(authz, identity, payload.organization_id)
+    challenge = FanEngagementChallenge(
+        organization_id=payload.organization_id,
+        title=payload.title,
+        description=payload.description,
+        challenge_type=payload.challenge_type,
+        target_activity_type=payload.target_activity_type,
+        target_count=payload.target_count,
+        points_reward=payload.points_reward,
+        badge_name=payload.badge_name,
+        starts_at=payload.starts_at or datetime.now(UTC),
+        ends_at=payload.ends_at,
+    )
+    db.add(challenge)
+    await db.commit()
+    await db.refresh(challenge)
+    return fan_challenge_read(challenge, 0)
+
+
+async def list_fan_challenges(db: AsyncSession, organization_id: UUID) -> list[FanEngagementChallengeRead]:
+    challenges = list(
+        (
+            await db.scalars(
+                select(FanEngagementChallenge)
+                .where(FanEngagementChallenge.organization_id == organization_id)
+                .order_by(FanEngagementChallenge.starts_at.desc())
+            )
+        ).all()
+    )
+    if not challenges:
+        return []
+    challenge_ids = [challenge.id for challenge in challenges]
+    completion_counts = await count_completed_challenges(db, challenge_ids)
+    return [
+        fan_challenge_read(challenge, completion_counts.get(challenge.id, 0))
+        for challenge in challenges
+    ]
+
+
+async def advance_fan_challenge(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    challenge_id: UUID,
+    payload: FanChallengeProgressCreate,
+    authz: AuthorizationService,
+) -> FanChallengeProgressRead:
+    challenge = await get_fan_challenge(db, challenge_id)
+    supporter = await get_supporter_profile(db, payload.supporter_profile_id)
+    if supporter.organization_id != challenge.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supporter profile not found")
+    await ensure_manage_community(authz, identity, challenge.organization_id)
+    progress = await db.scalar(
+        select(FanChallengeProgress).where(
+            FanChallengeProgress.challenge_id == challenge.id,
+            FanChallengeProgress.supporter_profile_id == supporter.id,
+        )
+    )
+    if progress is None:
+        progress = FanChallengeProgress(
+            organization_id=challenge.organization_id,
+            challenge_id=challenge.id,
+            supporter_profile_id=supporter.id,
+            progress_count=0,
+            points_awarded=0,
+            status="in_progress",
+        )
+        db.add(progress)
+    progress.progress_count += payload.progress_count
+    if progress.progress_count >= challenge.target_count and progress.status != "completed":
+        progress.status = "completed"
+        progress.completed_at = datetime.now(UTC)
+        progress.points_awarded = challenge.points_reward
+        supporter.engagement_points += challenge.points_reward
+        supporter.last_engagement_at = progress.completed_at
+        if challenge.badge_name:
+            db.add(
+                SupporterReward(
+                    organization_id=supporter.organization_id,
+                    supporter_profile_id=supporter.id,
+                    title=challenge.badge_name,
+                    reward_type="badge",
+                    threshold_points=challenge.points_reward,
+                )
+            )
+    await db.commit()
+    await db.refresh(progress)
+    return fan_challenge_progress_read(progress, supporter)
+
+
+async def fan_leaderboard(
+    db: AsyncSession,
+    organization_id: UUID,
+    *,
+    limit: int = 10,
+) -> list[FanLeaderboardEntryRead]:
+    reward_counts = await count_rewards_by_supporter(db, organization_id)
+    challenge_counts = await count_completed_challenges_by_supporter(db, organization_id)
+    rows = (
+        await db.execute(
+            select(SupporterProfile, SupporterMembershipTier)
+            .outerjoin(SupporterMembershipTier, SupporterProfile.tier_id == SupporterMembershipTier.id)
+            .where(SupporterProfile.organization_id == organization_id)
+            .order_by(SupporterProfile.engagement_points.desc(), SupporterProfile.lifetime_value.desc())
+            .limit(limit)
+        )
+    ).all()
+    return [
+        FanLeaderboardEntryRead(
+            rank=index,
+            supporter_profile_id=supporter.id,
+            supporter_name=supporter.display_name,
+            tier_name=tier.name if tier else None,
+            engagement_points=supporter.engagement_points,
+            lifetime_value=supporter.lifetime_value,
+            reward_count=reward_counts.get(supporter.id, 0),
+            completed_challenge_count=challenge_counts.get(supporter.id, 0),
+        )
+        for index, (supporter, tier) in enumerate(rows, start=1)
+    ]
+
+
 async def supporter_dashboard(db: AsyncSession, organization_id: UUID) -> SupporterDashboardRead:
     tier_count = await scalar_count(db, SupporterMembershipTier, organization_id)
     supporter_count = await scalar_count(db, SupporterProfile, organization_id)
@@ -486,6 +638,13 @@ async def supporter_dashboard(db: AsyncSession, organization_id: UUID) -> Suppor
         SupporterProfile.status == "active",
     )
     reward_count = await scalar_count(db, SupporterReward, organization_id)
+    challenge_count = await scalar_count(db, FanEngagementChallenge, organization_id)
+    completed_challenge_count = await scalar_count(
+        db,
+        FanChallengeProgress,
+        organization_id,
+        FanChallengeProgress.status == "completed",
+    )
     total_points = int(
         await db.scalar(
             select(func.coalesce(func.sum(SupporterProfile.engagement_points), 0)).where(
@@ -513,8 +672,17 @@ async def supporter_dashboard(db: AsyncSession, organization_id: UUID) -> Suppor
         total_points=total_points,
         total_lifetime_value=total_lifetime_value or 0,
         reward_count=reward_count,
+        challenge_count=challenge_count,
+        completed_challenge_count=completed_challenge_count,
         top_supporter_name=top_supporter.display_name if top_supporter else None,
-        recommendations=supporter_recommendations(tier_count, supporter_count, total_points, reward_count),
+        recommendations=supporter_recommendations(
+            tier_count,
+            supporter_count,
+            total_points,
+            reward_count,
+            challenge_count,
+            completed_challenge_count,
+        ),
     )
 
 
@@ -796,6 +964,44 @@ def supporter_reward_read(reward: SupporterReward) -> SupporterRewardRead:
     )
 
 
+def fan_challenge_read(
+    challenge: FanEngagementChallenge,
+    completion_count: int = 0,
+) -> FanEngagementChallengeRead:
+    return FanEngagementChallengeRead(
+        id=challenge.id,
+        organization_id=challenge.organization_id,
+        title=challenge.title,
+        description=challenge.description,
+        challenge_type=challenge.challenge_type,
+        target_activity_type=challenge.target_activity_type,
+        target_count=challenge.target_count,
+        points_reward=challenge.points_reward,
+        badge_name=challenge.badge_name,
+        starts_at=challenge.starts_at,
+        ends_at=challenge.ends_at,
+        status=challenge.status,
+        completion_count=completion_count,
+    )
+
+
+def fan_challenge_progress_read(
+    progress: FanChallengeProgress,
+    supporter: SupporterProfile | None = None,
+) -> FanChallengeProgressRead:
+    return FanChallengeProgressRead(
+        id=progress.id,
+        organization_id=progress.organization_id,
+        challenge_id=progress.challenge_id,
+        supporter_profile_id=progress.supporter_profile_id,
+        supporter_name=supporter.display_name if supporter else None,
+        progress_count=progress.progress_count,
+        points_awarded=progress.points_awarded,
+        status=progress.status,
+        completed_at=progress.completed_at,
+    )
+
+
 def alumni_profile_read(alumni: AlumniProfile) -> AlumniProfileRead:
     return AlumniProfileRead(
         id=alumni.id,
@@ -891,6 +1097,13 @@ async def get_supporter_profile(db: AsyncSession, supporter_profile_id: UUID) ->
     return supporter
 
 
+async def get_fan_challenge(db: AsyncSession, challenge_id: UUID) -> FanEngagementChallenge:
+    challenge = await db.get(FanEngagementChallenge, challenge_id)
+    if challenge is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fan challenge not found")
+    return challenge
+
+
 async def get_alumni_profile(db: AsyncSession, alumni_profile_id: UUID) -> AlumniProfile:
     alumni = await db.get(AlumniProfile, alumni_profile_id)
     if alumni is None:
@@ -934,6 +1147,47 @@ async def count_by_program(db: AsyncSession, program_ids: list[UUID]) -> dict[UU
         )
     ).all()
     return {program_id: count for program_id, count in rows}
+
+
+async def count_completed_challenges(db: AsyncSession, challenge_ids: list[UUID]) -> dict[UUID, int]:
+    if not challenge_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(FanChallengeProgress.challenge_id, func.count(FanChallengeProgress.id))
+            .where(
+                FanChallengeProgress.challenge_id.in_(challenge_ids),
+                FanChallengeProgress.status == "completed",
+            )
+            .group_by(FanChallengeProgress.challenge_id)
+        )
+    ).all()
+    return {challenge_id: count for challenge_id, count in rows}
+
+
+async def count_rewards_by_supporter(db: AsyncSession, organization_id: UUID) -> dict[UUID, int]:
+    rows = (
+        await db.execute(
+            select(SupporterReward.supporter_profile_id, func.count(SupporterReward.id))
+            .where(SupporterReward.organization_id == organization_id)
+            .group_by(SupporterReward.supporter_profile_id)
+        )
+    ).all()
+    return {supporter_id: count for supporter_id, count in rows}
+
+
+async def count_completed_challenges_by_supporter(db: AsyncSession, organization_id: UUID) -> dict[UUID, int]:
+    rows = (
+        await db.execute(
+            select(FanChallengeProgress.supporter_profile_id, func.count(FanChallengeProgress.id))
+            .where(
+                FanChallengeProgress.organization_id == organization_id,
+                FanChallengeProgress.status == "completed",
+            )
+            .group_by(FanChallengeProgress.supporter_profile_id)
+        )
+    ).all()
+    return {supporter_id: count for supporter_id, count in rows}
 
 
 async def scalar_count(db: AsyncSession, model, organization_id: UUID, *conditions) -> int:
@@ -991,6 +1245,8 @@ def supporter_recommendations(
     supporter_count: int,
     total_points: int,
     reward_count: int,
+    challenge_count: int,
+    completed_challenge_count: int,
 ) -> list[str]:
     recommendations: list[str] = []
     if not tier_count:
@@ -1001,6 +1257,10 @@ def supporter_recommendations(
         recommendations.append("Record attendance, poll votes, comments, donations, and merchandise purchases as engagement activity.")
     if total_points and not reward_count:
         recommendations.append("Attach rewards so top supporters can redeem experiences, badges, or merchandise.")
+    if not challenge_count:
+        recommendations.append("Launch daily or matchday challenges to convert passive fans into repeat participants.")
+    if challenge_count and not completed_challenge_count:
+        recommendations.append("Promote open challenges through communications and the public site until supporters complete them.")
     if not recommendations:
         recommendations.append("Supporter CRM is active; review top fans for tier upgrades and campaign targeting.")
     return recommendations[:6]

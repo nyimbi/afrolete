@@ -188,6 +188,53 @@ class SupporterRewardRead(BaseModel):
     redeemed_at: datetime | None
 
 
+class FanEngagementChallengeCreate(BaseModel):
+    organization_id: UUID
+    title: str = Field(min_length=2, max_length=180)
+    description: str = Field(default="", max_length=4000)
+    challenge_type: str = Field(default="daily", min_length=2, max_length=80)
+    target_activity_type: str = Field(default="any", min_length=2, max_length=80)
+    target_count: int = Field(default=1, ge=1, le=10000)
+    points_reward: int = Field(default=0, ge=0, le=100000)
+    badge_name: str | None = Field(default=None, max_length=160)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+
+class FanEngagementChallengeRead(FanEngagementChallengeCreate):
+    id: UUID
+    status: str
+    completion_count: int = 0
+
+
+class FanChallengeProgressCreate(BaseModel):
+    supporter_profile_id: UUID
+    progress_count: int = Field(default=1, ge=1, le=10000)
+
+
+class FanChallengeProgressRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    challenge_id: UUID
+    supporter_profile_id: UUID
+    supporter_name: str | None = None
+    progress_count: int
+    points_awarded: int
+    status: str
+    completed_at: datetime | None
+
+
+class FanLeaderboardEntryRead(BaseModel):
+    rank: int
+    supporter_profile_id: UUID
+    supporter_name: str
+    tier_name: str | None
+    engagement_points: int
+    lifetime_value: Decimal
+    reward_count: int
+    completed_challenge_count: int
+
+
 class SupporterDashboardRead(BaseModel):
     organization_id: UUID
     tier_count: int
@@ -196,6 +243,8 @@ class SupporterDashboardRead(BaseModel):
     total_points: int
     total_lifetime_value: Decimal
     reward_count: int
+    challenge_count: int = 0
+    completed_challenge_count: int = 0
     top_supporter_name: str | None
     recommendations: list[str]
 

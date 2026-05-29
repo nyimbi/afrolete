@@ -191,18 +191,77 @@ def test_supporter_memberships_alumni_profiles_and_mentorship(client, identity_h
     ).json()
     assert reward["status"] == "earned"
 
+    redeemed_reward = client.post(
+        f"/api/v1/community/supporter-rewards/{reward['id']}/redeem",
+        headers=identity_headers,
+    ).json()
+    assert redeemed_reward["status"] == "redeemed"
+    assert redeemed_reward["redeemed_at"] is not None
+
+    challenge = client.post(
+        "/api/v1/community/fan-challenges",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "title": "Derby week superfan",
+            "description": "Attend, vote, comment, and share during derby week.",
+            "challenge_type": "matchday",
+            "target_activity_type": "match_attendance",
+            "target_count": 2,
+            "points_reward": 750,
+            "badge_name": "Derby Superfan",
+            "starts_at": "2026-06-01T00:00:00Z",
+            "ends_at": "2026-06-08T00:00:00Z",
+        },
+    ).json()
+    assert challenge["status"] == "active"
+    assert challenge["completion_count"] == 0
+
+    in_progress = client.post(
+        f"/api/v1/community/fan-challenges/{challenge['id']}/progress",
+        headers=identity_headers,
+        json={"supporter_profile_id": supporter["id"], "progress_count": 1},
+    ).json()
+    assert in_progress["status"] == "in_progress"
+    assert in_progress["points_awarded"] == 0
+
+    completed = client.post(
+        f"/api/v1/community/fan-challenges/{challenge['id']}/progress",
+        headers=identity_headers,
+        json={"supporter_profile_id": supporter["id"], "progress_count": 1},
+    ).json()
+    assert completed["status"] == "completed"
+    assert completed["points_awarded"] == 750
+    assert completed["completed_at"] is not None
+
+    challenges = client.get(
+        f"/api/v1/community/fan-challenges?organization_id={organization['id']}"
+    ).json()
+    assert challenges[0]["completion_count"] == 1
+
     supporters = client.get(f"/api/v1/community/supporters?organization_id={organization['id']}").json()
-    assert supporters[0]["engagement_points"] == 1250
+    assert supporters[0]["engagement_points"] == 2000
     assert supporters[0]["lifetime_value"] == "75.00"
+
+    leaderboard = client.get(
+        f"/api/v1/community/fan-leaderboard?organization_id={organization['id']}&limit=5"
+    ).json()
+    assert leaderboard[0]["rank"] == 1
+    assert leaderboard[0]["supporter_name"] == "Sarah Supporter"
+    assert leaderboard[0]["engagement_points"] == 2000
+    assert leaderboard[0]["reward_count"] >= 2
+    assert leaderboard[0]["completed_challenge_count"] == 1
 
     supporter_dashboard = client.get(
         f"/api/v1/community/supporter-dashboard?organization_id={organization['id']}"
     ).json()
     assert supporter_dashboard["tier_count"] == 1
     assert supporter_dashboard["supporter_count"] == 1
-    assert supporter_dashboard["total_points"] == 1250
+    assert supporter_dashboard["total_points"] == 2000
     assert supporter_dashboard["top_supporter_name"] == "Sarah Supporter"
-    assert supporter_dashboard["reward_count"] >= 1
+    assert supporter_dashboard["reward_count"] >= 2
+    assert supporter_dashboard["challenge_count"] == 1
+    assert supporter_dashboard["completed_challenge_count"] == 1
 
     alumni = client.post(
         "/api/v1/community/alumni",

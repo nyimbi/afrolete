@@ -132,6 +132,35 @@ class SupporterReward(IdMixin, TimestampMixin, Base):
     redeemed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class FanEngagementChallenge(IdMixin, TimestampMixin, Base):
+    __tablename__ = "fan_engagement_challenges"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    challenge_type: Mapped[str] = mapped_column(String(80), default="daily", nullable=False, index=True)
+    target_activity_type: Mapped[str] = mapped_column(String(80), default="any", nullable=False, index=True)
+    target_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    points_reward: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    badge_name: Mapped[str | None] = mapped_column(String(160), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
+class FanChallengeProgress(IdMixin, TimestampMixin, Base):
+    __tablename__ = "fan_challenge_progress"
+    __table_args__ = (UniqueConstraint("challenge_id", "supporter_profile_id"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    challenge_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("fan_engagement_challenges.id"), index=True)
+    supporter_profile_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("supporter_profiles.id"), index=True)
+    progress_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    points_awarded: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="in_progress", nullable=False, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class AlumniProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "alumni_profiles"
     __table_args__ = (UniqueConstraint("organization_id", "email"),)

@@ -61,6 +61,8 @@ from app.models.community import (  # noqa: F401,E402
     CommunityComment,
     CommunityPost,
     CommunityReaction,
+    FanChallengeProgress,
+    FanEngagementChallenge,
     FanPoll,
     FanPollOption,
     FanPollVote,
