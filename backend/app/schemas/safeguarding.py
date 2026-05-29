@@ -265,6 +265,18 @@ class FamilyCoordinationDigestRead(BaseModel):
     dispatch_queued: int = 0
 
 
+class FamilyCoordinationDigestWorkerRunRead(BaseModel):
+    organization_id: UUID | None
+    eligible_count: int
+    executed_count: int
+    created_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool = False
+    guardian_person_ids: list[UUID]
+    message_ids: list[UUID]
+
+
 class FamilyScheduleConflictRead(BaseModel):
     starts_at: datetime
     ends_at: datetime

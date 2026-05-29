@@ -44,8 +44,8 @@ from app.models.enums import (
     TravelPlanStatus,
 )
 from app.models.event import BackgroundCheck, ComplianceCredential, ConsentRequest, Event, EventTravelPlan
-from app.models.identity import Person
-from app.models.organization import Membership, Organization
+from app.models.identity import AppUser, Person
+from app.models.organization import Membership, Organization, RegistrationInquiry
 from app.models.performance import (
     AthletePerformanceObservation,
     PerformanceForecastValidationRun,
@@ -105,6 +105,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
         "developer-webhooks",
         "emergency-escalations",
         "event-travel-consent-reminders",
+        "family-coordination-digests",
         "family-portal-invite-reminders",
         "object-storage-lifecycle",
         "performance-achievements",
@@ -129,6 +130,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["results"]["developer_webhooks"]["eligible_count"] == 0
     assert result["results"]["emergency_escalations"]["eligible_count"] == 0
     assert result["results"]["event_travel_consent_reminders"]["eligible_count"] == 0
+    assert result["results"]["family_coordination_digests"]["eligible_count"] == 0
     assert result["results"]["family_portal_invite_reminders"]["eligible_count"] == 0
     assert result["results"]["object_storage_lifecycle"]["eligible_count"] == 0
     assert result["results"]["performance_achievements"]["eligible_count"] == 0
@@ -160,6 +162,7 @@ def test_selected_lanes_expands_all() -> None:
         "developer-webhooks",
         "emergency-escalations",
         "event-travel-consent-reminders",
+        "family-coordination-digests",
         "family-portal-invite-reminders",
         "object-storage-lifecycle",
         "performance-achievements",
@@ -1286,6 +1289,86 @@ async def test_due_worker_sends_family_portal_invite_reminders_once(db_session) 
     duplicate = second["results"]["family_portal_invite_reminders"]
     assert duplicate["eligible_count"] == 1
     assert duplicate["reminded_count"] == 0
+    assert duplicate["skipped_count"] == 1
+
+
+async def test_due_worker_sends_family_coordination_digests_once(db_session) -> None:
+    organization = Organization(
+        name="Family Coordination Worker Club",
+        slug="family-coordination-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="athletics",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    athlete = Person(display_name="Coordination Athlete", primary_email="coordination-athlete@example.com")
+    guardian = Person(display_name="Coordination Guardian", primary_email="coordination-guardian@example.com")
+    db_session.add_all([athlete, guardian])
+    await db_session.flush()
+    app_user = AppUser(
+        keycloak_sub="kc-coordination-guardian",
+        person_id=guardian.id,
+        email=guardian.primary_email,
+        display_name=guardian.display_name,
+    )
+    profile = AthleteProfile(
+        organization_id=organization.id,
+        person_id=athlete.id,
+        athlete_code="COORD-1",
+    )
+    relationship = GuardianRelationship(
+        athlete_person_id=athlete.id,
+        guardian_person_id=guardian.id,
+        relationship_kind=GuardianRelationshipKind.PARENT,
+        relationship="parent",
+        can_sign_consent=True,
+    )
+    inquiry = RegistrationInquiry(
+        organization_id=organization.id,
+        athlete_name=athlete.display_name,
+        guardian_name=guardian.display_name,
+        email=guardian.primary_email,
+        age_group="U15",
+        guardian_person_id=guardian.id,
+        guardian_contact_status="linked",
+        payment_status="not_required",
+    )
+    db_session.add_all([app_user, profile, relationship, inquiry])
+    await db_session.commit()
+
+    first = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("family-coordination-digests",),
+        family_coordination_digest_channel=CommunicationChannel.IN_APP,
+        family_coordination_digest_repeat_after_hours=24,
+        family_coordination_digest_limit=10,
+    )
+
+    digest = first["results"]["family_coordination_digests"]
+    assert digest["eligible_count"] == 1
+    assert digest["executed_count"] == 1
+    assert digest["created_count"] == 1
+    assert digest["skipped_count"] == 0
+    assert len(digest["message_ids"]) == 1
+    message = await db_session.get(CommunicationMessage, digest["message_ids"][0])
+    assert message is not None
+    assert message.subject == "Family Coordination Worker Club family action digest"
+    assert "Coordination Athlete" in message.body
+    assert "family coordination digest" in message.body
+
+    second = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("family-coordination-digests",),
+        family_coordination_digest_channel=CommunicationChannel.IN_APP,
+        family_coordination_digest_repeat_after_hours=24,
+        family_coordination_digest_limit=10,
+    )
+
+    duplicate = second["results"]["family_coordination_digests"]
+    assert duplicate["eligible_count"] == 1
+    assert duplicate["created_count"] == 0
     assert duplicate["skipped_count"] == 1
 
 

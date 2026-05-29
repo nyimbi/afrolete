@@ -82,6 +82,7 @@ from app.schemas.safeguarding import (
     FamilyAthleteSummaryRead,
     FamilyCoordinationDigestCreate,
     FamilyCoordinationDigestRead,
+    FamilyCoordinationDigestWorkerRunRead,
     FamilyCoordinationRowRead,
     FamilyDashboardActionRead,
     FamilyDashboardRead,
@@ -5949,6 +5950,119 @@ async def create_family_coordination_digest(
         dispatch_suppressed=dispatch_summary.suppressed if dispatch_summary else 0,
         dispatch_queued=dispatch_summary.queued if dispatch_summary else 0,
     )
+
+
+async def run_family_coordination_digest_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    channel: CommunicationChannel = CommunicationChannel.IN_APP,
+    portal_url: str = "https://afrolete.lindela.io/family",
+    repeat_after_hours: int = 24,
+    limit: int = 100,
+    dry_run: bool = False,
+) -> FamilyCoordinationDigestWorkerRunRead:
+    statement = (
+        select(AppUser, Person, Organization)
+        .join(Person, Person.id == AppUser.person_id)
+        .join(GuardianRelationship, GuardianRelationship.guardian_person_id == Person.id)
+        .join(AthleteProfile, AthleteProfile.person_id == GuardianRelationship.athlete_person_id)
+        .join(Organization, Organization.id == AthleteProfile.organization_id)
+        .order_by(Organization.name, Person.display_name)
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(Organization.id == organization_id)
+    rows = (await db.execute(statement)).all()
+    seen_guardians: set[tuple[UUID, UUID]] = set()
+    eligible_count = 0
+    executed_count = 0
+    created_count = 0
+    skipped_count = 0
+    failed_count = 0
+    guardian_person_ids: list[UUID] = []
+    message_ids: list[UUID] = []
+
+    for app_user, guardian, organization in rows:
+        key = (guardian.id, organization.id)
+        if key in seen_guardians:
+            skipped_count += 1
+            continue
+        seen_guardians.add(key)
+        identity = CurrentIdentity(
+            user_id=app_user.id,
+            person_id=guardian.id,
+            keycloak_sub=app_user.keycloak_sub,
+            email=app_user.email,
+            display_name=app_user.display_name or guardian.display_name,
+        )
+        try:
+            coordination = await get_my_family_coordination(db, identity, organization.id)
+            if not any(row.urgency_score > 0 for row in coordination):
+                skipped_count += 1
+                continue
+            eligible_count += 1
+            if await has_recent_family_coordination_digest(db, organization.id, guardian.id, repeat_after_hours):
+                skipped_count += 1
+                continue
+            if dry_run:
+                skipped_count += 1
+                continue
+            digest = await create_family_coordination_digest(
+                db,
+                identity,
+                FamilyCoordinationDigestCreate(
+                    organization_id=organization.id,
+                    channel=channel,
+                    portal_url=portal_url,
+                    dispatch_now=True,
+                ),
+                None,
+            )
+            executed_count += 1
+            created_count += 1
+            guardian_person_ids.append(guardian.id)
+            message_ids.append(digest.message_id)
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return FamilyCoordinationDigestWorkerRunRead(
+        organization_id=organization_id,
+        eligible_count=eligible_count,
+        executed_count=executed_count,
+        created_count=created_count,
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        guardian_person_ids=guardian_person_ids,
+        message_ids=message_ids,
+    )
+
+
+async def has_recent_family_coordination_digest(
+    db: AsyncSession,
+    organization_id: UUID,
+    guardian_person_id: UUID,
+    repeat_after_hours: int,
+) -> bool:
+    cutoff = utc_now() - timedelta(hours=repeat_after_hours)
+    existing = await db.scalar(
+        select(CommunicationMessage.id)
+        .where(CommunicationMessage.organization_id == organization_id)
+        .where(CommunicationMessage.message_type == CommunicationMessageType.REMINDER)
+        .where(CommunicationMessage.scope_type == CommunicationScopeType.PERSON)
+        .where(CommunicationMessage.scope_id == guardian_person_id)
+        .where(CommunicationMessage.created_at >= cutoff)
+        .where(
+            or_(
+                CommunicationMessage.subject.ilike("%family action digest%"),
+                CommunicationMessage.body.ilike("%family coordination digest%"),
+            )
+        )
+        .limit(1)
+    )
+    return existing is not None
 
 
 def family_coordination_digest_body(

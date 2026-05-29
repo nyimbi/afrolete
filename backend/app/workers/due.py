@@ -36,6 +36,7 @@ from app.services.performance import (
 )
 from app.services.safeguarding import (
     run_compliance_reconciliation_worker,
+    run_family_coordination_digest_worker,
     run_guardian_portal_invite_reminder_worker,
 )
 from app.services.storage.lifecycle import run_object_storage_lifecycle
@@ -55,6 +56,7 @@ WORKER_LANES = (
     "developer-webhooks",
     "emergency-escalations",
     "event-travel-consent-reminders",
+    "family-coordination-digests",
     "family-portal-invite-reminders",
     "object-storage-lifecycle",
     "performance-achievements",
@@ -132,6 +134,18 @@ def parse_args() -> argparse.Namespace:
         default=CommunicationChannel.EMAIL.value,
     )
     parser.add_argument("--dry-run-event-travel-consent-reminders", action="store_true")
+    parser.add_argument("--family-coordination-digest-limit", type=int, default=None)
+    parser.add_argument("--family-coordination-digest-repeat-after-hours", type=int, default=24)
+    parser.add_argument(
+        "--family-coordination-digest-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        default=CommunicationChannel.IN_APP.value,
+    )
+    parser.add_argument(
+        "--family-coordination-digest-portal-url",
+        default="https://afrolete.lindela.io/family",
+    )
+    parser.add_argument("--dry-run-family-coordination-digests", action="store_true")
     parser.add_argument("--family-portal-invite-reminder-limit", type=int, default=None)
     parser.add_argument("--family-portal-invite-reminder-invited-before-hours", type=int, default=24)
     parser.add_argument("--family-portal-invite-reminder-repeat-after-hours", type=int, default=24)
@@ -300,6 +314,11 @@ async def run_due_workers(
     event_travel_consent_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
     dry_run_event_travel_consent_reminders: bool = False,
     family_portal_invite_reminder_limit: int | None = None,
+    family_coordination_digest_limit: int | None = None,
+    family_coordination_digest_repeat_after_hours: int = 24,
+    family_coordination_digest_channel: CommunicationChannel = CommunicationChannel.IN_APP,
+    family_coordination_digest_portal_url: str = "https://afrolete.lindela.io/family",
+    dry_run_family_coordination_digests: bool = False,
     family_portal_invite_reminder_invited_before_hours: int = 24,
     family_portal_invite_reminder_repeat_after_hours: int = 24,
     family_portal_invite_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
@@ -466,6 +485,18 @@ async def run_due_workers(
                 repeat_after_hours=family_portal_invite_reminder_repeat_after_hours,
                 limit=family_portal_invite_reminder_limit or limit,
                 dry_run=dry_run_family_portal_invite_reminders,
+            )
+        ).model_dump(mode="json")
+    if "family-coordination-digests" in active_lanes:
+        results["family_coordination_digests"] = (
+            await run_family_coordination_digest_worker(
+                db,
+                organization_id=organization_id,
+                channel=family_coordination_digest_channel,
+                portal_url=family_coordination_digest_portal_url,
+                repeat_after_hours=family_coordination_digest_repeat_after_hours,
+                limit=family_coordination_digest_limit or limit,
+                dry_run=dry_run_family_coordination_digests,
             )
         ).model_dump(mode="json")
     if "volunteer-reminders" in active_lanes:
@@ -690,6 +721,13 @@ async def run() -> None:
                 args.event_travel_consent_reminder_channel
             ),
             dry_run_event_travel_consent_reminders=args.dry_run_event_travel_consent_reminders,
+            family_coordination_digest_limit=args.family_coordination_digest_limit,
+            family_coordination_digest_repeat_after_hours=args.family_coordination_digest_repeat_after_hours,
+            family_coordination_digest_channel=CommunicationChannel(
+                args.family_coordination_digest_channel
+            ),
+            family_coordination_digest_portal_url=args.family_coordination_digest_portal_url,
+            dry_run_family_coordination_digests=args.dry_run_family_coordination_digests,
             family_portal_invite_reminder_limit=args.family_portal_invite_reminder_limit,
             family_portal_invite_reminder_invited_before_hours=args.family_portal_invite_reminder_invited_before_hours,
             family_portal_invite_reminder_repeat_after_hours=args.family_portal_invite_reminder_repeat_after_hours,
