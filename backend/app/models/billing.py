@@ -113,6 +113,9 @@ class SaaSInvoice(IdMixin, TimestampMixin, Base):
     )
     line_items: Mapped[str | None] = mapped_column(Text)
     external_invoice_id: Mapped[str | None] = mapped_column(String(180), index=True)
+    dunning_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    dunning_last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    dunning_last_severity: Mapped[str | None] = mapped_column(String(40), index=True)
 
 
 class SaaSPayment(IdMixin, TimestampMixin, Base):

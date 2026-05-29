@@ -62,6 +62,7 @@ import type {
   BillingCycle,
   BillingDunningDeliveryRead,
   BillingDunningNoticeRead,
+  BillingDunningRunRead,
   BillingEntitlementRead,
   BillingPaymentWebhookRead,
   BillingPlanChangeRead,
@@ -1604,6 +1605,7 @@ export default function HomePage() {
   const [billingDunning, setBillingDunning] = useState<BillingDunningNoticeRead | null>(null);
   const [billingDunningDelivery, setBillingDunningDelivery] =
     useState<BillingDunningDeliveryRead | null>(null);
+  const [billingDunningRun, setBillingDunningRun] = useState<BillingDunningRunRead | null>(null);
   const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
   const [billingRecurringRun, setBillingRecurringRun] = useState<BillingRecurringInvoiceRunRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
@@ -3398,6 +3400,7 @@ export default function HomePage() {
       setBillingPlanChange(null);
       setBillingDunning(null);
       setBillingDunningDelivery(null);
+      setBillingDunningRun(null);
       setBillingWebhook(null);
       setBillingRecurringRun(null);
       setBillingSummary(null);
@@ -11478,6 +11481,34 @@ export default function HomePage() {
     );
   };
 
+  const runBillingDunning = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "billing-dunning-run",
+      () =>
+        apiRequest<BillingDunningRunRead>("/billing/dunning/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            overdue_as_of: billingForm.period_end,
+            overdue_after_days: 0,
+            repeat_after_days: 7,
+            limit: 100,
+            dry_run: false
+          }
+        }),
+      (run) => {
+        setBillingDunningRun(run);
+        addLog(`Dunning sent ${run.notice_count}/${run.eligible_count} notices`, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
   const ingestBillingWebhook = () => {
     if (!selectedOrganizationId || !selectedSaasInvoiceId) {
       addLog("Create or select a SaaS invoice first", "bad");
@@ -14646,6 +14677,7 @@ export default function HomePage() {
                 <button type="button" onClick={runRecurringBilling} disabled={busyAction !== null}>Run billing</button>
                 <button type="button" onClick={createSaaSInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
                 <button type="button" onClick={prepareDunningNotice} disabled={busyAction !== null}>Dunning</button>
+                <button type="button" onClick={runBillingDunning} disabled={busyAction !== null}>Run dunning</button>
                 <button type="button" onClick={deliverBillingDunningNotice} disabled={busyAction !== null}>Deliver</button>
                 <button type="button" onClick={ingestBillingWebhook} disabled={busyAction !== null}>Webhook</button>
               </div>
@@ -14724,6 +14756,16 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {billingDunningRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{billingDunningRun.notice_count} dunning notices</strong>
+                    <span>
+                      {billingDunningRun.total_outstanding} outstanding · {billingDunningRun.past_due_count} past due · {billingDunningRun.failed_count} failed
+                    </span>
+                  </div>
+                </article>
+              ) : null}
               {billingDunning ? (
                 <article className="task-card">
                   <div>
@@ -14761,7 +14803,7 @@ export default function HomePage() {
                 >
                   <div>
                     <strong>{invoice.invoice_number}</strong>
-                    <span>{invoice.amount_paid}/{invoice.total} · {invoice.status}</span>
+                    <span>{invoice.amount_paid}/{invoice.total} · {invoice.status} · dunning {invoice.dunning_count}</span>
                   </div>
                 </button>
               ))}

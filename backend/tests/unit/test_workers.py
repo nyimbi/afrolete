@@ -84,6 +84,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
 
     assert result["lanes"] == [
         "agent-tasks",
+        "billing-dunning",
         "billing-recurring-invoices",
         "communication-digests",
         "communication-escalations",
@@ -101,6 +102,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     ]
     assert result["summary"]["eligible_count"] == 2
     assert result["summary"]["processed_count"] == 2
+    assert result["results"]["billing_dunning"]["eligible_count"] == 0
     assert result["results"]["billing_recurring_invoices"]["eligible_count"] == 0
     assert result["results"]["communication_digests"]["eligible_count"] == 0
     assert result["results"]["communication_escalations"]["eligible_count"] == 0
@@ -127,6 +129,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
 def test_selected_lanes_expands_all() -> None:
     assert selected_lanes(("all",)) == {
         "agent-tasks",
+        "billing-dunning",
         "billing-recurring-invoices",
         "communication-digests",
         "communication-escalations",
@@ -143,6 +146,83 @@ def test_selected_lanes_expands_all() -> None:
         "wearable-pull-retries",
     }
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}
+
+
+async def test_due_worker_sends_dunning_for_overdue_saas_invoice(db_session) -> None:
+    organization = Organization(
+        name="Dunning Worker Club",
+        slug="dunning-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    plan = BillingPlan(
+        code="dunning-growth",
+        name="Dunning Growth",
+        base_price=300,
+        currency="USD",
+        billing_cycle=BillingCycle.MONTHLY,
+        included_athletes=100,
+        included_teams=8,
+        included_agent_tasks=500,
+        included_storage_gb=50,
+        per_athlete_price=0,
+        per_agent_task_price=0,
+    )
+    db_session.add(plan)
+    await db_session.flush()
+    subscription = TenantSubscription(
+        organization_id=organization.id,
+        billing_plan_id=plan.id,
+        status=SubscriptionStatus.ACTIVE,
+        billing_cycle=BillingCycle.MONTHLY,
+        current_period_start=date(2026, 6, 1),
+        current_period_end=date(2026, 6, 30),
+        next_billing_on=date(2026, 6, 30),
+        seats_purchased=100,
+        negotiated_price=250,
+    )
+    db_session.add(subscription)
+    await db_session.flush()
+    invoice = SaaSInvoice(
+        organization_id=organization.id,
+        subscription_id=subscription.id,
+        invoice_number="DUN-WORKER-1",
+        period_start=date(2026, 6, 1),
+        period_end=date(2026, 6, 30),
+        subtotal=250,
+        tax_amount=0,
+        discount_amount=0,
+        total=250,
+        amount_paid=0,
+        currency="USD",
+        due_on=date(2026, 6, 1),
+        status=BillingInvoiceStatus.OPEN,
+        line_items="Monthly subscription",
+    )
+    db_session.add(invoice)
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("billing-dunning",),
+        billing_dunning_overdue_as_of=date(2026, 6, 20),
+        billing_dunning_repeat_after_days=7,
+        limit=10,
+    )
+
+    assert result["results"]["billing_dunning"]["eligible_count"] == 1
+    assert result["results"]["billing_dunning"]["notice_count"] == 1
+    assert result["results"]["billing_dunning"]["record_only_count"] == 1
+    assert result["summary"]["processed_count"] == 1
+    await db_session.refresh(invoice)
+    await db_session.refresh(subscription)
+    assert invoice.dunning_count == 1
+    assert invoice.dunning_last_severity == "urgent"
+    assert invoice.dunning_last_sent_at is not None
+    assert subscription.status == SubscriptionStatus.PAST_DUE
 
 
 async def test_due_worker_generates_recurring_subscription_invoice(db_session) -> None:

@@ -11,6 +11,8 @@ from app.schemas.billing import (
     BillingEntitlementRead,
     BillingDunningDeliveryRead,
     BillingDunningNoticeRead,
+    BillingDunningRunCreate,
+    BillingDunningRunRead,
     BillingPlanChangeCreate,
     BillingPlanChangeRead,
     BillingPaymentWebhookCreate,
@@ -59,6 +61,7 @@ from app.services.billing import (
     record_payment,
     record_usage,
     proration_quote,
+    run_dunning_scheduler,
     run_recurring_invoice_scheduler,
     validate_payment_webhook_signature,
 )
@@ -206,6 +209,16 @@ async def deliver_dunning_route(
     return BillingDunningDeliveryRead(
         **await deliver_dunning_notice(db, identity, organization_id, invoice_id, authz)
     )
+
+
+@router.post("/dunning/run", response_model=BillingDunningRunRead)
+async def run_dunning_route(
+    payload: BillingDunningRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BillingDunningRunRead:
+    return await run_dunning_scheduler(db, identity, payload, authz)
 
 
 @router.post("/payments", response_model=SaaSPaymentRead, status_code=status.HTTP_201_CREATED)

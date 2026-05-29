@@ -2517,6 +2517,9 @@ export type SaaSInvoiceRead = {
   status: BillingInvoiceStatus;
   line_items: string | null;
   external_invoice_id: string | null;
+  dunning_count: number;
+  dunning_last_sent_at: string | null;
+  dunning_last_severity: string | null;
 };
 
 export type SaaSPaymentRead = {
@@ -2609,6 +2612,24 @@ export type BillingDunningDeliveryRead = BillingDunningNoticeRead & {
   provider_status_code: number | null;
   failure_reason: string | null;
   delivered_at: string;
+};
+
+export type BillingDunningRunRead = {
+  organization_id: UUID | null;
+  overdue_as_of: string;
+  eligible_count: number;
+  executed_count: number;
+  notice_count: number;
+  delivered_count: number;
+  record_only_count: number;
+  past_due_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  invoice_ids: UUID[];
+  subscription_ids: UUID[];
+  total_outstanding: string;
+  severity_counts: Record<string, number>;
 };
 
 export type BillingPaymentWebhookRead = {

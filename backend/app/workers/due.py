@@ -12,7 +12,7 @@ from app.db.session import SessionLocal
 from app.models.enums import CommunicationChannel, NotificationFrequency
 from app.services.agents import run_agent_task_worker
 from app.services.assets import run_emergency_escalation_timer_worker
-from app.services.billing import run_recurring_invoice_worker
+from app.services.billing import run_dunning_worker, run_recurring_invoice_worker
 from app.services.communications import (
     run_digest_scheduler_worker,
     run_message_escalation_worker,
@@ -34,6 +34,7 @@ from app.services.safeguarding import (
 
 WORKER_LANES = (
     "agent-tasks",
+    "billing-dunning",
     "billing-recurring-invoices",
     "communication-digests",
     "communication-escalations",
@@ -57,6 +58,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lane", choices=(*WORKER_LANES, "all"), action="append", default=None)
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--agent-limit", type=int, default=None)
+    parser.add_argument("--billing-dunning-limit", type=int, default=None)
+    parser.add_argument("--billing-dunning-overdue-as-of", type=date_from_isoformat, default=None)
+    parser.add_argument("--billing-dunning-overdue-after-days", type=int, default=0)
+    parser.add_argument("--billing-dunning-repeat-after-days", type=int, default=7)
+    parser.add_argument("--dry-run-billing-dunning", action="store_true")
     parser.add_argument("--billing-recurring-invoice-limit", type=int, default=None)
     parser.add_argument("--billing-recurring-invoice-bill-on", type=date_from_isoformat, default=None)
     parser.add_argument("--billing-recurring-invoice-due-in-days", type=int, default=14)
@@ -162,6 +168,11 @@ async def run_due_workers(
     lanes: Sequence[str] = ("all",),
     limit: int = 25,
     agent_limit: int | None = None,
+    billing_dunning_limit: int | None = None,
+    billing_dunning_overdue_as_of: date | None = None,
+    billing_dunning_overdue_after_days: int = 0,
+    billing_dunning_repeat_after_days: int = 7,
+    dry_run_billing_dunning: bool = False,
     billing_recurring_invoice_limit: int | None = None,
     billing_recurring_invoice_bill_on: date | None = None,
     billing_recurring_invoice_due_in_days: int = 14,
@@ -225,6 +236,18 @@ async def run_due_workers(
                 db,
                 organization_id=organization_id,
                 limit=agent_limit or limit,
+            )
+        ).model_dump(mode="json")
+    if "billing-dunning" in active_lanes:
+        results["billing_dunning"] = (
+            await run_dunning_worker(
+                db,
+                organization_id=organization_id,
+                overdue_as_of=billing_dunning_overdue_as_of,
+                overdue_after_days=billing_dunning_overdue_after_days,
+                repeat_after_days=billing_dunning_repeat_after_days,
+                limit=billing_dunning_limit or limit,
+                dry_run=dry_run_billing_dunning,
             )
         ).model_dump(mode="json")
     if "billing-recurring-invoices" in active_lanes:
@@ -408,6 +431,7 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             or result.get("dispatched_count")
             or result.get("alerted_count")
             or result.get("invoiced_count")
+            or result.get("notice_count")
             or result.get("reminded_count")
             or result.get("retried_count")
             or 0
@@ -428,6 +452,11 @@ async def run() -> None:
             lanes=args.lane or ("all",),
             limit=args.limit,
             agent_limit=args.agent_limit,
+            billing_dunning_limit=args.billing_dunning_limit,
+            billing_dunning_overdue_as_of=args.billing_dunning_overdue_as_of,
+            billing_dunning_overdue_after_days=args.billing_dunning_overdue_after_days,
+            billing_dunning_repeat_after_days=args.billing_dunning_repeat_after_days,
+            dry_run_billing_dunning=args.dry_run_billing_dunning,
             billing_recurring_invoice_limit=args.billing_recurring_invoice_limit,
             billing_recurring_invoice_bill_on=args.billing_recurring_invoice_bill_on,
             billing_recurring_invoice_due_in_days=args.billing_recurring_invoice_due_in_days,

@@ -26,6 +26,8 @@ from app.models.organization import Organization
 from app.schemas.billing import (
     BillingEntitlementCreate,
     BillingPlanChangeCreate,
+    BillingDunningRunCreate,
+    BillingDunningRunRead,
     BillingPaymentWebhookCreate,
     BillingPlanCreate,
     BillingRecurringInvoiceRunCreate,
@@ -406,6 +408,12 @@ def enum_value(value) -> str:
     return getattr(value, "value", value)
 
 
+def normalize_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 async def list_invoices(db: AsyncSession, organization_id: UUID) -> list[SaaSInvoice]:
     return list(
         (
@@ -637,9 +645,16 @@ async def dunning_notice(
 ) -> dict:
     await ensure_manage_billing(authz, identity, organization_id)
     invoice = await get_invoice_for_organization(db, invoice_id, organization_id)
+    return dunning_notice_for_invoice(invoice, organization_id, date.today())
+
+
+def dunning_notice_for_invoice(
+    invoice: SaaSInvoice,
+    organization_id: UUID,
+    as_of: date,
+) -> dict:
     amount_due = money(max(invoice.total - invoice.amount_paid, Decimal("0")))
-    today = date.today()
-    days_overdue = max((today - invoice.due_on).days, 0) if invoice.due_on else 0
+    days_overdue = max((as_of - invoice.due_on).days, 0) if invoice.due_on else 0
     severity = "final" if days_overdue >= 30 else "urgent" if days_overdue >= 14 else "reminder"
     channel = "email+in_app" if severity == "reminder" else "email+sms+in_app"
     next_action = "pause_nonessential_entitlements" if severity == "final" else "retry_payment"
@@ -668,21 +683,38 @@ async def deliver_dunning_notice(
     settings: Settings | None = None,
 ) -> dict:
     selected_settings = settings or get_settings()
-    notice = await dunning_notice(db, identity, organization_id, invoice_id, authz)
+    await ensure_manage_billing(authz, identity, organization_id)
+    invoice = await get_invoice_for_organization(db, invoice_id, organization_id)
+    return await deliver_dunning_notice_for_invoice(
+        invoice,
+        organization_id,
+        selected_settings,
+        as_of=date.today(),
+    )
+
+
+async def deliver_dunning_notice_for_invoice(
+    invoice: SaaSInvoice,
+    organization_id: UUID,
+    settings: Settings,
+    *,
+    as_of: date,
+) -> dict:
+    notice = dunning_notice_for_invoice(invoice, organization_id, as_of)
     result = {
         **notice,
-        "delivery_mode": selected_settings.billing_dunning_delivery_mode,
+        "delivery_mode": settings.billing_dunning_delivery_mode,
         "delivery_attempted": False,
         "delivered": False,
-        "destination": selected_settings.billing_dunning_webhook_url or None,
+        "destination": settings.billing_dunning_webhook_url or None,
         "provider_status_code": None,
         "failure_reason": None,
         "delivered_at": datetime.now(UTC),
     }
-    if selected_settings.billing_dunning_delivery_mode == "record_only":
+    if settings.billing_dunning_delivery_mode == "record_only":
         result["failure_reason"] = "Record-only delivery mode; notice prepared for manual follow-up."
         return result
-    if not selected_settings.billing_dunning_webhook_url:
+    if not settings.billing_dunning_webhook_url:
         result["failure_reason"] = "Billing dunning webhook mode is enabled but no webhook URL is configured."
         return result
 
@@ -690,7 +722,7 @@ async def deliver_dunning_notice(
     payload = {
         "event_type": "billing.dunning_notice",
         "organization_id": str(organization_id),
-        "invoice_id": str(invoice_id),
+        "invoice_id": str(invoice.id),
         "invoice_number": notice["invoice_number"],
         "severity": notice["severity"],
         "channel": notice["channel"],
@@ -700,11 +732,11 @@ async def deliver_dunning_notice(
         "next_action": notice["next_action"],
         "created_at": result["delivered_at"].isoformat(),
     }
-    headers = await billing_dunning_headers(selected_settings)
+    headers = await billing_dunning_headers(settings)
     try:
-        async with httpx.AsyncClient(timeout=selected_settings.billing_dunning_timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=settings.billing_dunning_timeout_seconds) as client:
             response = await client.post(
-                selected_settings.billing_dunning_webhook_url,
+                settings.billing_dunning_webhook_url,
                 json=payload,
                 headers=headers,
             )
@@ -715,6 +747,146 @@ async def deliver_dunning_notice(
     except httpx.HTTPError as error:
         result["failure_reason"] = f"Dunning webhook failed: {error}"
     return result
+
+
+async def run_dunning_scheduler(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: BillingDunningRunCreate,
+    authz: AuthorizationService,
+) -> BillingDunningRunRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_billing(authz, identity, payload.organization_id)
+    return await run_dunning_worker(
+        db,
+        organization_id=payload.organization_id,
+        overdue_as_of=payload.overdue_as_of,
+        overdue_after_days=payload.overdue_after_days,
+        repeat_after_days=payload.repeat_after_days,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+    )
+
+
+async def run_dunning_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    overdue_as_of: date | None = None,
+    overdue_after_days: int = 0,
+    repeat_after_days: int = 7,
+    limit: int = 100,
+    dry_run: bool = False,
+    settings: Settings | None = None,
+) -> BillingDunningRunRead:
+    effective_as_of = overdue_as_of or date.today()
+    selected_settings = settings or get_settings()
+    invoices = await invoices_due_for_dunning(
+        db,
+        organization_id=organization_id,
+        overdue_as_of=effective_as_of,
+        overdue_after_days=overdue_after_days,
+        repeat_after_days=repeat_after_days,
+        limit=limit,
+    )
+    invoice_ids: list[UUID] = []
+    subscription_ids: list[UUID] = []
+    delivered_count = 0
+    record_only_count = 0
+    past_due_count = 0
+    skipped_count = 0
+    failed_count = 0
+    severity_counts: dict[str, int] = {}
+    total_outstanding = Decimal("0")
+
+    for invoice in invoices:
+        total_outstanding += money(max(invoice.total - invoice.amount_paid, Decimal("0")))
+        if dry_run:
+            skipped_count += 1
+            continue
+        try:
+            delivery = await deliver_dunning_notice_for_invoice(
+                invoice,
+                invoice.organization_id,
+                selected_settings,
+                as_of=effective_as_of,
+            )
+            invoice_ids.append(invoice.id)
+            subscription_ids.append(invoice.subscription_id)
+            severity = str(delivery["severity"])
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
+            invoice.dunning_count = (invoice.dunning_count or 0) + 1
+            invoice.dunning_last_sent_at = delivery["delivered_at"]
+            invoice.dunning_last_severity = severity
+            if delivery["delivered"]:
+                delivered_count += 1
+            elif delivery["delivery_mode"] == "record_only":
+                record_only_count += 1
+            elif delivery["delivery_attempted"]:
+                failed_count += 1
+            subscription = await db.get(TenantSubscription, invoice.subscription_id)
+            if subscription and subscription.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING}:
+                subscription.status = SubscriptionStatus.PAST_DUE
+                subscription.notes = append_note(
+                    subscription.notes,
+                    f"Marked past_due after {severity} dunning notice for invoice {invoice.invoice_number}.",
+                )
+                past_due_count += 1
+            await db.commit()
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return BillingDunningRunRead(
+        organization_id=organization_id,
+        overdue_as_of=effective_as_of,
+        eligible_count=len(invoices),
+        executed_count=len(invoices) - skipped_count,
+        notice_count=len(invoice_ids),
+        delivered_count=delivered_count,
+        record_only_count=record_only_count,
+        past_due_count=past_due_count,
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        invoice_ids=invoice_ids,
+        subscription_ids=list(dict.fromkeys(subscription_ids)),
+        total_outstanding=money(total_outstanding),
+        severity_counts=severity_counts,
+    )
+
+
+async def invoices_due_for_dunning(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    overdue_as_of: date,
+    overdue_after_days: int,
+    repeat_after_days: int,
+    limit: int,
+) -> list[SaaSInvoice]:
+    cutoff = overdue_as_of - timedelta(days=overdue_after_days)
+    statement = (
+        select(SaaSInvoice)
+        .where(SaaSInvoice.status.in_([BillingInvoiceStatus.OPEN, BillingInvoiceStatus.PARTIAL]))
+        .where(SaaSInvoice.due_on.is_not(None))
+        .where(SaaSInvoice.due_on <= cutoff)
+        .order_by(SaaSInvoice.due_on.asc(), SaaSInvoice.created_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(SaaSInvoice.organization_id == organization_id)
+    rows = list((await db.scalars(statement)).all())
+    repeat_cutoff = overdue_as_of - timedelta(days=repeat_after_days)
+    return [
+        invoice
+        for invoice in rows
+        if invoice.total > invoice.amount_paid
+        and (
+            invoice.dunning_last_sent_at is None
+            or normalize_datetime(invoice.dunning_last_sent_at).date() <= repeat_cutoff
+        )
+    ]
 
 
 async def billing_dunning_headers(settings: Settings) -> dict[str, str]:

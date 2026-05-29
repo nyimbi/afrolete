@@ -113,6 +113,9 @@ class SaaSInvoiceRead(BaseModel):
     status: BillingInvoiceStatus
     line_items: str | None
     external_invoice_id: str | None
+    dunning_count: int
+    dunning_last_sent_at: datetime | None
+    dunning_last_severity: str | None
 
 
 class SaaSPaymentCreate(BaseModel):
@@ -216,6 +219,33 @@ class BillingDunningDeliveryRead(BillingDunningNoticeRead):
     provider_status_code: int | None
     failure_reason: str | None
     delivered_at: datetime
+
+
+class BillingDunningRunCreate(BaseModel):
+    organization_id: UUID
+    overdue_as_of: date | None = None
+    overdue_after_days: int = Field(default=0, ge=0, le=365)
+    repeat_after_days: int = Field(default=7, ge=0, le=365)
+    limit: int = Field(default=100, ge=1, le=1000)
+    dry_run: bool = False
+
+
+class BillingDunningRunRead(BaseModel):
+    organization_id: UUID | None
+    overdue_as_of: date
+    eligible_count: int
+    executed_count: int
+    notice_count: int
+    delivered_count: int
+    record_only_count: int
+    past_due_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool = False
+    invoice_ids: list[UUID]
+    subscription_ids: list[UUID]
+    total_outstanding: Decimal
+    severity_counts: dict[str, int]
 
 
 class BillingPaymentWebhookCreate(BaseModel):
