@@ -63,6 +63,7 @@ export default function AdmissionsPage() {
   const [organizations, setOrganizations] = useState<OrganizationRead[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [inquiries, setInquiries] = useState<RegistrationInquiryRead[]>([]);
+  const [agentTasks, setAgentTasks] = useState<AgentTaskRead[]>([]);
   const [reviewForms, setReviewForms] = useState<Record<string, ReviewForm>>({});
   const [queue, setQueue] = useState<AdmissionQueue>("all");
   const [search, setSearch] = useState("");
@@ -114,6 +115,7 @@ export default function AdmissionsPage() {
   useEffect(() => {
     if (selectedOrganizationId) {
       void loadInquiries(selectedOrganizationId);
+      void loadAgentTasks(selectedOrganizationId);
     }
     // Explicit organization selection drives this load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -229,6 +231,18 @@ export default function AdmissionsPage() {
       setError(caught instanceof Error ? caught.message : "Registration inquiries could not be loaded");
     } finally {
       setBusy("");
+    }
+  };
+
+  const loadAgentTasks = async (organizationId: string) => {
+    try {
+      const loaded = await apiRequest<AgentTaskRead[]>(
+        `/agents/tasks?organization_id=${organizationId}`,
+        { identity: requestIdentity }
+      );
+      setAgentTasks(loaded.filter((task) => task.task_type === "registration_inquiry_review"));
+    } catch {
+      setAgentTasks([]);
     }
   };
 
@@ -358,6 +372,7 @@ export default function AdmissionsPage() {
         `/organizations/${selectedOrganizationId}/registration-inquiries/${inquiry.id}/agent-review`,
         { method: "POST", identity: requestIdentity }
       );
+      setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
       addLog(`AI review queued for ${inquiry.athlete_name}: ${task.status.replaceAll("_", " ")}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "AI review could not be queued");
@@ -522,6 +537,7 @@ export default function AdmissionsPage() {
 
         <section className="admissions-list">
           {filteredInquiries.map((inquiry) => {
+            const aiTask = agentTaskForInquiry(agentTasks, inquiry);
             const form = reviewForms[inquiry.id] ?? {
               status: inquiry.status,
               review_notes: inquiry.review_notes ?? "",
@@ -548,7 +564,26 @@ export default function AdmissionsPage() {
                   <span>{inquiry.packet_complete ? "packet complete" : "packet incomplete"}</span>
                   <span>{inquiry.packet_submitted_at ? `packet ${new Date(inquiry.packet_submitted_at).toLocaleDateString()}` : "packet not submitted"}</span>
                   <span>{inquiry.guardian_contact_status.replaceAll("_", " ")}</span>
+                  {aiTask ? (
+                    <span className="admission-ai-fact">
+                      AI {aiTask.status.replaceAll("_", " ")}
+                      {aiTask.approval_pending_count > 0 ? ` · ${aiTask.approval_pending_count} approvals` : ""}
+                    </span>
+                  ) : (
+                    <span className="admission-ai-fact muted">AI not queued</span>
+                  )}
                 </div>
+                {aiTask ? (
+                  <div className="admission-ai-panel">
+                    <strong>{aiTask.title}</strong>
+                    <span>
+                      {aiTask.governance_policy_code
+                        ? `${aiTask.governance_policy_code} · ${aiTask.governance_policy_decision ?? "governed"}`
+                        : "Governance check passed without a matching policy."}
+                    </span>
+                    {aiTask.governance_policy_rationale ? <small>{aiTask.governance_policy_rationale}</small> : null}
+                  </div>
+                ) : null}
                 {inquiry.missing_documents.length > 0 || inquiry.next_steps.length > 0 ? (
                   <div className="admission-facts">
                     {inquiry.missing_documents.length > 0 ? (
@@ -708,6 +743,11 @@ function familyPortalHref(inquiry: RegistrationInquiryRead): string {
     autoload: "1"
   });
   return `${window.location.origin}/family?${params.toString()}`;
+}
+
+function agentTaskForInquiry(tasks: AgentTaskRead[], inquiry: RegistrationInquiryRead): AgentTaskRead | null {
+  const marker = `registration-inquiry:${inquiry.id};`;
+  return tasks.find((task) => task.input_ref?.includes(marker)) ?? null;
 }
 
 function toDateTimeLocalValue(value: string | null): string {
