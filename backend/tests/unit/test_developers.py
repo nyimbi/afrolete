@@ -2,6 +2,9 @@ import base64
 import hashlib
 from datetime import UTC, datetime, timedelta
 
+from app.core.config import Settings
+from app.services import developer as developer_service
+
 
 def create_developer_org(client, identity_headers):
     response = client.post(
@@ -575,3 +578,59 @@ def test_developer_application_webhook_marketplace_workflow(client, identity_hea
         headers={"X-Afrolete-API-Key": raw_key},
     )
     assert revoked_inspect_response.status_code == 401
+
+
+def test_developer_api_key_uses_distributed_quota_counter(client, identity_headers, monkeypatch) -> None:
+    organization = create_developer_org(client, identity_headers)
+    application = client.post(
+        "/api/v1/developers/applications",
+        json={
+            "organization_id": organization["id"],
+            "name": "Distributed Quota App",
+            "app_type": "server_to_server",
+            "redirect_uris": ["https://quota.example/callback"],
+            "scopes": ["read:organization"],
+            "contact_email": "quota@example.com",
+        },
+        headers=identity_headers,
+    ).json()["application"]
+    limited_key_response = client.post(
+        "/api/v1/developers/api-keys",
+        json={
+            "organization_id": organization["id"],
+            "application_id": application["id"],
+            "name": "Redis Limited SDK Key",
+            "scopes": ["read:organization"],
+            "environment": "sandbox",
+            "rate_limit_per_minute": 1,
+        },
+        headers=identity_headers,
+    )
+    raw_key = limited_key_response.json()["key"]
+    counts = iter([1, 2])
+    observed_key_ids = []
+
+    async def fake_increment(settings, api_key, now):
+        observed_key_ids.append(str(api_key.id))
+        return next(counts), now.replace(second=0, microsecond=0)
+
+    monkeypatch.setattr(
+        developer_service,
+        "get_settings",
+        lambda: Settings(developer_api_quota_counter_mode="redis"),
+    )
+    monkeypatch.setattr(developer_service, "increment_developer_quota_redis", fake_increment)
+
+    first_response = client.get(
+        "/api/v1/sdk/me",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert first_response.status_code == 200
+    assert first_response.json()["quota_counter_mode"] == "redis"
+    assert first_response.json()["window_request_count"] == 1
+    second_response = client.get(
+        "/api/v1/sdk/me",
+        headers={"X-Afrolete-API-Key": raw_key},
+    )
+    assert second_response.status_code == 429
+    assert len(observed_key_ids) == 2

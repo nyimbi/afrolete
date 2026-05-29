@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     temporal_address: str = "127.0.0.1:7233"
     temporal_namespace: str = "default"
     infrastructure_probe_timeout_seconds: float = 1.5
+    developer_api_quota_counter_mode: Literal["database", "redis"] = "database"
+    developer_api_quota_redis_key_prefix: str = "afrolete:developer-api-quota"
 
     communication_delivery_mode: Literal["record_only", "webhook"] = "record_only"
     communication_webhook_url: str = ""

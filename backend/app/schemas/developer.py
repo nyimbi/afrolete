@@ -152,6 +152,7 @@ class DeveloperApiKeyInspectionRead(BaseModel):
     usage_count: int
     window_started_at: datetime | None
     window_request_count: int
+    quota_counter_mode: str = "database"
 
 
 class DeveloperPersonCreate(BaseModel):

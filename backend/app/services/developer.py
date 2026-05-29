@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import json
 import time
@@ -5,7 +6,7 @@ from base64 import urlsafe_b64encode
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlparse
 from uuid import UUID, uuid4
 
 import httpx
@@ -13,6 +14,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.models.developer import (
     DeveloperApiKey,
     DeveloperApplication,
@@ -205,6 +207,7 @@ async def inspect_developer_api_key(
     raw_key: str,
     request_ip: str | None = None,
 ) -> DeveloperApiKeyInspectionRead:
+    settings = get_settings()
     api_key = await authenticate_developer_api_key(db, raw_key, request_ip=request_ip)
     application = await get_developer_application(db, api_key.application_id)
     return DeveloperApiKeyInspectionRead(
@@ -220,6 +223,7 @@ async def inspect_developer_api_key(
         usage_count=api_key.usage_count,
         window_started_at=api_key.window_started_at,
         window_request_count=api_key.window_request_count,
+        quota_counter_mode=settings.developer_api_quota_counter_mode,
     )
 
 
@@ -441,25 +445,146 @@ async def authenticate_developer_api_key(
     application = await get_developer_application(db, api_key.application_id)
     if application.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Developer application is not active")
+    settings = get_settings()
     now = datetime.now(UTC)
-    window_started_at = as_utc(api_key.window_started_at)
-    if window_started_at is None or (now - window_started_at).total_seconds() >= 60:
-        api_key.window_started_at = now
-        api_key.window_request_count = 0
-    if api_key.window_request_count >= api_key.rate_limit_per_minute:
+    if settings.developer_api_quota_counter_mode == "redis":
+        try:
+            request_count, window_started_at = await increment_developer_quota_redis(settings, api_key, now)
+        except HTTPException:
+            raise
+        except Exception:
+            request_count, window_started_at = apply_database_developer_quota_counter(api_key, now)
+    else:
+        request_count, window_started_at = apply_database_developer_quota_counter(api_key, now)
+    api_key.window_started_at = window_started_at
+    api_key.window_request_count = request_count
+    if request_count > api_key.rate_limit_per_minute:
         api_key.last_rate_limited_at = now
         await db.commit()
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Developer API key rate limit exceeded",
         )
-    api_key.window_request_count += 1
     api_key.last_used_at = now
     api_key.last_used_ip = request_ip
     api_key.usage_count += 1
     await db.commit()
     await db.refresh(api_key)
     return api_key
+
+
+def apply_database_developer_quota_counter(api_key: DeveloperApiKey, now: datetime) -> tuple[int, datetime]:
+    window_started_at = as_utc(api_key.window_started_at)
+    if window_started_at is None or (now - window_started_at).total_seconds() >= 60:
+        window_started_at = now
+        request_count = 0
+    else:
+        request_count = int(api_key.window_request_count or 0)
+    return request_count + 1, window_started_at
+
+
+async def increment_developer_quota_redis(
+    settings: Settings,
+    api_key: DeveloperApiKey,
+    now: datetime,
+) -> tuple[int, datetime]:
+    minute_epoch = int(now.timestamp()) // 60
+    window_started_at = datetime.fromtimestamp(minute_epoch * 60, UTC)
+    key = (
+        f"{settings.developer_api_quota_redis_key_prefix}:"
+        f"{api_key.organization_id}:{api_key.id}:{minute_epoch}"
+    )
+    count = int(
+        await redis_command(
+            settings.redis_url,
+            ("INCR", key),
+            timeout_seconds=settings.infrastructure_probe_timeout_seconds,
+        )
+    )
+    if count == 1:
+        await redis_command(
+            settings.redis_url,
+            ("EXPIRE", key, "120"),
+            timeout_seconds=settings.infrastructure_probe_timeout_seconds,
+        )
+    return count, window_started_at
+
+
+async def redis_command(
+    redis_url: str,
+    command: tuple[object, ...],
+    *,
+    timeout_seconds: float,
+) -> object:
+    parsed = urlparse(redis_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 6379
+    db_index = int(parsed.path.strip("/") or "0")
+    use_tls = parsed.scheme == "rediss"
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_connection(host, port, ssl=use_tls),
+        timeout=timeout_seconds,
+    )
+    try:
+        if parsed.password:
+            password = unquote(parsed.password)
+            if parsed.username:
+                await redis_send_command(
+                    reader,
+                    writer,
+                    ("AUTH", unquote(parsed.username), password),
+                    timeout_seconds,
+                )
+            else:
+                await redis_send_command(reader, writer, ("AUTH", password), timeout_seconds)
+        if db_index:
+            await redis_send_command(reader, writer, ("SELECT", str(db_index)), timeout_seconds)
+        return await redis_send_command(reader, writer, command, timeout_seconds)
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
+async def redis_send_command(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    command: tuple[object, ...],
+    timeout_seconds: float,
+) -> object:
+    writer.write(redis_encode_command(command))
+    await asyncio.wait_for(writer.drain(), timeout=timeout_seconds)
+    return await asyncio.wait_for(redis_read_response(reader), timeout=timeout_seconds)
+
+
+def redis_encode_command(command: tuple[object, ...]) -> bytes:
+    chunks = [f"*{len(command)}\r\n".encode()]
+    for item in command:
+        raw = str(item).encode()
+        chunks.append(f"${len(raw)}\r\n".encode())
+        chunks.append(raw)
+        chunks.append(b"\r\n")
+    return b"".join(chunks)
+
+
+async def redis_read_response(reader: asyncio.StreamReader) -> object:
+    line = await reader.readline()
+    if not line:
+        raise RuntimeError("Redis closed the connection")
+    prefix = line[:1]
+    payload = line[1:-2]
+    if prefix == b":":
+        return int(payload)
+    if prefix == b"+":
+        return payload.decode()
+    if prefix == b"$":
+        length = int(payload)
+        if length < 0:
+            return None
+        data = await reader.readexactly(length + 2)
+        return data[:-2].decode()
+    if prefix == b"-":
+        raise RuntimeError(payload.decode())
+    raise RuntimeError("Unsupported Redis response")
 
 
 async def create_developer_webhook_subscription(
@@ -1562,11 +1687,12 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
         DeveloperQuickstartRead(
             title="Inspect an API key",
             language="HTTP",
-            description="Confirm a tenant-issued API key and learn its application, scopes, and quota state.",
+            description="Confirm a tenant-issued API key and learn its application, scopes, quota state, and active counter mode.",
             steps=[
                 "Create or select an active developer application in the tenant console.",
                 "Issue a sandbox API key and copy the raw key immediately.",
                 "Call /api/v1/developers/auth/inspect with X-Afrolete-API-Key.",
+                "Use quota_counter_mode to confirm whether the deployment is enforcing database or Redis-backed counters.",
             ],
             code_sample=(
                 "curl -s \"$AFROLETE_API/api/v1/developers/auth/inspect\" \\\n"

@@ -177,8 +177,8 @@ Major capability areas include:
   delivery, artifact storage, signed links, chart-ready summaries, deterministic
   AI insights, and export jobs.
 - Integrations and developer platform: API keys, OAuth-style consent grants,
-  SDK routes, marketplace listings, webhooks, replay, retry workers, quotas, and
-  integration catalogs.
+  SDK routes, marketplace listings, webhooks, replay, retry workers, database or
+  Redis-backed quotas, and integration catalogs.
 - SaaS billing and subscriptions: plans, tenant subscriptions, lifecycle
   actions, entitlements, enforcement, metering, recurring invoices, dunning,
   late fees, payment retries, checkout links, tax, provider webhooks, and
