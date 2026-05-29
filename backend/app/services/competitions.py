@@ -519,7 +519,7 @@ async def optimize_competition_schedule(
     unchanged = 0
     last_team_time: dict[UUID, datetime] = {}
     venue_available_at: dict[str, datetime] = {}
-    next_slot = payload.starts_at
+    next_slot = normalized_schedule_datetime(payload.starts_at)
     for fixture in fixtures:
         if payload.preserve_final_results and fixture.status == FixtureStatus.FINAL:
             protected_finals += 1
@@ -934,6 +934,7 @@ def optimized_fixture_time(
     venue_available_at: dict[str, datetime],
     team_rest_minutes: int,
 ) -> datetime:
+    candidate = normalized_schedule_datetime(candidate)
     for team_id in (fixture.home_team_id, fixture.away_team_id):
         if team_id in last_team_time:
             candidate = max(candidate, last_team_time[team_id] + timedelta(minutes=team_rest_minutes))
@@ -948,10 +949,17 @@ def remember_schedule_constraint(
     venue_available_at: dict[str, datetime],
     match_spacing_minutes: int,
 ) -> None:
-    last_team_time[fixture.home_team_id] = fixture.scheduled_at
-    last_team_time[fixture.away_team_id] = fixture.scheduled_at
+    scheduled_at = normalized_schedule_datetime(fixture.scheduled_at)
+    last_team_time[fixture.home_team_id] = scheduled_at
+    last_team_time[fixture.away_team_id] = scheduled_at
     if fixture.venue_name:
-        venue_available_at[fixture.venue_name] = fixture.scheduled_at + timedelta(minutes=match_spacing_minutes)
+        venue_available_at[fixture.venue_name] = scheduled_at + timedelta(minutes=match_spacing_minutes)
+
+
+def normalized_schedule_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def fixture_schedule_notes(existing: str | None) -> str:
