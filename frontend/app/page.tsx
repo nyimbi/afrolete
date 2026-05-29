@@ -356,6 +356,8 @@ import type {
   UsageUnit,
   VolunteerAssignmentRead,
   VolunteerGroupApplicationRead,
+  VolunteerNeedRequestRead,
+  VolunteerObligationRead,
   VolunteerOpportunityRead,
   VolunteerProfileRead,
   VolunteerRecognitionRead,
@@ -1627,6 +1629,8 @@ export default function HomePage() {
   const [volunteerOpportunities, setVolunteerOpportunities] = useState<VolunteerOpportunityRead[]>([]);
   const [volunteerAssignments, setVolunteerAssignments] = useState<VolunteerAssignmentRead[]>([]);
   const [volunteerGroupApplications, setVolunteerGroupApplications] = useState<VolunteerGroupApplicationRead[]>([]);
+  const [volunteerNeedRequests, setVolunteerNeedRequests] = useState<VolunteerNeedRequestRead[]>([]);
+  const [volunteerObligations, setVolunteerObligations] = useState<VolunteerObligationRead[]>([]);
   const [volunteerTrainingRecords, setVolunteerTrainingRecords] = useState<VolunteerTrainingRecordRead[]>([]);
   const [volunteerRecognitions, setVolunteerRecognitions] = useState<VolunteerRecognitionRead[]>([]);
   const [volunteerSummary, setVolunteerSummary] = useState<VolunteerSummaryRead | null>(null);
@@ -2211,6 +2215,26 @@ export default function HomePage() {
     background_check_required: true,
     training_required: true,
     priority: "high"
+  });
+  const [volunteerNeedForm, setVolunteerNeedForm] = useState({
+    title: "Snack table support",
+    role_type: "event_staff",
+    needed_count: 3,
+    required_skills: "food service,cash handling",
+    needed_by: "2026-10-10T08:00",
+    priority: "high",
+    notes: "Coach needs family volunteers for event support.",
+    create_opportunity: true
+  });
+  const [volunteerObligationForm, setVolunteerObligationForm] = useState({
+    email: "parent.service@example.com",
+    display_name: "Parent Service",
+    season_label: "2026 fall",
+    required_hours: 12,
+    completed_hours: 4,
+    waived_hours: 0,
+    due_on: "2026-12-15",
+    notes: "Family volunteer service obligation."
   });
   const [volunteerTrainingForm, setVolunteerTrainingForm] = useState({
     module_name: "Safeguarding for Matchday Volunteers",
@@ -3141,6 +3165,8 @@ export default function HomePage() {
       opportunities,
       assignments,
       groupApplications,
+      needRequests,
+      obligations,
       trainingRecords,
       recognitions,
       summary
@@ -3149,6 +3175,8 @@ export default function HomePage() {
       apiRequest<VolunteerOpportunityRead[]>(`/volunteers/opportunities?organization_id=${organizationId}${teamQuery}`),
       apiRequest<VolunteerAssignmentRead[]>(`/volunteers/assignments?organization_id=${organizationId}`),
       apiRequest<VolunteerGroupApplicationRead[]>(`/volunteers/group-applications?organization_id=${organizationId}`),
+      apiRequest<VolunteerNeedRequestRead[]>(`/volunteers/need-requests?organization_id=${organizationId}`),
+      apiRequest<VolunteerObligationRead[]>(`/volunteers/obligations?organization_id=${organizationId}`),
       apiRequest<VolunteerTrainingRecordRead[]>(`/volunteers/training-records?organization_id=${organizationId}`),
       apiRequest<VolunteerRecognitionRead[]>(`/volunteers/recognitions?organization_id=${organizationId}`),
       apiRequest<VolunteerSummaryRead>(`/volunteers/summary?organization_id=${organizationId}`)
@@ -3157,6 +3185,8 @@ export default function HomePage() {
     setVolunteerOpportunities(opportunities);
     setVolunteerAssignments(assignments);
     setVolunteerGroupApplications(groupApplications);
+    setVolunteerNeedRequests(needRequests);
+    setVolunteerObligations(obligations);
     setVolunteerTrainingRecords(trainingRecords);
     setVolunteerRecognitions(recognitions);
     setVolunteerSummary(summary);
@@ -3692,6 +3722,8 @@ export default function HomePage() {
       setVolunteerOpportunities([]);
       setVolunteerAssignments([]);
       setVolunteerGroupApplications([]);
+      setVolunteerNeedRequests([]);
+      setVolunteerObligations([]);
       setVolunteerTrainingRecords([]);
       setVolunteerRecognitions([]);
       setVolunteerSummary(null);
@@ -9764,6 +9796,72 @@ export default function HomePage() {
         ]);
         setSelectedVolunteerOpportunityId(opportunity.id);
         addLog(`${opportunity.title} needs ${opportunity.slots_required} volunteer slot(s)`, "good");
+      }
+    );
+  };
+
+  const createVolunteerNeedRequest = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-volunteer-need",
+      () =>
+        apiRequest<VolunteerNeedRequestRead>("/volunteers/need-requests", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            event_id: selectedEventId || null,
+            title: volunteerNeedForm.title,
+            role_type: volunteerNeedForm.role_type,
+            needed_count: volunteerNeedForm.needed_count,
+            required_skills: parseCommaList(volunteerNeedForm.required_skills),
+            needed_by: volunteerNeedForm.needed_by ? new Date(volunteerNeedForm.needed_by).toISOString() : null,
+            priority: volunteerNeedForm.priority,
+            notes: volunteerNeedForm.notes,
+            create_opportunity: volunteerNeedForm.create_opportunity
+          }
+        }),
+      (request) => {
+        setVolunteerNeedRequests((current) => [request, ...current.filter((item) => item.id !== request.id)]);
+        addLog(`${request.title} need recorded for ${request.needed_count} volunteer(s)`, "good");
+        void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const createVolunteerObligation = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-volunteer-obligation",
+      () =>
+        apiRequest<VolunteerObligationRead>("/volunteers/obligations", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || null,
+            email: volunteerObligationForm.email,
+            display_name: volunteerObligationForm.display_name,
+            season_label: volunteerObligationForm.season_label,
+            category: "family_service",
+            required_hours: volunteerObligationForm.required_hours,
+            completed_hours: volunteerObligationForm.completed_hours,
+            waived_hours: volunteerObligationForm.waived_hours,
+            due_on: volunteerObligationForm.due_on || null,
+            notes: volunteerObligationForm.notes
+          }
+        }),
+      (obligation) => {
+        setVolunteerObligations((current) => [obligation, ...current.filter((item) => item.id !== obligation.id)]);
+        addLog(`${obligation.person_name} has ${obligation.remaining_hours} service hour(s) remaining`, "good");
+        void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
       }
     );
   };
@@ -18655,6 +18753,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createVolunteerProfile} disabled={busyAction !== null}>Profile</button>
+                <button type="button" onClick={createVolunteerObligation} disabled={busyAction !== null}>Obligation</button>
                 <button type="button" onClick={createVolunteerTrainingRecord} disabled={busyAction !== null}>Training</button>
                 <button type="button" onClick={createVolunteerRecognition} disabled={busyAction !== null}>Award</button>
               </div>
@@ -18671,6 +18770,12 @@ export default function HomePage() {
                 <small>
                   {volunteerSummary.pending_group_applications} group applications ·{" "}
                   {volunteerSummary.approved_group_slots} corporate slots approved
+                </small>
+              ) : null}
+              {volunteerSummary ? (
+                <small>
+                  {volunteerSummary.open_need_requests} team needs ·{" "}
+                  {volunteerSummary.obligation_deficit_hours} family hours remaining
                 </small>
               ) : null}
             </div>
@@ -18711,6 +18816,38 @@ export default function HomePage() {
               <label className="wide-field">
                 Availability
                 <input value={volunteerForm.availability} onChange={(event) => setVolunteerForm({ ...volunteerForm, availability: event.target.value })} />
+              </label>
+              <label>
+                Family email
+                <input value={volunteerObligationForm.email} onChange={(event) => setVolunteerObligationForm({ ...volunteerObligationForm, email: event.target.value })} />
+              </label>
+              <label>
+                Family name
+                <input value={volunteerObligationForm.display_name} onChange={(event) => setVolunteerObligationForm({ ...volunteerObligationForm, display_name: event.target.value })} />
+              </label>
+              <label>
+                Season
+                <input value={volunteerObligationForm.season_label} onChange={(event) => setVolunteerObligationForm({ ...volunteerObligationForm, season_label: event.target.value })} />
+              </label>
+              <label>
+                Required hours
+                <input type="number" min="0" value={volunteerObligationForm.required_hours} onChange={(event) => setVolunteerObligationForm({ ...volunteerObligationForm, required_hours: Number(event.target.value) })} />
+              </label>
+              <label>
+                Completed hours
+                <input type="number" min="0" value={volunteerObligationForm.completed_hours} onChange={(event) => setVolunteerObligationForm({ ...volunteerObligationForm, completed_hours: Number(event.target.value) })} />
+              </label>
+              <label>
+                Waived hours
+                <input type="number" min="0" value={volunteerObligationForm.waived_hours} onChange={(event) => setVolunteerObligationForm({ ...volunteerObligationForm, waived_hours: Number(event.target.value) })} />
+              </label>
+              <label>
+                Due date
+                <input type="date" value={volunteerObligationForm.due_on} onChange={(event) => setVolunteerObligationForm({ ...volunteerObligationForm, due_on: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Obligation notes
+                <input value={volunteerObligationForm.notes} onChange={(event) => setVolunteerObligationForm({ ...volunteerObligationForm, notes: event.target.value })} />
               </label>
               <label>
                 Training module
@@ -18759,6 +18896,15 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {volunteerObligations.slice(0, 4).map((obligation) => (
+                <article key={obligation.id} className="task-card">
+                  <div>
+                    <strong>{obligation.person_name} · {obligation.season_label}</strong>
+                    <span>{obligation.remaining_hours} remaining of {obligation.required_hours} required hours</span>
+                    <small>{obligation.status} · due {obligation.due_on ?? "not set"}</small>
+                  </div>
+                </article>
+              ))}
             </div>
           </div>
 
@@ -18770,6 +18916,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createVolunteerOpportunity} disabled={busyAction !== null}>Shift</button>
+                <button type="button" onClick={createVolunteerNeedRequest} disabled={busyAction !== null}>Need</button>
                 <button type="button" onClick={assignVolunteer} disabled={busyAction !== null}>Assign</button>
                 <button type="button" onClick={completeVolunteerAssignment} disabled={busyAction !== null}>Complete</button>
               </div>
@@ -18820,8 +18967,53 @@ export default function HomePage() {
                 Location
                 <input value={volunteerOpportunityForm.location} onChange={(event) => setVolunteerOpportunityForm({ ...volunteerOpportunityForm, location: event.target.value })} />
               </label>
+              <label>
+                Team need
+                <input value={volunteerNeedForm.title} onChange={(event) => setVolunteerNeedForm({ ...volunteerNeedForm, title: event.target.value })} />
+              </label>
+              <label>
+                Need role
+                <input value={volunteerNeedForm.role_type} onChange={(event) => setVolunteerNeedForm({ ...volunteerNeedForm, role_type: event.target.value })} />
+              </label>
+              <label>
+                Need count
+                <input type="number" min="1" value={volunteerNeedForm.needed_count} onChange={(event) => setVolunteerNeedForm({ ...volunteerNeedForm, needed_count: Number(event.target.value) })} />
+              </label>
+              <label>
+                Needed by
+                <input type="datetime-local" value={volunteerNeedForm.needed_by} onChange={(event) => setVolunteerNeedForm({ ...volunteerNeedForm, needed_by: event.target.value })} />
+              </label>
+              <label>
+                Need priority
+                <select value={volunteerNeedForm.priority} onChange={(event) => setVolunteerNeedForm({ ...volunteerNeedForm, priority: event.target.value })}>
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </label>
+              <label>
+                Create shift
+                <input type="checkbox" checked={volunteerNeedForm.create_opportunity} onChange={(event) => setVolunteerNeedForm({ ...volunteerNeedForm, create_opportunity: event.target.checked })} />
+              </label>
+              <label className="wide-field">
+                Need skills
+                <input value={volunteerNeedForm.required_skills} onChange={(event) => setVolunteerNeedForm({ ...volunteerNeedForm, required_skills: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Need notes
+                <input value={volunteerNeedForm.notes} onChange={(event) => setVolunteerNeedForm({ ...volunteerNeedForm, notes: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
+              {volunteerNeedRequests.slice(0, 4).map((request) => (
+                <article key={request.id} className="task-card">
+                  <div>
+                    <strong>{request.title} · {request.needed_count} needed</strong>
+                    <span>{request.role_type.replaceAll("_", " ")} · {request.priority} · {request.status}</span>
+                    <small>{request.required_skills.join(", ") || "No required skills"}</small>
+                  </div>
+                </article>
+              ))}
               {volunteerOpportunities.slice(0, 5).map((opportunity) => (
                 <article
                   key={opportunity.id}

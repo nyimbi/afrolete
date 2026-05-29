@@ -457,6 +457,23 @@ export type VolunteerOpportunityRead = {
   status: string;
 };
 
+export type VolunteerNeedRequestRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  event_id: UUID | null;
+  requested_by_person_id: UUID | null;
+  title: string;
+  role_type: string;
+  needed_count: number;
+  required_skills: string[];
+  needed_by: string | null;
+  priority: string;
+  status: string;
+  notes: string | null;
+  opportunity_id: UUID | null;
+};
+
 export type PublicVolunteerSignupRead = {
   organization_id: UUID;
   opportunity_id: UUID;
@@ -527,6 +544,24 @@ export type VolunteerTrainingRecordRead = {
   certificate_url: string | null;
 };
 
+export type VolunteerObligationRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  person_email: string | null;
+  team_id: UUID | null;
+  season_label: string;
+  category: string;
+  required_hours: number;
+  completed_hours: number;
+  waived_hours: number;
+  remaining_hours: number;
+  due_on: string | null;
+  status: string;
+  notes: string | null;
+};
+
 export type VolunteerRecognitionRead = {
   id: UUID;
   organization_id: UUID;
@@ -548,6 +583,8 @@ export type VolunteerSummaryRead = {
   confirmed_shifts: number;
   pending_group_applications: number;
   approved_group_slots: number;
+  open_need_requests: number;
+  obligation_deficit_hours: number;
   completed_hours: number;
   training_compliance_percent: number;
   coverage_percent: number;

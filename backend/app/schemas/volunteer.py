@@ -84,6 +84,43 @@ class VolunteerOpportunityRead(BaseModel):
     status: str
 
 
+class VolunteerNeedRequestCreate(BaseModel):
+    organization_id: UUID
+    team_id: UUID | None = None
+    event_id: UUID | None = None
+    title: str = Field(min_length=2, max_length=240)
+    role_type: str = Field(min_length=2, max_length=80)
+    needed_count: int = Field(default=1, ge=1, le=500)
+    required_skills: list[str] = Field(default_factory=list, max_length=40)
+    needed_by: datetime | None = None
+    priority: str = Field(default="normal", max_length=40)
+    notes: str | None = Field(default=None, max_length=4000)
+    create_opportunity: bool = False
+
+
+class VolunteerNeedRequestUpdate(BaseModel):
+    status: str | None = Field(default=None, max_length=40)
+    opportunity_id: UUID | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class VolunteerNeedRequestRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    team_id: UUID | None
+    event_id: UUID | None
+    requested_by_person_id: UUID | None
+    title: str
+    role_type: str
+    needed_count: int
+    required_skills: list[str]
+    needed_by: datetime | None
+    priority: str
+    status: str
+    notes: str | None
+    opportunity_id: UUID | None
+
+
 class PublicVolunteerSignupCreate(BaseModel):
     opportunity_id: UUID
     display_name: str = Field(min_length=2, max_length=240)
@@ -215,6 +252,46 @@ class VolunteerTrainingRecordRead(BaseModel):
     certificate_url: str | None
 
 
+class VolunteerObligationCreate(BaseModel):
+    organization_id: UUID
+    person_id: UUID | None = None
+    email: str | None = Field(default=None, max_length=320)
+    display_name: str | None = Field(default=None, min_length=2, max_length=240)
+    team_id: UUID | None = None
+    season_label: str = Field(min_length=2, max_length=80)
+    category: str = Field(default="family_service", max_length=80)
+    required_hours: float = Field(ge=0, le=10_000)
+    completed_hours: float = Field(default=0, ge=0, le=10_000)
+    waived_hours: float = Field(default=0, ge=0, le=10_000)
+    due_on: date | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class VolunteerObligationUpdate(BaseModel):
+    completed_hours: float | None = Field(default=None, ge=0, le=10_000)
+    waived_hours: float | None = Field(default=None, ge=0, le=10_000)
+    status: str | None = Field(default=None, max_length=40)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class VolunteerObligationRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    person_id: UUID
+    person_name: str
+    person_email: str | None
+    team_id: UUID | None
+    season_label: str
+    category: str
+    required_hours: float
+    completed_hours: float
+    waived_hours: float
+    remaining_hours: float
+    due_on: date | None
+    status: str
+    notes: str | None
+
+
 class VolunteerRecognitionCreate(BaseModel):
     organization_id: UUID
     volunteer_profile_id: UUID
@@ -247,6 +324,8 @@ class VolunteerSummaryRead(BaseModel):
     confirmed_shifts: int
     pending_group_applications: int
     approved_group_slots: int
+    open_need_requests: int
+    obligation_deficit_hours: float
     completed_hours: float
     training_compliance_percent: float
     coverage_percent: float

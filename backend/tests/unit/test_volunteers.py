@@ -381,3 +381,117 @@ def test_corporate_volunteer_group_application_review(client, identity_headers) 
     ).json()
     assert summary["pending_group_applications"] == 0
     assert summary["approved_group_slots"] == 6
+
+
+def test_team_needs_and_family_volunteer_obligations(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Family Volunteer Association",
+            "slug": "family-volunteer-association",
+            "organization_type": "club",
+            "primary_sport": "football",
+        },
+    ).json()
+    team = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "U13 Families",
+            "sport": "football",
+            "sport_format": "team",
+        },
+    ).json()
+    event = client.post(
+        "/api/v1/events",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "event_type": "match",
+            "title": "Family Service Match",
+            "starts_at": "2026-10-10T09:00:00Z",
+            "ends_at": "2026-10-10T12:00:00Z",
+            "venue_name": "Family Ground",
+        },
+    ).json()
+
+    need_response = client.post(
+        "/api/v1/volunteers/need-requests",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "event_id": event["id"],
+            "title": "Snack table support",
+            "role_type": "event_staff",
+            "needed_count": 3,
+            "required_skills": ["food service", "cash handling"],
+            "needed_by": "2026-10-10T08:00:00Z",
+            "priority": "high",
+            "notes": "Coach needs family volunteers for the snack table.",
+            "create_opportunity": True,
+        },
+    )
+
+    assert need_response.status_code == 201
+    need = need_response.json()
+    assert need["status"] == "converted"
+    assert need["opportunity_id"] is not None
+    assert need["needed_count"] == 3
+
+    needs = client.get(
+        f"/api/v1/volunteers/need-requests?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert needs[0]["title"] == "Snack table support"
+
+    obligation_response = client.post(
+        "/api/v1/volunteers/obligations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "email": "parent.service@example.com",
+            "display_name": "Parent Service",
+            "season_label": "2026 fall",
+            "category": "family_service",
+            "required_hours": 12,
+            "completed_hours": 4,
+            "waived_hours": 1,
+            "due_on": "2026-12-15",
+            "notes": "Family service commitment for the fall season.",
+        },
+    )
+
+    assert obligation_response.status_code == 201
+    obligation = obligation_response.json()
+    assert obligation["person_name"] == "Parent Service"
+    assert obligation["remaining_hours"] == 7
+    assert obligation["status"] == "open"
+
+    update_response = client.patch(
+        f"/api/v1/volunteers/obligations/{obligation['id']}",
+        headers=identity_headers,
+        json={"completed_hours": 11, "waived_hours": 1},
+    )
+
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["remaining_hours"] == 0
+    assert updated["status"] == "complete"
+
+    obligations = client.get(
+        f"/api/v1/volunteers/obligations?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert obligations[0]["person_email"] == "parent.service@example.com"
+
+    summary = client.get(
+        f"/api/v1/volunteers/summary?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert summary["open_need_requests"] == 0
+    assert summary["obligation_deficit_hours"] == 0

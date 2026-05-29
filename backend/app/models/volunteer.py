@@ -51,6 +51,24 @@ class VolunteerOpportunity(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
 
 
+class VolunteerNeedRequest(IdMixin, TimestampMixin, Base):
+    __tablename__ = "volunteer_need_requests"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), nullable=False, index=True)
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    requested_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    role_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    needed_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    required_skills_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    needed_by: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    priority: Mapped[str] = mapped_column(String(40), default="normal", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="requested", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    opportunity_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("volunteer_opportunities.id"), index=True)
+
+
 class VolunteerAssignment(IdMixin, TimestampMixin, Base):
     __tablename__ = "volunteer_assignments"
     __table_args__ = (
@@ -107,6 +125,31 @@ class VolunteerTrainingRecord(IdMixin, TimestampMixin, Base):
     expires_on: Mapped[date | None] = mapped_column(Date, index=True)
     score: Mapped[float | None] = mapped_column(Float)
     certificate_url: Mapped[str | None] = mapped_column(String(500))
+
+
+class VolunteerObligation(IdMixin, TimestampMixin, Base):
+    __tablename__ = "volunteer_obligations"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "person_id",
+            "season_label",
+            "category",
+            name="uq_volunteer_obligations_org_person_season_category",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), nullable=False, index=True)
+    person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), nullable=False, index=True)
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    season_label: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(80), default="family_service", nullable=False, index=True)
+    required_hours: Mapped[float] = mapped_column(Float, nullable=False)
+    completed_hours: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    waived_hours: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    due_on: Mapped[date | None] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 class VolunteerRecognition(IdMixin, TimestampMixin, Base):

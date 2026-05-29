@@ -13,6 +13,12 @@ from app.schemas.volunteer import (
     VolunteerAssignmentUpdate,
     VolunteerGroupApplicationRead,
     VolunteerGroupApplicationUpdate,
+    VolunteerNeedRequestCreate,
+    VolunteerNeedRequestRead,
+    VolunteerNeedRequestUpdate,
+    VolunteerObligationCreate,
+    VolunteerObligationRead,
+    VolunteerObligationUpdate,
     VolunteerOpportunityCreate,
     VolunteerOpportunityRead,
     VolunteerProfileCreate,
@@ -30,6 +36,8 @@ from app.services.volunteers import (
     create_public_volunteer_group_application,
     create_public_volunteer_signup,
     create_volunteer_assignment,
+    create_volunteer_need_request,
+    create_volunteer_obligation,
     create_volunteer_opportunity,
     create_volunteer_profile,
     create_volunteer_recognition,
@@ -40,10 +48,14 @@ from app.services.volunteers import (
     list_volunteer_group_applications,
     list_volunteer_assignments,
     list_volunteer_opportunities,
+    list_volunteer_need_requests,
+    list_volunteer_obligations,
     list_volunteer_profiles,
     list_volunteer_recognitions,
     list_volunteer_training_records,
     update_volunteer_group_application,
+    update_volunteer_need_request,
+    update_volunteer_obligation,
     update_volunteer_assignment,
     volunteer_summary,
 )
@@ -119,6 +131,25 @@ def to_assignment_read(item) -> VolunteerAssignmentRead:
     )
 
 
+def to_need_request_read(request) -> VolunteerNeedRequestRead:
+    return VolunteerNeedRequestRead(
+        id=request.id,
+        organization_id=request.organization_id,
+        team_id=request.team_id,
+        event_id=request.event_id,
+        requested_by_person_id=request.requested_by_person_id,
+        title=request.title,
+        role_type=request.role_type,
+        needed_count=request.needed_count,
+        required_skills=decode_list(request.required_skills_json),
+        needed_by=request.needed_by,
+        priority=request.priority,
+        status=request.status,
+        notes=request.notes,
+        opportunity_id=request.opportunity_id,
+    )
+
+
 def to_training_read(record) -> VolunteerTrainingRecordRead:
     return VolunteerTrainingRecordRead(
         id=record.id,
@@ -133,6 +164,27 @@ def to_training_read(record) -> VolunteerTrainingRecordRead:
         expires_on=record.expires_on,
         score=record.score,
         certificate_url=record.certificate_url,
+    )
+
+
+def to_obligation_read(item) -> VolunteerObligationRead:
+    obligation, person = item
+    return VolunteerObligationRead(
+        id=obligation.id,
+        organization_id=obligation.organization_id,
+        person_id=obligation.person_id,
+        person_name=person.display_name,
+        person_email=person.primary_email,
+        team_id=obligation.team_id,
+        season_label=obligation.season_label,
+        category=obligation.category,
+        required_hours=obligation.required_hours,
+        completed_hours=obligation.completed_hours,
+        waived_hours=obligation.waived_hours,
+        remaining_hours=max(obligation.required_hours - obligation.completed_hours - obligation.waived_hours, 0),
+        due_on=obligation.due_on,
+        status=obligation.status,
+        notes=obligation.notes,
     )
 
 
@@ -301,6 +353,38 @@ async def list_volunteer_assignments_route(
     return [to_assignment_read(item) for item in await list_volunteer_assignments(db, organization_id)]
 
 
+@router.post("/need-requests", response_model=VolunteerNeedRequestRead, status_code=status.HTTP_201_CREATED)
+async def create_volunteer_need_request_route(
+    payload: VolunteerNeedRequestCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> VolunteerNeedRequestRead:
+    return to_need_request_read(await create_volunteer_need_request(db, identity, payload, authz))
+
+
+@router.get("/need-requests", response_model=list[VolunteerNeedRequestRead])
+async def list_volunteer_need_requests_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[VolunteerNeedRequestRead]:
+    await ensure_manage_volunteers(authz, identity, organization_id)
+    return [to_need_request_read(request) for request in await list_volunteer_need_requests(db, organization_id)]
+
+
+@router.patch("/need-requests/{request_id}", response_model=VolunteerNeedRequestRead)
+async def update_volunteer_need_request_route(
+    request_id: UUID,
+    payload: VolunteerNeedRequestUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> VolunteerNeedRequestRead:
+    return to_need_request_read(await update_volunteer_need_request(db, identity, request_id, payload, authz))
+
+
 @router.get("/group-applications", response_model=list[VolunteerGroupApplicationRead])
 async def list_volunteer_group_applications_route(
     organization_id: UUID = Query(),
@@ -323,6 +407,42 @@ async def update_volunteer_group_application_route(
     application = await update_volunteer_group_application(db, identity, application_id, payload, authz)
     rows = await list_volunteer_group_applications(db, application.organization_id)
     return to_group_application_read(next(item for item in rows if item[0].id == application.id))
+
+
+@router.post("/obligations", response_model=VolunteerObligationRead, status_code=status.HTTP_201_CREATED)
+async def create_volunteer_obligation_route(
+    payload: VolunteerObligationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> VolunteerObligationRead:
+    obligation = await create_volunteer_obligation(db, identity, payload, authz)
+    rows = await list_volunteer_obligations(db, payload.organization_id)
+    return to_obligation_read(next(item for item in rows if item[0].id == obligation.id))
+
+
+@router.get("/obligations", response_model=list[VolunteerObligationRead])
+async def list_volunteer_obligations_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[VolunteerObligationRead]:
+    await ensure_manage_volunteers(authz, identity, organization_id)
+    return [to_obligation_read(item) for item in await list_volunteer_obligations(db, organization_id)]
+
+
+@router.patch("/obligations/{obligation_id}", response_model=VolunteerObligationRead)
+async def update_volunteer_obligation_route(
+    obligation_id: UUID,
+    payload: VolunteerObligationUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> VolunteerObligationRead:
+    obligation = await update_volunteer_obligation(db, identity, obligation_id, payload, authz)
+    rows = await list_volunteer_obligations(db, obligation.organization_id)
+    return to_obligation_read(next(item for item in rows if item[0].id == obligation.id))
 
 
 @router.post("/training-records", response_model=VolunteerTrainingRecordRead, status_code=status.HTTP_201_CREATED)

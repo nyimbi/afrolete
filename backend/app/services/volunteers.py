@@ -15,6 +15,8 @@ from app.models.team import Team
 from app.models.volunteer import (
     VolunteerAssignment,
     VolunteerGroupApplication,
+    VolunteerNeedRequest,
+    VolunteerObligation,
     VolunteerOpportunity,
     VolunteerProfile,
     VolunteerRecognition,
@@ -26,6 +28,10 @@ from app.schemas.volunteer import (
     VolunteerAssignmentCreate,
     VolunteerAssignmentUpdate,
     VolunteerGroupApplicationUpdate,
+    VolunteerNeedRequestCreate,
+    VolunteerNeedRequestUpdate,
+    VolunteerObligationCreate,
+    VolunteerObligationUpdate,
     VolunteerOpportunityCreate,
     VolunteerProfileCreate,
     VolunteerRecognitionCreate,
@@ -129,6 +135,31 @@ async def get_or_create_volunteer_person(db: AsyncSession, payload: VolunteerPro
         person = Person(
             display_name=payload.display_name or payload.email.split("@")[0],
             primary_email=payload.email.lower(),
+        )
+        db.add(person)
+        await db.flush()
+    return person
+
+
+async def get_or_create_person_by_contact(
+    db: AsyncSession,
+    *,
+    person_id: UUID | None,
+    email: str | None,
+    display_name: str | None,
+) -> Person:
+    if person_id is not None:
+        person = await db.get(Person, person_id)
+        if person is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+        return person
+    if not email:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Person email required")
+    person = await db.scalar(select(Person).where(Person.primary_email == email.lower()))
+    if person is None:
+        person = Person(
+            display_name=display_name or email.split("@")[0],
+            primary_email=email.lower(),
         )
         db.add(person)
         await db.flush()
@@ -286,6 +317,98 @@ async def list_volunteer_opportunities(
     if team_id is not None:
         statement = statement.where(VolunteerOpportunity.team_id == team_id)
     return list((await db.execute(statement)).all())
+
+
+async def create_volunteer_need_request(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: VolunteerNeedRequestCreate,
+    authz: AuthorizationService,
+) -> VolunteerNeedRequest:
+    await ensure_manage_volunteers(authz, identity, payload.organization_id)
+    await ensure_volunteer_scope(db, payload.organization_id, payload.team_id, payload.event_id)
+    opportunity_id: UUID | None = None
+    status_value = "requested"
+    if payload.create_opportunity:
+        starts_at = payload.needed_by or datetime.now(UTC)
+        opportunity = VolunteerOpportunity(
+            organization_id=payload.organization_id,
+            team_id=payload.team_id,
+            event_id=payload.event_id,
+            title=payload.title,
+            role_type=payload.role_type,
+            description=payload.notes,
+            required_skills_json=encode_list(payload.required_skills),
+            starts_at=starts_at,
+            ends_at=None,
+            slots_required=payload.needed_count,
+            priority=payload.priority,
+        )
+        db.add(opportunity)
+        await db.flush()
+        opportunity_id = opportunity.id
+        status_value = "converted"
+    request = VolunteerNeedRequest(
+        organization_id=payload.organization_id,
+        team_id=payload.team_id,
+        event_id=payload.event_id,
+        requested_by_person_id=identity.person_id,
+        title=payload.title,
+        role_type=payload.role_type,
+        needed_count=payload.needed_count,
+        required_skills_json=encode_list(payload.required_skills),
+        needed_by=payload.needed_by,
+        priority=payload.priority,
+        status=status_value,
+        notes=payload.notes,
+        opportunity_id=opportunity_id,
+    )
+    db.add(request)
+    await db.commit()
+    await db.refresh(request)
+    return request
+
+
+async def list_volunteer_need_requests(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[VolunteerNeedRequest]:
+    return list(
+        (
+            await db.scalars(
+                select(VolunteerNeedRequest)
+                .where(VolunteerNeedRequest.organization_id == organization_id)
+                .order_by(VolunteerNeedRequest.created_at.desc())
+            )
+        ).all()
+    )
+
+
+async def update_volunteer_need_request(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    request_id: UUID,
+    payload: VolunteerNeedRequestUpdate,
+    authz: AuthorizationService,
+) -> VolunteerNeedRequest:
+    request = await db.get(VolunteerNeedRequest, request_id)
+    if request is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Need request not found")
+    await ensure_manage_volunteers(authz, identity, request.organization_id)
+    if payload.opportunity_id is not None:
+        opportunity = await get_volunteer_opportunity(db, payload.opportunity_id)
+        if opportunity.organization_id != request.organization_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+        request.opportunity_id = opportunity.id
+        if request.status == "requested":
+            request.status = "converted"
+    if payload.status is not None:
+        request.status = payload.status
+    if payload.notes is not None:
+        request.notes = payload.notes
+    await db.commit()
+    await db.refresh(request)
+    return request
 
 
 async def list_public_volunteer_opportunities(
@@ -697,6 +820,99 @@ async def list_volunteer_training_records(db: AsyncSession, organization_id: UUI
     )
 
 
+async def create_volunteer_obligation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: VolunteerObligationCreate,
+    authz: AuthorizationService,
+) -> VolunteerObligation:
+    await ensure_manage_volunteers(authz, identity, payload.organization_id)
+    await ensure_volunteer_scope(db, payload.organization_id, payload.team_id)
+    person = await get_or_create_person_by_contact(
+        db,
+        person_id=payload.person_id,
+        email=payload.email,
+        display_name=payload.display_name,
+    )
+    obligation = await db.scalar(
+        select(VolunteerObligation).where(
+            VolunteerObligation.organization_id == payload.organization_id,
+            VolunteerObligation.person_id == person.id,
+            VolunteerObligation.season_label == payload.season_label,
+            VolunteerObligation.category == payload.category,
+        )
+    )
+    if obligation is None:
+        obligation = VolunteerObligation(
+            organization_id=payload.organization_id,
+            person_id=person.id,
+            team_id=payload.team_id,
+            season_label=payload.season_label,
+            category=payload.category,
+            required_hours=payload.required_hours,
+            completed_hours=payload.completed_hours,
+            waived_hours=payload.waived_hours,
+            due_on=payload.due_on,
+            notes=payload.notes,
+        )
+        db.add(obligation)
+    else:
+        obligation.team_id = payload.team_id
+        obligation.required_hours = payload.required_hours
+        obligation.completed_hours = payload.completed_hours
+        obligation.waived_hours = payload.waived_hours
+        obligation.due_on = payload.due_on
+        obligation.notes = payload.notes
+    remaining = obligation.required_hours - obligation.completed_hours - obligation.waived_hours
+    obligation.status = "complete" if remaining <= 0 else "open"
+    await db.commit()
+    await db.refresh(obligation)
+    return obligation
+
+
+async def update_volunteer_obligation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    obligation_id: UUID,
+    payload: VolunteerObligationUpdate,
+    authz: AuthorizationService,
+) -> VolunteerObligation:
+    obligation = await db.get(VolunteerObligation, obligation_id)
+    if obligation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Volunteer obligation not found")
+    await ensure_manage_volunteers(authz, identity, obligation.organization_id)
+    if payload.completed_hours is not None:
+        obligation.completed_hours = payload.completed_hours
+    if payload.waived_hours is not None:
+        obligation.waived_hours = payload.waived_hours
+    if payload.notes is not None:
+        obligation.notes = payload.notes
+    if payload.status is not None:
+        obligation.status = payload.status
+    else:
+        remaining = obligation.required_hours - obligation.completed_hours - obligation.waived_hours
+        obligation.status = "complete" if remaining <= 0 else "open"
+    await db.commit()
+    await db.refresh(obligation)
+    return obligation
+
+
+async def list_volunteer_obligations(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[tuple[VolunteerObligation, Person]]:
+    return list(
+        (
+            await db.execute(
+                select(VolunteerObligation, Person)
+                .join(Person, Person.id == VolunteerObligation.person_id)
+                .where(VolunteerObligation.organization_id == organization_id)
+                .order_by(VolunteerObligation.season_label.desc(), Person.display_name)
+            )
+        ).all()
+    )
+
+
 async def create_volunteer_recognition(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -758,6 +974,8 @@ async def volunteer_summary(db: AsyncSession, organization_id: UUID) -> dict[str
             )
         ).all()
     )
+    need_requests = await list_volunteer_need_requests(db, organization_id)
+    obligation_rows = await list_volunteer_obligations(db, organization_id)
     training = await list_volunteer_training_records(db, organization_id)
     total_slots = sum(opportunity.slots_required for opportunity, _ in opportunities if opportunity.status == "open")
     assigned_slots = sum(count for opportunity, count in opportunities if opportunity.status == "open")
@@ -779,6 +997,15 @@ async def volunteer_summary(db: AsyncSession, organization_id: UUID) -> dict[str
         "pending_group_applications": sum(1 for application in group_applications if application.status == "pending"),
         "approved_group_slots": sum(
             application.approved_slots for application in group_applications if application.status == "approved"
+        ),
+        "open_need_requests": sum(1 for request in need_requests if request.status in {"requested", "open"}),
+        "obligation_deficit_hours": round(
+            sum(
+                max(obligation.required_hours - obligation.completed_hours - obligation.waived_hours, 0)
+                for obligation, _person in obligation_rows
+                if obligation.status != "complete"
+            ),
+            2,
         ),
         "completed_hours": round(sum(assignment.hours_logged for assignment in assignments), 2),
         "training_compliance_percent": round((len(completed_required) / len(required_training) * 100) if required_training else 100, 2),

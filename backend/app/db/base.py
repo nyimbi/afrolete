@@ -152,6 +152,8 @@ from app.models.training import (  # noqa: F401,E402
 from app.models.volunteer import (  # noqa: F401,E402
     VolunteerAssignment,
     VolunteerGroupApplication,
+    VolunteerNeedRequest,
+    VolunteerObligation,
     VolunteerOpportunity,
     VolunteerProfile,
     VolunteerRecognition,
