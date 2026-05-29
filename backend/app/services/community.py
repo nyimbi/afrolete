@@ -31,9 +31,14 @@ from app.schemas.community import (
     AlumniProfileRead,
     CommunityCommentCreate,
     CommunityEngagementSummaryRead,
+    CommunityModerationItemRead,
+    CommunityModerationQueueRead,
+    CommunityModerationUpdate,
     CommunityPostCreate,
     CommunityPostRead,
     CommunityReactionCreate,
+    CommunitySocialShareChannelRead,
+    CommunitySocialSharePackageRead,
     FanChallengeProgressCreate,
     FanChallengeProgressRead,
     FanEngagementChallengeCreate,
@@ -96,6 +101,7 @@ async def create_community_post(
     post = CommunityPost(
         **payload.model_dump(),
         author_person_id=identity.person_id,
+        status=moderation_status_for_text(f"{payload.title}\n{payload.body}"),
         published_at=datetime.now(UTC),
     )
     db.add(post)
@@ -149,6 +155,7 @@ async def add_community_comment(
         post_id=post.id,
         author_person_id=identity.person_id,
         body=payload.body,
+        status=moderation_status_for_text(payload.body),
     )
     db.add(comment)
     await db.commit()
@@ -329,6 +336,128 @@ async def community_engagement_summary(db: AsyncSession, organization_id: UUID) 
         vote_count=vote_count,
         engagement_score=engagement_score,
         recommendations=community_recommendations(post_count, pinned_count, comment_count, poll_count, vote_count),
+    )
+
+
+async def community_moderation_queue(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> CommunityModerationQueueRead:
+    await get_organization(db, organization_id)
+    await ensure_manage_community(authz, identity, organization_id)
+    posts = list(
+        (
+            await db.scalars(
+                select(CommunityPost)
+                .where(CommunityPost.organization_id == organization_id)
+                .where(CommunityPost.status != "published")
+                .order_by(CommunityPost.created_at.desc())
+                .limit(25)
+            )
+        ).all()
+    )
+    comments = list(
+        (
+            await db.scalars(
+                select(CommunityComment)
+                .where(CommunityComment.organization_id == organization_id)
+                .where(CommunityComment.status != "published")
+                .order_by(CommunityComment.created_at.desc())
+                .limit(25)
+            )
+        ).all()
+    )
+    items = [moderation_item_for_post(post) for post in posts] + [
+        moderation_item_for_comment(comment) for comment in comments
+    ]
+    items.sort(key=lambda item: item.created_at, reverse=True)
+    return CommunityModerationQueueRead(
+        organization_id=organization_id,
+        review_count=sum(1 for item in items if item.status == "needs_review"),
+        hidden_count=sum(1 for item in items if item.status == "hidden"),
+        rejected_count=sum(1 for item in items if item.status == "rejected"),
+        items=items[:40],
+    )
+
+
+async def moderate_community_post(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    post_id: UUID,
+    payload: CommunityModerationUpdate,
+    authz: AuthorizationService,
+) -> CommunityPost:
+    post = await get_community_post(db, post_id)
+    await ensure_manage_community(authz, identity, post.organization_id)
+    post.status = payload.status
+    if payload.status == "published":
+        post.published_at = post.published_at or datetime.now(UTC)
+    await db.commit()
+    await db.refresh(post)
+    return post
+
+
+async def moderate_community_comment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    comment_id: UUID,
+    payload: CommunityModerationUpdate,
+    authz: AuthorizationService,
+) -> CommunityComment:
+    comment = await db.get(CommunityComment, comment_id)
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community comment not found")
+    await ensure_manage_community(authz, identity, comment.organization_id)
+    comment.status = payload.status
+    await db.commit()
+    await db.refresh(comment)
+    return comment
+
+
+async def community_social_share_package(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    post_id: UUID,
+    authz: AuthorizationService,
+    *,
+    base_url: str = "https://afrolete.lindela.io",
+) -> CommunitySocialSharePackageRead:
+    post = await get_community_post(db, post_id)
+    await ensure_manage_community(authz, identity, post.organization_id)
+    organization = await get_organization(db, post.organization_id)
+    public_handle = organization.subdomain or organization.slug
+    public_url = f"{base_url.rstrip('/')}/site/{public_handle}?post_id={post.id}"
+    risk_score, risk_reasons = moderation_risk(post.body)
+    name = organization.public_name or organization.name
+    hashtags = social_hashtags(name, post.post_type)
+    body_excerpt = compact_text(post.body, 180)
+    channel_specs = [
+        ("whatsapp", f"{post.title}\n{body_excerpt}\n{public_url}", 900),
+        ("facebook", f"{name}: {post.title}\n\n{body_excerpt}\n\n{public_url}", 900),
+        ("x", f"{post.title} | {name} {public_url}", 260),
+        ("instagram", f"{post.title}\n\n{body_excerpt}\n\n{' '.join(hashtags)}\n{public_url}", 1200),
+    ]
+    channels = [
+        CommunitySocialShareChannelRead(
+            channel=channel,
+            text=compact_text(text, limit),
+            url=public_url,
+            character_count=len(compact_text(text, limit)),
+            hashtags=hashtags,
+        )
+        for channel, text, limit in channel_specs
+    ]
+    return CommunitySocialSharePackageRead(
+        post_id=post.id,
+        organization_id=post.organization_id,
+        title=post.title,
+        status=post.status,
+        public_url=public_url,
+        risk_score=risk_score,
+        risk_reasons=risk_reasons,
+        channels=channels,
     )
 
 
@@ -1195,6 +1324,94 @@ async def scalar_count(db: AsyncSession, model, organization_id: UUID, *conditio
     for condition in conditions:
         statement = statement.where(condition)
     return int(await db.scalar(statement) or 0)
+
+
+MODERATION_KEYWORDS = {
+    "hate": 35,
+    "abuse": 35,
+    "threat": 35,
+    "scam": 30,
+    "gambling": 25,
+    "betting": 25,
+    "violence": 25,
+    "attack": 20,
+    "idiot": 20,
+}
+
+
+def moderation_risk(text: str) -> tuple[int, list[str]]:
+    normalized = text.lower()
+    score = 0
+    reasons: list[str] = []
+    for keyword, weight in MODERATION_KEYWORDS.items():
+        if keyword in normalized:
+            score += weight
+            reasons.append(f"Contains moderation keyword: {keyword}")
+    if normalized.count("http://") + normalized.count("https://") > 2:
+        score += 25
+        reasons.append("Contains multiple links")
+    if len(text) > 1500:
+        score += 15
+        reasons.append("Long public text")
+    if sum(1 for char in text if char.isupper()) > 80:
+        score += 10
+        reasons.append("High uppercase intensity")
+    return min(score, 100), reasons[:6]
+
+
+def moderation_status_for_text(text: str) -> str:
+    score, _reasons = moderation_risk(text)
+    return "needs_review" if score >= 35 else "published"
+
+
+def moderation_item_for_post(post: CommunityPost) -> CommunityModerationItemRead:
+    score, reasons = moderation_risk(f"{post.title}\n{post.body}")
+    return CommunityModerationItemRead(
+        id=post.id,
+        item_type="post",
+        organization_id=post.organization_id,
+        post_id=post.id,
+        title=post.title,
+        body=post.body,
+        status=post.status,
+        risk_score=score,
+        risk_reasons=reasons,
+        created_at=post.created_at,
+    )
+
+
+def moderation_item_for_comment(comment: CommunityComment) -> CommunityModerationItemRead:
+    score, reasons = moderation_risk(comment.body)
+    return CommunityModerationItemRead(
+        id=comment.id,
+        item_type="comment",
+        organization_id=comment.organization_id,
+        post_id=comment.post_id,
+        title=None,
+        body=comment.body,
+        status=comment.status,
+        risk_score=score,
+        risk_reasons=reasons,
+        created_at=comment.created_at,
+    )
+
+
+def compact_text(value: str, limit: int) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: max(limit - 1, 0)].rstrip()}..."
+
+
+def social_hashtags(name: str, post_type: str) -> list[str]:
+    name_tag = "".join(part for part in name.title() if part.isalnum())[:40]
+    type_tag = "".join(part for part in post_type.title() if part.isalnum())[:30]
+    tags = ["#AfroLete"]
+    if name_tag:
+        tags.append(f"#{name_tag}")
+    if type_tag:
+        tags.append(f"#{type_tag}")
+    return tags[:4]
 
 
 def community_recommendations(

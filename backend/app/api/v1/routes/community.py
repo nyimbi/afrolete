@@ -11,10 +11,13 @@ from app.schemas.community import (
     CommunityCommentCreate,
     CommunityCommentRead,
     CommunityEngagementSummaryRead,
+    CommunityModerationQueueRead,
+    CommunityModerationUpdate,
     CommunityPostCreate,
     CommunityPostRead,
     CommunityReactionCreate,
     CommunityReactionRead,
+    CommunitySocialSharePackageRead,
     FanChallengeProgressCreate,
     FanChallengeProgressRead,
     FanEngagementChallengeCreate,
@@ -47,7 +50,9 @@ from app.services.community import (
     alumni_dashboard,
     alumni_profile_read,
     community_engagement_summary,
+    community_moderation_queue,
     community_post_read,
+    community_social_share_package,
     create_alumni_profile,
     create_community_post,
     create_fan_poll,
@@ -66,6 +71,8 @@ from app.services.community import (
     list_mentorship_programs,
     list_supporter_membership_tiers,
     list_supporter_profiles,
+    moderate_community_comment,
+    moderate_community_post,
     record_supporter_activity,
     advance_fan_challenge,
     list_fan_challenges,
@@ -132,6 +139,49 @@ async def list_posts_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[CommunityPostRead]:
     return await list_community_posts(db, organization_id, team_id=team_id)
+
+
+@router.get("/moderation-queue", response_model=CommunityModerationQueueRead)
+async def moderation_queue_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunityModerationQueueRead:
+    return await community_moderation_queue(db, identity, organization_id, authz)
+
+
+@router.post("/posts/{post_id}/moderation", response_model=CommunityPostRead)
+async def moderate_post_route(
+    post_id: UUID,
+    payload: CommunityModerationUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunityPostRead:
+    return community_post_read(await moderate_community_post(db, identity, post_id, payload, authz))
+
+
+@router.post("/comments/{comment_id}/moderation", response_model=CommunityCommentRead)
+async def moderate_comment_route(
+    comment_id: UUID,
+    payload: CommunityModerationUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunityCommentRead:
+    return comment_read(await moderate_community_comment(db, identity, comment_id, payload, authz))
+
+
+@router.post("/posts/{post_id}/social-share", response_model=CommunitySocialSharePackageRead)
+async def social_share_package_route(
+    post_id: UUID,
+    base_url: str = Query(default="https://afrolete.lindela.io"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CommunitySocialSharePackageRead:
+    return await community_social_share_package(db, identity, post_id, authz, base_url=base_url)
 
 
 @router.post(

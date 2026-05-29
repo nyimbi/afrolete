@@ -50,6 +50,42 @@ def test_community_posts_comments_reactions_polls_votes_and_summary(client, iden
     assert comment["post_id"] == post["id"]
     assert comment["status"] == "published"
 
+    flagged_comment = client.post(
+        f"/api/v1/community/posts/{post['id']}/comments",
+        headers=identity_headers,
+        json={"body": "This looks like a scam threat with abuse and too many bad links https://a.example https://b.example https://c.example"},
+    ).json()
+    assert flagged_comment["status"] == "needs_review"
+
+    moderation_queue = client.get(
+        f"/api/v1/community/moderation-queue?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert moderation_queue["review_count"] == 1
+    assert moderation_queue["items"][0]["item_type"] == "comment"
+    assert moderation_queue["items"][0]["risk_score"] >= 35
+
+    moderated_comment = client.post(
+        f"/api/v1/community/comments/{flagged_comment['id']}/moderation",
+        headers=identity_headers,
+        json={"status": "hidden", "note": "Spam and abuse risk."},
+    ).json()
+    assert moderated_comment["status"] == "hidden"
+
+    hidden_queue = client.get(
+        f"/api/v1/community/moderation-queue?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert hidden_queue["hidden_count"] == 1
+
+    share_package = client.post(
+        f"/api/v1/community/posts/{post['id']}/social-share?base_url=https://club.example",
+        headers=identity_headers,
+    ).json()
+    assert share_package["public_url"].startswith("https://club.example/site/")
+    assert {channel["channel"] for channel in share_package["channels"]} >= {"whatsapp", "facebook", "x"}
+    assert share_package["risk_score"] == 0
+
     reaction = client.post(
         f"/api/v1/community/posts/{post['id']}/reactions",
         headers=identity_headers,
@@ -102,12 +138,12 @@ def test_community_posts_comments_reactions_polls_votes_and_summary(client, iden
     posts = client.get(
         f"/api/v1/community/posts?organization_id={organization['id']}&team_id={team['id']}"
     ).json()
-    assert posts[0]["comment_count"] == 1
+    assert posts[0]["comment_count"] == 2
     assert posts[0]["reaction_count"] == 1
     assert posts[0]["poll_count"] == 1
 
     comments = client.get(f"/api/v1/community/posts/{post['id']}/comments").json()
-    assert [item["body"] for item in comments] == ["Great midfield pressure and strong family support."]
+    assert [item["status"] for item in comments] == ["published", "hidden"]
 
     polls = client.get(
         f"/api/v1/community/polls?organization_id={organization['id']}&team_id={team['id']}"
@@ -122,7 +158,7 @@ def test_community_posts_comments_reactions_polls_votes_and_summary(client, iden
     summary = client.get(f"/api/v1/community/summary?organization_id={organization['id']}").json()
     assert summary["post_count"] == 1
     assert summary["pinned_post_count"] == 1
-    assert summary["comment_count"] == 1
+    assert summary["comment_count"] == 2
     assert summary["reaction_count"] == 1
     assert summary["poll_count"] == 1
     assert summary["open_poll_count"] == 1

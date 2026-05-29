@@ -122,8 +122,10 @@ import type {
   CommunicationTemplateRead,
   CommunityCommentRead,
   CommunityEngagementSummaryRead,
+  CommunityModerationQueueRead,
   CommunityPostRead,
   CommunityReactionRead,
+  CommunitySocialSharePackageRead,
   CommercialRefundRead,
   FanChallengeProgressRead,
   FanEngagementChallengeRead,
@@ -1714,6 +1716,8 @@ export default function HomePage() {
   const [communityPosts, setCommunityPosts] = useState<CommunityPostRead[]>([]);
   const [communityComments, setCommunityComments] = useState<CommunityCommentRead[]>([]);
   const [communityReaction, setCommunityReaction] = useState<CommunityReactionRead | null>(null);
+  const [communityModerationQueue, setCommunityModerationQueue] = useState<CommunityModerationQueueRead | null>(null);
+  const [communitySharePackage, setCommunitySharePackage] = useState<CommunitySocialSharePackageRead | null>(null);
   const [fanPolls, setFanPolls] = useState<FanPollRead[]>([]);
   const [fanPollVote, setFanPollVote] = useState<FanPollVoteRead | null>(null);
   const [communitySummary, setCommunitySummary] = useState<CommunityEngagementSummaryRead | null>(null);
@@ -2553,6 +2557,7 @@ export default function HomePage() {
     pinned: true,
     comment: "Families loved the pressure and the bench energy.",
     reaction_type: "celebrate",
+    moderation_status: "published",
     poll_question: "Who was player of the match?",
     poll_audience: "supporters",
     poll_options: "Amina, Brian, Team defence",
@@ -2829,7 +2834,7 @@ export default function HomePage() {
       { id: crypto.randomUUID(), message, tone },
       ...current.slice(0, 7)
     ]);
-  }, []);
+  }, [identity]);
 
   const runAction = useCallback(
     async <T,>(label: string, action: () => Promise<T>, success: (value: T) => void) => {
@@ -3518,6 +3523,7 @@ export default function HomePage() {
     const teamQuery = teamId ? `&team_id=${teamId}` : "";
     const [
       posts,
+      moderationData,
       polls,
       summary,
       tiers,
@@ -3531,6 +3537,10 @@ export default function HomePage() {
       alumniSummary
     ] = await Promise.all([
       apiRequest<CommunityPostRead[]>(`/community/posts?organization_id=${organizationId}${teamQuery}`),
+      apiRequest<CommunityModerationQueueRead>(
+        `/community/moderation-queue?organization_id=${organizationId}`,
+        { identity }
+      ),
       apiRequest<FanPollRead[]>(`/community/polls?organization_id=${organizationId}${teamQuery}`),
       apiRequest<CommunityEngagementSummaryRead>(`/community/summary?organization_id=${organizationId}`),
       apiRequest<SupporterMembershipTierRead[]>(`/community/supporter-tiers?organization_id=${organizationId}`),
@@ -3544,6 +3554,7 @@ export default function HomePage() {
       apiRequest<AlumniDashboardRead>(`/community/alumni-dashboard?organization_id=${organizationId}`)
     ]);
     setCommunityPosts(posts);
+    setCommunityModerationQueue(moderationData);
     setFanPolls(polls);
     setCommunitySummary(summary);
     setSupporterTiers(tiers);
@@ -4141,6 +4152,8 @@ export default function HomePage() {
       setCommunityPosts([]);
       setCommunityComments([]);
       setCommunityReaction(null);
+      setCommunityModerationQueue(null);
+      setCommunitySharePackage(null);
       setFanPolls([]);
       setFanPollVote(null);
       setCommunitySummary(null);
@@ -12426,6 +12439,77 @@ export default function HomePage() {
     );
   };
 
+  const moderateCommunityPost = () => {
+    if (!selectedCommunityPost || !selectedOrganizationId) {
+      addLog("Create or select a community post first", "bad");
+      return;
+    }
+    runAction(
+      "moderate-community-post",
+      () =>
+        apiRequest<CommunityPostRead>(`/community/posts/${selectedCommunityPost.id}/moderation`, {
+          method: "POST",
+          identity,
+          body: {
+            status: communityForm.moderation_status,
+            note: "Updated from community moderation console"
+          }
+        }),
+      (post) => {
+        setCommunityPosts((current) => [post, ...current.filter((item) => item.id !== post.id)]);
+        addLog(`${post.title} marked ${post.status}`, post.status === "published" ? "good" : "neutral");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const moderateLatestCommunityComment = () => {
+    const comment = communityComments[0];
+    if (!comment || !selectedOrganizationId) {
+      addLog("Add a comment before moderating comments", "bad");
+      return;
+    }
+    runAction(
+      "moderate-community-comment",
+      () =>
+        apiRequest<CommunityCommentRead>(`/community/comments/${comment.id}/moderation`, {
+          method: "POST",
+          identity,
+          body: {
+            status: communityForm.moderation_status,
+            note: "Updated from community moderation console"
+          }
+        }),
+      (updated) => {
+        setCommunityComments((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        addLog(`Comment marked ${updated.status}`, updated.status === "published" ? "good" : "neutral");
+        void loadCommunity(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const generateCommunitySharePackage = () => {
+    if (!selectedCommunityPost || !selectedOrganizationId) {
+      addLog("Create or select a community post first", "bad");
+      return;
+    }
+    runAction(
+      "community-social-share",
+      () =>
+        apiRequest<CommunitySocialSharePackageRead>(
+          `/community/posts/${selectedCommunityPost.id}/social-share?base_url=${encodeURIComponent(window.location.origin)}`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (sharePackage) => {
+        setCommunitySharePackage(sharePackage);
+        addLog(`${sharePackage.channels.length} share drafts generated for ${sharePackage.title}`, "good");
+      }
+    );
+  };
+
   const createFanPoll = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -18601,6 +18685,9 @@ export default function HomePage() {
                 <button type="button" onClick={reactToCommunityPost} disabled={busyAction !== null || !selectedCommunityPost}>React</button>
                 <button type="button" onClick={createFanPoll} disabled={busyAction !== null}>Poll</button>
                 <button type="button" onClick={voteInFanPoll} disabled={busyAction !== null || !selectedFanPoll}>Vote</button>
+                <button type="button" onClick={moderateCommunityPost} disabled={busyAction !== null || !selectedCommunityPost}>Moderate</button>
+                <button type="button" onClick={moderateLatestCommunityComment} disabled={busyAction !== null || communityComments.length === 0}>Comment Review</button>
+                <button type="button" onClick={generateCommunitySharePackage} disabled={busyAction !== null || !selectedCommunityPost}>Share</button>
               </div>
             </div>
             <div className="score-summary">
@@ -18608,7 +18695,7 @@ export default function HomePage() {
               <span>{selectedCommunityPost?.title ?? "No community post selected"}</span>
               <small>
                 {communitySummary
-                  ? `${communitySummary.post_count} posts · ${communitySummary.comment_count} comments · ${communitySummary.reaction_count} reactions · ${communitySummary.vote_count} votes`
+                  ? `${communitySummary.post_count} posts · ${communitySummary.comment_count} comments · ${communitySummary.reaction_count} reactions · ${communitySummary.vote_count} votes · ${communityModerationQueue?.review_count ?? 0} review`
                   : "Community activity is ready for publishing"}
               </small>
             </div>
@@ -18657,6 +18744,15 @@ export default function HomePage() {
                   <option value="thanks">Thanks</option>
                 </select>
               </label>
+              <label>
+                Moderation
+                <select value={communityForm.moderation_status} onChange={(event) => setCommunityForm({ ...communityForm, moderation_status: event.target.value })}>
+                  <option value="published">Approve</option>
+                  <option value="needs_review">Needs review</option>
+                  <option value="hidden">Hide</option>
+                  <option value="rejected">Reject</option>
+                </select>
+              </label>
               <label className="wide-field">
                 Comment
                 <input value={communityForm.comment} onChange={(event) => setCommunityForm({ ...communityForm, comment: event.target.value })} />
@@ -18680,16 +18776,34 @@ export default function HomePage() {
                 >
                   <div>
                     <strong>{post.pinned ? "Pinned · " : ""}{post.title}</strong>
-                    <span>{post.post_type} · {post.visibility} · {post.comment_count} comments · {post.reaction_count} reactions</span>
+                    <span>{post.post_type} · {post.visibility} · {post.status} · {post.comment_count} comments · {post.reaction_count} reactions</span>
                     <span>{post.body}</span>
                   </div>
                 </button>
               ))}
+              {communityModerationQueue?.items.slice(0, 3).map((item) => (
+                <article key={`${item.item_type}-${item.id}`} className="task-card">
+                  <div>
+                    <strong>{item.item_type} review · {item.risk_score}</strong>
+                    <span>{item.status} · {item.risk_reasons.join(" · ") || "manual review"}</span>
+                    <span>{item.title ?? item.body}</span>
+                  </div>
+                </article>
+              ))}
+              {communitySharePackage ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Social share package</strong>
+                    <span>{communitySharePackage.status} · risk {communitySharePackage.risk_score} · {communitySharePackage.public_url}</span>
+                    <span>{communitySharePackage.channels.slice(0, 2).map((channel) => `${channel.channel}: ${channel.character_count}`).join(" · ")}</span>
+                  </div>
+                </article>
+              ) : null}
               {communityComments.slice(0, 2).map((comment) => (
                 <article key={comment.id} className="task-card">
                   <div>
                     <strong>Latest comment</strong>
-                    <span>{comment.body}</span>
+                    <span>{comment.status} · {comment.body}</span>
                   </div>
                 </article>
               ))}

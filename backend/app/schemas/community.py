@@ -40,6 +40,51 @@ class CommunityCommentRead(BaseModel):
     created_at: datetime
 
 
+class CommunityModerationUpdate(BaseModel):
+    status: str = Field(pattern="^(published|needs_review|hidden|rejected)$")
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class CommunityModerationItemRead(BaseModel):
+    id: UUID
+    item_type: str
+    organization_id: UUID
+    post_id: UUID | None = None
+    title: str | None = None
+    body: str
+    status: str
+    risk_score: int
+    risk_reasons: list[str]
+    created_at: datetime
+
+
+class CommunityModerationQueueRead(BaseModel):
+    organization_id: UUID
+    review_count: int
+    hidden_count: int
+    rejected_count: int
+    items: list[CommunityModerationItemRead]
+
+
+class CommunitySocialShareChannelRead(BaseModel):
+    channel: str
+    text: str
+    url: str
+    character_count: int
+    hashtags: list[str]
+
+
+class CommunitySocialSharePackageRead(BaseModel):
+    post_id: UUID
+    organization_id: UUID
+    title: str
+    status: str
+    public_url: str
+    risk_score: int
+    risk_reasons: list[str]
+    channels: list[CommunitySocialShareChannelRead]
+
+
 class CommunityReactionCreate(BaseModel):
     reaction_type: str = Field(default="like", min_length=2, max_length=40)
 

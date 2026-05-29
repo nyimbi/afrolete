@@ -2926,6 +2926,46 @@ export type CommunityCommentRead = {
   created_at: string;
 };
 
+export type CommunityModerationItemRead = {
+  id: UUID;
+  item_type: string;
+  organization_id: UUID;
+  post_id: UUID | null;
+  title: string | null;
+  body: string;
+  status: string;
+  risk_score: number;
+  risk_reasons: string[];
+  created_at: string;
+};
+
+export type CommunityModerationQueueRead = {
+  organization_id: UUID;
+  review_count: number;
+  hidden_count: number;
+  rejected_count: number;
+  items: CommunityModerationItemRead[];
+};
+
+export type CommunitySocialShareChannelRead = {
+  channel: string;
+  text: string;
+  url: string;
+  character_count: number;
+  hashtags: string[];
+};
+
+export type CommunitySocialSharePackageRead = {
+  post_id: UUID;
+  organization_id: UUID;
+  title: string;
+  status: string;
+  public_url: string;
+  risk_score: number;
+  risk_reasons: string[];
+  channels: CommunitySocialShareChannelRead[];
+};
+
 export type CommunityReactionRead = {
   id: UUID;
   organization_id: UUID;
