@@ -428,10 +428,18 @@ python scripts/verify_sdk_release.py --out-dir dist/sdk-release
 
 The verifier builds the TypeScript package, creates the npm tarball, builds the
 Python wheel and source distribution, and checks that typed entry points,
-README files, generated `dist/` files, and the Python `py.typed` marker are
-present in the release artifacts. The `SDK Release` GitHub Actions workflow
-runs the same verifier on `sdk-v*` tags and supports manual publishing when
-registry tokens are configured.
+README files, generated `dist/` files, generated endpoint manifests, and the
+Python `py.typed` marker are present in the release artifacts. The `SDK Release`
+GitHub Actions workflow runs the same verifier on `sdk-v*` tags and supports
+manual publishing when registry tokens are configured.
+
+The generated SDK endpoint manifests are derived from the backend developer
+catalog:
+
+```bash
+cd backend
+uv run python ../scripts/generate_sdk_endpoint_manifest.py --check
+```
 
 ### Docker
 

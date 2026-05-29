@@ -5,8 +5,10 @@ from .client import (
     verify_webhook_signature,
 )
 from . import types
+from .endpoints import AFROLETE_SDK_ENDPOINTS
 
 __all__ = [
+    "AFROLETE_SDK_ENDPOINTS",
     "AfroLeteClient",
     "AfroLeteRequestError",
     "expected_webhook_signature",

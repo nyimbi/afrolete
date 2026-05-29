@@ -2,6 +2,11 @@ export type UUID = string;
 export type ISODateTime = string;
 export type ISODate = string;
 
+export {
+  AFROLETE_SDK_ENDPOINTS,
+  type AfroLeteSdkEndpoint,
+} from "./generated/sdk-endpoints.js";
+
 export interface AfroLeteClientOptions {
   baseUrl: string;
   apiKey: string;

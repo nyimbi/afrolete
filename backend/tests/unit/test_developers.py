@@ -1,9 +1,15 @@
 import base64
 import hashlib
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from app.core.config import Settings
 from app.services import developer as developer_service
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def create_developer_org(client, identity_headers):
@@ -90,6 +96,18 @@ def test_public_developer_docs_search(client) -> None:
     assert docs["sdk_endpoints"]
     assert all("billing" in str(endpoint).lower() for endpoint in docs["sdk_endpoints"])
     assert docs["marketplace_categories"] == ["billing"]
+
+
+def test_generated_sdk_endpoint_manifests_are_current() -> None:
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "generate_sdk_endpoint_manifest.py"), "--check"],
+        cwd=REPO_ROOT / "backend",
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert "Verified" in result.stdout
 
 
 def test_developer_application_webhook_marketplace_workflow(client, identity_headers) -> None:

@@ -62,6 +62,10 @@ def clean_python_build_metadata() -> None:
 
 def verify_typescript_pack(out_dir: Path | None = None) -> None:
     verify_typescript_metadata()
+    run(
+        ["uv", "run", "python", "../scripts/generate_sdk_endpoint_manifest.py", "--check"],
+        cwd=REPO_ROOT / "backend",
+    )
     run(["pnpm", "--filter", "@afrolete/sdk", "build"])
     if out_dir is None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -81,6 +85,8 @@ def verify_typescript_pack(out_dir: Path | None = None) -> None:
         "package/README.md",
         "package/dist/index.js",
         "package/dist/index.d.ts",
+        "package/dist/generated/sdk-endpoints.js",
+        "package/dist/generated/sdk-endpoints.d.ts",
     }:
         if required not in names:
             fail(f"TypeScript npm tarball is missing {required}")
@@ -88,6 +94,10 @@ def verify_typescript_pack(out_dir: Path | None = None) -> None:
 
 def verify_python_build(out_dir: Path | None = None) -> None:
     verify_python_metadata()
+    run(
+        ["uv", "run", "python", "../scripts/generate_sdk_endpoint_manifest.py", "--check"],
+        cwd=REPO_ROOT / "backend",
+    )
     clean_python_build_metadata()
     run([sys.executable, "-m", "compileall", str(PY_PACKAGE_DIR / "src" / "afrolete_sdk")])
     if out_dir is None:
@@ -112,6 +122,7 @@ def verify_python_build(out_dir: Path | None = None) -> None:
     for required in {
         "afrolete_sdk/__init__.py",
         "afrolete_sdk/client.py",
+        "afrolete_sdk/endpoints.py",
         "afrolete_sdk/types.py",
         "afrolete_sdk/py.typed",
     }:

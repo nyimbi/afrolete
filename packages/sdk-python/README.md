@@ -3,7 +3,12 @@
 Repository package for server-side AfroLete developer API integrations.
 
 ```python
-from afrolete_sdk import AfroLeteClient, types, verify_webhook_signature
+from afrolete_sdk import (
+    AFROLETE_SDK_ENDPOINTS,
+    AfroLeteClient,
+    types,
+    verify_webhook_signature,
+)
 
 client = AfroLeteClient(
     base_url="https://api.afrolete.example",
@@ -11,6 +16,11 @@ client = AfroLeteClient(
 )
 
 organization: types.Organization = client.organization.get(organization_id="tenant-uuid")
+write_endpoints = [
+    endpoint
+    for endpoint in AFROLETE_SDK_ENDPOINTS
+    if any(scope.startswith("write:") for scope in endpoint["required_scopes"])
+]
 teams: list[types.Team] = client.teams.list(organization_id=organization["id"])
 athlete = client.people.create(
     {
@@ -229,6 +239,7 @@ Build and inspect the Python package from the repository root:
 python scripts/verify_sdk_release.py --out-dir dist/sdk-release
 ```
 
-The release verifier compiles the SDK package, builds one wheel and one source
-distribution with `uv build`, and checks that `client.py`, `types.py`, and the
-PEP 561 `py.typed` marker are present in the wheel before publication.
+The release verifier checks the backend-generated endpoint manifest, compiles
+the SDK package, builds one wheel and one source distribution with `uv build`,
+and checks that `client.py`, `endpoints.py`, `types.py`, and the PEP 561
+`py.typed` marker are present in the wheel before publication.

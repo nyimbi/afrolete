@@ -4,6 +4,7 @@ Repository package for tenant-facing AfroLete developer APIs.
 
 ```ts
 import { AfroLeteClient } from "@afrolete/sdk";
+import { AFROLETE_SDK_ENDPOINTS } from "@afrolete/sdk";
 import { verifyAfroLeteWebhookSignature } from "@afrolete/sdk";
 
 const client = new AfroLeteClient({
@@ -14,6 +15,10 @@ const client = new AfroLeteClient({
 const organization = await client.organization.get({
   organizationId: process.env.AFROLETE_ORG_ID!,
 });
+
+const writeEndpoints = AFROLETE_SDK_ENDPOINTS.filter((endpoint) =>
+  endpoint.required_scopes.some((scope) => scope.startsWith("write:")),
+);
 
 const events = await client.events.list({
   organizationId: organization.id,
@@ -222,6 +227,7 @@ Build and inspect the npm package from the repository root:
 python scripts/verify_sdk_release.py --out-dir dist/sdk-release
 ```
 
-The release verifier runs `pnpm --filter @afrolete/sdk build`, creates the npm
-tarball, and checks that `dist/index.js`, `dist/index.d.ts`, `README.md`, and
-package metadata are present before publication.
+The release verifier checks the backend-generated endpoint manifest, runs
+`pnpm --filter @afrolete/sdk build`, creates the npm tarball, and checks that
+`dist/index.js`, `dist/index.d.ts`, `dist/generated/sdk-endpoints.*`,
+`README.md`, and package metadata are present before publication.
