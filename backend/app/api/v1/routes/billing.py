@@ -19,6 +19,8 @@ from app.schemas.billing import (
     BillingPlanChangeRead,
     BillingPaymentWebhookCreate,
     BillingPaymentWebhookRead,
+    BillingPaymentRetryRunCreate,
+    BillingPaymentRetryRunRead,
     BillingPlanCreate,
     BillingPlanRead,
     BillingProrationQuoteRead,
@@ -65,6 +67,7 @@ from app.services.billing import (
     proration_quote,
     run_dunning_scheduler,
     run_late_fee_scheduler,
+    run_payment_retry_scheduler,
     run_recurring_invoice_scheduler,
     validate_payment_webhook_signature,
 )
@@ -232,6 +235,16 @@ async def run_late_fees_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> BillingLateFeeRunRead:
     return await run_late_fee_scheduler(db, identity, payload, authz)
+
+
+@router.post("/payment-retries/run", response_model=BillingPaymentRetryRunRead)
+async def run_payment_retries_route(
+    payload: BillingPaymentRetryRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> BillingPaymentRetryRunRead:
+    return await run_payment_retry_scheduler(db, identity, payload, authz)
 
 
 @router.post("/payments", response_model=SaaSPaymentRead, status_code=status.HTTP_201_CREATED)

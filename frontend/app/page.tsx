@@ -66,6 +66,7 @@ import type {
   BillingEntitlementRead,
   BillingLateFeeRunRead,
   BillingPaymentWebhookRead,
+  BillingPaymentRetryRunRead,
   BillingPlanChangeRead,
   BillingPlanRead,
   BillingProrationQuoteRead,
@@ -1608,6 +1609,7 @@ export default function HomePage() {
     useState<BillingDunningDeliveryRead | null>(null);
   const [billingDunningRun, setBillingDunningRun] = useState<BillingDunningRunRead | null>(null);
   const [billingLateFeeRun, setBillingLateFeeRun] = useState<BillingLateFeeRunRead | null>(null);
+  const [billingPaymentRetryRun, setBillingPaymentRetryRun] = useState<BillingPaymentRetryRunRead | null>(null);
   const [billingWebhook, setBillingWebhook] = useState<BillingPaymentWebhookRead | null>(null);
   const [billingRecurringRun, setBillingRecurringRun] = useState<BillingRecurringInvoiceRunRead | null>(null);
   const [billingSummary, setBillingSummary] = useState<BillingSummaryRead | null>(null);
@@ -2250,6 +2252,9 @@ export default function HomePage() {
     late_fee_fixed: 10,
     late_fee_rate: 2,
     late_fee_max: 50,
+    payment_retry_provider: "stripe",
+    payment_retry_max_attempts: 3,
+    payment_retry_repeat_hours: 24,
     prorated_price: 249,
     webhook_provider: "stripe",
     entitlement_feature: "ai_agents",
@@ -11545,6 +11550,36 @@ export default function HomePage() {
     );
   };
 
+  const runBillingPaymentRetries = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "billing-payment-retries-run",
+      () =>
+        apiRequest<BillingPaymentRetryRunRead>("/billing/payment-retries/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            retry_at: `${billingForm.period_end}T12:00:00.000Z`,
+            overdue_after_days: 0,
+            repeat_after_hours: billingForm.payment_retry_repeat_hours,
+            max_attempts: billingForm.payment_retry_max_attempts,
+            provider: billingForm.payment_retry_provider,
+            limit: 100,
+            dry_run: false
+          }
+        }),
+      (run) => {
+        setBillingPaymentRetryRun(run);
+        addLog(`Payment retries processed ${run.retry_count}/${run.eligible_count} invoices`, "good");
+        void loadBilling(selectedOrganizationId);
+      }
+    );
+  };
+
   const ingestBillingWebhook = () => {
     if (!selectedOrganizationId || !selectedSaasInvoiceId) {
       addLog("Create or select a SaaS invoice first", "bad");
@@ -14715,6 +14750,7 @@ export default function HomePage() {
                 <button type="button" onClick={prepareDunningNotice} disabled={busyAction !== null}>Dunning</button>
                 <button type="button" onClick={runBillingDunning} disabled={busyAction !== null}>Run dunning</button>
                 <button type="button" onClick={runBillingLateFees} disabled={busyAction !== null}>Run fees</button>
+                <button type="button" onClick={runBillingPaymentRetries} disabled={busyAction !== null}>Retry pay</button>
                 <button type="button" onClick={deliverBillingDunningNotice} disabled={busyAction !== null}>Deliver</button>
                 <button type="button" onClick={ingestBillingWebhook} disabled={busyAction !== null}>Webhook</button>
               </div>
@@ -14786,6 +14822,18 @@ export default function HomePage() {
                 <input type="number" min="0" value={billingForm.late_fee_max} onChange={(event) => setBillingForm({ ...billingForm, late_fee_max: Number(event.target.value) })} />
               </label>
               <label>
+                Retry provider
+                <input value={billingForm.payment_retry_provider} onChange={(event) => setBillingForm({ ...billingForm, payment_retry_provider: event.target.value })} />
+              </label>
+              <label>
+                Retry max
+                <input type="number" min="1" max="20" value={billingForm.payment_retry_max_attempts} onChange={(event) => setBillingForm({ ...billingForm, payment_retry_max_attempts: Number(event.target.value) })} />
+              </label>
+              <label>
+                Retry hours
+                <input type="number" min="0" value={billingForm.payment_retry_repeat_hours} onChange={(event) => setBillingForm({ ...billingForm, payment_retry_repeat_hours: Number(event.target.value) })} />
+              </label>
+              <label>
                 Provider
                 <input value={billingForm.webhook_provider} onChange={(event) => setBillingForm({ ...billingForm, webhook_provider: event.target.value })} />
               </label>
@@ -14821,6 +14869,16 @@ export default function HomePage() {
                     <strong>{billingLateFeeRun.fee_count} late fees</strong>
                     <span>
                       {billingLateFeeRun.total_late_fees} applied · {billingLateFeeRun.eligible_count} eligible · {billingLateFeeRun.failed_count} failed
+                    </span>
+                  </div>
+                </article>
+              ) : null}
+              {billingPaymentRetryRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{billingPaymentRetryRun.retry_count} payment retries</strong>
+                    <span>
+                      {billingPaymentRetryRun.total_attempted} attempted · {billingPaymentRetryRun.total_collected} collected · {billingPaymentRetryRun.delivery_mode}
                     </span>
                   </div>
                 </article>
@@ -14862,7 +14920,7 @@ export default function HomePage() {
                 >
                   <div>
                     <strong>{invoice.invoice_number}</strong>
-                    <span>{invoice.amount_paid}/{invoice.total} · {invoice.status} · dunning {invoice.dunning_count} · fees {invoice.late_fee_total}</span>
+                    <span>{invoice.amount_paid}/{invoice.total} · {invoice.status} · dunning {invoice.dunning_count} · fees {invoice.late_fee_total} · retries {invoice.payment_retry_count}</span>
                   </div>
                 </button>
               ))}

@@ -2,7 +2,7 @@ import argparse
 import asyncio
 import json
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -13,7 +13,12 @@ from app.db.session import SessionLocal
 from app.models.enums import CommunicationChannel, NotificationFrequency
 from app.services.agents import run_agent_task_worker
 from app.services.assets import run_emergency_escalation_timer_worker
-from app.services.billing import run_dunning_worker, run_late_fee_worker, run_recurring_invoice_worker
+from app.services.billing import (
+    run_dunning_worker,
+    run_late_fee_worker,
+    run_payment_retry_worker,
+    run_recurring_invoice_worker,
+)
 from app.services.communications import (
     run_digest_scheduler_worker,
     run_message_escalation_worker,
@@ -37,6 +42,7 @@ WORKER_LANES = (
     "agent-tasks",
     "billing-dunning",
     "billing-late-fees",
+    "billing-payment-retries",
     "billing-recurring-invoices",
     "communication-digests",
     "communication-escalations",
@@ -73,6 +79,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--billing-late-fee-percentage-rate", type=Decimal, default=Decimal("2.00"))
     parser.add_argument("--billing-late-fee-max-fee", type=Decimal, default=None)
     parser.add_argument("--dry-run-billing-late-fees", action="store_true")
+    parser.add_argument("--billing-payment-retry-limit", type=int, default=None)
+    parser.add_argument("--billing-payment-retry-at", type=datetime_from_isoformat, default=None)
+    parser.add_argument("--billing-payment-retry-overdue-after-days", type=int, default=0)
+    parser.add_argument("--billing-payment-retry-repeat-after-hours", type=int, default=24)
+    parser.add_argument("--billing-payment-retry-max-attempts", type=int, default=3)
+    parser.add_argument("--billing-payment-retry-provider", default="billing_provider")
+    parser.add_argument("--dry-run-billing-payment-retries", action="store_true")
     parser.add_argument("--billing-recurring-invoice-limit", type=int, default=None)
     parser.add_argument("--billing-recurring-invoice-bill-on", type=date_from_isoformat, default=None)
     parser.add_argument("--billing-recurring-invoice-due-in-days", type=int, default=14)
@@ -191,6 +204,13 @@ async def run_due_workers(
     billing_late_fee_percentage_rate: Decimal = Decimal("2.00"),
     billing_late_fee_max_fee: Decimal | None = None,
     dry_run_billing_late_fees: bool = False,
+    billing_payment_retry_limit: int | None = None,
+    billing_payment_retry_at: datetime | None = None,
+    billing_payment_retry_overdue_after_days: int = 0,
+    billing_payment_retry_repeat_after_hours: int = 24,
+    billing_payment_retry_max_attempts: int = 3,
+    billing_payment_retry_provider: str = "billing_provider",
+    dry_run_billing_payment_retries: bool = False,
     billing_recurring_invoice_limit: int | None = None,
     billing_recurring_invoice_bill_on: date | None = None,
     billing_recurring_invoice_due_in_days: int = 14,
@@ -281,6 +301,20 @@ async def run_due_workers(
                 max_fee=billing_late_fee_max_fee,
                 limit=billing_late_fee_limit or limit,
                 dry_run=dry_run_billing_late_fees,
+            )
+        ).model_dump(mode="json")
+    if "billing-payment-retries" in active_lanes:
+        results["billing_payment_retries"] = (
+            await run_payment_retry_worker(
+                db,
+                organization_id=organization_id,
+                retry_at=billing_payment_retry_at,
+                overdue_after_days=billing_payment_retry_overdue_after_days,
+                repeat_after_hours=billing_payment_retry_repeat_after_hours,
+                max_attempts=billing_payment_retry_max_attempts,
+                provider=billing_payment_retry_provider,
+                limit=billing_payment_retry_limit or limit,
+                dry_run=dry_run_billing_payment_retries,
             )
         ).model_dump(mode="json")
     if "billing-recurring-invoices" in active_lanes:
@@ -465,6 +499,7 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             or result.get("alerted_count")
             or result.get("invoiced_count")
             or result.get("fee_count")
+            or result.get("retry_count")
             or result.get("notice_count")
             or result.get("reminded_count")
             or result.get("retried_count")
@@ -499,6 +534,13 @@ async def run() -> None:
             billing_late_fee_percentage_rate=args.billing_late_fee_percentage_rate,
             billing_late_fee_max_fee=args.billing_late_fee_max_fee,
             dry_run_billing_late_fees=args.dry_run_billing_late_fees,
+            billing_payment_retry_limit=args.billing_payment_retry_limit,
+            billing_payment_retry_at=args.billing_payment_retry_at,
+            billing_payment_retry_overdue_after_days=args.billing_payment_retry_overdue_after_days,
+            billing_payment_retry_repeat_after_hours=args.billing_payment_retry_repeat_after_hours,
+            billing_payment_retry_max_attempts=args.billing_payment_retry_max_attempts,
+            billing_payment_retry_provider=args.billing_payment_retry_provider,
+            dry_run_billing_payment_retries=args.dry_run_billing_payment_retries,
             billing_recurring_invoice_limit=args.billing_recurring_invoice_limit,
             billing_recurring_invoice_bill_on=args.billing_recurring_invoice_bill_on,
             billing_recurring_invoice_due_in_days=args.billing_recurring_invoice_due_in_days,
@@ -581,6 +623,10 @@ async def run() -> None:
 
 def date_from_isoformat(value: str) -> date:
     return date.fromisoformat(value)
+
+
+def datetime_from_isoformat(value: str) -> datetime:
+    return datetime.fromisoformat(value)
 
 
 def main() -> None:

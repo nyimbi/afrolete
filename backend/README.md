@@ -58,7 +58,7 @@ cd backend
 uv run python -m app.workers.due --limit 25
 ```
 
-Use `--lane agent-tasks`, `--lane billing-dunning`, `--lane billing-late-fees`, `--lane billing-recurring-invoices`, `--lane communication-digests`,
+Use `--lane agent-tasks`, `--lane billing-dunning`, `--lane billing-late-fees`, `--lane billing-payment-retries`, `--lane billing-recurring-invoices`, `--lane communication-digests`,
 `--lane communication-escalations`,
 `--lane event-travel-consent-reminders`, `--lane emergency-escalations`, `--lane developer-webhooks`,
 `--lane performance-achievements`, `--lane performance-forecast-validations`,
@@ -70,7 +70,10 @@ open SaaS invoices for subscriptions whose `next_billing_on` date is due,
 advances their service period, and suppresses duplicate period invoices. The
 late-fee lane applies configured fixed and/or percentage fees to overdue open
 SaaS invoices, records repeat-suppression state, appends invoice audit notes,
-and marks active/trial subscriptions past due.
+and marks active/trial subscriptions past due. The payment retry lane prepares
+or dispatches provider retry attempts for overdue open invoices, records retry
+attempt state, applies webhook-reported collections, and marks subscriptions
+past due while respecting retry windows and max-attempt limits.
 communication digest lane creates daily/weekly digests for people with matching
 notification preferences and unread inbox items. The
 communication escalation lane scans unresolved urgent messages and creates

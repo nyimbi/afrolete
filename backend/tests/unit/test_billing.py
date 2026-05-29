@@ -203,3 +203,65 @@ def test_late_fee_run_applies_configured_fee_and_marks_subscription_past_due(cli
     ).json()
     renewed = next(item for item in subscriptions if item["id"] == subscription["id"])
     assert renewed["status"] == "past_due"
+
+
+def test_payment_retry_run_records_attempt_and_marks_subscription_past_due(client, identity_headers) -> None:
+    organization, _, subscription = create_billing_context(client, identity_headers)
+    invoice = client.post(
+        "/api/v1/billing/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "subscription_id": subscription["id"],
+            "invoice_number": "RETRY-2026-001",
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-30",
+            "tax_amount": "0.00",
+            "discount_amount": "0.00",
+            "due_on": "2026-06-01",
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/billing/payment-retries/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "retry_at": "2026-06-20T10:30:00+00:00",
+            "overdue_after_days": 0,
+            "repeat_after_hours": 24,
+            "max_attempts": 3,
+            "provider": "stripe",
+            "limit": 10,
+        },
+    )
+
+    assert response.status_code == 200
+    run = response.json()
+    assert run["eligible_count"] == 1
+    assert run["retry_count"] == 1
+    assert run["submitted_count"] == 1
+    assert run["failed_count"] == 0
+    assert run["delivery_mode"] == "record_only"
+    assert run["total_attempted"] == "249.00"
+    assert run["total_collected"] == "0.00"
+    assert run["status_counts"] == {"recorded": 1}
+    assert run["invoice_ids"] == [invoice["id"]]
+
+    invoices = client.get(
+        f"/api/v1/billing/invoices?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    retried = next(item for item in invoices if item["id"] == invoice["id"])
+    assert retried["payment_retry_count"] == 1
+    assert retried["payment_retry_last_status"] == "recorded"
+    assert retried["payment_retry_last_attempted_at"] is not None
+    assert retried["payment_retry_next_attempt_at"] is not None
+    assert "Payment retry recorded for 249.00 USD via stripe" in retried["line_items"]
+
+    subscriptions = client.get(
+        f"/api/v1/billing/subscriptions?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    renewed = next(item for item in subscriptions if item["id"] == subscription["id"])
+    assert renewed["status"] == "past_due"

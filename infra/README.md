@@ -56,6 +56,11 @@ a systemd drop-in when a tenant needs different throughput or alert policy:
 | `AFROLETE_DUE_WORKER_BILLING_LATE_FEE_FIXED_FEE` | `0` | Fixed late fee added to each eligible overdue invoice. |
 | `AFROLETE_DUE_WORKER_BILLING_LATE_FEE_PERCENTAGE_RATE` | `2` | Percentage of outstanding invoice balance added as a late fee. |
 | `AFROLETE_DUE_WORKER_BILLING_LATE_FEE_MAX_FEE` | `50` | Cap per late-fee application. |
+| `AFROLETE_DUE_WORKER_BILLING_PAYMENT_RETRY_LIMIT` | `100` | Overdue SaaS invoices scanned for payment retry attempts. |
+| `AFROLETE_DUE_WORKER_BILLING_PAYMENT_RETRY_OVERDUE_AFTER_DAYS` | `0` | Grace period after invoice due date before retry attempts are eligible. |
+| `AFROLETE_DUE_WORKER_BILLING_PAYMENT_RETRY_REPEAT_AFTER_HOURS` | `24` | Suppression window before another retry can be attempted for the same invoice. |
+| `AFROLETE_DUE_WORKER_BILLING_PAYMENT_RETRY_MAX_ATTEMPTS` | `3` | Maximum scheduled retry attempts per invoice. |
+| `AFROLETE_DUE_WORKER_BILLING_PAYMENT_RETRY_PROVIDER` | `billing_provider` | Provider label sent to retry delivery adapters. |
 | `AFROLETE_DUE_WORKER_BILLING_RECURRING_INVOICE_LIMIT` | `100` | Subscriptions scanned for due recurring SaaS invoices. |
 | `AFROLETE_DUE_WORKER_BILLING_RECURRING_INVOICE_DUE_IN_DAYS` | `14` | Payment due-date offset for generated recurring SaaS invoices. |
 | `AFROLETE_DUE_WORKER_BILLING_RECURRING_INVOICE_PREFIX` | `SAAS` | Invoice-number prefix for scheduler-generated SaaS invoices. |
@@ -93,6 +98,7 @@ For a deployment smoke without sending messages, run the command manually with
 `--dry-run-communication-escalations`,
 `--dry-run-billing-dunning`,
 `--dry-run-billing-late-fees`,
+`--dry-run-billing-payment-retries`,
 `--dry-run-billing-recurring-invoices`,
 `--dry-run-emergency-escalations`,
 `--dry-run-performance-forecast-drift-alerts`,

@@ -119,6 +119,12 @@ class SaaSInvoiceRead(BaseModel):
     late_fee_total: Decimal
     late_fee_count: int
     late_fee_last_applied_on: date | None
+    payment_retry_count: int
+    payment_retry_last_attempted_at: datetime | None
+    payment_retry_next_attempt_at: datetime | None
+    payment_retry_last_status: str | None
+    payment_retry_last_failure_reason: str | None
+    payment_retry_last_provider_reference: str | None
 
 
 class SaaSPaymentCreate(BaseModel):
@@ -281,6 +287,36 @@ class BillingLateFeeRunRead(BaseModel):
     invoice_ids: list[UUID]
     subscription_ids: list[UUID]
     total_late_fees: Decimal
+
+
+class BillingPaymentRetryRunCreate(BaseModel):
+    organization_id: UUID
+    retry_at: datetime | None = None
+    overdue_after_days: int = Field(default=0, ge=0, le=365)
+    repeat_after_hours: int = Field(default=24, ge=0, le=24 * 365)
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    provider: str = Field(default="billing_provider", min_length=2, max_length=80)
+    limit: int = Field(default=100, ge=1, le=1000)
+    dry_run: bool = False
+
+
+class BillingPaymentRetryRunRead(BaseModel):
+    organization_id: UUID | None
+    retry_at: datetime
+    eligible_count: int
+    executed_count: int
+    retry_count: int
+    succeeded_count: int
+    submitted_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool = False
+    delivery_mode: str
+    invoice_ids: list[UUID]
+    subscription_ids: list[UUID]
+    total_attempted: Decimal
+    total_collected: Decimal
+    status_counts: dict[str, int]
 
 
 class BillingPaymentWebhookCreate(BaseModel):

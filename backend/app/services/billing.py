@@ -31,6 +31,8 @@ from app.schemas.billing import (
     BillingLateFeeRunCreate,
     BillingLateFeeRunRead,
     BillingPaymentWebhookCreate,
+    BillingPaymentRetryRunCreate,
+    BillingPaymentRetryRunRead,
     BillingPlanCreate,
     BillingRecurringInvoiceRunCreate,
     BillingRecurringInvoiceRunRead,
@@ -1040,6 +1042,265 @@ def calculate_late_fee(
     if max_fee is not None:
         fee = min(fee, money(max_fee))
     return money(fee)
+
+
+async def run_payment_retry_scheduler(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: BillingPaymentRetryRunCreate,
+    authz: AuthorizationService,
+) -> BillingPaymentRetryRunRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_billing(authz, identity, payload.organization_id)
+    return await run_payment_retry_worker(
+        db,
+        organization_id=payload.organization_id,
+        retry_at=payload.retry_at,
+        overdue_after_days=payload.overdue_after_days,
+        repeat_after_hours=payload.repeat_after_hours,
+        max_attempts=payload.max_attempts,
+        provider=payload.provider,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+    )
+
+
+async def run_payment_retry_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    retry_at: datetime | None = None,
+    overdue_after_days: int = 0,
+    repeat_after_hours: int = 24,
+    max_attempts: int = 3,
+    provider: str = "billing_provider",
+    limit: int = 100,
+    dry_run: bool = False,
+    settings: Settings | None = None,
+) -> BillingPaymentRetryRunRead:
+    selected_settings = settings or get_settings()
+    effective_retry_at = normalize_datetime(retry_at or datetime.now(UTC))
+    invoices = await invoices_due_for_payment_retry(
+        db,
+        organization_id=organization_id,
+        retry_at=effective_retry_at,
+        overdue_after_days=overdue_after_days,
+        max_attempts=max_attempts,
+        limit=limit,
+    )
+    invoice_ids: list[UUID] = []
+    subscription_ids: list[UUID] = []
+    skipped_count = 0
+    failed_count = 0
+    succeeded_count = 0
+    submitted_count = 0
+    total_attempted = Decimal("0")
+    total_collected = Decimal("0")
+    status_counts: dict[str, int] = {}
+
+    for invoice in invoices:
+        outstanding = money(max(invoice.total - invoice.amount_paid, Decimal("0")))
+        if outstanding <= 0:
+            skipped_count += 1
+            continue
+        if dry_run:
+            skipped_count += 1
+            total_attempted += outstanding
+            continue
+        try:
+            subscription = await db.get(TenantSubscription, invoice.subscription_id)
+            result = await deliver_payment_retry_for_invoice(
+                selected_settings,
+                invoice,
+                subscription,
+                provider=provider,
+                outstanding=outstanding,
+                attempted_at=effective_retry_at,
+            )
+            status_label = str(result["status"])
+            status_counts[status_label] = status_counts.get(status_label, 0) + 1
+            collected = min(money(result["amount_collected"]), outstanding)
+            if collected > 0:
+                payment = SaaSPayment(
+                    organization_id=invoice.organization_id,
+                    invoice_id=invoice.id,
+                    amount=collected,
+                    currency=invoice.currency,
+                    provider=provider,
+                    external_payment_id=str(result["provider_reference"]) if result["provider_reference"] else None,
+                    received_at=effective_retry_at,
+                    status="succeeded",
+                    notes=f"Automated payment retry collected via {result['delivery_mode']}.",
+                )
+                db.add(payment)
+                invoice.amount_paid = money(invoice.amount_paid + collected)
+                invoice.status = (
+                    BillingInvoiceStatus.PAID
+                    if invoice.amount_paid >= invoice.total
+                    else BillingInvoiceStatus.PARTIAL
+                )
+                succeeded_count += 1
+                total_collected += collected
+            elif result["delivered"]:
+                submitted_count += 1
+            else:
+                failed_count += 1
+
+            invoice.payment_retry_count = (invoice.payment_retry_count or 0) + 1
+            invoice.payment_retry_last_attempted_at = effective_retry_at
+            invoice.payment_retry_next_attempt_at = effective_retry_at + timedelta(hours=repeat_after_hours)
+            invoice.payment_retry_last_status = status_label
+            invoice.payment_retry_last_failure_reason = result["failure_reason"]
+            invoice.payment_retry_last_provider_reference = result["provider_reference"]
+            invoice.line_items = append_note(
+                invoice.line_items,
+                (
+                    f"Payment retry {status_label} for {outstanding} {invoice.currency} "
+                    f"via {provider} on {effective_retry_at.isoformat()}."
+                ),
+            )
+            if subscription and subscription.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING}:
+                subscription.status = SubscriptionStatus.PAST_DUE
+                subscription.notes = append_note(
+                    subscription.notes,
+                    f"Marked past_due after automated payment retry on invoice {invoice.invoice_number}.",
+                )
+            await db.commit()
+            invoice_ids.append(invoice.id)
+            subscription_ids.append(invoice.subscription_id)
+            total_attempted += outstanding
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return BillingPaymentRetryRunRead(
+        organization_id=organization_id,
+        retry_at=effective_retry_at,
+        eligible_count=len(invoices),
+        executed_count=len(invoices) - skipped_count,
+        retry_count=len(invoice_ids),
+        succeeded_count=succeeded_count,
+        submitted_count=submitted_count,
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        delivery_mode=selected_settings.billing_payment_retry_delivery_mode,
+        invoice_ids=invoice_ids,
+        subscription_ids=list(dict.fromkeys(subscription_ids)),
+        total_attempted=money(total_attempted),
+        total_collected=money(total_collected),
+        status_counts=status_counts,
+    )
+
+
+async def invoices_due_for_payment_retry(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    retry_at: datetime,
+    overdue_after_days: int,
+    max_attempts: int,
+    limit: int,
+) -> list[SaaSInvoice]:
+    cutoff = retry_at.date() - timedelta(days=overdue_after_days)
+    statement = (
+        select(SaaSInvoice)
+        .where(SaaSInvoice.status.in_([BillingInvoiceStatus.OPEN, BillingInvoiceStatus.PARTIAL]))
+        .where(SaaSInvoice.due_on.is_not(None))
+        .where(SaaSInvoice.due_on <= cutoff)
+        .order_by(SaaSInvoice.due_on.asc(), SaaSInvoice.created_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(SaaSInvoice.organization_id == organization_id)
+    rows = list((await db.scalars(statement)).all())
+    return [
+        invoice
+        for invoice in rows
+        if invoice.total > invoice.amount_paid
+        and (invoice.payment_retry_count or 0) < max_attempts
+        and (
+            invoice.payment_retry_next_attempt_at is None
+            or normalize_datetime(invoice.payment_retry_next_attempt_at) <= retry_at
+        )
+    ]
+
+
+async def deliver_payment_retry_for_invoice(
+    settings: Settings,
+    invoice: SaaSInvoice,
+    subscription: TenantSubscription | None,
+    *,
+    provider: str,
+    outstanding: Decimal,
+    attempted_at: datetime,
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "delivery_mode": settings.billing_payment_retry_delivery_mode,
+        "delivered": False,
+        "status": "recorded",
+        "amount_collected": Decimal("0"),
+        "provider_reference": None,
+        "provider_status_code": None,
+        "failure_reason": None,
+    }
+    payload = {
+        "event_type": "billing.payment_retry",
+        "provider": provider,
+        "invoice_id": str(invoice.id),
+        "invoice_number": invoice.invoice_number,
+        "organization_id": str(invoice.organization_id),
+        "subscription_id": str(invoice.subscription_id),
+        "external_customer_id": subscription.external_customer_id if subscription else None,
+        "external_subscription_id": subscription.external_subscription_id if subscription else None,
+        "currency": invoice.currency,
+        "amount_due": str(outstanding),
+        "attempted_at": attempted_at.isoformat(),
+    }
+    if settings.billing_payment_retry_delivery_mode == "record_only":
+        result["delivered"] = True
+        return result
+    if not settings.billing_payment_retry_webhook_url:
+        result["status"] = "failed"
+        result["failure_reason"] = "Billing payment retry webhook mode is enabled but no webhook URL is configured."
+        return result
+
+    headers = await billing_payment_retry_headers(settings)
+    try:
+        async with httpx.AsyncClient(timeout=settings.billing_payment_retry_timeout_seconds) as client:
+            response = await client.post(settings.billing_payment_retry_webhook_url, json=payload, headers=headers)
+        result["provider_status_code"] = response.status_code
+        result["delivered"] = 200 <= response.status_code < 300
+        if result["delivered"]:
+            body = response.json() if response.content else {}
+            result["status"] = str(body.get("status") or "submitted")
+            result["amount_collected"] = money(body.get("amount_collected") or body.get("amount") or Decimal("0"))
+            result["provider_reference"] = (
+                body.get("external_payment_id")
+                or body.get("provider_reference")
+                or body.get("session_id")
+            )
+        else:
+            result["status"] = "failed"
+            result["failure_reason"] = f"Payment retry webhook returned {response.status_code}: {response.text[:500]}"
+    except Exception as error:  # pragma: no cover - network failure shape depends on provider
+        result["status"] = "failed"
+        result["failure_reason"] = f"Payment retry webhook failed: {error}"
+    return result
+
+
+async def billing_payment_retry_headers(settings: Settings) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    key = await resolve_billing_secret(
+        settings,
+        env_value=settings.billing_payment_retry_webhook_key,
+        path=settings.billing_payment_retry_webhook_key_secret_path,
+        field_name=settings.billing_payment_retry_webhook_key_secret_field,
+        label="billing payment retry webhook key",
+    )
+    if key:
+        headers["X-Afrolete-Billing-Retry-Key"] = key
+    return headers
 
 
 async def billing_dunning_headers(settings: Settings) -> dict[str, str]:

@@ -2523,6 +2523,12 @@ export type SaaSInvoiceRead = {
   late_fee_total: string;
   late_fee_count: number;
   late_fee_last_applied_on: string | null;
+  payment_retry_count: number;
+  payment_retry_last_attempted_at: string | null;
+  payment_retry_next_attempt_at: string | null;
+  payment_retry_last_status: string | null;
+  payment_retry_last_failure_reason: string | null;
+  payment_retry_last_provider_reference: string | null;
 };
 
 export type SaaSPaymentRead = {
@@ -2647,6 +2653,25 @@ export type BillingLateFeeRunRead = {
   invoice_ids: UUID[];
   subscription_ids: UUID[];
   total_late_fees: string;
+};
+
+export type BillingPaymentRetryRunRead = {
+  organization_id: UUID | null;
+  retry_at: string;
+  eligible_count: number;
+  executed_count: number;
+  retry_count: number;
+  succeeded_count: number;
+  submitted_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  delivery_mode: string;
+  invoice_ids: UUID[];
+  subscription_ids: UUID[];
+  total_attempted: string;
+  total_collected: string;
+  status_counts: Record<string, number>;
 };
 
 export type BillingPaymentWebhookRead = {
