@@ -469,6 +469,22 @@ textarea:focus {
   overflow: auto;
 }
 
+.offline-queue-card {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--wash);
+}
+
+.offline-queue-card span,
+.offline-queue-card small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .log-line {
   border-left: 3px solid var(--blue);
   margin: 0;

@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, OfflineQueueError } from "@/lib/api";
 import {
   clearStoredAuthSession,
   completeKeycloakCallbackFromUrl,
@@ -10,6 +10,14 @@ import {
   type AuthSession
 } from "@/lib/auth";
 import { afroleteAuthMode, apiBaseUrl, keycloakClientId, keycloakIssuer } from "@/lib/config";
+import {
+  flushOfflineQueue,
+  getOfflineQueueSnapshot,
+  installOfflineQueueListeners,
+  registerOfflineServiceWorker,
+  subscribeOfflineQueue,
+  type OfflineQueueSnapshot
+} from "@/lib/offline";
 import type { InfrastructureComponent, InfrastructureProbeSummary, InfrastructureStatus } from "@/types/platform";
 import type {
   AgentAssignmentRead,
@@ -262,6 +270,7 @@ import type {
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceObservationRead,
+  PerformanceVideoCoachingRead,
   PerformanceWearableConnectionRead,
   PerformanceWearableOAuthCallbackRead,
   PerformanceWearableOAuthStartRead,
@@ -1455,6 +1464,8 @@ export default function HomePage() {
   const [metricDefinitions, setMetricDefinitions] = useState<MetricDefinitionRead[]>([]);
   const [observations, setObservations] = useState<PerformanceObservationRead[]>([]);
   const [performanceIngestion, setPerformanceIngestion] = useState<PerformanceIngestionRead | null>(null);
+  const [performanceVideoCoaching, setPerformanceVideoCoaching] =
+    useState<PerformanceVideoCoachingRead | null>(null);
   const [performanceModelBenchmark, setPerformanceModelBenchmark] =
     useState<PerformanceModelExtractionBenchmarkRunRead | null>(null);
   const [performanceModelBenchmarkDatasets, setPerformanceModelBenchmarkDatasets] =
@@ -1717,6 +1728,7 @@ export default function HomePage() {
   const [infrastructureProbes, setInfrastructureProbes] = useState<InfrastructureProbeSummary | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [offlineQueue, setOfflineQueue] = useState<OfflineQueueSnapshot>(() => getOfflineQueueSnapshot());
 
   const [organizationForm, setOrganizationForm] = useState({
     name: "Nairobi Rising FC",
@@ -1954,6 +1966,14 @@ export default function HomePage() {
     evidence_text: "Clip analysis: first touch quality 8.4, pressure scan before receiving.",
     confidence: 0.9,
     notes: "Improved under pressure."
+  });
+  const [videoCoachingForm, setVideoCoachingForm] = useState({
+    sport: "athletics",
+    video_uri: "video://training/sprint-001",
+    clip_label: "100m acceleration block",
+    analysis_focus: "stride mechanics, posture, arm drive, ground contact, rhythm",
+    evidence_text:
+      "Stride efficiency 8.1. Posture control 6.4 due to late torso collapse. Ground contact control 7.2. Arm drive 6.8 with cross-body swing. Rhythm consistency 7.5."
   });
   const [performanceGoalForm, setPerformanceGoalForm] = useState({
     title: "Reach first-touch score 9",
@@ -2372,13 +2392,52 @@ export default function HomePage() {
         const value = await action();
         success(value);
       } catch (error) {
-        addLog(error instanceof Error ? error.message : "Request failed", "bad");
+        if (error instanceof OfflineQueueError) {
+          setOfflineQueue(getOfflineQueueSnapshot());
+          addLog(error.message, "neutral");
+        } else {
+          addLog(error instanceof Error ? error.message : "Request failed", "bad");
+        }
       } finally {
         setBusyAction(null);
       }
     },
     [addLog]
   );
+
+  useEffect(() => {
+    const unsubscribe = subscribeOfflineQueue(setOfflineQueue);
+    const cleanupConnectivity = installOfflineQueueListeners(() => {
+      void flushOfflineQueue().then((result) => {
+        if (result.succeeded > 0) {
+          addLog(`Offline replay synced ${result.succeeded}/${result.attempted} queued operation(s)`, "good");
+        }
+        if (result.failed > 0) {
+          addLog(`${result.failed} offline operation(s) still need replay`, "bad");
+        }
+      });
+    });
+    void registerOfflineServiceWorker();
+    return () => {
+      unsubscribe();
+      cleanupConnectivity();
+    };
+  }, [addLog]);
+
+  const flushQueuedOperations = useCallback(() => {
+    runAction(
+      "offline-queue-flush",
+      flushOfflineQueue,
+      (result) => {
+        addLog(
+          result.failed > 0
+            ? `${result.succeeded}/${result.attempted} offline operation(s) replayed; ${result.failed} still pending`
+            : `Offline queue replayed ${result.succeeded}/${result.attempted} operation(s)`,
+          result.failed > 0 ? "bad" : "good"
+        );
+      }
+    );
+  }, [addLog, runAction]);
 
   const beginKeycloakLogin = useCallback(() => {
     setBusyAction("keycloak-login");
@@ -3275,6 +3334,7 @@ export default function HomePage() {
       setMetricDefinitions([]);
       setObservations([]);
       setPerformanceIngestion(null);
+      setPerformanceVideoCoaching(null);
       setPerformanceModelBenchmark(null);
       setPerformanceModelBenchmarkDatasets([]);
       setPerformanceForecastValidationRun(null);
@@ -3620,6 +3680,7 @@ export default function HomePage() {
     if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
       setObservations([]);
       setAssessments([]);
+      setPerformanceVideoCoaching(null);
       setPerformanceBenchmarks([]);
       setPerformanceCohortComparisons([]);
       setPerformanceTrends([]);
@@ -3733,6 +3794,11 @@ export default function HomePage() {
         apiRequest<OrganizationRead>("/organizations", {
           method: "POST",
           identity,
+          offlineQueue: {
+            enabled: true,
+            label: `Create organization ${organizationForm.name}`,
+            idempotencyKey: `organization:${organizationForm.subdomain}:${organizationForm.name}`
+          },
           body: {
             ...organizationForm,
             mission: "Build an accountable athlete development pathway."
@@ -3758,6 +3824,11 @@ export default function HomePage() {
         apiRequest<TeamRead>("/teams", {
           method: "POST",
           identity,
+          offlineQueue: {
+            enabled: true,
+            label: `Create team ${teamForm.name}`,
+            idempotencyKey: `team:${selectedOrganizationId}:${teamForm.name}`
+          },
           body: {
             organization_id: selectedOrganizationId,
             ...teamForm
@@ -5581,7 +5652,12 @@ export default function HomePage() {
       () =>
         apiRequest<AttendanceSeedRead>(`/events/${selectedEventId}/attendance/from-roster`, {
           method: "POST",
-          identity
+          identity,
+          offlineQueue: {
+            enabled: true,
+            label: "Seed attendance from roster",
+            idempotencyKey: `attendance-seed:${selectedEventId}`
+          }
         }),
       (seed) => {
         addLog(`Attendance seeded: ${seed.created} created, ${seed.existing} existing`, "good");
@@ -5601,6 +5677,11 @@ export default function HomePage() {
         apiRequest<AttendanceRecordRead>(`/events/${selectedEventId}/attendance`, {
           method: "POST",
           identity,
+          offlineQueue: {
+            enabled: true,
+            label: `Record ${status} attendance`,
+            idempotencyKey: `attendance:${selectedEventId}:${personId}:${status}`
+          },
           body: {
             person_id: personId,
             status,
@@ -7713,6 +7794,11 @@ export default function HomePage() {
           {
             method: "POST",
             identity,
+            offlineQueue: {
+              enabled: true,
+              label: `Record ${metric.name} observation`,
+              idempotencyKey: `observation:${selectedAthlete.athleteProfileId}:${metric.id}:${Date.now()}`
+            },
             body: {
               organization_id: selectedOrganizationId,
               metric_definition_id: metric.id,
@@ -7772,6 +7858,54 @@ export default function HomePage() {
         ]);
         setSelectedObservationId(ingestion.observation.id);
         addLog(`${ingestion.extractor} queued observation review`, "good");
+        void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const analyzeAthleteVideoCoaching = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before running video coaching", "bad");
+      return;
+    }
+    runAction(
+      "video-coaching",
+      () =>
+        apiRequest<PerformanceVideoCoachingRead>(
+          `/performance/athletes/${selectedAthlete.athleteProfileId}/video-coaching`,
+          {
+            method: "POST",
+            identity,
+            offlineQueue: {
+              enabled: true,
+              label: `Analyze ${videoCoachingForm.clip_label || "athlete video"}`,
+              idempotencyKey: `video-coaching:${selectedAthlete.athleteProfileId}:${videoCoachingForm.video_uri}`
+            },
+            body: {
+              organization_id: selectedOrganizationId,
+              event_id: selectedEventId || null,
+              sport: videoCoachingForm.sport,
+              video_uri: videoCoachingForm.video_uri,
+              clip_label: videoCoachingForm.clip_label || null,
+              analysis_focus: videoCoachingForm.analysis_focus,
+              evidence_text: videoCoachingForm.evidence_text,
+              provider: "afrolete_console_video_coach"
+            }
+          }
+        ),
+      (coaching) => {
+        setPerformanceVideoCoaching(coaching);
+        setObservations((current) => [
+          ...coaching.observations,
+          ...current.filter(
+            (item) => !coaching.observations.some((observation) => observation.id === item.id)
+          )
+        ]);
+        setAssessments((current) => [
+          coaching.assessment,
+          ...current.filter((item) => item.id !== coaching.assessment.id)
+        ]);
+        addLog(`Video coach created ${coaching.observations.length} review items`, "good");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
       }
     );
@@ -12039,6 +12173,13 @@ export default function HomePage() {
             >
               Sync
             </button>
+            <button
+              type="button"
+              onClick={flushQueuedOperations}
+              disabled={busyAction !== null || offlineQueue.pending_count === 0 || !offlineQueue.online}
+            >
+              Replay {offlineQueue.pending_count}
+            </button>
           </div>
         </header>
 
@@ -12197,6 +12338,14 @@ export default function HomePage() {
               <strong>{attendance.length}</strong>
             </div>
             <div className="stat-row">
+              <span>Connectivity</span>
+              <strong>{offlineQueue.online ? "Online" : "Offline"}</strong>
+            </div>
+            <div className="stat-row">
+              <span>Outbox</span>
+              <strong>{offlineQueue.pending_count}</strong>
+            </div>
+            <div className="stat-row">
               <span>Agents</span>
               <strong>{agents.length}</strong>
             </div>
@@ -12212,6 +12361,16 @@ export default function HomePage() {
 
           <div className="panel log-panel">
             <p className="section-label">Activity</p>
+            <div className="offline-queue-card">
+              <strong>{offlineQueue.online ? "Online sync" : "Offline capture"}</strong>
+              <span>
+                {offlineQueue.service_worker_ready ? "Shell cached" : "Shell cache pending"} · {offlineQueue.pending_count} queued
+                {offlineQueue.last_flushed_at ? ` · last replay ${new Date(offlineQueue.last_flushed_at).toLocaleTimeString()}` : ""}
+              </span>
+              {offlineQueue.items.slice(0, 2).map((item) => (
+                <small key={item.id}>{item.label} · attempts {item.attempt_count}</small>
+              ))}
+            </div>
             <div className="activity-list">
               {logs.length === 0 ? <span className="muted">No activity yet</span> : null}
               {logs.map((log) => (
@@ -15956,6 +16115,7 @@ export default function HomePage() {
                 <button type="button" onClick={createMetricDefinition} disabled={busyAction !== null}>Metric</button>
                 <button type="button" onClick={recordObservation} disabled={busyAction !== null}>Observe</button>
                 <button type="button" onClick={ingestPerformanceEvidence} disabled={busyAction !== null}>Ingest</button>
+                <button type="button" onClick={analyzeAthleteVideoCoaching} disabled={busyAction !== null}>Video coach</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
                 <button type="button" onClick={runPerformanceForecastValidation} disabled={busyAction !== null}>Forecast QA</button>
@@ -16040,6 +16200,26 @@ export default function HomePage() {
               <label className="wide-field">
                 Evidence text
                 <input value={observationForm.evidence_text} onChange={(event) => setObservationForm({ ...observationForm, evidence_text: event.target.value })} />
+              </label>
+              <label>
+                Video sport
+                <input value={videoCoachingForm.sport} onChange={(event) => setVideoCoachingForm({ ...videoCoachingForm, sport: event.target.value })} />
+              </label>
+              <label>
+                Video URI
+                <input value={videoCoachingForm.video_uri} onChange={(event) => setVideoCoachingForm({ ...videoCoachingForm, video_uri: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Clip label
+                <input value={videoCoachingForm.clip_label} onChange={(event) => setVideoCoachingForm({ ...videoCoachingForm, clip_label: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Coaching focus
+                <input value={videoCoachingForm.analysis_focus} onChange={(event) => setVideoCoachingForm({ ...videoCoachingForm, analysis_focus: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Video evidence
+                <textarea value={videoCoachingForm.evidence_text} onChange={(event) => setVideoCoachingForm({ ...videoCoachingForm, evidence_text: event.target.value })} />
               </label>
               <label>
                 Goal
@@ -16346,6 +16526,26 @@ export default function HomePage() {
                           : "no score"}
                       </small>
                     ) : null}
+                  </div>
+                </article>
+              ) : null}
+              {performanceVideoCoaching ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{performanceVideoCoaching.model_policy}</strong>
+                    <span>
+                      {performanceVideoCoaching.summary} · confidence{" "}
+                      {Math.round(performanceVideoCoaching.confidence * 100)}%
+                    </span>
+                    <small>{performanceVideoCoaching.coaching_plan}</small>
+                    <small>
+                      {performanceVideoCoaching.metrics
+                        .slice(0, 4)
+                        .map((metric) =>
+                          `${metric.metric_name} ${metric.value}/10: ${metric.coaching_cue}`
+                        )
+                        .join(" · ")}
+                    </small>
                   </div>
                 </article>
               ) : null}

@@ -1,0 +1,11 @@
+{
+  "name": "AfroLete Operations",
+  "short_name": "AfroLete",
+  "description": "Offline-capable sports operations and athlete development command surface.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f2",
+  "theme_color": "#111827",
+  "icons": []
+}

@@ -105,6 +105,51 @@ class PerformanceIngestionRead(BaseModel):
     model_evaluation: dict[str, str]
 
 
+class PerformanceVideoCoachingCreate(BaseModel):
+    organization_id: UUID
+    event_id: UUID | None = None
+    sport: str = Field(default="athletics", min_length=2, max_length=80)
+    video_uri: str = Field(min_length=2, max_length=800)
+    clip_label: str | None = Field(default=None, max_length=180)
+    analysis_focus: str = Field(
+        default="stride mechanics, posture, acceleration, rhythm, and tactical execution",
+        max_length=1000,
+    )
+    evidence_text: str | None = Field(default=None, max_length=12000)
+    provider: str = Field(default="afrolete_deterministic_video_coach", max_length=80)
+    observed_at: datetime | None = None
+
+
+class PerformanceVideoCoachingMetricRead(BaseModel):
+    metric_definition_id: UUID
+    metric_code: str
+    metric_name: str
+    category: MetricCategory
+    value: float
+    unit: str | None
+    confidence: float
+    coaching_cue: str
+    evidence_summary: str
+
+
+class PerformanceVideoCoachingRead(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID
+    event_id: UUID | None
+    sport: str
+    video_uri: str
+    clip_label: str | None
+    model_policy: str
+    confidence: float
+    summary: str
+    coaching_plan: str
+    review_required: bool
+    observations: list[PerformanceObservationRead]
+    assessment: "AthleteAssessmentRead"
+    metrics: list[PerformanceVideoCoachingMetricRead]
+    next_actions: list[str]
+
+
 class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
     case_id: str = Field(min_length=2, max_length=120)
     metric_code: str = Field(min_length=2, max_length=80)

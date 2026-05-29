@@ -2735,6 +2735,49 @@ def test_performance_ingestion_uses_metric_specific_video_text(client, identity_
     assert ingestion["parser_confidence_reason"].startswith("Found the metric label")
 
 
+def test_video_coaching_analysis_creates_pending_review_outputs(
+    client,
+    identity_headers,
+) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+
+    response = client.post(
+        f"/api/v1/performance/athletes/{roster['athlete_profile_id']}/video-coaching",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "athletics",
+            "video_uri": "video://training/sprint-001",
+            "clip_label": "100m acceleration block",
+            "analysis_focus": "stride mechanics, posture, arm drive, ground contact, rhythm",
+            "evidence_text": (
+                "Stride efficiency 8.1. Posture control 6.4 due to late torso collapse. "
+                "Ground contact control 7.2. Arm drive 6.8 with cross-body swing. "
+                "Rhythm consistency 7.5."
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    coaching = response.json()
+    assert coaching["review_required"] is True
+    assert coaching["sport"] == "athletics"
+    assert len(coaching["observations"]) == 5
+    assert {observation["source"] for observation in coaching["observations"]} == {
+        "video_analysis"
+    }
+    assert {
+        observation["verification_status"]
+        for observation in coaching["observations"]
+    } == {"pending_review"}
+    assert coaching["assessment"]["verification_status"] == "pending_review"
+    assert "Posture Control" in coaching["summary"]
+    assert "Review the clip" in coaching["coaching_plan"]
+    metric_codes = {metric["metric_code"] for metric in coaching["metrics"]}
+    assert "video_stride_efficiency" in metric_codes
+    assert coaching["next_actions"]
+
+
 def test_performance_observation_rejects_metric_from_other_organization(
     client, identity_headers
 ) -> None:

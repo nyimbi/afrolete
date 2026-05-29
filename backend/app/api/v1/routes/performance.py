@@ -42,6 +42,9 @@ from app.schemas.performance import (
     PerformanceObservationCreate,
     PerformanceObservationRead,
     PerformanceObservationReviewCreate,
+    PerformanceVideoCoachingCreate,
+    PerformanceVideoCoachingMetricRead,
+    PerformanceVideoCoachingRead,
     PerformanceWearableConnectionCreate,
     PerformanceWearableConnectionRead,
     PerformanceWearableOAuthCallbackCreate,
@@ -64,6 +67,7 @@ from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, get_authorization_service
 from app.services.performance import (
     assessment_review_queue_summary,
+    analyze_video_for_coaching,
     create_assessment,
     create_metric_definition,
     create_observation,
@@ -476,6 +480,48 @@ async def ingest_performance_evidence_route(
         model_confidence=result["model_confidence"],
         model_summary=result["model_summary"],
         model_evaluation=result["model_evaluation"],
+    )
+
+
+@router.post(
+    "/athletes/{athlete_profile_id}/video-coaching",
+    response_model=PerformanceVideoCoachingRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def analyze_video_for_coaching_route(
+    athlete_profile_id: UUID,
+    payload: PerformanceVideoCoachingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceVideoCoachingRead:
+    result = await analyze_video_for_coaching(
+        db,
+        identity,
+        athlete_profile_id,
+        payload,
+        authz,
+    )
+    return PerformanceVideoCoachingRead(
+        organization_id=result["organization_id"],
+        athlete_profile_id=result["athlete_profile_id"],
+        event_id=result["event_id"],
+        sport=result["sport"],
+        video_uri=result["video_uri"],
+        clip_label=result["clip_label"],
+        model_policy=result["model_policy"],
+        confidence=result["confidence"],
+        summary=result["summary"],
+        coaching_plan=result["coaching_plan"],
+        review_required=result["review_required"],
+        observations=[
+            to_observation_read(observation) for observation in result["observations"]
+        ],
+        assessment=to_assessment_read(result["assessment"]),
+        metrics=[
+            PerformanceVideoCoachingMetricRead(**metric) for metric in result["metrics"]
+        ],
+        next_actions=result["next_actions"],
     )
 
 

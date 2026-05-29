@@ -1,5 +1,6 @@
 import { apiBaseUrl } from "@/lib/config";
 import { getStoredAuthSession } from "@/lib/auth";
+import { queueOfflineRequest, type OfflineQueueItem } from "@/lib/offline";
 import type { LocalIdentity } from "@/types/operations";
 
 export class ApiError extends Error {
@@ -13,17 +14,32 @@ export class ApiError extends Error {
   }
 }
 
+export class OfflineQueueError extends Error {
+  item: OfflineQueueItem;
+
+  constructor(item: OfflineQueueItem) {
+    super(`${item.label} queued for offline replay`);
+    this.item = item;
+  }
+}
+
 type RequestOptions = Omit<RequestInit, "body" | "headers"> & {
   body?: unknown;
   identity?: LocalIdentity;
   headers?: HeadersInit;
+  offlineQueue?: {
+    enabled: boolean;
+    label: string;
+    idempotencyKey?: string;
+  };
 };
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const headers = new Headers(options.headers);
+  const { body, headers: inputHeaders, identity, offlineQueue, ...requestOptions } = options;
+  const headers = new Headers(inputHeaders);
   headers.set("Accept", "application/json");
 
-  if (options.body !== undefined) {
+  if (body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -32,23 +48,58 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     headers.set("Authorization", `Bearer ${session.accessToken}`);
   }
 
-  if (options.identity) {
-    headers.set("X-Afrolete-Sub", options.identity.sub);
-    headers.set("X-Afrolete-Email", options.identity.email);
-    headers.set("X-Afrolete-Name", options.identity.name);
+  if (identity) {
+    headers.set("X-Afrolete-Sub", identity.sub);
+    headers.set("X-Afrolete-Email", identity.email);
+    headers.set("X-Afrolete-Name", identity.name);
   }
 
-  const response = await fetch(`${apiBaseUrl}/api/v1${path}`, {
-    ...options,
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
-  });
+  if (offlineQueue?.enabled && isOfflineMutation(requestOptions.method)) {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      throw new OfflineQueueError(queueOfflineRequest({
+        label: offlineQueue.label,
+        path,
+        method: requestOptions.method ?? "POST",
+        body,
+        identity,
+        headers,
+        idempotencyKey: offlineQueue.idempotencyKey
+      }));
+    }
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}/api/v1${path}`, {
+      ...requestOptions,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+  } catch (error) {
+    if (offlineQueue?.enabled && isOfflineMutation(requestOptions.method)) {
+      throw new OfflineQueueError(queueOfflineRequest({
+        label: offlineQueue.label,
+        path,
+        method: requestOptions.method ?? "POST",
+        body,
+        identity,
+        headers,
+        idempotencyKey: offlineQueue.idempotencyKey
+      }));
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     throw new ApiError(response.status, await readBody(response));
   }
 
   return (await response.json()) as T;
+}
+
+function isOfflineMutation(method?: string): boolean {
+  const normalized = (method ?? "GET").toUpperCase();
+  return normalized === "POST" || normalized === "PUT" || normalized === "PATCH";
 }
 
 async function readBody(response: Response): Promise<unknown> {

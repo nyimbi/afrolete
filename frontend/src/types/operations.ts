@@ -4436,6 +4436,36 @@ export type AthleteAssessmentRead = {
   verification_status: MetricVerificationStatus;
 };
 
+export type PerformanceVideoCoachingMetricRead = {
+  metric_definition_id: UUID;
+  metric_code: string;
+  metric_name: string;
+  category: MetricCategory;
+  value: number;
+  unit: string | null;
+  confidence: number;
+  coaching_cue: string;
+  evidence_summary: string;
+};
+
+export type PerformanceVideoCoachingRead = {
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  event_id: UUID | null;
+  sport: string;
+  video_uri: string;
+  clip_label: string | null;
+  model_policy: string;
+  confidence: number;
+  summary: string;
+  coaching_plan: string;
+  review_required: boolean;
+  observations: PerformanceObservationRead[];
+  assessment: AthleteAssessmentRead;
+  metrics: PerformanceVideoCoachingMetricRead[];
+  next_actions: string[];
+};
+
 export type AthleteAssessmentReviewQueueItemRead = {
   assessment: AthleteAssessmentRead;
   athlete_person_id: UUID;

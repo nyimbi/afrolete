@@ -68,6 +68,7 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkRunCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
+    PerformanceVideoCoachingCreate,
     PerformanceWearableConnectionCreate,
     PerformanceWearableOAuthCallbackCreate,
     PerformanceWearableProviderTokenResponse,
@@ -145,6 +146,13 @@ def as_utc_datetime(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def as_naive_utc_datetime(value: datetime | None) -> datetime | None:
+    utc_value = as_utc_datetime(value)
+    if utc_value is None:
+        return None
+    return utc_value.replace(tzinfo=None)
 
 
 async def create_metric_definition(
@@ -293,6 +301,128 @@ async def ingest_performance_evidence(
         "model_confidence": model_assist["confidence"] if model_assist else None,
         "model_summary": model_assist["summary"] if model_assist else None,
         "model_evaluation": model_evaluation(parsed, model_assist, model_applied),
+    }
+
+
+async def analyze_video_for_coaching(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    athlete_profile_id: UUID,
+    payload: PerformanceVideoCoachingCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    athlete_profile = await get_athlete_profile(db, athlete_profile_id, payload.organization_id)
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    if payload.event_id is not None:
+        event = await db.get(Event, payload.event_id)
+        if event is None or event.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+
+    sport = payload.sport.strip().lower()
+    specs = video_coaching_metric_specs(sport)
+    metrics = await ensure_video_coaching_metrics(db, payload.organization_id, sport, specs)
+    await db.flush()
+
+    observed_at = as_naive_utc_datetime(payload.observed_at) or datetime.now(UTC).replace(tzinfo=None)
+    metric_cards: list[dict[str, object]] = []
+    observations: list[AthletePerformanceObservation] = []
+    for spec, metric in zip(specs, metrics, strict=True):
+        extracted_value = extract_metric_specific_text_value(payload.evidence_text, metric)
+        value = video_coaching_score(payload.evidence_text, spec, extracted_value)
+        confidence = video_coaching_confidence(payload.evidence_text, extracted_value)
+        evidence_summary = (
+            f"Detected {metric.name} at {value:g}/10 from clip evidence."
+            if extracted_value is not None
+            else f"Estimated {metric.name} at {value:g}/10 from deterministic video cues."
+        )
+        observation = AthletePerformanceObservation(
+            organization_id=payload.organization_id,
+            athlete_profile_id=athlete_profile.id,
+            metric_definition_id=metric.id,
+            event_id=payload.event_id,
+            recorded_by_person_id=identity.person_id,
+            value=value,
+            raw_value=f"{value:g}/10",
+            observed_at=observed_at,
+            source=MetricSource.VIDEO_ANALYSIS,
+            confidence=confidence,
+            verification_status=MetricVerificationStatus.PENDING_REVIEW,
+            notes=(
+                f"AI video coaching analysis for {payload.video_uri}. "
+                f"Provider: {payload.provider}. Focus: {payload.analysis_focus}. "
+                f"{evidence_summary} Cue: {spec['cue']} Review before applying the plan."
+            ),
+        )
+        db.add(observation)
+        observations.append(observation)
+        metric_cards.append(
+            {
+                "metric_definition_id": metric.id,
+                "metric_code": metric.code,
+                "metric_name": metric.name,
+                "category": metric.category,
+                "value": value,
+                "unit": metric.unit,
+                "confidence": confidence,
+                "coaching_cue": spec["cue"],
+                "evidence_summary": evidence_summary,
+            }
+        )
+
+    scores_by_category = video_scores_by_category(metric_cards)
+    weakest = sorted(metric_cards, key=lambda card: float(card["value"]))[:2]
+    confidence = round(
+        sum(float(card["confidence"]) for card in metric_cards) / len(metric_cards),
+        2,
+    )
+    summary = video_coaching_summary(payload, metric_cards, confidence)
+    coaching_plan = video_coaching_plan(weakest)
+    assessment = AthleteAssessment(
+        organization_id=payload.organization_id,
+        athlete_profile_id=athlete_profile.id,
+        event_id=payload.event_id,
+        assessed_by_person_id=identity.person_id,
+        assessed_at=observed_at,
+        physical_score=scores_by_category["physical"],
+        technical_score=scores_by_category["technical"],
+        tactical_score=scores_by_category["tactical"],
+        mental_score=scores_by_category["mental"],
+        overall_score=round(
+            scores_by_category["physical"] * 0.25
+            + scores_by_category["technical"] * 0.35
+            + scores_by_category["tactical"] * 0.25
+            + scores_by_category["mental"] * 0.15,
+            2,
+        ),
+        perceived_exertion=None,
+        effort_rating=None,
+        summary=summary,
+        recommendations=coaching_plan,
+        review_due_at=datetime.now(UTC) + timedelta(hours=48),
+        review_priority="high" if any(float(card["value"]) < 6.5 for card in weakest) else "normal",
+        verification_status=MetricVerificationStatus.PENDING_REVIEW,
+    )
+    db.add(assessment)
+    await db.commit()
+    for observation in observations:
+        await db.refresh(observation)
+    await db.refresh(assessment)
+    return {
+        "organization_id": payload.organization_id,
+        "athlete_profile_id": athlete_profile.id,
+        "event_id": payload.event_id,
+        "sport": sport,
+        "video_uri": payload.video_uri,
+        "clip_label": payload.clip_label,
+        "model_policy": "afrolete-video-coach-v1",
+        "confidence": confidence,
+        "summary": summary,
+        "coaching_plan": coaching_plan,
+        "review_required": True,
+        "observations": observations,
+        "assessment": assessment,
+        "metrics": metric_cards,
+        "next_actions": video_coaching_next_actions(weakest),
     }
 
 
@@ -5412,6 +5542,198 @@ def decode_string_list(value: str | None) -> list[str]:
     except json.JSONDecodeError:
         return []
     return [str(item) for item in items if str(item)]
+
+
+def video_coaching_metric_specs(sport: str) -> list[dict[str, object]]:
+    if sport == "athletics":
+        return [
+            {
+                "code": "video_stride_efficiency",
+                "name": "Stride Efficiency",
+                "category": MetricCategory.PHYSICAL,
+                "cue": "Run tall through the hips and land under the center of mass.",
+                "positive_terms": ["smooth", "efficient", "quick turnover", "relaxed"],
+                "risk_terms": ["overstride", "reaching", "braking", "choppy"],
+            },
+            {
+                "code": "video_posture_control",
+                "name": "Posture Control",
+                "category": MetricCategory.TECHNICAL,
+                "cue": "Hold a neutral trunk and avoid late torso collapse under fatigue.",
+                "positive_terms": ["upright", "stable", "balanced", "tall"],
+                "risk_terms": ["collapse", "lean", "fold", "rotation"],
+            },
+            {
+                "code": "video_ground_contact_control",
+                "name": "Ground Contact Control",
+                "category": MetricCategory.PHYSICAL,
+                "cue": "Keep ground contact crisp with the foot striking under the body.",
+                "positive_terms": ["quick contact", "stiff ankle", "reactive", "spring"],
+                "risk_terms": ["long contact", "heavy", "braking", "flat foot"],
+            },
+            {
+                "code": "video_arm_drive",
+                "name": "Arm Drive Coordination",
+                "category": MetricCategory.TECHNICAL,
+                "cue": "Drive elbows back and keep hands from crossing the midline.",
+                "positive_terms": ["compact", "coordinated", "strong arms", "linear"],
+                "risk_terms": ["cross-body", "wide", "late arms", "twist"],
+            },
+            {
+                "code": "video_rhythm_consistency",
+                "name": "Rhythm Consistency",
+                "category": MetricCategory.TACTICAL,
+                "cue": "Build speed progressively while keeping cadence consistent.",
+                "positive_terms": ["rhythm", "consistent", "controlled", "progressive"],
+                "risk_terms": ["fatigue", "ragged", "rushed", "breakdown"],
+            },
+        ]
+    return [
+        {
+            "code": "video_movement_quality",
+            "name": "Movement Quality",
+            "category": MetricCategory.TECHNICAL,
+            "cue": "Repeat the core movement pattern at match speed with control.",
+            "positive_terms": ["controlled", "balanced", "smooth", "efficient"],
+            "risk_terms": ["unstable", "late", "rushed", "asymmetry"],
+        },
+        {
+            "code": "video_physical_execution",
+            "name": "Physical Execution",
+            "category": MetricCategory.PHYSICAL,
+            "cue": "Maintain physical quality while fatigue rises.",
+            "positive_terms": ["strong", "explosive", "quick", "powerful"],
+            "risk_terms": ["slow", "heavy", "weak", "fatigue"],
+        },
+        {
+            "code": "video_decision_timing",
+            "name": "Decision Timing",
+            "category": MetricCategory.TACTICAL,
+            "cue": "Scan early and commit to the action before pressure arrives.",
+            "positive_terms": ["early scan", "decisive", "aware", "timely"],
+            "risk_terms": ["late", "hesitant", "blind", "delayed"],
+        },
+    ]
+
+
+async def ensure_video_coaching_metrics(
+    db: AsyncSession,
+    organization_id: UUID,
+    sport: str,
+    specs: list[dict[str, object]],
+) -> list[PerformanceMetricDefinition]:
+    metrics: list[PerformanceMetricDefinition] = []
+    for spec in specs:
+        metric = await db.scalar(
+            select(PerformanceMetricDefinition).where(
+                PerformanceMetricDefinition.organization_id == organization_id,
+                PerformanceMetricDefinition.sport == sport,
+                PerformanceMetricDefinition.code == spec["code"],
+            )
+        )
+        if metric is None:
+            metric = PerformanceMetricDefinition(
+                organization_id=organization_id,
+                sport=sport,
+                code=str(spec["code"]),
+                name=str(spec["name"]),
+                category=spec["category"],
+                unit="score",
+                description="AI video coaching score generated from clip evidence.",
+                min_value=0,
+                max_value=10,
+                weight=1,
+                higher_is_better=True,
+            )
+            db.add(metric)
+        metrics.append(metric)
+    return metrics
+
+
+def video_coaching_score(
+    evidence_text: str | None,
+    spec: dict[str, object],
+    extracted_value: float | None,
+) -> float:
+    if extracted_value is not None:
+        return round(min(10.0, max(0.0, extracted_value)), 1)
+    text = (evidence_text or "").lower()
+    score = 7.2
+    positive_terms = [str(term).lower() for term in spec["positive_terms"]]
+    risk_terms = [str(term).lower() for term in spec["risk_terms"]]
+    if any(term in text for term in positive_terms):
+        score += 0.8
+    if any(term in text for term in risk_terms):
+        score -= 1.4
+    if any(term in text for term in ("excellent", "elite", "explosive", "fast")):
+        score += 0.5
+    if any(term in text for term in ("poor", "weak", "pain", "limp", "asymmetry")):
+        score -= 0.8
+    return round(min(10.0, max(0.0, score)), 1)
+
+
+def video_coaching_confidence(evidence_text: str | None, extracted_value: float | None) -> float:
+    if extracted_value is not None:
+        return 0.84
+    if evidence_text and len(evidence_text) >= 80:
+        return 0.76
+    return 0.68
+
+
+def video_scores_by_category(metric_cards: list[dict[str, object]]) -> dict[str, float]:
+    average_score = round(
+        sum(float(card["value"]) for card in metric_cards) / len(metric_cards) * 10,
+        1,
+    )
+    scores: dict[str, float] = {}
+    for category in (
+        MetricCategory.PHYSICAL,
+        MetricCategory.TECHNICAL,
+        MetricCategory.TACTICAL,
+    ):
+        values = [
+            float(card["value"]) * 10
+            for card in metric_cards
+            if card["category"] == category
+        ]
+        scores[category.value] = round(sum(values) / len(values), 1) if values else average_score
+    scores["mental"] = average_score
+    return scores
+
+
+def video_coaching_summary(
+    payload: PerformanceVideoCoachingCreate,
+    metric_cards: list[dict[str, object]],
+    confidence: float,
+) -> str:
+    weakest = min(metric_cards, key=lambda card: float(card["value"]))
+    strongest = max(metric_cards, key=lambda card: float(card["value"]))
+    clip = payload.clip_label or payload.video_uri
+    return (
+        f"AI video coaching reviewed {clip} for {payload.analysis_focus}. "
+        f"Strongest signal: {strongest['metric_name']} at {float(strongest['value']):g}/10. "
+        f"Priority correction: {weakest['metric_name']} at {float(weakest['value']):g}/10. "
+        f"Average confidence {confidence:.0%}; coach verification is required."
+    )
+
+
+def video_coaching_plan(weakest_cards: list[dict[str, object]]) -> str:
+    cues = [str(card["coaching_cue"]) for card in weakest_cards]
+    return (
+        "1. Review the clip with the athlete and confirm the model observations. "
+        f"2. Practice cue: {cues[0]} "
+        f"3. Secondary cue: {cues[-1]} "
+        "4. Re-test with a short comparison clip and promote only verified observations."
+    )
+
+
+def video_coaching_next_actions(weakest_cards: list[dict[str, object]]) -> list[str]:
+    return [
+        "Coach reviews the pending observations and assessment.",
+        f"Run a drill focused on {weakest_cards[0]['metric_name']}.",
+        "Capture a follow-up clip after the correction block.",
+        "Notify guardians before video review sessions that involve minors.",
+    ]
 
 
 def parse_performance_evidence(
