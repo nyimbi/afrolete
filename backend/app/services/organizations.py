@@ -52,6 +52,7 @@ from app.schemas.organization import (
     RegistrationInquiryImportCreate,
     RegistrationInquiryImportPreviewRowRead,
     RegistrationInquiryImportRowErrorRead,
+    RegistrationInquiryImportTemplateRead,
     RegistrationInquiryAccountReadinessRead,
     RegistrationInquiryConversionCreate,
     RegistrationInquiryFollowUpCreate,
@@ -1391,6 +1392,63 @@ async def list_registration_inquiries(
                 .limit(200)
             )
         ).all()
+    )
+
+
+async def registration_inquiry_import_template(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> RegistrationInquiryImportTemplateRead:
+    if not await can_manage_registration_inquiries(identity, organization_id, authz):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    teams = list(
+        (
+            await db.scalars(
+                select(Team)
+                .where(Team.organization_id == organization_id)
+                .order_by(Team.name)
+                .limit(3)
+            )
+        ).all()
+    )
+    columns = [
+        "athlete_name",
+        "guardian_name",
+        "email",
+        "phone",
+        "age_group",
+        "sport_interest",
+        "team",
+        "message",
+    ]
+    sample_team = teams[0].name if teams else ""
+    sample_sport = organization.primary_sport or "football"
+    rows = [
+        {
+            "athlete_name": "Amina Example",
+            "guardian_name": "Parent Example",
+            "email": "parent.example@example.com",
+            "phone": "+254700000000",
+            "age_group": "U15",
+            "sport_interest": sample_sport,
+            "team": sample_team,
+            "message": "Imported from spreadsheet.",
+        }
+    ]
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=columns)
+    writer.writeheader()
+    writer.writerows(rows)
+    return RegistrationInquiryImportTemplateRead(
+        organization_id=organization_id,
+        filename=f"{organization.slug}-registration-import-template.csv",
+        columns=columns,
+        csv_text=buffer.getvalue(),
     )
 
 

@@ -18,6 +18,7 @@ import type {
   RegistrationInquiryConversionRead,
   RegistrationInquiryFollowUpRead,
   RegistrationInquiryImportRead,
+  RegistrationInquiryImportTemplateRead,
   RegistrationInquiryRead
 } from "@/types/operations";
 
@@ -283,6 +284,28 @@ export default function AdmissionsPage() {
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Registration CSV import failed");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const loadRegistrationImportTemplate = async () => {
+    if (!selectedOrganizationId) {
+      setError("Choose an organization before loading the import template.");
+      return;
+    }
+    setBusy("registration-template");
+    setError("");
+    try {
+      const template = await apiRequest<RegistrationInquiryImportTemplateRead>(
+        `/organizations/${selectedOrganizationId}/registration-inquiries/import-template`,
+        { identity: requestIdentity }
+      );
+      setImportCsv(template.csv_text);
+      downloadCsvTemplate(template);
+      addLog(`Loaded ${template.filename}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Registration import template could not be loaded");
     } finally {
       setBusy("");
     }
@@ -648,6 +671,9 @@ export default function AdmissionsPage() {
               spellCheck={false}
             />
             <div className="admissions-import-actions">
+              <button type="button" onClick={loadRegistrationImportTemplate} disabled={!selectedOrganizationId || busy !== ""}>
+                {busy === "registration-template" ? "Loading" : "Template"}
+              </button>
               <button type="button" onClick={() => importRegistrationCsv(true)} disabled={!selectedOrganizationId || busy !== ""}>
                 {busy === "registration-preview" ? "Previewing" : "Preview"}
               </button>
@@ -968,6 +994,19 @@ function appendUniqueNote(existing: string, note: string): string {
     return trimmedExisting;
   }
   return `${trimmedExisting}\n\n${trimmedNote}`;
+}
+
+function downloadCsvTemplate(template: RegistrationInquiryImportTemplateRead): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const blob = new Blob([template.csv_text], { type: "text/csv;charset=utf-8" });
+  const href = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = template.filename;
+  anchor.click();
+  window.URL.revokeObjectURL(href);
 }
 
 function toDateTimeLocalValue(value: string | null): string {

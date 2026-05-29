@@ -39,6 +39,7 @@ from app.schemas.organization import (
     RegistrationInquiryFollowUpRead,
     RegistrationInquiryImportCreate,
     RegistrationInquiryImportRead,
+    RegistrationInquiryImportTemplateRead,
     RegistrationInquiryRead,
     RegistrationInquiryUpdate,
     RegistrationPaymentHostedCheckoutRead,
@@ -77,6 +78,7 @@ from app.services.organizations import (
     public_site_path,
     queue_onboarding_concierge_agent_task,
     registration_packet_summary,
+    registration_inquiry_import_template,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
     settle_registration_payment_checkout,
@@ -674,6 +676,16 @@ async def list_registration_inquiries_route(
         to_registration_inquiry_read(inquiry)
         for inquiry in await list_registration_inquiries(db, identity, organization_id, authz)
     ]
+
+
+@router.get("/{organization_id}/registration-inquiries/import-template", response_model=RegistrationInquiryImportTemplateRead)
+async def registration_inquiry_import_template_route(
+    organization_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RegistrationInquiryImportTemplateRead:
+    return await registration_inquiry_import_template(db, identity, organization_id, authz)
 
 
 @router.post("/{organization_id}/registration-inquiries/import", response_model=RegistrationInquiryImportRead)

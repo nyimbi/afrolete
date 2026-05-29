@@ -206,6 +206,25 @@ def test_self_service_onboarding_creates_school_and_public_directory(client, ide
     assert public_site["registration_fee_amount"] == "1000.00"
     assert public_site["registration_payment_instructions"] == "Use the hosted checkout link after uploading documents."
 
+    template_response = client.get(
+        f"/api/v1/organizations/{onboarding['organization']['id']}/registration-inquiries/import-template",
+        headers=identity_headers,
+    )
+    assert template_response.status_code == 200
+    template = template_response.json()
+    assert template["filename"] == "makini-track-school-registration-import-template.csv"
+    assert template["columns"] == [
+        "athlete_name",
+        "guardian_name",
+        "email",
+        "phone",
+        "age_group",
+        "sport_interest",
+        "team",
+        "message",
+    ]
+    assert "Junior Sprint Squad" in template["csv_text"]
+
     import_csv = (
         "athlete_name,guardian_name,email,phone,age_group,sport_interest,team,message\n"
         "Brian Import,Parent Import,parent.import@example.com,+254700000010,U15,athletics,Junior Sprint Squad,CSV intake\n"

@@ -469,6 +469,13 @@ export type RegistrationInquiryImportRowErrorRead = {
   row: Record<string, string | null>;
 };
 
+export type RegistrationInquiryImportTemplateRead = {
+  organization_id: UUID;
+  filename: string;
+  columns: string[];
+  csv_text: string;
+};
+
 export type RegistrationInquiryImportPreviewRowRead = {
   row_number: number;
   athlete_name: string;

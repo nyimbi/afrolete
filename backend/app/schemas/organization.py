@@ -267,6 +267,13 @@ class RegistrationInquiryImportCreate(BaseModel):
     dry_run: bool = False
 
 
+class RegistrationInquiryImportTemplateRead(BaseModel):
+    organization_id: UUID
+    filename: str
+    columns: list[str]
+    csv_text: str
+
+
 class RegistrationInquiryImportRowErrorRead(BaseModel):
     row_number: int
     message: str
