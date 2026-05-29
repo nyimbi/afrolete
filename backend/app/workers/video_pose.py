@@ -31,6 +31,7 @@ POSE_SAMPLE_ENDPOINT_BATCH_SIZE = 600
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract pose landmarks from stored performance videos.")
     parser.add_argument("--organization-id", type=UUID, default=None)
+    parser.add_argument("--video-asset-id", type=UUID, default=None)
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--max-frames", type=int, default=None)
     parser.add_argument("--sample-every-seconds", type=float, default=None)
@@ -149,6 +150,7 @@ async def run_performance_video_pose_endpoint_worker(
     *,
     api_base_url: str,
     organization_id: UUID | None = None,
+    video_asset_id: UUID | None = None,
     limit: int = 10,
     max_frames: int | None = None,
     sample_every_seconds: float | None = None,
@@ -175,6 +177,8 @@ async def run_performance_video_pose_endpoint_worker(
     )
     if organization_id is not None:
         statement = statement.where(PerformanceVideoAsset.organization_id == organization_id)
+    if video_asset_id is not None:
+        statement = statement.where(PerformanceVideoAsset.id == video_asset_id)
     videos = list((await db.scalars(statement.order_by(PerformanceVideoAsset.created_at.asc()).limit(limit))).all())
     processed_count = 0
     failed_count = 0
@@ -284,6 +288,7 @@ async def run() -> None:
                 db,
                 api_base_url=api_base_url,
                 organization_id=args.organization_id,
+                video_asset_id=args.video_asset_id,
                 limit=args.limit,
                 max_frames=args.max_frames,
                 sample_every_seconds=args.sample_every_seconds,
@@ -294,6 +299,7 @@ async def run() -> None:
             result = await run_performance_video_pose_worker(
                 db,
                 organization_id=args.organization_id,
+                video_asset_id=args.video_asset_id,
                 limit=args.limit,
                 max_frames=args.max_frames,
                 sample_every_seconds=args.sample_every_seconds,

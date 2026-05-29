@@ -110,8 +110,9 @@ uv run python -m app.workers.video_pose \
 ```
 
 Omit `--api-base-url` to store extracted samples in-process through the same
-domain service. Use bearer-token headers in Keycloak deployments and local
-`X-Afrolete-*` headers only for trusted local/demo runs.
+domain service. Add `--video-asset-id <uuid>` to process one stored clip for a
+manual retry or a controlled demo. Use bearer-token headers in Keycloak
+deployments and local `X-Afrolete-*` headers only for trusted local/demo runs.
 
 Training plan generation defaults to deterministic local planning. To hand
 planning off to a live model worker, set:

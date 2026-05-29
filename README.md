@@ -305,7 +305,10 @@ or the local demo identity headers
 `AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_NAME`. Docker demo deployments
 mount the local performance-video directory into both the API and due-worker
 containers, so uploaded clips are available to the worker before the extracted
-keypoints are posted back to the API.
+keypoints are posted back to the API. For focused video processing, run the
+standalone profile with `docker compose --profile video-pose up
+video-pose-worker`; the worker can also target one stored clip with
+`--video-asset-id` for manual retries or demos.
 
 Object storage can run in local mode for demos or S3-compatible mode for MinIO.
 The same storage adapter supports retention policy enforcement: local mode

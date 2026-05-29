@@ -6330,6 +6330,7 @@ async def run_performance_video_pose_worker(
     db: AsyncSession,
     *,
     organization_id: UUID | None = None,
+    video_asset_id: UUID | None = None,
     limit: int = 10,
     max_frames: int | None = None,
     sample_every_seconds: float | None = None,
@@ -6341,6 +6342,8 @@ async def run_performance_video_pose_worker(
     )
     if organization_id is not None:
         statement = statement.where(PerformanceVideoAsset.organization_id == organization_id)
+    if video_asset_id is not None:
+        statement = statement.where(PerformanceVideoAsset.id == video_asset_id)
     videos = list((await db.scalars(statement.order_by(PerformanceVideoAsset.created_at.asc()).limit(limit))).all())
     processed_count = 0
     failed_count = 0

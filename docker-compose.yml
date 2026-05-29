@@ -93,6 +93,35 @@ services:
         "while true; do python -m app.workers.due --limit 20 --billing-dunning-limit 50 --billing-dunning-repeat-after-days 7 --billing-late-fee-limit 50 --billing-late-fee-fixed-fee 0 --billing-late-fee-percentage-rate 2 --billing-late-fee-max-fee 50 --billing-payment-retry-limit 50 --billing-payment-retry-repeat-after-hours 24 --billing-payment-retry-max-attempts 3 --billing-recurring-invoice-limit 50 --billing-recurring-invoice-due-in-days 14 --communication-digest-limit 50 --communication-escalation-limit 50 --communication-escalation-channel in_app --communication-escalation-unresolved-after-minutes 15 --communication-escalation-repeat-after-minutes 60 --communication-scheduled-dispatch-limit 50 --emergency-escalation-limit 50 --emergency-escalation-unresolved-after-minutes 15 --emergency-escalation-repeat-after-minutes 15 --compliance-reconciliation-limit 50 --event-travel-consent-reminder-limit 20 --event-travel-consent-reminder-channel in_app --object-storage-lifecycle-retention-days 365 --auto-alert-performance-forecast-drift --performance-forecast-drift-channel in_app --performance-video-pose-limit 10 --performance-video-pose-max-frames 45 --performance-video-pose-sample-every-seconds 0.2 --performance-video-pose-api-base-url http://backend:8000 --performance-video-pose-local-auth-sub kc-owner-1 --performance-video-pose-local-auth-email owner@example.com --performance-video-pose-local-auth-name 'Owner Example'; sleep 60; done",
       ]
 
+  video-pose-worker:
+    profiles: ["video-pose"]
+    platform: linux/amd64
+    build:
+      context: ./backend
+    environment:
+      AFROLETE_ENV: demo
+      AFROLETE_AUTH_MODE: local
+      AFROLETE_AUTHZ_MODE: memory
+      AFROLETE_DATABASE_URL: postgresql+asyncpg://afrolete:afrolete@postgres:5432/afrolete
+      AFROLETE_RUN_MIGRATIONS: "0"
+      AFROLETE_SEED_DEMO: "0"
+      AFROLETE_PERFORMANCE_VIDEO_FILE_DIR: /app/data/performance-videos
+      AFROLETE_PERFORMANCE_POSE_WORKER_API_BASE_URL: http://backend:8000
+      AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_SUB: kc-owner-1
+      AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_EMAIL: owner@example.com
+      AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_NAME: Owner Example
+    volumes:
+      - afrolete-performance-videos:/app/data/performance-videos
+    depends_on:
+      backend:
+        condition: service_healthy
+    command:
+      [
+        "sh",
+        "-c",
+        "while true; do python -m app.workers.video_pose --limit 10 --max-frames 45 --sample-every-seconds 0.2 --pretty; sleep 60; done",
+      ]
+
 volumes:
   afrolete-postgres:
   afrolete-performance-videos:

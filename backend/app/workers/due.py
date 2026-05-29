@@ -167,6 +167,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--dry-run-performance-injury-risk-alerts", action="store_true")
     parser.add_argument("--performance-video-pose-limit", type=int, default=None)
+    parser.add_argument("--performance-video-pose-video-asset-id", type=UUID, default=None)
     parser.add_argument("--performance-video-pose-max-frames", type=int, default=None)
     parser.add_argument("--performance-video-pose-sample-every-seconds", type=float, default=None)
     parser.add_argument("--performance-video-pose-api-base-url", default=None)
@@ -310,6 +311,7 @@ async def run_due_workers(
     performance_injury_risk_channels: Sequence[CommunicationChannel] | None = None,
     dry_run_performance_injury_risk_alerts: bool = False,
     performance_video_pose_limit: int | None = None,
+    performance_video_pose_video_asset_id: UUID | None = None,
     performance_video_pose_max_frames: int | None = None,
     performance_video_pose_sample_every_seconds: float | None = None,
     performance_video_pose_api_base_url: str | None = None,
@@ -527,6 +529,7 @@ async def run_due_workers(
                 db,
                 api_base_url=performance_video_pose_api_base_url,
                 organization_id=organization_id,
+                video_asset_id=performance_video_pose_video_asset_id,
                 limit=performance_video_pose_limit or performance_limit or limit,
                 max_frames=performance_video_pose_max_frames,
                 sample_every_seconds=performance_video_pose_sample_every_seconds,
@@ -537,6 +540,7 @@ async def run_due_workers(
             results["performance_video_pose"] = await run_performance_video_pose_worker(
                 db,
                 organization_id=organization_id,
+                video_asset_id=performance_video_pose_video_asset_id,
                 limit=performance_video_pose_limit or performance_limit or limit,
                 max_frames=performance_video_pose_max_frames,
                 sample_every_seconds=performance_video_pose_sample_every_seconds,
@@ -691,6 +695,7 @@ async def run() -> None:
             else None,
             dry_run_performance_injury_risk_alerts=args.dry_run_performance_injury_risk_alerts,
             performance_video_pose_limit=args.performance_video_pose_limit,
+            performance_video_pose_video_asset_id=args.performance_video_pose_video_asset_id,
             performance_video_pose_max_frames=args.performance_video_pose_max_frames,
             performance_video_pose_sample_every_seconds=args.performance_video_pose_sample_every_seconds,
             performance_video_pose_api_base_url=(

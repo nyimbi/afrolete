@@ -75,6 +75,11 @@ MediaPipe/OpenCV pose extractor, and posts keypoint batches back to
 `/api/v1/performance/videos/{video_asset_id}/pose-samples` through the backend
 API in the Docker demo.
 
+For a focused video-processing demo, run `docker compose --profile video-pose
+up video-pose-worker` alongside the API. That optional worker loops over stored
+performance clips, decodes frames, runs the pose model, and posts the resulting
+keypoints through the same endpoint without enabling every due-worker lane.
+
 ## Reset
 
 ```bash

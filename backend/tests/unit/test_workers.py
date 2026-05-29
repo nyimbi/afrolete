@@ -238,6 +238,7 @@ async def test_video_pose_worker_posts_extracted_keypoints_to_pose_samples_endpo
     db_session.add(athlete)
     await db_session.flush()
     video_bytes = b"fake sprint video bytes"
+    unselected_video_bytes = b"unselected sprint video bytes"
     settings = Settings(performance_video_file_dir=str(tmp_path / "videos"))
     storage_key = f"{organization.id}/{athlete.id}/endpoint-sprint.mp4"
     stored = put_object(
@@ -262,7 +263,21 @@ async def test_video_pose_worker_posts_extracted_keypoints_to_pose_samples_endpo
         video_uri=f"performance-video://{organization.id}/{athlete.id}/endpoint",
         status="uploaded",
     )
-    db_session.add(video)
+    unselected_video = PerformanceVideoAsset(
+        organization_id=organization.id,
+        athlete_profile_id=athlete.id,
+        uploaded_by_person_id=person.id,
+        sport="athletics",
+        filename="unselected-sprint.mp4",
+        content_type="video/mp4",
+        size_bytes=len(unselected_video_bytes),
+        checksum=hashlib.sha256(unselected_video_bytes).hexdigest(),
+        storage_url="local://performance-videos/unselected-sprint.mp4",
+        storage_path="unselected-sprint.mp4",
+        video_uri=f"performance-video://{organization.id}/{athlete.id}/unselected",
+        status="uploaded",
+    )
+    db_session.add_all([video, unselected_video])
     await db_session.commit()
 
     extracted_sample = {
@@ -315,6 +330,7 @@ async def test_video_pose_worker_posts_extracted_keypoints_to_pose_samples_endpo
         db_session,
         api_base_url="http://api.test",
         organization_id=organization.id,
+        video_asset_id=video.id,
         limit=5,
         request_headers={
             "X-Afrolete-Sub": "kc-pose-worker",
@@ -337,6 +353,8 @@ async def test_video_pose_worker_posts_extracted_keypoints_to_pose_samples_endpo
     assert video.status == "pose_sampled"
     assert video.frame_rate == 48.0
     assert json.loads(video.pose_analysis_json)["endpoint_sample_count"] == 1
+    await db_session.refresh(unselected_video)
+    assert unselected_video.status == "uploaded"
 
 
 async def test_video_pose_worker_batches_pose_samples_for_endpoint_limits() -> None:
