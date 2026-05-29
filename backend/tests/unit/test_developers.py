@@ -48,6 +48,11 @@ def test_public_developer_docs(client) -> None:
         for sdk in docs["sdks"]
         if sdk["language"] == "Python"
     )
+    assert any(
+        quickstart["title"] == "Exchange an OAuth code"
+        and "/developers/oauth/consent" in " ".join(quickstart["steps"])
+        for quickstart in docs["quickstarts"]
+    )
     assert "operations" in docs["marketplace_categories"]
     assert docs["security_requirements"]
 

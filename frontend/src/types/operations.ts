@@ -2904,6 +2904,16 @@ export type DeveloperApiKeyProvisionedRead = {
   secret_hint: string;
 };
 
+export type DeveloperOAuthAuthorizationCreate = {
+  organization_id: UUID;
+  client_id: string;
+  redirect_uri: string;
+  scopes: string[];
+  state?: string | null;
+  code_challenge?: string | null;
+  code_challenge_method?: string | null;
+};
+
 export type DeveloperOAuthAuthorizationRead = {
   id: UUID;
   organization_id: UUID;

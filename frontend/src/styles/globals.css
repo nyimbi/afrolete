@@ -2825,6 +2825,104 @@ textarea:focus {
   padding: 20px;
 }
 
+.developer-oauth-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(45, 93, 73, 0.16), transparent 34rem),
+    linear-gradient(180deg, #f3f7f2 0, #edf4ef 100%);
+  color: var(--ink);
+  padding: 24px;
+}
+
+.developer-oauth-shell {
+  width: min(960px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 18px;
+}
+
+.developer-oauth-heading h1 {
+  font-size: 44px;
+  line-height: 1;
+  margin: 4px 0 0;
+}
+
+.developer-oauth-form,
+.developer-oauth-result {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.developer-oauth-form {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+}
+
+.developer-oauth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.developer-oauth-grid label {
+  display: grid;
+  gap: 7px;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.developer-oauth-wide {
+  grid-column: 1 / -1;
+}
+
+.developer-oauth-grid input,
+.developer-oauth-grid select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7faf7;
+  color: var(--ink);
+  font: inherit;
+  padding: 12px;
+}
+
+.developer-oauth-scopes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.developer-oauth-scopes article,
+.developer-oauth-result div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.developer-oauth-scopes strong,
+.developer-oauth-scopes span,
+.developer-oauth-result span,
+.developer-oauth-result strong,
+.developer-oauth-result a {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.developer-oauth-scopes span,
+.developer-oauth-result span {
+  color: var(--muted);
+}
+
+.developer-oauth-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.7fr) minmax(0, 0.8fr);
+  gap: 10px;
+  padding: 16px;
+}
+
 .payment-page {
   min-height: 100vh;
   background:
@@ -3080,7 +3178,10 @@ textarea:focus {
   .developer-docs-quickstarts,
   .developer-docs-two-column,
   .developer-docs-events,
-  .developer-docs-footer {
+  .developer-docs-footer,
+  .developer-oauth-grid,
+  .developer-oauth-scopes,
+  .developer-oauth-result {
     grid-template-columns: 1fr;
   }
 }

@@ -2183,7 +2183,7 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
             description="Redeem a tenant-approved authorization code for an expiring AfroLete API token with client-secret or PKCE proof.",
             steps=[
                 "Register a developer application with a redirect URI and allowed scopes.",
-                "Ask a tenant manager to grant OAuth consent for the requested scopes and optional PKCE code challenge.",
+                "Send the tenant manager to /developers/oauth/consent with organization_id, client_id, redirect_uri, scopes, state, and optional PKCE parameters.",
                 "POST the authorization code, redirect URI, and either client_secret or code_verifier to /api/v1/developers/oauth/token.",
             ],
             code_sample=(
