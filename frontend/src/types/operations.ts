@@ -370,6 +370,36 @@ export type OrganizationPublicSiteRead = {
   ticket_products: PublicSiteTicketProductRead[];
 };
 
+export type OrganizationDirectoryRead = {
+  id: UUID;
+  name: string;
+  slug: string;
+  organization_type: OrganizationType;
+  country_code: string | null;
+  primary_sport: string | null;
+  mission: string | null;
+  public_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  website_url: string | null;
+  subdomain: string | null;
+  logo_url: string | null;
+  brand_primary_color: string | null;
+  brand_secondary_color: string | null;
+  public_site_path: string;
+  team_count: number;
+  upcoming_event_count: number;
+};
+
+export type OrganizationOnboardingRead = {
+  organization: OrganizationRead;
+  public_site_path: string;
+  dashboard_path: string;
+  owner_email: string;
+  owner_display_name: string;
+  checklist: string[];
+};
+
 export type RegistrationInquiryRead = {
   id: UUID;
   organization_id: UUID;

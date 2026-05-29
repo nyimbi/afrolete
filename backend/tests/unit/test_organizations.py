@@ -43,6 +43,66 @@ def test_create_and_list_organization(client, identity_headers) -> None:
     )
 
 
+def test_self_service_onboarding_creates_school_and_public_directory(client, identity_headers) -> None:
+    response = client.post(
+        "/api/v1/organizations/onboarding",
+        headers=identity_headers,
+        json={
+            "launch_goal": "Open registration for term two athletics",
+            "organization": {
+                "name": "Makini Track School",
+                "organization_type": "school",
+                "country_code": "KE",
+                "primary_sport": "athletics",
+                "public_name": "Makini Track",
+                "contact_email": "sports@makini.example",
+                "subdomain": "makini-track",
+                "mission": "Run school athletics safely and transparently.",
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    onboarding = response.json()
+    assert onboarding["organization"]["organization_type"] == "school"
+    assert onboarding["organization"]["my_roles"] == ["owner"]
+    assert onboarding["owner_email"] == identity_headers["X-Afrolete-Email"]
+    assert onboarding["public_site_path"] == "/site/makini-track"
+    assert onboarding["dashboard_path"].startswith("/?organization_id=")
+    assert onboarding["checklist"][0] == "Confirm launch goal: Open registration for term two athletics"
+    assert any("school teams" in step for step in onboarding["checklist"])
+
+    directory_response = client.get(
+        "/api/v1/organizations/directory?q=Makini&organization_type=school&sport=athletics"
+    )
+
+    assert directory_response.status_code == 200
+    directory = directory_response.json()
+    assert [item["slug"] for item in directory] == ["makini-track-school"]
+    assert directory[0]["public_site_path"] == "/site/makini-track"
+    assert directory[0]["team_count"] == 0
+
+    inquiry_response = client.post(
+        "/api/v1/organizations/public/makini-track/registration-inquiries",
+        json={
+            "athlete_name": "Amina Runner",
+            "guardian_name": "Parent Runner",
+            "email": "parent.runner@example.com",
+            "phone": "+254700000001",
+            "age_group": "U15",
+            "sport_interest": "athletics",
+            "message": "Interested in sprint training.",
+            "source_url": "https://makini-track.afrolete.local/register",
+        },
+    )
+
+    assert inquiry_response.status_code == 201
+    inquiry = inquiry_response.json()
+    assert inquiry["athlete_name"] == "Amina Runner"
+    assert inquiry["status"] == "new"
+    assert inquiry["organization_id"] == onboarding["organization"]["id"]
+
+
 def test_public_site_exposes_commercial_support_opportunities(client, identity_headers) -> None:
     organization = client.post(
         "/api/v1/organizations",

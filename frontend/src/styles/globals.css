@@ -2324,6 +2324,215 @@ textarea:focus {
   margin-top: 5px;
 }
 
+.register-page {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, #edf3ee 0, #f7f9f5 420px),
+    #f7f9f5;
+  color: var(--ink);
+}
+
+.register-hero {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 300px;
+  gap: 24px;
+  align-items: start;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 30px 20px 24px;
+}
+
+.register-brand,
+.register-auth-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.register-brand strong,
+.register-brand span,
+.register-auth-card strong,
+.register-auth-card span,
+.register-auth-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.register-brand span,
+.register-auth-card span,
+.register-auth-card small {
+  color: var(--muted);
+}
+
+.register-hero-copy h1 {
+  max-width: 780px;
+  font-size: 50px;
+  line-height: 1;
+  margin: 0;
+}
+
+.register-auth-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  padding: 14px;
+}
+
+.register-auth-card {
+  display: grid;
+}
+
+.register-auth-card button,
+.register-mode-switch button,
+.register-panel button,
+.register-result-links a {
+  border: 0;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  padding: 10px 13px;
+  text-decoration: none;
+}
+
+.register-shell {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 0 20px 52px;
+}
+
+.register-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.register-mode-switch button {
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+}
+
+.register-mode-switch button.selected {
+  color: #fff;
+  background: var(--teal);
+  border-color: var(--teal);
+}
+
+.register-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.75fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.register-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.register-panel h2 {
+  margin: 4px 0 0;
+}
+
+.register-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.register-wide {
+  grid-column: 1 / -1;
+}
+
+.register-result-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.register-result-panel p {
+  color: var(--muted);
+  margin-bottom: 0;
+}
+
+.register-result-panel ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.register-result-panel li {
+  color: var(--muted);
+}
+
+.register-result-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.register-result-links a:last-child {
+  background: var(--teal);
+}
+
+.register-directory {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.register-directory button,
+.register-directory > span,
+.register-success {
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfb;
+  color: var(--ink);
+  padding: 12px;
+}
+
+.register-directory button.selected {
+  border-color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 10%, #fff);
+}
+
+.register-directory strong,
+.register-directory span,
+.register-directory small,
+.register-success strong,
+.register-success span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.register-directory span,
+.register-directory small,
+.register-success span {
+  color: var(--muted);
+}
+
+.register-directory small {
+  margin-top: 3px;
+}
+
+.register-success {
+  margin: 0 0 14px;
+}
+
+.register-error {
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--line));
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
 .public-ai-page {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--site-primary) 12%, #f5f7f2), #f5f7f2 420px),
@@ -3216,6 +3425,9 @@ textarea:focus {
 
   .public-site-inquiry,
   .public-site-inquiry form,
+  .register-hero,
+  .register-workspace,
+  .register-inline-grid,
   .public-ai-hero-grid,
   .public-ai-metrics,
   .public-ai-actions,
@@ -3269,6 +3481,14 @@ textarea:focus {
 
   .public-site-copy h1 {
     font-size: 40px;
+  }
+
+  .register-hero-copy h1 {
+    font-size: 36px;
+  }
+
+  .register-mode-switch {
+    grid-template-columns: 1fr;
   }
 
   .public-ai-copy h1 {

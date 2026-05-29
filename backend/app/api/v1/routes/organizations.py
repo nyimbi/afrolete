@@ -1,10 +1,11 @@
 from uuid import UUID
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.enums import OrganizationType
 from app.schemas.communication import CommunicationMessageRead
 from app.schemas.organization import (
     CommitteeCreate,
@@ -14,6 +15,9 @@ from app.schemas.organization import (
     MemberAdd,
     MembershipRead,
     OrganizationCreate,
+    OrganizationDirectoryRead,
+    OrganizationOnboardingCreate,
+    OrganizationOnboardingRead,
     OrganizationPublicSiteRead,
     OrganizationRead,
     PublicRegistrationInquiryCreate,
@@ -45,6 +49,9 @@ from app.services.organizations import (
     list_committees,
     list_organizations_for_identity,
     list_registration_inquiries,
+    onboarding_checklist,
+    public_site_path,
+    search_public_organizations,
     update_registration_inquiry,
 )
 from app.services.communications import list_recipients
@@ -175,6 +182,30 @@ def to_public_site_read(item) -> OrganizationPublicSiteRead:
     )
 
 
+def to_directory_read(item) -> OrganizationDirectoryRead:
+    organization, team_count, upcoming_event_count = item
+    return OrganizationDirectoryRead(
+        id=organization.id,
+        name=organization.name,
+        slug=organization.slug,
+        organization_type=organization.organization_type,
+        country_code=organization.country_code,
+        primary_sport=organization.primary_sport,
+        mission=organization.mission,
+        public_name=organization.public_name,
+        contact_email=organization.contact_email,
+        contact_phone=organization.contact_phone,
+        website_url=organization.website_url,
+        subdomain=organization.subdomain,
+        logo_url=organization.logo_url,
+        brand_primary_color=organization.brand_primary_color,
+        brand_secondary_color=organization.brand_secondary_color,
+        public_site_path=public_site_path(organization),
+        team_count=team_count,
+        upcoming_event_count=upcoming_event_count,
+    )
+
+
 def _top_sponsorship_tier(sponsor_id: UUID, sponsorships) -> str | None:
     return next((agreement.tier for agreement in sponsorships if agreement.sponsor_id == sponsor_id), None)
 
@@ -284,6 +315,46 @@ async def list_organizations_route(
     return [
         to_organization_read(item) for item in await list_organizations_for_identity(db, identity)
     ]
+
+
+@router.get("/directory", response_model=list[OrganizationDirectoryRead])
+async def search_public_organizations_route(
+    q: str | None = Query(default=None, max_length=120),
+    organization_type: OrganizationType | None = None,
+    sport: str | None = Query(default=None, max_length=80),
+    country_code: str | None = Query(default=None, min_length=2, max_length=2),
+    limit: int = Query(default=12, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+) -> list[OrganizationDirectoryRead]:
+    return [
+        to_directory_read(item)
+        for item in await search_public_organizations(
+            db,
+            query=q,
+            organization_type=organization_type,
+            sport=sport,
+            country_code=country_code,
+            limit=limit,
+        )
+    ]
+
+
+@router.post("/onboarding", response_model=OrganizationOnboardingRead, status_code=status.HTTP_201_CREATED)
+async def create_organization_onboarding_route(
+    payload: OrganizationOnboardingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationOnboardingRead:
+    organization, roles = await create_organization(db, identity, payload.organization, authz)
+    return OrganizationOnboardingRead(
+        organization=to_organization_read((organization, roles)),
+        public_site_path=public_site_path(organization),
+        dashboard_path=f"/?organization_id={organization.id}",
+        owner_email=identity.email,
+        owner_display_name=identity.display_name,
+        checklist=onboarding_checklist(organization, payload.launch_goal),
+    )
 
 
 @router.get("/public/{site}", response_model=OrganizationPublicSiteRead)

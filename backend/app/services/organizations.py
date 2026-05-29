@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.communication import CommunicationMessage
@@ -15,6 +15,7 @@ from app.models.enums import (
     GuardianRelationshipKind,
     MemberSubjectType,
     MembershipRole,
+    OrganizationType,
     RosterStatus,
     TeamRole,
 )
@@ -52,6 +53,27 @@ def organization_member_relation(subject_type: MemberSubjectType, role: Membersh
 
 
 INQUIRY_REVIEW_STATUSES = {"new", "reviewing", "contacted", "waitlisted", "rejected"}
+
+
+def public_site_path(organization: Organization) -> str:
+    return f"/site/{organization.subdomain or organization.slug}"
+
+
+def onboarding_checklist(organization: Organization, launch_goal: str | None = None) -> list[str]:
+    organization_label = "school" if organization.organization_type == OrganizationType.SCHOOL else "club"
+    steps = [
+        f"Invite the first {organization_label} administrators and coaches.",
+        "Create teams, squads, or individual sport groups.",
+        "Publish the branded public registration page.",
+        "Collect player/family registration inquiries and convert accepted athletes.",
+        "Send guardian portal invitations for minors and consent signers.",
+        "Configure fees, payment links, and communication delivery channels.",
+    ]
+    if organization.organization_type == OrganizationType.SCHOOL:
+        steps.insert(2, "Add school teams by sport, age group, season, and staff lead.")
+    if launch_goal:
+        steps.insert(0, f"Confirm launch goal: {launch_goal}")
+    return steps
 
 
 async def can_manage_registration_inquiries(
@@ -141,6 +163,50 @@ async def create_organization(
     await db.commit()
     await db.refresh(organization)
     return organization, [MembershipRole.OWNER]
+
+
+async def search_public_organizations(
+    db: AsyncSession,
+    query: str | None = None,
+    organization_type: OrganizationType | None = None,
+    sport: str | None = None,
+    country_code: str | None = None,
+    limit: int = 12,
+) -> list[tuple[Organization, int, int]]:
+    bounded_limit = max(1, min(limit, 50))
+    statement = select(Organization).order_by(Organization.name).limit(bounded_limit)
+    if organization_type is not None:
+        statement = statement.where(Organization.organization_type == organization_type)
+    if sport:
+        statement = statement.where(func.lower(Organization.primary_sport).like(f"%{sport.lower()}%"))
+    if country_code:
+        statement = statement.where(func.lower(Organization.country_code) == country_code.lower())
+    if query and query.strip():
+        like = f"%{query.strip().lower()}%"
+        statement = statement.where(
+            or_(
+                func.lower(Organization.name).like(like),
+                func.lower(Organization.public_name).like(like),
+                func.lower(Organization.slug).like(like),
+                func.lower(Organization.subdomain).like(like),
+                func.lower(Organization.primary_sport).like(like),
+            )
+        )
+
+    organizations = list((await db.scalars(statement)).all())
+    now = datetime.now(UTC)
+    results: list[tuple[Organization, int, int]] = []
+    for organization in organizations:
+        team_count = await db.scalar(
+            select(func.count(Team.id)).where(Team.organization_id == organization.id)
+        )
+        upcoming_event_count = await db.scalar(
+            select(func.count(Event.id))
+            .where(Event.organization_id == organization.id)
+            .where(Event.starts_at >= now)
+        )
+        results.append((organization, int(team_count or 0), int(upcoming_event_count or 0)))
+    return results
 
 
 async def list_organizations_for_identity(

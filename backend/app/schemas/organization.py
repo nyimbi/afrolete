@@ -137,6 +137,41 @@ class OrganizationPublicSiteRead(BaseModel):
     ticket_products: list[PublicSiteTicketProductRead]
 
 
+class OrganizationDirectoryRead(BaseModel):
+    id: UUID
+    name: str
+    slug: str
+    organization_type: OrganizationType
+    country_code: str | None
+    primary_sport: str | None
+    mission: str | None
+    public_name: str | None
+    contact_email: str | None
+    contact_phone: str | None
+    website_url: str | None
+    subdomain: str | None
+    logo_url: str | None
+    brand_primary_color: str | None
+    brand_secondary_color: str | None
+    public_site_path: str
+    team_count: int
+    upcoming_event_count: int
+
+
+class OrganizationOnboardingCreate(BaseModel):
+    organization: OrganizationCreate
+    launch_goal: str | None = Field(default=None, max_length=500)
+
+
+class OrganizationOnboardingRead(BaseModel):
+    organization: OrganizationRead
+    public_site_path: str
+    dashboard_path: str
+    owner_email: str
+    owner_display_name: str
+    checklist: list[str]
+
+
 class PublicRegistrationInquiryCreate(BaseModel):
     team_id: UUID | None = None
     athlete_name: str = Field(min_length=2, max_length=240)
