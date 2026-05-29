@@ -2384,6 +2384,48 @@ textarea:focus {
   margin-top: 5px;
 }
 
+.registration-account-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--teal);
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 12px;
+}
+
+.registration-account-card > div {
+  display: grid;
+  gap: 4px;
+}
+
+.registration-account-card > div:last-child {
+  grid-template-columns: repeat(2, minmax(0, auto));
+  align-items: center;
+}
+
+.registration-account-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.registration-account-card strong,
+.registration-account-card span {
+  overflow-wrap: anywhere;
+}
+
+.registration-account-card button,
+.registration-account-card a {
+  color: #fff;
+  background: var(--teal);
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 13px;
+  text-align: center;
+}
+
 .public-registration-packet {
   display: grid;
   gap: 14px;
@@ -3929,9 +3971,15 @@ textarea:focus {
   }
 
   .public-registration-packet-head,
-  .public-registration-actions {
+  .public-registration-actions,
+  .registration-account-card {
     align-items: stretch;
     flex-direction: column;
+    grid-template-columns: 1fr;
+  }
+
+  .registration-account-card > div:last-child {
+    grid-template-columns: 1fr;
   }
 
   .admissions-queue {

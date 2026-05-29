@@ -174,6 +174,28 @@ export default function RegistrationPage() {
     );
   };
 
+  const beginFamilyKeycloakRegistration = () => {
+    if (!submittedInquiry) {
+      return;
+    }
+    setBusy("family-keycloak");
+    void startKeycloakRegistration({ loginHint: submittedInquiry.email }).catch((caught) => {
+      setBusy("");
+      setError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
+    });
+  };
+
+  const beginFamilyKeycloakLogin = () => {
+    if (!submittedInquiry) {
+      return;
+    }
+    setBusy("family-keycloak");
+    void startKeycloakLogin({ loginHint: submittedInquiry.email, prompt: "login" }).catch((caught) => {
+      setBusy("");
+      setError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
+    });
+  };
+
   const signOut = () => {
     clearStoredAuthSession();
     setAuthSession(null);
@@ -755,6 +777,26 @@ export default function RegistrationPage() {
                   </span>
                 </div>
               ) : null}
+              {submittedInquiry && selectedSite ? (
+                <div className="registration-account-card">
+                  <div>
+                    <strong>{submittedInquiry.email}</strong>
+                    <span>{keycloakEnabled ? "Family account" : "Family portal"}</span>
+                  </div>
+                  {keycloakEnabled ? (
+                    <div>
+                      <button type="button" onClick={beginFamilyKeycloakRegistration} disabled={busy !== ""}>
+                        Create account
+                      </button>
+                      <button type="button" onClick={beginFamilyKeycloakLogin} disabled={busy !== ""}>
+                        Sign in
+                      </button>
+                    </div>
+                  ) : (
+                    <a href={familyPortalHref(selectedSite.id, submittedInquiry)}>Open family portal</a>
+                  )}
+                </div>
+              ) : null}
               {submittedInquiry ? (
                 <div className="registration-packet">
                   <div>
@@ -1029,4 +1071,14 @@ function subdomainSuggestionFromError(caught: unknown): string | null {
   }
   const suggestions = (inner as { subdomain_suggestions: unknown }).subdomain_suggestions;
   return Array.isArray(suggestions) && typeof suggestions[0] === "string" ? suggestions[0] : null;
+}
+
+function familyPortalHref(organizationId: string, inquiry: RegistrationInquiryRead): string {
+  const params = new URLSearchParams({
+    organization_id: organizationId,
+    guardian_email: inquiry.email,
+    guardian_name: inquiry.guardian_name ?? inquiry.email,
+    athlete_name: inquiry.athlete_name
+  });
+  return `/family?${params.toString()}`;
 }

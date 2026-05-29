@@ -4,6 +4,8 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useParams } from "next/navigation";
 import { apiRequest } from "@/lib/api";
+import { startKeycloakLogin, startKeycloakRegistration } from "@/lib/auth";
+import { afroleteAuthMode } from "@/lib/config";
 import type {
   AgentEthicalScorecardRead,
   OrganizationPublicSiteRead,
@@ -45,6 +47,8 @@ const defaultPacketForm = {
   payment_reference: "",
   payment_status: "pending"
 };
+
+const keycloakEnabled = afroleteAuthMode === "keycloak";
 
 export default function PublicOrganizationSitePage() {
   const params = useParams<{ slug?: string | string[] }>();
@@ -97,6 +101,7 @@ export default function PublicOrganizationSitePage() {
   const [volunteerGroupFormError, setVolunteerGroupFormError] = useState("");
   const [busy, setBusy] = useState(false);
   const [packetBusy, setPacketBusy] = useState("");
+  const [accountBusy, setAccountBusy] = useState("");
   const [volunteerBusy, setVolunteerBusy] = useState(false);
   const [volunteerGroupBusy, setVolunteerGroupBusy] = useState(false);
 
@@ -357,6 +362,28 @@ export default function PublicOrganizationSitePage() {
     } finally {
       setPacketBusy("");
     }
+  };
+
+  const beginFamilyKeycloakRegistration = () => {
+    if (!submittedInquiry) {
+      return;
+    }
+    setAccountBusy("registration");
+    void startKeycloakRegistration({ loginHint: submittedInquiry.email }).catch((caught) => {
+      setAccountBusy("");
+      setPacketError(caught instanceof Error ? caught.message : "Keycloak account creation failed");
+    });
+  };
+
+  const beginFamilyKeycloakLogin = () => {
+    if (!submittedInquiry) {
+      return;
+    }
+    setAccountBusy("login");
+    void startKeycloakLogin({ loginHint: submittedInquiry.email, prompt: "login" }).catch((caught) => {
+      setAccountBusy("");
+      setPacketError(caught instanceof Error ? caught.message : "Keycloak sign-in failed");
+    });
   };
 
   const submitVolunteerSignup = async (event: FormEvent<HTMLFormElement>) => {
@@ -857,6 +884,24 @@ export default function PublicOrganizationSitePage() {
               <strong>Inquiry received</strong>
               <span>{submittedInquiry.athlete_name} · {submittedInquiry.status} · {submittedInquiry.verification_status}</span>
             </div>
+            <div className="registration-account-card">
+              <div>
+                <strong>{submittedInquiry.email}</strong>
+                <span>{keycloakEnabled ? "Family account" : "Family portal"}</span>
+              </div>
+              {keycloakEnabled ? (
+                <div>
+                  <button type="button" onClick={beginFamilyKeycloakRegistration} disabled={accountBusy !== ""}>
+                    {accountBusy === "registration" ? "Starting" : "Create account"}
+                  </button>
+                  <button type="button" onClick={beginFamilyKeycloakLogin} disabled={accountBusy !== ""}>
+                    {accountBusy === "login" ? "Starting" : "Sign in"}
+                  </button>
+                </div>
+              ) : (
+                <a href={familyPortalHref(site.id, submittedInquiry)}>Open family portal</a>
+              )}
+            </div>
             <div className="public-registration-packet-head">
               <div>
                 <p className="section-label">Registration packet</p>
@@ -1120,6 +1165,16 @@ function splitCsv(value: string): string[] {
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+function familyPortalHref(organizationId: string, inquiry: RegistrationInquiryRead): string {
+  const params = new URLSearchParams({
+    organization_id: organizationId,
+    guardian_email: inquiry.email,
+    guardian_name: inquiry.guardian_name ?? inquiry.email,
+    athlete_name: inquiry.athlete_name
+  });
+  return `/family?${params.toString()}`;
 }
 
 function RegistrationDocumentInput({
