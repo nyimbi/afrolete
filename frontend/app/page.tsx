@@ -480,6 +480,7 @@ import type {
   UsageRecordRead,
   UsageUnit,
   VolunteerAssignmentRead,
+  VolunteerBackgroundCheckSubmissionRead,
   VolunteerCoordinationMessageRead,
   VolunteerGroupApplicationRead,
   VolunteerNeedRequestRead,
@@ -2007,6 +2008,8 @@ export default function HomePage() {
   const [volunteerReminderRun, setVolunteerReminderRun] = useState<VolunteerReminderRunRead | null>(null);
   const [volunteerCoordinationMessage, setVolunteerCoordinationMessage] =
     useState<VolunteerCoordinationMessageRead | null>(null);
+  const [volunteerBackgroundCheckSubmission, setVolunteerBackgroundCheckSubmission] =
+    useState<VolunteerBackgroundCheckSubmissionRead | null>(null);
   const [volunteerSubstitutePool, setVolunteerSubstitutePool] = useState<VolunteerSubstitutePoolMemberRead[]>([]);
   const [volunteerSubstituteDispatch, setVolunteerSubstituteDispatch] =
     useState<VolunteerSubstituteDispatchRead | null>(null);
@@ -2808,6 +2811,11 @@ export default function HomePage() {
     onboarding_status: "active",
     reliability_score: 0.96,
     emergency_contact: "+254711000001"
+  });
+  const [volunteerBackgroundCheckForm, setVolunteerBackgroundCheckForm] = useState({
+    provider: "safe_sport_screening",
+    check_type: "",
+    notes: "Volunteer screening before athlete-facing assignment."
   });
   const [volunteerOpportunityForm, setVolunteerOpportunityForm] = useState({
     title: "Matchday first aid station",
@@ -5204,6 +5212,7 @@ export default function HomePage() {
       setVolunteerSummary(null);
       setVolunteerReminderRun(null);
       setVolunteerCoordinationMessage(null);
+      setVolunteerBackgroundCheckSubmission(null);
       setVolunteerSubstitutePool([]);
       setVolunteerSubstituteDispatch(null);
       setSelectedVolunteerProfileId("");
@@ -12685,6 +12694,44 @@ export default function HomePage() {
         ]);
         setSelectedVolunteerOpportunityId(opportunity.id);
         addLog(`${opportunity.title} needs ${opportunity.slots_required} volunteer slot(s)`, "good");
+      }
+    );
+  };
+
+  const submitVolunteerBackgroundCheck = () => {
+    if (!selectedVolunteerProfileId) {
+      addLog("Select a volunteer before submitting screening", "bad");
+      return;
+    }
+    runAction(
+      "submit-volunteer-background-check",
+      () =>
+        apiRequest<VolunteerBackgroundCheckSubmissionRead>(
+          `/volunteers/profiles/${selectedVolunteerProfileId}/background-check-submissions`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              provider: volunteerBackgroundCheckForm.provider,
+              check_type: volunteerBackgroundCheckForm.check_type || null,
+              notes: volunteerBackgroundCheckForm.notes || null
+            }
+          }
+        ),
+      (result) => {
+        setVolunteerBackgroundCheckSubmission(result);
+        setVolunteerProfiles((current) => [
+          result.volunteer_profile,
+          ...current.filter((item) => item.id !== result.volunteer_profile.id)
+        ]);
+        setSelectedVolunteerProfileId(result.volunteer_profile.id);
+        addLog(
+          `${result.volunteer_profile.person_name} screening ${result.submission.check_status}`,
+          result.submission.delivered ? "good" : "neutral"
+        );
+        if (selectedOrganizationId) {
+          void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+        }
       }
     );
   };
@@ -27977,6 +28024,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createVolunteerProfile} disabled={busyAction !== null}>Profile</button>
+                <button type="button" onClick={submitVolunteerBackgroundCheck} disabled={busyAction !== null}>Screen</button>
                 <button type="button" onClick={createVolunteerObligation} disabled={busyAction !== null}>Obligation</button>
                 <button type="button" onClick={addVolunteerSubstitutePoolMember} disabled={busyAction !== null}>Pool</button>
                 <button type="button" onClick={runVolunteerReminders} disabled={busyAction !== null}>Remind</button>
@@ -28035,6 +28083,14 @@ export default function HomePage() {
                 Check expiry
                 <input type="date" value={volunteerForm.background_check_expires_on} onChange={(event) => setVolunteerForm({ ...volunteerForm, background_check_expires_on: event.target.value })} />
               </label>
+              <label>
+                Screening provider
+                <input value={volunteerBackgroundCheckForm.provider} onChange={(event) => setVolunteerBackgroundCheckForm({ ...volunteerBackgroundCheckForm, provider: event.target.value })} />
+              </label>
+              <label>
+                Screening type
+                <input placeholder="Default from role" value={volunteerBackgroundCheckForm.check_type} onChange={(event) => setVolunteerBackgroundCheckForm({ ...volunteerBackgroundCheckForm, check_type: event.target.value })} />
+              </label>
               <label className="wide-field">
                 Skills
                 <input value={volunteerForm.skills} onChange={(event) => setVolunteerForm({ ...volunteerForm, skills: event.target.value })} />
@@ -28042,6 +28098,10 @@ export default function HomePage() {
               <label className="wide-field">
                 Availability
                 <input value={volunteerForm.availability} onChange={(event) => setVolunteerForm({ ...volunteerForm, availability: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Screening notes
+                <input value={volunteerBackgroundCheckForm.notes} onChange={(event) => setVolunteerBackgroundCheckForm({ ...volunteerBackgroundCheckForm, notes: event.target.value })} />
               </label>
               <label>
                 Family email
@@ -28125,6 +28185,24 @@ export default function HomePage() {
                     <small>
                       {volunteerReminderRun.recipient_count} recipients · {volunteerReminderRun.skipped_count} skipped ·{" "}
                       {volunteerReminderRun.failed_count} failed
+                    </small>
+                  </div>
+                </article>
+              ) : null}
+              {volunteerBackgroundCheckSubmission ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{volunteerBackgroundCheckSubmission.volunteer_profile.person_name} · screening submitted</strong>
+                    <span>
+                      {volunteerBackgroundCheckSubmission.submission.provider_profile} ·{" "}
+                      {volunteerBackgroundCheckSubmission.submission.check_status} ·{" "}
+                      {volunteerBackgroundCheckSubmission.submission.delivered ? "delivered" : "recorded"}
+                    </span>
+                    <small>
+                      {volunteerBackgroundCheckSubmission.submission.provider_schema_id}
+                      {volunteerBackgroundCheckSubmission.submission.failure_reason
+                        ? ` · ${volunteerBackgroundCheckSubmission.submission.failure_reason}`
+                        : ""}
                     </small>
                   </div>
                 </article>

@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.models.enums import CommunicationChannel
+from app.schemas.safeguarding import BackgroundCheckProviderSubmissionRead
 
 
 class VolunteerProfileCreate(BaseModel):
@@ -42,6 +43,19 @@ class VolunteerProfileRead(BaseModel):
     emergency_contact: str | None
     notes: str | None
     status: str
+
+
+class VolunteerBackgroundCheckSubmitCreate(BaseModel):
+    provider: str = Field(default="youth_sport_staff", min_length=2, max_length=120)
+    check_type: str | None = Field(default=None, max_length=120)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class VolunteerBackgroundCheckSubmissionRead(BaseModel):
+    volunteer_profile: VolunteerProfileRead
+    background_check_id: UUID
+    created_background_check: bool
+    submission: BackgroundCheckProviderSubmissionRead
 
 
 class VolunteerOpportunityCreate(BaseModel):

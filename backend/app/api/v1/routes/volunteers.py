@@ -11,6 +11,8 @@ from app.schemas.volunteer import (
     VolunteerAssignmentCreate,
     VolunteerAssignmentRead,
     VolunteerAssignmentUpdate,
+    VolunteerBackgroundCheckSubmissionRead,
+    VolunteerBackgroundCheckSubmitCreate,
     VolunteerCoordinationMessageCreate,
     VolunteerCoordinationMessageRead,
     VolunteerGroupApplicationRead,
@@ -66,6 +68,7 @@ from app.services.volunteers import (
     list_volunteer_training_records,
     run_volunteer_reminders,
     send_volunteer_coordination_message,
+    submit_volunteer_background_check,
     update_volunteer_group_application,
     update_volunteer_need_request,
     update_volunteer_obligation,
@@ -328,6 +331,32 @@ async def list_volunteer_profiles_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[VolunteerProfileRead]:
     return [to_profile_read(profile, person) for profile, person in await list_volunteer_profiles(db, organization_id)]
+
+
+@router.post(
+    "/profiles/{profile_id}/background-check-submissions",
+    response_model=VolunteerBackgroundCheckSubmissionRead,
+)
+async def submit_volunteer_background_check_route(
+    profile_id: UUID,
+    payload: VolunteerBackgroundCheckSubmitCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> VolunteerBackgroundCheckSubmissionRead:
+    profile, person, submission, created = await submit_volunteer_background_check(
+        db,
+        identity,
+        profile_id,
+        payload,
+        authz,
+    )
+    return VolunteerBackgroundCheckSubmissionRead(
+        volunteer_profile=to_profile_read(profile, person),
+        background_check_id=submission.background_check_id,
+        created_background_check=created,
+        submission=submission,
+    )
 
 
 @router.post("/opportunities", response_model=VolunteerOpportunityRead, status_code=status.HTTP_201_CREATED)

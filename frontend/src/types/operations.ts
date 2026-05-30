@@ -877,6 +877,13 @@ export type VolunteerProfileRead = {
   status: string;
 };
 
+export type VolunteerBackgroundCheckSubmissionRead = {
+  volunteer_profile: VolunteerProfileRead;
+  background_check_id: UUID;
+  created_background_check: boolean;
+  submission: BackgroundCheckProviderSubmissionRead;
+};
+
 export type VolunteerOpportunityRead = {
   id: UUID;
   organization_id: UUID;

@@ -8,10 +8,11 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.communication import CommunicationMessage, MessageRecipient
-from app.models.event import Event
+from app.models.event import BackgroundCheck, Event
 from app.models.identity import Person
 from app.models.organization import Membership, Organization
 from app.models.enums import (
+    BackgroundCheckStatus,
     CommunicationChannel,
     CommunicationMessageType,
     CommunicationScopeType,
@@ -35,6 +36,7 @@ from app.schemas.volunteer import (
     PublicVolunteerSignupCreate,
     VolunteerAssignmentCreate,
     VolunteerAssignmentUpdate,
+    VolunteerBackgroundCheckSubmitCreate,
     VolunteerCoordinationMessageCreate,
     VolunteerCoordinationMessageRead,
     VolunteerGroupApplicationUpdate,
@@ -52,9 +54,11 @@ from app.schemas.volunteer import (
     VolunteerSubstitutePoolMemberCreate,
     VolunteerTrainingRecordCreate,
 )
+from app.schemas.safeguarding import BackgroundCheckProviderSubmissionRead
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
 from app.services.communications import create_message_for_recipients
+from app.services.safeguarding import submit_background_check_to_screening_provider
 
 
 async def ensure_manage_volunteers(
@@ -468,6 +472,80 @@ async def get_volunteer_profile(db: AsyncSession, profile_id: UUID) -> Volunteer
     if profile is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Volunteer profile not found")
     return profile
+
+
+def volunteer_background_check_status(check_status: BackgroundCheckStatus) -> str:
+    return {
+        BackgroundCheckStatus.REQUESTED: "pending",
+        BackgroundCheckStatus.IN_PROGRESS: "in_progress",
+        BackgroundCheckStatus.CLEAR: "cleared",
+        BackgroundCheckStatus.REVIEW_REQUIRED: "review_required",
+        BackgroundCheckStatus.FAILED: "failed",
+        BackgroundCheckStatus.EXPIRED: "expired",
+    }.get(check_status, str(check_status))
+
+
+def volunteer_background_check_type(profile: VolunteerProfile, payload: VolunteerBackgroundCheckSubmitCreate) -> str:
+    if payload.check_type:
+        return payload.check_type
+    role = profile.volunteer_type.strip().lower().replace(" ", "_") or "volunteer"
+    return f"{role}_volunteer_screening"
+
+
+async def submit_volunteer_background_check(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    profile_id: UUID,
+    payload: VolunteerBackgroundCheckSubmitCreate,
+    authz: AuthorizationService,
+) -> tuple[VolunteerProfile, Person, BackgroundCheckProviderSubmissionRead, bool]:
+    profile = await get_volunteer_profile(db, profile_id)
+    await ensure_manage_volunteers(authz, identity, profile.organization_id)
+    person = await db.get(Person, profile.person_id)
+    if person is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+    check_type = volunteer_background_check_type(profile, payload)
+    existing_check = await db.scalar(
+        select(BackgroundCheck)
+        .where(BackgroundCheck.organization_id == profile.organization_id)
+        .where(BackgroundCheck.person_id == profile.person_id)
+        .where(BackgroundCheck.provider == payload.provider)
+        .where(BackgroundCheck.check_type == check_type)
+        .where(BackgroundCheck.status.in_([BackgroundCheckStatus.REQUESTED, BackgroundCheckStatus.IN_PROGRESS]))
+        .order_by(BackgroundCheck.requested_at.desc())
+        .limit(1)
+    )
+    created = False
+    if existing_check is None:
+        existing_check = BackgroundCheck(
+            organization_id=profile.organization_id,
+            person_id=profile.person_id,
+            requested_by_person_id=identity.person_id,
+            provider=payload.provider,
+            check_type=check_type,
+            status=BackgroundCheckStatus.REQUESTED,
+            requested_at=datetime.now(UTC),
+            notes=(
+                payload.notes
+                or f"Volunteer screening request for {person.display_name} ({profile.volunteer_type})."
+            ),
+        )
+        db.add(existing_check)
+        await db.flush()
+        created = True
+    submission = await submit_background_check_to_screening_provider(
+        db,
+        identity,
+        existing_check.id,
+        authz,
+    )
+    profile.background_check_status = volunteer_background_check_status(submission.check_status)
+    profile.background_check_expires_on = existing_check.expires_at
+    if profile.onboarding_status in {"invited", "applied"}:
+        profile.onboarding_status = "screening"
+    await db.commit()
+    await db.refresh(profile)
+    return profile, person, submission, created
 
 
 def compute_match_score(profile: VolunteerProfile, opportunity: VolunteerOpportunity) -> float:

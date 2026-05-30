@@ -307,6 +307,66 @@ def test_public_volunteer_recruitment_signup_creates_application(client, identit
     assert manager_list[0]["open_slots"] == 2
 
 
+def test_volunteer_profile_can_submit_background_check_provider_packet(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Volunteer Screening Club",
+            "slug": "volunteer-screening-club",
+            "organization_type": "club",
+            "primary_sport": "football",
+        },
+    ).json()
+    profile = client.post(
+        "/api/v1/volunteers/profiles",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "email": "screen.me@example.com",
+            "display_name": "Screen Me",
+            "volunteer_type": "youth_coach",
+            "skills": ["coaching", "safeguarding"],
+            "background_check_status": "not_started",
+            "training_status": "complete",
+            "onboarding_status": "applied",
+        },
+    ).json()
+
+    response = client.post(
+        f"/api/v1/volunteers/profiles/{profile['id']}/background-check-submissions",
+        headers=identity_headers,
+        json={
+            "provider": "safe_sport_screening",
+            "notes": "Youth coach applicant needs screening before assignment.",
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["created_background_check"] is True
+    assert result["volunteer_profile"]["background_check_status"] == "in_progress"
+    assert result["volunteer_profile"]["onboarding_status"] == "screening"
+    assert result["submission"]["provider"] == "safe_sport_screening"
+    assert result["submission"]["check_type"] == "youth_coach_volunteer_screening"
+    assert result["submission"]["provider_schema_id"] == "safeguarding.screening.safe_sport_screening.v1"
+    assert result["submission"]["failure_reason"].startswith("Record-only screening mode")
+
+    checks = client.get(
+        f"/api/v1/safeguarding/background-checks?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert checks[0]["id"] == result["background_check_id"]
+    assert checks[0]["status"] == "in_progress"
+    assert checks[0]["external_reference"].startswith("safe_sport_screening-")
+
+    profiles = client.get(
+        f"/api/v1/volunteers/profiles?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert profiles[0]["background_check_status"] == "in_progress"
+
+
 def test_corporate_volunteer_group_application_review(client, identity_headers) -> None:
     organization = client.post(
         "/api/v1/organizations",
