@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import (
     AssetCondition,
@@ -45,6 +45,33 @@ class FacilityCreate(BaseModel):
 class FacilityRead(FacilityCreate):
     id: UUID
     status: FacilityStatus
+
+
+class FacilityBookingRuleCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    min_booking_minutes: int = Field(default=60, ge=15, le=24 * 60)
+    max_booking_minutes: int = Field(default=240, ge=15, le=24 * 60)
+    buffer_minutes: int = Field(default=30, ge=0, le=240)
+    advance_booking_days: int = Field(default=90, ge=0, le=730)
+    requires_approval: bool = False
+    allow_public_booking: bool = False
+    cancellation_notice_hours: int = Field(default=24, ge=0, le=720)
+    peak_hour_rate_multiplier: Decimal | None = Field(default=None, ge=0, max_digits=5, decimal_places=2)
+    public_booking_note: str | None = Field(default=None, max_length=4000)
+    status: str = Field(default="active", min_length=2, max_length=40)
+
+    @model_validator(mode="after")
+    def valid_duration_bounds(self) -> "FacilityBookingRuleCreate":
+        if self.max_booking_minutes < self.min_booking_minutes:
+            raise ValueError("max_booking_minutes must be at least min_booking_minutes")
+        return self
+
+
+class FacilityBookingRuleRead(FacilityBookingRuleCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
 
 
 class EmergencyActionPlanCreate(BaseModel):
@@ -661,6 +688,7 @@ class FacilityBookingCreate(BaseModel):
     insurance_certificate_ref: str | None = Field(default=None, max_length=240)
     special_requirements: str | None = Field(default=None, max_length=4000)
     access_code: str | None = Field(default=None, max_length=80)
+    public_visible: bool = False
 
     @model_validator(mode="after")
     def valid_period(self) -> "FacilityBookingCreate":
@@ -673,6 +701,47 @@ class FacilityBookingRead(FacilityBookingCreate):
     id: UUID
     status: FacilityBookingStatus
     requested_by_person_id: UUID | None
+    recurrence_group_id: str | None
+    occurrence_index: int | None
+    conflict_note: str | None
+
+
+class FacilityRecurringBookingCreate(FacilityBookingCreate):
+    recurrence_frequency: str = Field(default="weekly", pattern="^(daily|weekly)$")
+    occurrence_count: int = Field(default=4, ge=1, le=52)
+
+
+class FacilityAvailabilitySlotRead(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+    status: str
+    booking_id: UUID | None = None
+    title: str | None = None
+    conflict_note: str | None = None
+
+
+class FacilityAvailabilityRead(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    starts_at: datetime
+    ends_at: datetime
+    rule: FacilityBookingRuleRead | None
+    slots: list[FacilityAvailabilitySlotRead]
+    conflict_count: int
+
+
+class FacilityUtilizationRead(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    starts_at: datetime
+    ends_at: datetime
+    available_hours: float
+    booked_hours: float
+    utilization_percent: int
+    booking_count: int
+    projected_revenue: Decimal
+    average_attendance: float | None
+    recommendation: str
 
 
 class AssetSummaryRead(BaseModel):

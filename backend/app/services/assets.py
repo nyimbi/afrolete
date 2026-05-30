@@ -30,6 +30,7 @@ from app.models.assets import (
     EquipmentScanEvent,
     Facility,
     FacilityBooking,
+    FacilityBookingRule,
     MaintenanceWorkOrder,
     SupplierOrder,
 )
@@ -87,8 +88,13 @@ from app.schemas.assets import (
     EquipmentScanEventRead,
     EquipmentScanRead,
     EquipmentItemCreate,
+    FacilityAvailabilityRead,
+    FacilityAvailabilitySlotRead,
     FacilityBookingCreate,
+    FacilityBookingRuleCreate,
     FacilityCreate,
+    FacilityRecurringBookingCreate,
+    FacilityUtilizationRead,
     MaintenanceWorkOrderCreate,
     MaintenanceWorkOrderUpdate,
     ProcurementRecommendationRead,
@@ -157,6 +163,51 @@ async def list_facilities(db: AsyncSession, organization_id: UUID) -> list[Facil
                 .order_by(Facility.name)
             )
         ).all()
+    )
+
+
+async def upsert_facility_booking_rule(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityBookingRuleCreate,
+    authz: AuthorizationService,
+) -> FacilityBookingRule:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    rule = await db.scalar(
+        select(FacilityBookingRule)
+        .where(FacilityBookingRule.organization_id == payload.organization_id)
+        .where(FacilityBookingRule.facility_id == payload.facility_id)
+    )
+    if rule is None:
+        rule = FacilityBookingRule(organization_id=payload.organization_id, facility_id=payload.facility_id)
+        db.add(rule)
+    rule.min_booking_minutes = payload.min_booking_minutes
+    rule.max_booking_minutes = payload.max_booking_minutes
+    rule.buffer_minutes = payload.buffer_minutes
+    rule.advance_booking_days = payload.advance_booking_days
+    rule.requires_approval = payload.requires_approval
+    rule.allow_public_booking = payload.allow_public_booking
+    rule.cancellation_notice_hours = payload.cancellation_notice_hours
+    rule.peak_hour_rate_multiplier = payload.peak_hour_rate_multiplier
+    rule.public_booking_note = payload.public_booking_note
+    rule.status = payload.status.strip().lower()
+    await db.commit()
+    await db.refresh(rule)
+    return rule
+
+
+async def get_facility_booking_rule(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID,
+) -> FacilityBookingRule | None:
+    await get_facility_for_organization(db, facility_id, organization_id)
+    return await db.scalar(
+        select(FacilityBookingRule)
+        .where(FacilityBookingRule.organization_id == organization_id)
+        .where(FacilityBookingRule.facility_id == facility_id)
     )
 
 
@@ -1102,17 +1153,72 @@ async def create_facility_booking(
         await get_team_for_organization(db, payload.team_id, payload.organization_id)
     if payload.event_id is not None:
         await get_event_for_organization(db, payload.event_id, payload.organization_id)
-    await ensure_facility_available(db, payload.facility_id, payload.starts_at, payload.ends_at)
+    rule = await get_facility_booking_rule(db, payload.organization_id, payload.facility_id)
+    validate_booking_against_rule(payload.starts_at, payload.ends_at, rule)
+    await ensure_facility_available(db, payload.facility_id, payload.starts_at, payload.ends_at, rule=rule)
 
     booking = FacilityBooking(
         requested_by_person_id=identity.person_id,
-        status=FacilityBookingStatus.CONFIRMED,
+        status=FacilityBookingStatus.REQUESTED if rule and rule.requires_approval else FacilityBookingStatus.CONFIRMED,
         **payload.model_dump(),
     )
     db.add(booking)
     await db.commit()
     await db.refresh(booking)
     return booking
+
+
+async def create_recurring_facility_bookings(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityRecurringBookingCreate,
+    authz: AuthorizationService,
+) -> list[FacilityBooking]:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.team_id is not None:
+        await get_team_for_organization(db, payload.team_id, payload.organization_id)
+    if payload.event_id is not None:
+        await get_event_for_organization(db, payload.event_id, payload.organization_id)
+    rule = await get_facility_booking_rule(db, payload.organization_id, payload.facility_id)
+    delta = timedelta(days=1 if payload.recurrence_frequency == "daily" else 7)
+    recurrence_group_id = f"rec-{token_urlsafe(8)}"
+    bookings: list[FacilityBooking] = []
+    for index in range(payload.occurrence_count):
+        starts_at = payload.starts_at + delta * index
+        ends_at = payload.ends_at + delta * index
+        validate_booking_against_rule(starts_at, ends_at, rule)
+        await ensure_facility_available(db, payload.facility_id, starts_at, ends_at, rule=rule)
+        booking = FacilityBooking(
+            organization_id=payload.organization_id,
+            facility_id=payload.facility_id,
+            team_id=payload.team_id,
+            event_id=payload.event_id,
+            requested_by_person_id=identity.person_id,
+            title=f"{payload.title} #{index + 1}",
+            starts_at=starts_at,
+            ends_at=ends_at,
+            status=FacilityBookingStatus.REQUESTED if rule and rule.requires_approval else FacilityBookingStatus.CONFIRMED,
+            requester_name=payload.requester_name,
+            requester_email=payload.requester_email,
+            expected_attendees=payload.expected_attendees,
+            rate=payload.rate,
+            deposit_required=payload.deposit_required,
+            insurance_certificate_ref=payload.insurance_certificate_ref,
+            special_requirements=payload.special_requirements,
+            access_code=f"{payload.access_code}-{index + 1}" if payload.access_code else None,
+            public_visible=payload.public_visible,
+            recurrence_group_id=recurrence_group_id,
+            occurrence_index=index + 1,
+            conflict_note="Created from recurring booking pattern.",
+        )
+        db.add(booking)
+        bookings.append(booking)
+    await db.commit()
+    for booking in bookings:
+        await db.refresh(booking)
+    return bookings
 
 
 async def list_facility_bookings(
@@ -1124,6 +1230,79 @@ async def list_facility_bookings(
     if facility_id is not None:
         statement = statement.where(FacilityBooking.facility_id == facility_id)
     return list((await db.scalars(statement.order_by(FacilityBooking.starts_at.desc()))).all())
+
+
+async def facility_availability(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> FacilityAvailabilityRead:
+    await get_facility_for_organization(db, facility_id, organization_id)
+    if ends_at <= starts_at:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="ends_at must be after starts_at")
+    rule = await get_facility_booking_rule(db, organization_id, facility_id)
+    bookings = await bookings_between(db, facility_id, starts_at, ends_at)
+    slots = [
+        FacilityAvailabilitySlotRead(
+            starts_at=booking.starts_at,
+            ends_at=booking.ends_at,
+            status="booked" if booking.status != FacilityBookingStatus.REQUESTED else "requested",
+            booking_id=booking.id,
+            title=booking.title,
+            conflict_note=booking.conflict_note,
+        )
+        for booking in bookings
+    ]
+    conflict_count = count_booking_conflicts(bookings, rule.buffer_minutes if rule else 0)
+    return FacilityAvailabilityRead(
+        organization_id=organization_id,
+        facility_id=facility_id,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        rule=rule,
+        slots=slots,
+        conflict_count=conflict_count,
+    )
+
+
+async def facility_utilization(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> FacilityUtilizationRead:
+    await get_facility_for_organization(db, facility_id, organization_id)
+    if ends_at <= starts_at:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="ends_at must be after starts_at")
+    bookings = await bookings_between(db, facility_id, starts_at, ends_at)
+    booked_hours = sum(max((booking.ends_at - booking.starts_at).total_seconds() / 3600, 0) for booking in bookings)
+    available_hours = max((ends_at - starts_at).total_seconds() / 3600, 0)
+    projected_revenue = sum(
+        (
+            Decimal(str(max((booking.ends_at - booking.starts_at).total_seconds() / 3600, 0)))
+            * (booking.rate or Decimal("0"))
+            for booking in bookings
+        ),
+        Decimal("0"),
+    )
+    attendee_values = [booking.expected_attendees for booking in bookings if booking.expected_attendees is not None]
+    utilization_percent = round(booked_hours / available_hours * 100) if available_hours else 0
+    return FacilityUtilizationRead(
+        organization_id=organization_id,
+        facility_id=facility_id,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        available_hours=round(available_hours, 2),
+        booked_hours=round(booked_hours, 2),
+        utilization_percent=max(0, min(100, utilization_percent)),
+        booking_count=len(bookings),
+        projected_revenue=projected_revenue.quantize(Decimal("0.01")),
+        average_attendance=round(sum(attendee_values) / len(attendee_values), 1) if attendee_values else None,
+        recommendation=facility_utilization_recommendation(utilization_percent, projected_revenue),
+    )
 
 
 async def asset_summary(db: AsyncSession, organization_id: UUID) -> AssetSummaryRead:
@@ -2075,7 +2254,9 @@ async def ensure_facility_available(
     facility_id: UUID,
     starts_at: datetime,
     ends_at: datetime,
+    rule: FacilityBookingRule | None = None,
 ) -> None:
+    buffer_delta = timedelta(minutes=rule.buffer_minutes if rule else 0)
     conflict = await db.scalar(
         select(FacilityBooking).where(
             FacilityBooking.facility_id == facility_id,
@@ -2087,12 +2268,77 @@ async def ensure_facility_available(
                     FacilityBookingStatus.CHECKED_IN,
                 ]
             ),
-            FacilityBooking.starts_at < ends_at,
-            FacilityBooking.ends_at > starts_at,
+            FacilityBooking.starts_at < ends_at + buffer_delta,
+            FacilityBooking.ends_at > starts_at - buffer_delta,
         )
     )
     if conflict is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Facility is already booked")
+
+
+async def bookings_between(
+    db: AsyncSession,
+    facility_id: UUID,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> list[FacilityBooking]:
+    return list(
+        (
+            await db.scalars(
+                select(FacilityBooking)
+                .where(FacilityBooking.facility_id == facility_id)
+                .where(
+                    FacilityBooking.status.in_(
+                        [
+                            FacilityBookingStatus.REQUESTED,
+                            FacilityBookingStatus.APPROVED,
+                            FacilityBookingStatus.CONFIRMED,
+                            FacilityBookingStatus.CHECKED_IN,
+                        ]
+                    )
+                )
+                .where(FacilityBooking.starts_at < ends_at)
+                .where(FacilityBooking.ends_at > starts_at)
+                .order_by(FacilityBooking.starts_at.asc())
+            )
+        ).all()
+    )
+
+
+def validate_booking_against_rule(
+    starts_at: datetime,
+    ends_at: datetime,
+    rule: FacilityBookingRule | None,
+) -> None:
+    if rule is None:
+        return
+    duration_minutes = int((ends_at - starts_at).total_seconds() / 60)
+    if duration_minutes < rule.min_booking_minutes:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Booking shorter than facility minimum")
+    if duration_minutes > rule.max_booking_minutes:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Booking exceeds facility maximum")
+    if starts_at > datetime.now(UTC) + timedelta(days=rule.advance_booking_days):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Booking exceeds advance booking window")
+
+
+def count_booking_conflicts(bookings: list[FacilityBooking], buffer_minutes: int) -> int:
+    conflicts = 0
+    buffer_delta = timedelta(minutes=buffer_minutes)
+    ordered = sorted(bookings, key=lambda booking: booking.starts_at)
+    for previous, current in zip(ordered, ordered[1:]):
+        if previous.ends_at + buffer_delta > current.starts_at:
+            conflicts += 1
+    return conflicts
+
+
+def facility_utilization_recommendation(utilization_percent: int, projected_revenue: Decimal) -> str:
+    if utilization_percent >= 85:
+        return "High utilization; protect buffer time and consider peak pricing for public bookings."
+    if utilization_percent >= 55:
+        return "Healthy utilization; fill shoulder hours with clinics, rentals, or community sessions."
+    if projected_revenue > 0:
+        return "Revenue exists but capacity remains; market open slots and bundle facility time with programs."
+    return "Low utilization; publish availability, seed recurring training blocks, and review pricing."
 
 
 def equipment_status_for_quantity(quantity_available: int) -> EquipmentStatus:

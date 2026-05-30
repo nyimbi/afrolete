@@ -271,6 +271,104 @@ def test_facility_booking_rejects_overlap(client, identity_headers) -> None:
     assert overlap.json()["detail"] == "Facility is already booked"
 
 
+def test_facility_booking_rules_recurring_availability_and_utilization(client, identity_headers) -> None:
+    organization, team, _, _ = create_assets_context(client, identity_headers, "Facility Calendar Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Performance Court",
+            "facility_type": "court",
+            "hourly_rate": "100.00",
+            "capacity": 80,
+        },
+    ).json()
+
+    rule = client.post(
+        "/api/v1/assets/facility-booking-rules",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "min_booking_minutes": 60,
+            "max_booking_minutes": 180,
+            "buffer_minutes": 30,
+            "advance_booking_days": 90,
+            "requires_approval": False,
+            "allow_public_booking": True,
+            "cancellation_notice_hours": 24,
+            "peak_hour_rate_multiplier": "1.50",
+            "public_booking_note": "Public bookings require clean shoes and proof of insurance.",
+        },
+    )
+    assert rule.status_code == 201
+    assert rule.json()["allow_public_booking"] is True
+    assert rule.json()["buffer_minutes"] == 30
+
+    recurring = client.post(
+        "/api/v1/assets/bookings/recurring",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "team_id": team["id"],
+            "title": "Weekly academy court block",
+            "starts_at": "2026-06-09T10:00:00Z",
+            "ends_at": "2026-06-09T12:00:00Z",
+            "requester_name": "Academy Scheduler",
+            "expected_attendees": 24,
+            "rate": "100.00",
+            "access_code": "COURT",
+            "public_visible": True,
+            "recurrence_frequency": "weekly",
+            "occurrence_count": 3,
+        },
+    )
+    assert recurring.status_code == 201
+    bookings = recurring.json()
+    assert len(bookings) == 3
+    assert bookings[0]["recurrence_group_id"] == bookings[1]["recurrence_group_id"]
+    assert bookings[0]["occurrence_index"] == 1
+    assert bookings[0]["public_visible"] is True
+
+    buffer_conflict = client.post(
+        "/api/v1/assets/bookings",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "team_id": team["id"],
+            "title": "Too close after court block",
+            "starts_at": "2026-06-09T12:15:00Z",
+            "ends_at": "2026-06-09T13:15:00Z",
+        },
+    )
+    assert buffer_conflict.status_code == 409
+
+    availability = client.get(
+        "/api/v1/assets/facilities/"
+        f"{facility['id']}/availability?organization_id={organization['id']}"
+        "&starts_at=2026-06-01T00:00:00Z&ends_at=2026-07-01T00:00:00Z",
+        headers=identity_headers,
+    )
+    assert availability.status_code == 200
+    assert availability.json()["rule"]["allow_public_booking"] is True
+    assert len(availability.json()["slots"]) == 3
+
+    utilization = client.get(
+        "/api/v1/assets/facilities/"
+        f"{facility['id']}/utilization?organization_id={organization['id']}"
+        "&starts_at=2026-06-01T00:00:00Z&ends_at=2026-07-01T00:00:00Z",
+        headers=identity_headers,
+    )
+    assert utilization.status_code == 200
+    assert utilization.json()["booking_count"] == 3
+    assert utilization.json()["booked_hours"] == 6
+    assert utilization.json()["projected_revenue"] == "600.00"
+    assert "open slots" in utilization.json()["recommendation"].lower()
+
+
 def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
     plan = client.post(

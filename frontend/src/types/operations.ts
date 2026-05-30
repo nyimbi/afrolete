@@ -2306,6 +2306,22 @@ export type FacilityRead = {
   notes: string | null;
 };
 
+export type FacilityBookingRuleRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  min_booking_minutes: number;
+  max_booking_minutes: number;
+  buffer_minutes: number;
+  advance_booking_days: number;
+  requires_approval: boolean;
+  allow_public_booking: boolean;
+  cancellation_notice_hours: number;
+  peak_hour_rate_multiplier: string | null;
+  public_booking_note: string | null;
+  status: string;
+};
+
 export type EmergencyActionPlanRead = {
   id: UUID;
   organization_id: UUID;
@@ -2684,6 +2700,43 @@ export type FacilityBookingRead = {
   insurance_certificate_ref: string | null;
   special_requirements: string | null;
   access_code: string | null;
+  public_visible: boolean;
+  recurrence_group_id: string | null;
+  occurrence_index: number | null;
+  conflict_note: string | null;
+};
+
+export type FacilityAvailabilitySlotRead = {
+  starts_at: string;
+  ends_at: string;
+  status: string;
+  booking_id: UUID | null;
+  title: string | null;
+  conflict_note: string | null;
+};
+
+export type FacilityAvailabilityRead = {
+  organization_id: UUID;
+  facility_id: UUID;
+  starts_at: string;
+  ends_at: string;
+  rule: FacilityBookingRuleRead | null;
+  slots: FacilityAvailabilitySlotRead[];
+  conflict_count: number;
+};
+
+export type FacilityUtilizationRead = {
+  organization_id: UUID;
+  facility_id: UUID;
+  starts_at: string;
+  ends_at: string;
+  available_hours: number;
+  booked_hours: number;
+  utilization_percent: number;
+  booking_count: number;
+  projected_revenue: string;
+  average_attendance: number | null;
+  recommendation: string;
 };
 
 export type AssetSummaryRead = {

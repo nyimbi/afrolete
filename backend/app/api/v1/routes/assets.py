@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Response, status
@@ -42,10 +43,15 @@ from app.schemas.assets import (
     EquipmentScanEventCreate,
     EquipmentScanEventRead,
     EquipmentScanRead,
+    FacilityAvailabilityRead,
     FacilityBookingCreate,
     FacilityBookingRead,
+    FacilityBookingRuleCreate,
+    FacilityBookingRuleRead,
     FacilityCreate,
     FacilityRead,
+    FacilityRecurringBookingCreate,
+    FacilityUtilizationRead,
     MaintenanceWorkOrderCreate,
     MaintenanceWorkOrderRead,
     MaintenanceWorkOrderUpdate,
@@ -68,6 +74,7 @@ from app.services.assets import (
     create_equipment_item,
     create_facility,
     create_facility_booking,
+    create_recurring_facility_bookings,
     create_equipment_lease_invoice,
     create_equipment_lease_schedule,
     dispatch_emergency_activation_alert,
@@ -77,6 +84,9 @@ from app.services.assets import (
     downloadable_equipment_file,
     equipment_lease_quote,
     ensure_manage_assets,
+    facility_availability,
+    facility_utilization,
+    get_facility_booking_rule,
     list_equipment_files,
     list_equipment_scan_events,
     list_checkouts,
@@ -103,6 +113,7 @@ from app.services.assets import (
     update_emergency_action_plan,
     update_emergency_plan_activation,
     update_equipment_photo,
+    upsert_facility_booking_rule,
     upload_equipment_file,
     provision_equipment_reader,
     update_work_order,
@@ -134,6 +145,24 @@ def to_facility_read(facility) -> FacilityRead:
         insurance_policy_ref=facility.insurance_policy_ref,
         last_inspection_on=facility.last_inspection_on,
         notes=facility.notes,
+    )
+
+
+def to_booking_rule_read(rule) -> FacilityBookingRuleRead:
+    return FacilityBookingRuleRead(
+        id=rule.id,
+        organization_id=rule.organization_id,
+        facility_id=rule.facility_id,
+        min_booking_minutes=rule.min_booking_minutes,
+        max_booking_minutes=rule.max_booking_minutes,
+        buffer_minutes=rule.buffer_minutes,
+        advance_booking_days=rule.advance_booking_days,
+        requires_approval=rule.requires_approval,
+        allow_public_booking=rule.allow_public_booking,
+        cancellation_notice_hours=rule.cancellation_notice_hours,
+        peak_hour_rate_multiplier=rule.peak_hour_rate_multiplier,
+        public_booking_note=rule.public_booking_note,
+        status=rule.status,
     )
 
 
@@ -332,6 +361,10 @@ def to_booking_read(booking) -> FacilityBookingRead:
         insurance_certificate_ref=booking.insurance_certificate_ref,
         special_requirements=booking.special_requirements,
         access_code=booking.access_code,
+        public_visible=booking.public_visible,
+        recurrence_group_id=booking.recurrence_group_id,
+        occurrence_index=booking.occurrence_index,
+        conflict_note=booking.conflict_note,
     )
 
 
@@ -374,6 +407,48 @@ async def list_facilities_route(
         to_facility_read(facility)
         for facility in await list_facilities(db, organization_id)
     ]
+
+
+@router.post("/facility-booking-rules", response_model=FacilityBookingRuleRead, status_code=status.HTTP_201_CREATED)
+async def upsert_facility_booking_rule_route(
+    payload: FacilityBookingRuleCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityBookingRuleRead:
+    return to_booking_rule_read(await upsert_facility_booking_rule(db, identity, payload, authz))
+
+
+@router.get("/facility-booking-rules/{facility_id}", response_model=FacilityBookingRuleRead | None)
+async def get_facility_booking_rule_route(
+    facility_id: UUID,
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityBookingRuleRead | None:
+    rule = await get_facility_booking_rule(db, organization_id, facility_id)
+    return to_booking_rule_read(rule) if rule else None
+
+
+@router.get("/facilities/{facility_id}/availability", response_model=FacilityAvailabilityRead)
+async def facility_availability_route(
+    facility_id: UUID,
+    organization_id: UUID = Query(),
+    starts_at: datetime = Query(),
+    ends_at: datetime = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityAvailabilityRead:
+    return await facility_availability(db, organization_id, facility_id, starts_at, ends_at)
+
+
+@router.get("/facilities/{facility_id}/utilization", response_model=FacilityUtilizationRead)
+async def facility_utilization_route(
+    facility_id: UUID,
+    organization_id: UUID = Query(),
+    starts_at: datetime = Query(),
+    ends_at: datetime = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityUtilizationRead:
+    return await facility_utilization(db, organization_id, facility_id, starts_at, ends_at)
 
 
 @router.post("/emergency-plans", response_model=EmergencyActionPlanRead, status_code=status.HTTP_201_CREATED)
@@ -807,6 +882,19 @@ async def create_facility_booking_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> FacilityBookingRead:
     return to_booking_read(await create_facility_booking(db, identity, payload, authz))
+
+
+@router.post("/bookings/recurring", response_model=list[FacilityBookingRead], status_code=status.HTTP_201_CREATED)
+async def create_recurring_facility_bookings_route(
+    payload: FacilityRecurringBookingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[FacilityBookingRead]:
+    return [
+        to_booking_read(booking)
+        for booking in await create_recurring_facility_bookings(db, identity, payload, authz)
+    ]
 
 
 @router.get("/bookings", response_model=list[FacilityBookingRead])

@@ -235,9 +235,12 @@ import type {
   EquipmentReaderRead,
   EquipmentScanEventRead,
   EquipmentScanRead,
+  FacilityAvailabilityRead,
   FacilityBookingRead,
+  FacilityBookingRuleRead,
   FacilityRead,
   FacilityType,
+  FacilityUtilizationRead,
   FinanceInvoiceRead,
   FinancePaymentRead,
   FixtureMatchEventRead,
@@ -1782,6 +1785,9 @@ export default function HomePage() {
   const [equipmentCheckouts, setEquipmentCheckouts] = useState<EquipmentCheckoutRead[]>([]);
   const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
+  const [facilityBookingRule, setFacilityBookingRule] = useState<FacilityBookingRuleRead | null>(null);
+  const [facilityAvailability, setFacilityAvailability] = useState<FacilityAvailabilityRead | null>(null);
+  const [facilityUtilization, setFacilityUtilization] = useState<FacilityUtilizationRead | null>(null);
   const [assetSummary, setAssetSummary] = useState<AssetSummaryRead | null>(null);
   const [procurementRecommendations, setProcurementRecommendations] = useState<ProcurementRecommendationRead[]>([]);
   const [supplierOrders, setSupplierOrders] = useState<SupplierOrderRead[]>([]);
@@ -2632,7 +2638,23 @@ export default function HomePage() {
     rate: 120,
     deposit_required: 50,
     insurance_certificate_ref: "CERT-2026",
-    special_requirements: "Goals, corner flags, and first-aid kit."
+    special_requirements: "Goals, corner flags, and first-aid kit.",
+    public_visible: true
+  });
+  const [facilityBookingRuleForm, setFacilityBookingRuleForm] = useState({
+    min_booking_minutes: 60,
+    max_booking_minutes: 240,
+    buffer_minutes: 30,
+    advance_booking_days: 90,
+    requires_approval: false,
+    allow_public_booking: true,
+    cancellation_notice_hours: 24,
+    peak_hour_rate_multiplier: 1.25,
+    public_booking_note: "Public bookings require proof of insurance and venue rules acknowledgement."
+  });
+  const [recurringBookingForm, setRecurringBookingForm] = useState({
+    recurrence_frequency: "weekly" as "daily" | "weekly",
+    occurrence_count: 4
   });
   const [sponsorForm, setSponsorForm] = useState({
     name: "Sportswear Co.",
@@ -3881,12 +3903,18 @@ export default function HomePage() {
 
   const loadAssets = useCallback(async (organizationId: string, facilityId?: string) => {
     const facilityQuery = facilityId ? `&facility_id=${facilityId}` : "";
+    const facilityWindowStart = "2026-06-01T00:00:00.000Z";
+    const facilityWindowEnd = "2026-07-15T00:00:00.000Z";
+    const facilityWindowQuery = `organization_id=${organizationId}&starts_at=${encodeURIComponent(facilityWindowStart)}&ends_at=${encodeURIComponent(facilityWindowEnd)}`;
     const [
       facilityData,
       equipmentData,
       checkoutData,
       workOrderData,
       bookingData,
+      bookingRuleData,
+      availabilityData,
+      facilityUtilizationData,
       summaryData,
       procurementData,
       supplierOrderData,
@@ -3903,6 +3931,21 @@ export default function HomePage() {
       apiRequest<EquipmentCheckoutRead[]>(`/assets/checkouts?organization_id=${organizationId}`),
       apiRequest<MaintenanceWorkOrderRead[]>(`/assets/work-orders?organization_id=${organizationId}`),
       apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
+      facilityId
+        ? apiRequest<FacilityBookingRuleRead | null>(
+            `/assets/facility-booking-rules/${facilityId}?organization_id=${organizationId}`
+          )
+        : Promise.resolve(null),
+      facilityId
+        ? apiRequest<FacilityAvailabilityRead>(
+            `/assets/facilities/${facilityId}/availability?${facilityWindowQuery}`
+          )
+        : Promise.resolve(null),
+      facilityId
+        ? apiRequest<FacilityUtilizationRead>(
+            `/assets/facilities/${facilityId}/utilization?${facilityWindowQuery}`
+          )
+        : Promise.resolve(null),
       apiRequest<AssetSummaryRead>(`/assets/summary?organization_id=${organizationId}`),
       apiRequest<ProcurementRecommendationRead[]>(
         `/assets/procurement/recommendations?organization_id=${organizationId}`
@@ -3931,6 +3974,9 @@ export default function HomePage() {
     setEquipmentCheckouts(checkoutData);
     setWorkOrders(workOrderData);
     setFacilityBookings(bookingData);
+    setFacilityBookingRule(bookingRuleData);
+    setFacilityAvailability(availabilityData);
+    setFacilityUtilization(facilityUtilizationData);
     setAssetSummary(summaryData);
     setProcurementRecommendations(procurementData);
     setSupplierOrders(supplierOrderData);
@@ -13604,6 +13650,7 @@ export default function HomePage() {
             deposit_required: String(bookingForm.deposit_required),
             insurance_certificate_ref: bookingForm.insurance_certificate_ref,
             special_requirements: bookingForm.special_requirements,
+            public_visible: bookingForm.public_visible,
             access_code: `${selectedFacility?.name.slice(0, 4).toUpperCase() ?? "SITE"}-${startsAt.getDate()}`
           }
         }),
@@ -13613,6 +13660,85 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== booking.id)
         ]);
         addLog(`${booking.title} confirmed for ${selectedFacility?.name ?? "facility"}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const upsertFacilityBookingRule = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before setting booking rules", "bad");
+      return;
+    }
+    runAction(
+      "upsert-facility-booking-rule",
+      () =>
+        apiRequest<FacilityBookingRuleRead>("/assets/facility-booking-rules", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            min_booking_minutes: facilityBookingRuleForm.min_booking_minutes,
+            max_booking_minutes: facilityBookingRuleForm.max_booking_minutes,
+            buffer_minutes: facilityBookingRuleForm.buffer_minutes,
+            advance_booking_days: facilityBookingRuleForm.advance_booking_days,
+            requires_approval: facilityBookingRuleForm.requires_approval,
+            allow_public_booking: facilityBookingRuleForm.allow_public_booking,
+            cancellation_notice_hours: facilityBookingRuleForm.cancellation_notice_hours,
+            peak_hour_rate_multiplier: String(facilityBookingRuleForm.peak_hour_rate_multiplier),
+            public_booking_note: facilityBookingRuleForm.public_booking_note,
+            status: "active"
+          }
+        }),
+      (rule) => {
+        setFacilityBookingRule(rule);
+        addLog(`${selectedFacility?.name ?? "Facility"} booking rules updated`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const createRecurringFacilityBookings = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Create or select a facility first", "bad");
+      return;
+    }
+    const startsAt = new Date(bookingForm.starts_at);
+    const endsAt = new Date(startsAt.getTime() + bookingForm.duration_hours * 60 * 60_000);
+    runAction(
+      "create-recurring-facility-bookings",
+      () =>
+        apiRequest<FacilityBookingRead[]>("/assets/bookings/recurring", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            team_id: selectedTeamId || null,
+            event_id: selectedEventId || null,
+            title: bookingForm.title,
+            starts_at: startsAt.toISOString(),
+            ends_at: endsAt.toISOString(),
+            requester_name: bookingForm.requester_name,
+            requester_email: bookingForm.requester_email,
+            expected_attendees: bookingForm.expected_attendees,
+            rate: String(bookingForm.rate),
+            deposit_required: String(bookingForm.deposit_required),
+            insurance_certificate_ref: bookingForm.insurance_certificate_ref,
+            special_requirements: bookingForm.special_requirements,
+            public_visible: bookingForm.public_visible,
+            access_code: `${selectedFacility?.name.slice(0, 4).toUpperCase() ?? "SITE"}-SERIES`,
+            recurrence_frequency: recurringBookingForm.recurrence_frequency,
+            occurrence_count: recurringBookingForm.occurrence_count
+          }
+        }),
+      (bookings) => {
+        setFacilityBookings((current) => [
+          ...bookings,
+          ...current.filter((item) => !bookings.some((booking) => booking.id === item.id))
+        ]);
+        addLog(`${bookings.length} ${recurringBookingForm.recurrence_frequency} bookings created`, "good");
         void loadAssets(selectedOrganizationId, selectedFacilityId);
       }
     );
@@ -17441,7 +17567,9 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createFacility} disabled={busyAction !== null}>Facility</button>
                 <button type="button" onClick={createEmergencyPlan} disabled={busyAction !== null}>EAP</button>
+                <button type="button" onClick={upsertFacilityBookingRule} disabled={busyAction !== null}>Rule</button>
                 <button type="button" onClick={createFacilityBooking} disabled={busyAction !== null}>Book</button>
+                <button type="button" onClick={createRecurringFacilityBookings} disabled={busyAction !== null}>Series</button>
               </div>
             </div>
             <div className="score-summary">
@@ -17505,6 +17633,44 @@ export default function HomePage() {
                   <small>{facility.facility_type} · {facility.status} · {facility.condition}</small>
                 </button>
               ))}
+            </div>
+            <div className="form-grid three">
+              <label>
+                Min minutes
+                <input type="number" min="15" value={facilityBookingRuleForm.min_booking_minutes} onChange={(event) => setFacilityBookingRuleForm({ ...facilityBookingRuleForm, min_booking_minutes: Number(event.target.value) })} />
+              </label>
+              <label>
+                Max minutes
+                <input type="number" min="15" value={facilityBookingRuleForm.max_booking_minutes} onChange={(event) => setFacilityBookingRuleForm({ ...facilityBookingRuleForm, max_booking_minutes: Number(event.target.value) })} />
+              </label>
+              <label>
+                Buffer minutes
+                <input type="number" min="0" value={facilityBookingRuleForm.buffer_minutes} onChange={(event) => setFacilityBookingRuleForm({ ...facilityBookingRuleForm, buffer_minutes: Number(event.target.value) })} />
+              </label>
+              <label>
+                Advance days
+                <input type="number" min="0" value={facilityBookingRuleForm.advance_booking_days} onChange={(event) => setFacilityBookingRuleForm({ ...facilityBookingRuleForm, advance_booking_days: Number(event.target.value) })} />
+              </label>
+              <label>
+                Cancel notice
+                <input type="number" min="0" value={facilityBookingRuleForm.cancellation_notice_hours} onChange={(event) => setFacilityBookingRuleForm({ ...facilityBookingRuleForm, cancellation_notice_hours: Number(event.target.value) })} />
+              </label>
+              <label>
+                Peak multiplier
+                <input type="number" min="0" step="0.05" value={facilityBookingRuleForm.peak_hour_rate_multiplier} onChange={(event) => setFacilityBookingRuleForm({ ...facilityBookingRuleForm, peak_hour_rate_multiplier: Number(event.target.value) })} />
+              </label>
+              <label>
+                Approval
+                <input type="checkbox" checked={facilityBookingRuleForm.requires_approval} onChange={(event) => setFacilityBookingRuleForm({ ...facilityBookingRuleForm, requires_approval: event.target.checked })} />
+              </label>
+              <label>
+                Public
+                <input type="checkbox" checked={facilityBookingRuleForm.allow_public_booking} onChange={(event) => setFacilityBookingRuleForm({ ...facilityBookingRuleForm, allow_public_booking: event.target.checked })} />
+              </label>
+              <label className="wide-field">
+                Public note
+                <input value={facilityBookingRuleForm.public_booking_note} onChange={(event) => setFacilityBookingRuleForm({ ...facilityBookingRuleForm, public_booking_note: event.target.value })} />
+              </label>
             </div>
             <div className="form-grid three">
               <label>
@@ -17592,8 +17758,80 @@ export default function HomePage() {
                 Attendees
                 <input type="number" min="0" value={bookingForm.expected_attendees} onChange={(event) => setBookingForm({ ...bookingForm, expected_attendees: Number(event.target.value) })} />
               </label>
+              <label>
+                Requester
+                <input value={bookingForm.requester_name} onChange={(event) => setBookingForm({ ...bookingForm, requester_name: event.target.value })} />
+              </label>
+              <label>
+                Request email
+                <input value={bookingForm.requester_email} onChange={(event) => setBookingForm({ ...bookingForm, requester_email: event.target.value })} />
+              </label>
+              <label>
+                Rate
+                <input type="number" min="0" value={bookingForm.rate} onChange={(event) => setBookingForm({ ...bookingForm, rate: Number(event.target.value) })} />
+              </label>
+              <label>
+                Frequency
+                <select value={recurringBookingForm.recurrence_frequency} onChange={(event) => setRecurringBookingForm({ ...recurringBookingForm, recurrence_frequency: event.target.value as "daily" | "weekly" })}>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+              </label>
+              <label>
+                Occurrences
+                <input type="number" min="1" max="52" value={recurringBookingForm.occurrence_count} onChange={(event) => setRecurringBookingForm({ ...recurringBookingForm, occurrence_count: Number(event.target.value) })} />
+              </label>
+              <label>
+                Publish
+                <input type="checkbox" checked={bookingForm.public_visible} onChange={(event) => setBookingForm({ ...bookingForm, public_visible: event.target.checked })} />
+              </label>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Booking rule</span>
+                <strong>{facilityBookingRule ? `${facilityBookingRule.min_booking_minutes}-${facilityBookingRule.max_booking_minutes}` : "Unset"}</strong>
+                <span className="muted">minutes</span>
+              </div>
+              <div>
+                <span className="muted">Buffer</span>
+                <strong>{facilityBookingRule?.buffer_minutes ?? 0}</strong>
+                <span className="muted">minutes</span>
+              </div>
+              <div>
+                <span className="muted">Utilization</span>
+                <strong>{facilityUtilization?.utilization_percent ?? 0}%</strong>
+                <span className="muted">{facilityUtilization?.booked_hours ?? 0} booked hours</span>
+              </div>
+              <div>
+                <span className="muted">Facility revenue</span>
+                <strong>${facilityUtilization?.projected_revenue ?? "0.00"}</strong>
+                <span className="muted">{facilityUtilization?.booking_count ?? 0} bookings</span>
+              </div>
+              <div>
+                <span className="muted">Calendar conflicts</span>
+                <strong>{facilityAvailability?.conflict_count ?? 0}</strong>
+                <span className="muted">{facilityBookingRule?.allow_public_booking ? "public enabled" : "internal only"}</span>
+              </div>
             </div>
             <div className="task-list">
+              {facilityUtilization ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Facility scheduling recommendation</strong>
+                    <span>{facilityUtilization.recommendation}</span>
+                    <span>{facilityUtilization.available_hours} available hours · {facilityUtilization.average_attendance ?? 0} average attendance</span>
+                  </div>
+                </article>
+              ) : null}
+              {facilityAvailability?.slots.slice(0, 4).map((slot) => (
+                <article key={`${slot.booking_id ?? slot.starts_at}-${slot.ends_at}`} className="task-card">
+                  <div>
+                    <strong>{slot.title ?? "Open calendar slot"}</strong>
+                    <span>{slot.status} · {new Date(slot.starts_at).toLocaleString()} to {new Date(slot.ends_at).toLocaleTimeString()}</span>
+                    <span>{slot.conflict_note ?? "No conflict flagged"}</span>
+                  </div>
+                </article>
+              ))}
               {emergencyAlert ? (
                 <article className="task-card">
                   <div>
@@ -17640,6 +17878,7 @@ export default function HomePage() {
                   <div>
                     <strong>{booking.title}</strong>
                     <span>{booking.status} · {new Date(booking.starts_at).toLocaleString()}</span>
+                    <span>{booking.recurrence_group_id ? `Series #${booking.occurrence_index}` : "Single booking"} · {booking.public_visible ? "public" : "private"}</span>
                   </div>
                 </article>
               ))}

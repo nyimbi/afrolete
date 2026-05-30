@@ -56,6 +56,28 @@ class Facility(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class FacilityBookingRule(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_booking_rules"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "facility_id", name="uq_facility_booking_rules_facility"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    min_booking_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    max_booking_minutes: Mapped[int] = mapped_column(Integer, default=240, nullable=False)
+    buffer_minutes: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    advance_booking_days: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    requires_approval: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    allow_public_booking: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    cancellation_notice_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
+    peak_hour_rate_multiplier: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    public_booking_note: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
 class EmergencyActionPlan(IdMixin, TimestampMixin, Base):
     __tablename__ = "emergency_action_plans"
 
@@ -330,6 +352,10 @@ class FacilityBooking(IdMixin, TimestampMixin, Base):
     insurance_certificate_ref: Mapped[str | None] = mapped_column(String(240))
     special_requirements: Mapped[str | None] = mapped_column(Text)
     access_code: Mapped[str | None] = mapped_column(String(80))
+    recurrence_group_id: Mapped[str | None] = mapped_column(String(120), index=True)
+    occurrence_index: Mapped[int | None] = mapped_column(Integer)
+    public_visible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    conflict_note: Mapped[str | None] = mapped_column(Text)
 
 
 class SupplierOrder(IdMixin, TimestampMixin, Base):

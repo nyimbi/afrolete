@@ -27,6 +27,7 @@ from app.models.assets import (  # noqa: F401,E402
     EquipmentScanEvent,
     Facility,
     FacilityBooking,
+    FacilityBookingRule,
     MaintenanceWorkOrder,
     SupplierOrder,
 )
