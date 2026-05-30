@@ -7433,6 +7433,56 @@ export type PerformanceMatchPlayerGuidancePublishAuditRead = {
   created_at: string;
 };
 
+export type PerformanceMatchPlayerGuidanceRecipientEngagementRead = {
+  recipient_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  is_player: boolean;
+  destination: string | null;
+  delivery_status: MessageDeliveryStatus;
+  delivered_at: string | null;
+  read_at: string | null;
+  feedback_status: string | null;
+  feedback_rating: number | null;
+  feedback_requested_follow_up: boolean;
+  feedback_priority_focus: string | null;
+  feedback_response_preview: string | null;
+  feedback_completed_action_count: number;
+  feedback_submitted_at: string | null;
+  feedback_agent_task_id: UUID | null;
+  feedback_agent_task_status: string | null;
+  feedback_agent_task_title: string | null;
+};
+
+export type PerformanceMatchPlayerGuidanceEngagementRead = {
+  publish_audit_id: UUID;
+  organization_id: UUID;
+  tracking_run_id: UUID;
+  video_asset_id: UUID;
+  message_id: UUID;
+  player_person_id: UUID;
+  track_id: string;
+  player_label: string;
+  opponent_name: string;
+  match_label: string | null;
+  channel: CommunicationChannel;
+  recipient_count: number;
+  queued_count: number;
+  sent_count: number;
+  delivered_count: number;
+  read_count: number;
+  failed_count: number;
+  suppressed_count: number;
+  read_rate_percent: number;
+  feedback_count: number;
+  follow_up_request_count: number;
+  completed_count: number;
+  average_feedback_rating: number | null;
+  last_engagement_at: string | null;
+  recipients: PerformanceMatchPlayerGuidanceRecipientEngagementRead[];
+  published_at: string;
+};
+
 export type PerformanceMatchPlayerGuidancePublishRead = {
   tracking_run_id: UUID;
   organization_id: UUID;

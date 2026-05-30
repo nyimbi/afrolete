@@ -76,6 +76,7 @@ from app.schemas.performance import (
     PerformanceMatchMomentDetectionCreate,
     PerformanceMatchMomentRead,
     PerformanceMatchMomentReviewCreate,
+    PerformanceMatchPlayerGuidanceEngagementRead,
     PerformanceMatchPlayerGuidancePublishAuditRead,
     PerformanceMatchPlayerGuidancePublishCreate,
     PerformanceMatchPlayerGuidancePublishRead,
@@ -197,6 +198,7 @@ from app.services.performance import (
     list_my_shared_highlight_reels,
     list_metric_definitions,
     list_match_tracking_identity_reviews,
+    list_match_tracking_player_guidance_engagement,
     list_match_tracking_player_guidance_publishes,
     list_match_tracking_provider_ingest_events,
     list_match_tracking_runs,
@@ -1301,6 +1303,29 @@ async def list_match_tracking_player_guidance_publishes_route(
             identity,
             tracking_run_id,
             authz,
+        )
+    ]
+
+
+@router.get(
+    "/scouting/match-guidance-engagement",
+    response_model=list[PerformanceMatchPlayerGuidanceEngagementRead],
+)
+async def list_match_tracking_player_guidance_engagement_route(
+    organization_id: UUID = Query(),
+    tracking_run_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMatchPlayerGuidanceEngagementRead]:
+    return [
+        PerformanceMatchPlayerGuidanceEngagementRead(**item)
+        for item in await list_match_tracking_player_guidance_engagement(
+            db,
+            identity,
+            organization_id,
+            authz,
+            tracking_run_id=tracking_run_id,
         )
     ]
 

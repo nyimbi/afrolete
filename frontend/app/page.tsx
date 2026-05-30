@@ -402,6 +402,7 @@ import type {
   PerformanceMatchMomentRead,
   PlayerMatchGuidanceFeedbackRead,
   PlayerMatchGuidanceRead,
+  PerformanceMatchPlayerGuidanceEngagementRead,
   PerformanceMatchPlayerGuidancePublishAuditRead,
   PerformanceMatchPlayerGuidancePublishRead,
   PerformanceMatchPlayerGuidanceReviewRead,
@@ -1942,6 +1943,8 @@ export default function HomePage() {
     useState<PerformanceMatchTrainingFollowupRead | null>(null);
   const [performanceMatchPlayerGuidancePublishes, setPerformanceMatchPlayerGuidancePublishes] =
     useState<PerformanceMatchPlayerGuidancePublishAuditRead[]>([]);
+  const [performanceMatchPlayerGuidanceEngagements, setPerformanceMatchPlayerGuidanceEngagements] =
+    useState<PerformanceMatchPlayerGuidanceEngagementRead[]>([]);
   const [performanceMatchPitchCalibrations, setPerformanceMatchPitchCalibrations] =
     useState<PerformanceMatchPitchCalibrationRead[]>([]);
   const [performanceMatchPitchCalibration, setPerformanceMatchPitchCalibration] =
@@ -4140,6 +4143,7 @@ export default function HomePage() {
       trackingIdentityReviewData,
       matchAnalysisReportData,
       matchMomentData,
+      matchGuidanceEngagementData,
       calibrationData,
       multiCameraData,
       hardwareKitData,
@@ -4177,6 +4181,10 @@ export default function HomePage() {
       ),
       apiRequest<PerformanceMatchMomentRead[]>(
         `/performance/scouting/match-moments?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<PerformanceMatchPlayerGuidanceEngagementRead[]>(
+        `/performance/scouting/match-guidance-engagement?organization_id=${organizationId}`,
         { identity }
       ),
       apiRequest<PerformanceMatchPitchCalibrationRead[]>(
@@ -4227,6 +4235,7 @@ export default function HomePage() {
     setPerformanceMatchTrackingIdentityReviews(trackingIdentityReviewData);
     setPerformanceMatchAnalysisReports(matchAnalysisReportData);
     setPerformanceMatchMoments(matchMomentData);
+    setPerformanceMatchPlayerGuidanceEngagements(matchGuidanceEngagementData);
     setPerformanceMatchPitchCalibrations(calibrationData);
     setPerformanceMultiCameraAnalyses(multiCameraData);
     setPerformanceHardwareKits(hardwareKitData);
@@ -5427,6 +5436,7 @@ export default function HomePage() {
       setPerformanceMatchPlayerGuidancePublish(null);
       setPerformanceMatchTrainingFollowup(null);
       setPerformanceMatchPlayerGuidancePublishes([]);
+      setPerformanceMatchPlayerGuidanceEngagements([]);
       setPerformanceMatchPitchCalibrations([]);
       setPerformanceMatchPitchCalibration(null);
       setPerformanceMultiCameraAnalyses([]);
@@ -20172,6 +20182,10 @@ export default function HomePage() {
     (engagement) => !performanceHighlightReel || engagement.highlight_reel_id === performanceHighlightReel.id
   );
   const latestHighlightEngagement = selectedHighlightEngagements[0] ?? null;
+  const selectedMatchGuidanceEngagements = performanceMatchPlayerGuidanceEngagements.filter(
+    (engagement) => !performanceMatchTrackingRun || engagement.tracking_run_id === performanceMatchTrackingRun.id
+  );
+  const latestMatchGuidanceEngagement = selectedMatchGuidanceEngagements[0] ?? null;
 
   return (
     <main className="app-shell">
@@ -27840,7 +27854,20 @@ export default function HomePage() {
                       ? `${performanceMatchPlayerGuidancePublish.recipient_count} inbox recipient(s) · ${performanceMatchPlayerGuidancePublish.skipped_track_count} skipped`
                       : performanceMatchPlayerGuidancePublishes[0]
                         ? `${performanceMatchPlayerGuidancePublishes.reduce((total, audit) => total + audit.recipient_count, 0)} audited recipient(s) · latest ${new Date(performanceMatchPlayerGuidancePublishes[0].published_at).toLocaleDateString()}`
-                        : "Publish reviewed guidance as private player/guardian inbox messages."}
+                      : "Publish reviewed guidance as private player/guardian inbox messages."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Guidance feedback</span>
+                  <strong>
+                    {latestMatchGuidanceEngagement
+                      ? `${latestMatchGuidanceEngagement.feedback_count} response(s)`
+                      : "no responses"}
+                  </strong>
+                  <p>
+                    {latestMatchGuidanceEngagement
+                      ? `${latestMatchGuidanceEngagement.read_rate_percent.toFixed(0)}% read · ${latestMatchGuidanceEngagement.follow_up_request_count} help request(s) · ${latestMatchGuidanceEngagement.completed_count} completed`
+                      : "Player acknowledgements, help requests, and completed action plans appear after guidance is published."}
                   </p>
                 </article>
               </div>
@@ -28591,6 +28618,51 @@ export default function HomePage() {
                         </span>
                       </article>
                     ))}
+                  {selectedMatchGuidanceEngagements.slice(0, 5).map((engagement) => (
+                    <article key={engagement.publish_audit_id} className="task-card">
+                      <div>
+                        <strong>{engagement.player_label} · match-guidance engagement</strong>
+                        <span>
+                          {engagement.read_count}/{engagement.recipient_count} read ·{" "}
+                          {engagement.feedback_count} response(s) · {engagement.follow_up_request_count} help request(s)
+                        </span>
+                        <small>
+                          {engagement.match_label ?? engagement.opponent_name} · {engagement.track_id} ·{" "}
+                          {engagement.average_feedback_rating ? `${engagement.average_feedback_rating}/5 avg rating · ` : ""}
+                          {engagement.last_engagement_at
+                            ? `last ${new Date(engagement.last_engagement_at).toLocaleString()}`
+                            : "no response yet"}
+                        </small>
+                        {engagement.recipients.slice(0, 3).map((recipient) => (
+                          <small key={recipient.recipient_id}>
+                            {recipient.person_name}{recipient.is_player ? " · player" : ""} ·{" "}
+                            {recipient.delivery_status.replaceAll("_", " ")}
+                            {recipient.feedback_status
+                              ? ` · ${recipient.feedback_status.replaceAll("_", " ")}${recipient.feedback_requested_follow_up ? " · wants help" : ""}`
+                              : ""}
+                            {recipient.feedback_agent_task_id ? ` · AI task ${recipient.feedback_agent_task_id.slice(0, 8)}` : ""}
+                            {recipient.feedback_response_preview ? ` · "${recipient.feedback_response_preview}"` : ""}
+                          </small>
+                        ))}
+                      </div>
+                      <span>
+                        {engagement.recipients.some((recipient) => recipient.feedback_agent_task_id) ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const taskId = engagement.recipients.find((recipient) => recipient.feedback_agent_task_id)?.feedback_agent_task_id;
+                              if (taskId) {
+                                executeAgentTask(taskId);
+                              }
+                            }}
+                            disabled={busyAction !== null}
+                          >
+                            AI help
+                          </button>
+                        ) : null}
+                      </span>
+                    </article>
+                  ))}
                 </div>
               ) : null}
               {(performanceHardwareKits.length || performanceHardwareDevices.length || performanceHardwareSyncRun) ? (

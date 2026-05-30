@@ -3055,6 +3055,179 @@ async def list_match_tracking_player_guidance_publishes(
     ]
 
 
+async def list_match_tracking_player_guidance_engagement(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    tracking_run_id: UUID | None = None,
+) -> list[dict[str, object]]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = (
+        select(
+            PerformanceMatchPlayerGuidancePublishAudit,
+            PerformanceMatchTrackingRun,
+            OppositionScoutingVideoAsset,
+        )
+        .join(
+            PerformanceMatchTrackingRun,
+            PerformanceMatchTrackingRun.id == PerformanceMatchPlayerGuidancePublishAudit.tracking_run_id,
+        )
+        .join(
+            OppositionScoutingVideoAsset,
+            OppositionScoutingVideoAsset.id == PerformanceMatchPlayerGuidancePublishAudit.video_asset_id,
+        )
+        .where(PerformanceMatchPlayerGuidancePublishAudit.organization_id == organization_id)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.status == "published")
+    )
+    if tracking_run_id is not None:
+        statement = statement.where(PerformanceMatchPlayerGuidancePublishAudit.tracking_run_id == tracking_run_id)
+    publish_rows = list(
+        (
+            await db.execute(
+                statement.order_by(
+                    PerformanceMatchPlayerGuidancePublishAudit.published_at.desc(),
+                    PerformanceMatchPlayerGuidancePublishAudit.created_at.desc(),
+                ).limit(200)
+            )
+        ).all()
+    )
+    if not publish_rows:
+        return []
+    message_ids = [audit.message_id for audit, _, _ in publish_rows]
+    recipient_rows = list(
+        (
+            await db.execute(
+                select(MessageRecipient, Person)
+                .join(Person, Person.id == MessageRecipient.person_id)
+                .where(MessageRecipient.message_id.in_(message_ids))
+                .order_by(Person.display_name, MessageRecipient.created_at)
+            )
+        ).all()
+    )
+    recipient_ids = [recipient.id for recipient, _ in recipient_rows]
+    feedback_rows: list[PerformanceMatchPlayerGuidanceFeedback] = []
+    if recipient_ids:
+        feedback_rows = list(
+            (
+                await db.scalars(
+                    select(PerformanceMatchPlayerGuidanceFeedback).where(
+                        PerformanceMatchPlayerGuidanceFeedback.message_recipient_id.in_(recipient_ids)
+                    )
+                )
+            ).all()
+        )
+    feedback_by_recipient = {
+        feedback.message_recipient_id: feedback
+        for feedback in feedback_rows
+    }
+    agent_task_ids = [feedback.agent_task_id for feedback in feedback_rows if feedback.agent_task_id is not None]
+    task_by_id: dict[UUID, AgentTask] = {}
+    if agent_task_ids:
+        task_by_id = {
+            task.id: task
+            for task in (
+                await db.scalars(select(AgentTask).where(AgentTask.id.in_(agent_task_ids)))
+            ).all()
+        }
+    audit_by_message = {
+        audit.message_id: audit
+        for audit, _, _ in publish_rows
+    }
+    recipients_by_message: dict[UUID, list[dict[str, object]]] = {}
+    for recipient, person in recipient_rows:
+        audit = audit_by_message.get(recipient.message_id)
+        feedback = feedback_by_recipient.get(recipient.id)
+        task = task_by_id.get(feedback.agent_task_id) if feedback is not None and feedback.agent_task_id else None
+        feedback_response_preview = feedback.response_text if feedback and feedback.response_text else None
+        if feedback_response_preview and len(feedback_response_preview) > 180:
+            feedback_response_preview = f"{feedback_response_preview[:177]}..."
+        recipients_by_message.setdefault(recipient.message_id, []).append(
+            {
+                "recipient_id": recipient.id,
+                "person_id": recipient.person_id,
+                "person_name": person.display_name,
+                "is_player": audit is not None and recipient.person_id == audit.player_person_id,
+                "destination": recipient.destination,
+                "delivery_status": recipient.delivery_status,
+                "delivered_at": recipient.delivered_at,
+                "read_at": recipient.read_at,
+                "feedback_status": feedback.status if feedback is not None else None,
+                "feedback_rating": feedback.rating if feedback is not None else None,
+                "feedback_requested_follow_up": feedback.requested_follow_up if feedback is not None else False,
+                "feedback_priority_focus": feedback.priority_focus if feedback is not None else None,
+                "feedback_response_preview": feedback_response_preview,
+                "feedback_completed_action_count": feedback.completed_action_count if feedback is not None else 0,
+                "feedback_submitted_at": feedback.submitted_at if feedback is not None else None,
+                "feedback_agent_task_id": feedback.agent_task_id if feedback is not None else None,
+                "feedback_agent_task_status": (
+                    task.status.value
+                    if task is not None and hasattr(task.status, "value")
+                    else str(task.status) if task is not None else None
+                ),
+                "feedback_agent_task_title": task.title if task is not None else None,
+            }
+        )
+    counts = await delivery_counts_for_messages(db, message_ids)
+    rows: list[dict[str, object]] = []
+    for audit, run, video_asset in publish_rows:
+        recipients = recipients_by_message.get(audit.message_id, [])
+        delivery_counts = counts.get(audit.message_id, {})
+        recipient_count = max(audit.recipient_count, len(recipients), 1)
+        feedback_count = sum(1 for recipient in recipients if recipient.get("feedback_status"))
+        follow_up_request_count = sum(1 for recipient in recipients if recipient.get("feedback_requested_follow_up"))
+        completed_count = sum(1 for recipient in recipients if recipient.get("feedback_status") == "completed")
+        feedback_ratings = [
+            int(recipient["feedback_rating"])
+            for recipient in recipients
+            if recipient.get("feedback_rating") is not None
+        ]
+        engagement_times = [
+            value
+            for recipient in recipients
+            for value in (
+                recipient.get("read_at"),
+                recipient.get("feedback_submitted_at"),
+            )
+            if isinstance(value, datetime)
+        ]
+        rows.append(
+            {
+                "publish_audit_id": audit.id,
+                "organization_id": audit.organization_id,
+                "tracking_run_id": audit.tracking_run_id,
+                "video_asset_id": audit.video_asset_id,
+                "message_id": audit.message_id,
+                "player_person_id": audit.player_person_id,
+                "track_id": audit.track_id,
+                "player_label": audit.player_label,
+                "opponent_name": video_asset.opponent_name,
+                "match_label": video_asset.clip_label,
+                "channel": audit.channel,
+                "recipient_count": audit.recipient_count,
+                "queued_count": delivery_counts.get("queued_count", 0),
+                "sent_count": delivery_counts.get("sent_count", 0),
+                "delivered_count": delivery_counts.get("delivered_count", 0),
+                "read_count": delivery_counts.get("read_count", 0),
+                "failed_count": delivery_counts.get("failed_count", 0),
+                "suppressed_count": delivery_counts.get("suppressed_count", 0),
+                "read_rate_percent": round(delivery_counts.get("read_count", 0) / recipient_count * 100, 2),
+                "feedback_count": feedback_count,
+                "follow_up_request_count": follow_up_request_count,
+                "completed_count": completed_count,
+                "average_feedback_rating": (
+                    round(sum(feedback_ratings) / len(feedback_ratings), 2)
+                    if feedback_ratings
+                    else None
+                ),
+                "last_engagement_at": max(engagement_times) if engagement_times else None,
+                "recipients": recipients,
+                "published_at": audit.published_at,
+            }
+        )
+    return rows
+
+
 def match_player_guidance_publish_audit_read(
     audit: PerformanceMatchPlayerGuidancePublishAudit,
     delivery_counts: dict[str, int],

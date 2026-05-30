@@ -400,6 +400,23 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert feedback_guidance["feedback"]["agent_task_id"] == feedback["agent_task_id"]
     assert feedback_guidance["guidance_delivery_status"] == "read"
 
+    engagement_response = client.get(
+        f"/api/v1/performance/scouting/match-guidance-engagement?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert engagement_response.status_code == 200
+    engagement = engagement_response.json()[0]
+    assert engagement["tracking_run_id"] == tracking.json()["id"]
+    assert engagement["player_person_id"] == member["subject_id"]
+    assert engagement["feedback_count"] == 1
+    assert engagement["follow_up_request_count"] == 1
+    assert engagement["read_count"] == 1
+    player_recipient = next(recipient for recipient in engagement["recipients"] if recipient["is_player"])
+    assert player_recipient["feedback_status"] == "needs_help"
+    assert player_recipient["feedback_requested_follow_up"] is True
+    assert player_recipient["feedback_agent_task_id"] == feedback["agent_task_id"]
+    assert player_recipient["feedback_agent_task_status"] == "queued"
+
     followup_response = client.post(
         f"/api/v1/performance/my-profiles/{roster['athlete_profile_id']}/match-guidance/training-followups",
         headers=player_headers,

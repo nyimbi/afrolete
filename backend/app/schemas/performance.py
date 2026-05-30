@@ -1057,6 +1057,56 @@ class PerformanceMatchPlayerGuidancePublishAuditRead(BaseModel):
     created_at: datetime
 
 
+class PerformanceMatchPlayerGuidanceRecipientEngagementRead(BaseModel):
+    recipient_id: UUID
+    person_id: UUID
+    person_name: str
+    is_player: bool = False
+    destination: str | None
+    delivery_status: MessageDeliveryStatus
+    delivered_at: datetime | None
+    read_at: datetime | None
+    feedback_status: str | None = None
+    feedback_rating: int | None = None
+    feedback_requested_follow_up: bool = False
+    feedback_priority_focus: str | None = None
+    feedback_response_preview: str | None = None
+    feedback_completed_action_count: int = 0
+    feedback_submitted_at: datetime | None = None
+    feedback_agent_task_id: UUID | None = None
+    feedback_agent_task_status: str | None = None
+    feedback_agent_task_title: str | None = None
+
+
+class PerformanceMatchPlayerGuidanceEngagementRead(BaseModel):
+    publish_audit_id: UUID
+    organization_id: UUID
+    tracking_run_id: UUID
+    video_asset_id: UUID
+    message_id: UUID
+    player_person_id: UUID
+    track_id: str
+    player_label: str
+    opponent_name: str
+    match_label: str | None
+    channel: CommunicationChannel
+    recipient_count: int
+    queued_count: int = 0
+    sent_count: int = 0
+    delivered_count: int = 0
+    read_count: int = 0
+    failed_count: int = 0
+    suppressed_count: int = 0
+    read_rate_percent: float = 0.0
+    feedback_count: int = 0
+    follow_up_request_count: int = 0
+    completed_count: int = 0
+    average_feedback_rating: float | None = None
+    last_engagement_at: datetime | None = None
+    recipients: list[PerformanceMatchPlayerGuidanceRecipientEngagementRead]
+    published_at: datetime
+
+
 class PerformanceMatchPlayerGuidancePublishRead(BaseModel):
     tracking_run_id: UUID
     organization_id: UUID
