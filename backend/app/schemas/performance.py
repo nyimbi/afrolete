@@ -614,7 +614,11 @@ class PerformanceMatchTrackingPlayerMetricRead(BaseModel):
     territorial_advance_count: int = 0
     pass_completed_count: int = 0
     pass_received_count: int = 0
+    pass_attempt_count: int = 0
+    pass_accuracy_percent: float = 0.0
     turnover_involved_count: int = 0
+    interception_count: int = 0
+    tackle_count: int = 0
     ball_carry_m: float = 0.0
     ball_possession_sample_count: int = 0
     shot_count: int = 0
@@ -663,6 +667,8 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     ball_action_events: list[dict[str, Any]] = Field(default_factory=list)
     shot_events: list[dict[str, Any]] = Field(default_factory=list)
     pass_network: list[dict[str, Any]] = Field(default_factory=list)
+    pass_type_metrics: list[dict[str, Any]] = Field(default_factory=list)
+    defensive_action_events: list[dict[str, Any]] = Field(default_factory=list)
     chance_creation_metrics: dict[str, Any] = Field(default_factory=dict)
     formation_snapshots: list[dict[str, Any]] = Field(default_factory=list)
     player_metrics: list[PerformanceMatchTrackingPlayerMetricRead]

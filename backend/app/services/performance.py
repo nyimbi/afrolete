@@ -7958,7 +7958,11 @@ def build_match_analysis_report_artifact(
                 "territorial_advance_count": int(metric.get("territorial_advance_count") or 0),
                 "pass_completed_count": int(metric.get("pass_completed_count") or 0),
                 "pass_received_count": int(metric.get("pass_received_count") or 0),
+                "pass_attempt_count": int(metric.get("pass_attempt_count") or 0),
+                "pass_accuracy_percent": round(float(metric.get("pass_accuracy_percent") or 0.0), 2),
                 "turnover_involved_count": int(metric.get("turnover_involved_count") or 0),
+                "interception_count": int(metric.get("interception_count") or 0),
+                "tackle_count": int(metric.get("tackle_count") or 0),
                 "ball_carry_m": round(float(metric.get("ball_carry_m") or 0.0), 2),
                 "ball_possession_sample_count": int(metric.get("ball_possession_sample_count") or 0),
                 "shot_count": int(metric.get("shot_count") or 0),
@@ -7989,6 +7993,8 @@ def build_match_analysis_report_artifact(
     ball_action_events = [item for item in tracking.get("ball_action_events", []) if isinstance(item, dict)]
     shot_events = [item for item in tracking.get("shot_events", []) if isinstance(item, dict)]
     pass_network = [item for item in tracking.get("pass_network", []) if isinstance(item, dict)]
+    pass_type_metrics = [item for item in tracking.get("pass_type_metrics", []) if isinstance(item, dict)]
+    defensive_action_events = [item for item in tracking.get("defensive_action_events", []) if isinstance(item, dict)]
     chance_creation_metrics = (
         tracking.get("chance_creation_metrics") if isinstance(tracking.get("chance_creation_metrics"), dict) else {}
     )
@@ -8013,7 +8019,11 @@ def build_match_analysis_report_artifact(
         "calibration_quality_score": round(float(tracking.get("calibration_quality_score") or 0.0), 3),
         "pressure_event_count": len(pressure_events),
         "pass_count": int(ball_tracking_metrics.get("pass_count") or 0),
+        "pass_attempt_count": int(ball_tracking_metrics.get("pass_attempt_count") or 0),
+        "pass_accuracy_percent": round(float(ball_tracking_metrics.get("pass_accuracy_percent") or 0.0), 2),
         "turnover_count": int(ball_tracking_metrics.get("turnover_count") or 0),
+        "interception_count": int(ball_tracking_metrics.get("interception_count") or 0),
+        "tackle_count": int(ball_tracking_metrics.get("tackle_count") or 0),
         "shot_count": int(ball_tracking_metrics.get("shot_count") or 0),
         "shot_on_target_count": int(ball_tracking_metrics.get("shot_on_target_count") or 0),
         "expected_goals": round(float(ball_tracking_metrics.get("expected_goals") or 0.0), 3),
@@ -8034,6 +8044,8 @@ def build_match_analysis_report_artifact(
         ball_action_events=ball_action_events,
         shot_events=shot_events,
         pass_network=pass_network,
+        pass_type_metrics=pass_type_metrics,
+        defensive_action_events=defensive_action_events,
         chance_creation_metrics=chance_creation_metrics,
         ball_tracking_metrics=ball_tracking_metrics,
         quality_warnings=[str(item) for item in (tracking.get("quality_warnings") or [])],
@@ -8086,6 +8098,10 @@ def match_analysis_report_recommendations(
         recommendations.append("Use detected pass chains to compare intended support patterns with actual movement.")
     if int(ball_metrics.get("shot_count") or 0) > 0:
         recommendations.append("Review shot clips against xG estimates to coach shot selection and final-action quality.")
+    if int(ball_metrics.get("pass_attempt_count") or 0) > 0:
+        recommendations.append("Use pass-type accuracy to separate technical execution problems from risky decision-making.")
+    if int(ball_metrics.get("interception_count") or 0) > 0:
+        recommendations.append("Review interceptions and tackles to coach scanning, body shape, and counter-press reactions.")
     if not recommendations:
         recommendations.append("Capture a calibrated tracking run before issuing individualized player guidance.")
     return list(dict.fromkeys(recommendations))[:12]
@@ -8106,6 +8122,8 @@ def match_analysis_report_markdown(
     ball_action_events: list[dict[str, object]],
     shot_events: list[dict[str, object]],
     pass_network: list[dict[str, object]],
+    pass_type_metrics: list[dict[str, object]],
+    defensive_action_events: list[dict[str, object]],
     chance_creation_metrics: dict[str, object],
     ball_tracking_metrics: dict[str, object],
     quality_warnings: list[str],
@@ -8128,8 +8146,9 @@ def match_analysis_report_markdown(
         f"- Max speed: {summary['max_speed_mps']} m/s",
         f"- Sprint count: {summary['sprint_count']}",
         f"- Pressure events: {summary['pressure_event_count']}",
-        f"- Passes detected: {summary['pass_count']}",
+        f"- Passes detected: {summary['pass_count']} / {summary['pass_attempt_count']} attempts ({summary['pass_accuracy_percent']}%)",
         f"- Turnovers detected: {summary['turnover_count']}",
+        f"- Defensive ball wins: {summary['interception_count']} interceptions, {summary['tackle_count']} tackles",
         f"- Shots detected: {summary['shot_count']}",
         f"- Expected goals: {summary['expected_goals']}",
         f"- Tracking quality: {round(float(summary['tracking_quality_score']) * 100)}%",
@@ -8149,7 +8168,7 @@ def match_analysis_report_markdown(
                     f"- Distance: {card['distance_m']}m | High-speed: {card['high_speed_distance_m']}m",
                     f"- Max speed: {card['max_speed_mps']} m/s | Sprints: {card['sprint_count']}",
                     f"- Pressure: +{card['pressure_applied_count']} applied / {card['pressure_received_count']} received | Off-ball runs: {card['off_ball_run_count']}",
-                    f"- Ball actions: {card['pass_completed_count']} pass(es), {card['pass_received_count']} received, {card['turnover_involved_count']} turnover involvement(s), {card['ball_carry_m']}m carried",
+                    f"- Ball actions: {card['pass_completed_count']}/{card['pass_attempt_count']} pass(es), {card['pass_accuracy_percent']}% accuracy, {card['pass_received_count']} received, {card['turnover_involved_count']} turnover involvement(s), {card['interception_count']} interception(s), {card['tackle_count']} tackle(s), {card['ball_carry_m']}m carried",
                     f"- Chance creation: {card['shot_count']} shot(s), {card['shot_on_target_count']} on target, {card['expected_goals']} xG, {card['key_pass_count']} key pass(es)",
                     f"- Work rate: {card['work_rate_m_per_min']} m/min | Dominant zone: {str(card['dominant_zone']).replace('_', ' ')}",
                     f"- Guidance: {(card.get('coaching_flags') or ['Review video context before coaching.'])[0]}",
@@ -8209,6 +8228,16 @@ def match_analysis_report_markdown(
         first_link = pass_network[0]
         lines.append(
             f"- Leading pass link: {first_link.get('from_track_id')} to {first_link.get('to_track_id')} completed {first_link.get('pass_count', 0)} pass(es)."
+        )
+    if pass_type_metrics:
+        first_pass_type = pass_type_metrics[0]
+        lines.append(
+            f"- Pass-type accuracy: {first_pass_type.get('team_label')} {first_pass_type.get('pass_type')} {first_pass_type.get('completed_count', 0)}/{first_pass_type.get('attempt_count', 0)} ({first_pass_type.get('accuracy_percent', 0)}%)."
+        )
+    if defensive_action_events:
+        first_defense = defensive_action_events[0]
+        lines.append(
+            f"- First defensive action: {first_defense.get('defensive_action_type')} by {first_defense.get('to_track_id')} after {first_defense.get('from_track_id')} lost possession."
         )
     if chance_creation_metrics:
         lines.append(
@@ -8451,7 +8480,11 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
                 "territorial_advance_count": 0,
                 "pass_completed_count": 0,
                 "pass_received_count": 0,
+                "pass_attempt_count": 0,
+                "pass_accuracy_percent": 0.0,
                 "turnover_involved_count": 0,
+                "interception_count": 0,
+                "tackle_count": 0,
                 "ball_carry_m": 0.0,
                 "shot_count": 0,
                 "shot_on_target_count": 0,
@@ -8503,6 +8536,8 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         "ball_action_events": ball_context["ball_action_events"],
         "shot_events": ball_context["shot_events"],
         "pass_network": ball_context["pass_network"],
+        "pass_type_metrics": ball_context["pass_type_metrics"],
+        "defensive_action_events": ball_context["defensive_action_events"],
         "chance_creation_metrics": ball_context["chance_creation_metrics"],
     }
 
@@ -8771,7 +8806,11 @@ def derive_match_ball_context(
                 "ball_sample_count": 0,
                 "possession_sample_count": 0,
                 "pass_count": 0,
+                "pass_attempt_count": 0,
+                "pass_accuracy_percent": 0.0,
                 "turnover_count": 0,
+                "interception_count": 0,
+                "tackle_count": 0,
                 "carry_count": 0,
                 "shot_count": 0,
                 "shot_on_target_count": 0,
@@ -8784,6 +8823,8 @@ def derive_match_ball_context(
             "ball_action_events": [],
             "shot_events": [],
             "pass_network": [],
+            "pass_type_metrics": [],
+            "defensive_action_events": [],
             "chance_creation_metrics": {},
         }
     metric_by_track = {str(metric["track_id"]): metric for metric in player_metrics}
@@ -8800,11 +8841,15 @@ def derive_match_ball_context(
     ball_distance = 0.0
     max_ball_speed = 0.0
     pass_count = 0
+    pass_attempt_count = 0
     turnover_count = 0
+    interception_count = 0
+    tackle_count = 0
     carry_count = 0
     shot_count = 0
     shot_on_target_count = 0
     expected_goals = 0.0
+    pass_type_totals: dict[tuple[str, str], dict[str, int]] = {}
     for ball in ball_rows:
         holder = nearest_ball_holder(ball, player_rows_by_timestamp)
         if holder is not None:
@@ -8854,8 +8899,21 @@ def derive_match_ball_context(
                             )
                 elif segment_distance >= 3.0:
                     event_type = "pass" if holder_team == previous_team else "turnover"
+                    pass_type = match_tracking_pass_type(previous_ball, ball, previous_holder, holder)
+                    pass_attempt_count += 1
+                    if previous_holder_id in metric_by_track:
+                        metric_by_track[previous_holder_id]["pass_attempt_count"] = (
+                            int(metric_by_track[previous_holder_id].get("pass_attempt_count") or 0) + 1
+                        )
+                    pass_type_key = (previous_team, pass_type)
+                    pass_type_totals.setdefault(
+                        pass_type_key,
+                        {"attempt_count": 0, "completed_count": 0, "turnover_count": 0},
+                    )
+                    pass_type_totals[pass_type_key]["attempt_count"] += 1
                     if event_type == "pass":
                         pass_count += 1
+                        pass_type_totals[pass_type_key]["completed_count"] += 1
                         if previous_holder_id in metric_by_track:
                             metric_by_track[previous_holder_id]["pass_completed_count"] = (
                                 int(metric_by_track[previous_holder_id].get("pass_completed_count") or 0) + 1
@@ -8866,6 +8924,20 @@ def derive_match_ball_context(
                             )
                     else:
                         turnover_count += 1
+                        pass_type_totals[pass_type_key]["turnover_count"] += 1
+                        defensive_action_type = match_tracking_defensive_action_type(previous_ball, ball)
+                        if defensive_action_type == "interception":
+                            interception_count += 1
+                            if holder_id in metric_by_track:
+                                metric_by_track[holder_id]["interception_count"] = (
+                                    int(metric_by_track[holder_id].get("interception_count") or 0) + 1
+                                )
+                        else:
+                            tackle_count += 1
+                            if holder_id in metric_by_track:
+                                metric_by_track[holder_id]["tackle_count"] = (
+                                    int(metric_by_track[holder_id].get("tackle_count") or 0) + 1
+                                )
                         for track_id in {holder_id, previous_holder_id}:
                             if track_id in metric_by_track:
                                 metric_by_track[track_id]["turnover_involved_count"] = (
@@ -8881,6 +8953,9 @@ def derive_match_ball_context(
                                 "to_track_id": holder_id,
                                 "to_team_label": holder_team,
                                 "ball_distance_m": round(segment_distance, 2),
+                                "pass_type": pass_type,
+                                "outcome": "completed" if event_type == "pass" else "lost",
+                                "defensive_action_type": defensive_action_type if event_type == "turnover" else None,
                                 "zone": match_tracking_zone(float(ball["x_percent"]), float(ball["y_percent"])),
                             }
                         )
@@ -8902,7 +8977,28 @@ def derive_match_ball_context(
     for track_id, count in player_possession_counts.items():
         if track_id in metric_by_track:
             metric_by_track[track_id]["ball_possession_sample_count"] = count
+    for metric in metric_by_track.values():
+        attempts = int(metric.get("pass_attempt_count") or 0)
+        if attempts:
+            metric["pass_accuracy_percent"] = round(int(metric.get("pass_completed_count") or 0) / attempts * 100, 2)
     shot_events = [event for event in ball_action_events if event.get("event_type") == "shot"]
+    defensive_action_events = [event for event in ball_action_events if event.get("event_type") == "turnover"]
+    pass_type_metrics = [
+        {
+            "team_label": team_label,
+            "pass_type": pass_type,
+            "attempt_count": totals["attempt_count"],
+            "completed_count": totals["completed_count"],
+            "turnover_count": totals["turnover_count"],
+            "accuracy_percent": round(totals["completed_count"] / totals["attempt_count"] * 100, 2)
+            if totals["attempt_count"]
+            else 0.0,
+        }
+        for (team_label, pass_type), totals in sorted(
+            pass_type_totals.items(),
+            key=lambda item: (-item[1]["attempt_count"], item[0][0], item[0][1]),
+        )
+    ]
     pass_network = derive_match_pass_network(ball_action_events, metric_by_track)
     key_pass_count = sum(int(link.get("key_pass_count") or 0) for link in pass_network)
     return {
@@ -8910,7 +9006,13 @@ def derive_match_ball_context(
             "ball_sample_count": len(ball_rows),
             "possession_sample_count": possession_sample_count,
             "pass_count": pass_count,
+            "pass_attempt_count": pass_attempt_count,
+            "pass_accuracy_percent": round(pass_count / pass_attempt_count * 100, 2)
+            if pass_attempt_count
+            else 0.0,
             "turnover_count": turnover_count,
+            "interception_count": interception_count,
+            "tackle_count": tackle_count,
             "carry_count": carry_count,
             "shot_count": shot_count,
             "shot_on_target_count": shot_on_target_count,
@@ -8923,6 +9025,8 @@ def derive_match_ball_context(
         "ball_action_events": ball_action_events,
         "shot_events": shot_events,
         "pass_network": pass_network,
+        "pass_type_metrics": pass_type_metrics,
+        "defensive_action_events": defensive_action_events,
         "chance_creation_metrics": {
             "shot_count": shot_count,
             "shot_on_target_count": shot_on_target_count,
@@ -8959,6 +9063,39 @@ def nearest_ball_holder(
         (float(nearest["x_meters"]), float(nearest["y_meters"])),
     )
     return nearest if distance <= 12.0 else None
+
+
+def match_tracking_pass_type(
+    previous_ball: dict[str, object],
+    ball: dict[str, object],
+    previous_holder: dict[str, object],
+    holder: dict[str, object],
+) -> str:
+    distance = math.dist(
+        (float(previous_ball["x_meters"]), float(previous_ball["y_meters"])),
+        (float(ball["x_meters"]), float(ball["y_meters"])),
+    )
+    x_delta = float(ball["x_percent"]) - float(previous_ball["x_percent"])
+    y_delta = abs(float(ball["y_percent"]) - float(previous_ball["y_percent"]))
+    holder_team = str(holder.get("team_label") or "")
+    previous_team = str(previous_holder.get("team_label") or "")
+    if previous_team == holder_team and y_delta >= 22 and max(float(previous_ball["x_percent"]), float(ball["x_percent"])) >= 60:
+        return "cross"
+    if previous_team == holder_team and abs(x_delta) >= 18 and distance >= 16:
+        return "through_ball" if x_delta > 0 else "progressive_pass"
+    if distance < 12:
+        return "short_pass"
+    if distance < 28:
+        return "medium_pass"
+    return "long_pass"
+
+
+def match_tracking_defensive_action_type(previous_ball: dict[str, object], ball: dict[str, object]) -> str:
+    distance = math.dist(
+        (float(previous_ball["x_meters"]), float(previous_ball["y_meters"])),
+        (float(ball["x_meters"]), float(ball["y_meters"])),
+    )
+    return "interception" if distance >= 8 else "tackle"
 
 
 def match_tracking_shot_event(
@@ -10162,6 +10299,8 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "ball_action_events": summary.get("ball_action_events", []),
         "shot_events": summary.get("shot_events", []),
         "pass_network": summary.get("pass_network", []),
+        "pass_type_metrics": summary.get("pass_type_metrics", []),
+        "defensive_action_events": summary.get("defensive_action_events", []),
         "chance_creation_metrics": summary.get("chance_creation_metrics", {}),
         "formation_snapshots": summary.get("formation_snapshots", []),
         "player_metrics": summary.get("player_metrics", []),

@@ -3326,6 +3326,16 @@ def test_match_tracking_derives_shot_xg_and_key_pass_network() -> None:
             "y_meters": 25,
         },
         {
+            "track_id": "away-5",
+            "team_label": "Away",
+            "player_label": "Defender",
+            "timestamp_seconds": 3,
+            "x_percent": 60,
+            "y_percent": 50,
+            "x_meters": 60,
+            "y_meters": 25,
+        },
+        {
             "track_id": "ball",
             "team_label": "ball",
             "player_label": "Ball",
@@ -3355,11 +3365,24 @@ def test_match_tracking_derives_shot_xg_and_key_pass_network() -> None:
             "x_meters": 98,
             "y_meters": 25,
         },
+        {
+            "track_id": "ball",
+            "team_label": "ball",
+            "player_label": "Ball",
+            "timestamp_seconds": 3,
+            "x_percent": 60,
+            "y_percent": 50,
+            "x_meters": 60,
+            "y_meters": 25,
+        },
     ]
 
     summary = performance_service.summarize_match_tracking_samples(samples)
 
     assert summary["ball_tracking_metrics"]["pass_count"] == 1
+    assert summary["ball_tracking_metrics"]["pass_attempt_count"] == 2
+    assert summary["ball_tracking_metrics"]["pass_accuracy_percent"] == 50.0
+    assert summary["ball_tracking_metrics"]["interception_count"] == 1
     assert summary["ball_tracking_metrics"]["shot_count"] == 1
     assert summary["ball_tracking_metrics"]["shot_on_target_count"] == 1
     assert summary["ball_tracking_metrics"]["expected_goals"] > 0.3
@@ -3370,12 +3393,21 @@ def test_match_tracking_derives_shot_xg_and_key_pass_network() -> None:
     assert summary["pass_network"][0]["from_track_id"] == "home-8"
     assert summary["pass_network"][0]["to_track_id"] == "home-9"
     assert summary["pass_network"][0]["key_pass_count"] == 1
+    assert summary["pass_type_metrics"][0]["team_label"] == "Home"
+    assert summary["pass_type_metrics"][0]["attempt_count"] == 1
+    assert {event["defensive_action_type"] for event in summary["defensive_action_events"]} == {"interception"}
     midfielder = next(metric for metric in summary["player_metrics"] if metric["track_id"] == "home-8")
     forward = next(metric for metric in summary["player_metrics"] if metric["track_id"] == "home-9")
+    defender = next(metric for metric in summary["player_metrics"] if metric["track_id"] == "away-5")
     assert midfielder["key_pass_count"] == 1
     assert midfielder["expected_assists"] == summary["shot_events"][0]["expected_goals"]
+    assert midfielder["pass_attempt_count"] == 1
+    assert midfielder["pass_accuracy_percent"] == 100.0
     assert forward["shot_count"] == 1
     assert forward["expected_goals"] == summary["shot_events"][0]["expected_goals"]
+    assert forward["pass_attempt_count"] == 1
+    assert forward["pass_accuracy_percent"] == 0.0
+    assert defender["interception_count"] == 1
 
 
 def test_match_tracking_contour_classifier_separates_ball_and_player_candidates() -> None:

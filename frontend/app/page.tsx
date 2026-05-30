@@ -25151,10 +25151,10 @@ export default function HomePage() {
                 </article>
                 <article className="mini-card">
                   <span className="muted">Possession</span>
-                  <strong>{Number(performanceMatchTrackingRun?.ball_tracking_metrics.pass_count ?? 0)} pass(es)</strong>
+                  <strong>{Number(performanceMatchTrackingRun?.ball_tracking_metrics.pass_accuracy_percent ?? 0).toFixed(0)}% passing</strong>
                   <p>
                     {performanceMatchTrackingRun?.possession_estimates[0]
-                      ? `${String(performanceMatchTrackingRun.possession_estimates[0].team_label ?? "Team")} ${Math.round(Number(performanceMatchTrackingRun.possession_estimates[0].possession_percent ?? 0))}% · ${Number(performanceMatchTrackingRun.ball_tracking_metrics.turnover_count ?? 0)} turnover(s)`
+                      ? `${String(performanceMatchTrackingRun.possession_estimates[0].team_label ?? "Team")} ${Math.round(Number(performanceMatchTrackingRun.possession_estimates[0].possession_percent ?? 0))}% · ${Number(performanceMatchTrackingRun.ball_tracking_metrics.pass_count ?? 0)}/${Number(performanceMatchTrackingRun.ball_tracking_metrics.pass_attempt_count ?? 0)} passes`
                       : "Auto-track or add a ball track to estimate possession, passes, turnovers, and carries."}
                   </p>
                 </article>
@@ -25393,14 +25393,40 @@ export default function HomePage() {
                   {performanceMatchTrackingRun.ball_action_events.slice(0, 5).map((event, index) => (
                     <article key={`ball-action-${index}`} className="task-card">
                       <div>
-                        <strong>{String(event.event_type ?? "ball action").replaceAll("_", " ")}</strong>
+                        <strong>
+                          {String(event.pass_type ?? event.event_type ?? "ball action").replaceAll("_", " ")}
+                          {event.outcome ? ` · ${String(event.outcome)}` : ""}
+                        </strong>
                         <span>
                           {String(event.shooter_track_id ?? event.from_track_id ?? "source")} to {String(event.target_goal ?? event.to_track_id ?? "target")} · {Number(event.ball_distance_m ?? 0).toFixed(1)}m
                         </span>
                         <small>
                           {Number(event.timestamp_seconds ?? 0).toFixed(1)}s · {String(event.zone ?? "unknown").replaceAll("_", " ")}
                           {event.expected_goals ? ` · ${Number(event.expected_goals).toFixed(2)} xG` : ""}
+                          {event.defensive_action_type ? ` · ${String(event.defensive_action_type).replaceAll("_", " ")}` : ""}
                         </small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceMatchTrackingRun.pass_type_metrics.slice(0, 4).map((passType, index) => (
+                    <article key={`pass-type-${String(passType.team_label ?? index)}-${String(passType.pass_type ?? index)}`} className="task-card">
+                      <div>
+                        <strong>{String(passType.team_label ?? "Team")} · {String(passType.pass_type ?? "pass").replaceAll("_", " ")}</strong>
+                        <span>
+                          {Number(passType.completed_count ?? 0)}/{Number(passType.attempt_count ?? 0)} completed · {Number(passType.accuracy_percent ?? 0).toFixed(0)}%
+                        </span>
+                        <small>{Number(passType.turnover_count ?? 0)} turnover(s) from this pass type</small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceMatchTrackingRun.defensive_action_events.slice(0, 4).map((event, index) => (
+                    <article key={`defensive-action-${index}`} className="task-card">
+                      <div>
+                        <strong>{String(event.to_team_label ?? "Team")} {String(event.defensive_action_type ?? "ball win").replaceAll("_", " ")}</strong>
+                        <span>
+                          {String(event.to_track_id ?? "winner")} won it from {String(event.from_track_id ?? "opponent")} · {String(event.pass_type ?? "pass").replaceAll("_", " ")}
+                        </span>
+                        <small>{Number(event.timestamp_seconds ?? 0).toFixed(1)}s · {Number(event.ball_distance_m ?? 0).toFixed(1)}m ball movement</small>
                       </div>
                     </article>
                   ))}
@@ -25444,7 +25470,10 @@ export default function HomePage() {
                           {metric.average_nearest_opponent_m ? ` · nearest opponent ${metric.average_nearest_opponent_m.toFixed(1)}m` : ""}
                         </small>
                         <small>
-                          passes {metric.pass_completed_count ?? 0}/{metric.pass_received_count ?? 0} · turnovers {metric.turnover_involved_count ?? 0} · carry {Math.round(metric.ball_carry_m ?? 0)}m
+                          passes {metric.pass_completed_count ?? 0}/{metric.pass_attempt_count ?? 0} · accuracy {Math.round(metric.pass_accuracy_percent ?? 0)}% · received {metric.pass_received_count ?? 0}
+                        </small>
+                        <small>
+                          turnovers {metric.turnover_involved_count ?? 0} · interceptions {metric.interception_count ?? 0} · tackles {metric.tackle_count ?? 0} · carry {Math.round(metric.ball_carry_m ?? 0)}m
                         </small>
                         <small>
                           shots {metric.shot_count ?? 0} · xG {(metric.expected_goals ?? 0).toFixed(2)} · key passes {metric.key_pass_count ?? 0} · xA {(metric.expected_assists ?? 0).toFixed(2)}

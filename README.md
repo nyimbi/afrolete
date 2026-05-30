@@ -314,8 +314,9 @@ Football opposition videos can also run through the match-tracking worker. The
 Docker `match-tracking` profile asks the backend to decode stored match video,
 extract OpenCV player motion tracks plus a best-effort ball contour track, and
 create tracking runs that feed distance, speed, heatmaps, estimated possession,
-pass/turnover cues, pass networks, shot/xG estimates, tactical shape,
-highlights, and coach/player reports.
+pass/turnover cues, pass-type accuracy, defensive ball-win labels, pass
+networks, shot/xG estimates, tactical shape, highlights, and coach/player
+reports.
 
 Object storage can run in local mode for demos or S3-compatible mode for MinIO.
 The same storage adapter supports retention policy enforcement: local mode

@@ -6910,7 +6910,11 @@ export type PerformanceMatchTrackingPlayerMetricRead = {
   territorial_advance_count: number;
   pass_completed_count: number;
   pass_received_count: number;
+  pass_attempt_count: number;
+  pass_accuracy_percent: number;
   turnover_involved_count: number;
+  interception_count: number;
+  tackle_count: number;
   ball_carry_m: number;
   ball_possession_sample_count: number;
   shot_count: number;
@@ -6959,6 +6963,8 @@ export type PerformanceMatchTrackingRunRead = {
   ball_action_events: Record<string, unknown>[];
   shot_events: Record<string, unknown>[];
   pass_network: Record<string, unknown>[];
+  pass_type_metrics: Record<string, unknown>[];
+  defensive_action_events: Record<string, unknown>[];
   chance_creation_metrics: Record<string, unknown>;
   formation_snapshots: Record<string, unknown>[];
   player_metrics: PerformanceMatchTrackingPlayerMetricRead[];
