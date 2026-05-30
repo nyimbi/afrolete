@@ -57,6 +57,7 @@ from app.schemas.commercial import (
     SponsorContentDashboardRead,
     SponsorCouponRedemptionCreate,
     SponsorCouponRedemptionRead,
+    SponsorDigitalSignagePlaylistRead,
     SponsorInteractionCreate,
     SponsorInteractionRead,
     SponsorPortalRead,
@@ -152,6 +153,7 @@ from app.services.commercial import (
     sponsor_portal,
     sponsor_activation_dashboard,
     sponsor_content_dashboard,
+    sponsor_digital_signage_playlist,
     sponsorship_dashboard,
     sponsor_stewardship_dashboard,
     sync_accounting_export,
@@ -458,6 +460,31 @@ async def sponsor_content_dashboard_route(
     db: AsyncSession = Depends(get_db),
 ) -> SponsorContentDashboardRead:
     return await sponsor_content_dashboard(db, organization_id)
+
+
+@router.get("/sponsor-digital-signage-playlist", response_model=SponsorDigitalSignagePlaylistRead)
+async def sponsor_digital_signage_playlist_route(
+    organization_id: UUID = Query(),
+    screen_name: str = Query(default="Main scoreboard", max_length=120),
+    location_name: str | None = Query(default=None, max_length=180),
+    event_id: UUID | None = Query(default=None),
+    slot_count: int = Query(default=12, ge=1, le=60),
+    slot_seconds: int = Query(default=12, ge=5, le=120),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SponsorDigitalSignagePlaylistRead:
+    return await sponsor_digital_signage_playlist(
+        db,
+        identity,
+        organization_id,
+        authz,
+        screen_name=screen_name,
+        location_name=location_name,
+        event_id=event_id,
+        slot_count=slot_count,
+        slot_seconds=slot_seconds,
+    )
 
 
 @router.post("/campaigns", response_model=FundraisingCampaignRead, status_code=status.HTTP_201_CREATED)

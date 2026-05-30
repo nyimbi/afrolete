@@ -3646,6 +3646,47 @@ export type SponsorActivationPlacementRead = {
   actual_engagements: number;
 };
 
+export type SponsorDigitalSignagePlaylistItemRead = {
+  slot_index: number;
+  duration_seconds: number;
+  placement_id: UUID;
+  sponsor_id: UUID;
+  sponsor_name: string | null;
+  content_asset_id: UUID | null;
+  content_title: string;
+  asset_url: string | null;
+  thumbnail_url: string | null;
+  format: string;
+  placement_name: string;
+  placement_type: string;
+  channel: string;
+  location_name: string | null;
+  event_id: UUID | null;
+  event_title: string | null;
+  scheduled_at: string | null;
+  campaign_title: string | null;
+  coupon_code: string | null;
+  target_url: string | null;
+  rights_status: string;
+  expected_impressions: number;
+  warnings: string[];
+};
+
+export type SponsorDigitalSignagePlaylistRead = {
+  organization_id: UUID;
+  screen_name: string;
+  location_name: string | null;
+  event_id: UUID | null;
+  generated_at: string;
+  slot_count: number;
+  total_duration_seconds: number;
+  approved_slot_count: number;
+  review_required_count: number;
+  rotation_policy: string;
+  items: SponsorDigitalSignagePlaylistItemRead[];
+  warnings: string[];
+};
+
 export type SponsorContentDashboardRead = {
   organization_id: UUID;
   asset_count: number;

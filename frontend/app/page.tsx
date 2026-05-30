@@ -436,6 +436,7 @@ import type {
   SponsorContentAssetRead,
   SponsorContentDashboardRead,
   SponsorCouponRedemptionRead,
+  SponsorDigitalSignagePlaylistRead,
   SponsorInteractionRead,
   SponsorStewardshipDashboardRead,
   SponsorRead,
@@ -2119,6 +2120,7 @@ export default function HomePage() {
   const [sponsorContentApprovals, setSponsorContentApprovals] = useState<SponsorContentApprovalRead[]>([]);
   const [sponsorPlacements, setSponsorPlacements] = useState<SponsorActivationPlacementRead[]>([]);
   const [sponsorContentDashboard, setSponsorContentDashboard] = useState<SponsorContentDashboardRead | null>(null);
+  const [sponsorDigitalSignagePlaylist, setSponsorDigitalSignagePlaylist] = useState<SponsorDigitalSignagePlaylistRead | null>(null);
   const [sponsorMilestones, setSponsorMilestones] = useState<SponsorshipDeliverableMilestoneRead[]>([]);
   const [sponsorInteractions, setSponsorInteractions] = useState<SponsorInteractionRead[]>([]);
   const [sponsorStewardshipDashboard, setSponsorStewardshipDashboard] = useState<SponsorStewardshipDashboardRead | null>(null);
@@ -4663,6 +4665,7 @@ export default function HomePage() {
       sponsorContentApprovalData,
       sponsorPlacementData,
       sponsorContentDashboardData,
+      sponsorDigitalSignagePlaylistData,
       sponsorMilestoneData,
       sponsorInteractionData,
       sponsorStewardshipDashboardData,
@@ -4695,6 +4698,9 @@ export default function HomePage() {
       apiRequest<SponsorContentApprovalRead[]>(`/commercial/sponsor-content-approvals?organization_id=${organizationId}`),
       apiRequest<SponsorActivationPlacementRead[]>(`/commercial/sponsor-placements?organization_id=${organizationId}`),
       apiRequest<SponsorContentDashboardRead>(`/commercial/sponsor-content-dashboard?organization_id=${organizationId}`),
+      apiRequest<SponsorDigitalSignagePlaylistRead>(
+        `/commercial/sponsor-digital-signage-playlist?organization_id=${organizationId}&screen_name=Main%20scoreboard&slot_count=8&slot_seconds=12`
+      ),
       apiRequest<SponsorshipDeliverableMilestoneRead[]>(`/commercial/sponsorship-milestones?organization_id=${organizationId}`),
       apiRequest<SponsorInteractionRead[]>(`/commercial/sponsor-interactions?organization_id=${organizationId}`),
       apiRequest<SponsorStewardshipDashboardRead>(`/commercial/sponsor-stewardship-dashboard?organization_id=${organizationId}`),
@@ -4729,6 +4735,7 @@ export default function HomePage() {
     setSponsorContentApprovals(sponsorContentApprovalData);
     setSponsorPlacements(sponsorPlacementData);
     setSponsorContentDashboard(sponsorContentDashboardData);
+    setSponsorDigitalSignagePlaylist(sponsorDigitalSignagePlaylistData);
     setSponsorMilestones(sponsorMilestoneData);
     setSponsorInteractions(sponsorInteractionData);
     setSponsorStewardshipDashboard(sponsorStewardshipDashboardData);
@@ -16630,6 +16637,29 @@ export default function HomePage() {
     );
   };
 
+  const refreshSponsorDigitalSignagePlaylist = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const locationQuery = sponsorForm.location_name
+      ? `&location_name=${encodeURIComponent(sponsorForm.location_name)}`
+      : "";
+    const eventQuery = selectedEventId ? `&event_id=${selectedEventId}` : "";
+    runAction(
+      "sponsor-digital-signage-playlist",
+      () =>
+        apiRequest<SponsorDigitalSignagePlaylistRead>(
+          `/commercial/sponsor-digital-signage-playlist?organization_id=${selectedOrganizationId}&screen_name=Main%20scoreboard${locationQuery}${eventQuery}&slot_count=8&slot_seconds=12`,
+          { identity }
+        ),
+      (playlist) => {
+        setSponsorDigitalSignagePlaylist(playlist);
+        addLog(`${playlist.screen_name} playlist generated with ${playlist.slot_count} slot(s)`, "good");
+      }
+    );
+  };
+
   const createSponsorStewardshipWorkflow = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -22015,6 +22045,7 @@ export default function HomePage() {
                 <button type="button" onClick={createSponsorActivationCampaign} disabled={busyAction !== null}>Activation</button>
                 <button type="button" onClick={recordSponsorCouponRedemption} disabled={busyAction !== null}>Redeem</button>
                 <button type="button" onClick={createSponsorContentWorkflow} disabled={busyAction !== null}>Content</button>
+                <button type="button" onClick={refreshSponsorDigitalSignagePlaylist} disabled={busyAction !== null}>Signage</button>
                 <button type="button" onClick={createSponsorStewardshipWorkflow} disabled={busyAction !== null}>Steward</button>
                 <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
@@ -22271,6 +22302,28 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {sponsorDigitalSignagePlaylist ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{sponsorDigitalSignagePlaylist.screen_name} · {sponsorDigitalSignagePlaylist.slot_count} signage slots</strong>
+                    <span>
+                      {sponsorDigitalSignagePlaylist.approved_slot_count} cleared · {sponsorDigitalSignagePlaylist.review_required_count} review · {sponsorDigitalSignagePlaylist.total_duration_seconds}s loop
+                    </span>
+                    <span>{sponsorDigitalSignagePlaylist.warnings[0] ?? sponsorDigitalSignagePlaylist.rotation_policy.replaceAll("_", " ")}</span>
+                  </div>
+                </article>
+              ) : null}
+              {sponsorDigitalSignagePlaylist?.items.slice(0, 4).map((item) => (
+                <article key={`${item.placement_id}-${item.slot_index}`} className="task-card">
+                  <div>
+                    <strong>Slot {item.slot_index} · {item.content_title}</strong>
+                    <span>
+                      {item.sponsor_name ?? "Sponsor"} · {item.format} · {item.duration_seconds}s · {item.rights_status.replaceAll("_", " ")}
+                    </span>
+                    <small>{item.coupon_code ? `Code ${item.coupon_code}` : item.location_name ?? item.channel}</small>
+                  </div>
+                </article>
+              ))}
               {sponsorStewardshipDashboard ? (
                 <article className="task-card">
                   <div>

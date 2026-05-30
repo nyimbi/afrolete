@@ -261,6 +261,47 @@ class SponsorActivationPlacementRead(SponsorActivationPlacementCreate):
     actual_engagements: int
 
 
+class SponsorDigitalSignagePlaylistItemRead(BaseModel):
+    slot_index: int
+    duration_seconds: int
+    placement_id: UUID
+    sponsor_id: UUID
+    sponsor_name: str | None = None
+    content_asset_id: UUID | None = None
+    content_title: str
+    asset_url: str | None = None
+    thumbnail_url: str | None = None
+    format: str
+    placement_name: str
+    placement_type: str
+    channel: str
+    location_name: str | None = None
+    event_id: UUID | None = None
+    event_title: str | None = None
+    scheduled_at: datetime | None = None
+    campaign_title: str | None = None
+    coupon_code: str | None = None
+    target_url: str | None = None
+    rights_status: str
+    expected_impressions: int
+    warnings: list[str] = Field(default_factory=list)
+
+
+class SponsorDigitalSignagePlaylistRead(BaseModel):
+    organization_id: UUID
+    screen_name: str
+    location_name: str | None = None
+    event_id: UUID | None = None
+    generated_at: datetime
+    slot_count: int
+    total_duration_seconds: int
+    approved_slot_count: int
+    review_required_count: int
+    rotation_policy: str
+    items: list[SponsorDigitalSignagePlaylistItemRead]
+    warnings: list[str] = Field(default_factory=list)
+
+
 class SponsorContentDashboardRead(BaseModel):
     organization_id: UUID
     asset_count: int

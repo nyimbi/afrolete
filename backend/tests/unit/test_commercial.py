@@ -189,6 +189,23 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     assert content_dashboard["placement_count"] == 1
     assert content_dashboard["total_expected_impressions"] == 2500
 
+    signage_playlist = client.get(
+        (
+            f"/api/v1/commercial/sponsor-digital-signage-playlist?organization_id={organization['id']}"
+            "&screen_name=Main%20scoreboard&location_name=Main&slot_count=3&slot_seconds=10"
+        ),
+        headers=identity_headers,
+    ).json()
+    assert signage_playlist["screen_name"] == "Main scoreboard"
+    assert signage_playlist["slot_count"] == 3
+    assert signage_playlist["total_duration_seconds"] == 30
+    assert signage_playlist["approved_slot_count"] == 3
+    assert signage_playlist["review_required_count"] == 0
+    assert signage_playlist["items"][0]["content_title"] == "Acme scoreboard overlay"
+    assert signage_playlist["items"][0]["coupon_code"] == "ACME-DERBY-10"
+    assert signage_playlist["items"][0]["rights_status"] == "cleared"
+    assert signage_playlist["items"][0]["asset_url"] == "https://assets.example/acme-scoreboard.png"
+
     content_assets = client.get(
         f"/api/v1/commercial/sponsor-content-assets?organization_id={organization['id']}"
     ).json()

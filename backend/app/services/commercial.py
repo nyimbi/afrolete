@@ -95,6 +95,8 @@ from app.schemas.commercial import (
     SponsorContentDashboardRead,
     SponsorCouponRedemptionCreate,
     SponsorCouponRedemptionRead,
+    SponsorDigitalSignagePlaylistItemRead,
+    SponsorDigitalSignagePlaylistRead,
     SponsorInteractionCreate,
     SponsorInteractionRead,
     SponsorRenewalForecastRead,
@@ -568,6 +570,76 @@ async def sponsor_content_dashboard(db: AsyncSession, organization_id: UUID) -> 
         total_expected_impressions=sum(placement.expected_impressions for placement in placements),
         total_actual_impressions=sum(placement.actual_impressions for placement in placements),
         recommendations=sponsor_content_recommendations(assets, placements),
+    )
+
+
+async def sponsor_digital_signage_playlist(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    *,
+    screen_name: str = "Main scoreboard",
+    location_name: str | None = None,
+    event_id: UUID | None = None,
+    slot_count: int = 12,
+    slot_seconds: int = 12,
+) -> SponsorDigitalSignagePlaylistRead:
+    await ensure_manage_commercial(authz, identity, organization_id)
+    await get_organization(db, organization_id)
+    if event_id is not None:
+        await get_event_for_organization(db, event_id, organization_id)
+    placements = list(
+        (
+            await db.scalars(
+                select(SponsorActivationPlacement)
+                .where(SponsorActivationPlacement.organization_id == organization_id)
+                .order_by(
+                    SponsorActivationPlacement.scheduled_at.is_(None),
+                    SponsorActivationPlacement.scheduled_at,
+                    SponsorActivationPlacement.expected_impressions.desc(),
+                    SponsorActivationPlacement.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+    eligible = [
+        placement
+        for placement in placements
+        if sponsor_placement_can_feed_signage(placement, event_id=event_id, location_name=location_name)
+    ]
+    bounded_slot_count = max(1, min(slot_count, 60))
+    bounded_slot_seconds = max(5, min(slot_seconds, 120))
+    now = datetime.now(UTC)
+    items: list[SponsorDigitalSignagePlaylistItemRead] = []
+    for index in range(bounded_slot_count):
+        if not eligible:
+            break
+        placement = eligible[index % len(eligible)]
+        items.append(
+            await sponsor_digital_signage_playlist_item_read(
+                db,
+                placement,
+                slot_index=index + 1,
+                duration_seconds=bounded_slot_seconds,
+                now=now,
+            )
+        )
+    playlist_warnings = sponsor_digital_signage_warnings(eligible, items)
+    review_required_count = sum(1 for item in items if item.rights_status != "cleared")
+    return SponsorDigitalSignagePlaylistRead(
+        organization_id=organization_id,
+        screen_name=screen_name[:120] or "Main scoreboard",
+        location_name=location_name,
+        event_id=event_id,
+        generated_at=now,
+        slot_count=len(items),
+        total_duration_seconds=len(items) * bounded_slot_seconds,
+        approved_slot_count=len(items) - review_required_count,
+        review_required_count=review_required_count,
+        rotation_policy="expected-impressions-priority-cyclic",
+        items=items,
+        warnings=playlist_warnings,
     )
 
 
@@ -3783,3 +3855,117 @@ def sponsor_content_recommendations(
     if placements:
         recommendations.append("Collect post-placement impressions and engagement to strengthen sponsor ROI reporting.")
     return recommendations[:5]
+
+
+def sponsor_placement_can_feed_signage(
+    placement: SponsorActivationPlacement,
+    *,
+    event_id: UUID | None,
+    location_name: str | None,
+) -> bool:
+    if placement.status in {"cancelled", "archived"}:
+        return False
+    if event_id is not None and placement.event_id != event_id:
+        return False
+    if location_name:
+        placement_location = (placement.location_name or "").lower()
+        if location_name.lower() not in placement_location:
+            return False
+    haystack = " ".join(
+        [
+            placement.placement_type or "",
+            placement.channel or "",
+            placement.location_name or "",
+            placement.placement_name or "",
+        ]
+    ).lower()
+    signage_keywords = {"digital_signage", "signage", "scoreboard", "screen", "display", "venue_zone", "concourse"}
+    return any(keyword in haystack for keyword in signage_keywords)
+
+
+async def sponsor_digital_signage_playlist_item_read(
+    db: AsyncSession,
+    placement: SponsorActivationPlacement,
+    *,
+    slot_index: int,
+    duration_seconds: int,
+    now: datetime,
+) -> SponsorDigitalSignagePlaylistItemRead:
+    sponsor = await db.get(Sponsor, placement.sponsor_id)
+    asset = await db.get(SponsorContentAsset, placement.content_asset_id) if placement.content_asset_id else None
+    campaign = (
+        await db.get(SponsorActivationCampaign, placement.activation_campaign_id)
+        if placement.activation_campaign_id
+        else None
+    )
+    event = await db.get(Event, placement.event_id) if placement.event_id else None
+    rights_status, warnings = sponsor_digital_signage_rights_status(asset, now=now)
+    coupon_code = campaign.coupon_code if campaign else None
+    message_parts = [placement.placement_name]
+    if sponsor is not None:
+        message_parts.append(sponsor.name)
+    if coupon_code:
+        message_parts.append(f"Use code {coupon_code}")
+    return SponsorDigitalSignagePlaylistItemRead(
+        slot_index=slot_index,
+        duration_seconds=duration_seconds,
+        placement_id=placement.id,
+        sponsor_id=placement.sponsor_id,
+        sponsor_name=sponsor.name if sponsor else None,
+        content_asset_id=asset.id if asset else None,
+        content_title=asset.title if asset else " · ".join(message_parts),
+        asset_url=asset.asset_url if asset else None,
+        thumbnail_url=asset.thumbnail_url if asset else None,
+        format=asset.format if asset else "text_slate",
+        placement_name=placement.placement_name,
+        placement_type=placement.placement_type,
+        channel=placement.channel,
+        location_name=placement.location_name,
+        event_id=placement.event_id,
+        event_title=event.title if event else None,
+        scheduled_at=placement.scheduled_at,
+        campaign_title=campaign.title if campaign else None,
+        coupon_code=coupon_code,
+        target_url=campaign.target_url if campaign else None,
+        rights_status=rights_status,
+        expected_impressions=placement.expected_impressions,
+        warnings=warnings,
+    )
+
+
+def sponsor_digital_signage_rights_status(
+    asset: SponsorContentAsset | None,
+    *,
+    now: datetime,
+) -> tuple[str, list[str]]:
+    if asset is None:
+        return "placement_without_asset", ["Attach an approved content asset before pushing this slot to live signage."]
+    warnings: list[str] = []
+    if asset.expires_at is not None and asset.expires_at <= now:
+        warnings.append("Content asset has expired.")
+        return "expired", warnings
+    if asset.approval_status != "approved":
+        warnings.append(f"Content asset approval status is {asset.approval_status}.")
+        return "review_required", warnings
+    if asset.player_rights_required and not (asset.rights_summary or "").strip():
+        warnings.append("Player likeness rights are required but no rights summary is recorded.")
+        return "rights_review_required", warnings
+    if asset.expires_at is not None and asset.expires_at <= now + timedelta(days=7):
+        warnings.append("Content asset expires within seven days.")
+    return "cleared", warnings
+
+
+def sponsor_digital_signage_warnings(
+    placements: list[SponsorActivationPlacement],
+    items: list[SponsorDigitalSignagePlaylistItemRead],
+) -> list[str]:
+    warnings: list[str] = []
+    if not placements:
+        warnings.append("No sponsor placements are eligible for digital signage rotation.")
+    if any(item.rights_status != "cleared" for item in items):
+        warnings.append("One or more signage slots require content, approval, expiry, or player-likeness review.")
+    if len({item.sponsor_id for item in items}) == 1 and len(items) > 1:
+        warnings.append("Rotation currently features one sponsor; add more approved placements for a balanced screen loop.")
+    if items and sum(item.expected_impressions for item in items) == 0:
+        warnings.append("Expected impressions are missing; add venue estimates before sponsor ROI reporting.")
+    return warnings[:5]
