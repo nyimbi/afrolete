@@ -3037,7 +3037,7 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert runs.json()[0]["id"] == tracking["id"]
 
 
-def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, identity_headers) -> None:
+def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, identity_headers, monkeypatch) -> None:
     organization, team, _, _ = create_rostered_athlete(client, identity_headers)
     upload_response = client.post(
         "/api/v1/performance/scouting/videos",
@@ -3153,12 +3153,41 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert edl["manifest"]["renderer_status"] == "needs_renderer"
     assert len(edl["manifest"]["edit_decisions"]) == reel["clip_count"]
 
+    monkeypatch.setattr(performance_service.shutil, "which", lambda path: path)
+
+    def fake_ffmpeg_run(command, **kwargs):
+        output_path = command[-1]
+        if str(output_path).endswith(".mp4"):
+            with open(output_path, "wb") as handle:
+                handle.write(b"fake rendered afrolete highlight reel")
+        return performance_service.subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(performance_service.subprocess, "run", fake_ffmpeg_run)
+    render_response = client.post(
+        f"/api/v1/performance/scouting/highlight-reel-exports/{edl['id']}/render",
+        headers=identity_headers,
+    )
+    assert render_response.status_code == 201
+    rendered = render_response.json()
+    assert rendered["export_format"] == "mp4_render"
+    assert rendered["status"] == "rendered"
+    assert rendered["content_type"] == "video/mp4"
+    assert rendered["filename"].endswith("-render.mp4")
+    assert rendered["manifest"]["source_export_id"] == edl["id"]
+
+    rendered_download = client.get(
+        f"/api/v1/performance/scouting/highlight-reel-exports/{rendered['id']}/content",
+        headers=identity_headers,
+    )
+    assert rendered_download.status_code == 200
+    assert rendered_download.content == b"fake rendered afrolete highlight reel"
+
     exports = client.get(
         f"/api/v1/performance/scouting/highlight-reel-exports?organization_id={organization['id']}&highlight_reel_id={reel['id']}",
         headers=identity_headers,
     )
     assert exports.status_code == 200
-    assert {artifact["id"] for artifact in exports.json()} == {timeline["id"], edl["id"]}
+    assert {artifact["id"] for artifact in exports.json()} == {timeline["id"], edl["id"], rendered["id"]}
 
     download_response = client.get(
         f"/api/v1/performance/scouting/highlight-reel-exports/{timeline['id']}/content",

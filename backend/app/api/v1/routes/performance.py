@@ -171,6 +171,7 @@ from app.services.performance import (
     run_assessment_review_escalations,
     run_performance_injury_risk_alert_scan,
     run_performance_hardware_sync,
+    render_performance_highlight_reel_export,
     run_wearable_provider_sync,
     refresh_wearable_provider_token,
     register_wearable_provider_webhook,
@@ -1022,6 +1023,24 @@ async def list_performance_highlight_reel_exports_route(
             highlight_reel_id=highlight_reel_id,
         )
     ]
+
+
+@router.post(
+    "/scouting/highlight-reel-exports/{export_id}/render",
+    response_model=PerformanceHighlightReelExportRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def render_performance_highlight_reel_export_route(
+    export_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceHighlightReelExportRead:
+    return PerformanceHighlightReelExportRead(
+        **highlight_reel_export_read(
+            await render_performance_highlight_reel_export(db, identity, export_id, authz)
+        )
+    )
 
 
 @router.get("/scouting/reports", response_model=list[OppositionScoutingReportRead])

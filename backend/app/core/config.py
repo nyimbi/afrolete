@@ -257,6 +257,7 @@ class Settings(BaseSettings):
     performance_video_file_url_prefix: str = "local://performance-videos"
     performance_highlight_export_dir: str = "data/performance-highlight-exports"
     performance_highlight_export_url_prefix: str = "local://performance-highlight-exports"
+    performance_highlight_renderer_ffmpeg_path: str = "ffmpeg"
     performance_video_max_upload_bytes: int = 250_000_000
     performance_pose_worker_provider: Literal["mediapipe", "disabled"] = "mediapipe"
     performance_pose_worker_max_frames: int = 45

@@ -10245,6 +10245,28 @@ export default function HomePage() {
     );
   };
 
+  const renderPerformanceHighlightReelExport = (artifact: PerformanceHighlightReelExportRead) => {
+    runAction(
+      `render-performance-highlight-export-${artifact.id}`,
+      () =>
+        apiRequest<PerformanceHighlightReelExportRead>(
+          `/performance/scouting/highlight-reel-exports/${artifact.id}/render`,
+          { method: "POST", identity }
+        ),
+      (renderedArtifact) => {
+        setPerformanceHighlightReelExport(renderedArtifact);
+        setPerformanceHighlightReelExports((current) => [
+          renderedArtifact,
+          ...current.filter((item) => item.id !== renderedArtifact.id)
+        ]);
+        addLog(
+          `${renderedArtifact.filename} ${renderedArtifact.status}`,
+          renderedArtifact.status === "rendered" ? "good" : "bad"
+        );
+      }
+    );
+  };
+
   const annotatePerformanceVideo = () => {
     if (!performanceVideoAsset) {
       addLog("Upload a performance video before annotating", "bad");
@@ -25075,6 +25097,15 @@ export default function HomePage() {
                         </small>
                       </div>
                       <span>
+                        {performanceHighlightReelExport.export_format === "mp4_edit_decision_list" ? (
+                          <button
+                            type="button"
+                            onClick={() => renderPerformanceHighlightReelExport(performanceHighlightReelExport)}
+                            disabled={busyAction !== null}
+                          >
+                            Render MP4
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => downloadPerformanceHighlightReelExport(performanceHighlightReelExport)}
@@ -25096,6 +25127,15 @@ export default function HomePage() {
                           <small>{artifact.message ?? artifact.storage_url}</small>
                         </div>
                         <span>
+                          {artifact.export_format === "mp4_edit_decision_list" ? (
+                            <button
+                              type="button"
+                              onClick={() => renderPerformanceHighlightReelExport(artifact)}
+                              disabled={busyAction !== null}
+                            >
+                              Render
+                            </button>
+                          ) : null}
                           <button type="button" onClick={() => setPerformanceHighlightReelExport(artifact)} disabled={busyAction !== null}>Open</button>
                         </span>
                       </article>

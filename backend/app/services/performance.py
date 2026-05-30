@@ -8,6 +8,8 @@ import json
 import math
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import tempfile
 import time
 from secrets import token_urlsafe
@@ -1076,6 +1078,60 @@ async def create_performance_highlight_reel_export(
     return export
 
 
+async def persist_performance_highlight_reel_export_artifact(
+    db: AsyncSession,
+    organization_id: UUID,
+    highlight_reel_id: UUID,
+    video_asset_id: UUID,
+    tracking_run_id: UUID | None,
+    requested_by_person_id: UUID | None,
+    artifact: dict[str, object],
+    *,
+    settings: Settings,
+) -> PerformanceHighlightReelExport:
+    export_id = uuid4()
+    content = bytes(artifact["content"])
+    checksum = hashlib.sha256(content).hexdigest()
+    key = highlight_reel_export_object_key(
+        organization_id,
+        highlight_reel_id,
+        export_id,
+        str(artifact["filename"]),
+    )
+    stored = put_object(
+        settings,
+        local_root=settings.performance_highlight_export_dir,
+        local_url_prefix=settings.performance_highlight_export_url_prefix,
+        key=key,
+        content=content,
+        content_type=str(artifact["content_type"]),
+    )
+    export = PerformanceHighlightReelExport(
+        id=export_id,
+        organization_id=organization_id,
+        highlight_reel_id=highlight_reel_id,
+        video_asset_id=video_asset_id,
+        tracking_run_id=tracking_run_id,
+        requested_by_person_id=requested_by_person_id,
+        export_format=str(artifact["export_format"]),
+        status=str(artifact["status"]),
+        renderer_policy=str(artifact["renderer_policy"]),
+        filename=str(artifact["filename"]),
+        content_type=str(artifact["content_type"]),
+        storage_url=stored.url,
+        storage_path=stored.path,
+        checksum=checksum,
+        size_bytes=len(content),
+        message=str(artifact["message"]),
+        manifest_json=json.dumps(artifact["manifest"], default=str),
+        generated_at=datetime.now(UTC),
+    )
+    db.add(export)
+    await db.commit()
+    await db.refresh(export)
+    return export
+
+
 async def list_performance_highlight_reel_exports(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1095,6 +1151,55 @@ async def list_performance_highlight_reel_exports(
                 statement.order_by(PerformanceHighlightReelExport.generated_at.desc()).limit(50)
             )
         ).all()
+    )
+
+
+async def render_performance_highlight_reel_export(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    export_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> PerformanceHighlightReelExport:
+    export = await get_performance_highlight_reel_export(db, export_id)
+    await ensure_manage_performance(authz, identity, export.organization_id)
+    if export.export_format != "mp4_edit_decision_list":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only MP4 edit-decision exports can be rendered",
+        )
+    reel = await get_performance_highlight_reel(db, export.highlight_reel_id)
+    video_asset = await get_opposition_scouting_video_asset(db, export.video_asset_id)
+    selected_settings = settings or get_settings()
+    ffmpeg_path = selected_settings.performance_highlight_renderer_ffmpeg_path.strip() or "ffmpeg"
+    if shutil.which(ffmpeg_path) is None:
+        artifact = build_highlight_reel_render_failure_artifact(
+            export,
+            reason=f"ffmpeg executable '{ffmpeg_path}' is not available",
+        )
+    else:
+        source_content = get_object(
+            selected_settings,
+            local_root=selected_settings.performance_video_file_dir,
+            key=opposition_scouting_video_object_key(video_asset, selected_settings),
+        )
+        if hashlib.sha256(source_content).hexdigest() != video_asset.checksum:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Source video checksum mismatch")
+        artifact = render_highlight_reel_mp4_artifact(
+            export,
+            reel,
+            source_content=source_content,
+            ffmpeg_path=ffmpeg_path,
+        )
+    return await persist_performance_highlight_reel_export_artifact(
+        db,
+        export.organization_id,
+        export.highlight_reel_id,
+        export.video_asset_id,
+        export.tracking_run_id,
+        identity.person_id,
+        artifact,
+        settings=selected_settings,
     )
 
 
@@ -8406,6 +8511,167 @@ def build_highlight_reel_export_artifact(
         "status": "rendered",
         "renderer_policy": "afrolete-highlight-caption-pack-v1",
         "message": "Caption pack is ready for social, family, scout, or coach distribution review.",
+        "manifest": manifest,
+    }
+
+
+def render_highlight_reel_mp4_artifact(
+    source_export: PerformanceHighlightReelExport,
+    reel: PerformanceHighlightReel,
+    *,
+    source_content: bytes,
+    ffmpeg_path: str,
+) -> dict[str, object]:
+    manifest = decode_json_dict(source_export.manifest_json)
+    edit_decisions = [item for item in manifest.get("edit_decisions", []) if isinstance(item, dict)]
+    if not edit_decisions:
+        return build_highlight_reel_render_failure_artifact(
+            source_export,
+            reason="Edit decision list has no clips to render",
+        )
+    safe_title = safe_highlight_export_filename(reel.title)
+    try:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            work_dir = Path(temporary_dir)
+            source_path = work_dir / "source.mp4"
+            source_path.write_bytes(source_content)
+            segment_paths: list[Path] = []
+            command_results: list[dict[str, object]] = []
+            for index, decision in enumerate(edit_decisions, start=1):
+                start_seconds = max(float(decision.get("source_in_seconds") or 0), 0.0)
+                end_seconds = decision.get("source_out_seconds")
+                duration_seconds = decision.get("duration_seconds")
+                if duration_seconds is None and end_seconds is not None:
+                    duration_seconds = max(float(end_seconds) - start_seconds, 0.25)
+                duration = max(float(duration_seconds or 1.0), 0.25)
+                segment_path = work_dir / f"segment-{index:03d}.mp4"
+                command = [
+                    ffmpeg_path,
+                    "-y",
+                    "-ss",
+                    f"{start_seconds:.3f}",
+                    "-t",
+                    f"{duration:.3f}",
+                    "-i",
+                    str(source_path),
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-c:a",
+                    "aac",
+                    "-movflags",
+                    "+faststart",
+                    str(segment_path),
+                ]
+                result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=120)
+                command_results.append(
+                    {
+                        "clip_number": index,
+                        "return_code": result.returncode,
+                        "stderr_tail": result.stderr[-500:] if result.stderr else "",
+                    }
+                )
+                if result.returncode != 0 or not segment_path.is_file():
+                    return build_highlight_reel_render_failure_artifact(
+                        source_export,
+                        reason=f"ffmpeg failed while rendering clip {index}",
+                        command_results=command_results,
+                    )
+                segment_paths.append(segment_path)
+            concat_path = work_dir / "concat.txt"
+            concat_path.write_text(
+                "\n".join(f"file '{path.as_posix()}'" for path in segment_paths),
+                encoding="utf-8",
+            )
+            output_path = work_dir / f"{safe_title}-render.mp4"
+            concat_command = [
+                ffmpeg_path,
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(concat_path),
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+            concat_result = subprocess.run(
+                concat_command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=120,
+            )
+            command_results.append(
+                {
+                    "clip_number": "concat",
+                    "return_code": concat_result.returncode,
+                    "stderr_tail": concat_result.stderr[-500:] if concat_result.stderr else "",
+                }
+            )
+            if concat_result.returncode != 0 or not output_path.is_file():
+                return build_highlight_reel_render_failure_artifact(
+                    source_export,
+                    reason="ffmpeg failed while joining highlight clips",
+                    command_results=command_results,
+                )
+            rendered_content = output_path.read_bytes()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return build_highlight_reel_render_failure_artifact(source_export, reason=str(exc))
+    rendered_manifest = {
+        "render_policy": "afrolete-ffmpeg-highlight-renderer-v1",
+        "renderer_status": "rendered",
+        "source_export_id": str(source_export.id),
+        "highlight_reel_id": str(source_export.highlight_reel_id),
+        "video_asset_id": str(source_export.video_asset_id),
+        "clip_count": len(edit_decisions),
+        "source_manifest_checksum": source_export.checksum,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "ffmpeg_path": ffmpeg_path,
+    }
+    return {
+        "export_format": "mp4_render",
+        "filename": f"{safe_title}-render.mp4",
+        "content_type": "video/mp4",
+        "content": rendered_content,
+        "status": "rendered",
+        "renderer_policy": "afrolete-ffmpeg-highlight-renderer-v1",
+        "message": "Rendered MP4 highlight reel is ready for coach review and controlled sharing.",
+        "manifest": rendered_manifest,
+    }
+
+
+def build_highlight_reel_render_failure_artifact(
+    source_export: PerformanceHighlightReelExport,
+    *,
+    reason: str,
+    command_results: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    manifest = {
+        "render_policy": "afrolete-ffmpeg-highlight-renderer-v1",
+        "renderer_status": "failed",
+        "source_export_id": str(source_export.id),
+        "highlight_reel_id": str(source_export.highlight_reel_id),
+        "video_asset_id": str(source_export.video_asset_id),
+        "reason": reason,
+        "command_results": command_results or [],
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
+    content = json.dumps(manifest, indent=2, default=str).encode()
+    safe_source = safe_highlight_export_filename(source_export.filename.rsplit(".", 1)[0])
+    return {
+        "export_format": "mp4_render",
+        "filename": f"{safe_source}-render-failed.json",
+        "content_type": "application/json",
+        "content": content,
+        "status": "failed",
+        "renderer_policy": "afrolete-ffmpeg-highlight-renderer-v1",
+        "message": f"MP4 render failed: {reason}",
         "manifest": manifest,
     }
 
