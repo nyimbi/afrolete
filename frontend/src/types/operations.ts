@@ -8242,6 +8242,7 @@ export type PlayerMatchGuidanceRead = {
   tracking_run_id: UUID;
   video_asset_id: UUID;
   guidance_message_id: UUID;
+  guidance_recipient_id: UUID | null;
   guidance_published_at: string;
   guidance_delivery_status: string;
   guidance_recipient_count: number;

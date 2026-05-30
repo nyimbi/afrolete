@@ -5,6 +5,7 @@ import { apiRequest } from "@/lib/api";
 import type {
   AthleteAssessmentRead,
   LocalIdentity,
+  MessageRecipientRead,
   MetricCategory,
   PlayerMatchGuidanceRead,
   PlayerMatchTrainingFollowupRead,
@@ -740,6 +741,38 @@ export default function PlayerPerformancePage() {
     }
   };
 
+  const markMatchGuidanceReviewed = async (guidance: PlayerMatchGuidanceRead) => {
+    if (!guidance.guidance_recipient_id) {
+      setError("This guidance card is missing a message recipient record");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const recipient = await apiRequest<MessageRecipientRead>(
+        `/communications/inbox/${guidance.guidance_recipient_id}/read`,
+        {
+          method: "POST",
+          identity
+        }
+      );
+      setProfiles((current) =>
+        current.map((profile) => ({
+          ...profile,
+          match_guidance: profile.match_guidance.map((item) =>
+            item.guidance_recipient_id === recipient.id
+              ? { ...item, guidance_delivery_status: recipient.delivery_status }
+              : item
+          )
+        }))
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Guidance review update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="player-page">
       <section className="player-shell">
@@ -973,6 +1006,14 @@ export default function PlayerPerformancePage() {
                   {guidance.tactical_context.slice(0, 2).map((item, index) => (
                     <small key={`${guidance.track_id}-context-${index}`}>{item}</small>
                   ))}
+                  <button
+                    className="player-inline-action"
+                    type="button"
+                    disabled={busy || !guidance.guidance_recipient_id || guidance.guidance_delivery_status === "read"}
+                    onClick={() => markMatchGuidanceReviewed(guidance)}
+                  >
+                    Mark reviewed
+                  </button>
                   <button
                     className="player-inline-action"
                     type="button"

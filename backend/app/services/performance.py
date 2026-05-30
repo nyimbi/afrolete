@@ -6439,6 +6439,7 @@ def build_player_match_guidance(
         "tracking_run_id": run.id,
         "video_asset_id": video_asset.id,
         "guidance_message_id": publish_audit.message_id,
+        "guidance_recipient_id": player_recipient.id if player_recipient is not None else None,
         "guidance_published_at": publish_audit.published_at,
         "guidance_delivery_status": (
             player_recipient.delivery_status.value if player_recipient is not None else "unknown"

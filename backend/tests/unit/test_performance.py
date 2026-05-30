@@ -336,6 +336,7 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert len(match_guidance) == 1
     assert match_guidance[0]["tracking_run_id"] == tracking.json()["id"]
     assert match_guidance[0]["guidance_message_id"] == published["messages"][0]["message_id"]
+    assert match_guidance[0]["guidance_recipient_id"]
     assert match_guidance[0]["guidance_delivery_status"] == "queued"
     assert match_guidance[0]["guidance_recipient_count"] == 1
     assert match_guidance[0]["opponent_name"] == "Player Guidance FC"
@@ -352,6 +353,19 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     }
     assert all(item["drill_recommendation"] for item in match_guidance[0]["action_plan"])
     assert any("Home phase" in item for item in match_guidance[0]["tactical_context"])
+
+    player_read_response = client.post(
+        f"/api/v1/communications/inbox/{match_guidance[0]['guidance_recipient_id']}/read",
+        headers=player_headers,
+    )
+    assert player_read_response.status_code == 200
+    assert player_read_response.json()["delivery_status"] == "read"
+    read_profile_response = client.get(
+        f"/api/v1/performance/my-profiles?organization_id={organization['id']}",
+        headers=player_headers,
+    )
+    assert read_profile_response.status_code == 200
+    assert read_profile_response.json()[0]["match_guidance"][0]["guidance_delivery_status"] == "read"
 
     followup_response = client.post(
         f"/api/v1/performance/my-profiles/{roster['athlete_profile_id']}/match-guidance/training-followups",
