@@ -695,6 +695,145 @@ class ClubhousePOSOrderLine(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class ClubhouseOperationsChecklist(IdMixin, TimestampMixin, Base):
+    __tablename__ = "clubhouse_operations_checklists"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    checklist_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
+    assigned_to_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    score: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ClubhouseOperationsChecklistItem(IdMixin, TimestampMixin, Base):
+    __tablename__ = "clubhouse_operations_checklist_items"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    checklist_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("clubhouse_operations_checklists.id"), nullable=False, index=True
+    )
+    label: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    area: Mapped[str | None] = mapped_column(String(120), index=True)
+    category: Mapped[str] = mapped_column(String(80), default="operations", nullable=False, index=True)
+    priority: Mapped[str] = mapped_column(String(40), default="normal", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    assigned_to_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    work_order_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("maintenance_work_orders.id"), index=True)
+    evidence_url: Mapped[str | None] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ClubhouseEvent(IdMixin, TimestampMixin, Base):
+    __tablename__ = "clubhouse_events"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    amenity_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("clubhouse_amenities.id"), index=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), default="social", nullable=False, index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    expected_attendees: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="planning", nullable=False, index=True)
+    budget_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    revenue_target: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    actual_revenue: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    vendor_notes: Mapped[str | None] = mapped_column(Text)
+    catering_notes: Mapped[str | None] = mapped_column(Text)
+    staffing_notes: Mapped[str | None] = mapped_column(Text)
+    run_sheet: Mapped[str | None] = mapped_column(Text)
+    post_event_summary: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ClubhouseEventGuest(IdMixin, TimestampMixin, Base):
+    __tablename__ = "clubhouse_event_guests"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    clubhouse_event_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("clubhouse_events.id"), nullable=False, index=True
+    )
+    person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    guest_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    guest_email: Mapped[str | None] = mapped_column(String(255), index=True)
+    party_size: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    rsvp_status: Mapped[str] = mapped_column(String(40), default="invited", nullable=False, index=True)
+    checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ClubhouseServiceOffering(IdMixin, TimestampMixin, Base):
+    __tablename__ = "clubhouse_service_offerings"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    service_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    billing_period: Mapped[str] = mapped_column(String(40), default="once", nullable=False, index=True)
+    capacity_per_slot: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ClubhouseServiceBooking(IdMixin, TimestampMixin, Base):
+    __tablename__ = "clubhouse_service_bookings"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    service_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("clubhouse_service_offerings.id"), nullable=False, index=True
+    )
+    person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    guest_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="booked", nullable=False, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    finance_invoice_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("finance_invoices.id"), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ClubhouseFeedback(IdMixin, TimestampMixin, Base):
+    __tablename__ = "clubhouse_feedback"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    amenity_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("clubhouse_amenities.id"), index=True)
+    person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    guest_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    category: Mapped[str] = mapped_column(String(80), default="general", nullable=False, index=True)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    subject: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
+    response: Mapped[str | None] = mapped_column(Text)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class FacilityBooking(IdMixin, TimestampMixin, Base):
     __tablename__ = "facility_bookings"
 

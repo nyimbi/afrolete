@@ -1410,6 +1410,266 @@ class ClubhousePOSDashboardRead(BaseModel):
     recommendation: str
 
 
+class ClubhouseChecklistItemCreate(BaseModel):
+    label: str = Field(min_length=2, max_length=240)
+    area: str | None = Field(default=None, max_length=120)
+    category: str = Field(default="operations", min_length=2, max_length=80)
+    priority: str = Field(default="normal", pattern="^(low|normal|high|critical)$")
+    due_at: datetime | None = None
+    assigned_to_person_id: UUID | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseOperationsChecklistCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    checklist_type: str = Field(default="opening", pattern="^(opening|midday|closing|cleaning|safety|custom)$")
+    title: str = Field(min_length=2, max_length=220)
+    scheduled_for: datetime | None = None
+    assigned_to_person_id: UUID | None = None
+    items: list[ClubhouseChecklistItemCreate] = Field(default_factory=list, max_length=100)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseOperationsChecklistUpdate(BaseModel):
+    status: str = Field(pattern="^(open|in_progress|completed|blocked|cancelled)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseOperationsChecklistItemUpdate(BaseModel):
+    status: str = Field(pattern="^(pending|done|issue|blocked|skipped)$")
+    evidence_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+    create_work_order: bool = False
+
+
+class ClubhouseOperationsChecklistItemRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    checklist_id: UUID
+    label: str
+    area: str | None
+    category: str
+    priority: str
+    status: str
+    due_at: datetime | None
+    completed_at: datetime | None
+    assigned_to_person_id: UUID | None
+    work_order_id: UUID | None
+    evidence_url: str | None
+    notes: str | None
+
+
+class ClubhouseOperationsChecklistRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    checklist_type: str
+    title: str
+    scheduled_for: datetime
+    status: str
+    assigned_to_person_id: UUID | None
+    completed_at: datetime | None
+    score: int | None
+    notes: str | None
+    items: list[ClubhouseOperationsChecklistItemRead]
+
+
+class ClubhouseOperationsDashboardRead(BaseModel):
+    organization_id: UUID
+    facility_id: UUID | None
+    open_checklist_count: int
+    blocked_item_count: int
+    issue_item_count: int
+    completed_today: int
+    average_score: int | None
+    open_checklists: list[ClubhouseOperationsChecklistRead]
+    blocked_items: list[ClubhouseOperationsChecklistItemRead]
+    recommendation: str
+
+
+class ClubhouseEventCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    amenity_id: UUID | None = None
+    title: str = Field(min_length=2, max_length=220)
+    event_type: str = Field(default="social", min_length=2, max_length=80)
+    starts_at: datetime
+    ends_at: datetime
+    expected_attendees: int = Field(default=1, ge=1, le=100000)
+    budget_amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    revenue_target: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    vendor_notes: str | None = Field(default=None, max_length=8000)
+    catering_notes: str | None = Field(default=None, max_length=8000)
+    staffing_notes: str | None = Field(default=None, max_length=8000)
+    run_sheet: str | None = Field(default=None, max_length=12000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseEventUpdate(BaseModel):
+    status: str = Field(pattern="^(planning|tentative|confirmed|active|completed|cancelled)$")
+    actual_revenue: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    post_event_summary: str | None = Field(default=None, max_length=8000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseEventGuestCreate(BaseModel):
+    person_id: UUID | None = None
+    guest_name: str = Field(min_length=2, max_length=180)
+    guest_email: str | None = Field(default=None, max_length=255)
+    party_size: int = Field(default=1, ge=1, le=500)
+    rsvp_status: str = Field(default="invited", pattern="^(invited|confirmed|declined|checked_in|no_show)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseEventGuestRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    clubhouse_event_id: UUID
+    person_id: UUID | None
+    guest_name: str
+    guest_email: str | None
+    party_size: int
+    rsvp_status: str
+    checked_in_at: datetime | None
+    notes: str | None
+
+
+class ClubhouseEventRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    amenity_id: UUID | None
+    title: str
+    event_type: str
+    starts_at: datetime
+    ends_at: datetime
+    expected_attendees: int
+    status: str
+    budget_amount: Decimal | None
+    revenue_target: Decimal | None
+    actual_revenue: Decimal
+    vendor_notes: str | None
+    catering_notes: str | None
+    staffing_notes: str | None
+    run_sheet: str | None
+    post_event_summary: str | None
+    notes: str | None
+    guests: list[ClubhouseEventGuestRead]
+
+
+class ClubhouseServiceOfferingCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    service_type: str = Field(default="member_service", min_length=2, max_length=80)
+    description: str | None = Field(default=None, max_length=4000)
+    price: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    billing_period: str = Field(default="once", pattern="^(once|visit|monthly|season|annual)$")
+    capacity_per_slot: int | None = Field(default=None, ge=1, le=10000)
+    status: str = Field(default="active", pattern="^(active|paused|retired)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseServiceBookingCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    service_id: UUID
+    person_id: UUID | None = None
+    guest_name: str | None = Field(default=None, max_length=180)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    invoice: bool = True
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseServiceBookingUpdate(BaseModel):
+    status: str = Field(pattern="^(booked|active|completed|cancelled|no_show)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseServiceOfferingRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    name: str
+    service_type: str
+    description: str | None
+    price: Decimal
+    billing_period: str
+    capacity_per_slot: int | None
+    status: str
+    notes: str | None
+
+
+class ClubhouseServiceBookingRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    service_id: UUID
+    person_id: UUID | None
+    guest_name: str | None
+    starts_at: datetime | None
+    ends_at: datetime | None
+    status: str
+    amount: Decimal
+    finance_invoice_id: UUID | None
+    notes: str | None
+
+
+class ClubhouseFeedbackCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    amenity_id: UUID | None = None
+    person_id: UUID | None = None
+    guest_name: str | None = Field(default=None, max_length=180)
+    category: str = Field(default="general", min_length=2, max_length=80)
+    rating: int = Field(ge=1, le=5)
+    subject: str = Field(min_length=2, max_length=220)
+    message: str = Field(min_length=2, max_length=8000)
+
+
+class ClubhouseFeedbackUpdate(BaseModel):
+    status: str = Field(pattern="^(open|reviewing|resolved|dismissed)$")
+    response: str | None = Field(default=None, max_length=8000)
+
+
+class ClubhouseFeedbackRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    amenity_id: UUID | None
+    person_id: UUID | None
+    guest_name: str | None
+    category: str
+    rating: int
+    subject: str
+    message: str
+    status: str
+    response: str | None
+    submitted_at: datetime
+    resolved_at: datetime | None
+
+
+class ClubhouseBusinessDashboardRead(BaseModel):
+    organization_id: UUID
+    facility_id: UUID | None
+    event_count: int
+    confirmed_event_count: int
+    service_booking_count: int
+    open_feedback_count: int
+    average_feedback_rating: Decimal | None
+    projected_event_revenue: Decimal
+    actual_event_revenue: Decimal
+    service_revenue: Decimal
+    pos_revenue: Decimal
+    total_revenue: Decimal
+    upcoming_events: list[ClubhouseEventRead]
+    open_feedback: list[ClubhouseFeedbackRead]
+    recommendation: str
+
+
 class FacilityBookingCreate(BaseModel):
     organization_id: UUID
     facility_id: UUID

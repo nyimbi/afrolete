@@ -15,14 +15,33 @@ from app.schemas.assets import (
     ClubhouseAmenityReservationCreate,
     ClubhouseAmenityReservationRead,
     ClubhouseAmenityReservationUpdate,
+    ClubhouseBusinessDashboardRead,
     ClubhouseDashboardRead,
+    ClubhouseEventCreate,
+    ClubhouseEventGuestCreate,
+    ClubhouseEventRead,
+    ClubhouseEventUpdate,
+    ClubhouseFeedbackCreate,
+    ClubhouseFeedbackRead,
+    ClubhouseFeedbackUpdate,
     ClubhouseMenuItemCreate,
     ClubhouseMenuItemRead,
     ClubhouseMenuItemUpdate,
+    ClubhouseOperationsChecklistCreate,
+    ClubhouseOperationsChecklistItemRead,
+    ClubhouseOperationsChecklistItemUpdate,
+    ClubhouseOperationsChecklistRead,
+    ClubhouseOperationsChecklistUpdate,
+    ClubhouseOperationsDashboardRead,
     ClubhousePOSDashboardRead,
     ClubhousePOSOrderCreate,
     ClubhousePOSOrderRead,
     ClubhousePOSOrderUpdate,
+    ClubhouseServiceBookingCreate,
+    ClubhouseServiceBookingRead,
+    ClubhouseServiceBookingUpdate,
+    ClubhouseServiceOfferingCreate,
+    ClubhouseServiceOfferingRead,
     ClubhouseVisitCreate,
     ClubhouseVisitRead,
     ClubhouseVisitUpdate,
@@ -136,11 +155,19 @@ from app.services.assets import (
     asset_summary,
     checkout_equipment,
     clubhouse_dashboard,
+    clubhouse_operations_dashboard,
+    clubhouse_business_dashboard,
     clubhouse_pos_dashboard,
+    add_clubhouse_event_guest,
     create_clubhouse_amenity,
     create_clubhouse_amenity_reservation,
+    create_clubhouse_event,
+    create_clubhouse_feedback,
     create_clubhouse_menu_item,
+    create_clubhouse_operations_checklist,
     create_clubhouse_pos_order,
+    create_clubhouse_service_booking,
+    create_clubhouse_service_offering,
     create_clubhouse_visit,
     create_facility_access_credential,
     create_emergency_action_plan,
@@ -178,8 +205,13 @@ from app.services.assets import (
     list_checkouts,
     list_clubhouse_amenities,
     list_clubhouse_amenity_reservations,
+    list_clubhouse_events,
+    list_clubhouse_feedback,
     list_clubhouse_menu_items,
+    list_clubhouse_operations_checklists,
     list_clubhouse_pos_orders,
+    list_clubhouse_service_bookings,
+    list_clubhouse_service_offerings,
     list_clubhouse_visits,
     list_emergency_action_plans,
     list_emergency_plan_activations,
@@ -231,8 +263,13 @@ from app.services.assets import (
     update_work_order,
     update_facility_utility_alert,
     update_clubhouse_amenity_reservation,
+    update_clubhouse_event,
+    update_clubhouse_feedback,
     update_clubhouse_menu_item,
+    update_clubhouse_operations_checklist,
+    update_clubhouse_operations_checklist_item,
     update_clubhouse_pos_order,
+    update_clubhouse_service_booking,
     update_clubhouse_visit,
     utilization_recommendations,
     convert_facility_waitlist_entry,
@@ -1590,6 +1627,209 @@ async def clubhouse_pos_dashboard_route(
     db: AsyncSession = Depends(get_db),
 ) -> ClubhousePOSDashboardRead:
     return await clubhouse_pos_dashboard(db, organization_id, facility_id=facility_id)
+
+
+@router.post(
+    "/clubhouse/operations-checklists",
+    response_model=ClubhouseOperationsChecklistRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_clubhouse_operations_checklist_route(
+    payload: ClubhouseOperationsChecklistCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseOperationsChecklistRead:
+    return await create_clubhouse_operations_checklist(db, identity, payload, authz)
+
+
+@router.get("/clubhouse/operations-checklists", response_model=list[ClubhouseOperationsChecklistRead])
+async def list_clubhouse_operations_checklists_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[ClubhouseOperationsChecklistRead]:
+    return await list_clubhouse_operations_checklists(
+        db,
+        identity,
+        organization_id,
+        authz,
+        facility_id=facility_id,
+        status_filter=status_filter,
+    )
+
+
+@router.patch("/clubhouse/operations-checklists/{checklist_id}", response_model=ClubhouseOperationsChecklistRead)
+async def update_clubhouse_operations_checklist_route(
+    checklist_id: UUID,
+    payload: ClubhouseOperationsChecklistUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseOperationsChecklistRead:
+    return await update_clubhouse_operations_checklist(db, identity, checklist_id, payload, authz)
+
+
+@router.patch("/clubhouse/operations-checklist-items/{item_id}", response_model=ClubhouseOperationsChecklistItemRead)
+async def update_clubhouse_operations_checklist_item_route(
+    item_id: UUID,
+    payload: ClubhouseOperationsChecklistItemUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseOperationsChecklistItemRead:
+    return await update_clubhouse_operations_checklist_item(db, identity, item_id, payload, authz)
+
+
+@router.get("/clubhouse/operations-dashboard", response_model=ClubhouseOperationsDashboardRead)
+async def clubhouse_operations_dashboard_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ClubhouseOperationsDashboardRead:
+    return await clubhouse_operations_dashboard(db, organization_id, facility_id=facility_id)
+
+
+@router.post("/clubhouse/events", response_model=ClubhouseEventRead, status_code=status.HTTP_201_CREATED)
+async def create_clubhouse_event_route(
+    payload: ClubhouseEventCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseEventRead:
+    return await create_clubhouse_event(db, identity, payload, authz)
+
+
+@router.get("/clubhouse/events", response_model=list[ClubhouseEventRead])
+async def list_clubhouse_events_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[ClubhouseEventRead]:
+    return await list_clubhouse_events(db, identity, organization_id, authz, facility_id, status_filter)
+
+
+@router.patch("/clubhouse/events/{event_id}", response_model=ClubhouseEventRead)
+async def update_clubhouse_event_route(
+    event_id: UUID,
+    payload: ClubhouseEventUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseEventRead:
+    return await update_clubhouse_event(db, identity, event_id, payload, authz)
+
+
+@router.post("/clubhouse/events/{event_id}/guests", response_model=ClubhouseEventRead, status_code=status.HTTP_201_CREATED)
+async def add_clubhouse_event_guest_route(
+    event_id: UUID,
+    payload: ClubhouseEventGuestCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseEventRead:
+    return await add_clubhouse_event_guest(db, identity, event_id, payload, authz)
+
+
+@router.post("/clubhouse/services", response_model=ClubhouseServiceOfferingRead, status_code=status.HTTP_201_CREATED)
+async def create_clubhouse_service_offering_route(
+    payload: ClubhouseServiceOfferingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseServiceOfferingRead:
+    return await create_clubhouse_service_offering(db, identity, payload, authz)
+
+
+@router.get("/clubhouse/services", response_model=list[ClubhouseServiceOfferingRead])
+async def list_clubhouse_service_offerings_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[ClubhouseServiceOfferingRead]:
+    return await list_clubhouse_service_offerings(db, identity, organization_id, authz, facility_id)
+
+
+@router.post("/clubhouse/service-bookings", response_model=ClubhouseServiceBookingRead, status_code=status.HTTP_201_CREATED)
+async def create_clubhouse_service_booking_route(
+    payload: ClubhouseServiceBookingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseServiceBookingRead:
+    return await create_clubhouse_service_booking(db, identity, payload, authz)
+
+
+@router.get("/clubhouse/service-bookings", response_model=list[ClubhouseServiceBookingRead])
+async def list_clubhouse_service_bookings_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[ClubhouseServiceBookingRead]:
+    return await list_clubhouse_service_bookings(db, identity, organization_id, authz, facility_id)
+
+
+@router.patch("/clubhouse/service-bookings/{booking_id}", response_model=ClubhouseServiceBookingRead)
+async def update_clubhouse_service_booking_route(
+    booking_id: UUID,
+    payload: ClubhouseServiceBookingUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseServiceBookingRead:
+    return await update_clubhouse_service_booking(db, identity, booking_id, payload, authz)
+
+
+@router.post("/clubhouse/feedback", response_model=ClubhouseFeedbackRead, status_code=status.HTTP_201_CREATED)
+async def create_clubhouse_feedback_route(
+    payload: ClubhouseFeedbackCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseFeedbackRead:
+    return await create_clubhouse_feedback(db, identity, payload, authz)
+
+
+@router.get("/clubhouse/feedback", response_model=list[ClubhouseFeedbackRead])
+async def list_clubhouse_feedback_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[ClubhouseFeedbackRead]:
+    return await list_clubhouse_feedback(db, identity, organization_id, authz, facility_id, status_filter)
+
+
+@router.patch("/clubhouse/feedback/{feedback_id}", response_model=ClubhouseFeedbackRead)
+async def update_clubhouse_feedback_route(
+    feedback_id: UUID,
+    payload: ClubhouseFeedbackUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ClubhouseFeedbackRead:
+    return await update_clubhouse_feedback(db, identity, feedback_id, payload, authz)
+
+
+@router.get("/clubhouse/business-dashboard", response_model=ClubhouseBusinessDashboardRead)
+async def clubhouse_business_dashboard_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ClubhouseBusinessDashboardRead:
+    return await clubhouse_business_dashboard(db, organization_id, facility_id=facility_id)
 
 
 @router.post("/bookings", response_model=FacilityBookingRead, status_code=status.HTTP_201_CREATED)

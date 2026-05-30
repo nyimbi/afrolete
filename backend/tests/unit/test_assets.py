@@ -1996,3 +1996,219 @@ def test_clubhouse_pos_orders_inventory_settlement_and_dashboard(client, identit
     assert dashboard["low_stock_count"] >= 1
     assert "Athlete Protein Bowl" in dashboard["popular_items"]
     assert dashboard["recommendation"].startswith("Restock")
+
+
+def test_clubhouse_operations_checklists_escalate_issues_to_work_orders(client, identity_headers) -> None:
+    organization, _, member, _ = create_assets_context(client, identity_headers, "Clubhouse Ops Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Daily Operations Clubhouse",
+            "facility_type": "clubhouse",
+            "capacity": 80,
+        },
+    ).json()
+
+    checklist_response = client.post(
+        "/api/v1/assets/clubhouse/operations-checklists",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "checklist_type": "opening",
+            "title": "Opening procedures",
+            "scheduled_for": "2026-09-04T06:00:00Z",
+            "assigned_to_person_id": member["subject_id"],
+        },
+    )
+    assert checklist_response.status_code == 201
+    checklist = checklist_response.json()
+    assert checklist["status"] == "open"
+    assert len(checklist["items"]) == 4
+    critical_item = next(item for item in checklist["items"] if item["priority"] == "critical")
+
+    blocked_response = client.patch(
+        f"/api/v1/assets/clubhouse/operations-checklist-items/{critical_item['id']}",
+        headers=identity_headers,
+        json={
+            "status": "blocked",
+            "notes": "AED battery missing.",
+            "evidence_url": "https://evidence.example/aed.jpg",
+            "create_work_order": True,
+        },
+    )
+    assert blocked_response.status_code == 200
+    blocked = blocked_response.json()
+    assert blocked["status"] == "blocked"
+    assert blocked["work_order_id"] is not None
+    assert blocked["evidence_url"] == "https://evidence.example/aed.jpg"
+
+    listed = client.get(
+        f"/api/v1/assets/clubhouse/operations-checklists?organization_id={organization['id']}&facility_id={facility['id']}",
+        headers=identity_headers,
+    ).json()[0]
+    assert listed["status"] == "blocked"
+    assert listed["score"] == 0
+
+    work_orders = client.get(f"/api/v1/assets/work-orders?organization_id={organization['id']}").json()
+    generated = next(order for order in work_orders if order["id"] == blocked["work_order_id"])
+    assert generated["priority"] == "critical"
+    assert generated["safety_related"] is True
+    assert generated["compliance_reference"] == "Clubhouse opening checklist"
+
+    for item in listed["items"]:
+        client.patch(
+            f"/api/v1/assets/clubhouse/operations-checklist-items/{item['id']}",
+            headers=identity_headers,
+            json={"status": "done", "notes": "Cleared."},
+        )
+    completed = client.get(
+        f"/api/v1/assets/clubhouse/operations-checklists?organization_id={organization['id']}&facility_id={facility['id']}",
+        headers=identity_headers,
+    ).json()[0]
+    assert completed["status"] == "completed"
+    assert completed["completed_at"] is not None
+    assert completed["score"] == 100
+
+    dashboard = client.get(
+        f"/api/v1/assets/clubhouse/operations-dashboard?organization_id={organization['id']}&facility_id={facility['id']}"
+    ).json()
+    assert dashboard["completed_today"] >= 1
+    assert dashboard["blocked_item_count"] == 0
+    assert dashboard["average_score"] == 100
+    assert dashboard["recommendation"].startswith("Clubhouse operations are clear")
+
+
+def test_clubhouse_events_services_feedback_and_business_dashboard(client, identity_headers) -> None:
+    organization, _, member, _ = create_assets_context(client, identity_headers, "Clubhouse Business Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Event Clubhouse",
+            "facility_type": "clubhouse",
+            "capacity": 120,
+        },
+    ).json()
+    amenity = client.post(
+        "/api/v1/assets/clubhouse/amenities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "name": "Main Hall",
+            "amenity_type": "event_hall",
+            "capacity": 100,
+            "hourly_rate": "200.00",
+        },
+    ).json()
+
+    event_response = client.post(
+        "/api/v1/assets/clubhouse/events",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "amenity_id": amenity["id"],
+            "title": "Season Launch Dinner",
+            "event_type": "banquet",
+            "starts_at": "2026-09-10T18:00:00Z",
+            "ends_at": "2026-09-10T22:00:00Z",
+            "expected_attendees": 80,
+            "budget_amount": "3000.00",
+            "revenue_target": "6000.00",
+            "catering_notes": "Buffet and hydration station.",
+        },
+    )
+    assert event_response.status_code == 201
+    event = event_response.json()
+    assert "Setup:" in event["run_sheet"]
+
+    guest_response = client.post(
+        f"/api/v1/assets/clubhouse/events/{event['id']}/guests",
+        headers=identity_headers,
+        json={
+            "person_id": member["subject_id"],
+            "guest_name": "Member Host",
+            "party_size": 4,
+            "rsvp_status": "checked_in",
+        },
+    )
+    assert guest_response.status_code == 201
+    assert guest_response.json()["guests"][0]["checked_in_at"] is not None
+
+    confirmed = client.patch(
+        f"/api/v1/assets/clubhouse/events/{event['id']}",
+        headers=identity_headers,
+        json={
+            "status": "completed",
+            "actual_revenue": "6200.00",
+            "post_event_summary": "Strong attendance and sponsor table traffic.",
+        },
+    ).json()
+    assert confirmed["status"] == "completed"
+    assert confirmed["actual_revenue"] == "6200.00"
+
+    service = client.post(
+        "/api/v1/assets/clubhouse/services",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "name": "Towel Service",
+            "service_type": "towel",
+            "price": "30.00",
+            "billing_period": "monthly",
+        },
+    ).json()
+    booking = client.post(
+        "/api/v1/assets/clubhouse/service-bookings",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "service_id": service["id"],
+            "person_id": member["subject_id"],
+            "starts_at": "2026-09-01T00:00:00Z",
+            "amount": "30.00",
+            "invoice": True,
+        },
+    ).json()
+    assert booking["finance_invoice_id"] is not None
+    assert booking["amount"] == "30.00"
+
+    feedback = client.post(
+        "/api/v1/assets/clubhouse/feedback",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "amenity_id": amenity["id"],
+            "person_id": member["subject_id"],
+            "category": "amenity",
+            "rating": 2,
+            "subject": "Main hall audio",
+            "message": "Microphone coverage was patchy near the rear tables.",
+        },
+    ).json()
+    assert feedback["status"] == "open"
+    resolved_feedback = client.patch(
+        f"/api/v1/assets/clubhouse/feedback/{feedback['id']}",
+        headers=identity_headers,
+        json={"status": "resolved", "response": "Added AV inspection to event setup."},
+    ).json()
+    assert resolved_feedback["resolved_at"] is not None
+
+    dashboard = client.get(
+        f"/api/v1/assets/clubhouse/business-dashboard?organization_id={organization['id']}&facility_id={facility['id']}"
+    ).json()
+    assert dashboard["event_count"] == 1
+    assert dashboard["service_booking_count"] == 1
+    assert dashboard["open_feedback_count"] == 0
+    assert dashboard["projected_event_revenue"] == "6000.00"
+    assert dashboard["actual_event_revenue"] == "6200.00"
+    assert dashboard["service_revenue"] == "30.00"
+    assert dashboard["total_revenue"] == "6230.00"

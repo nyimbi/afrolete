@@ -238,9 +238,17 @@ import type {
   ClubhouseAmenityRead,
   ClubhouseAmenityReservationRead,
   ClubhouseDashboardRead,
+  ClubhouseBusinessDashboardRead,
+  ClubhouseEventRead,
+  ClubhouseFeedbackRead,
   ClubhouseMenuItemRead,
+  ClubhouseOperationsChecklistItemRead,
+  ClubhouseOperationsChecklistRead,
+  ClubhouseOperationsDashboardRead,
   ClubhousePOSDashboardRead,
   ClubhousePOSOrderRead,
+  ClubhouseServiceBookingRead,
+  ClubhouseServiceOfferingRead,
   ClubhouseVisitRead,
   FacilityAccessCredentialRead,
   FacilityAccessCommandRead,
@@ -1842,6 +1850,15 @@ export default function HomePage() {
   const [clubhouseMenuItems, setClubhouseMenuItems] = useState<ClubhouseMenuItemRead[]>([]);
   const [clubhousePOSOrders, setClubhousePOSOrders] = useState<ClubhousePOSOrderRead[]>([]);
   const [clubhousePOSDashboard, setClubhousePOSDashboard] = useState<ClubhousePOSDashboardRead | null>(null);
+  const [clubhouseOperationsChecklists, setClubhouseOperationsChecklists] = useState<ClubhouseOperationsChecklistRead[]>([]);
+  const [clubhouseOperationsDashboard, setClubhouseOperationsDashboard] =
+    useState<ClubhouseOperationsDashboardRead | null>(null);
+  const [clubhouseEvents, setClubhouseEvents] = useState<ClubhouseEventRead[]>([]);
+  const [clubhouseServices, setClubhouseServices] = useState<ClubhouseServiceOfferingRead[]>([]);
+  const [clubhouseServiceBookings, setClubhouseServiceBookings] = useState<ClubhouseServiceBookingRead[]>([]);
+  const [clubhouseFeedback, setClubhouseFeedback] = useState<ClubhouseFeedbackRead[]>([]);
+  const [clubhouseBusinessDashboard, setClubhouseBusinessDashboard] =
+    useState<ClubhouseBusinessDashboardRead | null>(null);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [facilityWaitlist, setFacilityWaitlist] = useState<FacilityBookingWaitlistRead[]>([]);
   const [facilityBookingRule, setFacilityBookingRule] = useState<FacilityBookingRuleRead | null>(null);
@@ -2786,7 +2803,28 @@ export default function HomePage() {
     table_label: "Table 3",
     pickup_location: "Poolside",
     payment_method: "member_account",
-    tax_rate: 0.1
+    tax_rate: 0.1,
+    checklist_title: "Opening procedures",
+    checklist_type: "opening" as ClubhouseOperationsChecklistRead["checklist_type"],
+    checklist_scheduled_for: "2026-09-04T06:00",
+    event_title: "Season Launch Dinner",
+    event_type: "banquet",
+    event_starts_at: "2026-09-10T18:00",
+    event_ends_at: "2026-09-10T22:00",
+    event_attendees: 80,
+    event_budget: 3000,
+    event_revenue_target: 6000,
+    vendor_notes: "AV, music, table decor",
+    catering_notes: "Buffet, recovery smoothies, hydration station",
+    staffing_notes: "Front desk, bar, cleaning, security",
+    service_name: "Towel Service",
+    service_type: "towel",
+    service_price: 30,
+    service_billing_period: "monthly" as ClubhouseServiceOfferingRead["billing_period"],
+    feedback_subject: "Main hall audio",
+    feedback_category: "amenity",
+    feedback_rating: 3,
+    feedback_message: "Microphone coverage was patchy near the rear tables."
   });
   const [bookingForm, setBookingForm] = useState({
     title: "U16 training block",
@@ -4089,6 +4127,13 @@ export default function HomePage() {
       clubhouseMenuItemData,
       clubhousePOSOrderData,
       clubhousePOSDashboardData,
+      clubhouseOperationsChecklistData,
+      clubhouseOperationsDashboardData,
+      clubhouseEventData,
+      clubhouseServiceData,
+      clubhouseServiceBookingData,
+      clubhouseFeedbackData,
+      clubhouseBusinessDashboardData,
       bookingData,
       waitlistData,
       bookingRuleData,
@@ -4148,6 +4193,29 @@ export default function HomePage() {
         identity
       }),
       apiRequest<ClubhousePOSDashboardRead>(`/assets/clubhouse/pos-dashboard?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<ClubhouseOperationsChecklistRead[]>(
+        `/assets/clubhouse/operations-checklists?organization_id=${organizationId}${facilityQuery}`,
+        { identity }
+      ),
+      apiRequest<ClubhouseOperationsDashboardRead>(
+        `/assets/clubhouse/operations-dashboard?organization_id=${organizationId}${facilityQuery}`
+      ),
+      apiRequest<ClubhouseEventRead[]>(`/assets/clubhouse/events?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
+      apiRequest<ClubhouseServiceOfferingRead[]>(`/assets/clubhouse/services?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
+      apiRequest<ClubhouseServiceBookingRead[]>(
+        `/assets/clubhouse/service-bookings?organization_id=${organizationId}${facilityQuery}`,
+        { identity }
+      ),
+      apiRequest<ClubhouseFeedbackRead[]>(`/assets/clubhouse/feedback?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
+      apiRequest<ClubhouseBusinessDashboardRead>(
+        `/assets/clubhouse/business-dashboard?organization_id=${organizationId}${facilityQuery}`
+      ),
       apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingWaitlistRead[]>(`/assets/waitlist?organization_id=${organizationId}${facilityQuery}`),
       facilityId
@@ -4210,6 +4278,13 @@ export default function HomePage() {
     setClubhouseMenuItems(clubhouseMenuItemData);
     setClubhousePOSOrders(clubhousePOSOrderData);
     setClubhousePOSDashboard(clubhousePOSDashboardData);
+    setClubhouseOperationsChecklists(clubhouseOperationsChecklistData);
+    setClubhouseOperationsDashboard(clubhouseOperationsDashboardData);
+    setClubhouseEvents(clubhouseEventData);
+    setClubhouseServices(clubhouseServiceData);
+    setClubhouseServiceBookings(clubhouseServiceBookingData);
+    setClubhouseFeedback(clubhouseFeedbackData);
+    setClubhouseBusinessDashboard(clubhouseBusinessDashboardData);
     setFacilityBookings(bookingData);
     setFacilityWaitlist(waitlistData);
     setFacilityBookingRule(bookingRuleData);
@@ -4840,6 +4915,13 @@ export default function HomePage() {
       setClubhouseMenuItems([]);
       setClubhousePOSOrders([]);
       setClubhousePOSDashboard(null);
+      setClubhouseOperationsChecklists([]);
+      setClubhouseOperationsDashboard(null);
+      setClubhouseEvents([]);
+      setClubhouseServices([]);
+      setClubhouseServiceBookings([]);
+      setClubhouseFeedback([]);
+      setClubhouseBusinessDashboard(null);
       setFacilityBookings([]);
       setFacilityWaitlist([]);
       setFacilityBookingRule(null);
@@ -14080,6 +14162,325 @@ export default function HomePage() {
     );
   };
 
+  const createClubhouseOperationsChecklist = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before creating clubhouse checklists", "bad");
+      return;
+    }
+    runAction(
+      "create-clubhouse-operations-checklist",
+      () =>
+        apiRequest<ClubhouseOperationsChecklistRead>("/assets/clubhouse/operations-checklists", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            title: clubhouseForm.checklist_title,
+            checklist_type: clubhouseForm.checklist_type,
+            scheduled_for: new Date(clubhouseForm.checklist_scheduled_for).toISOString(),
+            notes: "Created from clubhouse operations console."
+          }
+        }),
+      (checklist) => {
+        setClubhouseOperationsChecklists((current) => [
+          checklist,
+          ...current.filter((entry) => entry.id !== checklist.id)
+        ]);
+        addLog(`${checklist.title} checklist opened`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const updateClubhouseChecklistItem = (
+    item: ClubhouseOperationsChecklistItemRead,
+    status: "done" | "blocked" | "issue"
+  ) => {
+    runAction(
+      `clubhouse-checklist-${status}-${item.id}`,
+      () =>
+        apiRequest<ClubhouseOperationsChecklistItemRead>(`/assets/clubhouse/operations-checklist-items/${item.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            create_work_order: status !== "done",
+            notes: status === "done" ? "Cleared from operations console." : "Escalated from operations console."
+          }
+        }),
+      (updated) => {
+        setClubhouseOperationsChecklists((current) =>
+          current.map((checklist) =>
+            checklist.id === updated.checklist_id
+              ? {
+                  ...checklist,
+                  items: checklist.items.map((entry) => (entry.id === updated.id ? updated : entry))
+                }
+              : checklist
+          )
+        );
+        addLog(`${updated.label} ${updated.status}`, updated.status === "done" ? "good" : "bad");
+        if (selectedOrganizationId) {
+          void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+        }
+      }
+    );
+  };
+
+  const createClubhouseEvent = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before creating clubhouse events", "bad");
+      return;
+    }
+    const amenity = clubhouseAmenities[0];
+    runAction(
+      "create-clubhouse-event",
+      () =>
+        apiRequest<ClubhouseEventRead>("/assets/clubhouse/events", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            amenity_id: amenity?.id ?? null,
+            title: clubhouseForm.event_title,
+            event_type: clubhouseForm.event_type,
+            starts_at: new Date(clubhouseForm.event_starts_at).toISOString(),
+            ends_at: new Date(clubhouseForm.event_ends_at).toISOString(),
+            expected_attendees: clubhouseForm.event_attendees,
+            budget_amount: clubhouseForm.event_budget,
+            revenue_target: clubhouseForm.event_revenue_target,
+            vendor_notes: clubhouseForm.vendor_notes,
+            catering_notes: clubhouseForm.catering_notes,
+            staffing_notes: clubhouseForm.staffing_notes,
+            notes: "Created from clubhouse event console."
+          }
+        }),
+      (event) => {
+        setClubhouseEvents((current) => [
+          event,
+          ...current.filter((entry) => entry.id !== event.id)
+        ]);
+        addLog(`${event.title} event planned`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const addClubhouseEventGuest = (event: ClubhouseEventRead) => {
+    runAction(
+      `clubhouse-event-guest-${event.id}`,
+      () =>
+        apiRequest<ClubhouseEventRead>(`/assets/clubhouse/events/${event.id}/guests`, {
+          method: "POST",
+          identity,
+          body: {
+            guest_name: clubhouseForm.guest_name,
+            guest_email: clubhouseForm.guest_email,
+            party_size: clubhouseForm.party_size,
+            rsvp_status: "checked_in",
+            notes: "Added from clubhouse event console."
+          }
+        }),
+      (updated) => {
+        setClubhouseEvents((current) => [
+          updated,
+          ...current.filter((entry) => entry.id !== updated.id)
+        ]);
+        addLog(`${updated.title} guest list updated`, "good");
+        if (selectedOrganizationId) {
+          void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+        }
+      }
+    );
+  };
+
+  const updateClubhouseEventStatus = (event: ClubhouseEventRead, status: ClubhouseEventRead["status"]) => {
+    runAction(
+      `clubhouse-event-${status}-${event.id}`,
+      () =>
+        apiRequest<ClubhouseEventRead>(`/assets/clubhouse/events/${event.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            actual_revenue: status === "completed" ? clubhouseForm.event_revenue_target : undefined,
+            post_event_summary: status === "completed" ? "Completed from clubhouse event console." : undefined,
+            notes: `${status} from clubhouse event console.`
+          }
+        }),
+      (updated) => {
+        setClubhouseEvents((current) => [
+          updated,
+          ...current.filter((entry) => entry.id !== updated.id)
+        ]);
+        addLog(`${updated.title} ${updated.status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+        }
+      }
+    );
+  };
+
+  const createClubhouseServiceOffering = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before creating clubhouse services", "bad");
+      return;
+    }
+    runAction(
+      "create-clubhouse-service",
+      () =>
+        apiRequest<ClubhouseServiceOfferingRead>("/assets/clubhouse/services", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            name: clubhouseForm.service_name,
+            service_type: clubhouseForm.service_type,
+            price: clubhouseForm.service_price,
+            billing_period: clubhouseForm.service_billing_period,
+            notes: "Created from clubhouse member-services console."
+          }
+        }),
+      (service) => {
+        setClubhouseServices((current) => [
+          service,
+          ...current.filter((entry) => entry.id !== service.id)
+        ]);
+        addLog(`${service.name} service active`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const bookClubhouseService = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before booking clubhouse services", "bad");
+      return;
+    }
+    const service = clubhouseServices.find((entry) => entry.status === "active") ?? clubhouseServices[0];
+    if (!service) {
+      addLog("Create a clubhouse service before booking it", "bad");
+      return;
+    }
+    runAction(
+      "book-clubhouse-service",
+      () =>
+        apiRequest<ClubhouseServiceBookingRead>("/assets/clubhouse/service-bookings", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            service_id: service.id,
+            guest_name: clubhouseForm.guest_name,
+            starts_at: new Date(clubhouseForm.starts_at).toISOString(),
+            ends_at: new Date(clubhouseForm.ends_at).toISOString(),
+            amount: service.price,
+            invoice: true,
+            notes: "Booked from clubhouse member-services console."
+          }
+        }),
+      (booking) => {
+        setClubhouseServiceBookings((current) => [
+          booking,
+          ...current.filter((entry) => entry.id !== booking.id)
+        ]);
+        addLog(`${service.name} booked for $${booking.amount}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const updateClubhouseServiceBookingStatus = (
+    booking: ClubhouseServiceBookingRead,
+    status: ClubhouseServiceBookingRead["status"]
+  ) => {
+    runAction(
+      `clubhouse-service-booking-${status}-${booking.id}`,
+      () =>
+        apiRequest<ClubhouseServiceBookingRead>(`/assets/clubhouse/service-bookings/${booking.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            notes: `${status} from clubhouse member-services console.`
+          }
+        }),
+      (updated) => {
+        setClubhouseServiceBookings((current) => [
+          updated,
+          ...current.filter((entry) => entry.id !== updated.id)
+        ]);
+        addLog(`Clubhouse service booking ${updated.status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+        }
+      }
+    );
+  };
+
+  const createClubhouseFeedback = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before logging clubhouse feedback", "bad");
+      return;
+    }
+    const amenity = clubhouseAmenities[0];
+    runAction(
+      "create-clubhouse-feedback",
+      () =>
+        apiRequest<ClubhouseFeedbackRead>("/assets/clubhouse/feedback", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            amenity_id: amenity?.id ?? null,
+            guest_name: clubhouseForm.guest_name,
+            category: clubhouseForm.feedback_category,
+            rating: clubhouseForm.feedback_rating,
+            subject: clubhouseForm.feedback_subject,
+            message: clubhouseForm.feedback_message
+          }
+        }),
+      (feedback) => {
+        setClubhouseFeedback((current) => [
+          feedback,
+          ...current.filter((entry) => entry.id !== feedback.id)
+        ]);
+        addLog(`Feedback captured: ${feedback.subject}`, feedback.rating >= 4 ? "good" : "bad");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const updateClubhouseFeedbackStatus = (feedback: ClubhouseFeedbackRead, status: ClubhouseFeedbackRead["status"]) => {
+    runAction(
+      `clubhouse-feedback-${status}-${feedback.id}`,
+      () =>
+        apiRequest<ClubhouseFeedbackRead>(`/assets/clubhouse/feedback/${feedback.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            response: status === "resolved" ? "Resolved from clubhouse feedback console." : null
+          }
+        }),
+      (updated) => {
+        setClubhouseFeedback((current) => [
+          updated,
+          ...current.filter((entry) => entry.id !== updated.id)
+        ]);
+        addLog(`${updated.subject} ${updated.status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+        }
+      }
+    );
+  };
+
   const revokeFacilityAccessCredential = (credential: FacilityAccessCredentialRead) => {
     if (!selectedOrganizationId) {
       return;
@@ -19428,6 +19829,11 @@ export default function HomePage() {
                 <button type="button" onClick={createClubhouseReservation} disabled={busyAction !== null}>Reserve</button>
                 <button type="button" onClick={createClubhouseMenuItem} disabled={busyAction !== null}>Menu</button>
                 <button type="button" onClick={placeClubhousePOSOrder} disabled={busyAction !== null}>POS</button>
+                <button type="button" onClick={createClubhouseOperationsChecklist} disabled={busyAction !== null}>Checklist</button>
+                <button type="button" onClick={createClubhouseEvent} disabled={busyAction !== null}>Event</button>
+                <button type="button" onClick={createClubhouseServiceOffering} disabled={busyAction !== null}>Service</button>
+                <button type="button" onClick={bookClubhouseService} disabled={busyAction !== null}>Book svc</button>
+                <button type="button" onClick={createClubhouseFeedback} disabled={busyAction !== null}>Feedback</button>
                 <button type="button" onClick={createWorkOrder} disabled={busyAction !== null}>Work order</button>
               </div>
             </div>
@@ -19516,6 +19922,26 @@ export default function HomePage() {
                 <span className="muted">Cafe revenue</span>
                 <strong>${clubhousePOSDashboard?.revenue_today ?? "0.00"}</strong>
                 <span className="muted">{clubhousePOSDashboard?.low_stock_count ?? 0} low stock</span>
+              </div>
+              <div>
+                <span className="muted">Ops checks</span>
+                <strong>{clubhouseOperationsDashboard?.open_checklist_count ?? clubhouseOperationsChecklists.length}</strong>
+                <span className="muted">{clubhouseOperationsDashboard?.blocked_item_count ?? 0} blocked · score {clubhouseOperationsDashboard?.average_score ?? "n/a"}</span>
+              </div>
+              <div>
+                <span className="muted">Club events</span>
+                <strong>{clubhouseBusinessDashboard?.event_count ?? clubhouseEvents.length}</strong>
+                <span className="muted">{clubhouseBusinessDashboard?.confirmed_event_count ?? 0} confirmed/completed</span>
+              </div>
+              <div>
+                <span className="muted">Member services</span>
+                <strong>{clubhouseBusinessDashboard?.service_booking_count ?? clubhouseServiceBookings.length}</strong>
+                <span className="muted">${clubhouseBusinessDashboard?.service_revenue ?? "0.00"} service revenue</span>
+              </div>
+              <div>
+                <span className="muted">Club feedback</span>
+                <strong>{clubhouseBusinessDashboard?.open_feedback_count ?? clubhouseFeedback.filter((item) => ["open", "reviewing"].includes(item.status)).length}</strong>
+                <span className="muted">rating {clubhouseBusinessDashboard?.average_feedback_rating ?? "n/a"}</span>
               </div>
             </div>
             <div className="form-grid">
@@ -19871,6 +20297,106 @@ export default function HomePage() {
                   });
                 }} />
               </label>
+              <label>
+                Checklist
+                <input value={clubhouseForm.checklist_title} onChange={(event) => setClubhouseForm({ ...clubhouseForm, checklist_title: event.target.value })} />
+              </label>
+              <label>
+                Checklist type
+                <select value={clubhouseForm.checklist_type} onChange={(event) => setClubhouseForm({ ...clubhouseForm, checklist_type: event.target.value as ClubhouseOperationsChecklistRead["checklist_type"] })}>
+                  <option value="opening">Opening</option>
+                  <option value="midday">Midday</option>
+                  <option value="closing">Closing</option>
+                  <option value="cleaning">Cleaning</option>
+                  <option value="safety">Safety</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label>
+                Checklist due
+                <input type="datetime-local" value={clubhouseForm.checklist_scheduled_for} onChange={(event) => setClubhouseForm({ ...clubhouseForm, checklist_scheduled_for: event.target.value })} />
+              </label>
+              <label>
+                Event title
+                <input value={clubhouseForm.event_title} onChange={(event) => setClubhouseForm({ ...clubhouseForm, event_title: event.target.value })} />
+              </label>
+              <label>
+                Event type
+                <input value={clubhouseForm.event_type} onChange={(event) => setClubhouseForm({ ...clubhouseForm, event_type: event.target.value })} />
+              </label>
+              <label>
+                Event starts
+                <input type="datetime-local" value={clubhouseForm.event_starts_at} onChange={(event) => setClubhouseForm({ ...clubhouseForm, event_starts_at: event.target.value })} />
+              </label>
+              <label>
+                Event ends
+                <input type="datetime-local" value={clubhouseForm.event_ends_at} onChange={(event) => setClubhouseForm({ ...clubhouseForm, event_ends_at: event.target.value })} />
+              </label>
+              <label>
+                Attendees
+                <input type="number" min="1" value={clubhouseForm.event_attendees} onChange={(event) => setClubhouseForm({ ...clubhouseForm, event_attendees: Number(event.target.value) })} />
+              </label>
+              <label>
+                Event budget
+                <input type="number" min="0" step="0.01" value={clubhouseForm.event_budget} onChange={(event) => setClubhouseForm({ ...clubhouseForm, event_budget: Number(event.target.value) })} />
+              </label>
+              <label>
+                Revenue target
+                <input type="number" min="0" step="0.01" value={clubhouseForm.event_revenue_target} onChange={(event) => setClubhouseForm({ ...clubhouseForm, event_revenue_target: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Event vendors
+                <input value={clubhouseForm.vendor_notes} onChange={(event) => setClubhouseForm({ ...clubhouseForm, vendor_notes: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Catering and staffing
+                <input value={`${clubhouseForm.catering_notes} | ${clubhouseForm.staffing_notes}`} onChange={(event) => {
+                  const [cateringNotes, staffingNotes = ""] = event.target.value.split("|");
+                  setClubhouseForm({
+                    ...clubhouseForm,
+                    catering_notes: cateringNotes.trim(),
+                    staffing_notes: staffingNotes.trim()
+                  });
+                }} />
+              </label>
+              <label>
+                Service name
+                <input value={clubhouseForm.service_name} onChange={(event) => setClubhouseForm({ ...clubhouseForm, service_name: event.target.value })} />
+              </label>
+              <label>
+                Service type
+                <input value={clubhouseForm.service_type} onChange={(event) => setClubhouseForm({ ...clubhouseForm, service_type: event.target.value })} />
+              </label>
+              <label>
+                Service price
+                <input type="number" min="0" step="0.01" value={clubhouseForm.service_price} onChange={(event) => setClubhouseForm({ ...clubhouseForm, service_price: Number(event.target.value) })} />
+              </label>
+              <label>
+                Billing
+                <select value={clubhouseForm.service_billing_period} onChange={(event) => setClubhouseForm({ ...clubhouseForm, service_billing_period: event.target.value as ClubhouseServiceOfferingRead["billing_period"] })}>
+                  <option value="once">Once</option>
+                  <option value="visit">Visit</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="season">Season</option>
+                  <option value="annual">Annual</option>
+                </select>
+              </label>
+              <label>
+                Feedback subject
+                <input value={clubhouseForm.feedback_subject} onChange={(event) => setClubhouseForm({ ...clubhouseForm, feedback_subject: event.target.value })} />
+              </label>
+              <label>
+                Feedback category
+                <input value={clubhouseForm.feedback_category} onChange={(event) => setClubhouseForm({ ...clubhouseForm, feedback_category: event.target.value })} />
+              </label>
+              <label>
+                Rating
+                <input type="number" min="1" max="5" value={clubhouseForm.feedback_rating} onChange={(event) => setClubhouseForm({ ...clubhouseForm, feedback_rating: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Feedback
+                <input value={clubhouseForm.feedback_message} onChange={(event) => setClubhouseForm({ ...clubhouseForm, feedback_message: event.target.value })} />
+              </label>
             </div>
             <div className="form-grid">
               <label>
@@ -20156,6 +20682,92 @@ export default function HomePage() {
                       <button type="button" onClick={() => updateClubhousePOSOrderStatus(order, "cancelled")}>Cancel</button>
                     ) : null}
                   </div>
+                </article>
+              ))}
+              {clubhouseOperationsDashboard ? (
+                <article className={`task-card ${clubhouseOperationsDashboard.blocked_item_count === 0 ? "selected" : ""}`}>
+                  <div>
+                    <strong>Clubhouse operations · {clubhouseOperationsDashboard.open_checklist_count} open</strong>
+                    <span>{clubhouseOperationsDashboard.blocked_item_count} blocked · {clubhouseOperationsDashboard.issue_item_count} issues · {clubhouseOperationsDashboard.completed_today} completed today</span>
+                    <span>{clubhouseOperationsDashboard.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {clubhouseOperationsChecklists.slice(0, 3).map((checklist) => (
+                <article key={checklist.id} className={`task-card ${checklist.status === "completed" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{checklist.title} · {checklist.status}</strong>
+                    <span>{checklist.checklist_type} · score {checklist.score ?? "n/a"} · due {new Date(checklist.scheduled_for).toLocaleString()}</span>
+                    <span>{checklist.items.filter((item) => item.status === "done").length}/{checklist.items.length} clear</span>
+                  </div>
+                  <div className="event-toolbar">
+                    {checklist.items.find((item) => item.status === "pending") ? (
+                      <button type="button" onClick={() => updateClubhouseChecklistItem(checklist.items.find((item) => item.status === "pending")!, "done")}>Clear item</button>
+                    ) : null}
+                    {checklist.items.find((item) => item.status === "pending") ? (
+                      <button type="button" onClick={() => updateClubhouseChecklistItem(checklist.items.find((item) => item.status === "pending")!, "blocked")}>Block</button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+              {clubhouseBusinessDashboard ? (
+                <article className={`task-card ${clubhouseBusinessDashboard.open_feedback_count === 0 ? "selected" : ""}`}>
+                  <div>
+                    <strong>Clubhouse business · ${clubhouseBusinessDashboard.total_revenue}</strong>
+                    <span>${clubhouseBusinessDashboard.actual_event_revenue} events · ${clubhouseBusinessDashboard.service_revenue} services · ${clubhouseBusinessDashboard.pos_revenue} POS</span>
+                    <span>{clubhouseBusinessDashboard.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {clubhouseEvents.slice(0, 4).map((event) => (
+                <article key={event.id} className={`task-card ${event.status === "completed" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{event.title} · {event.status}</strong>
+                    <span>{event.event_type} · {event.guests.reduce((total, guest) => total + guest.party_size, 0)}/{event.expected_attendees} guests · target ${event.revenue_target ?? "0.00"}</span>
+                    <span>{new Date(event.starts_at).toLocaleString()} · {event.run_sheet?.split("\n")[0] ?? "Run sheet pending"}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => addClubhouseEventGuest(event)}>Guest</button>
+                    {event.status !== "completed" ? (
+                      <button type="button" onClick={() => updateClubhouseEventStatus(event, "completed")}>Complete</button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+              {clubhouseServices.slice(0, 4).map((service) => (
+                <article key={service.id} className={`task-card ${service.status === "active" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{service.name} · {service.status}</strong>
+                    <span>{service.service_type} · ${service.price} · {service.billing_period}</span>
+                    <span>{service.description ?? service.notes ?? "Member service ready for booking"}</span>
+                  </div>
+                </article>
+              ))}
+              {clubhouseServiceBookings.slice(0, 4).map((booking) => {
+                const service = clubhouseServices.find((entry) => entry.id === booking.service_id);
+                return (
+                  <article key={booking.id} className={`task-card ${booking.status === "completed" ? "selected" : ""}`}>
+                    <div>
+                      <strong>{service?.name ?? "Clubhouse service"} · {booking.status}</strong>
+                      <span>{booking.guest_name ?? "Member"} · ${booking.amount} · invoice {booking.finance_invoice_id ? "ready" : "not needed"}</span>
+                      <span>{booking.starts_at ? new Date(booking.starts_at).toLocaleString() : "No scheduled start"}</span>
+                    </div>
+                    {booking.status !== "completed" ? (
+                      <button type="button" onClick={() => updateClubhouseServiceBookingStatus(booking, "completed")}>Complete</button>
+                    ) : null}
+                  </article>
+                );
+              })}
+              {clubhouseFeedback.slice(0, 4).map((feedback) => (
+                <article key={feedback.id} className={`task-card ${feedback.status === "resolved" || feedback.status === "dismissed" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{feedback.subject} · {feedback.status}</strong>
+                    <span>{feedback.category} · rating {feedback.rating}/5 · {feedback.guest_name ?? "member"}</span>
+                    <span>{feedback.message}</span>
+                  </div>
+                  {feedback.status !== "resolved" ? (
+                    <button type="button" onClick={() => updateClubhouseFeedbackStatus(feedback, "resolved")}>Resolve</button>
+                  ) : null}
                 </article>
               ))}
               {facilityAccessEvent ? (

@@ -3121,6 +3121,151 @@ export type ClubhousePOSDashboardRead = {
   recommendation: string;
 };
 
+export type ClubhouseOperationsChecklistItemRead = {
+  id: UUID;
+  organization_id: UUID;
+  checklist_id: UUID;
+  label: string;
+  area: string | null;
+  category: string;
+  priority: "low" | "medium" | "high" | "critical" | string;
+  status: "pending" | "done" | "issue" | "blocked" | "skipped" | string;
+  due_at: string | null;
+  completed_at: string | null;
+  assigned_to_person_id: UUID | null;
+  work_order_id: UUID | null;
+  evidence_url: string | null;
+  notes: string | null;
+};
+
+export type ClubhouseOperationsChecklistRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  checklist_type: "opening" | "midday" | "closing" | "cleaning" | "safety" | "custom" | string;
+  title: string;
+  scheduled_for: string;
+  status: "open" | "in_progress" | "completed" | "blocked" | "cancelled" | string;
+  assigned_to_person_id: UUID | null;
+  completed_at: string | null;
+  score: number | null;
+  notes: string | null;
+  items: ClubhouseOperationsChecklistItemRead[];
+};
+
+export type ClubhouseOperationsDashboardRead = {
+  organization_id: UUID;
+  facility_id: UUID | null;
+  open_checklist_count: number;
+  blocked_item_count: number;
+  issue_item_count: number;
+  completed_today: number;
+  average_score: number | null;
+  open_checklists: ClubhouseOperationsChecklistRead[];
+  blocked_items: ClubhouseOperationsChecklistItemRead[];
+  recommendation: string;
+};
+
+export type ClubhouseEventGuestRead = {
+  id: UUID;
+  organization_id: UUID;
+  clubhouse_event_id: UUID;
+  person_id: UUID | null;
+  guest_name: string;
+  guest_email: string | null;
+  party_size: number;
+  rsvp_status: "invited" | "confirmed" | "declined" | "checked_in" | "no_show" | string;
+  checked_in_at: string | null;
+  notes: string | null;
+};
+
+export type ClubhouseEventRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  amenity_id: UUID | null;
+  title: string;
+  event_type: string;
+  starts_at: string;
+  ends_at: string;
+  expected_attendees: number;
+  status: "planning" | "tentative" | "confirmed" | "active" | "completed" | "cancelled" | string;
+  budget_amount: string | null;
+  revenue_target: string | null;
+  actual_revenue: string;
+  vendor_notes: string | null;
+  catering_notes: string | null;
+  staffing_notes: string | null;
+  run_sheet: string | null;
+  post_event_summary: string | null;
+  notes: string | null;
+  guests: ClubhouseEventGuestRead[];
+};
+
+export type ClubhouseServiceOfferingRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  name: string;
+  service_type: string;
+  description: string | null;
+  price: string;
+  billing_period: "once" | "visit" | "monthly" | "season" | "annual" | string;
+  capacity_per_slot: number | null;
+  status: "active" | "paused" | "retired" | string;
+  notes: string | null;
+};
+
+export type ClubhouseServiceBookingRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  service_id: UUID;
+  person_id: UUID | null;
+  guest_name: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  status: "booked" | "active" | "completed" | "cancelled" | "no_show" | string;
+  amount: string;
+  finance_invoice_id: UUID | null;
+  notes: string | null;
+};
+
+export type ClubhouseFeedbackRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  amenity_id: UUID | null;
+  person_id: UUID | null;
+  guest_name: string | null;
+  category: string;
+  rating: number;
+  subject: string;
+  message: string;
+  status: "open" | "reviewing" | "resolved" | "dismissed" | string;
+  response: string | null;
+  submitted_at: string;
+  resolved_at: string | null;
+};
+
+export type ClubhouseBusinessDashboardRead = {
+  organization_id: UUID;
+  facility_id: UUID | null;
+  event_count: number;
+  confirmed_event_count: number;
+  service_booking_count: number;
+  open_feedback_count: number;
+  average_feedback_rating: string | null;
+  projected_event_revenue: string;
+  actual_event_revenue: string;
+  service_revenue: string;
+  pos_revenue: string;
+  total_revenue: string;
+  upcoming_events: ClubhouseEventRead[];
+  open_feedback: ClubhouseFeedbackRead[];
+  recommendation: string;
+};
+
 export type FacilityBookingRead = {
   id: UUID;
   organization_id: UUID;

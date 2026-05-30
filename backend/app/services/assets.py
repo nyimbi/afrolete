@@ -22,9 +22,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.assets import (
     ClubhouseAmenity,
     ClubhouseAmenityReservation,
+    ClubhouseEvent,
+    ClubhouseEventGuest,
+    ClubhouseFeedback,
     ClubhouseMenuItem,
+    ClubhouseOperationsChecklist,
+    ClubhouseOperationsChecklistItem,
     ClubhousePOSOrder,
     ClubhousePOSOrderLine,
+    ClubhouseServiceBooking,
+    ClubhouseServiceOffering,
     ClubhouseVisit,
     EmergencyActionPlan,
     EmergencyPlanActivation,
@@ -84,15 +91,36 @@ from app.schemas.assets import (
     ClubhouseAmenityReservationCreate,
     ClubhouseAmenityReservationRead,
     ClubhouseAmenityReservationUpdate,
+    ClubhouseChecklistItemCreate,
+    ClubhouseBusinessDashboardRead,
     ClubhouseDashboardRead,
+    ClubhouseEventCreate,
+    ClubhouseEventGuestCreate,
+    ClubhouseEventGuestRead,
+    ClubhouseEventRead,
+    ClubhouseEventUpdate,
+    ClubhouseFeedbackCreate,
+    ClubhouseFeedbackRead,
+    ClubhouseFeedbackUpdate,
     ClubhouseMenuItemCreate,
     ClubhouseMenuItemRead,
     ClubhouseMenuItemUpdate,
+    ClubhouseOperationsChecklistCreate,
+    ClubhouseOperationsChecklistItemRead,
+    ClubhouseOperationsChecklistItemUpdate,
+    ClubhouseOperationsChecklistRead,
+    ClubhouseOperationsChecklistUpdate,
+    ClubhouseOperationsDashboardRead,
     ClubhousePOSDashboardRead,
     ClubhousePOSOrderCreate,
     ClubhousePOSOrderLineRead,
     ClubhousePOSOrderRead,
     ClubhousePOSOrderUpdate,
+    ClubhouseServiceBookingCreate,
+    ClubhouseServiceBookingRead,
+    ClubhouseServiceBookingUpdate,
+    ClubhouseServiceOfferingCreate,
+    ClubhouseServiceOfferingRead,
     ClubhouseVisitCreate,
     ClubhouseVisitRead,
     ClubhouseVisitUpdate,
@@ -2706,6 +2734,543 @@ async def clubhouse_pos_dashboard(
     )
 
 
+async def create_clubhouse_operations_checklist(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ClubhouseOperationsChecklistCreate,
+    authz: AuthorizationService,
+) -> ClubhouseOperationsChecklistRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.assigned_to_person_id is not None:
+        await get_person_member_for_organization(db, payload.assigned_to_person_id, payload.organization_id)
+    scheduled_for = payload.scheduled_for or datetime.now(UTC)
+    checklist = ClubhouseOperationsChecklist(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        checklist_type=payload.checklist_type,
+        title=payload.title,
+        scheduled_for=scheduled_for,
+        status="open",
+        assigned_to_person_id=payload.assigned_to_person_id,
+        notes=payload.notes,
+    )
+    db.add(checklist)
+    await db.flush()
+    item_payloads = payload.items or default_clubhouse_checklist_items(payload.checklist_type, scheduled_for)
+    for item_payload in item_payloads:
+        assigned_to = item_payload.assigned_to_person_id or payload.assigned_to_person_id
+        if assigned_to is not None:
+            await get_person_member_for_organization(db, assigned_to, payload.organization_id)
+        db.add(
+            ClubhouseOperationsChecklistItem(
+                organization_id=payload.organization_id,
+                checklist_id=checklist.id,
+                label=item_payload.label,
+                area=item_payload.area,
+                category=item_payload.category,
+                priority=item_payload.priority,
+                due_at=item_payload.due_at,
+                assigned_to_person_id=assigned_to,
+                notes=item_payload.notes,
+            )
+        )
+    await db.commit()
+    await db.refresh(checklist)
+    return await clubhouse_operations_checklist_read(db, checklist)
+
+
+async def list_clubhouse_operations_checklists(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[ClubhouseOperationsChecklistRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(ClubhouseOperationsChecklist).where(
+        ClubhouseOperationsChecklist.organization_id == organization_id
+    )
+    if facility_id is not None:
+        statement = statement.where(ClubhouseOperationsChecklist.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(ClubhouseOperationsChecklist.status == status_filter)
+    rows = list((await db.scalars(statement.order_by(ClubhouseOperationsChecklist.scheduled_for.desc()).limit(50))).all())
+    return [await clubhouse_operations_checklist_read(db, row) for row in rows]
+
+
+async def update_clubhouse_operations_checklist(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    checklist_id: UUID,
+    payload: ClubhouseOperationsChecklistUpdate,
+    authz: AuthorizationService,
+) -> ClubhouseOperationsChecklistRead:
+    checklist = await get_clubhouse_operations_checklist(db, checklist_id)
+    await ensure_manage_assets(authz, identity, checklist.organization_id)
+    checklist.status = payload.status
+    if payload.status == "completed":
+        checklist.completed_at = datetime.now(UTC)
+    elif payload.status in {"open", "in_progress", "blocked"}:
+        checklist.completed_at = None
+    if payload.notes:
+        checklist.notes = append_note(checklist.notes, payload.notes)
+    await recompute_clubhouse_checklist_score(db, checklist)
+    await db.commit()
+    await db.refresh(checklist)
+    return await clubhouse_operations_checklist_read(db, checklist)
+
+
+async def update_clubhouse_operations_checklist_item(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    item_id: UUID,
+    payload: ClubhouseOperationsChecklistItemUpdate,
+    authz: AuthorizationService,
+) -> ClubhouseOperationsChecklistItemRead:
+    item = await get_clubhouse_operations_checklist_item(db, item_id)
+    checklist = await get_clubhouse_operations_checklist(db, item.checklist_id)
+    await ensure_manage_assets(authz, identity, item.organization_id)
+    item.status = payload.status
+    if payload.status in {"done", "skipped"}:
+        item.completed_at = datetime.now(UTC)
+    elif payload.status in {"pending", "issue", "blocked"}:
+        item.completed_at = None
+    if payload.evidence_url is not None:
+        item.evidence_url = payload.evidence_url
+    if payload.notes:
+        item.notes = append_note(item.notes, payload.notes)
+    if payload.create_work_order and payload.status in {"issue", "blocked"} and item.work_order_id is None:
+        work_order = MaintenanceWorkOrder(
+            organization_id=item.organization_id,
+            facility_id=checklist.facility_id,
+            title=f"{checklist.title}: {item.label}",
+            priority=WorkOrderPriority.CRITICAL if item.priority == "critical" else WorkOrderPriority.HIGH,
+            due_at=item.due_at,
+            assigned_to_person_id=item.assigned_to_person_id or checklist.assigned_to_person_id,
+            estimated_cost=Decimal("0"),
+            safety_related=item.category in {"safety", "security", "medical"},
+            compliance_reference=f"Clubhouse {checklist.checklist_type} checklist",
+            notes=item.notes or payload.notes,
+        )
+        db.add(work_order)
+        await db.flush()
+        item.work_order_id = work_order.id
+    await recompute_clubhouse_checklist_score(db, checklist)
+    checklist.status = clubhouse_checklist_status_from_items(await clubhouse_checklist_items(db, checklist.id))
+    if checklist.status == "completed" and checklist.completed_at is None:
+        checklist.completed_at = datetime.now(UTC)
+    if checklist.status != "completed":
+        checklist.completed_at = None
+    await db.commit()
+    await db.refresh(item)
+    return clubhouse_operations_checklist_item_read(item)
+
+
+async def clubhouse_operations_dashboard(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> ClubhouseOperationsDashboardRead:
+    await get_organization(db, organization_id)
+    checklist_statement = select(ClubhouseOperationsChecklist).where(
+        ClubhouseOperationsChecklist.organization_id == organization_id
+    )
+    item_statement = select(ClubhouseOperationsChecklistItem).where(
+        ClubhouseOperationsChecklistItem.organization_id == organization_id
+    )
+    if facility_id is not None:
+        checklist_statement = checklist_statement.where(ClubhouseOperationsChecklist.facility_id == facility_id)
+        checklist_ids = [
+            row
+            for row in (await db.scalars(select(ClubhouseOperationsChecklist.id).where(
+                ClubhouseOperationsChecklist.organization_id == organization_id,
+                ClubhouseOperationsChecklist.facility_id == facility_id,
+            ))).all()
+        ]
+        if checklist_ids:
+            item_statement = item_statement.where(ClubhouseOperationsChecklistItem.checklist_id.in_(checklist_ids))
+        else:
+            item_statement = item_statement.where(ClubhouseOperationsChecklistItem.checklist_id.is_(None))
+    checklists = list((await db.scalars(checklist_statement.order_by(ClubhouseOperationsChecklist.scheduled_for.desc()).limit(50))).all())
+    items = list((await db.scalars(item_statement.order_by(ClubhouseOperationsChecklistItem.created_at.desc()).limit(200))).all())
+    now = datetime.now(UTC)
+    day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=UTC)
+    open_checklists = [item for item in checklists if item.status in {"open", "in_progress", "blocked"}]
+    blocked_items = [item for item in items if item.status in {"issue", "blocked"}]
+    scored = [item.score for item in checklists if item.score is not None]
+    return ClubhouseOperationsDashboardRead(
+        organization_id=organization_id,
+        facility_id=facility_id,
+        open_checklist_count=len(open_checklists),
+        blocked_item_count=len([item for item in items if item.status == "blocked"]),
+        issue_item_count=len([item for item in items if item.status == "issue"]),
+        completed_today=len(
+            [
+                item
+                for item in checklists
+                if item.completed_at is not None and normalize_datetime(item.completed_at) >= day_start
+            ]
+        ),
+        average_score=int(sum(scored) / len(scored)) if scored else None,
+        open_checklists=[await clubhouse_operations_checklist_read(db, row) for row in open_checklists[:10]],
+        blocked_items=[clubhouse_operations_checklist_item_read(item) for item in blocked_items[:10]],
+        recommendation=clubhouse_operations_recommendation(open_checklists, blocked_items),
+    )
+
+
+async def create_clubhouse_event(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ClubhouseEventCreate,
+    authz: AuthorizationService,
+) -> ClubhouseEventRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    facility = await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.ends_at <= payload.starts_at:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="ends_at must be after starts_at")
+    if facility.capacity is not None and payload.expected_attendees > facility.capacity:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Clubhouse event exceeds facility capacity")
+    if payload.amenity_id is not None:
+        amenity = await get_clubhouse_amenity(db, payload.amenity_id)
+        if amenity.organization_id != payload.organization_id or amenity.facility_id != payload.facility_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse amenity not found")
+    event = ClubhouseEvent(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        amenity_id=payload.amenity_id,
+        title=payload.title,
+        event_type=payload.event_type.strip().lower(),
+        starts_at=payload.starts_at,
+        ends_at=payload.ends_at,
+        expected_attendees=payload.expected_attendees,
+        budget_amount=payload.budget_amount,
+        revenue_target=payload.revenue_target,
+        vendor_notes=payload.vendor_notes,
+        catering_notes=payload.catering_notes,
+        staffing_notes=payload.staffing_notes,
+        run_sheet=payload.run_sheet or clubhouse_event_run_sheet(payload),
+        notes=payload.notes,
+    )
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    return await clubhouse_event_read(db, event)
+
+
+async def list_clubhouse_events(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[ClubhouseEventRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(ClubhouseEvent).where(ClubhouseEvent.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(ClubhouseEvent.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(ClubhouseEvent.status == status_filter)
+    rows = list((await db.scalars(statement.order_by(ClubhouseEvent.starts_at.desc()).limit(50))).all())
+    return [await clubhouse_event_read(db, row) for row in rows]
+
+
+async def update_clubhouse_event(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    event_id: UUID,
+    payload: ClubhouseEventUpdate,
+    authz: AuthorizationService,
+) -> ClubhouseEventRead:
+    event = await get_clubhouse_event(db, event_id)
+    await ensure_manage_assets(authz, identity, event.organization_id)
+    event.status = payload.status
+    if payload.actual_revenue is not None:
+        event.actual_revenue = payload.actual_revenue
+    if payload.post_event_summary is not None:
+        event.post_event_summary = payload.post_event_summary
+    if payload.notes:
+        event.notes = append_note(event.notes, payload.notes)
+    await db.commit()
+    await db.refresh(event)
+    return await clubhouse_event_read(db, event)
+
+
+async def add_clubhouse_event_guest(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    event_id: UUID,
+    payload: ClubhouseEventGuestCreate,
+    authz: AuthorizationService,
+) -> ClubhouseEventRead:
+    event = await get_clubhouse_event(db, event_id)
+    await ensure_manage_assets(authz, identity, event.organization_id)
+    if payload.person_id is not None:
+        await get_person_member_for_organization(db, payload.person_id, event.organization_id)
+    current_party = await clubhouse_event_guest_party_size(db, event.id)
+    if current_party + payload.party_size > event.expected_attendees:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Clubhouse event guest list exceeds expected attendance")
+    guest = ClubhouseEventGuest(
+        organization_id=event.organization_id,
+        clubhouse_event_id=event.id,
+        person_id=payload.person_id,
+        guest_name=payload.guest_name,
+        guest_email=payload.guest_email,
+        party_size=payload.party_size,
+        rsvp_status=payload.rsvp_status,
+        checked_in_at=datetime.now(UTC) if payload.rsvp_status == "checked_in" else None,
+        notes=payload.notes,
+    )
+    db.add(guest)
+    await db.commit()
+    await db.refresh(event)
+    return await clubhouse_event_read(db, event)
+
+
+async def create_clubhouse_service_offering(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ClubhouseServiceOfferingCreate,
+    authz: AuthorizationService,
+) -> ClubhouseServiceOfferingRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    service = ClubhouseServiceOffering(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        name=payload.name,
+        service_type=payload.service_type.strip().lower(),
+        description=payload.description,
+        price=payload.price,
+        billing_period=payload.billing_period,
+        capacity_per_slot=payload.capacity_per_slot,
+        status=payload.status,
+        notes=payload.notes,
+    )
+    db.add(service)
+    await db.commit()
+    await db.refresh(service)
+    return clubhouse_service_offering_read(service)
+
+
+async def list_clubhouse_service_offerings(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+) -> list[ClubhouseServiceOfferingRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(ClubhouseServiceOffering).where(ClubhouseServiceOffering.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(ClubhouseServiceOffering.facility_id == facility_id)
+    rows = await db.scalars(statement.order_by(ClubhouseServiceOffering.service_type, ClubhouseServiceOffering.name))
+    return [clubhouse_service_offering_read(row) for row in rows.all()]
+
+
+async def create_clubhouse_service_booking(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ClubhouseServiceBookingCreate,
+    authz: AuthorizationService,
+) -> ClubhouseServiceBookingRead:
+    service = await get_clubhouse_service_offering(db, payload.service_id)
+    if service.organization_id != payload.organization_id or service.facility_id != payload.facility_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse service not found")
+    await ensure_manage_assets(authz, identity, service.organization_id)
+    if service.status != "active":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Clubhouse service is not active")
+    if payload.person_id is not None:
+        await get_person_member_for_organization(db, payload.person_id, payload.organization_id)
+    if payload.starts_at is not None and payload.ends_at is not None and payload.ends_at <= payload.starts_at:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="ends_at must be after starts_at")
+    amount = payload.amount if payload.amount is not None else service.price
+    invoice_id = None
+    if payload.invoice and amount > 0:
+        invoice = FinanceInvoice(
+            organization_id=service.organization_id,
+            person_id=payload.person_id,
+            invoice_number=f"CLUB-SVC-{datetime.now(UTC):%Y%m%d}-{str(service.id)[:8]}",
+            title=f"Clubhouse service: {service.name}",
+            amount_due=amount,
+            amount_paid=Decimal("0"),
+            currency="USD",
+            due_on=(payload.starts_at or datetime.now(UTC)).date(),
+            status=CommercialStatus.DRAFT,
+            memo=payload.notes or f"{service.billing_period} clubhouse service booking.",
+        )
+        db.add(invoice)
+        await db.flush()
+        invoice_id = invoice.id
+    booking = ClubhouseServiceBooking(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        service_id=payload.service_id,
+        person_id=payload.person_id,
+        guest_name=payload.guest_name,
+        starts_at=payload.starts_at,
+        ends_at=payload.ends_at,
+        amount=amount,
+        finance_invoice_id=invoice_id,
+        notes=payload.notes,
+    )
+    db.add(booking)
+    await db.commit()
+    await db.refresh(booking)
+    return clubhouse_service_booking_read(booking)
+
+
+async def list_clubhouse_service_bookings(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+) -> list[ClubhouseServiceBookingRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(ClubhouseServiceBooking).where(ClubhouseServiceBooking.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(ClubhouseServiceBooking.facility_id == facility_id)
+    rows = await db.scalars(statement.order_by(ClubhouseServiceBooking.created_at.desc()).limit(50))
+    return [clubhouse_service_booking_read(row) for row in rows.all()]
+
+
+async def update_clubhouse_service_booking(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    booking_id: UUID,
+    payload: ClubhouseServiceBookingUpdate,
+    authz: AuthorizationService,
+) -> ClubhouseServiceBookingRead:
+    booking = await get_clubhouse_service_booking(db, booking_id)
+    await ensure_manage_assets(authz, identity, booking.organization_id)
+    booking.status = payload.status
+    if payload.notes:
+        booking.notes = append_note(booking.notes, payload.notes)
+    await db.commit()
+    await db.refresh(booking)
+    return clubhouse_service_booking_read(booking)
+
+
+async def create_clubhouse_feedback(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ClubhouseFeedbackCreate,
+    authz: AuthorizationService,
+) -> ClubhouseFeedbackRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.amenity_id is not None:
+        amenity = await get_clubhouse_amenity(db, payload.amenity_id)
+        if amenity.organization_id != payload.organization_id or amenity.facility_id != payload.facility_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse amenity not found")
+    if payload.person_id is not None:
+        await get_person_member_for_organization(db, payload.person_id, payload.organization_id)
+    feedback = ClubhouseFeedback(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        amenity_id=payload.amenity_id,
+        person_id=payload.person_id,
+        guest_name=payload.guest_name,
+        category=payload.category.strip().lower(),
+        rating=payload.rating,
+        subject=payload.subject,
+        message=payload.message,
+        submitted_at=datetime.now(UTC),
+    )
+    db.add(feedback)
+    await db.commit()
+    await db.refresh(feedback)
+    return clubhouse_feedback_read(feedback)
+
+
+async def list_clubhouse_feedback(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[ClubhouseFeedbackRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(ClubhouseFeedback).where(ClubhouseFeedback.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(ClubhouseFeedback.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(ClubhouseFeedback.status == status_filter)
+    rows = await db.scalars(statement.order_by(ClubhouseFeedback.submitted_at.desc()).limit(50))
+    return [clubhouse_feedback_read(row) for row in rows.all()]
+
+
+async def update_clubhouse_feedback(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    feedback_id: UUID,
+    payload: ClubhouseFeedbackUpdate,
+    authz: AuthorizationService,
+) -> ClubhouseFeedbackRead:
+    feedback = await get_clubhouse_feedback(db, feedback_id)
+    await ensure_manage_assets(authz, identity, feedback.organization_id)
+    feedback.status = payload.status
+    if payload.response is not None:
+        feedback.response = payload.response
+    if payload.status in {"resolved", "dismissed"}:
+        feedback.resolved_at = datetime.now(UTC)
+    elif payload.status in {"open", "reviewing"}:
+        feedback.resolved_at = None
+    await db.commit()
+    await db.refresh(feedback)
+    return clubhouse_feedback_read(feedback)
+
+
+async def clubhouse_business_dashboard(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> ClubhouseBusinessDashboardRead:
+    await get_organization(db, organization_id)
+    event_statement = select(ClubhouseEvent).where(ClubhouseEvent.organization_id == organization_id)
+    service_statement = select(ClubhouseServiceBooking).where(ClubhouseServiceBooking.organization_id == organization_id)
+    feedback_statement = select(ClubhouseFeedback).where(ClubhouseFeedback.organization_id == organization_id)
+    pos_statement = select(ClubhousePOSOrder).where(ClubhousePOSOrder.organization_id == organization_id)
+    if facility_id is not None:
+        event_statement = event_statement.where(ClubhouseEvent.facility_id == facility_id)
+        service_statement = service_statement.where(ClubhouseServiceBooking.facility_id == facility_id)
+        feedback_statement = feedback_statement.where(ClubhouseFeedback.facility_id == facility_id)
+        pos_statement = pos_statement.where(ClubhousePOSOrder.facility_id == facility_id)
+    events = list((await db.scalars(event_statement.order_by(ClubhouseEvent.starts_at.desc()).limit(100))).all())
+    service_bookings = list((await db.scalars(service_statement.order_by(ClubhouseServiceBooking.created_at.desc()).limit(100))).all())
+    feedback = list((await db.scalars(feedback_statement.order_by(ClubhouseFeedback.submitted_at.desc()).limit(100))).all())
+    pos_orders = list((await db.scalars(pos_statement.order_by(ClubhousePOSOrder.ordered_at.desc()).limit(100))).all())
+    ratings = [item.rating for item in feedback]
+    pos_revenue = sum((order.total for order in pos_orders if order.status == "paid"), Decimal("0")).quantize(Decimal("0.01"))
+    service_revenue = sum((booking.amount for booking in service_bookings if booking.status != "cancelled"), Decimal("0")).quantize(Decimal("0.01"))
+    actual_event_revenue = sum((event.actual_revenue for event in events), Decimal("0")).quantize(Decimal("0.01"))
+    return ClubhouseBusinessDashboardRead(
+        organization_id=organization_id,
+        facility_id=facility_id,
+        event_count=len(events),
+        confirmed_event_count=len([event for event in events if event.status in {"confirmed", "active", "completed"}]),
+        service_booking_count=len(service_bookings),
+        open_feedback_count=len([item for item in feedback if item.status in {"open", "reviewing"}]),
+        average_feedback_rating=Decimal(str(round(sum(ratings) / len(ratings), 2))) if ratings else None,
+        projected_event_revenue=sum((event.revenue_target or Decimal("0") for event in events), Decimal("0")).quantize(Decimal("0.01")),
+        actual_event_revenue=actual_event_revenue,
+        service_revenue=service_revenue,
+        pos_revenue=pos_revenue,
+        total_revenue=(actual_event_revenue + service_revenue + pos_revenue).quantize(Decimal("0.01")),
+        upcoming_events=[await clubhouse_event_read(db, event) for event in events if event.status in {"planning", "tentative", "confirmed"}][:5],
+        open_feedback=[clubhouse_feedback_read(item) for item in feedback if item.status in {"open", "reviewing"}][:5],
+        recommendation=clubhouse_business_recommendation(events, feedback, service_bookings, pos_orders),
+    )
+
+
 async def create_facility_booking(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -4279,6 +4844,54 @@ async def get_clubhouse_pos_order(db: AsyncSession, order_id: UUID) -> Clubhouse
     return order
 
 
+async def get_clubhouse_operations_checklist(
+    db: AsyncSession,
+    checklist_id: UUID,
+) -> ClubhouseOperationsChecklist:
+    checklist = await db.get(ClubhouseOperationsChecklist, checklist_id)
+    if checklist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse operations checklist not found")
+    return checklist
+
+
+async def get_clubhouse_operations_checklist_item(
+    db: AsyncSession,
+    item_id: UUID,
+) -> ClubhouseOperationsChecklistItem:
+    item = await db.get(ClubhouseOperationsChecklistItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse operations checklist item not found")
+    return item
+
+
+async def get_clubhouse_event(db: AsyncSession, event_id: UUID) -> ClubhouseEvent:
+    event = await db.get(ClubhouseEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse event not found")
+    return event
+
+
+async def get_clubhouse_service_offering(db: AsyncSession, service_id: UUID) -> ClubhouseServiceOffering:
+    service = await db.get(ClubhouseServiceOffering, service_id)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse service not found")
+    return service
+
+
+async def get_clubhouse_service_booking(db: AsyncSession, booking_id: UUID) -> ClubhouseServiceBooking:
+    booking = await db.get(ClubhouseServiceBooking, booking_id)
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse service booking not found")
+    return booking
+
+
+async def get_clubhouse_feedback(db: AsyncSession, feedback_id: UUID) -> ClubhouseFeedback:
+    feedback = await db.get(ClubhouseFeedback, feedback_id)
+    if feedback is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse feedback not found")
+    return feedback
+
+
 async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> SupplierOrder:
     order = await db.get(SupplierOrder, supplier_order_id)
     if order is None:
@@ -5463,6 +6076,293 @@ def clubhouse_pos_recommendation(
     if not items:
         return "Create clubhouse menu items so staff can take food, beverage, and retail orders."
     return "Clubhouse POS is clear; keep mobile ordering and inventory counts current."
+
+
+def clubhouse_operations_checklist_item_read(
+    item: ClubhouseOperationsChecklistItem,
+) -> ClubhouseOperationsChecklistItemRead:
+    return ClubhouseOperationsChecklistItemRead(
+        id=item.id,
+        organization_id=item.organization_id,
+        checklist_id=item.checklist_id,
+        label=item.label,
+        area=item.area,
+        category=item.category,
+        priority=item.priority,
+        status=item.status,
+        due_at=item.due_at,
+        completed_at=item.completed_at,
+        assigned_to_person_id=item.assigned_to_person_id,
+        work_order_id=item.work_order_id,
+        evidence_url=item.evidence_url,
+        notes=item.notes,
+    )
+
+
+async def clubhouse_checklist_items(
+    db: AsyncSession,
+    checklist_id: UUID,
+) -> list[ClubhouseOperationsChecklistItem]:
+    return list(
+        (
+            await db.scalars(
+                select(ClubhouseOperationsChecklistItem)
+                .where(ClubhouseOperationsChecklistItem.checklist_id == checklist_id)
+                .order_by(ClubhouseOperationsChecklistItem.category, ClubhouseOperationsChecklistItem.created_at)
+            )
+        ).all()
+    )
+
+
+async def clubhouse_operations_checklist_read(
+    db: AsyncSession,
+    checklist: ClubhouseOperationsChecklist,
+) -> ClubhouseOperationsChecklistRead:
+    items = await clubhouse_checklist_items(db, checklist.id)
+    return ClubhouseOperationsChecklistRead(
+        id=checklist.id,
+        organization_id=checklist.organization_id,
+        facility_id=checklist.facility_id,
+        checklist_type=checklist.checklist_type,
+        title=checklist.title,
+        scheduled_for=checklist.scheduled_for,
+        status=checklist.status,
+        assigned_to_person_id=checklist.assigned_to_person_id,
+        completed_at=checklist.completed_at,
+        score=checklist.score,
+        notes=checklist.notes,
+        items=[clubhouse_operations_checklist_item_read(item) for item in items],
+    )
+
+
+def default_clubhouse_checklist_items(
+    checklist_type: str,
+    scheduled_for: datetime,
+) -> list[ClubhouseChecklistItemCreate]:
+    defaults = {
+        "opening": [
+            ("Unlock all public doors", "entrance", "security", "high"),
+            ("Check emergency equipment and AED", "lobby", "safety", "critical"),
+            ("Prepare cafe and POS terminal", "cafe", "operations", "normal"),
+            ("Stock restrooms and towel stations", "restrooms", "cleaning", "normal"),
+        ],
+        "midday": [
+            ("Record pool and wet-area condition", "pool", "safety", "high"),
+            ("Inspect gym equipment condition", "gym", "safety", "high"),
+            ("Check cafe stock and low inventory", "cafe", "inventory", "normal"),
+            ("Review cleanliness exceptions", "clubhouse", "cleaning", "normal"),
+        ],
+        "closing": [
+            ("Confirm final member check-out", "front desk", "security", "high"),
+            ("Complete security walk-through", "clubhouse", "security", "high"),
+            ("Shut down cafe and POS drawers", "cafe", "operations", "normal"),
+            ("Set alarm readiness", "entrance", "security", "critical"),
+        ],
+        "safety": [
+            ("Inspect emergency exits", "clubhouse", "safety", "critical"),
+            ("Verify first aid supplies", "lobby", "medical", "high"),
+            ("Check incident log for unresolved issues", "front desk", "safety", "high"),
+        ],
+        "cleaning": [
+            ("Clean high-touch surfaces", "clubhouse", "cleaning", "normal"),
+            ("Restock consumables", "storage", "inventory", "normal"),
+            ("Inspect locker rooms", "locker rooms", "cleaning", "high"),
+        ],
+    }
+    items = defaults.get(checklist_type, defaults["opening"])
+    return [
+        ClubhouseChecklistItemCreate(
+            label=label,
+            area=area,
+            category=category,
+            priority=priority,
+            due_at=scheduled_for + timedelta(hours=2),
+        )
+        for label, area, category, priority in items
+    ]
+
+
+async def recompute_clubhouse_checklist_score(
+    db: AsyncSession,
+    checklist: ClubhouseOperationsChecklist,
+) -> None:
+    items = await clubhouse_checklist_items(db, checklist.id)
+    if not items:
+        checklist.score = None
+        return
+    earned = 0
+    for item in items:
+        if item.status == "done":
+            earned += 1
+        elif item.status == "skipped":
+            earned += 0.5
+    checklist.score = int((earned / len(items)) * 100)
+
+
+def clubhouse_checklist_status_from_items(
+    items: list[ClubhouseOperationsChecklistItem],
+) -> str:
+    if not items:
+        return "open"
+    if any(item.status == "blocked" for item in items):
+        return "blocked"
+    if any(item.status == "issue" for item in items):
+        return "in_progress"
+    if all(item.status in {"done", "skipped"} for item in items):
+        return "completed"
+    if any(item.status in {"done", "skipped"} for item in items):
+        return "in_progress"
+    return "open"
+
+
+def clubhouse_operations_recommendation(
+    open_checklists: list[ClubhouseOperationsChecklist],
+    blocked_items: list[ClubhouseOperationsChecklistItem],
+) -> str:
+    if any(item.priority == "critical" for item in blocked_items):
+        return "Critical clubhouse operations item is blocked; assign maintenance before opening further areas."
+    if blocked_items:
+        return "Resolve clubhouse operations issues and convert safety or cleaning blockers into work orders."
+    if len(open_checklists) >= 3:
+        return "Multiple clubhouse checklists are open; close stale runs before the next operating period."
+    if not open_checklists:
+        return "Clubhouse operations are clear; schedule the next opening, mid-day, or closing checklist."
+        return "Clubhouse checklist work is active; finish pending items and capture evidence for exceptions."
+
+
+def clubhouse_event_guest_read(guest: ClubhouseEventGuest) -> ClubhouseEventGuestRead:
+    return ClubhouseEventGuestRead(
+        id=guest.id,
+        organization_id=guest.organization_id,
+        clubhouse_event_id=guest.clubhouse_event_id,
+        person_id=guest.person_id,
+        guest_name=guest.guest_name,
+        guest_email=guest.guest_email,
+        party_size=guest.party_size,
+        rsvp_status=guest.rsvp_status,
+        checked_in_at=guest.checked_in_at,
+        notes=guest.notes,
+    )
+
+
+async def clubhouse_event_read(db: AsyncSession, event: ClubhouseEvent) -> ClubhouseEventRead:
+    guests = list(
+        (
+            await db.scalars(
+                select(ClubhouseEventGuest)
+                .where(ClubhouseEventGuest.clubhouse_event_id == event.id)
+                .order_by(ClubhouseEventGuest.guest_name.asc())
+            )
+        ).all()
+    )
+    return ClubhouseEventRead(
+        id=event.id,
+        organization_id=event.organization_id,
+        facility_id=event.facility_id,
+        amenity_id=event.amenity_id,
+        title=event.title,
+        event_type=event.event_type,
+        starts_at=event.starts_at,
+        ends_at=event.ends_at,
+        expected_attendees=event.expected_attendees,
+        status=event.status,
+        budget_amount=event.budget_amount,
+        revenue_target=event.revenue_target,
+        actual_revenue=event.actual_revenue,
+        vendor_notes=event.vendor_notes,
+        catering_notes=event.catering_notes,
+        staffing_notes=event.staffing_notes,
+        run_sheet=event.run_sheet,
+        post_event_summary=event.post_event_summary,
+        notes=event.notes,
+        guests=[clubhouse_event_guest_read(guest) for guest in guests],
+    )
+
+
+def clubhouse_service_offering_read(service: ClubhouseServiceOffering) -> ClubhouseServiceOfferingRead:
+    return ClubhouseServiceOfferingRead(
+        id=service.id,
+        organization_id=service.organization_id,
+        facility_id=service.facility_id,
+        name=service.name,
+        service_type=service.service_type,
+        description=service.description,
+        price=service.price,
+        billing_period=service.billing_period,
+        capacity_per_slot=service.capacity_per_slot,
+        status=service.status,
+        notes=service.notes,
+    )
+
+
+def clubhouse_service_booking_read(booking: ClubhouseServiceBooking) -> ClubhouseServiceBookingRead:
+    return ClubhouseServiceBookingRead(
+        id=booking.id,
+        organization_id=booking.organization_id,
+        facility_id=booking.facility_id,
+        service_id=booking.service_id,
+        person_id=booking.person_id,
+        guest_name=booking.guest_name,
+        starts_at=booking.starts_at,
+        ends_at=booking.ends_at,
+        status=booking.status,
+        amount=booking.amount,
+        finance_invoice_id=booking.finance_invoice_id,
+        notes=booking.notes,
+    )
+
+
+def clubhouse_feedback_read(feedback: ClubhouseFeedback) -> ClubhouseFeedbackRead:
+    return ClubhouseFeedbackRead(
+        id=feedback.id,
+        organization_id=feedback.organization_id,
+        facility_id=feedback.facility_id,
+        amenity_id=feedback.amenity_id,
+        person_id=feedback.person_id,
+        guest_name=feedback.guest_name,
+        category=feedback.category,
+        rating=feedback.rating,
+        subject=feedback.subject,
+        message=feedback.message,
+        status=feedback.status,
+        response=feedback.response,
+        submitted_at=feedback.submitted_at,
+        resolved_at=feedback.resolved_at,
+    )
+
+
+def clubhouse_event_run_sheet(payload: ClubhouseEventCreate) -> str:
+    return "\n".join(
+        [
+            f"Setup: prepare {payload.title} for {payload.expected_attendees} attendee(s).",
+            f"Doors: {payload.starts_at.isoformat()}.",
+            f"Catering: {payload.catering_notes or 'Confirm food and beverage requirements.'}",
+            f"Staffing: {payload.staffing_notes or 'Assign front desk, service, and cleanup owners.'}",
+            f"Teardown: {payload.ends_at.isoformat()}.",
+        ]
+    )
+
+
+async def clubhouse_event_guest_party_size(db: AsyncSession, event_id: UUID) -> int:
+    guests = await db.scalars(select(ClubhouseEventGuest).where(ClubhouseEventGuest.clubhouse_event_id == event_id))
+    return sum(guest.party_size for guest in guests.all())
+
+
+def clubhouse_business_recommendation(
+    events: list[ClubhouseEvent],
+    feedback: list[ClubhouseFeedback],
+    service_bookings: list[ClubhouseServiceBooking],
+    pos_orders: list[ClubhousePOSOrder],
+) -> str:
+    if any(item.status in {"open", "reviewing"} and item.rating <= 2 for item in feedback):
+        return "Low-rated clubhouse feedback is open; respond before promoting more member services."
+    if any(event.status in {"planning", "tentative"} and not event.run_sheet for event in events):
+        return "Upcoming clubhouse events need run sheets before confirmation."
+    if service_bookings and not pos_orders:
+        return "Member services are active; add POS bundles or cafe prompts to lift per-visit revenue."
+    if events:
+        return "Clubhouse commercial operations are active; compare event targets, services, and POS revenue weekly."
+    return "Create clubhouse events and member services to complete the commercial operating model."
 
 
 async def clubhouse_current_occupancy(
