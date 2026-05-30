@@ -395,6 +395,8 @@ import type {
   PerformanceMatchPlayerGuidancePublishRead,
   PerformanceMatchPlayerGuidanceReviewRead,
   PerformanceMatchPitchCalibrationRead,
+  PerformanceMultiCameraAnalysisCreate,
+  PerformanceMultiCameraAnalysisRead,
   PerformanceMatchTrackingProviderIngestEventRead,
   PerformanceMatchTrackingProviderWebhookRead,
   PerformanceMatchTrackingProviderImportCreate,
@@ -1878,6 +1880,10 @@ export default function HomePage() {
     useState<PerformanceMatchPitchCalibrationRead[]>([]);
   const [performanceMatchPitchCalibration, setPerformanceMatchPitchCalibration] =
     useState<PerformanceMatchPitchCalibrationRead | null>(null);
+  const [performanceMultiCameraAnalyses, setPerformanceMultiCameraAnalyses] =
+    useState<PerformanceMultiCameraAnalysisRead[]>([]);
+  const [performanceMultiCameraAnalysis, setPerformanceMultiCameraAnalysis] =
+    useState<PerformanceMultiCameraAnalysisRead | null>(null);
   const [performanceHardwareKits, setPerformanceHardwareKits] = useState<PerformanceHardwareKitRead[]>([]);
   const [performanceHardwareDevices, setPerformanceHardwareDevices] = useState<PerformanceHardwareDeviceRead[]>([]);
   const [performanceHardwareSyncRun, setPerformanceHardwareSyncRun] =
@@ -4054,6 +4060,7 @@ export default function HomePage() {
       trackingIdentityReviewData,
       matchAnalysisReportData,
       calibrationData,
+      multiCameraData,
       hardwareKitData,
       hardwareDeviceData,
       highlightReelData,
@@ -4087,6 +4094,10 @@ export default function HomePage() {
         `/performance/scouting/pitch-calibrations?${params.toString()}`,
         { identity }
       ),
+      apiRequest<PerformanceMultiCameraAnalysisRead[]>(
+        `/performance/scouting/multi-camera-analyses?organization_id=${organizationId}`,
+        { identity }
+      ),
       apiRequest<PerformanceHardwareKitRead[]>(
         `/performance/hardware-kits?organization_id=${organizationId}&sport=football`,
         { identity }
@@ -4111,6 +4122,7 @@ export default function HomePage() {
     setPerformanceMatchTrackingIdentityReviews(trackingIdentityReviewData);
     setPerformanceMatchAnalysisReports(matchAnalysisReportData);
     setPerformanceMatchPitchCalibrations(calibrationData);
+    setPerformanceMultiCameraAnalyses(multiCameraData);
     setPerformanceHardwareKits(hardwareKitData);
     setPerformanceHardwareDevices(hardwareDeviceData);
     setPerformanceHighlightReels(highlightReelData);
@@ -4133,6 +4145,11 @@ export default function HomePage() {
       current && calibrationData.some((calibration) => calibration.id === current.id)
         ? current
         : calibrationData[0] ?? null
+    );
+    setPerformanceMultiCameraAnalysis((current) =>
+      current && multiCameraData.some((analysis) => analysis.id === current.id)
+        ? current
+        : multiCameraData[0] ?? null
     );
     setPerformanceHighlightReel((current) =>
       current && highlightReelData.some((reel) => reel.id === current.id) ? current : highlightReelData[0] ?? null
@@ -5300,6 +5317,8 @@ export default function HomePage() {
       setPerformanceMatchPlayerGuidancePublishes([]);
       setPerformanceMatchPitchCalibrations([]);
       setPerformanceMatchPitchCalibration(null);
+      setPerformanceMultiCameraAnalyses([]);
+      setPerformanceMultiCameraAnalysis(null);
       setPerformanceHighlightReels([]);
       setPerformanceHighlightReel(null);
       setPerformanceHighlightReelExports([]);
@@ -10628,6 +10647,67 @@ export default function HomePage() {
             : current
         );
         addLog(`Auto-tracked ${run.player_count} tracks from video frames`, "good");
+      }
+    );
+  };
+
+  const createPerformanceMultiCameraAnalysis = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before fusing camera angles", "bad");
+      return;
+    }
+    const candidates = [
+      oppositionScoutingVideo,
+      ...oppositionScoutingVideos.filter((video) => video.id !== oppositionScoutingVideo?.id)
+    ].filter(Boolean).slice(0, 4) as OppositionScoutingVideoAssetRead[];
+    if (candidates.length < 2) {
+      addLog("Upload at least two match camera videos before creating a multi-camera package", "bad");
+      return;
+    }
+    const cameraRoles: PerformanceMultiCameraAnalysisCreate["camera_videos"][number]["camera_role"][] = [
+      "primary",
+      "tactical",
+      "endline",
+      "sideline"
+    ];
+    const payload: PerformanceMultiCameraAnalysisCreate = {
+      organization_id: selectedOrganizationId,
+      team_id: selectedTeamId || oppositionScoutingVideo?.team_id || null,
+      event_id: selectedEventId || oppositionScoutingVideo?.event_id || null,
+      competition_id: selectedCompetitionId || oppositionScoutingVideo?.competition_id || null,
+      analysis_label: `${oppositionScoutingVideo?.opponent_name ?? "Match"} multi-camera review`,
+      sport: oppositionScoutingForm.sport || "football",
+      synchronization_policy: "timestamp_offset",
+      camera_videos: candidates.map((video, index) => {
+        const trackingRun = performanceMatchTrackingRuns.find((run) => run.video_asset_id === video.id) ?? null;
+        return {
+          video_asset_id: video.id,
+          tracking_run_id: trackingRun?.id ?? null,
+          camera_label: video.clip_label ?? `Camera ${index + 1}`,
+          camera_role: cameraRoles[index] ?? "provider",
+          sync_offset_seconds: index === 0 ? 0 : Number((index * 0.2).toFixed(2)),
+          angle_confidence: Math.max(0.6, 0.9 - index * 0.05)
+        };
+      })
+    };
+    runAction(
+      "create-performance-multi-camera-analysis",
+      () =>
+        apiRequest<PerformanceMultiCameraAnalysisRead>("/performance/scouting/multi-camera-analyses", {
+          method: "POST",
+          identity,
+          body: payload
+        }),
+      (analysis) => {
+        setPerformanceMultiCameraAnalysis(analysis);
+        setPerformanceMultiCameraAnalyses((current) => [
+          analysis,
+          ...current.filter((item) => item.id !== analysis.id)
+        ]);
+        addLog(
+          `Fused ${analysis.camera_count} camera angle(s) into ${analysis.fused_player_count} player track(s)`,
+          analysis.confidence >= 0.7 ? "good" : "neutral"
+        );
       }
     );
   };
@@ -26320,6 +26400,7 @@ export default function HomePage() {
                 <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Scout report</button>
                 <button type="button" onClick={calibrateOppositionMatchVideo} disabled={busyAction !== null}>Calibrate</button>
                 <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
+                <button type="button" onClick={createPerformanceMultiCameraAnalysis} disabled={busyAction !== null}>Multi-cam</button>
                 <button type="button" onClick={createPerformanceHardwareKit} disabled={busyAction !== null}>Kit</button>
                 <button type="button" onClick={provisionPerformanceHardwareDevice} disabled={busyAction !== null}>Device</button>
                 <button type="button" onClick={syncPerformanceHardwareDevice} disabled={busyAction !== null}>Hardware sync</button>
@@ -26967,6 +27048,7 @@ export default function HomePage() {
                   <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
                   <button type="button" onClick={importProviderMatchTracking} disabled={busyAction !== null}>Import tracker</button>
                   <button type="button" onClick={autoTrackOppositionMatchVideo} disabled={busyAction !== null}>Auto-track video</button>
+                  <button type="button" onClick={createPerformanceMultiCameraAnalysis} disabled={busyAction !== null}>Multi-cam</button>
                   <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Player guidance</button>
                   <button type="button" onClick={reviewPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Review share</button>
                   <button type="button" onClick={publishPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Publish</button>
@@ -27020,6 +27102,19 @@ export default function HomePage() {
                     {performanceMatchTrackingRun
                       ? `${performanceMatchTrackingRun.readiness_level.replaceAll("_", " ")} · identity ${Math.round(performanceMatchTrackingRun.identity_continuity_score * 100)}%`
                     : "Quality scoring separates demo tracking from coach-ready metrics."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Multi-camera</span>
+                  <strong>
+                    {performanceMultiCameraAnalysis
+                      ? `${Math.round(performanceMultiCameraAnalysis.confidence * 100)}% confidence`
+                      : `${performanceMultiCameraAnalyses.length} package(s)`}
+                  </strong>
+                  <p>
+                    {performanceMultiCameraAnalysis
+                      ? `${performanceMultiCameraAnalysis.camera_count} angle(s) · ${performanceMultiCameraAnalysis.fused_player_count} fused player(s) · ${performanceMultiCameraAnalysis.tracking_run_count} tracked`
+                      : "Fuse primary, tactical, sideline, provider, and endline camera runs into one coach review package."}
                   </p>
                 </article>
                 <article className="mini-card">
@@ -27163,6 +27258,9 @@ export default function HomePage() {
                           setPerformanceMatchAnalysisReport(
                             performanceMatchAnalysisReports.find((report) => report.video_asset_id === video.id) ?? null
                           );
+                          setPerformanceMultiCameraAnalysis(
+                            performanceMultiCameraAnalyses.find((analysis) => analysis.primary_video_asset_id === video.id) ?? null
+                          );
                         }} disabled={busyAction !== null}>Select</button>
                       </span>
                     </article>
@@ -27213,6 +27311,69 @@ export default function HomePage() {
                           </button>
                         ) : null}
                       </span>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+              {performanceMultiCameraAnalysis ? (
+                <div className="task-list">
+                  <article className="task-card">
+                    <div>
+                      <strong>{performanceMultiCameraAnalysis.analysis_label}</strong>
+                      <span>
+                        {performanceMultiCameraAnalysis.camera_count} camera angle(s) ·{" "}
+                        {performanceMultiCameraAnalysis.tracking_run_count} tracked ·{" "}
+                        {performanceMultiCameraAnalysis.fused_sample_count} fused samples
+                      </span>
+                      <small>
+                        {performanceMultiCameraAnalysis.status.replaceAll("_", " ")} ·{" "}
+                        {Math.round(performanceMultiCameraAnalysis.confidence * 100)}% confidence ·{" "}
+                        {performanceMultiCameraAnalysis.synchronization_policy.replaceAll("_", " ")}
+                      </small>
+                    </div>
+                    <span>
+                      <button type="button" onClick={createPerformanceMultiCameraAnalysis} disabled={busyAction !== null}>Refresh</button>
+                    </span>
+                  </article>
+                  {performanceMultiCameraAnalysis.camera_package.slice(0, 4).map((camera, index) => (
+                    <article key={`multi-camera-${String(camera.video_asset_id ?? index)}`} className="task-card">
+                      <div>
+                        <strong>
+                          {String(camera.camera_label ?? `Camera ${index + 1}`)} ·{" "}
+                          {String(camera.camera_role ?? "camera").replaceAll("_", " ")}
+                        </strong>
+                        <span>
+                          {Number(camera.sample_count ?? 0)} samples · {Number(camera.player_count ?? 0)} players ·{" "}
+                          {Math.round(Number(camera.tracking_quality_score ?? 0) * 100)}% tracking
+                        </span>
+                        <small>
+                          {String(camera.filename ?? "video")} · offset {Number(camera.sync_offset_seconds ?? 0).toFixed(2)}s ·{" "}
+                          {String(camera.readiness_level ?? "needs review").replaceAll("_", " ")}
+                        </small>
+                      </div>
+                    </article>
+                  ))}
+                  <article className="task-card">
+                    <div>
+                      <strong>Fused match evidence</strong>
+                      <span>
+                        {Math.round(Number(performanceMultiCameraAnalysis.fused_summary.best_estimated_total_distance_m ?? 0))}m best distance ·{" "}
+                        {Math.round(Number(performanceMultiCameraAnalysis.fused_summary.best_high_speed_distance_m ?? 0))}m high-speed ·{" "}
+                        {Number(performanceMultiCameraAnalysis.fused_summary.recognized_action_event_count ?? 0)} action(s)
+                      </span>
+                      <small>
+                        roles {(performanceMultiCameraAnalysis.fused_summary.role_coverage as string[] | undefined)?.join(", ") ?? "pending"} ·{" "}
+                        sync {Math.round(Number(performanceMultiCameraAnalysis.fused_summary.synchronization_score ?? 0) * 100)}%
+                      </small>
+                    </div>
+                  </article>
+                  {performanceMultiCameraAnalysis.recommendations.slice(0, 3).map((recommendation, index) => (
+                    <article key={`multi-camera-rec-${index}`} className="task-card">
+                      <div>
+                        <strong>Multi-camera recommendation</strong>
+                        <span>{recommendation}</span>
+                        <small>{performanceMultiCameraAnalysis.model_policy}</small>
+                      </div>
                     </article>
                   ))}
                 </div>

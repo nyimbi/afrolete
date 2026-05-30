@@ -4209,6 +4209,161 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     assert any(card["track_id"] == "home-9" for card in report["player_cards"])
 
 
+def test_multi_camera_match_analysis_fuses_tracked_camera_angles(client, identity_headers) -> None:
+    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    camera_assets = []
+    for label in ["Broadcast primary", "Tactical endline"]:
+        upload_response = client.post(
+            "/api/v1/performance/scouting/videos",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "team_id": team["id"],
+                "opponent_name": "Multi Cam FC",
+                "sport": "football",
+                "filename": f"{label.lower().replace(' ', '-')}.mp4",
+                "content_type": "video/mp4",
+                "content_base64": base64.b64encode(f"{label} football footage".encode()).decode(),
+                "clip_label": label,
+                "match_context": "Two synchronized football match camera angles.",
+                "analysis_focus": "multi-camera tracking fusion and coach guidance",
+            },
+        )
+        assert upload_response.status_code == 201
+        camera_assets.append(upload_response.json())
+
+    tracking_runs = []
+    for index, video_asset in enumerate(camera_assets):
+        import_response = client.post(
+            f"/api/v1/performance/scouting/videos/{video_asset['id']}/tracking-provider-imports",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "source_provider": "multicam_bytetrack_provider",
+                "model_policy": "multicam-bytetrack-provider-import-v1",
+                "replace_existing": True,
+                "provider_metadata": {"camera_id": f"camera-{index + 1}", "tracker": "bytetrack"},
+                "frames": [
+                    {
+                        "timestamp_seconds": 0,
+                        "frame_index": 0,
+                        "detections": [
+                            {
+                                "track_id": "home-9",
+                                "team_label": "Home",
+                                "player_label": "Forward",
+                                "jersey_number": "9",
+                                "foot_x_percent": 12 + index,
+                                "foot_y_percent": 52,
+                                "confidence": 0.94,
+                            },
+                            {
+                                "track_id": "away-4",
+                                "team_label": "Opponent",
+                                "player_label": "Center back",
+                                "jersey_number": "4",
+                                "foot_x_percent": 55 + index,
+                                "foot_y_percent": 56,
+                                "confidence": 0.91,
+                            },
+                            {
+                                "track_id": "ball",
+                                "object_type": "ball",
+                                "x_percent": 14 + index,
+                                "y_percent": 52,
+                                "confidence": 0.85,
+                            },
+                        ],
+                    },
+                    {
+                        "timestamp_seconds": 1,
+                        "frame_index": 25,
+                        "detections": [
+                            {
+                                "track_id": "home-9",
+                                "team_label": "Home",
+                                "player_label": "Forward",
+                                "jersey_number": "9",
+                                "foot_x_percent": 26 + index,
+                                "foot_y_percent": 51,
+                                "confidence": 0.95,
+                            },
+                            {
+                                "track_id": "away-4",
+                                "team_label": "Opponent",
+                                "player_label": "Center back",
+                                "jersey_number": "4",
+                                "foot_x_percent": 62 + index,
+                                "foot_y_percent": 55,
+                                "confidence": 0.92,
+                            },
+                            {
+                                "track_id": "ball",
+                                "object_type": "ball",
+                                "x_percent": 28 + index,
+                                "y_percent": 51,
+                                "confidence": 0.86,
+                            },
+                        ],
+                    },
+                ],
+            },
+        )
+        assert import_response.status_code == 201
+        tracking_runs.append(import_response.json())
+
+    analysis_response = client.post(
+        "/api/v1/performance/scouting/multi-camera-analyses",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "analysis_label": "Two-angle coach review",
+            "sport": "football",
+            "synchronization_policy": "timestamp_offset",
+            "camera_videos": [
+                {
+                    "video_asset_id": camera_assets[0]["id"],
+                    "tracking_run_id": tracking_runs[0]["id"],
+                    "camera_label": "Main stand",
+                    "camera_role": "primary",
+                    "sync_offset_seconds": 0,
+                    "angle_confidence": 0.88,
+                },
+                {
+                    "video_asset_id": camera_assets[1]["id"],
+                    "tracking_run_id": tracking_runs[1]["id"],
+                    "camera_label": "Endline tactical",
+                    "camera_role": "endline",
+                    "sync_offset_seconds": 0.2,
+                    "angle_confidence": 0.84,
+                },
+            ],
+        },
+    )
+    assert analysis_response.status_code == 201
+    analysis = analysis_response.json()
+    assert analysis["model_policy"] == "afrolete-multicamera-match-analysis-v1"
+    assert analysis["camera_count"] == 2
+    assert analysis["tracking_run_count"] == 2
+    assert analysis["fused_player_count"] == 2
+    assert analysis["fused_sample_count"] == 12
+    assert analysis["confidence"] > 0.6
+    assert {camera["camera_role"] for camera in analysis["camera_package"]} == {"primary", "endline"}
+    assert analysis["fused_summary"]["best_estimated_total_distance_m"] > 0
+    assert analysis["fused_summary"]["ball_sample_count"] == 4
+    assert "endline" in analysis["fused_summary"]["role_coverage"]
+    assert any("best-distance estimate" in item for item in analysis["recommendations"])
+    assert any("tactical" in warning for warning in analysis["fused_summary"]["quality_warnings"])
+
+    analyses = client.get(
+        f"/api/v1/performance/scouting/multi-camera-analyses?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert analyses.status_code == 200
+    assert analyses.json()[0]["id"] == analysis["id"]
+
+
 def test_match_tracking_provider_webhook_is_signed_and_replay_safe(
     client,
     identity_headers,

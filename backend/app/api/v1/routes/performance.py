@@ -69,6 +69,8 @@ from app.schemas.performance import (
     PerformanceMatchTrackingIdentityReviewCreate,
     PerformanceMatchTrackingIdentityReviewRead,
     PerformanceMatchTrackingIdentityReviewResultRead,
+    PerformanceMultiCameraAnalysisCreate,
+    PerformanceMultiCameraAnalysisRead,
     PerformanceMatchTrackingProviderIngestEventRead,
     PerformanceMatchTrackingProviderIngestReprocessCreate,
     PerformanceMatchTrackingProviderImportCreate,
@@ -135,6 +137,7 @@ from app.services.performance import (
     create_match_tracking_provider_import,
     create_match_tracking_run,
     create_match_pitch_calibration,
+    create_performance_multi_camera_analysis,
     create_performance_match_analysis_report,
     create_movement_reference_profile,
     create_observation,
@@ -174,9 +177,11 @@ from app.services.performance import (
     list_match_tracking_provider_ingest_events,
     list_match_tracking_runs,
     list_match_pitch_calibrations,
+    list_performance_multi_camera_analyses,
     list_performance_match_analysis_reports,
     match_pitch_calibration_read,
     match_analysis_report_read,
+    multi_camera_analysis_read,
     match_tracking_provider_ingest_event_read,
     match_tracking_identity_review_read,
     highlight_reel_read,
@@ -1287,6 +1292,44 @@ async def reprocess_match_tracking_provider_ingest_event_route(
             authz,
         )
     )
+
+
+@router.post(
+    "/scouting/multi-camera-analyses",
+    response_model=PerformanceMultiCameraAnalysisRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_performance_multi_camera_analysis_route(
+    payload: PerformanceMultiCameraAnalysisCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMultiCameraAnalysisRead:
+    return PerformanceMultiCameraAnalysisRead(
+        **multi_camera_analysis_read(
+            await create_performance_multi_camera_analysis(db, identity, payload, authz)
+        )
+    )
+
+
+@router.get("/scouting/multi-camera-analyses", response_model=list[PerformanceMultiCameraAnalysisRead])
+async def list_performance_multi_camera_analyses_route(
+    organization_id: UUID = Query(),
+    video_asset_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMultiCameraAnalysisRead]:
+    return [
+        PerformanceMultiCameraAnalysisRead(**multi_camera_analysis_read(analysis))
+        for analysis in await list_performance_multi_camera_analyses(
+            db,
+            identity,
+            organization_id,
+            authz,
+            video_asset_id=video_asset_id,
+        )
+    ]
 
 
 @router.post(

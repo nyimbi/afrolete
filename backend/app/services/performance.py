@@ -70,6 +70,7 @@ from app.models.performance import (
     PerformanceMatchTrackingProviderIngestEvent,
     PerformanceMatchTrackingRun,
     PerformanceMatchTrackingSample,
+    PerformanceMultiCameraAnalysis,
     PerformanceMetricDefinition,
     PerformanceForecastValidationRun,
     PerformanceMovementReferenceProfile,
@@ -114,6 +115,7 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkDatasetCreate,
     PerformanceModelExtractionBenchmarkRunCreate,
     PerformanceMatchPitchCalibrationCreate,
+    PerformanceMultiCameraAnalysisCreate,
     PerformanceMatchTrackingIdentityReviewCreate,
     PerformanceMatchTrackingProviderDetection,
     PerformanceMatchTrackingProviderFrame,
@@ -1747,6 +1749,304 @@ def match_analysis_report_read(report: PerformanceMatchAnalysisReport) -> dict[s
         "generated_at": report.generated_at,
         "created_at": report.created_at,
     }
+
+
+async def create_performance_multi_camera_analysis(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: PerformanceMultiCameraAnalysisCreate,
+    authz: AuthorizationService,
+) -> PerformanceMultiCameraAnalysis:
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    camera_entries: list[dict[str, object]] = []
+    tracking_payloads: list[dict[str, object]] = []
+    seen_video_ids: set[UUID] = set()
+    for index, camera in enumerate(payload.camera_videos):
+        if camera.video_asset_id in seen_video_ids:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Each multi-camera analysis camera must reference a different video asset",
+            )
+        seen_video_ids.add(camera.video_asset_id)
+        video_asset = await get_opposition_scouting_video_asset(db, camera.video_asset_id)
+        if video_asset.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+        tracking_run = (
+            await get_match_tracking_run(db, camera.tracking_run_id)
+            if camera.tracking_run_id is not None
+            else await latest_match_tracking_run(db, video_asset.id)
+        )
+        tracking: dict[str, object] | None = None
+        if tracking_run is not None:
+            if tracking_run.organization_id != payload.organization_id or tracking_run.video_asset_id != video_asset.id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Tracking run does not belong to the supplied camera video",
+                )
+            tracking = await match_tracking_run_read(db, tracking_run)
+            tracking_payloads.append(tracking)
+        camera_entries.append(
+            build_multi_camera_entry(
+                video_asset,
+                camera_index=index + 1,
+                camera_label=camera.camera_label,
+                camera_role=camera.camera_role,
+                sync_offset_seconds=camera.sync_offset_seconds,
+                angle_confidence=camera.angle_confidence,
+                tracking=tracking,
+            )
+        )
+    fused_summary, recommendations, confidence = build_multi_camera_fusion(
+        camera_entries,
+        tracking_payloads,
+        synchronization_policy=payload.synchronization_policy,
+    )
+    now = datetime.now(UTC)
+    analysis = PerformanceMultiCameraAnalysis(
+        organization_id=payload.organization_id,
+        team_id=payload.team_id,
+        event_id=payload.event_id,
+        competition_id=payload.competition_id,
+        primary_video_asset_id=payload.camera_videos[0].video_asset_id,
+        created_by_person_id=identity.person_id,
+        analysis_label=payload.analysis_label.strip(),
+        sport=payload.sport.strip().lower(),
+        synchronization_policy=payload.synchronization_policy.strip().lower(),
+        status="completed" if tracking_payloads else "needs_tracking",
+        camera_count=len(camera_entries),
+        tracking_run_count=len(tracking_payloads),
+        fused_player_count=int(fused_summary["fused_player_count"]),
+        fused_sample_count=int(fused_summary["fused_sample_count"]),
+        confidence=confidence,
+        camera_package_json=json.dumps(camera_entries, default=str),
+        fused_summary_json=json.dumps(fused_summary, default=str),
+        recommendations_json=json.dumps(recommendations, default=str),
+        model_policy="afrolete-multicamera-match-analysis-v1",
+        analyzed_at=now,
+    )
+    db.add(analysis)
+    await db.commit()
+    await db.refresh(analysis)
+    return analysis
+
+
+async def list_performance_multi_camera_analyses(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    video_asset_id: UUID | None = None,
+) -> list[PerformanceMultiCameraAnalysis]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceMultiCameraAnalysis).where(
+        PerformanceMultiCameraAnalysis.organization_id == organization_id
+    )
+    if video_asset_id is not None:
+        statement = statement.where(PerformanceMultiCameraAnalysis.primary_video_asset_id == video_asset_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(PerformanceMultiCameraAnalysis.analyzed_at.desc()).limit(50)
+            )
+        ).all()
+    )
+
+
+def multi_camera_analysis_read(analysis: PerformanceMultiCameraAnalysis) -> dict[str, object]:
+    return {
+        "id": analysis.id,
+        "organization_id": analysis.organization_id,
+        "team_id": analysis.team_id,
+        "event_id": analysis.event_id,
+        "competition_id": analysis.competition_id,
+        "primary_video_asset_id": analysis.primary_video_asset_id,
+        "created_by_person_id": analysis.created_by_person_id,
+        "analysis_label": analysis.analysis_label,
+        "sport": analysis.sport,
+        "synchronization_policy": analysis.synchronization_policy,
+        "status": analysis.status,
+        "camera_count": analysis.camera_count,
+        "tracking_run_count": analysis.tracking_run_count,
+        "fused_player_count": analysis.fused_player_count,
+        "fused_sample_count": analysis.fused_sample_count,
+        "confidence": analysis.confidence,
+        "camera_package": decode_json_list(analysis.camera_package_json),
+        "fused_summary": decode_json_dict(analysis.fused_summary_json),
+        "recommendations": decode_string_list(analysis.recommendations_json),
+        "model_policy": analysis.model_policy,
+        "analyzed_at": analysis.analyzed_at,
+        "created_at": analysis.created_at,
+    }
+
+
+def build_multi_camera_entry(
+    video_asset: OppositionScoutingVideoAsset,
+    *,
+    camera_index: int,
+    camera_label: str,
+    camera_role: str,
+    sync_offset_seconds: float,
+    angle_confidence: float,
+    tracking: dict[str, object] | None,
+) -> dict[str, object]:
+    return {
+        "camera_index": camera_index,
+        "video_asset_id": str(video_asset.id),
+        "filename": video_asset.filename,
+        "clip_label": video_asset.clip_label,
+        "opponent_name": video_asset.opponent_name,
+        "camera_label": camera_label.strip(),
+        "camera_role": camera_role.strip().lower(),
+        "sync_offset_seconds": sync_offset_seconds,
+        "angle_confidence": round(angle_confidence, 3),
+        "tracking_run_id": str(tracking["id"]) if tracking else None,
+        "tracking_status": "tracked" if tracking else "missing_tracking",
+        "source_provider": str(tracking["source_provider"]) if tracking else None,
+        "model_policy": str(tracking["model_policy"]) if tracking else None,
+        "sample_count": int(tracking["sample_count"]) if tracking else 0,
+        "player_count": int(tracking["player_count"]) if tracking else 0,
+        "tracking_quality_score": float(tracking["tracking_quality_score"]) if tracking else 0.0,
+        "readiness_level": str(tracking["readiness_level"]) if tracking else "needs_tracking",
+        "total_distance_m": float(tracking["total_distance_m"]) if tracking else 0.0,
+        "max_speed_mps": float(tracking["max_speed_mps"]) if tracking else 0.0,
+        "ball_sample_count": int(
+            (tracking.get("ball_tracking_metrics", {}) if tracking else {}).get("ball_sample_count") or 0
+        ),
+        "quality_warnings": list(tracking.get("quality_warnings", [])) if tracking else [
+            "No tracking run is attached to this camera angle yet."
+        ],
+    }
+
+
+def build_multi_camera_fusion(
+    camera_entries: list[dict[str, object]],
+    tracking_payloads: list[dict[str, object]],
+    *,
+    synchronization_policy: str,
+) -> tuple[dict[str, object], list[str], float]:
+    roles = sorted({str(camera["camera_role"]) for camera in camera_entries})
+    tracking_quality_scores = [float(camera["tracking_quality_score"]) for camera in camera_entries]
+    angle_scores = [float(camera["angle_confidence"]) for camera in camera_entries]
+    sync_offsets = [abs(float(camera["sync_offset_seconds"])) for camera in camera_entries]
+    player_keys: set[str] = set()
+    best_player_metrics: dict[str, dict[str, object]] = {}
+    for tracking in tracking_payloads:
+        for metric in tracking.get("player_metrics", []):
+            if not isinstance(metric, dict):
+                continue
+            key = multi_camera_player_key(metric)
+            player_keys.add(key)
+            current = best_player_metrics.get(key)
+            if current is None or float(metric.get("tracking_quality_score") or 0.0) > float(
+                current.get("tracking_quality_score") or 0.0
+            ):
+                best_player_metrics[key] = metric
+    tracked_camera_count = len(tracking_payloads)
+    camera_count = len(camera_entries)
+    fused_sample_count = sum(int(tracking.get("sample_count") or 0) for tracking in tracking_payloads)
+    best_total_distance_m = max(
+        [float(tracking.get("total_distance_m") or 0.0) for tracking in tracking_payloads],
+        default=0.0,
+    )
+    best_high_speed_distance_m = max(
+        [float(tracking.get("high_speed_distance_m") or 0.0) for tracking in tracking_payloads],
+        default=0.0,
+    )
+    max_speed_mps = max([float(tracking.get("max_speed_mps") or 0.0) for tracking in tracking_payloads], default=0.0)
+    action_event_count = sum(
+        int((tracking.get("action_recognition_metrics") or {}).get("event_count") or 0)
+        for tracking in tracking_payloads
+        if isinstance(tracking.get("action_recognition_metrics"), dict)
+    )
+    ball_sample_count = sum(
+        int((tracking.get("ball_tracking_metrics") or {}).get("ball_sample_count") or 0)
+        for tracking in tracking_payloads
+        if isinstance(tracking.get("ball_tracking_metrics"), dict)
+    )
+    average_tracking_quality = (
+        sum(tracking_quality_scores) / len(tracking_quality_scores) if tracking_quality_scores else 0.0
+    )
+    average_angle_confidence = sum(angle_scores) / len(angle_scores) if angle_scores else 0.0
+    average_sync_offset = sum(sync_offsets) / len(sync_offsets) if sync_offsets else 0.0
+    sync_score = max(0.35, 1.0 - min(average_sync_offset / 12.0, 0.65))
+    coverage_score = min(1.0, (tracked_camera_count / max(camera_count, 1)) * (0.75 + 0.08 * camera_count))
+    confidence = round(
+        max(0.0, min(1.0, ((average_tracking_quality + average_angle_confidence) / 2.0) * sync_score * coverage_score)),
+        3,
+    )
+    fused_summary = {
+        "camera_count": camera_count,
+        "tracked_camera_count": tracked_camera_count,
+        "fused_player_count": len(player_keys),
+        "fused_sample_count": fused_sample_count,
+        "best_estimated_total_distance_m": round(best_total_distance_m, 2),
+        "best_high_speed_distance_m": round(best_high_speed_distance_m, 2),
+        "max_speed_mps": round(max_speed_mps, 2),
+        "ball_sample_count": ball_sample_count,
+        "recognized_action_event_count": action_event_count,
+        "role_coverage": roles,
+        "synchronization_policy": synchronization_policy.strip().lower(),
+        "average_sync_offset_seconds": round(average_sync_offset, 3),
+        "synchronization_score": round(sync_score, 3),
+        "coverage_score": round(coverage_score, 3),
+        "average_tracking_quality": round(average_tracking_quality, 3),
+        "average_angle_confidence": round(average_angle_confidence, 3),
+        "best_player_metrics": list(best_player_metrics.values())[:20],
+        "quality_warnings": multi_camera_quality_warnings(camera_entries, roles, confidence),
+    }
+    return fused_summary, multi_camera_recommendations(fused_summary, roles, camera_count, tracked_camera_count), confidence
+
+
+def multi_camera_player_key(metric: dict[str, object]) -> str:
+    team_label = str(metric.get("team_label") or "").strip().lower()
+    jersey_number = str(metric.get("jersey_number") or "").strip().lower()
+    player_label = str(metric.get("player_label") or "").strip().lower()
+    if team_label and jersey_number:
+        return f"{team_label}:#{jersey_number}"
+    if team_label and player_label and not player_label.startswith("track "):
+        return f"{team_label}:{player_label}"
+    return str(metric.get("track_id") or player_label or "unknown")
+
+
+def multi_camera_quality_warnings(
+    camera_entries: list[dict[str, object]],
+    roles: list[str],
+    confidence: float,
+) -> list[str]:
+    warnings: list[str] = []
+    if any(str(camera["tracking_status"]) != "tracked" for camera in camera_entries):
+        warnings.append("One or more camera angles are not tracked yet; fused metrics use only tracked angles.")
+    if "tactical" not in roles and "drone" not in roles:
+        warnings.append("No elevated tactical angle is attached, so team-shape and off-ball context may be incomplete.")
+    if not {"goal", "endline"} & set(roles):
+        warnings.append("No goal/endline camera is attached, so shot and penalty-area events need extra review.")
+    if confidence < 0.7:
+        warnings.append("Multi-camera confidence is below coach-ready threshold; review synchronization and identities.")
+    return warnings
+
+
+def multi_camera_recommendations(
+    fused_summary: dict[str, object],
+    roles: list[str],
+    camera_count: int,
+    tracked_camera_count: int,
+) -> list[str]:
+    recommendations: list[str] = []
+    if tracked_camera_count < camera_count:
+        recommendations.append("Run match tracking on every camera angle before relying on fused player metrics.")
+    if "tactical" not in roles and "drone" not in roles:
+        recommendations.append("Add an elevated tactical camera for formation, compactness, and off-ball coaching.")
+    if not {"goal", "endline"} & set(roles):
+        recommendations.append("Add a goal or endline camera when shot quality and penalty-box defending matter.")
+    if float(fused_summary["synchronization_score"]) < 0.8:
+        recommendations.append("Tighten timestamp offsets or provider timecode sync before publishing player guidance.")
+    if float(fused_summary["best_estimated_total_distance_m"]) > 0:
+        recommendations.append(
+            "Use the best-distance estimate for coach review; avoid summing camera totals because angles may duplicate tracks."
+        )
+    if not recommendations:
+        recommendations.append("Multi-camera package is ready for coach tactical review and player guidance preparation.")
+    return recommendations
 
 
 async def review_match_tracking_player_guidance(

@@ -850,6 +850,54 @@ class PerformanceMatchTrackingProviderIngestReprocessCreate(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class PerformanceMultiCameraVideoCreate(BaseModel):
+    video_asset_id: UUID
+    tracking_run_id: UUID | None = None
+    camera_label: str = Field(min_length=2, max_length=120)
+    camera_role: str = Field(
+        default="primary",
+        pattern="^(primary|tactical|goal|sideline|endline|drone|provider)$",
+    )
+    sync_offset_seconds: float = Field(default=0.0, ge=-900, le=900)
+    angle_confidence: float = Field(default=0.75, ge=0, le=1)
+
+
+class PerformanceMultiCameraAnalysisCreate(BaseModel):
+    organization_id: UUID
+    team_id: UUID | None = None
+    event_id: UUID | None = None
+    competition_id: UUID | None = None
+    analysis_label: str = Field(default="Multi-camera match review", min_length=2, max_length=180)
+    sport: str = Field(default="football", min_length=2, max_length=80)
+    synchronization_policy: str = Field(default="timestamp_offset", min_length=2, max_length=80)
+    camera_videos: list[PerformanceMultiCameraVideoCreate] = Field(min_length=2, max_length=12)
+
+
+class PerformanceMultiCameraAnalysisRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    team_id: UUID | None
+    event_id: UUID | None
+    competition_id: UUID | None
+    primary_video_asset_id: UUID
+    created_by_person_id: UUID | None
+    analysis_label: str
+    sport: str
+    synchronization_policy: str
+    status: str
+    camera_count: int
+    tracking_run_count: int
+    fused_player_count: int
+    fused_sample_count: int
+    confidence: float
+    camera_package: list[dict[str, Any]]
+    fused_summary: dict[str, Any]
+    recommendations: list[str]
+    model_policy: str
+    analyzed_at: datetime
+    created_at: datetime
+
+
 class PerformanceMatchTrackingIdentityReviewCreate(BaseModel):
     track_id: str = Field(min_length=1, max_length=120)
     person_id: UUID | None = None

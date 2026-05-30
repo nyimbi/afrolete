@@ -468,6 +468,37 @@ class PerformanceMatchTrackingRun(IdMixin, TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class PerformanceMultiCameraAnalysis(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_multi_camera_analyses"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    competition_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("competitions.id"), index=True)
+    primary_video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    analysis_label: Mapped[str] = mapped_column(String(180), nullable=False)
+    sport: Mapped[str] = mapped_column(String(80), default="football", nullable=False, index=True)
+    synchronization_policy: Mapped[str] = mapped_column(String(80), default="timestamp_offset", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="completed", nullable=False, index=True)
+    camera_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    tracking_run_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    fused_player_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    fused_sample_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    camera_package_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    fused_summary_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    recommendations_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    model_policy: Mapped[str] = mapped_column(
+        String(180), default="afrolete-multicamera-match-analysis-v1", nullable=False
+    )
+    analyzed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class PerformanceMatchTrackingProviderIngestEvent(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_match_tracking_provider_ingest_events"
     __table_args__ = (

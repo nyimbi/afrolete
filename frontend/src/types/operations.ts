@@ -7246,6 +7246,51 @@ export type PerformanceMatchTrackingProviderIngestReprocessCreate = {
   notes?: string | null;
 };
 
+export type PerformanceMultiCameraVideoCreate = {
+  video_asset_id: UUID;
+  tracking_run_id?: UUID | null;
+  camera_label: string;
+  camera_role?: "primary" | "tactical" | "goal" | "sideline" | "endline" | "drone" | "provider";
+  sync_offset_seconds?: number;
+  angle_confidence?: number;
+};
+
+export type PerformanceMultiCameraAnalysisCreate = {
+  organization_id: UUID;
+  team_id?: UUID | null;
+  event_id?: UUID | null;
+  competition_id?: UUID | null;
+  analysis_label?: string;
+  sport?: string;
+  synchronization_policy?: string;
+  camera_videos: PerformanceMultiCameraVideoCreate[];
+};
+
+export type PerformanceMultiCameraAnalysisRead = {
+  id: UUID;
+  organization_id: UUID;
+  team_id: UUID | null;
+  event_id: UUID | null;
+  competition_id: UUID | null;
+  primary_video_asset_id: UUID;
+  created_by_person_id: UUID | null;
+  analysis_label: string;
+  sport: string;
+  synchronization_policy: string;
+  status: string;
+  camera_count: number;
+  tracking_run_count: number;
+  fused_player_count: number;
+  fused_sample_count: number;
+  confidence: number;
+  camera_package: Record<string, unknown>[];
+  fused_summary: Record<string, unknown>;
+  recommendations: string[];
+  model_policy: string;
+  analyzed_at: string;
+  created_at: string;
+};
+
 export type PerformanceMatchTrackingProviderWebhookRead = {
   ingest_event_id: UUID;
   organization_id: UUID;
