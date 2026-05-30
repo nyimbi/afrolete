@@ -1222,6 +1222,7 @@ athlete-development platform:
 | 537 - Highlight curation UI visibility | Complete | Frontend typecheck; diff check | The operations console now surfaces curation provenance directly on selected highlight reels, export artifacts, export history cards, and clip cards, showing curated/featured/approved counts, rejected-moment exclusion, and per-clip coach-featured/approved/AI-detected labels without forcing staff to inspect raw JSON. |
 | 538 - Player highlight reel inbox UI | Complete | Frontend typecheck; diff check | The frontend now loads recipient-scoped `/performance/my-highlight-reels` data, shows player-inbox highlight reel cards with delivery/read state, share policy, export format, and curation counts, and provides an authenticated Open action for the recipient-scoped export download path. |
 | 539 - Shared highlight reel feedback follow-ups | Complete | Focused highlight-reel feedback test; backend lint; frontend typecheck; Alembic heads; diff check | Shared highlight reel feedback now supports coach follow-up messages through the communications ledger, persists follow-up metadata on feedback records, exposes reply state in coach engagement summaries, and gives player/family portals direct acknowledgement/help controls plus visible coach replies. |
+| 540 - Club-managed member dues subscriptions | Complete | Focused organization dues test; backend lint; frontend typecheck; Alembic heads; diff check | Clubs, schools, and associations can now manage their own member subscription plans, assign dues to person/organization/team members, and record M-Pesa/manual/provider payment references against those subscriptions without mixing club receivables into AfroLete SaaS hosting subscriptions; the operations console exposes dues plan creation, selected-member assignment, outstanding balances, and payment recording. |
 
 ## Capability Coverage
 
@@ -1267,6 +1268,7 @@ Latest slices:
 - Player match-guidance cards now show coach follow-up messages and timestamps after a coach replies to an athlete help request, so the player guidance loop closes on the same card that originated the request.
 - Family-copied match-guidance cards now accept guardian feedback and help requests, queue Training Strategy Agent review tasks, appear in coach engagement summaries, and show coach replies back inside the family portal card.
 - Shared highlight reels now close the same loop: players and guardians can acknowledge or ask for help, coaches can reply from highlight engagement summaries, and player/family cards show coach follow-up metadata.
+- Club-managed member dues now have separate plans, member subscriptions, and M-Pesa/manual payment tracking so tenant clubs can manage receivables without confusing them with AfroLete platform hosting subscriptions.
 
 ## Next Actions
 

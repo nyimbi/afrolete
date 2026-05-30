@@ -758,6 +758,88 @@ class MembershipRead(BaseModel):
     status: str
 
 
+class MemberSubscriptionPlanCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    description: str | None = Field(default=None, max_length=4000)
+    member_role: str | None = Field(default=None, max_length=80)
+    amount: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="KES", min_length=3, max_length=3)
+    billing_interval: str = Field(default="monthly", pattern="^(weekly|monthly|quarterly|term|season|annual|one_time)$")
+    due_day: int | None = Field(default=None, ge=1, le=31)
+    grace_period_days: int = Field(default=7, ge=0, le=120)
+    benefits: str | None = Field(default=None, max_length=4000)
+
+
+class MemberSubscriptionPlanRead(MemberSubscriptionPlanCreate):
+    id: UUID
+    organization_id: UUID
+    status: str
+
+
+class MemberSubscriptionCreate(BaseModel):
+    plan_id: UUID
+    membership_id: UUID | None = None
+    subject_type: MemberSubjectType | None = None
+    subject_id: UUID | None = None
+    starts_on: date
+    current_period_start: date
+    current_period_end: date
+    next_due_on: date | None = None
+    status: str = Field(default="active", pattern="^(trialing|active|past_due|paused|cancelled)$")
+    balance_amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    external_reference: str | None = Field(default=None, max_length=180)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class MemberSubscriptionRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    plan_id: UUID
+    plan_name: str
+    membership_id: UUID | None
+    subject_type: MemberSubjectType
+    subject_id: UUID
+    subject_label: str | None = None
+    starts_on: date
+    current_period_start: date
+    current_period_end: date
+    next_due_on: date | None
+    status: str
+    balance_amount: Decimal
+    currency: str
+    external_reference: str | None
+    notes: str | None
+
+
+class MemberSubscriptionPaymentCreate(BaseModel):
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    provider: str = Field(default="mpesa", min_length=2, max_length=80)
+    method: str = Field(default="mobile_money", min_length=2, max_length=80)
+    external_payment_id: str | None = Field(default=None, max_length=180)
+    received_at: datetime | None = None
+    status: str = Field(default="succeeded", pattern="^(succeeded|pending|failed|cancelled)$")
+    raw_reference: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class MemberSubscriptionPaymentRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    subscription_id: UUID
+    amount: Decimal
+    currency: str
+    provider: str
+    method: str
+    external_payment_id: str | None
+    received_at: datetime
+    status: str
+    raw_reference: str | None
+    notes: str | None
+    subscription_balance_amount: Decimal
+    subscription_status: str
+
+
 class CommitteeCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     level: AssociationLevel | None = None

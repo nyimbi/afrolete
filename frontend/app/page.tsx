@@ -338,6 +338,9 @@ import type {
   MessageDeliveryStatus,
   MessageRecipientRead,
   MembershipRead,
+  MemberSubscriptionPaymentRead,
+  MemberSubscriptionPlanRead,
+  MemberSubscriptionRead,
   MetricCategory,
   MetricDefinitionRead,
   MetricVerificationStatus,
@@ -1819,6 +1822,9 @@ export default function HomePage() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [organizations, setOrganizations] = useState<OrganizationRead[]>([]);
   const [teams, setTeams] = useState<TeamRead[]>([]);
+  const [memberSubscriptionPlans, setMemberSubscriptionPlans] = useState<MemberSubscriptionPlanRead[]>([]);
+  const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
+  const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
   const [events, setEvents] = useState<EventRead[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
   const [attendancePolicy, setAttendancePolicy] = useState<EventAttendancePolicyRead | null>(null);
@@ -2443,6 +2449,7 @@ export default function HomePage() {
   const [selectedSubscriptionId, setSelectedSubscriptionId] = useState("");
   const [selectedUsageMeterId, setSelectedUsageMeterId] = useState("");
   const [selectedSaasInvoiceId, setSelectedSaasInvoiceId] = useState("");
+  const [selectedMemberSubscriptionId, setSelectedMemberSubscriptionId] = useState("");
   const [emergencyAlert, setEmergencyAlert] = useState<EmergencyActivationAlertRead | null>(null);
   const [selectedEquipmentFile, setSelectedEquipmentFile] = useState<File | null>(null);
   const [infrastructureStatus, setInfrastructureStatus] = useState<InfrastructureStatus | null>(null);
@@ -2473,6 +2480,30 @@ export default function HomePage() {
     age_group: "U16",
     gender_category: "open",
     season_label: "2026"
+  });
+  const [memberDuesPlanForm, setMemberDuesPlanForm] = useState({
+    name: "Senior player monthly dues",
+    member_role: "athlete",
+    amount: "1500.00",
+    currency: "KES",
+    billing_interval: "monthly",
+    due_day: 5,
+    grace_period_days: 10,
+    benefits: "Training access, league registration, member voting eligibility."
+  });
+  const [memberDuesSubscriptionForm, setMemberDuesSubscriptionForm] = useState({
+    subject_id: "",
+    starts_on: "2026-06-01",
+    current_period_start: "2026-06-01",
+    current_period_end: "2026-06-30",
+    next_due_on: "2026-06-05",
+    external_reference: "club-dues-2026-06"
+  });
+  const [memberDuesPaymentForm, setMemberDuesPaymentForm] = useState({
+    amount: "500.00",
+    provider: "mpesa",
+    method: "stk_push",
+    external_payment_id: "MPESA-DEMO-001"
   });
   const [athleteForm, setAthleteForm] = useState({
     display_name: "Amani Otieno",
@@ -3846,6 +3877,18 @@ export default function HomePage() {
     },
     []
   );
+
+  const loadMemberDues = useCallback(async (organizationId: string) => {
+    const [plans, subscriptions] = await Promise.all([
+      apiRequest<MemberSubscriptionPlanRead[]>(`/organizations/${organizationId}/member-subscription-plans`),
+      apiRequest<MemberSubscriptionRead[]>(`/organizations/${organizationId}/member-subscriptions`)
+    ]);
+    setMemberSubscriptionPlans(plans);
+    setMemberSubscriptions(subscriptions);
+    setSelectedMemberSubscriptionId((current) =>
+      subscriptions.some((subscription) => subscription.id === current) ? current : subscriptions[0]?.id ?? ""
+    );
+  }, []);
 
   const loadRegistrationInquiries = useCallback(
     async (organizationId: string) => {
@@ -5354,6 +5397,10 @@ export default function HomePage() {
   useEffect(() => {
     if (!selectedOrganizationId) {
       setTeams([]);
+      setMemberSubscriptionPlans([]);
+      setMemberSubscriptions([]);
+      setMemberSubscriptionPayment(null);
+      setSelectedMemberSubscriptionId("");
       setEvents([]);
       setWeatherAssessments([]);
       setWeatherAlert(null);
@@ -5767,6 +5814,7 @@ export default function HomePage() {
     }
     runAction("load-tenant-data", async () => {
       await loadTeams(selectedOrganizationId);
+      await loadMemberDues(selectedOrganizationId);
       await loadRegistrationInquiries(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
       await loadSafeguardingIncidents(selectedOrganizationId);
@@ -5800,6 +5848,7 @@ export default function HomePage() {
   }, [
     selectedOrganizationId,
     loadTeams,
+    loadMemberDues,
     loadRegistrationInquiries,
     loadEvents,
     loadSafeguardingIncidents,
@@ -6170,6 +6219,100 @@ export default function HomePage() {
         setTeams((current) => [team, ...current.filter((item) => item.id !== team.id)]);
         setSelectedTeamId(team.id);
         addLog(`${team.name} roster lane opened`, "good");
+      }
+    );
+  };
+
+  const createMemberDuesPlan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a member dues plan", "bad");
+      return;
+    }
+    runAction(
+      "create-member-dues-plan",
+      () =>
+        apiRequest<MemberSubscriptionPlanRead>(`/organizations/${selectedOrganizationId}/member-subscription-plans`, {
+          method: "POST",
+          identity,
+          body: {
+            ...memberDuesPlanForm,
+            amount: memberDuesPlanForm.amount,
+            currency: memberDuesPlanForm.currency.toUpperCase()
+          }
+        }),
+      (plan) => {
+        setMemberSubscriptionPlans((current) => [plan, ...current.filter((item) => item.id !== plan.id)]);
+        addLog(`${plan.name} member dues plan is ready`, "good");
+      }
+    );
+  };
+
+  const createMemberDuesSubscription = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before assigning dues", "bad");
+      return;
+    }
+    const plan = memberSubscriptionPlans[0];
+    const subjectId = memberDuesSubscriptionForm.subject_id || selectedAthlete?.personId || "";
+    if (!plan || !subjectId) {
+      addLog("Create a dues plan and select/add a member first", "bad");
+      return;
+    }
+    runAction(
+      "create-member-dues-subscription",
+      () =>
+        apiRequest<MemberSubscriptionRead>(`/organizations/${selectedOrganizationId}/member-subscriptions`, {
+          method: "POST",
+          identity,
+          body: {
+            plan_id: plan.id,
+            subject_type: "person",
+            ...memberDuesSubscriptionForm,
+            subject_id: subjectId
+          }
+        }),
+      (subscription) => {
+        setMemberSubscriptions((current) => [
+          subscription,
+          ...current.filter((item) => item.id !== subscription.id)
+        ]);
+        setSelectedMemberSubscriptionId(subscription.id);
+        addLog(`${subscription.subject_label ?? "Member"} dues tracking opened`, "good");
+      }
+    );
+  };
+
+  const recordMemberDuesPayment = () => {
+    const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
+    if (!subscriptionId) {
+      addLog("Select a member dues subscription before recording payment", "bad");
+      return;
+    }
+    runAction(
+      "record-member-dues-payment",
+      () =>
+        apiRequest<MemberSubscriptionPaymentRead>(
+          `/organizations/member-subscriptions/${subscriptionId}/payments`,
+          {
+            method: "POST",
+            identity,
+            body: memberDuesPaymentForm
+          }
+        ),
+      (payment) => {
+        setMemberSubscriptionPayment(payment);
+        setMemberSubscriptions((current) =>
+          current.map((subscription) =>
+            subscription.id === payment.subscription_id
+              ? {
+                  ...subscription,
+                  balance_amount: payment.subscription_balance_amount,
+                  status: payment.subscription_status
+                }
+              : subscription
+          )
+        );
+        addLog(`Recorded ${payment.provider.toUpperCase()} dues payment`, "good");
       }
     );
   };
@@ -21094,6 +21237,107 @@ export default function HomePage() {
               ))}
             </div>
           </form>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Member dues</p>
+                <h2>Club subscriptions</h2>
+              </div>
+              <button type="button" onClick={createMemberDuesPlan} disabled={busyAction !== null}>Plan</button>
+            </div>
+            <div className="form-grid">
+              <label>
+                Plan
+                <input value={memberDuesPlanForm.name} onChange={(event) => setMemberDuesPlanForm({ ...memberDuesPlanForm, name: event.target.value })} />
+              </label>
+              <label>
+                Role
+                <select value={memberDuesPlanForm.member_role} onChange={(event) => setMemberDuesPlanForm({ ...memberDuesPlanForm, member_role: event.target.value })}>
+                  <option value="athlete">Athlete</option>
+                  <option value="guardian">Guardian</option>
+                  <option value="coach">Coach</option>
+                  <option value="volunteer">Volunteer</option>
+                  <option value="viewer">Supporter</option>
+                </select>
+              </label>
+              <label>
+                Amount
+                <input value={memberDuesPlanForm.amount} onChange={(event) => setMemberDuesPlanForm({ ...memberDuesPlanForm, amount: event.target.value })} />
+              </label>
+              <label>
+                Currency
+                <input maxLength={3} value={memberDuesPlanForm.currency} onChange={(event) => setMemberDuesPlanForm({ ...memberDuesPlanForm, currency: event.target.value.toUpperCase() })} />
+              </label>
+              <label>
+                Interval
+                <select value={memberDuesPlanForm.billing_interval} onChange={(event) => setMemberDuesPlanForm({ ...memberDuesPlanForm, billing_interval: event.target.value })}>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="term">Term</option>
+                  <option value="season">Season</option>
+                  <option value="annual">Annual</option>
+                  <option value="one_time">One time</option>
+                </select>
+              </label>
+              <label>
+                Due day
+                <input type="number" min="1" max="31" value={memberDuesPlanForm.due_day} onChange={(event) => setMemberDuesPlanForm({ ...memberDuesPlanForm, due_day: Number(event.target.value) })} />
+              </label>
+            </div>
+            <div className="event-toolbar">
+              <button type="button" onClick={createMemberDuesSubscription} disabled={busyAction !== null}>Assign selected member</button>
+              <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
+            </div>
+            <div className="form-grid">
+              <label>
+                Member person id
+                <input value={memberDuesSubscriptionForm.subject_id || selectedAthlete?.personId || ""} onChange={(event) => setMemberDuesSubscriptionForm({ ...memberDuesSubscriptionForm, subject_id: event.target.value })} />
+              </label>
+              <label>
+                Next due
+                <input type="date" value={memberDuesSubscriptionForm.next_due_on} onChange={(event) => setMemberDuesSubscriptionForm({ ...memberDuesSubscriptionForm, next_due_on: event.target.value })} />
+              </label>
+              <label>
+                M-Pesa amount
+                <input value={memberDuesPaymentForm.amount} onChange={(event) => setMemberDuesPaymentForm({ ...memberDuesPaymentForm, amount: event.target.value })} />
+              </label>
+              <label>
+                Receipt
+                <input value={memberDuesPaymentForm.external_payment_id} onChange={(event) => setMemberDuesPaymentForm({ ...memberDuesPaymentForm, external_payment_id: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {memberSubscriptionPlans.slice(0, 3).map((plan) => (
+                <article key={plan.id} className="task-card">
+                  <div>
+                    <strong>{plan.name}</strong>
+                    <span>{plan.amount} {plan.currency} · {plan.billing_interval.replaceAll("_", " ")} · grace {plan.grace_period_days}d</span>
+                    <small>{plan.benefits ?? "Club-managed member dues plan, separate from AfroLete SaaS billing."}</small>
+                  </div>
+                </article>
+              ))}
+              {memberSubscriptions.slice(0, 5).map((subscription) => (
+                <article key={subscription.id} className={`task-card ${subscription.id === selectedMemberSubscriptionId ? "selected" : ""}`}>
+                  <div>
+                    <strong>{subscription.subject_label ?? subscription.subject_id} · {subscription.plan_name}</strong>
+                    <span>{subscription.balance_amount} {subscription.currency} outstanding · {subscription.status.replaceAll("_", " ")}</span>
+                    <small>{subscription.next_due_on ? `Next due ${subscription.next_due_on}` : "No next due date"} · {subscription.external_reference ?? "local ledger"}</small>
+                  </div>
+                  <button type="button" onClick={() => setSelectedMemberSubscriptionId(subscription.id)}>Select</button>
+                </article>
+              ))}
+              {memberSubscriptionPayment ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{memberSubscriptionPayment.provider.toUpperCase()} payment recorded</strong>
+                    <span>{memberSubscriptionPayment.amount} {memberSubscriptionPayment.currency} · balance {memberSubscriptionPayment.subscription_balance_amount}</span>
+                    <small>{memberSubscriptionPayment.external_payment_id ?? memberSubscriptionPayment.method}</small>
+                  </div>
+                </article>
+              ) : null}
+            </div>
+          </div>
         </section>
 
         <section className="work-grid">

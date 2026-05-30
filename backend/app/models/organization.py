@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
@@ -72,6 +72,66 @@ class Membership(IdMixin, TimestampMixin, Base):
     )
     title: Mapped[str | None] = mapped_column(String(160))
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
+
+
+class MemberSubscriptionPlan(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_subscription_plans"
+    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    member_role: Mapped[str | None] = mapped_column(String(80), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    billing_interval: Mapped[str] = mapped_column(String(40), default="monthly", nullable=False, index=True)
+    due_day: Mapped[int | None] = mapped_column(Integer)
+    grace_period_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
+    benefits: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
+class MemberSubscription(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_subscriptions"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "plan_id",
+            "subject_type",
+            "subject_id",
+            name="uq_member_subscriptions_org_plan_subject",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscription_plans.id"), index=True)
+    membership_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("memberships.id"), index=True)
+    subject_type: Mapped[MemberSubjectType] = mapped_column(enum_type(MemberSubjectType), nullable=False, index=True)
+    subject_id: Mapped[UUID] = mapped_column(GUID(), index=True)
+    starts_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    current_period_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    current_period_end: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    next_due_on: Mapped[date | None] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    balance_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    external_reference: Mapped[str | None] = mapped_column(String(180), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class MemberSubscriptionPayment(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_subscription_payments"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    subscription_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscriptions.id"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    provider: Mapped[str] = mapped_column(String(80), default="mpesa", nullable=False, index=True)
+    method: Mapped[str] = mapped_column(String(80), default="mobile_money", nullable=False, index=True)
+    external_payment_id: Mapped[str | None] = mapped_column(String(180), index=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="succeeded", nullable=False, index=True)
+    raw_reference: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 class RegistrationInquiry(IdMixin, TimestampMixin, Base):

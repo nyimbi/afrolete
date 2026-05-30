@@ -178,6 +178,9 @@ from app.models.identity import AppUser, Person  # noqa: F401,E402
 from app.models.organization import (  # noqa: F401,E402
     Committee,
     CommitteeMembership,
+    MemberSubscription,
+    MemberSubscriptionPayment,
+    MemberSubscriptionPlan,
     Membership,
     Organization,
     RegistrationInquiry,

@@ -45,13 +45,25 @@ from app.models.enums import (
 )
 from app.models.event import Event
 from app.models.identity import AppUser, Person
-from app.models.organization import Committee, CommitteeMembership, Membership, Organization, RegistrationInquiry
+from app.models.organization import (
+    Committee,
+    CommitteeMembership,
+    MemberSubscription,
+    MemberSubscriptionPayment,
+    MemberSubscriptionPlan,
+    Membership,
+    Organization,
+    RegistrationInquiry,
+)
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.organization import (
     CommitteeCreate,
     CommitteeMemberAdd,
     FamilyRegistrationInquiryRead,
     MemberAdd,
+    MemberSubscriptionCreate,
+    MemberSubscriptionPaymentCreate,
+    MemberSubscriptionPlanCreate,
     OrganizationHandleAvailabilityRead,
     OrganizationCreate,
     PublicRegistrationDocumentUpload,
@@ -3598,6 +3610,206 @@ async def add_member(
     await db.commit()
     await db.refresh(membership)
     return membership
+
+
+async def ensure_manage_organization(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> Organization:
+    can_manage = await authz.check(
+        resource_type="organization",
+        resource_id=str(organization_id),
+        permission="manage",
+        subject_type="user",
+        subject_id=str(identity.user_id),
+    )
+    if not can_manage:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    return organization
+
+
+async def create_member_subscription_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: MemberSubscriptionPlanCreate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionPlan:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    plan = MemberSubscriptionPlan(
+        organization_id=organization_id,
+        name=payload.name,
+        description=payload.description,
+        member_role=payload.member_role,
+        amount=payload.amount,
+        currency=payload.currency.upper(),
+        billing_interval=payload.billing_interval,
+        due_day=payload.due_day,
+        grace_period_days=payload.grace_period_days,
+        benefits=payload.benefits,
+    )
+    db.add(plan)
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
+async def list_member_subscription_plans(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[MemberSubscriptionPlan]:
+    return list(
+        (
+            await db.scalars(
+                select(MemberSubscriptionPlan)
+                .where(MemberSubscriptionPlan.organization_id == organization_id)
+                .order_by(MemberSubscriptionPlan.status, MemberSubscriptionPlan.name)
+            )
+        ).all()
+    )
+
+
+async def create_member_subscription(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: MemberSubscriptionCreate,
+    authz: AuthorizationService,
+) -> MemberSubscription:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    plan = await db.get(MemberSubscriptionPlan, payload.plan_id)
+    if plan is None or plan.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription plan not found")
+
+    membership_id = payload.membership_id
+    subject_type = payload.subject_type
+    subject_id = payload.subject_id
+    if membership_id is not None:
+        membership = await db.get(Membership, membership_id)
+        if membership is None or membership.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found")
+        subject_type = membership.subject_type
+        subject_id = membership.subject_id
+    else:
+        if subject_type is None or subject_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Member subscription requires membership_id or subject_type and subject_id",
+            )
+        membership = await db.scalar(
+            select(Membership).where(
+                Membership.organization_id == organization_id,
+                Membership.subject_type == subject_type,
+                Membership.subject_id == subject_id,
+                Membership.status == "active",
+            )
+        )
+        membership_id = membership.id if membership else None
+
+    if subject_type is None or subject_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Missing subscription subject")
+    await ensure_member_subject_exists(db, subject_type, subject_id)
+
+    subscription = MemberSubscription(
+        organization_id=organization_id,
+        plan_id=plan.id,
+        membership_id=membership_id,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        starts_on=payload.starts_on,
+        current_period_start=payload.current_period_start,
+        current_period_end=payload.current_period_end,
+        next_due_on=payload.next_due_on,
+        status=payload.status,
+        balance_amount=payload.balance_amount if payload.balance_amount is not None else plan.amount,
+        external_reference=payload.external_reference,
+        notes=payload.notes,
+    )
+    db.add(subscription)
+    await db.commit()
+    await db.refresh(subscription)
+    return subscription
+
+
+async def list_member_subscriptions(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[tuple[MemberSubscription, MemberSubscriptionPlan, str | None]]:
+    rows = (
+        await db.execute(
+            select(MemberSubscription, MemberSubscriptionPlan)
+            .join(MemberSubscriptionPlan, MemberSubscriptionPlan.id == MemberSubscription.plan_id)
+            .where(MemberSubscription.organization_id == organization_id)
+            .order_by(MemberSubscription.status, MemberSubscription.next_due_on, MemberSubscription.created_at.desc())
+        )
+    ).all()
+    result: list[tuple[MemberSubscription, MemberSubscriptionPlan, str | None]] = []
+    for subscription, plan in rows:
+        result.append((subscription, plan, await member_subject_label(db, subscription.subject_type, subscription.subject_id)))
+    return result
+
+
+async def record_member_subscription_payment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    subscription_id: UUID,
+    payload: MemberSubscriptionPaymentCreate,
+    authz: AuthorizationService,
+) -> tuple[MemberSubscriptionPayment, MemberSubscription]:
+    subscription = await db.get(MemberSubscription, subscription_id)
+    if subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription not found")
+    await ensure_manage_organization(db, identity, subscription.organization_id, authz)
+    plan = await db.get(MemberSubscriptionPlan, subscription.plan_id)
+    currency = (payload.currency or (plan.currency if plan else "KES")).upper()
+    payment = MemberSubscriptionPayment(
+        organization_id=subscription.organization_id,
+        subscription_id=subscription.id,
+        amount=payload.amount,
+        currency=currency,
+        provider=payload.provider,
+        method=payload.method,
+        external_payment_id=payload.external_payment_id,
+        received_at=payload.received_at or datetime.now(UTC),
+        status=payload.status,
+        raw_reference=payload.raw_reference,
+        notes=payload.notes,
+    )
+    db.add(payment)
+    if payload.status == "succeeded":
+        subscription.balance_amount = max(Decimal("0"), subscription.balance_amount - payload.amount)
+        if subscription.balance_amount == Decimal("0") and subscription.status == "past_due":
+            subscription.status = "active"
+    await db.commit()
+    await db.refresh(payment)
+    await db.refresh(subscription)
+    return payment, subscription
+
+
+async def ensure_member_subject_exists(db: AsyncSession, subject_type: MemberSubjectType, subject_id: UUID) -> None:
+    model = Person
+    if subject_type == MemberSubjectType.ORGANIZATION:
+        model = Organization
+    elif subject_type == MemberSubjectType.TEAM:
+        model = Team
+    if await db.get(model, subject_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{subject_type.value.title()} subject not found")
+
+
+async def member_subject_label(db: AsyncSession, subject_type: MemberSubjectType, subject_id: UUID) -> str | None:
+    if subject_type == MemberSubjectType.PERSON:
+        person = await db.get(Person, subject_id)
+        return person.display_name if person else None
+    if subject_type == MemberSubjectType.ORGANIZATION:
+        organization = await db.get(Organization, subject_id)
+        return organization.public_name or organization.name if organization else None
+    team = await db.get(Team, subject_id)
+    return team.name if team else None
 
 
 async def create_committee(

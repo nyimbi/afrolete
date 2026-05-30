@@ -857,6 +857,58 @@ export type MembershipRead = {
   status: string;
 };
 
+export type MemberSubscriptionPlanRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  description: string | null;
+  member_role: string | null;
+  amount: string;
+  currency: string;
+  billing_interval: "weekly" | "monthly" | "quarterly" | "term" | "season" | "annual" | "one_time" | string;
+  due_day: number | null;
+  grace_period_days: number;
+  benefits: string | null;
+  status: string;
+};
+
+export type MemberSubscriptionRead = {
+  id: UUID;
+  organization_id: UUID;
+  plan_id: UUID;
+  plan_name: string;
+  membership_id: UUID | null;
+  subject_type: "person" | "organization" | "team";
+  subject_id: UUID;
+  subject_label: string | null;
+  starts_on: string;
+  current_period_start: string;
+  current_period_end: string;
+  next_due_on: string | null;
+  status: string;
+  balance_amount: string;
+  currency: string;
+  external_reference: string | null;
+  notes: string | null;
+};
+
+export type MemberSubscriptionPaymentRead = {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  amount: string;
+  currency: string;
+  provider: string;
+  method: string;
+  external_payment_id: string | null;
+  received_at: string;
+  status: string;
+  raw_reference: string | null;
+  notes: string | null;
+  subscription_balance_amount: string;
+  subscription_status: string;
+};
+
 export type VolunteerProfileRead = {
   id: UUID;
   organization_id: UUID;

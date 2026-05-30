@@ -16,6 +16,12 @@ from app.schemas.organization import (
     CommitteeRead,
     FamilyRegistrationInquiryRead,
     MemberAdd,
+    MemberSubscriptionCreate,
+    MemberSubscriptionPaymentCreate,
+    MemberSubscriptionPaymentRead,
+    MemberSubscriptionPlanCreate,
+    MemberSubscriptionPlanRead,
+    MemberSubscriptionRead,
     MembershipRead,
     OrganizationCreate,
     OrganizationDirectoryRead,
@@ -71,6 +77,8 @@ from app.services.organizations import (
     convert_registration_inquiry,
     create_registration_inquiry_follow_up,
     create_registration_payment_session,
+    create_member_subscription,
+    create_member_subscription_plan,
     create_public_registration_inquiry,
     create_committee,
     create_onboarding_starter_team,
@@ -84,6 +92,8 @@ from app.services.organizations import (
     import_registration_inquiries,
     organization_handle_availability,
     list_family_registration_inquiries,
+    list_member_subscription_plans,
+    list_member_subscriptions,
     list_committees,
     list_organizations_for_identity,
     list_registration_inquiries,
@@ -98,6 +108,7 @@ from app.services.organizations import (
     registration_learning_path,
     registration_onboarding_presets,
     registration_readiness,
+    record_member_subscription_payment,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
     settle_registration_payment_checkout,
@@ -963,6 +974,130 @@ async def add_member_route(
         role=membership.role,
         title=membership.title,
         status=membership.status,
+    )
+
+
+def to_member_subscription_plan_read(plan) -> MemberSubscriptionPlanRead:
+    return MemberSubscriptionPlanRead(
+        id=plan.id,
+        organization_id=plan.organization_id,
+        name=plan.name,
+        description=plan.description,
+        member_role=plan.member_role,
+        amount=plan.amount,
+        currency=plan.currency,
+        billing_interval=plan.billing_interval,
+        due_day=plan.due_day,
+        grace_period_days=plan.grace_period_days,
+        benefits=plan.benefits,
+        status=plan.status,
+    )
+
+
+def to_member_subscription_read(item) -> MemberSubscriptionRead:
+    subscription, plan, subject_label = item
+    return MemberSubscriptionRead(
+        id=subscription.id,
+        organization_id=subscription.organization_id,
+        plan_id=subscription.plan_id,
+        plan_name=plan.name,
+        membership_id=subscription.membership_id,
+        subject_type=subscription.subject_type,
+        subject_id=subscription.subject_id,
+        subject_label=subject_label,
+        starts_on=subscription.starts_on,
+        current_period_start=subscription.current_period_start,
+        current_period_end=subscription.current_period_end,
+        next_due_on=subscription.next_due_on,
+        status=subscription.status,
+        balance_amount=subscription.balance_amount,
+        currency=plan.currency,
+        external_reference=subscription.external_reference,
+        notes=subscription.notes,
+    )
+
+
+@router.post(
+    "/{organization_id}/member-subscription-plans",
+    response_model=MemberSubscriptionPlanRead,
+    status_code=201,
+)
+async def create_member_subscription_plan_route(
+    organization_id: UUID,
+    payload: MemberSubscriptionPlanCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionPlanRead:
+    return to_member_subscription_plan_read(
+        await create_member_subscription_plan(db, identity, organization_id, payload, authz)
+    )
+
+
+@router.get("/{organization_id}/member-subscription-plans", response_model=list[MemberSubscriptionPlanRead])
+async def list_member_subscription_plans_route(
+    organization_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[MemberSubscriptionPlanRead]:
+    return [
+        to_member_subscription_plan_read(plan)
+        for plan in await list_member_subscription_plans(db, organization_id)
+    ]
+
+
+@router.post(
+    "/{organization_id}/member-subscriptions",
+    response_model=MemberSubscriptionRead,
+    status_code=201,
+)
+async def create_member_subscription_route(
+    organization_id: UUID,
+    payload: MemberSubscriptionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionRead:
+    subscription = await create_member_subscription(db, identity, organization_id, payload, authz)
+    rows = await list_member_subscriptions(db, organization_id)
+    return to_member_subscription_read(next(row for row in rows if row[0].id == subscription.id))
+
+
+@router.get("/{organization_id}/member-subscriptions", response_model=list[MemberSubscriptionRead])
+async def list_member_subscriptions_route(
+    organization_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[MemberSubscriptionRead]:
+    return [to_member_subscription_read(row) for row in await list_member_subscriptions(db, organization_id)]
+
+
+@router.post(
+    "/member-subscriptions/{subscription_id}/payments",
+    response_model=MemberSubscriptionPaymentRead,
+    status_code=201,
+)
+async def record_member_subscription_payment_route(
+    subscription_id: UUID,
+    payload: MemberSubscriptionPaymentCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionPaymentRead:
+    payment, subscription = await record_member_subscription_payment(db, identity, subscription_id, payload, authz)
+    return MemberSubscriptionPaymentRead(
+        id=payment.id,
+        organization_id=payment.organization_id,
+        subscription_id=payment.subscription_id,
+        amount=payment.amount,
+        currency=payment.currency,
+        provider=payment.provider,
+        method=payment.method,
+        external_payment_id=payment.external_payment_id,
+        received_at=payment.received_at,
+        status=payment.status,
+        raw_reference=payment.raw_reference,
+        notes=payment.notes,
+        subscription_balance_amount=subscription.balance_amount,
+        subscription_status=subscription.status,
     )
 
 

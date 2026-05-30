@@ -97,6 +97,97 @@ def test_organization_handle_availability_suggests_conflict_recovery(client, ide
     assert detail["subdomain_suggestions"][0] == "harbor-youth-2"
 
 
+def test_club_manages_member_dues_without_saas_subscription_coupling(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Dues Managed FC",
+            "organization_type": "club",
+            "country_code": "KE",
+            "primary_sport": "football",
+        },
+    ).json()
+
+    member_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "member-dues@example.com",
+            "display_name": "Member Dues",
+            "country_code": "KE",
+            "role": "athlete",
+            "title": "Senior player",
+        },
+    )
+    assert member_response.status_code == 201
+    member = member_response.json()
+
+    plan_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-plans",
+        headers=identity_headers,
+        json={
+            "name": "Senior player monthly dues",
+            "member_role": "athlete",
+            "amount": "1500.00",
+            "currency": "KES",
+            "billing_interval": "monthly",
+            "due_day": 5,
+            "grace_period_days": 10,
+            "benefits": "Training access, league registration, member voting eligibility.",
+        },
+    )
+    assert plan_response.status_code == 201
+    plan = plan_response.json()
+    assert plan["currency"] == "KES"
+    assert plan["billing_interval"] == "monthly"
+
+    subscription_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-subscriptions",
+        headers=identity_headers,
+        json={
+            "plan_id": plan["id"],
+            "membership_id": member["id"],
+            "starts_on": "2026-06-01",
+            "current_period_start": "2026-06-01",
+            "current_period_end": "2026-06-30",
+            "next_due_on": "2026-06-05",
+            "external_reference": "club-dues-2026-06",
+        },
+    )
+    assert subscription_response.status_code == 201
+    subscription = subscription_response.json()
+    assert subscription["subject_type"] == "person"
+    assert subscription["subject_id"] == member["subject_id"]
+    assert subscription["subject_label"] == "Member Dues"
+    assert subscription["plan_name"] == "Senior player monthly dues"
+    assert subscription["balance_amount"] == "1500.00"
+
+    payment_response = client.post(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}/payments",
+        headers=identity_headers,
+        json={
+            "amount": "1000.00",
+            "provider": "mpesa",
+            "method": "stk_push",
+            "external_payment_id": "MPESA-ABC-123",
+            "raw_reference": "Till 123456 confirmed receipt.",
+        },
+    )
+    assert payment_response.status_code == 201
+    payment = payment_response.json()
+    assert payment["provider"] == "mpesa"
+    assert payment["subscription_balance_amount"] == "500.00"
+    assert payment["subscription_status"] == "active"
+
+    subscriptions_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscriptions",
+        headers=identity_headers,
+    )
+    assert subscriptions_response.status_code == 200
+    assert subscriptions_response.json()[0]["balance_amount"] == "500.00"
+
+
 def test_registration_learning_path_personalizes_onboarding(client) -> None:
     response = client.post(
         "/api/v1/organizations/registration-learning-path",
