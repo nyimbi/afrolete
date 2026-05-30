@@ -56,6 +56,9 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkRunRead,
     PerformanceMetricTrendRead,
     PerformanceMetricTrendSeriesRead,
+    PerformanceMatchTrackingIdentityReviewCreate,
+    PerformanceMatchTrackingIdentityReviewRead,
+    PerformanceMatchTrackingIdentityReviewResultRead,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingRunRead,
     PerformanceMatchPitchCalibrationCreate,
@@ -109,6 +112,7 @@ from app.services.performance import (
     create_assessment,
     create_athlete_pathway_projection,
     create_metric_definition,
+    create_match_tracking_identity_review,
     create_match_tracking_run,
     create_match_pitch_calibration,
     create_movement_reference_profile,
@@ -141,9 +145,11 @@ from app.services.performance import (
     list_performance_highlight_reels,
     list_performance_highlight_reel_exports,
     list_metric_definitions,
+    list_match_tracking_identity_reviews,
     list_match_tracking_runs,
     list_match_pitch_calibrations,
     match_pitch_calibration_read,
+    match_tracking_identity_review_read,
     highlight_reel_read,
     highlight_reel_export_read,
     list_movement_reference_profiles,
@@ -943,6 +949,43 @@ async def list_match_tracking_runs_route(
             organization_id,
             authz,
             video_asset_id=video_asset_id,
+        )
+    ]
+
+
+@router.post(
+    "/scouting/tracking-runs/{tracking_run_id}/identity-reviews",
+    response_model=PerformanceMatchTrackingIdentityReviewResultRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_match_tracking_identity_review_route(
+    tracking_run_id: UUID,
+    payload: PerformanceMatchTrackingIdentityReviewCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchTrackingIdentityReviewResultRead:
+    return PerformanceMatchTrackingIdentityReviewResultRead(
+        **await create_match_tracking_identity_review(db, identity, tracking_run_id, payload, authz)
+    )
+
+
+@router.get("/scouting/tracking-identity-reviews", response_model=list[PerformanceMatchTrackingIdentityReviewRead])
+async def list_match_tracking_identity_reviews_route(
+    organization_id: UUID = Query(),
+    tracking_run_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMatchTrackingIdentityReviewRead]:
+    return [
+        PerformanceMatchTrackingIdentityReviewRead(**match_tracking_identity_review_read(review))
+        for review in await list_match_tracking_identity_reviews(
+            db,
+            identity,
+            organization_id,
+            authz,
+            tracking_run_id=tracking_run_id,
         )
     ]
 

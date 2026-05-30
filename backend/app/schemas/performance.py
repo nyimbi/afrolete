@@ -645,6 +645,41 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     completed_at: datetime | None
 
 
+class PerformanceMatchTrackingIdentityReviewCreate(BaseModel):
+    track_id: str = Field(min_length=1, max_length=120)
+    person_id: UUID | None = None
+    team_label: str | None = Field(default=None, max_length=120)
+    player_label: str | None = Field(default=None, max_length=180)
+    jersey_number: str | None = Field(default=None, max_length=20)
+    decision: str = Field(default="confirmed", min_length=2, max_length=40)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class PerformanceMatchTrackingIdentityReviewRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    tracking_run_id: UUID
+    video_asset_id: UUID
+    track_id: str
+    reviewer_person_id: UUID | None
+    person_id: UUID | None
+    team_label: str | None
+    player_label: str | None
+    jersey_number: str | None
+    decision: str
+    sample_count: int
+    before: dict[str, Any]
+    after: dict[str, Any]
+    notes: str | None
+    reviewed_at: datetime
+    created_at: datetime
+
+
+class PerformanceMatchTrackingIdentityReviewResultRead(BaseModel):
+    review: PerformanceMatchTrackingIdentityReviewRead
+    tracking_run: PerformanceMatchTrackingRunRead
+
+
 class PerformanceHardwareKitCreate(BaseModel):
     organization_id: UUID
     name: str = Field(min_length=2, max_length=180)

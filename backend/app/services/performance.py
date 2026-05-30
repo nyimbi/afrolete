@@ -58,6 +58,7 @@ from app.models.performance import (
     PerformanceHighlightReel,
     PerformanceHighlightReelExport,
     PerformanceMatchPitchCalibration,
+    PerformanceMatchTrackingIdentityReview,
     PerformanceMatchTrackingRun,
     PerformanceMatchTrackingSample,
     PerformanceMetricDefinition,
@@ -101,6 +102,7 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkDatasetCreate,
     PerformanceModelExtractionBenchmarkRunCreate,
     PerformanceMatchPitchCalibrationCreate,
+    PerformanceMatchTrackingIdentityReviewCreate,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingSampleCreate,
     PerformanceMovementReferenceProfileCreate,
@@ -929,6 +931,100 @@ async def list_match_tracking_runs(
         statement = statement.where(PerformanceMatchTrackingRun.video_asset_id == video_asset_id)
     runs = list((await db.scalars(statement.order_by(PerformanceMatchTrackingRun.created_at.desc()).limit(25))).all())
     return [await match_tracking_run_read(db, run) for run in runs]
+
+
+async def create_match_tracking_identity_review(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    tracking_run_id: UUID,
+    payload: PerformanceMatchTrackingIdentityReviewCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    run = await get_match_tracking_run(db, tracking_run_id)
+    await ensure_manage_performance(authz, identity, run.organization_id)
+    if payload.person_id is not None:
+        await ensure_assignment_person(db, run.organization_id, payload.person_id)
+    samples = list(
+        (
+            await db.scalars(
+                select(PerformanceMatchTrackingSample)
+                .where(
+                    PerformanceMatchTrackingSample.tracking_run_id == run.id,
+                    PerformanceMatchTrackingSample.track_id == payload.track_id,
+                )
+                .order_by(PerformanceMatchTrackingSample.timestamp_seconds.asc())
+            )
+        ).all()
+    )
+    if not samples:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+    before = match_tracking_identity_snapshot(samples)
+    person_id = payload.person_id if payload.person_id is not None else samples[-1].person_id
+    team_label = cleaned_optional_text(payload.team_label, fallback=samples[-1].team_label)
+    player_label = cleaned_optional_text(payload.player_label, fallback=samples[-1].player_label)
+    jersey_number = cleaned_optional_text(payload.jersey_number, fallback=samples[-1].jersey_number)
+    for sample in samples:
+        sample.person_id = person_id
+        sample.team_label = team_label
+        sample.player_label = player_label
+        sample.jersey_number = jersey_number
+        if "identity_review" not in sample.source:
+            sample.source = f"{sample.source}|identity_review"[:80]
+    after = {
+        "person_id": str(person_id) if person_id else None,
+        "team_label": team_label,
+        "player_label": player_label,
+        "jersey_number": jersey_number,
+    }
+    review = PerformanceMatchTrackingIdentityReview(
+        organization_id=run.organization_id,
+        tracking_run_id=run.id,
+        video_asset_id=run.video_asset_id,
+        track_id=payload.track_id,
+        reviewer_person_id=identity.person_id,
+        person_id=person_id,
+        team_label=team_label,
+        player_label=player_label,
+        jersey_number=jersey_number,
+        decision=payload.decision.strip().lower(),
+        sample_count=len(samples),
+        before_json=json.dumps(before, default=str),
+        after_json=json.dumps(after, default=str),
+        notes=payload.notes,
+        reviewed_at=datetime.now(UTC),
+    )
+    db.add(review)
+    await recompute_match_tracking_run_summary(db, run)
+    run.status = "reviewed"
+    await db.commit()
+    await db.refresh(review)
+    await db.refresh(run)
+    return {
+        "review": match_tracking_identity_review_read(review),
+        "tracking_run": await match_tracking_run_read(db, run),
+    }
+
+
+async def list_match_tracking_identity_reviews(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    tracking_run_id: UUID | None = None,
+) -> list[PerformanceMatchTrackingIdentityReview]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceMatchTrackingIdentityReview).where(
+        PerformanceMatchTrackingIdentityReview.organization_id == organization_id
+    )
+    if tracking_run_id is not None:
+        statement = statement.where(PerformanceMatchTrackingIdentityReview.tracking_run_id == tracking_run_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(PerformanceMatchTrackingIdentityReview.reviewed_at.desc()).limit(100)
+            )
+        ).all()
+    )
 
 
 async def create_performance_highlight_reel(
@@ -8699,6 +8795,96 @@ def decode_json_dict(value: str | None) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+async def get_match_tracking_run(db: AsyncSession, tracking_run_id: UUID) -> PerformanceMatchTrackingRun:
+    run = await db.get(PerformanceMatchTrackingRun, tracking_run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match tracking run not found")
+    return run
+
+
+def cleaned_optional_text(value: str | None, *, fallback: str | None = None) -> str | None:
+    if value is None:
+        return fallback
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def match_tracking_identity_snapshot(samples: list[PerformanceMatchTrackingSample]) -> dict[str, object]:
+    person_ids = sorted({str(sample.person_id) for sample in samples if sample.person_id})
+    return {
+        "sample_count": len(samples),
+        "person_ids": person_ids,
+        "team_labels": sorted({sample.team_label for sample in samples if sample.team_label}),
+        "player_labels": sorted({sample.player_label for sample in samples if sample.player_label}),
+        "jersey_numbers": sorted({sample.jersey_number for sample in samples if sample.jersey_number}),
+        "first_timestamp_seconds": samples[0].timestamp_seconds if samples else None,
+        "last_timestamp_seconds": samples[-1].timestamp_seconds if samples else None,
+    }
+
+
+def match_tracking_identity_review_read(review: PerformanceMatchTrackingIdentityReview) -> dict[str, object]:
+    return {
+        "id": review.id,
+        "organization_id": review.organization_id,
+        "tracking_run_id": review.tracking_run_id,
+        "video_asset_id": review.video_asset_id,
+        "track_id": review.track_id,
+        "reviewer_person_id": review.reviewer_person_id,
+        "person_id": review.person_id,
+        "team_label": review.team_label,
+        "player_label": review.player_label,
+        "jersey_number": review.jersey_number,
+        "decision": review.decision,
+        "sample_count": review.sample_count,
+        "before": decode_json_dict(review.before_json),
+        "after": decode_json_dict(review.after_json),
+        "notes": review.notes,
+        "reviewed_at": review.reviewed_at,
+        "created_at": review.created_at,
+    }
+
+
+async def recompute_match_tracking_run_summary(db: AsyncSession, run: PerformanceMatchTrackingRun) -> None:
+    samples = list(
+        (
+            await db.scalars(
+                select(PerformanceMatchTrackingSample)
+                .where(PerformanceMatchTrackingSample.tracking_run_id == run.id)
+                .order_by(
+                    PerformanceMatchTrackingSample.timestamp_seconds,
+                    PerformanceMatchTrackingSample.track_id,
+                )
+            )
+        ).all()
+    )
+    sample_payloads = [match_tracking_sample_read(sample) for sample in samples]
+    summary = summarize_match_tracking_samples(sample_payloads)
+    previous_summary = decode_json_dict(run.summary_json)
+    warnings = previous_summary.get("warnings")
+    if isinstance(warnings, list):
+        summary["warnings"] = warnings
+    summary["identity_review_count"] = int(previous_summary.get("identity_review_count") or 0) + 1
+    summary["identity_reviewed_at"] = datetime.now(UTC).isoformat()
+    calibration = await db.get(PerformanceMatchPitchCalibration, run.calibration_id) if run.calibration_id else None
+    if calibration is not None:
+        summary["calibration_id"] = str(calibration.id)
+        summary["calibration_quality_score"] = calibration.quality_score
+    summary = enrich_match_tracking_summary(
+        summary,
+        calibration=calibration,
+        source_provider=run.source_provider,
+        model_policy=run.model_policy,
+    )
+    run.sample_count = len(samples)
+    run.player_count = len(summary["player_metrics"])
+    run.total_distance_m = float(summary["total_distance_m"])
+    run.max_speed_mps = float(summary["max_speed_mps"])
+    run.high_speed_distance_m = float(summary["high_speed_distance_m"])
+    run.sprint_count = int(summary["sprint_count"])
+    run.summary_json = json.dumps(summary, default=str)
+    run.completed_at = datetime.now(UTC)
 
 
 async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackingRun) -> dict[str, object]:

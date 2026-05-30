@@ -6941,6 +6941,31 @@ export type PerformanceMatchTrackingRunRead = {
   completed_at: string | null;
 };
 
+export type PerformanceMatchTrackingIdentityReviewRead = {
+  id: UUID;
+  organization_id: UUID;
+  tracking_run_id: UUID;
+  video_asset_id: UUID;
+  track_id: string;
+  reviewer_person_id: UUID | null;
+  person_id: UUID | null;
+  team_label: string | null;
+  player_label: string | null;
+  jersey_number: string | null;
+  decision: string;
+  sample_count: number;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  notes: string | null;
+  reviewed_at: string;
+  created_at: string;
+};
+
+export type PerformanceMatchTrackingIdentityReviewResultRead = {
+  review: PerformanceMatchTrackingIdentityReviewRead;
+  tracking_run: PerformanceMatchTrackingRunRead;
+};
+
 export type PerformanceHardwareKitRead = {
   id: UUID;
   organization_id: UUID;

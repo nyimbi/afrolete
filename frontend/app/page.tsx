@@ -375,6 +375,8 @@ import type {
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchPitchCalibrationRead,
+  PerformanceMatchTrackingIdentityReviewRead,
+  PerformanceMatchTrackingIdentityReviewResultRead,
   PerformanceMatchTrackingRunRead,
   PerformanceMovementReferenceProfileRead,
   PerformanceObservationRead,
@@ -1671,6 +1673,8 @@ export default function HomePage() {
     useState<PerformanceMatchTrackingRunRead[]>([]);
   const [performanceMatchTrackingRun, setPerformanceMatchTrackingRun] =
     useState<PerformanceMatchTrackingRunRead | null>(null);
+  const [performanceMatchTrackingIdentityReviews, setPerformanceMatchTrackingIdentityReviews] =
+    useState<PerformanceMatchTrackingIdentityReviewRead[]>([]);
   const [performanceMatchPitchCalibrations, setPerformanceMatchPitchCalibrations] =
     useState<PerformanceMatchPitchCalibrationRead[]>([]);
   const [performanceMatchPitchCalibration, setPerformanceMatchPitchCalibration] =
@@ -2370,6 +2374,14 @@ export default function HomePage() {
     target_duration_seconds: 90,
     channels: "coach_review,scout_packet,parent_share",
     tags: "speed,pressing,transition"
+  });
+  const [trackingIdentityForm, setTrackingIdentityForm] = useState({
+    track_id: "",
+    player_label: "Confirmed player",
+    team_label: "Home",
+    jersey_number: "",
+    decision: "confirmed",
+    notes: "Coach confirmed this tracking identity after video review."
   });
   const [poseGaitEvidenceText, setPoseGaitEvidenceText] = useState(
     "Torso lean angle 18 degrees with late torso collapse. Front knee drive 64 degrees. Ground contact time 138 ms. Arm swing symmetry 6.5 with cross-body movement. Stride frequency 4.1 Hz."
@@ -3701,6 +3713,7 @@ export default function HomePage() {
       videoData,
       reportData,
       trackingData,
+      trackingIdentityReviewData,
       calibrationData,
       hardwareKitData,
       hardwareDeviceData,
@@ -3717,6 +3730,10 @@ export default function HomePage() {
       ),
       apiRequest<PerformanceMatchTrackingRunRead[]>(
         `/performance/scouting/tracking-runs?${params.toString()}`,
+        { identity }
+      ),
+      apiRequest<PerformanceMatchTrackingIdentityReviewRead[]>(
+        `/performance/scouting/tracking-identity-reviews?organization_id=${organizationId}`,
         { identity }
       ),
       apiRequest<PerformanceMatchPitchCalibrationRead[]>(
@@ -3743,6 +3760,7 @@ export default function HomePage() {
     setOppositionScoutingVideos(videoData);
     setOppositionScoutingReports(reportData);
     setPerformanceMatchTrackingRuns(trackingData);
+    setPerformanceMatchTrackingIdentityReviews(trackingIdentityReviewData);
     setPerformanceMatchPitchCalibrations(calibrationData);
     setPerformanceHardwareKits(hardwareKitData);
     setPerformanceHardwareDevices(hardwareDeviceData);
@@ -4843,6 +4861,7 @@ export default function HomePage() {
       setOppositionScoutingReport(null);
       setPerformanceMatchTrackingRuns([]);
       setPerformanceMatchTrackingRun(null);
+      setPerformanceMatchTrackingIdentityReviews([]);
       setPerformanceMatchPitchCalibrations([]);
       setPerformanceMatchPitchCalibration(null);
       setPerformanceHighlightReels([]);
@@ -9974,6 +9993,64 @@ export default function HomePage() {
             : current
         );
         addLog(`Tracked ${run.player_count} players for ${Math.round(run.total_distance_m)}m`, "good");
+      }
+    );
+  };
+
+  const reviewPerformanceTrackingIdentity = (metric?: {
+    track_id: string;
+    player_label: string | null;
+    team_label: string | null;
+    jersey_number: string | null;
+  }) => {
+    if (!performanceMatchTrackingRun) {
+      addLog("Track a match before reviewing player identity", "bad");
+      return;
+    }
+    const trackId = metric?.track_id || trackingIdentityForm.track_id;
+    if (!trackId) {
+      addLog("Choose a track to review first", "bad");
+      return;
+    }
+    const playerLabel = metric?.player_label ?? trackingIdentityForm.player_label;
+    const teamLabel = metric?.team_label ?? trackingIdentityForm.team_label;
+    const jerseyNumber = metric?.jersey_number ?? trackingIdentityForm.jersey_number;
+    runAction(
+      `review-tracking-identity-${trackId}`,
+      () =>
+        apiRequest<PerformanceMatchTrackingIdentityReviewResultRead>(
+          `/performance/scouting/tracking-runs/${performanceMatchTrackingRun.id}/identity-reviews`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              track_id: trackId,
+              player_label: playerLabel || "Confirmed player",
+              team_label: teamLabel || "Unassigned",
+              jersey_number: jerseyNumber || null,
+              decision: trackingIdentityForm.decision,
+              notes: trackingIdentityForm.notes
+            }
+          }
+        ),
+      (result) => {
+        setPerformanceMatchTrackingRun(result.tracking_run);
+        setPerformanceMatchTrackingRuns((current) => [
+          result.tracking_run,
+          ...current.filter((item) => item.id !== result.tracking_run.id)
+        ]);
+        setPerformanceMatchTrackingIdentityReviews((current) => [
+          result.review,
+          ...current.filter((item) => item.id !== result.review.id)
+        ]);
+        setTrackingIdentityForm((current) => ({
+          ...current,
+          track_id: result.review.track_id,
+          player_label: result.review.player_label ?? current.player_label,
+          team_label: result.review.team_label ?? current.team_label,
+          jersey_number: result.review.jersey_number ?? ""
+        }));
+        addLog(`${result.review.track_id} identity ${result.review.decision}`, "good");
       }
     );
   };
@@ -24986,6 +25063,39 @@ export default function HomePage() {
                       </small>
                     </div>
                   </article>
+                  <article className="task-card">
+                    <div>
+                      <strong>Identity review desk</strong>
+                      <span>
+                        <input
+                          value={trackingIdentityForm.track_id}
+                          onChange={(event) => setTrackingIdentityForm({ ...trackingIdentityForm, track_id: event.target.value })}
+                          placeholder="track id"
+                        />
+                        <input
+                          value={trackingIdentityForm.player_label}
+                          onChange={(event) => setTrackingIdentityForm({ ...trackingIdentityForm, player_label: event.target.value })}
+                          placeholder="player name"
+                        />
+                        <input
+                          value={trackingIdentityForm.team_label}
+                          onChange={(event) => setTrackingIdentityForm({ ...trackingIdentityForm, team_label: event.target.value })}
+                          placeholder="team"
+                        />
+                        <input
+                          value={trackingIdentityForm.jersey_number}
+                          onChange={(event) => setTrackingIdentityForm({ ...trackingIdentityForm, jersey_number: event.target.value })}
+                          placeholder="#"
+                        />
+                      </span>
+                      <small>
+                        {performanceMatchTrackingIdentityReviews.filter((review) => review.tracking_run_id === performanceMatchTrackingRun.id).length} review(s) recorded · corrected labels recompute distance, heatmap, and highlight identity context.
+                      </small>
+                    </div>
+                    <span>
+                      <button type="button" onClick={() => reviewPerformanceTrackingIdentity()} disabled={busyAction !== null}>Apply</button>
+                    </span>
+                  </article>
                   {performanceMatchTrackingRun.coaching_guidance.slice(0, 4).map((guidance, index) => (
                     <article key={`tracking-guidance-${index}`} className="task-card">
                       <div>
@@ -25017,8 +25127,41 @@ export default function HomePage() {
                           {metric.coaching_flags[0] ?? `${metric.sample_count} samples`}
                         </small>
                       </div>
+                      <span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTrackingIdentityForm({
+                              ...trackingIdentityForm,
+                              track_id: metric.track_id,
+                              player_label: metric.player_label ?? trackingIdentityForm.player_label,
+                              team_label: metric.team_label ?? trackingIdentityForm.team_label,
+                              jersey_number: metric.jersey_number ?? ""
+                            });
+                          }}
+                          disabled={busyAction !== null}
+                        >
+                          Edit
+                        </button>
+                        <button type="button" onClick={() => reviewPerformanceTrackingIdentity(metric)} disabled={busyAction !== null}>Confirm</button>
+                      </span>
                     </article>
                   ))}
+                  {performanceMatchTrackingIdentityReviews
+                    .filter((review) => review.tracking_run_id === performanceMatchTrackingRun.id)
+                    .slice(0, 4)
+                    .map((review) => (
+                      <article key={review.id} className="task-card">
+                        <div>
+                          <strong>{review.track_id} · {review.decision}</strong>
+                          <span>
+                            {review.player_label ?? "unassigned"} · {review.team_label ?? "no team"}
+                            {review.jersey_number ? ` · #${review.jersey_number}` : ""}
+                          </span>
+                          <small>{review.sample_count} samples updated · {review.notes ?? new Date(review.reviewed_at).toLocaleString()}</small>
+                        </div>
+                      </article>
+                    ))}
                 </div>
               ) : null}
               {(performanceHardwareKits.length || performanceHardwareDevices.length || performanceHardwareSyncRun) ? (

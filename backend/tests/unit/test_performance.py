@@ -3036,6 +3036,45 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert runs.status_code == 200
     assert runs.json()[0]["id"] == tracking["id"]
 
+    review_response = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/identity-reviews",
+        headers=identity_headers,
+        json={
+            "track_id": "home-9",
+            "team_label": "AfroLete",
+            "player_label": "Confirmed Forward",
+            "jersey_number": "99",
+            "decision": "confirmed",
+            "notes": "Coach confirmed the track identity after slow-motion review.",
+        },
+    )
+    assert review_response.status_code == 201
+    review_result = review_response.json()
+    review = review_result["review"]
+    revised_tracking = review_result["tracking_run"]
+    assert review["track_id"] == "home-9"
+    assert review["sample_count"] == 3
+    assert review["before"]["player_labels"] == ["Striker"]
+    assert review["after"]["player_label"] == "Confirmed Forward"
+    assert revised_tracking["status"] == "reviewed"
+    revised_forward = next(metric for metric in revised_tracking["player_metrics"] if metric["track_id"] == "home-9")
+    assert revised_forward["player_label"] == "Confirmed Forward"
+    assert revised_forward["team_label"] == "AfroLete"
+    assert revised_forward["jersey_number"] == "99"
+    assert revised_forward["distance_m"] == 20.0
+    assert all(
+        sample["source"].endswith("identity_review")
+        for sample in revised_tracking["samples"]
+        if sample["track_id"] == "home-9"
+    )
+
+    reviews = client.get(
+        f"/api/v1/performance/scouting/tracking-identity-reviews?organization_id={organization['id']}&tracking_run_id={tracking['id']}",
+        headers=identity_headers,
+    )
+    assert reviews.status_code == 200
+    assert reviews.json()[0]["id"] == review["id"]
+
 
 def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, identity_headers, monkeypatch) -> None:
     organization, team, _, _ = create_rostered_athlete(client, identity_headers)

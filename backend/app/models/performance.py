@@ -496,6 +496,32 @@ class PerformanceMatchTrackingSample(IdMixin, TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(80), default="tracking_sample", nullable=False, index=True)
 
 
+class PerformanceMatchTrackingIdentityReview(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_match_tracking_identity_reviews"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    tracking_run_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_match_tracking_runs.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    track_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    reviewer_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    team_label: Mapped[str | None] = mapped_column(String(120), index=True)
+    player_label: Mapped[str | None] = mapped_column(String(180), index=True)
+    jersey_number: Mapped[str | None] = mapped_column(String(20), index=True)
+    decision: Mapped[str] = mapped_column(String(40), default="confirmed", nullable=False, index=True)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    before_json: Mapped[str] = mapped_column(Text, nullable=False)
+    after_json: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class PerformanceHighlightReel(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_highlight_reels"
 
