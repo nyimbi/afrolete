@@ -1840,6 +1840,14 @@ class PerformanceAssessmentReviewEscalationRunRead(BaseModel):
     dry_run: bool = False
 
 
+class PlayerMatchActionPlanRead(BaseModel):
+    priority: str
+    focus: str
+    cue: str
+    drill_recommendation: str
+    evidence: str
+
+
 class PlayerMatchGuidanceRead(BaseModel):
     tracking_run_id: UUID
     video_asset_id: UUID
@@ -1865,6 +1873,7 @@ class PlayerMatchGuidanceRead(BaseModel):
     expected_goals: float = 0.0
     coaching_flags: list[str] = Field(default_factory=list)
     player_guidance: list[str] = Field(default_factory=list)
+    action_plan: list[PlayerMatchActionPlanRead] = Field(default_factory=list)
     tactical_context: list[str] = Field(default_factory=list)
     quality_warnings: list[str] = Field(default_factory=list)
 

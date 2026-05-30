@@ -2165,6 +2165,22 @@ textarea:focus {
   margin: 4px 0;
 }
 
+.player-action-plan {
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.player-action-plan strong {
+  font-size: 13px;
+}
+
+.player-action-plan span,
+.player-action-plan small {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .player-self-check {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) repeat(6, minmax(76px, 0.36fr)) auto;

@@ -5093,6 +5093,16 @@ def build_player_match_guidance(
     )
     if event_count:
         tactical_context.append(f"{event_count} recognized action cue(s) are linked to this track.")
+    action_plan = player_match_action_plan(
+        metric=metric,
+        tracking_quality=tracking_quality,
+        high_speed_distance=high_speed_distance,
+        sprint_count=sprint_count,
+        pass_attempts=pass_attempts,
+        pass_accuracy=pass_accuracy,
+        pressure_count=pressure_count,
+        off_ball_runs=off_ball_runs,
+    )
 
     return {
         "tracking_run_id": run.id,
@@ -5119,9 +5129,108 @@ def build_player_match_guidance(
         "expected_goals": round(float(metric.get("expected_goals") or 0.0), 3),
         "coaching_flags": coaching_flags,
         "player_guidance": player_guidance[:6],
+        "action_plan": action_plan,
         "tactical_context": tactical_context[:4],
         "quality_warnings": [str(item) for item in summary.get("quality_warnings", []) if str(item)][:4],
     }
+
+
+def player_match_action_plan(
+    *,
+    metric: dict[str, object],
+    tracking_quality: float,
+    high_speed_distance: float,
+    sprint_count: int,
+    pass_attempts: int,
+    pass_accuracy: float,
+    pressure_count: int,
+    off_ball_runs: int,
+) -> list[dict[str, str]]:
+    plan: list[dict[str, str]] = []
+    max_speed = float(metric.get("max_speed_mps") or 0.0)
+    recovery_ratio = float(metric.get("recovery_ratio") or 0.0)
+    work_rate = float(metric.get("work_rate_m_per_min") or 0.0)
+    if tracking_quality < 0.65:
+        plan.append(
+            {
+                "priority": "confirm",
+                "focus": "Track identity review",
+                "cue": "Confirm this is your track before adjusting training load.",
+                "drill_recommendation": "Review the clip with a coach and mark shirt number, role, and key timestamps.",
+                "evidence": f"Tracking quality {round(tracking_quality * 100)}%.",
+            }
+        )
+    if max_speed >= 8.5 or sprint_count >= 2 or high_speed_distance >= 40:
+        plan.append(
+            {
+                "priority": "high",
+                "focus": "Sprint mechanics and deceleration",
+                "cue": "Accelerate tall, keep hips stable, and brake under control after the action.",
+                "drill_recommendation": "Run 4 x 20m accelerations with 10m controlled deceleration and video one side-on rep.",
+                "evidence": f"{round(high_speed_distance)}m high-speed work, {sprint_count} sprint trigger(s), max {max_speed:.1f} m/s.",
+            }
+        )
+    if pressure_count >= 2:
+        plan.append(
+            {
+                "priority": "medium",
+                "focus": "Pressing angle and recovery cover",
+                "cue": "Arrive on the opponent's outside shoulder and curve the run to block the easy pass.",
+                "drill_recommendation": "Use 3v3+2 pressing waves with a five-second counter-press rule.",
+                "evidence": f"{pressure_count} pressure action(s) detected near opponents.",
+            }
+        )
+    if off_ball_runs >= 1:
+        plan.append(
+            {
+                "priority": "medium",
+                "focus": "Off-ball timing",
+                "cue": "Start the run when the passer's touch opens, not after the pass is already obvious.",
+                "drill_recommendation": "Practice third-player runs from midfield into channel gates with a timed release cue.",
+                "evidence": f"{off_ball_runs} off-ball run(s) created separation or territory.",
+            }
+        )
+    if pass_attempts >= 2 and pass_accuracy < 70:
+        plan.append(
+            {
+                "priority": "medium",
+                "focus": "First touch and passing choice",
+                "cue": "Scan before receiving and keep the first touch away from pressure.",
+                "drill_recommendation": "Run rondo-to-target sequences with mandatory shoulder checks before each receive.",
+                "evidence": f"{pass_accuracy:.0f}% pass completion from {pass_attempts} tracked attempt(s).",
+            }
+        )
+    if recovery_ratio < 0.12 and high_speed_distance > 0:
+        plan.append(
+            {
+                "priority": "medium",
+                "focus": "Recovery between efforts",
+                "cue": "After sprinting, recover into shape before the next trigger instead of hovering between roles.",
+                "drill_recommendation": "Pair repeated sprint work with walk-jog recovery gates and heart-rate/readiness check-ins.",
+                "evidence": f"Low-speed recovery ratio {recovery_ratio:.2f} after high-speed load.",
+            }
+        )
+    if work_rate >= 120 and len(plan) < 4:
+        plan.append(
+            {
+                "priority": "monitor",
+                "focus": "Work-rate management",
+                "cue": "Protect quality late in the match by choosing the highest-value runs.",
+                "drill_recommendation": "Use interval possession games with a coach callout for sprint/no-sprint decisions.",
+                "evidence": f"Work rate {work_rate:.0f} m/min.",
+            }
+        )
+    if not plan:
+        plan.append(
+            {
+                "priority": "review",
+                "focus": "Match decision review",
+                "cue": "Pick two moments where your positioning changed the next pass or defensive action.",
+                "drill_recommendation": "Review the match replay with your coach and tag one strength plus one next action.",
+                "evidence": "No urgent load or tactical flag crossed the action-plan thresholds.",
+            }
+        )
+    return plan[:4]
 
 
 async def evaluate_performance_achievements(

@@ -902,6 +902,14 @@ export default function PlayerPerformancePage() {
                   {guidance.player_guidance.slice(0, 3).map((item, index) => (
                     <small key={`${guidance.track_id}-guidance-${index}`}>{item}</small>
                   ))}
+                  {guidance.action_plan.slice(0, 3).map((item, index) => (
+                    <div className="player-action-plan" key={`${guidance.track_id}-action-${index}`}>
+                      <strong>{item.focus}</strong>
+                      <span>{item.cue}</span>
+                      <small>{item.drill_recommendation}</small>
+                      <small>{item.priority} · {item.evidence}</small>
+                    </div>
+                  ))}
                   {guidance.tactical_context.slice(0, 2).map((item, index) => (
                     <small key={`${guidance.track_id}-context-${index}`}>{item}</small>
                   ))}

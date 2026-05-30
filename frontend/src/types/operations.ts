@@ -7992,6 +7992,13 @@ export type PlayerMatchGuidanceRead = {
   expected_goals: number;
   coaching_flags: string[];
   player_guidance: string[];
+  action_plan: {
+    priority: string;
+    focus: string;
+    cue: string;
+    drill_recommendation: string;
+    evidence: string;
+  }[];
   tactical_context: string[];
   quality_warnings: string[];
 };

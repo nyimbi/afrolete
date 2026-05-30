@@ -301,6 +301,12 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert match_guidance[0]["max_speed_mps"] > 0
     assert match_guidance[0]["pressure_applied_count"] >= 1
     assert any("high-speed" in item or "High peak speed" in item for item in match_guidance[0]["player_guidance"])
+    assert match_guidance[0]["action_plan"]
+    assert {item["focus"] for item in match_guidance[0]["action_plan"]} & {
+        "Sprint mechanics and deceleration",
+        "Pressing angle and recovery cover",
+    }
+    assert all(item["drill_recommendation"] for item in match_guidance[0]["action_plan"])
     assert any("Home phase" in item for item in match_guidance[0]["tactical_context"])
 
     touch_metric = client.post(
