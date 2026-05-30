@@ -11,6 +11,7 @@ from app.api.v1.routes import coach_education
 from app.api.v1.routes import developers
 from app.api.v1.routes import development
 from app.api.v1.routes import events
+from app.api.v1.routes import experience
 from app.api.v1.routes import nutrition
 from app.api.v1.routes import organizations
 from app.api.v1.routes import platform
@@ -35,6 +36,7 @@ api_router.include_router(coach_education.router)
 api_router.include_router(developers.router)
 api_router.include_router(development.router)
 api_router.include_router(events.router)
+api_router.include_router(experience.router)
 api_router.include_router(nutrition.router)
 api_router.include_router(organizations.router)
 api_router.include_router(performance.router)

@@ -8415,6 +8415,89 @@ export type CoachEducationDashboardRead = {
   enrollments: CoachEducationEnrollmentRead[];
 };
 
+export type ProductTourStepRead = {
+  key: string;
+  title: string;
+  target: string;
+  instruction: string;
+  practice_task: string;
+  success_criteria: string;
+  xp: number;
+};
+
+export type ProductTourDefinitionRead = {
+  key: string;
+  surface: string;
+  role: string;
+  title: string;
+  estimated_minutes: number;
+  objective: string;
+  steps: ProductTourStepRead[];
+};
+
+export type ProductHelpArticleRead = {
+  key: string;
+  surface: string;
+  role: string;
+  title: string;
+  summary: string;
+  body: string;
+  tags: string[];
+  related_tour_key: string | null;
+  action_label: string | null;
+  action_href: string | null;
+};
+
+export type ProductExperienceCatalogRead = {
+  tours: ProductTourDefinitionRead[];
+  articles: ProductHelpArticleRead[];
+};
+
+export type ProductTourProgressRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  tour_key: string;
+  surface: string;
+  role: string;
+  title: string;
+  current_step_key: string | null;
+  current_step: ProductTourStepRead | null;
+  completed_steps: string[];
+  skipped_steps: string[];
+  progress_percent: number;
+  score: number;
+  star_count: number;
+  status: string;
+  last_feedback: string | null;
+  completed_at: string | null;
+  last_activity_at: string | null;
+  created_at: string;
+};
+
+export type ProductHelpSearchRead = {
+  query: string;
+  surface: string | null;
+  role: string | null;
+  result_count: number;
+  articles: ProductHelpArticleRead[];
+  recommended_tours: ProductTourDefinitionRead[];
+  suggested_actions: string[];
+};
+
+export type ProductExperienceDashboardRead = {
+  organization_id: UUID;
+  active_tour_count: number;
+  completed_tour_count: number;
+  average_progress_percent: number;
+  total_score: number;
+  active_progress: ProductTourProgressRead[];
+  recent_searches: Array<Record<string, unknown>>;
+  recommended_tours: ProductTourDefinitionRead[];
+  suggested_actions: string[];
+};
+
 export type TrainingDrillRead = {
   id: UUID;
   organization_id: UUID;

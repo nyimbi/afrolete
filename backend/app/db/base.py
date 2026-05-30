@@ -173,6 +173,7 @@ from app.models.event import (  # noqa: F401,E402
     SafeguardingIncident,
     SafeguardingIncidentAccessGrant,
 )
+from app.models.experience import ProductHelpInteraction, ProductTourProgress  # noqa: F401,E402
 from app.models.identity import AppUser, Person  # noqa: F401,E402
 from app.models.organization import (  # noqa: F401,E402
     Committee,

@@ -354,6 +354,10 @@ import type {
   CoachEducationCatalogRead,
   CoachEducationDashboardRead,
   CoachEducationEnrollmentRead,
+  ProductExperienceCatalogRead,
+  ProductExperienceDashboardRead,
+  ProductHelpSearchRead,
+  ProductTourProgressRead,
   OppositionScoutingReportRead,
   OppositionScoutingVideoAssetRead,
   PerformanceAchievementAwardRead,
@@ -2004,6 +2008,11 @@ export default function HomePage() {
   const [coachEducationDashboard, setCoachEducationDashboard] = useState<CoachEducationDashboardRead | null>(null);
   const [coachEducationEnrollments, setCoachEducationEnrollments] = useState<CoachEducationEnrollmentRead[]>([]);
   const [coachEducationActivity, setCoachEducationActivity] = useState<CoachEducationActivityRead | null>(null);
+  const [productExperienceCatalog, setProductExperienceCatalog] = useState<ProductExperienceCatalogRead | null>(null);
+  const [productExperienceDashboard, setProductExperienceDashboard] =
+    useState<ProductExperienceDashboardRead | null>(null);
+  const [productTourProgress, setProductTourProgress] = useState<ProductTourProgressRead[]>([]);
+  const [productHelpSearch, setProductHelpSearch] = useState<ProductHelpSearchRead | null>(null);
   const [volunteerProfiles, setVolunteerProfiles] = useState<VolunteerProfileRead[]>([]);
   const [volunteerOpportunities, setVolunteerOpportunities] = useState<VolunteerOpportunityRead[]>([]);
   const [volunteerAssignments, setVolunteerAssignments] = useState<VolunteerAssignmentRead[]>([]);
@@ -2291,6 +2300,7 @@ export default function HomePage() {
   const [selectedTrainingPlanId, setSelectedTrainingPlanId] = useState("");
   const [selectedTrainingSessionId, setSelectedTrainingSessionId] = useState("");
   const [selectedCoachEducationEnrollmentId, setSelectedCoachEducationEnrollmentId] = useState("");
+  const [selectedProductTourProgressId, setSelectedProductTourProgressId] = useState("");
   const [selectedVolunteerProfileId, setSelectedVolunteerProfileId] = useState("");
   const [selectedVolunteerOpportunityId, setSelectedVolunteerOpportunityId] = useState("");
   const [selectedVolunteerAssignmentId, setSelectedVolunteerAssignmentId] = useState("");
@@ -2815,6 +2825,13 @@ export default function HomePage() {
     module_key: "platform_basics",
     score_percent: 92,
     evidence_ref: "coach-lab://platform-basics"
+  });
+  const [productExperienceForm, setProductExperienceForm] = useState({
+    tour_key: "video_analysis_tour",
+    surface: "performance",
+    role: "coach",
+    help_query: "tracking distance quality",
+    feedback: "Completed this guided step from the operations console."
   });
   const [volunteerForm, setVolunteerForm] = useState({
     display_name: "Maria Volunteer",
@@ -3539,6 +3556,10 @@ export default function HomePage() {
   const selectedCoachEducationEnrollment = useMemo(
     () => coachEducationEnrollments.find((enrollment) => enrollment.id === selectedCoachEducationEnrollmentId) ?? null,
     [coachEducationEnrollments, selectedCoachEducationEnrollmentId]
+  );
+  const selectedProductTourProgress = useMemo(
+    () => productTourProgress.find((progress) => progress.id === selectedProductTourProgressId) ?? null,
+    [productTourProgress, selectedProductTourProgressId]
   );
   const selectedVolunteerProfile = useMemo(
     () => volunteerProfiles.find((profile) => profile.id === selectedVolunteerProfileId) ?? null,
@@ -4295,7 +4316,18 @@ export default function HomePage() {
 
   const loadTraining = useCallback(async (organizationId: string, teamId?: string) => {
     const teamQuery = teamId ? `&team_id=${teamId}` : "";
-    const [drills, plans, sessions, commandCenter, coachCatalog, coachDashboard, coachEnrollments] = await Promise.all([
+    const [
+      drills,
+      plans,
+      sessions,
+      commandCenter,
+      coachCatalog,
+      coachDashboard,
+      coachEnrollments,
+      experienceCatalog,
+      experienceDashboard,
+      tourProgress
+    ] = await Promise.all([
       apiRequest<TrainingDrillRead[]>(`/training/drills?organization_id=${organizationId}`),
       apiRequest<TrainingPlanRead[]>(`/training/plans?organization_id=${organizationId}${teamQuery}`),
       apiRequest<TrainingSessionPlanRead[]>(
@@ -4313,6 +4345,15 @@ export default function HomePage() {
       apiRequest<CoachEducationEnrollmentRead[]>(
         `/coach-education/enrollments?organization_id=${organizationId}`,
         { identity }
+      ),
+      apiRequest<ProductExperienceCatalogRead>("/experience/catalog", { identity }),
+      apiRequest<ProductExperienceDashboardRead>(
+        `/experience/dashboard?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<ProductTourProgressRead[]>(
+        `/experience/tours/progress?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setTrainingDrills(drills);
@@ -4322,6 +4363,9 @@ export default function HomePage() {
     setCoachEducationCatalog(coachCatalog);
     setCoachEducationDashboard(coachDashboard);
     setCoachEducationEnrollments(coachEnrollments);
+    setProductExperienceCatalog(experienceCatalog);
+    setProductExperienceDashboard(experienceDashboard);
+    setProductTourProgress(tourProgress);
     setSelectedTrainingPlanId((current) =>
       plans.some((plan) => plan.id === current) ? current : plans[0]?.id ?? ""
     );
@@ -4330,6 +4374,9 @@ export default function HomePage() {
     );
     setSelectedCoachEducationEnrollmentId((current) =>
       coachEnrollments.some((enrollment) => enrollment.id === current) ? current : coachEnrollments[0]?.id ?? ""
+    );
+    setSelectedProductTourProgressId((current) =>
+      tourProgress.some((progress) => progress.id === current) ? current : tourProgress[0]?.id ?? ""
     );
   }, [identity]);
 
@@ -5243,6 +5290,11 @@ export default function HomePage() {
       setCoachEducationEnrollments([]);
       setCoachEducationActivity(null);
       setSelectedCoachEducationEnrollmentId("");
+      setProductExperienceCatalog(null);
+      setProductExperienceDashboard(null);
+      setProductTourProgress([]);
+      setProductHelpSearch(null);
+      setSelectedProductTourProgressId("");
       setVolunteerProfiles([]);
       setVolunteerOpportunities([]);
       setVolunteerAssignments([]);
@@ -12663,6 +12715,95 @@ export default function HomePage() {
           activity.enrollment.status === "certified" ? "good" : "neutral"
         );
         void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const startProductTour = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "start-product-tour",
+      () =>
+        apiRequest<ProductTourProgressRead>("/experience/tours/progress", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            tour_key: productExperienceForm.tour_key,
+            surface: productExperienceForm.surface,
+            role: productExperienceForm.role
+          }
+        }),
+      (progress) => {
+        setProductTourProgress((current) => [
+          progress,
+          ...current.filter((item) => item.id !== progress.id)
+        ]);
+        setSelectedProductTourProgressId(progress.id);
+        addLog(`${progress.title} started at ${progress.progress_percent}%`, "good");
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const advanceProductTour = (skipped = false) => {
+    if (!selectedOrganizationId || !selectedProductTourProgress?.current_step_key) {
+      addLog("Start or select a guided tour with an active step", "bad");
+      return;
+    }
+    runAction(
+      skipped ? "skip-product-tour-step" : "complete-product-tour-step",
+      () =>
+        apiRequest<ProductTourProgressRead>(
+          `/experience/tours/progress/${selectedProductTourProgress.id}/steps`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              step_key: selectedProductTourProgress.current_step_key,
+              skipped,
+              feedback: productExperienceForm.feedback
+            }
+          }
+        ),
+      (progress) => {
+        setProductTourProgress((current) => [
+          progress,
+          ...current.filter((item) => item.id !== progress.id)
+        ]);
+        setSelectedProductTourProgressId(progress.id);
+        addLog(
+          `${progress.title} ${progress.progress_percent}% · ${progress.score} XP`,
+          progress.status === "completed" ? "good" : "neutral"
+        );
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const searchProductHelp = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const params = new URLSearchParams({
+      organization_id: selectedOrganizationId,
+      surface: productExperienceForm.surface,
+      role: productExperienceForm.role,
+      q: productExperienceForm.help_query
+    });
+    runAction(
+      "search-product-help",
+      () => apiRequest<ProductHelpSearchRead>(`/experience/help/search?${params.toString()}`, { identity }),
+      (result) => {
+        setProductHelpSearch(result);
+        addLog(`Help search returned ${result.result_count} article(s)`, result.result_count ? "good" : "neutral");
+        if (selectedOrganizationId) {
+          void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+        }
       }
     );
   };
@@ -21171,6 +21312,112 @@ export default function HomePage() {
               ))}
             </div>
           </div>
+        </section>
+
+        <section className="work-grid" id="experience">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Guided help</p>
+                <h2>Product tours and smart answers</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={startProductTour} disabled={busyAction !== null}>Start</button>
+                <button type="button" onClick={() => advanceProductTour(false)} disabled={busyAction !== null}>Complete</button>
+                <button type="button" onClick={() => advanceProductTour(true)} disabled={busyAction !== null}>Skip</button>
+                <button type="button" onClick={searchProductHelp} disabled={busyAction !== null}>Search</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{productExperienceDashboard?.total_score ?? 0}</strong>
+              <span>{productExperienceDashboard?.completed_tour_count ?? 0} tour(s) complete</span>
+              <small>
+                {productExperienceDashboard
+                  ? `${productExperienceDashboard.active_tour_count} active · ${productExperienceDashboard.average_progress_percent}% average progress`
+                  : "Save staff onboarding progress, resume tours, and search contextual help."}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Tour
+                <select value={productExperienceForm.tour_key} onChange={(event) => setProductExperienceForm({ ...productExperienceForm, tour_key: event.target.value })}>
+                  {(productExperienceCatalog?.tours ?? [
+                    { key: "video_analysis_tour", title: "Video Analysis Made Easy" },
+                    { key: "training_command_tour", title: "Training Command Center" }
+                  ]).map((tour) => (
+                    <option key={tour.key} value={tour.key}>{tour.title}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Surface
+                <select value={productExperienceForm.surface} onChange={(event) => setProductExperienceForm({ ...productExperienceForm, surface: event.target.value })}>
+                  <option value="performance">Performance</option>
+                  <option value="training">Training</option>
+                  <option value="registration">Registration</option>
+                  <option value="safeguarding">Safeguarding</option>
+                </select>
+              </label>
+              <label>
+                Role
+                <input value={productExperienceForm.role} onChange={(event) => setProductExperienceForm({ ...productExperienceForm, role: event.target.value })} />
+              </label>
+              <label>
+                Help query
+                <input value={productExperienceForm.help_query} onChange={(event) => setProductExperienceForm({ ...productExperienceForm, help_query: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Step feedback
+                <input value={productExperienceForm.feedback} onChange={(event) => setProductExperienceForm({ ...productExperienceForm, feedback: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {selectedProductTourProgress ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{selectedProductTourProgress.title} · {selectedProductTourProgress.progress_percent}%</strong>
+                    <span>{selectedProductTourProgress.score} XP · {selectedProductTourProgress.star_count} star(s) · {selectedProductTourProgress.status}</span>
+                    <small>
+                      {selectedProductTourProgress.current_step
+                        ? `${selectedProductTourProgress.current_step.title}: ${selectedProductTourProgress.current_step.practice_task}`
+                        : "Tour complete or awaiting restart"}
+                    </small>
+                  </div>
+                </article>
+              ) : null}
+              {productHelpSearch?.articles.slice(0, 3).map((article) => (
+                <article key={article.key} className="task-card">
+                  <div>
+                    <strong>{article.title}</strong>
+                    <span>{article.summary}</span>
+                    <small>{article.tags.join(", ")}</small>
+                  </div>
+                </article>
+              ))}
+              {productExperienceDashboard?.suggested_actions.slice(0, 3).map((action) => (
+                <article key={action} className="task-card">
+                  <div>
+                    <strong>Suggested action</strong>
+                    <span>{action}</span>
+                  </div>
+                </article>
+              ))}
+              {productTourProgress.slice(0, 4).map((progress) => (
+                <button
+                  type="button"
+                  key={progress.id}
+                  className={`task-card ${progress.id === selectedProductTourProgressId ? "selected" : ""}`}
+                  onClick={() => setSelectedProductTourProgressId(progress.id)}
+                >
+                  <div>
+                    <strong>{progress.title}</strong>
+                    <span>{progress.progress_percent}% · {progress.score} XP · {progress.status}</span>
+                    <small>{progress.last_feedback ?? progress.current_step?.instruction ?? "Guided tour progress"}</small>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="panel form-panel">
             <div className="panel-head">
@@ -21294,7 +21541,9 @@ export default function HomePage() {
               ))}
             </div>
           </div>
+        </section>
 
+        <section className="work-grid">
           <div className="panel form-panel">
             <div className="panel-head">
               <div>
