@@ -1064,6 +1064,12 @@ export default function PlayerPerformancePage() {
                     {guidance.feedback?.agent_task_id ? (
                       <small>Training Strategy Agent queued · {guidance.feedback.agent_task_id.slice(0, 8)}</small>
                     ) : null}
+                    {guidance.feedback?.coach_followup_sent_at ? (
+                      <small>
+                        Coach follow-up {new Date(guidance.feedback.coach_followup_sent_at).toLocaleString()} ·{" "}
+                        {guidance.feedback.coach_followup_notes ?? "open your inbox for the full message"}
+                      </small>
+                    ) : null}
                   </div>
                   <div className="chart-bars">
                     <div className="chart-bar-row">

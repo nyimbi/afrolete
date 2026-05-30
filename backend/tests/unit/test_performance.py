@@ -449,6 +449,16 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert followup_recipient["feedback_coach_followup_message_id"] == coach_followup["message_id"]
     assert followup_recipient["feedback_coach_followup_sent_at"] is not None
 
+    player_after_coach_response = client.get(
+        f"/api/v1/performance/my-profiles?organization_id={organization['id']}",
+        headers=player_headers,
+    )
+    assert player_after_coach_response.status_code == 200
+    player_feedback = player_after_coach_response.json()[0]["match_guidance"][0]["feedback"]
+    assert player_feedback["coach_followup_message_id"] == coach_followup["message_id"]
+    assert player_feedback["coach_followup_notes"] == "We will review your pressing angle and adjust the next training block."
+    assert player_feedback["coach_followup_sent_at"] is not None
+
     followup_response = client.post(
         f"/api/v1/performance/my-profiles/{roster['athlete_profile_id']}/match-guidance/training-followups",
         headers=player_headers,
