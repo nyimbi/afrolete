@@ -1,9 +1,11 @@
 from base64 import b64decode
 from binascii import Error as Base64Error
+import csv
 from datetime import UTC, date, datetime, timedelta
 import hmac
 import hashlib
 import httpx
+import io
 import json
 import math
 from pathlib import Path
@@ -1196,6 +1198,180 @@ async def list_match_tracking_runs(
         statement = statement.where(PerformanceMatchTrackingRun.video_asset_id == video_asset_id)
     runs = list((await db.scalars(statement.order_by(PerformanceMatchTrackingRun.created_at.desc()).limit(25))).all())
     return [await match_tracking_run_read(db, run) for run in runs]
+
+
+async def downloadable_match_tracking_run_export(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    tracking_run_id: UUID,
+    export_format: str,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    run = await get_match_tracking_run(db, tracking_run_id)
+    await ensure_manage_performance(authz, identity, run.organization_id)
+    samples = list(
+        (
+            await db.scalars(
+                select(PerformanceMatchTrackingSample)
+                .where(PerformanceMatchTrackingSample.tracking_run_id == run.id)
+                .order_by(
+                    PerformanceMatchTrackingSample.timestamp_seconds,
+                    PerformanceMatchTrackingSample.track_id,
+                    PerformanceMatchTrackingSample.frame_index,
+                )
+            )
+        ).all()
+    )
+    try:
+        summary = json.loads(run.summary_json)
+    except json.JSONDecodeError:
+        summary = {}
+    normalized_format = export_format.strip().lower().replace("-", "_")
+    if normalized_format in {"json", "full_json", "analysis_json"}:
+        content = json.dumps(
+            {
+                "export_format": "analysis_json",
+                "exported_at": datetime.now(UTC).isoformat(),
+                "tracking_run": {
+                    "id": str(run.id),
+                    "organization_id": str(run.organization_id),
+                    "video_asset_id": str(run.video_asset_id),
+                    "calibration_id": str(run.calibration_id) if run.calibration_id else None,
+                    "team_id": str(run.team_id) if run.team_id else None,
+                    "event_id": str(run.event_id) if run.event_id else None,
+                    "source_provider": run.source_provider,
+                    "model_policy": run.model_policy,
+                    "status": run.status,
+                    "pitch_length_m": run.pitch_length_m,
+                    "pitch_width_m": run.pitch_width_m,
+                    "sample_count": run.sample_count,
+                    "player_count": run.player_count,
+                    "total_distance_m": run.total_distance_m,
+                    "max_speed_mps": run.max_speed_mps,
+                    "high_speed_distance_m": run.high_speed_distance_m,
+                    "sprint_count": run.sprint_count,
+                    "started_at": run.started_at.isoformat(),
+                    "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                },
+                "summary": summary,
+                "samples": [match_tracking_sample_read(sample) for sample in samples],
+            },
+            default=str,
+            indent=2,
+            sort_keys=True,
+        ).encode()
+        filename = f"match-tracking-{run.id}-analysis.json"
+        content_type = "application/json"
+    elif normalized_format in {"samples_csv", "tracking_samples_csv", "csv"}:
+        rows = [match_tracking_sample_export_row(sample) for sample in samples]
+        content = csv_bytes(
+            [
+                "timestamp_seconds",
+                "frame_index",
+                "track_id",
+                "person_id",
+                "team_label",
+                "player_label",
+                "jersey_number",
+                "x_percent",
+                "y_percent",
+                "x_meters",
+                "y_meters",
+                "speed_mps",
+                "confidence",
+                "source",
+            ],
+            rows,
+        )
+        filename = f"match-tracking-{run.id}-samples.csv"
+        content_type = "text/csv; charset=utf-8"
+    elif normalized_format in {"player_metrics_csv", "metrics_csv"}:
+        metrics = [item for item in summary.get("player_metrics", []) if isinstance(item, dict)]
+        content = csv_bytes(
+            [
+                "track_id",
+                "player_label",
+                "team_label",
+                "jersey_number",
+                "sample_count",
+                "duration_seconds",
+                "distance_m",
+                "high_speed_distance_m",
+                "max_speed_mps",
+                "average_speed_mps",
+                "work_rate_m_per_min",
+                "sprint_count",
+                "pressure_applied_count",
+                "pressure_received_count",
+                "pass_completed_count",
+                "pass_attempt_count",
+                "pass_accuracy_percent",
+                "turnover_involved_count",
+                "interception_count",
+                "tackle_count",
+                "shot_count",
+                "expected_goals",
+                "dominant_zone",
+                "tracking_quality_score",
+                "coaching_flags",
+            ],
+            [match_tracking_player_metric_export_row(metric) for metric in metrics],
+        )
+        filename = f"match-tracking-{run.id}-player-metrics.csv"
+        content_type = "text/csv; charset=utf-8"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unsupported match tracking export format",
+        )
+    checksum = hashlib.sha256(content).hexdigest()
+    return {
+        "content": content,
+        "content_type": content_type,
+        "filename": filename,
+        "checksum": checksum,
+        "size_bytes": len(content),
+    }
+
+
+def csv_bytes(headers: list[str], rows: list[dict[str, object]]) -> bytes:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=headers, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return buffer.getvalue().encode()
+
+
+def match_tracking_sample_export_row(sample: PerformanceMatchTrackingSample) -> dict[str, object]:
+    return {
+        "timestamp_seconds": sample.timestamp_seconds,
+        "frame_index": sample.frame_index,
+        "track_id": sample.track_id,
+        "person_id": str(sample.person_id) if sample.person_id else "",
+        "team_label": sample.team_label or "",
+        "player_label": sample.player_label or "",
+        "jersey_number": sample.jersey_number or "",
+        "x_percent": sample.x_percent,
+        "y_percent": sample.y_percent,
+        "x_meters": sample.x_meters,
+        "y_meters": sample.y_meters,
+        "speed_mps": sample.speed_mps if sample.speed_mps is not None else "",
+        "confidence": sample.confidence if sample.confidence is not None else "",
+        "source": sample.source,
+    }
+
+
+def match_tracking_player_metric_export_row(metric: dict[str, object]) -> dict[str, object]:
+    row: dict[str, object] = {}
+    for key, value in metric.items():
+        if isinstance(value, (list, dict)):
+            row[key] = json.dumps(value, default=str, sort_keys=True)
+        elif value is None:
+            row[key] = ""
+        else:
+            row[key] = value
+    return row
 
 
 async def list_match_tracking_provider_ingest_events(

@@ -10585,6 +10585,55 @@ export default function HomePage() {
     );
   };
 
+  const downloadPerformanceMatchTrackingExport = (
+    run: PerformanceMatchTrackingRunRead,
+    exportFormat: "analysis_json" | "samples_csv" | "player_metrics_csv"
+  ) => {
+    runAction(
+      `download-performance-match-tracking-${exportFormat}-${run.id}`,
+      async () => {
+        const headers = new Headers({ Accept: exportFormat === "analysis_json" ? "application/json,*/*" : "text/csv,*/*" });
+        if (authSession) {
+          headers.set("Authorization", `Bearer ${authSession.accessToken}`);
+        } else {
+          headers.set("X-Afrolete-Sub", identity.sub);
+          headers.set("X-Afrolete-Email", identity.email);
+          headers.set("X-Afrolete-Name", identity.name);
+        }
+        const response = await fetch(
+          `${apiBaseUrl}/api/v1/performance/scouting/tracking-runs/${run.id}/export?export_format=${exportFormat}`,
+          { headers }
+        );
+        if (!response.ok) {
+          throw new Error(`Match tracking export failed: ${response.status}`);
+        }
+        const blob = await response.blob();
+        const disposition = response.headers.get("content-disposition") ?? "";
+        const filenameMatch = disposition.match(/filename="([^"]+)"/);
+        const filename = filenameMatch?.[1] ?? `match-tracking-${run.id}-${exportFormat}.${exportFormat.endsWith("csv") ? "csv" : "json"}`;
+        const href = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = href;
+        anchor.download = filename;
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(href);
+        return {
+          filename,
+          checksum: response.headers.get("X-Afrolete-Match-Tracking-Export-Checksum") ?? "",
+          size: blob.size
+        };
+      },
+      (download) => {
+        addLog(
+          `${download.filename} downloaded (${download.size} bytes${download.checksum ? `, ${download.checksum.slice(0, 8)}` : ""})`,
+          "good"
+        );
+      }
+    );
+  };
+
   const createPerformanceHardwareKit = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization before creating a hardware kit", "bad");
@@ -25952,6 +26001,40 @@ export default function HomePage() {
                       {performanceMatchAnalysisReport?.tracking_run_id === performanceMatchTrackingRun.id ? (
                         <button type="button" onClick={() => downloadPerformanceMatchAnalysisReport(performanceMatchAnalysisReport)} disabled={busyAction !== null}>Download</button>
                       ) : null}
+                    </span>
+                  </article>
+                  <article className="task-card">
+                    <div>
+                      <strong>Portable match data</strong>
+                      <span>
+                        {performanceMatchTrackingRun.sample_count} time-series samples · {performanceMatchTrackingRun.player_count} player metric row(s)
+                      </span>
+                      <small>
+                        Export JSON for APIs, sample CSV for analysts, or player-metrics CSV for spreadsheets and partner tools.
+                      </small>
+                    </div>
+                    <span>
+                      <button
+                        type="button"
+                        onClick={() => downloadPerformanceMatchTrackingExport(performanceMatchTrackingRun, "analysis_json")}
+                        disabled={busyAction !== null}
+                      >
+                        JSON
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadPerformanceMatchTrackingExport(performanceMatchTrackingRun, "samples_csv")}
+                        disabled={busyAction !== null}
+                      >
+                        Samples
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadPerformanceMatchTrackingExport(performanceMatchTrackingRun, "player_metrics_csv")}
+                        disabled={busyAction !== null}
+                      >
+                        Metrics
+                      </button>
                     </span>
                   </article>
                   <article className="task-card">

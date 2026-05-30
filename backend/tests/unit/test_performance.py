@@ -1,7 +1,9 @@
 import base64
+import csv
 from datetime import UTC, datetime, timedelta
 import hashlib
 import hmac
+import io
 import json
 import time
 from types import SimpleNamespace
@@ -3771,6 +3773,36 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     forward = next(metric for metric in tracking["player_metrics"] if metric["track_id"] == "home-9")
     assert forward["player_label"] == "Forward"
     assert forward["distance_m"] > 20
+
+    sample_export = client.get(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/export?export_format=samples_csv",
+        headers=identity_headers,
+    )
+    assert sample_export.status_code == 200
+    assert sample_export.headers["content-type"].startswith("text/csv")
+    assert sample_export.headers["x-afrolete-match-tracking-export-checksum"]
+    sample_rows = list(csv.DictReader(io.StringIO(sample_export.text)))
+    assert len(sample_rows) == tracking["sample_count"]
+    assert sample_rows[0]["track_id"] == "away-4"
+    assert sample_rows[0]["x_meters"]
+
+    metrics_export = client.get(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/export?export_format=player_metrics_csv",
+        headers=identity_headers,
+    )
+    assert metrics_export.status_code == 200
+    metric_rows = list(csv.DictReader(io.StringIO(metrics_export.text)))
+    assert any(row["track_id"] == "home-9" and row["distance_m"] for row in metric_rows)
+
+    json_export = client.get(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/export?export_format=analysis_json",
+        headers=identity_headers,
+    )
+    assert json_export.status_code == 200
+    exported = json_export.json()
+    assert exported["tracking_run"]["id"] == tracking["id"]
+    assert len(exported["samples"]) == tracking["sample_count"]
+    assert exported["summary"]["player_metrics"]
 
     report_response = client.post(
         f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/analysis-reports",

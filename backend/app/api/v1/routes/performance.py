@@ -147,6 +147,7 @@ from app.services.performance import (
     create_wearable_provider_connection,
     decode_string_list,
     decode_uuid_list,
+    downloadable_match_tracking_run_export,
     evaluate_performance_achievements,
     ensure_manage_performance,
     ingest_performance_evidence,
@@ -1153,6 +1154,32 @@ async def list_match_tracking_runs_route(
             video_asset_id=video_asset_id,
         )
     ]
+
+
+@router.get("/scouting/tracking-runs/{tracking_run_id}/export")
+async def download_match_tracking_run_export_route(
+    tracking_run_id: UUID,
+    export_format: str = Query(default="analysis_json"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> Response:
+    artifact = await downloadable_match_tracking_run_export(
+        db,
+        identity,
+        tracking_run_id,
+        export_format,
+        authz,
+    )
+    return Response(
+        content=artifact["content"],
+        media_type=str(artifact["content_type"]),
+        headers={
+            "Content-Disposition": f'attachment; filename="{artifact["filename"]}"',
+            "X-Afrolete-Match-Tracking-Export-Checksum": str(artifact["checksum"]),
+            "X-Afrolete-Match-Tracking-Export-Size": str(artifact["size_bytes"]),
+        },
+    )
 
 
 @router.get(
