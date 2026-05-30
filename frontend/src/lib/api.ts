@@ -97,6 +97,45 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   return (await response.json()) as T;
 }
 
+export async function apiDownload(path: string, options: RequestOptions = {}): Promise<{ blob: Blob; filename: string }> {
+  const { body: _body, headers: inputHeaders, identity, ...requestOptions } = options;
+  const headers = new Headers(inputHeaders);
+  headers.set("Accept", "*/*");
+
+  const session = getStoredAuthSession();
+  if (session) {
+    headers.set("Authorization", `Bearer ${session.accessToken}`);
+  }
+
+  if (identity) {
+    headers.set("X-Afrolete-Sub", identity.sub);
+    headers.set("X-Afrolete-Email", identity.email);
+    headers.set("X-Afrolete-Name", identity.name);
+  }
+
+  const response = await fetch(`${apiBaseUrl}/api/v1${path}`, {
+    ...requestOptions,
+    headers
+  });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await readBody(response));
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(response.headers.get("Content-Disposition")) ?? "afrolete-download"
+  };
+}
+
+function filenameFromContentDisposition(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const match = /filename="?([^";]+)"?/i.exec(value);
+  return match?.[1] ?? null;
+}
+
 function isOfflineMutation(method?: string): boolean {
   const normalized = (method ?? "GET").toUpperCase();
   return normalized === "POST" || normalized === "PUT" || normalized === "PATCH";

@@ -45,6 +45,7 @@ from app.schemas.performance import (
     PerformanceHighlightReelShareAuditRead,
     PerformanceHighlightReelShareCreate,
     PerformanceHighlightReelShareRead,
+    PerformanceSharedHighlightReelRead,
     PerformanceInjuryRiskAlertRead,
     PerformanceInjuryRiskAlertRunRead,
     PerformanceInjuryRiskRead,
@@ -160,6 +161,7 @@ from app.services.performance import (
     create_wearable_provider_connection,
     decode_string_list,
     decode_uuid_list,
+    downloadable_my_shared_highlight_reel_export,
     downloadable_match_tracking_run_export,
     evaluate_performance_achievements,
     ensure_manage_performance,
@@ -178,6 +180,7 @@ from app.services.performance import (
     list_performance_highlight_reels,
     list_performance_highlight_reel_exports,
     list_performance_highlight_reel_shares,
+    list_my_shared_highlight_reels,
     list_metric_definitions,
     list_match_tracking_identity_reviews,
     list_match_tracking_player_guidance_publishes,
@@ -855,6 +858,36 @@ async def list_my_player_performance_route(
         )
         for profile in profiles
     ]
+
+
+@router.get("/my-highlight-reels", response_model=list[PerformanceSharedHighlightReelRead])
+async def list_my_shared_highlight_reels_route(
+    organization_id: UUID = Query(),
+    limit: int = Query(default=20, ge=1, le=100),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> list[PerformanceSharedHighlightReelRead]:
+    return [
+        PerformanceSharedHighlightReelRead(**item)
+        for item in await list_my_shared_highlight_reels(db, identity, organization_id, limit=limit)
+    ]
+
+
+@router.get("/my-highlight-reels/{recipient_id}/content")
+async def download_my_shared_highlight_reel_route(
+    recipient_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    artifact = await downloadable_my_shared_highlight_reel_export(db, identity, recipient_id)
+    return Response(
+        content=artifact["content"],
+        media_type=str(artifact["content_type"]),
+        headers={
+            "Content-Disposition": f"attachment; filename={artifact['filename']}",
+            "X-Afrolete-Highlight-Export-Checksum": str(artifact["checksum"]),
+        },
+    )
 
 
 @router.post(

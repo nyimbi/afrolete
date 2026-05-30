@@ -3281,6 +3281,92 @@ def highlight_reel_share_audit_read(
     }
 
 
+def shared_highlight_reel_read(
+    audit: PerformanceHighlightReelShareAudit,
+    reel: PerformanceHighlightReel,
+    export: PerformanceHighlightReelExport | None,
+    recipient: MessageRecipient,
+    message: CommunicationMessage,
+) -> dict[str, object]:
+    preview = message.body.strip().replace("\r\n", "\n").replace("\r", "\n")
+    if len(preview) > 260:
+        preview = f"{preview[:257]}..."
+    return {
+        "organization_id": audit.organization_id,
+        "highlight_reel_id": reel.id,
+        "highlight_reel_export_id": export.id if export is not None else None,
+        "video_asset_id": reel.video_asset_id,
+        "tracking_run_id": reel.tracking_run_id,
+        "message_id": audit.message_id,
+        "recipient_id": recipient.id,
+        "title": reel.title,
+        "message_subject": message.subject,
+        "message_body_preview": preview or None,
+        "audience": reel.audience,
+        "purpose": reel.purpose,
+        "model_policy": reel.model_policy,
+        "share_policy": audit.share_policy,
+        "clip_count": reel.clip_count,
+        "duration_seconds": reel.duration_seconds,
+        "clips": [clip for clip in decode_json_list(reel.clips_json) if isinstance(clip, dict)],
+        "tags": decode_string_list(reel.tags_json),
+        "distribution": decode_json_dict(reel.distribution_json),
+        "export_format": export.export_format if export is not None else None,
+        "export_filename": export.filename if export is not None else None,
+        "export_content_type": export.content_type if export is not None else None,
+        "export_checksum": export.checksum if export is not None else None,
+        "download_path": f"/api/v1/performance/my-highlight-reels/{recipient.id}/content"
+        if export is not None
+        else None,
+        "channel": audit.channel,
+        "delivery_status": recipient.delivery_status,
+        "delivered_at": recipient.delivered_at,
+        "read_at": recipient.read_at,
+        "published_at": audit.published_at,
+        "created_at": audit.created_at,
+    }
+
+
+async def list_my_shared_highlight_reels(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    limit: int = 20,
+) -> list[dict[str, object]]:
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    rows = (
+        await db.execute(
+            select(
+                PerformanceHighlightReelShareAudit,
+                PerformanceHighlightReel,
+                PerformanceHighlightReelExport,
+                MessageRecipient,
+                CommunicationMessage,
+            )
+            .join(PerformanceHighlightReel, PerformanceHighlightReel.id == PerformanceHighlightReelShareAudit.highlight_reel_id)
+            .outerjoin(
+                PerformanceHighlightReelExport,
+                PerformanceHighlightReelExport.id == PerformanceHighlightReelShareAudit.highlight_reel_export_id,
+            )
+            .join(CommunicationMessage, CommunicationMessage.id == PerformanceHighlightReelShareAudit.message_id)
+            .join(MessageRecipient, MessageRecipient.message_id == PerformanceHighlightReelShareAudit.message_id)
+            .where(PerformanceHighlightReelShareAudit.organization_id == organization_id)
+            .where(MessageRecipient.person_id == identity.person_id)
+            .order_by(
+                PerformanceHighlightReelShareAudit.published_at.desc(),
+                PerformanceHighlightReelShareAudit.created_at.desc(),
+            )
+            .limit(limit)
+        )
+    ).all()
+    return [
+        shared_highlight_reel_read(audit, reel, export, recipient, message)
+        for audit, reel, export, recipient, message in rows
+    ]
+
+
 async def render_performance_highlight_reel_export(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3348,6 +3434,48 @@ async def downloadable_performance_highlight_reel_export(
     checksum = hashlib.sha256(content).hexdigest()
     if checksum != export.checksum:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Highlight export checksum mismatch")
+    return {
+        "content": content,
+        "content_type": export.content_type,
+        "filename": export.filename,
+        "checksum": checksum,
+    }
+
+
+async def downloadable_my_shared_highlight_reel_export(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    recipient_id: UUID,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    row = (
+        await db.execute(
+            select(PerformanceHighlightReelShareAudit, PerformanceHighlightReelExport, MessageRecipient)
+            .join(
+                PerformanceHighlightReelExport,
+                PerformanceHighlightReelExport.id == PerformanceHighlightReelShareAudit.highlight_reel_export_id,
+            )
+            .join(MessageRecipient, MessageRecipient.message_id == PerformanceHighlightReelShareAudit.message_id)
+            .where(MessageRecipient.id == recipient_id)
+            .where(MessageRecipient.person_id == identity.person_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shared highlight reel not found")
+    _, export, recipient = row
+    selected_settings = settings or get_settings()
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.performance_highlight_export_dir,
+        key=performance_highlight_reel_export_object_key(export, selected_settings),
+    )
+    checksum = hashlib.sha256(content).hexdigest()
+    if checksum != export.checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Highlight export checksum mismatch")
+    if recipient.delivery_status != MessageDeliveryStatus.READ:
+        recipient.delivery_status = MessageDeliveryStatus.READ
+        recipient.read_at = datetime.now(UTC)
+        await db.commit()
     return {
         "content": content,
         "content_type": export.content_type,

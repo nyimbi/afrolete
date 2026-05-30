@@ -4,7 +4,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.enums import CommunicationChannel, MetricCategory, MetricSource, MetricVerificationStatus
+from app.models.enums import (
+    CommunicationChannel,
+    MessageDeliveryStatus,
+    MetricCategory,
+    MetricSource,
+    MetricVerificationStatus,
+)
 
 
 class MetricDefinitionCreate(BaseModel):
@@ -1345,6 +1351,39 @@ class PerformanceHighlightReelShareRead(BaseModel):
     subject: str
     audit: PerformanceHighlightReelShareAuditRead
     published_at: datetime
+
+
+class PerformanceSharedHighlightReelRead(BaseModel):
+    organization_id: UUID
+    highlight_reel_id: UUID
+    highlight_reel_export_id: UUID | None
+    video_asset_id: UUID
+    tracking_run_id: UUID | None
+    message_id: UUID
+    recipient_id: UUID
+    title: str
+    message_subject: str
+    message_body_preview: str | None = None
+    audience: str
+    purpose: str
+    model_policy: str
+    share_policy: str
+    clip_count: int
+    duration_seconds: float
+    clips: list[PerformanceHighlightClipRead]
+    tags: list[str]
+    distribution: dict[str, Any]
+    export_format: str | None
+    export_filename: str | None
+    export_content_type: str | None
+    export_checksum: str | None
+    download_path: str | None
+    channel: CommunicationChannel
+    delivery_status: MessageDeliveryStatus
+    delivered_at: datetime | None
+    read_at: datetime | None
+    published_at: datetime
+    created_at: datetime
 
 
 class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):

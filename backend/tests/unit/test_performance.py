@@ -5067,7 +5067,36 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
         headers=identity_headers,
     )
     assert share_recipients.status_code == 200
-    assert [recipient["person_id"] for recipient in share_recipients.json()] == [member["subject_id"]]
+    recipient_rows = share_recipients.json()
+    assert [recipient["person_id"] for recipient in recipient_rows] == [member["subject_id"]]
+    player_headers = {
+        "X-Afrolete-Sub": "kc-athlete-1",
+        "X-Afrolete-Email": "performance-athlete@example.com",
+        "X-Afrolete-Name": "Performance Athlete",
+    }
+    shared_reels = client.get(
+        f"/api/v1/performance/my-highlight-reels?organization_id={organization['id']}",
+        headers=player_headers,
+    )
+    assert shared_reels.status_code == 200
+    shared = shared_reels.json()
+    assert len(shared) == 1
+    assert shared[0]["highlight_reel_id"] == reel["id"]
+    assert shared[0]["highlight_reel_export_id"] == timeline["id"]
+    assert shared[0]["recipient_id"] == recipient_rows[0]["id"]
+    assert shared[0]["delivery_status"] == "queued"
+    assert shared[0]["download_path"] == f"/api/v1/performance/my-highlight-reels/{recipient_rows[0]['id']}/content"
+    assert shared[0]["clips"][0]["title"]
+    shared_download = client.get(shared[0]["download_path"], headers=player_headers)
+    assert shared_download.status_code == 200
+    assert shared_download.headers["X-Afrolete-Highlight-Export-Checksum"] == timeline["checksum"]
+    assert json.loads(shared_download.content)["reel"]["id"] == reel["id"]
+    shared_after_download = client.get(
+        f"/api/v1/performance/my-highlight-reels?organization_id={organization['id']}",
+        headers=player_headers,
+    )
+    assert shared_after_download.status_code == 200
+    assert shared_after_download.json()[0]["delivery_status"] == "read"
     share_audits = client.get(
         f"/api/v1/performance/scouting/highlight-reel-shares?organization_id={organization['id']}&highlight_reel_id={reel['id']}",
         headers=identity_headers,

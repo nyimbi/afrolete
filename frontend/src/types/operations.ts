@@ -7656,6 +7656,39 @@ export type PerformanceHighlightReelShareRead = {
   published_at: string;
 };
 
+export type PerformanceSharedHighlightReelRead = {
+  organization_id: UUID;
+  highlight_reel_id: UUID;
+  highlight_reel_export_id: UUID | null;
+  video_asset_id: UUID;
+  tracking_run_id: UUID | null;
+  message_id: UUID;
+  recipient_id: UUID;
+  title: string;
+  message_subject: string;
+  message_body_preview: string | null;
+  audience: string;
+  purpose: string;
+  model_policy: string;
+  share_policy: string;
+  clip_count: number;
+  duration_seconds: number;
+  clips: PerformanceHighlightClipRead[];
+  tags: string[];
+  distribution: Record<string, unknown>;
+  export_format: string | null;
+  export_filename: string | null;
+  export_content_type: string | null;
+  export_checksum: string | null;
+  download_path: string | null;
+  channel: CommunicationChannel;
+  delivery_status: MessageDeliveryStatus;
+  delivered_at: string | null;
+  read_at: string | null;
+  published_at: string;
+  created_at: string;
+};
+
 export type PerformanceVideoAnnotationRead = {
   id: UUID;
   organization_id: UUID;

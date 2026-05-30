@@ -1,12 +1,13 @@
 "use client";
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import { apiDownload, apiRequest } from "@/lib/api";
 import type {
   AthleteAssessmentRead,
   LocalIdentity,
   MessageRecipientRead,
   MetricCategory,
+  PerformanceSharedHighlightReelRead,
   PlayerMatchGuidanceRead,
   PlayerMatchTrainingFollowupRead,
   PlayerPerformanceProfileRead
@@ -61,6 +62,15 @@ function isoDateOffset(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function saveDownloadedFile(blob: Blob, filename: string) {
+  const href = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(href);
 }
 
 function goalProgress(goal: PlayerPerformanceProfileRead["goals"][number]) {
@@ -557,6 +567,7 @@ export default function PlayerPerformancePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [trainingFollowups, setTrainingFollowups] = useState<PlayerMatchTrainingFollowupRead[]>([]);
+  const [sharedHighlights, setSharedHighlights] = useState<PerformanceSharedHighlightReelRead[]>([]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.playerPortal");
@@ -654,11 +665,18 @@ export default function PlayerPerformancePage() {
       if (trendPeriodEnd) {
         params.set("trend_period_end", trendPeriodEnd);
       }
-      const rows = await apiRequest<PlayerPerformanceProfileRead[]>(
-        `/performance/my-profiles?${params.toString()}`,
-        { identity }
-      );
+      const [rows, highlightRows] = await Promise.all([
+        apiRequest<PlayerPerformanceProfileRead[]>(
+          `/performance/my-profiles?${params.toString()}`,
+          { identity }
+        ),
+        apiRequest<PerformanceSharedHighlightReelRead[]>(
+          `/performance/my-highlight-reels?organization_id=${encodeURIComponent(organizationId)}&limit=12`,
+          { identity }
+        )
+      ]);
       setProfiles(rows);
+      setSharedHighlights(highlightRows);
       setSelectedProfileId((current) =>
         rows.some((profile) => profile.athlete_profile_id === current)
           ? current
@@ -768,6 +786,55 @@ export default function PlayerPerformancePage() {
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Guidance review update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const markSharedHighlightReviewed = async (highlight: PerformanceSharedHighlightReelRead) => {
+    setBusy(true);
+    setError("");
+    try {
+      const recipient = await apiRequest<MessageRecipientRead>(
+        `/communications/inbox/${highlight.recipient_id}/read`,
+        {
+          method: "POST",
+          identity
+        }
+      );
+      setSharedHighlights((current) =>
+        current.map((item) =>
+          item.recipient_id === recipient.id
+            ? { ...item, delivery_status: recipient.delivery_status, read_at: recipient.read_at }
+            : item
+        )
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Highlight review update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const downloadSharedHighlight = async (highlight: PerformanceSharedHighlightReelRead) => {
+    if (!highlight.download_path) {
+      setError("This highlight reel does not have a downloadable export yet");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const file = await apiDownload(highlight.download_path, { identity });
+      saveDownloadedFile(file.blob, file.filename);
+      setSharedHighlights((current) =>
+        current.map((item) =>
+          item.recipient_id === highlight.recipient_id
+            ? { ...item, delivery_status: "read", read_at: new Date().toISOString() }
+            : item
+        )
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Highlight download failed");
     } finally {
       setBusy(false);
     }
@@ -1054,6 +1121,83 @@ export default function PlayerPerformancePage() {
                       </div>
                       <strong>n/a</strong>
                     </div>
+                  </div>
+                </article>
+              ) : null}
+            </section>
+
+            <section className="player-visual-grid">
+              {sharedHighlights.slice(0, 4).map((highlight) => (
+                <article className="player-chart-card" key={highlight.recipient_id}>
+                  <div>
+                    <span>Shared highlight reel</span>
+                    <strong>{highlight.title}</strong>
+                    <small>
+                      {highlight.audience.replaceAll("_", " ")} · {highlight.purpose.replaceAll("_", " ")} ·{" "}
+                      {Math.round(highlight.duration_seconds)}s
+                    </small>
+                    <small>
+                      {highlight.delivery_status.replaceAll("_", " ")} · shared{" "}
+                      {new Date(highlight.published_at).toLocaleDateString()}
+                    </small>
+                  </div>
+                  <div className="chart-bars">
+                    <div className="chart-bar-row">
+                      <span>Clips</span>
+                      <div className="chart-track">
+                        <div
+                          className="chart-fill"
+                          style={{
+                            width: `${boundedPercent((highlight.clip_count / 8) * 100)}%`,
+                            backgroundColor: "var(--teal)"
+                          }}
+                        />
+                      </div>
+                      <strong>{highlight.clip_count}</strong>
+                    </div>
+                    <div className="chart-bar-row">
+                      <span>Export</span>
+                      <div className="chart-track">
+                        <div
+                          className="chart-fill"
+                          style={{
+                            width: highlight.download_path ? "100%" : "8%",
+                            backgroundColor: highlight.download_path ? "var(--green)" : "var(--quiet)"
+                          }}
+                        />
+                      </div>
+                      <strong>{highlight.export_format?.replaceAll("_", " ") ?? "pending"}</strong>
+                    </div>
+                  </div>
+                  {highlight.clips.slice(0, 3).map((clip, index) => (
+                    <small key={`${highlight.recipient_id}-clip-${index}`}>
+                      {clip.title} · {Math.round(clip.start_seconds)}s-{Math.round(clip.end_seconds)}s
+                    </small>
+                  ))}
+                  <button
+                    className="player-inline-action"
+                    type="button"
+                    disabled={busy || !highlight.download_path}
+                    onClick={() => downloadSharedHighlight(highlight)}
+                  >
+                    Download reel
+                  </button>
+                  <button
+                    className="player-inline-action"
+                    type="button"
+                    disabled={busy || highlight.delivery_status === "read"}
+                    onClick={() => markSharedHighlightReviewed(highlight)}
+                  >
+                    Mark reviewed
+                  </button>
+                </article>
+              ))}
+              {sharedHighlights.length === 0 ? (
+                <article className="player-chart-card">
+                  <div>
+                    <span>Shared highlight reel</span>
+                    <strong>No shared reels yet</strong>
+                    <small>Coach-published highlight exports will appear here for download and review.</small>
                   </div>
                 </article>
               ) : null}

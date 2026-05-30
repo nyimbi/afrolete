@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import { apiDownload, apiRequest } from "@/lib/api";
 import {
   clearStoredAuthSession,
   completeKeycloakCallbackFromUrl,
@@ -29,7 +29,8 @@ import type {
   FamilyRegistrationInquiryRead,
   FamilyPerformanceSummaryRead,
   LocalIdentity,
-  MessageRecipientRead
+  MessageRecipientRead,
+  PerformanceSharedHighlightReelRead
 } from "@/types/operations";
 
 const defaultFamilyIdentity: LocalIdentity = {
@@ -67,6 +68,15 @@ function currentFamilyReturnTo(): string {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
+function saveDownloadedFile(blob: Blob, filename: string) {
+  const href = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(href);
+}
+
 export default function FamilyPortalPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [identity, setIdentity] = useState<LocalIdentity>(defaultFamilyIdentity);
@@ -84,6 +94,7 @@ export default function FamilyPortalPage() {
   const [coordinationDigest, setCoordinationDigest] = useState<FamilyCoordinationDigestRead | null>(null);
   const [performance, setPerformance] = useState<FamilyPerformanceSummaryRead[]>([]);
   const [matchGuidance, setMatchGuidance] = useState<FamilyMatchGuidanceRead[]>([]);
+  const [sharedHighlights, setSharedHighlights] = useState<PerformanceSharedHighlightReelRead[]>([]);
   const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
   const [consentRequests, setConsentRequests] = useState<FamilyConsentRequestRead[]>([]);
   const [aiAppeals, setAiAppeals] = useState<AgentDecisionAppealRead[]>([]);
@@ -234,6 +245,7 @@ export default function FamilyPortalPage() {
         registrationRows,
         performanceRows,
         matchGuidanceRows,
+        highlightRows,
         eventRows,
         coordination,
         pendingRequests,
@@ -259,6 +271,10 @@ export default function FamilyPortalPage() {
         ),
         apiRequest<FamilyMatchGuidanceRead[]>(
           `/safeguarding/my-family/match-guidance?organization_id=${organizationQuery}`,
+          { identity: requestIdentity }
+        ),
+        apiRequest<PerformanceSharedHighlightReelRead[]>(
+          `/performance/my-highlight-reels?organization_id=${organizationQuery}&limit=12`,
           { identity: requestIdentity }
         ),
         apiRequest<FamilyEventSummaryRead[]>(`/safeguarding/my-family/events?organization_id=${organizationQuery}`, {
@@ -287,6 +303,7 @@ export default function FamilyPortalPage() {
       setCoordinationDigest(null);
       setPerformance(performanceRows);
       setMatchGuidance(matchGuidanceRows);
+      setSharedHighlights(highlightRows);
       setEvents(eventRows);
       setCoordinationRows(coordination);
       setConsentRequests(pendingRequests);
@@ -377,8 +394,39 @@ export default function FamilyPortalPage() {
             : guidance
         )
       );
+      setSharedHighlights((current) =>
+        current.map((highlight) =>
+          highlight.recipient_id === recipient.id
+            ? { ...highlight, delivery_status: recipient.delivery_status, read_at: recipient.read_at }
+            : highlight
+        )
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Read update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const downloadSharedHighlight = async (highlight: PerformanceSharedHighlightReelRead) => {
+    if (!highlight.download_path) {
+      setError("This highlight reel does not have a downloadable export yet");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const file = await apiDownload(highlight.download_path, { identity: requestIdentity });
+      saveDownloadedFile(file.blob, file.filename);
+      setSharedHighlights((current) =>
+        current.map((item) =>
+          item.recipient_id === highlight.recipient_id
+            ? { ...item, delivery_status: "read", read_at: new Date().toISOString() }
+            : item
+        )
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Highlight download failed");
     } finally {
       setBusy(false);
     }
@@ -875,6 +923,48 @@ export default function FamilyPortalPage() {
             })}
             {matchGuidance.length === 0 ? (
               <span>No coach-published match guidance has been shared with this guardian yet</span>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="family-ai-appeals">
+          <div>
+            <p className="section-label">Highlights</p>
+            <h2>Shared reels</h2>
+            <p>Coach-controlled video exports shared with this family account stay attached to the original review message.</p>
+          </div>
+          <div className="family-appeal-list">
+            {sharedHighlights.slice(0, 6).map((highlight) => (
+              <article key={highlight.recipient_id}>
+                <strong>{highlight.title}</strong>
+                <span>
+                  {highlight.clip_count} clip(s) · {Math.round(highlight.duration_seconds)}s ·{" "}
+                  {highlight.audience.replaceAll("_", " ")}
+                </span>
+                <small>
+                  {highlight.delivery_status.replaceAll("_", " ")} · shared {formatDate(highlight.published_at)}
+                </small>
+                <small>
+                  {highlight.clips[0]?.title ?? highlight.message_body_preview ?? "Review the coach-published reel with the player."}
+                </small>
+                <button
+                  type="button"
+                  onClick={() => downloadSharedHighlight(highlight)}
+                  disabled={busy || !highlight.download_path}
+                >
+                  Download reel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => markRead(highlight.recipient_id)}
+                  disabled={busy || highlight.delivery_status === "read"}
+                >
+                  Mark reviewed
+                </button>
+              </article>
+            ))}
+            {sharedHighlights.length === 0 ? (
+              <span>No highlight reels have been shared with this family account yet</span>
             ) : null}
           </div>
         </section>
