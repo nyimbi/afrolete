@@ -7956,6 +7956,11 @@ def build_match_analysis_report_artifact(
                 "pressure_received_count": int(metric.get("pressure_received_count") or 0),
                 "off_ball_run_count": int(metric.get("off_ball_run_count") or 0),
                 "territorial_advance_count": int(metric.get("territorial_advance_count") or 0),
+                "pass_completed_count": int(metric.get("pass_completed_count") or 0),
+                "pass_received_count": int(metric.get("pass_received_count") or 0),
+                "turnover_involved_count": int(metric.get("turnover_involved_count") or 0),
+                "ball_carry_m": round(float(metric.get("ball_carry_m") or 0.0), 2),
+                "ball_possession_sample_count": int(metric.get("ball_possession_sample_count") or 0),
                 "average_nearest_opponent_m": metric.get("average_nearest_opponent_m"),
                 "dominant_zone": metric.get("dominant_zone") or "unknown",
                 "tracking_quality_score": round(float(metric.get("tracking_quality_score") or 0.0), 3),
@@ -7975,6 +7980,9 @@ def build_match_analysis_report_artifact(
     ] if include_tactical_shape else []
     team_phase = [item for item in tracking.get("team_phase_metrics", []) if isinstance(item, dict)]
     pressure_events = [item for item in tracking.get("pressure_events", []) if isinstance(item, dict)]
+    possession_estimates = [item for item in tracking.get("possession_estimates", []) if isinstance(item, dict)]
+    ball_action_events = [item for item in tracking.get("ball_action_events", []) if isinstance(item, dict)]
+    ball_tracking_metrics = tracking.get("ball_tracking_metrics") if isinstance(tracking.get("ball_tracking_metrics"), dict) else {}
     summary = {
         "video_asset_id": str(video_asset.id),
         "filename": video_asset.filename,
@@ -7994,6 +8002,8 @@ def build_match_analysis_report_artifact(
         "identity_continuity_score": round(float(tracking.get("identity_continuity_score") or 0.0), 3),
         "calibration_quality_score": round(float(tracking.get("calibration_quality_score") or 0.0), 3),
         "pressure_event_count": len(pressure_events),
+        "pass_count": int(ball_tracking_metrics.get("pass_count") or 0),
+        "turnover_count": int(ball_tracking_metrics.get("turnover_count") or 0),
     }
     recommendations = match_analysis_report_recommendations(tracking, player_cards, team_shape, team_phase)
     report_title = title.strip() if title and title.strip() else f"{video_asset.opponent_name} match analysis"
@@ -8007,6 +8017,9 @@ def build_match_analysis_report_artifact(
         team_shape=team_shape,
         team_phase=team_phase,
         pressure_events=pressure_events,
+        possession_estimates=possession_estimates,
+        ball_action_events=ball_action_events,
+        ball_tracking_metrics=ball_tracking_metrics,
         quality_warnings=[str(item) for item in (tracking.get("quality_warnings") or [])],
         notes=notes,
     ).encode()
@@ -8050,6 +8063,11 @@ def match_analysis_report_recommendations(
     active_press = [phase for phase in team_phase if str(phase.get("phase_hint") or "") == "active_pressing"]
     if active_press:
         recommendations.append("Review whether pressure events were backed by cover shadows and second-ball support.")
+    ball_metrics = tracking.get("ball_tracking_metrics") if isinstance(tracking.get("ball_tracking_metrics"), dict) else {}
+    if int(ball_metrics.get("turnover_count") or 0) > 0:
+        recommendations.append("Review turnover clips to identify first-touch, scanning, and support-angle breakdowns.")
+    if int(ball_metrics.get("pass_count") or 0) > 0:
+        recommendations.append("Use detected pass chains to compare intended support patterns with actual movement.")
     if not recommendations:
         recommendations.append("Capture a calibrated tracking run before issuing individualized player guidance.")
     return list(dict.fromkeys(recommendations))[:12]
@@ -8066,6 +8084,9 @@ def match_analysis_report_markdown(
     team_shape: list[dict[str, object]],
     team_phase: list[dict[str, object]],
     pressure_events: list[dict[str, object]],
+    possession_estimates: list[dict[str, object]],
+    ball_action_events: list[dict[str, object]],
+    ball_tracking_metrics: dict[str, object],
     quality_warnings: list[str],
     notes: str | None,
 ) -> str:
@@ -8086,6 +8107,8 @@ def match_analysis_report_markdown(
         f"- Max speed: {summary['max_speed_mps']} m/s",
         f"- Sprint count: {summary['sprint_count']}",
         f"- Pressure events: {summary['pressure_event_count']}",
+        f"- Passes detected: {summary['pass_count']}",
+        f"- Turnovers detected: {summary['turnover_count']}",
         f"- Tracking quality: {round(float(summary['tracking_quality_score']) * 100)}%",
         f"- Identity continuity: {round(float(summary['identity_continuity_score']) * 100)}%",
         "",
@@ -8103,6 +8126,7 @@ def match_analysis_report_markdown(
                     f"- Distance: {card['distance_m']}m | High-speed: {card['high_speed_distance_m']}m",
                     f"- Max speed: {card['max_speed_mps']} m/s | Sprints: {card['sprint_count']}",
                     f"- Pressure: +{card['pressure_applied_count']} applied / {card['pressure_received_count']} received | Off-ball runs: {card['off_ball_run_count']}",
+                    f"- Ball actions: {card['pass_completed_count']} pass(es), {card['pass_received_count']} received, {card['turnover_involved_count']} turnover involvement(s), {card['ball_carry_m']}m carried",
                     f"- Work rate: {card['work_rate_m_per_min']} m/min | Dominant zone: {str(card['dominant_zone']).replace('_', ' ')}",
                     f"- Guidance: {(card.get('coaching_flags') or ['Review video context before coaching.'])[0]}",
                 ]
@@ -8135,6 +8159,23 @@ def match_analysis_report_markdown(
         lines.append("- Team phase metrics were not available.")
     if pressure_events:
         lines.append(f"- First pressure cue: {pressure_events[0].get('presser_track_id')} closed {pressure_events[0].get('receiver_track_id')} at {pressure_events[0].get('distance_m')}m.")
+    lines.extend(["", "## Possession And Ball Actions"])
+    if possession_estimates:
+        for estimate in possession_estimates:
+            lines.append(
+                f"- {estimate.get('team_label', 'Team')}: {estimate.get('possession_percent', 0)}% estimated possession from {estimate.get('sample_count', 0)} ball sample(s)."
+            )
+    else:
+        lines.append("- Ball tracking was not available for possession estimation.")
+    if ball_tracking_metrics:
+        lines.append(
+            f"- Ball distance {ball_tracking_metrics.get('ball_distance_m', 0)}m; max ball speed {ball_tracking_metrics.get('max_ball_speed_mps', 0)} m/s."
+        )
+    if ball_action_events:
+        first_action = ball_action_events[0]
+        lines.append(
+            f"- First ball action: {first_action.get('event_type')} from {first_action.get('from_track_id')} to {first_action.get('to_track_id')} at {first_action.get('timestamp_seconds')}s."
+        )
     lines.extend(["", "## Data Quality"])
     if quality_warnings:
         lines.extend(f"- {warning}" for warning in quality_warnings)
@@ -8273,6 +8314,7 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
     by_track: dict[str, list[dict[str, object]]] = {}
     for sample in samples:
         by_track.setdefault(str(sample["track_id"]), []).append(sample)
+    player_samples = [sample for sample in samples if not is_match_ball_tracking_row(sample)]
     player_metrics: list[dict[str, object]] = []
     total_distance = 0.0
     total_high_speed_distance = 0.0
@@ -8283,6 +8325,8 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
     speed_spike_count = 0
     for track_id, rows in sorted(by_track.items()):
         ordered = sorted(rows, key=lambda row: (float(row["timestamp_seconds"]), int(row.get("frame_index") or 0)))
+        if is_match_ball_tracking_row(ordered[-1]):
+            continue
         distance = 0.0
         low_speed_distance = 0.0
         high_speed_distance = 0.0
@@ -8367,6 +8411,10 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
                 "average_nearest_opponent_m": None,
                 "off_ball_run_count": 0,
                 "territorial_advance_count": 0,
+                "pass_completed_count": 0,
+                "pass_received_count": 0,
+                "turnover_involved_count": 0,
+                "ball_carry_m": 0.0,
                 "tracking_quality_score": round(tracking_quality, 3),
                 "coaching_flags": match_tracking_player_coaching_flags(
                     sample_count=len(ordered),
@@ -8388,8 +8436,9 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         overall_max_speed = max(overall_max_speed, max_speed)
     identity_continuity_score = sum(continuity_scores) / len(continuity_scores) if continuity_scores else 0.0
     average_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
-    team_shape = derive_match_team_shape(samples)
-    football_context = derive_match_football_context(samples, player_metrics)
+    team_shape = derive_match_team_shape(player_samples)
+    football_context = derive_match_football_context(player_samples, player_metrics)
+    ball_context = derive_match_ball_context(samples, player_metrics)
     return {
         "sample_count": len(samples),
         "player_count": len(player_metrics),
@@ -8406,7 +8455,20 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         "team_phase_metrics": football_context["team_phase_metrics"],
         "pressure_events": football_context["pressure_events"],
         "match_phase_snapshots": football_context["match_phase_snapshots"],
+        "ball_tracking_metrics": ball_context["ball_tracking_metrics"],
+        "possession_estimates": ball_context["possession_estimates"],
+        "ball_action_events": ball_context["ball_action_events"],
     }
+
+
+def is_match_ball_tracking_row(sample: dict[str, object]) -> bool:
+    values = [
+        str(sample.get("track_id") or ""),
+        str(sample.get("player_label") or ""),
+        str(sample.get("team_label") or ""),
+        str(sample.get("source") or ""),
+    ]
+    return any(value.strip().lower() in {"ball", "match_ball", "football", "soccer_ball"} for value in values)
 
 
 def derive_match_team_shape(samples: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
@@ -8647,6 +8709,165 @@ def derive_match_football_context(
         "pressure_events": pressure_events,
         "match_phase_snapshots": match_phase_snapshots,
     }
+
+
+def derive_match_ball_context(
+    samples: list[dict[str, object]],
+    player_metrics: list[dict[str, object]],
+) -> dict[str, object]:
+    ball_rows = sorted(
+        [sample for sample in samples if is_match_ball_tracking_row(sample)],
+        key=lambda row: (float(row["timestamp_seconds"]), int(row.get("frame_index") or 0)),
+    )
+    if not ball_rows:
+        return {
+            "ball_tracking_metrics": {
+                "ball_sample_count": 0,
+                "possession_sample_count": 0,
+                "pass_count": 0,
+                "turnover_count": 0,
+                "carry_count": 0,
+                "ball_distance_m": 0.0,
+                "max_ball_speed_mps": 0.0,
+            },
+            "possession_estimates": [],
+            "ball_action_events": [],
+        }
+    metric_by_track = {str(metric["track_id"]): metric for metric in player_metrics}
+    player_rows_by_timestamp: dict[float, list[dict[str, object]]] = {}
+    for sample in samples:
+        if is_match_ball_tracking_row(sample):
+            continue
+        player_rows_by_timestamp.setdefault(round(float(sample["timestamp_seconds"]), 2), []).append(sample)
+    possession_counts: dict[str, int] = {}
+    player_possession_counts: dict[str, int] = {}
+    ball_action_events: list[dict[str, object]] = []
+    previous_ball: dict[str, object] | None = None
+    previous_holder: dict[str, object] | None = None
+    ball_distance = 0.0
+    max_ball_speed = 0.0
+    pass_count = 0
+    turnover_count = 0
+    carry_count = 0
+    for ball in ball_rows:
+        holder = nearest_ball_holder(ball, player_rows_by_timestamp)
+        if holder is not None:
+            team_label = str(holder.get("team_label") or "unassigned")
+            track_id = str(holder.get("track_id") or "unknown")
+            possession_counts[team_label] = possession_counts.get(team_label, 0) + 1
+            player_possession_counts[track_id] = player_possession_counts.get(track_id, 0) + 1
+        if previous_ball is not None:
+            dt = max(float(ball["timestamp_seconds"]) - float(previous_ball["timestamp_seconds"]), 0.001)
+            segment_distance = math.dist(
+                (float(previous_ball["x_meters"]), float(previous_ball["y_meters"])),
+                (float(ball["x_meters"]), float(ball["y_meters"])),
+            )
+            ball_distance += segment_distance
+            max_ball_speed = max(max_ball_speed, segment_distance / dt)
+            if holder is not None and previous_holder is not None:
+                holder_id = str(holder.get("track_id") or "unknown")
+                previous_holder_id = str(previous_holder.get("track_id") or "unknown")
+                holder_team = str(holder.get("team_label") or "unassigned")
+                previous_team = str(previous_holder.get("team_label") or "unassigned")
+                if holder_id == previous_holder_id:
+                    if segment_distance >= 3.0:
+                        carry_count += 1
+                        if holder_id in metric_by_track:
+                            metric_by_track[holder_id]["ball_carry_m"] = round(
+                                float(metric_by_track[holder_id].get("ball_carry_m") or 0.0) + segment_distance,
+                                2,
+                            )
+                elif segment_distance >= 3.0:
+                    event_type = "pass" if holder_team == previous_team else "turnover"
+                    if event_type == "pass":
+                        pass_count += 1
+                        if previous_holder_id in metric_by_track:
+                            metric_by_track[previous_holder_id]["pass_completed_count"] = (
+                                int(metric_by_track[previous_holder_id].get("pass_completed_count") or 0) + 1
+                            )
+                        if holder_id in metric_by_track:
+                            metric_by_track[holder_id]["pass_received_count"] = (
+                                int(metric_by_track[holder_id].get("pass_received_count") or 0) + 1
+                            )
+                    else:
+                        turnover_count += 1
+                        for track_id in {holder_id, previous_holder_id}:
+                            if track_id in metric_by_track:
+                                metric_by_track[track_id]["turnover_involved_count"] = (
+                                    int(metric_by_track[track_id].get("turnover_involved_count") or 0) + 1
+                                )
+                    if len(ball_action_events) < 80:
+                        ball_action_events.append(
+                            {
+                                "event_type": event_type,
+                                "timestamp_seconds": round(float(ball["timestamp_seconds"]), 2),
+                                "from_track_id": previous_holder_id,
+                                "from_team_label": previous_team,
+                                "to_track_id": holder_id,
+                                "to_team_label": holder_team,
+                                "ball_distance_m": round(segment_distance, 2),
+                                "zone": match_tracking_zone(float(ball["x_percent"]), float(ball["y_percent"])),
+                            }
+                        )
+        previous_ball = ball
+        if holder is not None:
+            previous_holder = holder
+    possession_sample_count = sum(possession_counts.values())
+    possession_estimates = [
+        {
+            "team_label": team_label,
+            "sample_count": count,
+            "possession_percent": round(count / possession_sample_count * 100, 2)
+            if possession_sample_count
+            else 0.0,
+            "phase_hint": "possession_control" if possession_sample_count and count / possession_sample_count >= 0.55 else "shared_possession",
+        }
+        for team_label, count in sorted(possession_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    for track_id, count in player_possession_counts.items():
+        if track_id in metric_by_track:
+            metric_by_track[track_id]["ball_possession_sample_count"] = count
+    return {
+        "ball_tracking_metrics": {
+            "ball_sample_count": len(ball_rows),
+            "possession_sample_count": possession_sample_count,
+            "pass_count": pass_count,
+            "turnover_count": turnover_count,
+            "carry_count": carry_count,
+            "ball_distance_m": round(ball_distance, 2),
+            "max_ball_speed_mps": round(max_ball_speed, 3),
+        },
+        "possession_estimates": possession_estimates,
+        "ball_action_events": ball_action_events,
+    }
+
+
+def nearest_ball_holder(
+    ball: dict[str, object],
+    player_rows_by_timestamp: dict[float, list[dict[str, object]]],
+) -> dict[str, object] | None:
+    timestamp = round(float(ball["timestamp_seconds"]), 2)
+    candidates = player_rows_by_timestamp.get(timestamp, [])
+    if not candidates:
+        nearby_timestamps = sorted(
+            player_rows_by_timestamp,
+            key=lambda value: abs(value - timestamp),
+        )[:1]
+        candidates = player_rows_by_timestamp.get(nearby_timestamps[0], []) if nearby_timestamps else []
+    if not candidates:
+        return None
+    nearest = min(
+        candidates,
+        key=lambda row: math.dist(
+            (float(ball["x_meters"]), float(ball["y_meters"])),
+            (float(row["x_meters"]), float(row["y_meters"])),
+        ),
+    )
+    distance = math.dist(
+        (float(ball["x_meters"]), float(ball["y_meters"])),
+        (float(nearest["x_meters"]), float(nearest["y_meters"])),
+    )
+    return nearest if distance <= 12.0 else None
 
 
 def match_phase_snapshot(timestamp: float, team_rows: dict[str, list[dict[str, object]]]) -> dict[str, object]:
@@ -9723,6 +9944,9 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "team_phase_metrics": summary.get("team_phase_metrics", []),
         "pressure_events": summary.get("pressure_events", []),
         "match_phase_snapshots": summary.get("match_phase_snapshots", []),
+        "ball_tracking_metrics": summary.get("ball_tracking_metrics", {}),
+        "possession_estimates": summary.get("possession_estimates", []),
+        "ball_action_events": summary.get("ball_action_events", []),
         "formation_snapshots": summary.get("formation_snapshots", []),
         "player_metrics": summary.get("player_metrics", []),
         "samples": [match_tracking_sample_read(sample) for sample in samples],

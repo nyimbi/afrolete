@@ -25150,6 +25150,15 @@ export default function HomePage() {
                   </p>
                 </article>
                 <article className="mini-card">
+                  <span className="muted">Possession</span>
+                  <strong>{Number(performanceMatchTrackingRun?.ball_tracking_metrics.pass_count ?? 0)} pass(es)</strong>
+                  <p>
+                    {performanceMatchTrackingRun?.possession_estimates[0]
+                      ? `${String(performanceMatchTrackingRun.possession_estimates[0].team_label ?? "Team")} ${Math.round(Number(performanceMatchTrackingRun.possession_estimates[0].possession_percent ?? 0))}% · ${Number(performanceMatchTrackingRun.ball_tracking_metrics.turnover_count ?? 0)} turnover(s)`
+                      : "Add a ball track to estimate possession, passes, turnovers, and carries."}
+                  </p>
+                </article>
+                <article className="mini-card">
                   <span className="muted">Calibration</span>
                   <strong>{performanceMatchPitchCalibration ? `${Math.round(performanceMatchPitchCalibration.quality_score * 100)}%` : "none"}</strong>
                   <p>
@@ -25361,6 +25370,28 @@ export default function HomePage() {
                       </div>
                     </article>
                   ))}
+                  {performanceMatchTrackingRun.possession_estimates.slice(0, 4).map((estimate, index) => (
+                    <article key={`possession-estimate-${String(estimate.team_label ?? index)}`} className="task-card">
+                      <div>
+                        <strong>{String(estimate.team_label ?? "Team")} possession estimate</strong>
+                        <span>
+                          {Math.round(Number(estimate.possession_percent ?? 0))}% · {Number(estimate.sample_count ?? 0)} ball sample(s)
+                        </span>
+                        <small>{String(estimate.phase_hint ?? "shared_possession").replaceAll("_", " ")}</small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceMatchTrackingRun.ball_action_events.slice(0, 5).map((event, index) => (
+                    <article key={`ball-action-${index}`} className="task-card">
+                      <div>
+                        <strong>{String(event.event_type ?? "ball action").replaceAll("_", " ")}</strong>
+                        <span>
+                          {String(event.from_track_id ?? "source")} to {String(event.to_track_id ?? "target")} · {Number(event.ball_distance_m ?? 0).toFixed(1)}m
+                        </span>
+                        <small>{Number(event.timestamp_seconds ?? 0).toFixed(1)}s · {String(event.zone ?? "unknown").replaceAll("_", " ")}</small>
+                      </div>
+                    </article>
+                  ))}
                   {performanceMatchTrackingRun.player_metrics.slice(0, 6).map((metric) => (
                     <article key={metric.track_id} className="task-card">
                       <div>
@@ -25377,6 +25408,9 @@ export default function HomePage() {
                           pressure +{metric.pressure_applied_count ?? 0}/-{metric.pressure_received_count ?? 0} ·{" "}
                           off-ball {metric.off_ball_run_count ?? 0} · advances {metric.territorial_advance_count ?? 0}
                           {metric.average_nearest_opponent_m ? ` · nearest opponent ${metric.average_nearest_opponent_m.toFixed(1)}m` : ""}
+                        </small>
+                        <small>
+                          passes {metric.pass_completed_count ?? 0}/{metric.pass_received_count ?? 0} · turnovers {metric.turnover_involved_count ?? 0} · carry {Math.round(metric.ball_carry_m ?? 0)}m
                         </small>
                       </div>
                       <span>

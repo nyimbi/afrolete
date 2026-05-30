@@ -2998,6 +2998,9 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
                 {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 0, "x_percent": 0, "y_percent": 0},
                 {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 1, "x_percent": 3, "y_percent": 8},
                 {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 2, "x_percent": 6, "y_percent": 16},
+                {"track_id": "ball", "team_label": "ball", "player_label": "Ball", "timestamp_seconds": 0, "x_percent": 0, "y_percent": 60},
+                {"track_id": "ball", "team_label": "ball", "player_label": "Ball", "timestamp_seconds": 1, "x_percent": 0, "y_percent": 20},
+                {"track_id": "ball", "team_label": "ball", "player_label": "Ball", "timestamp_seconds": 2, "x_percent": 6, "y_percent": 16},
             ],
         },
     )
@@ -3006,7 +3009,7 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert tracking["model_policy"] == "afrolete-match-tracking-import-v1"
     assert tracking["calibration_id"] == calibration["id"]
     assert tracking["calibration"]["name"] == "Broadcast wide camera"
-    assert tracking["sample_count"] == 9
+    assert tracking["sample_count"] == 12
     assert tracking["player_count"] == 3
     assert tracking["total_distance_m"] == 30.0
     assert tracking["max_speed_mps"] == 10.0
@@ -3035,6 +3038,12 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert home_phase["territorial_advance_count"] >= 1
     assert tracking["pressure_events"]
     assert tracking["pressure_events"][0]["distance_m"] <= 8.0
+    assert tracking["ball_tracking_metrics"]["ball_sample_count"] == 3
+    assert tracking["ball_tracking_metrics"]["pass_count"] == 1
+    assert tracking["ball_tracking_metrics"]["turnover_count"] == 1
+    assert tracking["possession_estimates"][0]["team_label"] == "Home"
+    assert tracking["possession_estimates"][0]["possession_percent"] > 60
+    assert {event["event_type"] for event in tracking["ball_action_events"]} == {"pass", "turnover"}
     assert any(snapshot["team_label"] == "Home" for snapshot in tracking["formation_snapshots"])
     assert any("Home" in guidance for guidance in tracking["tactical_guidance"])
 
@@ -3111,6 +3120,8 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert report["summary"]["total_distance_m"] == 30.0
     assert report["summary"]["player_count"] == 3
     assert report["summary"]["pressure_event_count"] >= 1
+    assert report["summary"]["pass_count"] == 0
+    assert report["summary"]["turnover_count"] == 2
     assert report["player_cards"][0]["player_label"] == "Confirmed Forward"
     assert report["player_cards"][0]["high_speed_distance_m"] == 20.0
     assert any(shape["team_label"] == "Home" for shape in report["team_shape"])
@@ -3137,6 +3148,7 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert "Confirmed Forward" in report_text
     assert "## Tactical Shape" in report_text
     assert "## Team Phase And Pressure" in report_text
+    assert "## Possession And Ball Actions" in report_text
     assert "## Data Quality" in report_text
 
 
