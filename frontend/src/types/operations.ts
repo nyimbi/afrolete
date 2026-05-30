@@ -8690,6 +8690,29 @@ export type FixtureOfficialAssignmentRead = {
   conflict_notes: string | null;
 };
 
+export type MyOfficialAssignmentRead = {
+  id: UUID;
+  organization_id: UUID;
+  organization_name: string;
+  competition_id: UUID;
+  competition_name: string;
+  sport: string;
+  fixture_id: UUID;
+  home_team_name: string;
+  away_team_name: string;
+  round_label: string | null;
+  stage_label: string | null;
+  scheduled_at: string;
+  venue_name: string | null;
+  fixture_status: FixtureStatus;
+  role: OfficialRole;
+  status: OfficialAssignmentStatus;
+  certification_level: string | null;
+  conflict_notes: string | null;
+  response_required: boolean;
+  action_label: string;
+};
+
 export type FixtureMatchEventRead = {
   id: UUID;
   fixture_id: UUID;

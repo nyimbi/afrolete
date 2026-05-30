@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.commercial import TicketProduct
 from app.models.competition import (
@@ -25,6 +26,7 @@ from app.models.enums import (
     FixtureStatus,
     MemberSubjectType,
     MedicalClearanceStatus,
+    OfficialAssignmentStatus,
     RosterStatus,
 )
 from app.models.event import ComplianceCredential, Event, IncidentMedicalClearance
@@ -44,6 +46,7 @@ from app.schemas.competition import (
     CompetitionTicketingCreate,
     FixtureMatchEventCreate,
     FixtureOfficialAssignmentCreate,
+    FixtureOfficialResponseUpdate,
     FixtureResultUpdate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -914,6 +917,120 @@ async def assign_fixture_official(
     await db.commit()
     await db.refresh(assignment)
     return assignment
+
+
+async def list_my_official_assignments(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID | None = None,
+    status_filter: OfficialAssignmentStatus | None = None,
+) -> list[dict[str, object]]:
+    home_team = aliased(Team)
+    away_team = aliased(Team)
+    statement = (
+        select(
+            FixtureOfficialAssignment,
+            CompetitionFixture,
+            Competition,
+            Organization,
+            home_team.name,
+            away_team.name,
+        )
+        .join(CompetitionFixture, CompetitionFixture.id == FixtureOfficialAssignment.fixture_id)
+        .join(Competition, Competition.id == CompetitionFixture.competition_id)
+        .join(Organization, Organization.id == Competition.organization_id)
+        .join(home_team, home_team.id == CompetitionFixture.home_team_id)
+        .join(away_team, away_team.id == CompetitionFixture.away_team_id)
+        .where(FixtureOfficialAssignment.person_id == identity.person_id)
+    )
+    if organization_id is not None:
+        statement = statement.where(Competition.organization_id == organization_id)
+    if status_filter is not None:
+        statement = statement.where(FixtureOfficialAssignment.status == status_filter)
+    rows = (
+        await db.execute(
+            statement.order_by(
+                CompetitionFixture.scheduled_at.asc(),
+                Competition.name.asc(),
+            ).limit(100)
+        )
+    ).all()
+    return [
+        official_assignment_portal_read(
+            assignment,
+            fixture,
+            competition,
+            organization,
+            home_team_name,
+            away_team_name,
+        )
+        for assignment, fixture, competition, organization, home_team_name, away_team_name in rows
+    ]
+
+
+async def update_my_official_assignment_response(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    assignment_id: UUID,
+    payload: FixtureOfficialResponseUpdate,
+) -> dict[str, object]:
+    assignment = await db.get(FixtureOfficialAssignment, assignment_id)
+    if assignment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Official assignment not found")
+    if assignment.person_id != identity.person_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    fixture = await get_fixture(db, assignment.fixture_id)
+    assignment.status = payload.status
+    assignment.conflict_notes = payload.conflict_notes.strip() if payload.conflict_notes else None
+    await db.commit()
+    await db.refresh(assignment)
+    rows = await list_my_official_assignments(
+        db,
+        identity,
+        organization_id=fixture.organization_id,
+    )
+    return next(row for row in rows if row["id"] == assignment.id)
+
+
+def official_assignment_portal_read(
+    assignment: FixtureOfficialAssignment,
+    fixture: CompetitionFixture,
+    competition: Competition,
+    organization: Organization,
+    home_team_name: str,
+    away_team_name: str,
+) -> dict[str, object]:
+    response_required = assignment.status == OfficialAssignmentStatus.PROPOSED
+    if assignment.status == OfficialAssignmentStatus.ACCEPTED:
+        action_label = "Accepted - await match-day confirmation"
+    elif assignment.status == OfficialAssignmentStatus.CONFIRMED:
+        action_label = "Confirmed - prepare match report and arrival checks"
+    elif assignment.status == OfficialAssignmentStatus.DECLINED:
+        action_label = "Declined - organizer should assign cover"
+    else:
+        action_label = "Respond to assignment"
+    return {
+        "id": assignment.id,
+        "organization_id": competition.organization_id,
+        "organization_name": organization.name,
+        "competition_id": competition.id,
+        "competition_name": competition.name,
+        "sport": competition.sport,
+        "fixture_id": fixture.id,
+        "home_team_name": home_team_name,
+        "away_team_name": away_team_name,
+        "round_label": fixture.round_label,
+        "stage_label": fixture.stage_label,
+        "scheduled_at": fixture.scheduled_at,
+        "venue_name": fixture.venue_name,
+        "fixture_status": fixture.status,
+        "role": assignment.role,
+        "status": assignment.status,
+        "certification_level": assignment.certification_level,
+        "conflict_notes": assignment.conflict_notes,
+        "response_required": response_required,
+        "action_label": action_label,
+    }
 
 
 async def record_fixture_match_event(

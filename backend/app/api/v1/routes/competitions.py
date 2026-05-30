@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.enums import OfficialAssignmentStatus
 from app.schemas.competition import (
     AthleteTransferCreate,
     AthleteTransferRead,
@@ -32,7 +33,9 @@ from app.schemas.competition import (
     FixtureMatchEventRead,
     FixtureOfficialAssignmentCreate,
     FixtureOfficialAssignmentRead,
+    FixtureOfficialResponseUpdate,
     FixtureResultUpdate,
+    MyOfficialAssignmentRead,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -58,8 +61,10 @@ from app.services.competitions import (
     list_competition_ticketing,
     list_competitions,
     list_fixture_match_events,
+    list_my_official_assignments,
     optimize_competition_schedule,
     record_fixture_match_event,
+    update_my_official_assignment_response,
     update_fixture_result,
 )
 
@@ -458,6 +463,39 @@ async def assign_fixture_official_route(
 ) -> FixtureOfficialAssignmentRead:
     return to_official_assignment_read(
         await assign_fixture_official(db, identity, fixture_id, payload, authz)
+    )
+
+
+@router.get("/my-officiating", response_model=list[MyOfficialAssignmentRead])
+async def list_my_official_assignments_route(
+    organization_id: UUID | None = Query(default=None),
+    status_filter: OfficialAssignmentStatus | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> list[MyOfficialAssignmentRead]:
+    return [
+        MyOfficialAssignmentRead(**assignment)
+        for assignment in await list_my_official_assignments(
+            db,
+            identity,
+            organization_id=organization_id,
+            status_filter=status_filter,
+        )
+    ]
+
+
+@router.patch(
+    "/official-assignments/{assignment_id}/response",
+    response_model=MyOfficialAssignmentRead,
+)
+async def update_my_official_assignment_response_route(
+    assignment_id: UUID,
+    payload: FixtureOfficialResponseUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> MyOfficialAssignmentRead:
+    return MyOfficialAssignmentRead(
+        **await update_my_official_assignment_response(db, identity, assignment_id, payload)
     )
 
 

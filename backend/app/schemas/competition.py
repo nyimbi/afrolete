@@ -329,6 +329,47 @@ class FixtureOfficialAssignmentRead(BaseModel):
     conflict_notes: str | None
 
 
+class FixtureOfficialResponseUpdate(BaseModel):
+    status: OfficialAssignmentStatus
+    conflict_notes: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_official_response(self) -> "FixtureOfficialResponseUpdate":
+        if self.status not in {
+            OfficialAssignmentStatus.ACCEPTED,
+            OfficialAssignmentStatus.DECLINED,
+        }:
+            raise ValueError("official response must be accepted or declined")
+        if self.status == OfficialAssignmentStatus.DECLINED and not (
+            self.conflict_notes and self.conflict_notes.strip()
+        ):
+            raise ValueError("declined official assignments require conflict notes")
+        return self
+
+
+class MyOfficialAssignmentRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    organization_name: str
+    competition_id: UUID
+    competition_name: str
+    sport: str
+    fixture_id: UUID
+    home_team_name: str
+    away_team_name: str
+    round_label: str | None
+    stage_label: str | None
+    scheduled_at: datetime
+    venue_name: str | None
+    fixture_status: FixtureStatus
+    role: OfficialRole
+    status: OfficialAssignmentStatus
+    certification_level: str | None
+    conflict_notes: str | None
+    response_required: bool
+    action_label: str
+
+
 class FixtureMatchEventCreate(BaseModel):
     team_id: UUID
     athlete_profile_id: UUID | None = None

@@ -169,6 +169,119 @@ def test_competition_fixture_result_standings_official_and_events(
     assert standings[1]["losses"] == 1
 
 
+def test_official_can_review_and_respond_to_own_fixture_assignments(
+    client,
+    identity_headers,
+) -> None:
+    organization, home_team, away_team, official = create_competition_context(
+        client,
+        identity_headers,
+    )
+    competition = client.post(
+        "/api/v1/competitions",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Official Portal League",
+            "sport": "football",
+            "competition_type": "league",
+            "format": "round_robin",
+            "season_label": "2026",
+            "rules_summary": "Officials must accept assignments before match day.",
+        },
+    ).json()
+    for seed, team in enumerate([home_team, away_team], start=1):
+        participant_response = client.post(
+            f"/api/v1/competitions/{competition['id']}/participants",
+            headers=identity_headers,
+            json={"team_id": team["id"], "seed": seed, "group_label": "A"},
+        )
+        assert participant_response.status_code == 201
+    fixture = client.post(
+        f"/api/v1/competitions/{competition['id']}/fixtures",
+        headers=identity_headers,
+        json={
+            "home_team_id": home_team["id"],
+            "away_team_id": away_team["id"],
+            "round_label": "Round 2",
+            "stage_label": "League",
+            "scheduled_at": "2026-06-12T18:30:00Z",
+            "venue_name": "Referee Stadium",
+            "notes": "Official portal fixture.",
+        },
+    ).json()
+    assignment_response = client.post(
+        f"/api/v1/competitions/fixtures/{fixture['id']}/officials",
+        headers=identity_headers,
+        json={
+            "person_id": official["subject_id"],
+            "role": "referee",
+            "status": "proposed",
+            "certification_level": "Regional",
+        },
+    )
+    assert assignment_response.status_code == 201
+    assignment = assignment_response.json()
+    official_headers = {
+        "X-Afrolete-Sub": "kc-referee-example",
+        "X-Afrolete-Email": "referee@example.com",
+        "X-Afrolete-Name": "Referee Example",
+    }
+
+    portal_response = client.get(
+        f"/api/v1/competitions/my-officiating?organization_id={organization['id']}",
+        headers=official_headers,
+    )
+    assert portal_response.status_code == 200
+    portal = portal_response.json()
+    assert len(portal) == 1
+    assert portal[0]["id"] == assignment["id"]
+    assert portal[0]["competition_name"] == "Official Portal League"
+    assert portal[0]["home_team_name"] == "Riverside"
+    assert portal[0]["away_team_name"] == "City Stars"
+    assert portal[0]["status"] == "proposed"
+    assert portal[0]["response_required"] is True
+    assert portal[0]["action_label"] == "Respond to assignment"
+
+    accepted_response = client.patch(
+        f"/api/v1/competitions/official-assignments/{assignment['id']}/response",
+        headers=official_headers,
+        json={"status": "accepted", "conflict_notes": "Arriving 45 minutes before kickoff."},
+    )
+    assert accepted_response.status_code == 200
+    accepted = accepted_response.json()
+    assert accepted["status"] == "accepted"
+    assert accepted["response_required"] is False
+    assert accepted["conflict_notes"] == "Arriving 45 minutes before kickoff."
+    assert "Accepted" in accepted["action_label"]
+
+    filtered_response = client.get(
+        f"/api/v1/competitions/my-officiating?organization_id={organization['id']}&status=accepted",
+        headers=official_headers,
+    )
+    assert filtered_response.status_code == 200
+    assert filtered_response.json()[0]["id"] == assignment["id"]
+
+    other_headers = {
+        "X-Afrolete-Sub": "kc-other-official",
+        "X-Afrolete-Email": "other-official@example.com",
+        "X-Afrolete-Name": "Other Official",
+    }
+    forbidden_response = client.patch(
+        f"/api/v1/competitions/official-assignments/{assignment['id']}/response",
+        headers=other_headers,
+        json={"status": "accepted"},
+    )
+    assert forbidden_response.status_code == 403
+
+    declined_without_note_response = client.patch(
+        f"/api/v1/competitions/official-assignments/{assignment['id']}/response",
+        headers=official_headers,
+        json={"status": "declined"},
+    )
+    assert declined_without_note_response.status_code == 422
+
+
 def test_competition_fixture_rejects_cross_organization_team(client, identity_headers) -> None:
     organization, home_team, _, _ = create_competition_context(client, identity_headers)
     other_organization = client.post(
