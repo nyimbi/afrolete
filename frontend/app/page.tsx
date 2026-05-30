@@ -25879,6 +25879,19 @@ export default function HomePage() {
                   </p>
                 </article>
                 <article className="mini-card">
+                  <span className="muted">Processing run</span>
+                  <strong>
+                    {performanceMatchTrackingRun
+                      ? String(performanceMatchTrackingRun.processing_metadata.mode ?? performanceMatchTrackingRun.source_provider).replaceAll("_", " ")
+                      : "pending"}
+                  </strong>
+                  <p>
+                    {performanceMatchTrackingRun
+                      ? `${Number(performanceMatchTrackingRun.processing_metadata.processed_frame_count ?? performanceMatchTrackingRun.processing_metadata.submitted_sample_count ?? performanceMatchTrackingRun.sample_count)} processed · ${Number(performanceMatchTrackingRun.processing_metadata.decoded_frame_count ?? 0)} decoded · ${performanceMatchTrackingRun.processing_metadata.calibration_applied ? "calibrated" : "uncalibrated"}`
+                      : "Every tracking run reports extractor, frame, sample, and calibration metadata for coach review."}
+                  </p>
+                </article>
+                <article className="mini-card">
                   <span className="muted">Pressure map</span>
                   <strong>{performanceMatchTrackingRun?.pressure_events.length ?? 0} event(s)</strong>
                   <p>
@@ -26290,6 +26303,37 @@ export default function HomePage() {
                       </div>
                     </article>
                   ))}
+                  <article className="task-card">
+                    <div>
+                      <strong>Processing evidence</strong>
+                      <span>
+                        {String(performanceMatchTrackingRun.processing_metadata.mode ?? "tracking_run").replaceAll("_", " ")} ·{" "}
+                        {String(performanceMatchTrackingRun.processing_metadata.source_provider ?? performanceMatchTrackingRun.source_provider).replaceAll("_", " ")}
+                      </span>
+                      <small>
+                        processed {Number(performanceMatchTrackingRun.processing_metadata.processed_frame_count ?? performanceMatchTrackingRun.processing_metadata.submitted_sample_count ?? performanceMatchTrackingRun.sample_count)} ·{" "}
+                        decoded {Number(performanceMatchTrackingRun.processing_metadata.decoded_frame_count ?? 0)} ·{" "}
+                        sample interval {Number(performanceMatchTrackingRun.processing_metadata.sample_every_seconds ?? 0).toFixed(2)}s ·{" "}
+                        confidence floor {Number(performanceMatchTrackingRun.processing_metadata.min_detection_confidence ?? 0).toFixed(2)}
+                      </small>
+                    </div>
+                  </article>
+                  {Object.keys(performanceMatchTrackingRun.provider_metadata).length ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>Provider evidence</strong>
+                        <span>
+                          {String(performanceMatchTrackingRun.provider_metadata.detector ?? performanceMatchTrackingRun.provider_metadata.ingest_contract ?? "provider package").replaceAll("_", " ")}
+                          {performanceMatchTrackingRun.provider_metadata.tracker ? ` · ${String(performanceMatchTrackingRun.provider_metadata.tracker).replaceAll("_", " ")}` : ""}
+                        </span>
+                        <small>
+                          frames {Number(performanceMatchTrackingRun.provider_metadata.frame_count ?? 0)} ·{" "}
+                          detections {Number(performanceMatchTrackingRun.provider_metadata.detection_count ?? 0)} ·{" "}
+                          {String(performanceMatchTrackingRun.provider_metadata.ingest_contract ?? "sample import")}
+                        </small>
+                      </div>
+                    </article>
+                  ) : null}
                   {performanceMatchTrackingRun.team_shape_metrics.slice(0, 4).map((shape, index) => (
                     <article key={`team-shape-${String(shape.team_label ?? index)}`} className="task-card">
                       <div>

@@ -832,6 +832,16 @@ async def create_match_tracking_run(
     source_provider = payload.source_provider.strip().lower()
     model_policy = (payload.model_policy or "afrolete-match-tracking-import-v1").strip()
     warnings = list(payload.quality_warnings)
+    provider_metadata = dict(payload.provider_metadata)
+    processing_metadata: dict[str, object] = {
+        "mode": "sample_import",
+        "source_provider": source_provider,
+        "model_policy": model_policy,
+        "submitted_sample_count": len(sample_payloads),
+        "pitch_length_m": pitch_length_m,
+        "pitch_width_m": pitch_width_m,
+        "calibration_applied": calibration is not None,
+    }
     if payload.auto_track and not sample_payloads:
         content = get_object(
             selected_settings,
@@ -852,6 +862,20 @@ async def create_match_tracking_run(
         source_provider = str(extracted["source_provider"])
         model_policy = str(extracted["model_policy"])
         warnings = list(extracted["warnings"])
+        processing_metadata = {
+            "mode": "auto_track_video",
+            "source_provider": source_provider,
+            "model_policy": model_policy,
+            "decoded_frame_count": int(extracted.get("decoded_frame_count") or 0),
+            "processed_frame_count": int(extracted.get("processed_frame_count") or 0),
+            "extracted_sample_count": len(sample_payloads),
+            "max_frames": payload.max_frames,
+            "sample_every_seconds": payload.sample_every_seconds,
+            "min_detection_confidence": payload.min_detection_confidence,
+            "pitch_length_m": pitch_length_m,
+            "pitch_width_m": pitch_width_m,
+            "calibration_applied": calibration is not None,
+        }
     if not sample_payloads:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -888,8 +912,9 @@ async def create_match_tracking_run(
     summary = summarize_match_tracking_samples(normalized_samples)
     if warnings:
         summary["warnings"] = warnings
-    if payload.provider_metadata:
-        summary["provider_metadata"] = payload.provider_metadata
+    if provider_metadata:
+        summary["provider_metadata"] = provider_metadata
+    summary["processing_metadata"] = processing_metadata
     if calibration is not None:
         summary["calibration_id"] = str(calibration.id)
         summary["calibration_quality_score"] = calibration.quality_score
@@ -12577,6 +12602,8 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "identity_continuity_score": summary.get("identity_continuity_score", 0.0),
         "calibration_quality_score": summary.get("calibration_quality_score", 0.0),
         "readiness_level": summary.get("readiness_level", "unknown"),
+        "provider_metadata": summary.get("provider_metadata", {}),
+        "processing_metadata": summary.get("processing_metadata", {}),
         "quality_warnings": summary.get("quality_warnings", []),
         "coaching_guidance": summary.get("coaching_guidance", []),
         "tactical_guidance": summary.get("tactical_guidance", []),

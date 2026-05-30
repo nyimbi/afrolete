@@ -779,6 +779,8 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     identity_continuity_score: float = 0.0
     calibration_quality_score: float = 0.0
     readiness_level: str = "unknown"
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
+    processing_metadata: dict[str, Any] = Field(default_factory=dict)
     quality_warnings: list[str] = Field(default_factory=list)
     coaching_guidance: list[str] = Field(default_factory=list)
     tactical_guidance: list[str] = Field(default_factory=list)

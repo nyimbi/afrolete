@@ -3863,6 +3863,11 @@ def test_match_video_auto_tracking_uses_video_frame_extractor(
     tracking = tracking_response.json()
     assert tracking["source_provider"] == "opencv_motion_tracker"
     assert tracking["model_policy"] == "opencv-background-subtraction-match-tracker-v2"
+    assert tracking["processing_metadata"]["mode"] == "auto_track_video"
+    assert tracking["processing_metadata"]["decoded_frame_count"] == 24
+    assert tracking["processing_metadata"]["processed_frame_count"] == 4
+    assert tracking["processing_metadata"]["extracted_sample_count"] == 6
+    assert tracking["processing_metadata"]["calibration_applied"] is False
     assert tracking["sample_count"] == 6
     assert tracking["player_count"] == 2
     assert tracking["total_distance_m"] > 0
@@ -4143,6 +4148,10 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     tracking = import_response.json()
     assert tracking["source_provider"] == "bytetrack_yolo_provider"
     assert tracking["model_policy"] == "yolo-bytetrack-provider-import-v1"
+    assert tracking["provider_metadata"]["detector"] == "yolov9"
+    assert tracking["provider_metadata"]["frame_count"] == 3
+    assert tracking["processing_metadata"]["mode"] == "sample_import"
+    assert tracking["processing_metadata"]["submitted_sample_count"] == 9
     assert tracking["sample_count"] == 9
     assert tracking["player_count"] == 2
     assert tracking["total_distance_m"] > 20

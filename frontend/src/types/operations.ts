@@ -7128,6 +7128,8 @@ export type PerformanceMatchTrackingRunRead = {
   identity_continuity_score: number;
   calibration_quality_score: number;
   readiness_level: string;
+  provider_metadata: Record<string, unknown>;
+  processing_metadata: Record<string, unknown>;
   quality_warnings: string[];
   coaching_guidance: string[];
   tactical_guidance: string[];
