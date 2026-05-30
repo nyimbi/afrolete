@@ -3050,6 +3050,77 @@ export type ClubhouseDashboardRead = {
   recommendation: string;
 };
 
+export type ClubhouseMenuItemRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  name: string;
+  category: string;
+  description: string | null;
+  unit_price: string;
+  unit_cost: string | null;
+  stock_quantity: number | null;
+  reorder_point: number;
+  nutrition_summary: string | null;
+  dietary_tags: string | null;
+  taxable: boolean;
+  status: "active" | "sold_out" | "paused" | "retired";
+  notes: string | null;
+};
+
+export type ClubhousePOSOrderLineRead = {
+  id: UUID;
+  organization_id: UUID;
+  order_id: UUID;
+  menu_item_id: UUID;
+  item_name: string;
+  quantity: number;
+  unit_price: string;
+  line_total: string;
+  notes: string | null;
+};
+
+export type ClubhousePOSOrderRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  visit_id: UUID | null;
+  reservation_id: UUID | null;
+  person_id: UUID | null;
+  guest_name: string | null;
+  guest_email: string | null;
+  order_type: "counter" | "mobile" | "table" | "delivery";
+  table_label: string | null;
+  pickup_location: string | null;
+  status: "placed" | "preparing" | "ready" | "completed" | "paid" | "cancelled";
+  subtotal: string;
+  tax_total: string;
+  total: string;
+  currency: string;
+  payment_method: string;
+  ordered_at: string;
+  fulfilled_at: string | null;
+  paid_at: string | null;
+  finance_invoice_id: UUID | null;
+  finance_payment_id: UUID | null;
+  notes: string | null;
+  lines: ClubhousePOSOrderLineRead[];
+};
+
+export type ClubhousePOSDashboardRead = {
+  organization_id: UUID;
+  facility_id: UUID | null;
+  open_order_count: number;
+  ready_order_count: number;
+  completed_order_count_today: number;
+  revenue_today: string;
+  low_stock_count: number;
+  popular_items: string[];
+  open_orders: ClubhousePOSOrderRead[];
+  low_stock_items: ClubhouseMenuItemRead[];
+  recommendation: string;
+};
+
 export type FacilityBookingRead = {
   id: UUID;
   organization_id: UUID;

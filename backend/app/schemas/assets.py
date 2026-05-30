@@ -1276,6 +1276,140 @@ class ClubhouseDashboardRead(BaseModel):
     recommendation: str
 
 
+class ClubhouseMenuItemCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    category: str = Field(default="food", min_length=2, max_length=80)
+    description: str | None = Field(default=None, max_length=4000)
+    unit_price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    unit_cost: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    stock_quantity: int | None = Field(default=None, ge=0, le=1_000_000)
+    reorder_point: int = Field(default=0, ge=0, le=1_000_000)
+    nutrition_summary: str | None = Field(default=None, max_length=4000)
+    dietary_tags: str | None = Field(default=None, max_length=500)
+    taxable: bool = True
+    status: str = Field(default="active", pattern="^(active|sold_out|paused|retired)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseMenuItemUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    category: str | None = Field(default=None, min_length=2, max_length=80)
+    description: str | None = Field(default=None, max_length=4000)
+    unit_price: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    unit_cost: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    stock_quantity: int | None = Field(default=None, ge=0, le=1_000_000)
+    reorder_point: int | None = Field(default=None, ge=0, le=1_000_000)
+    nutrition_summary: str | None = Field(default=None, max_length=4000)
+    dietary_tags: str | None = Field(default=None, max_length=500)
+    taxable: bool | None = None
+    status: str | None = Field(default=None, pattern="^(active|sold_out|paused|retired)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseMenuItemRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    name: str
+    category: str
+    description: str | None
+    unit_price: Decimal
+    unit_cost: Decimal | None
+    stock_quantity: int | None
+    reorder_point: int
+    nutrition_summary: str | None
+    dietary_tags: str | None
+    taxable: bool
+    status: str
+    notes: str | None
+
+
+class ClubhousePOSOrderLineCreate(BaseModel):
+    menu_item_id: UUID
+    quantity: int = Field(default=1, ge=1, le=500)
+    unit_price: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class ClubhousePOSOrderCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    visit_id: UUID | None = None
+    reservation_id: UUID | None = None
+    person_id: UUID | None = None
+    guest_name: str | None = Field(default=None, max_length=180)
+    guest_email: str | None = Field(default=None, max_length=255)
+    order_type: str = Field(default="counter", pattern="^(counter|mobile|table|delivery)$")
+    table_label: str | None = Field(default=None, max_length=80)
+    pickup_location: str | None = Field(default=None, max_length=180)
+    payment_method: str = Field(default="counter", min_length=2, max_length=80)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=1, max_digits=5, decimal_places=4)
+    lines: list[ClubhousePOSOrderLineCreate] = Field(min_length=1, max_length=100)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhousePOSOrderUpdate(BaseModel):
+    status: str = Field(pattern="^(placed|preparing|ready|completed|paid|cancelled)$")
+    payment_method: str | None = Field(default=None, min_length=2, max_length=80)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhousePOSOrderLineRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    order_id: UUID
+    menu_item_id: UUID
+    item_name: str
+    quantity: int
+    unit_price: Decimal
+    line_total: Decimal
+    notes: str | None
+
+
+class ClubhousePOSOrderRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    visit_id: UUID | None
+    reservation_id: UUID | None
+    person_id: UUID | None
+    guest_name: str | None
+    guest_email: str | None
+    order_type: str
+    table_label: str | None
+    pickup_location: str | None
+    status: str
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    currency: str
+    payment_method: str
+    ordered_at: datetime
+    fulfilled_at: datetime | None
+    paid_at: datetime | None
+    finance_invoice_id: UUID | None
+    finance_payment_id: UUID | None
+    notes: str | None
+    lines: list[ClubhousePOSOrderLineRead]
+
+
+class ClubhousePOSDashboardRead(BaseModel):
+    organization_id: UUID
+    facility_id: UUID | None
+    open_order_count: int
+    ready_order_count: int
+    completed_order_count_today: int
+    revenue_today: Decimal
+    low_stock_count: int
+    popular_items: list[str]
+    open_orders: list[ClubhousePOSOrderRead]
+    low_stock_items: list[ClubhouseMenuItemRead]
+    recommendation: str
+
+
 class FacilityBookingCreate(BaseModel):
     organization_id: UUID
     facility_id: UUID

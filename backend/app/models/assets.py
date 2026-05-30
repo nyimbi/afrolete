@@ -626,6 +626,75 @@ class ClubhouseAmenityReservation(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class ClubhouseMenuItem(IdMixin, TimestampMixin, Base):
+    __tablename__ = "clubhouse_menu_items"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    stock_quantity: Mapped[int | None] = mapped_column(Integer)
+    reorder_point: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    nutrition_summary: Mapped[str | None] = mapped_column(Text)
+    dietary_tags: Mapped[str | None] = mapped_column(String(500), index=True)
+    taxable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ClubhousePOSOrder(IdMixin, TimestampMixin, Base):
+    __tablename__ = "clubhouse_pos_orders"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    visit_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("clubhouse_visits.id"), index=True)
+    reservation_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("clubhouse_amenity_reservations.id"), index=True
+    )
+    person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    guest_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    guest_email: Mapped[str | None] = mapped_column(String(255), index=True)
+    order_type: Mapped[str] = mapped_column(String(40), default="counter", nullable=False, index=True)
+    table_label: Mapped[str | None] = mapped_column(String(80), index=True)
+    pickup_location: Mapped[str | None] = mapped_column(String(180), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="placed", nullable=False, index=True)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(80), default="counter", nullable=False, index=True)
+    ordered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    finance_invoice_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("finance_invoices.id"), index=True)
+    finance_payment_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("finance_payments.id"), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ClubhousePOSOrderLine(IdMixin, TimestampMixin, Base):
+    __tablename__ = "clubhouse_pos_order_lines"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    order_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("clubhouse_pos_orders.id"), nullable=False, index=True)
+    menu_item_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("clubhouse_menu_items.id"), nullable=False, index=True
+    )
+    item_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class FacilityBooking(IdMixin, TimestampMixin, Base):
     __tablename__ = "facility_bookings"
 

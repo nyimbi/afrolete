@@ -1838,3 +1838,161 @@ def test_equipment_rejects_facility_from_other_organization(client, identity_hea
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Facility not found"
+
+
+def test_clubhouse_pos_orders_inventory_settlement_and_dashboard(client, identity_headers) -> None:
+    organization, _, member, _ = create_assets_context(client, identity_headers, "Clubhouse POS Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Members Clubhouse",
+            "facility_type": "clubhouse",
+            "capacity": 30,
+        },
+    ).json()
+    visit = client.post(
+        "/api/v1/assets/clubhouse/visits",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "person_id": member["subject_id"],
+            "party_size": 2,
+            "purpose": "post-training meal",
+        },
+    ).json()
+
+    protein_bowl = client.post(
+        "/api/v1/assets/clubhouse/menu-items",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "name": "Athlete Protein Bowl",
+            "category": "food",
+            "unit_price": "14.99",
+            "unit_cost": "6.25",
+            "stock_quantity": 10,
+            "reorder_point": 3,
+            "nutrition_summary": "42g protein, high carbohydrate recovery meal",
+            "dietary_tags": "high-protein,gluten-free",
+        },
+    ).json()
+    smoothie = client.post(
+        "/api/v1/assets/clubhouse/menu-items",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "name": "Recovery Smoothie",
+            "category": "beverage",
+            "unit_price": "8.99",
+            "stock_quantity": 1,
+            "reorder_point": 2,
+            "taxable": False,
+        },
+    ).json()
+
+    order_response = client.post(
+        "/api/v1/assets/clubhouse/pos-orders",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "visit_id": visit["id"],
+            "person_id": member["subject_id"],
+            "order_type": "mobile",
+            "pickup_location": "Poolside",
+            "payment_method": "member_account",
+            "tax_rate": "0.10",
+            "lines": [
+                {"menu_item_id": protein_bowl["id"], "quantity": 2},
+                {"menu_item_id": smoothie["id"], "quantity": 1},
+            ],
+        },
+    )
+    assert order_response.status_code == 201
+    order = order_response.json()
+    assert order["status"] == "placed"
+    assert order["subtotal"] == "38.97"
+    assert order["tax_total"] == "3.00"
+    assert order["total"] == "41.97"
+    assert len(order["lines"]) == 2
+
+    menu = client.get(
+        f"/api/v1/assets/clubhouse/menu-items?organization_id={organization['id']}&facility_id={facility['id']}",
+        headers=identity_headers,
+    ).json()
+    stocks = {item["name"]: (item["stock_quantity"], item["status"]) for item in menu}
+    assert stocks["Athlete Protein Bowl"] == (8, "active")
+    assert stocks["Recovery Smoothie"] == (0, "sold_out")
+
+    oversell = client.post(
+        "/api/v1/assets/clubhouse/pos-orders",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "order_type": "counter",
+            "lines": [{"menu_item_id": smoothie["id"], "quantity": 1}],
+        },
+    )
+    assert oversell.status_code == 409
+
+    paid_response = client.patch(
+        f"/api/v1/assets/clubhouse/pos-orders/{order['id']}",
+        headers=identity_headers,
+        json={"status": "paid", "payment_method": "member_account"},
+    )
+    assert paid_response.status_code == 200
+    paid = paid_response.json()
+    assert paid["status"] == "paid"
+    assert paid["paid_at"] is not None
+    assert paid["finance_invoice_id"] is not None
+    assert paid["finance_payment_id"] is not None
+
+    cancel_item = client.post(
+        "/api/v1/assets/clubhouse/menu-items",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "name": "Post-game Burger",
+            "category": "food",
+            "unit_price": "16.99",
+            "stock_quantity": 4,
+            "reorder_point": 1,
+        },
+    ).json()
+    cancellable = client.post(
+        "/api/v1/assets/clubhouse/pos-orders",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "order_type": "table",
+            "table_label": "Table 5",
+            "lines": [{"menu_item_id": cancel_item["id"], "quantity": 2}],
+        },
+    ).json()
+    cancel_response = client.patch(
+        f"/api/v1/assets/clubhouse/pos-orders/{cancellable['id']}",
+        headers=identity_headers,
+        json={"status": "cancelled", "notes": "Kitchen duplicate."},
+    )
+    assert cancel_response.status_code == 200
+    menu_after_cancel = client.get(
+        f"/api/v1/assets/clubhouse/menu-items?organization_id={organization['id']}&facility_id={facility['id']}",
+        headers=identity_headers,
+    ).json()
+    assert next(item for item in menu_after_cancel if item["id"] == cancel_item["id"])["stock_quantity"] == 4
+
+    dashboard = client.get(
+        f"/api/v1/assets/clubhouse/pos-dashboard?organization_id={organization['id']}&facility_id={facility['id']}"
+    ).json()
+    assert dashboard["revenue_today"] == "41.97"
+    assert dashboard["low_stock_count"] >= 1
+    assert "Athlete Protein Bowl" in dashboard["popular_items"]
+    assert dashboard["recommendation"].startswith("Restock")

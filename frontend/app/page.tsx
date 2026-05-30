@@ -238,6 +238,9 @@ import type {
   ClubhouseAmenityRead,
   ClubhouseAmenityReservationRead,
   ClubhouseDashboardRead,
+  ClubhouseMenuItemRead,
+  ClubhousePOSDashboardRead,
+  ClubhousePOSOrderRead,
   ClubhouseVisitRead,
   FacilityAccessCredentialRead,
   FacilityAccessCommandRead,
@@ -1836,6 +1839,9 @@ export default function HomePage() {
   const [clubhouseVisits, setClubhouseVisits] = useState<ClubhouseVisitRead[]>([]);
   const [clubhouseReservations, setClubhouseReservations] = useState<ClubhouseAmenityReservationRead[]>([]);
   const [clubhouseDashboard, setClubhouseDashboard] = useState<ClubhouseDashboardRead | null>(null);
+  const [clubhouseMenuItems, setClubhouseMenuItems] = useState<ClubhouseMenuItemRead[]>([]);
+  const [clubhousePOSOrders, setClubhousePOSOrders] = useState<ClubhousePOSOrderRead[]>([]);
+  const [clubhousePOSDashboard, setClubhousePOSDashboard] = useState<ClubhousePOSDashboardRead | null>(null);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [facilityWaitlist, setFacilityWaitlist] = useState<FacilityBookingWaitlistRead[]>([]);
   const [facilityBookingRule, setFacilityBookingRule] = useState<FacilityBookingRuleRead | null>(null);
@@ -2766,7 +2772,21 @@ export default function HomePage() {
     party_size: 2,
     purpose: "matchday guest",
     starts_at: "2026-09-03T10:00",
-    ends_at: "2026-09-03T12:00"
+    ends_at: "2026-09-03T12:00",
+    menu_name: "Athlete Protein Bowl",
+    menu_category: "food",
+    menu_price: 14.99,
+    menu_cost: 6.25,
+    stock_quantity: 24,
+    reorder_point: 6,
+    nutrition_summary: "42g protein recovery meal",
+    dietary_tags: "high-protein,gluten-free",
+    order_quantity: 2,
+    order_type: "mobile" as ClubhousePOSOrderRead["order_type"],
+    table_label: "Table 3",
+    pickup_location: "Poolside",
+    payment_method: "member_account",
+    tax_rate: 0.1
   });
   const [bookingForm, setBookingForm] = useState({
     title: "U16 training block",
@@ -4066,6 +4086,9 @@ export default function HomePage() {
       clubhouseVisitData,
       clubhouseReservationData,
       clubhouseDashboardData,
+      clubhouseMenuItemData,
+      clubhousePOSOrderData,
+      clubhousePOSDashboardData,
       bookingData,
       waitlistData,
       bookingRuleData,
@@ -4118,6 +4141,13 @@ export default function HomePage() {
         { identity }
       ),
       apiRequest<ClubhouseDashboardRead>(`/assets/clubhouse/dashboard?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<ClubhouseMenuItemRead[]>(`/assets/clubhouse/menu-items?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
+      apiRequest<ClubhousePOSOrderRead[]>(`/assets/clubhouse/pos-orders?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
+      apiRequest<ClubhousePOSDashboardRead>(`/assets/clubhouse/pos-dashboard?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingWaitlistRead[]>(`/assets/waitlist?organization_id=${organizationId}${facilityQuery}`),
       facilityId
@@ -4177,6 +4207,9 @@ export default function HomePage() {
     setClubhouseVisits(clubhouseVisitData);
     setClubhouseReservations(clubhouseReservationData);
     setClubhouseDashboard(clubhouseDashboardData);
+    setClubhouseMenuItems(clubhouseMenuItemData);
+    setClubhousePOSOrders(clubhousePOSOrderData);
+    setClubhousePOSDashboard(clubhousePOSDashboardData);
     setFacilityBookings(bookingData);
     setFacilityWaitlist(waitlistData);
     setFacilityBookingRule(bookingRuleData);
@@ -4804,6 +4837,9 @@ export default function HomePage() {
       setClubhouseVisits([]);
       setClubhouseReservations([]);
       setClubhouseDashboard(null);
+      setClubhouseMenuItems([]);
+      setClubhousePOSOrders([]);
+      setClubhousePOSDashboard(null);
       setFacilityBookings([]);
       setFacilityWaitlist([]);
       setFacilityBookingRule(null);
@@ -13930,6 +13966,120 @@ export default function HomePage() {
     );
   };
 
+  const createClubhouseMenuItem = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before creating clubhouse menu items", "bad");
+      return;
+    }
+    runAction(
+      "create-clubhouse-menu-item",
+      () =>
+        apiRequest<ClubhouseMenuItemRead>("/assets/clubhouse/menu-items", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            name: clubhouseForm.menu_name,
+            category: clubhouseForm.menu_category,
+            unit_price: clubhouseForm.menu_price,
+            unit_cost: clubhouseForm.menu_cost,
+            stock_quantity: clubhouseForm.stock_quantity,
+            reorder_point: clubhouseForm.reorder_point,
+            nutrition_summary: clubhouseForm.nutrition_summary,
+            dietary_tags: clubhouseForm.dietary_tags,
+            taxable: true,
+            notes: "Created from clubhouse POS console."
+          }
+        }),
+      (item) => {
+        setClubhouseMenuItems((current) => [
+          item,
+          ...current.filter((entry) => entry.id !== item.id)
+        ]);
+        addLog(`${item.name} added to clubhouse menu`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const placeClubhousePOSOrder = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before placing clubhouse orders", "bad");
+      return;
+    }
+    const item = clubhouseMenuItems.find((entry) => entry.status === "active") ?? clubhouseMenuItems[0];
+    if (!item) {
+      addLog("Create a clubhouse menu item before placing an order", "bad");
+      return;
+    }
+    const activeVisit = clubhouseVisits.find((visit) => visit.status === "checked_in");
+    runAction(
+      "place-clubhouse-pos-order",
+      () =>
+        apiRequest<ClubhousePOSOrderRead>("/assets/clubhouse/pos-orders", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            visit_id: activeVisit?.id ?? null,
+            guest_name: activeVisit?.guest_name ?? clubhouseForm.guest_name,
+            guest_email: activeVisit?.guest_email ?? clubhouseForm.guest_email,
+            order_type: clubhouseForm.order_type,
+            table_label: clubhouseForm.table_label,
+            pickup_location: clubhouseForm.pickup_location,
+            payment_method: clubhouseForm.payment_method,
+            tax_rate: clubhouseForm.tax_rate,
+            lines: [
+              {
+                menu_item_id: item.id,
+                quantity: clubhouseForm.order_quantity
+              }
+            ],
+            notes: "Placed from clubhouse POS console."
+          }
+        }),
+      (order) => {
+        setClubhousePOSOrders((current) => [
+          order,
+          ...current.filter((entry) => entry.id !== order.id)
+        ]);
+        addLog(`Clubhouse order ${order.status}: $${order.total}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const updateClubhousePOSOrderStatus = (
+    order: ClubhousePOSOrderRead,
+    status: ClubhousePOSOrderRead["status"]
+  ) => {
+    runAction(
+      `clubhouse-pos-${status}-${order.id}`,
+      () =>
+        apiRequest<ClubhousePOSOrderRead>(`/assets/clubhouse/pos-orders/${order.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            payment_method: clubhouseForm.payment_method,
+            notes: `${status} from clubhouse POS console.`
+          }
+        }),
+      (updated) => {
+        setClubhousePOSOrders((current) => [
+          updated,
+          ...current.filter((entry) => entry.id !== updated.id)
+        ]);
+        addLog(`Clubhouse order ${updated.status}: $${updated.total}`, updated.status === "cancelled" ? "bad" : "good");
+        if (selectedOrganizationId) {
+          void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+        }
+      }
+    );
+  };
+
   const revokeFacilityAccessCredential = (credential: FacilityAccessCredentialRead) => {
     if (!selectedOrganizationId) {
       return;
@@ -19276,6 +19426,8 @@ export default function HomePage() {
                 <button type="button" onClick={createClubhouseAmenity} disabled={busyAction !== null}>Amenity</button>
                 <button type="button" onClick={checkInClubhouseVisit} disabled={busyAction !== null}>Check-in</button>
                 <button type="button" onClick={createClubhouseReservation} disabled={busyAction !== null}>Reserve</button>
+                <button type="button" onClick={createClubhouseMenuItem} disabled={busyAction !== null}>Menu</button>
+                <button type="button" onClick={placeClubhousePOSOrder} disabled={busyAction !== null}>POS</button>
                 <button type="button" onClick={createWorkOrder} disabled={busyAction !== null}>Work order</button>
               </div>
             </div>
@@ -19354,6 +19506,16 @@ export default function HomePage() {
                 <span className="muted">Amenities</span>
                 <strong>{clubhouseDashboard?.amenity_count ?? clubhouseAmenities.length}</strong>
                 <span className="muted">{clubhouseDashboard?.popular_amenities[0] ?? clubhouseAmenities[0]?.name ?? "none"}</span>
+              </div>
+              <div>
+                <span className="muted">Cafe queue</span>
+                <strong>{clubhousePOSDashboard?.open_order_count ?? clubhousePOSOrders.filter((order) => ["placed", "preparing", "ready"].includes(order.status)).length}</strong>
+                <span className="muted">{clubhousePOSDashboard?.ready_order_count ?? 0} ready</span>
+              </div>
+              <div>
+                <span className="muted">Cafe revenue</span>
+                <strong>${clubhousePOSDashboard?.revenue_today ?? "0.00"}</strong>
+                <span className="muted">{clubhousePOSDashboard?.low_stock_count ?? 0} low stock</span>
               </div>
             </div>
             <div className="form-grid">
@@ -19645,6 +19807,70 @@ export default function HomePage() {
                 Purpose
                 <input value={clubhouseForm.purpose} onChange={(event) => setClubhouseForm({ ...clubhouseForm, purpose: event.target.value })} />
               </label>
+              <label>
+                Menu item
+                <input value={clubhouseForm.menu_name} onChange={(event) => setClubhouseForm({ ...clubhouseForm, menu_name: event.target.value })} />
+              </label>
+              <label>
+                Menu category
+                <input value={clubhouseForm.menu_category} onChange={(event) => setClubhouseForm({ ...clubhouseForm, menu_category: event.target.value })} />
+              </label>
+              <label>
+                Menu price
+                <input type="number" min="0" step="0.01" value={clubhouseForm.menu_price} onChange={(event) => setClubhouseForm({ ...clubhouseForm, menu_price: Number(event.target.value) })} />
+              </label>
+              <label>
+                Unit cost
+                <input type="number" min="0" step="0.01" value={clubhouseForm.menu_cost} onChange={(event) => setClubhouseForm({ ...clubhouseForm, menu_cost: Number(event.target.value) })} />
+              </label>
+              <label>
+                Stock
+                <input type="number" min="0" value={clubhouseForm.stock_quantity} onChange={(event) => setClubhouseForm({ ...clubhouseForm, stock_quantity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Reorder at
+                <input type="number" min="0" value={clubhouseForm.reorder_point} onChange={(event) => setClubhouseForm({ ...clubhouseForm, reorder_point: Number(event.target.value) })} />
+              </label>
+              <label>
+                Order quantity
+                <input type="number" min="1" value={clubhouseForm.order_quantity} onChange={(event) => setClubhouseForm({ ...clubhouseForm, order_quantity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Order type
+                <select value={clubhouseForm.order_type} onChange={(event) => setClubhouseForm({ ...clubhouseForm, order_type: event.target.value as ClubhousePOSOrderRead["order_type"] })}>
+                  <option value="counter">Counter</option>
+                  <option value="mobile">Mobile</option>
+                  <option value="table">Table</option>
+                  <option value="delivery">Delivery</option>
+                </select>
+              </label>
+              <label>
+                Table
+                <input value={clubhouseForm.table_label} onChange={(event) => setClubhouseForm({ ...clubhouseForm, table_label: event.target.value })} />
+              </label>
+              <label>
+                Pickup
+                <input value={clubhouseForm.pickup_location} onChange={(event) => setClubhouseForm({ ...clubhouseForm, pickup_location: event.target.value })} />
+              </label>
+              <label>
+                Payment
+                <input value={clubhouseForm.payment_method} onChange={(event) => setClubhouseForm({ ...clubhouseForm, payment_method: event.target.value })} />
+              </label>
+              <label>
+                Tax rate
+                <input type="number" min="0" max="1" step="0.01" value={clubhouseForm.tax_rate} onChange={(event) => setClubhouseForm({ ...clubhouseForm, tax_rate: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Nutrition and tags
+                <input value={`${clubhouseForm.nutrition_summary} | ${clubhouseForm.dietary_tags}`} onChange={(event) => {
+                  const [nutritionSummary, dietaryTags = ""] = event.target.value.split("|");
+                  setClubhouseForm({
+                    ...clubhouseForm,
+                    nutrition_summary: nutritionSummary.trim(),
+                    dietary_tags: dietaryTags.trim()
+                  });
+                }} />
+              </label>
             </div>
             <div className="form-grid">
               <label>
@@ -19891,6 +20117,47 @@ export default function HomePage() {
                   </article>
                 );
               })}
+              {clubhousePOSDashboard ? (
+                <article className={`task-card ${clubhousePOSDashboard.open_order_count === 0 && clubhousePOSDashboard.low_stock_count === 0 ? "selected" : ""}`}>
+                  <div>
+                    <strong>Clubhouse POS · {clubhousePOSDashboard.open_order_count} open</strong>
+                    <span>${clubhousePOSDashboard.revenue_today} today · {clubhousePOSDashboard.low_stock_count} low-stock item(s)</span>
+                    <span>{clubhousePOSDashboard.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {clubhouseMenuItems.slice(0, 4).map((item) => (
+                <article key={item.id} className={`task-card ${item.status === "active" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{item.category} · ${item.unit_price} · {item.status}</span>
+                    <span>Stock {item.stock_quantity ?? "untracked"} · reorder {item.reorder_point} · {item.dietary_tags ?? "no tags"}</span>
+                  </div>
+                </article>
+              ))}
+              {clubhousePOSOrders.slice(0, 4).map((order) => (
+                <article key={order.id} className={`task-card ${order.status === "paid" || order.status === "completed" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{order.order_type} order · {order.status}</strong>
+                    <span>{order.lines.map((line) => `${line.quantity}x ${line.item_name}`).join(", ")}</span>
+                    <span>${order.total} · {order.pickup_location ?? order.table_label ?? order.guest_name ?? "counter"} · {new Date(order.ordered_at).toLocaleString()}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    {order.status === "placed" ? (
+                      <button type="button" onClick={() => updateClubhousePOSOrderStatus(order, "preparing")}>Prep</button>
+                    ) : null}
+                    {order.status === "preparing" ? (
+                      <button type="button" onClick={() => updateClubhousePOSOrderStatus(order, "ready")}>Ready</button>
+                    ) : null}
+                    {order.status === "ready" ? (
+                      <button type="button" onClick={() => updateClubhousePOSOrderStatus(order, "paid")}>Paid</button>
+                    ) : null}
+                    {order.status !== "paid" && order.status !== "cancelled" ? (
+                      <button type="button" onClick={() => updateClubhousePOSOrderStatus(order, "cancelled")}>Cancel</button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
               {facilityAccessEvent ? (
                 <article className={`task-card ${facilityAccessEvent.decision === "granted" ? "selected" : ""}`}>
                   <div>

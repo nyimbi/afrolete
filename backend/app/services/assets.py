@@ -22,6 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.assets import (
     ClubhouseAmenity,
     ClubhouseAmenityReservation,
+    ClubhouseMenuItem,
+    ClubhousePOSOrder,
+    ClubhousePOSOrderLine,
     ClubhouseVisit,
     EmergencyActionPlan,
     EmergencyPlanActivation,
@@ -82,6 +85,14 @@ from app.schemas.assets import (
     ClubhouseAmenityReservationRead,
     ClubhouseAmenityReservationUpdate,
     ClubhouseDashboardRead,
+    ClubhouseMenuItemCreate,
+    ClubhouseMenuItemRead,
+    ClubhouseMenuItemUpdate,
+    ClubhousePOSDashboardRead,
+    ClubhousePOSOrderCreate,
+    ClubhousePOSOrderLineRead,
+    ClubhousePOSOrderRead,
+    ClubhousePOSOrderUpdate,
     ClubhouseVisitCreate,
     ClubhouseVisitRead,
     ClubhouseVisitUpdate,
@@ -2448,6 +2459,253 @@ async def clubhouse_dashboard(
     )
 
 
+async def create_clubhouse_menu_item(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ClubhouseMenuItemCreate,
+    authz: AuthorizationService,
+) -> ClubhouseMenuItemRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    item = ClubhouseMenuItem(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        name=payload.name,
+        category=payload.category.strip().lower(),
+        description=payload.description,
+        unit_price=payload.unit_price.quantize(Decimal("0.01")),
+        unit_cost=payload.unit_cost.quantize(Decimal("0.01")) if payload.unit_cost is not None else None,
+        stock_quantity=payload.stock_quantity,
+        reorder_point=payload.reorder_point,
+        nutrition_summary=payload.nutrition_summary,
+        dietary_tags=payload.dietary_tags,
+        taxable=payload.taxable,
+        status=payload.status,
+        notes=payload.notes,
+    )
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return clubhouse_menu_item_read(item)
+
+
+async def list_clubhouse_menu_items(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[ClubhouseMenuItemRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(ClubhouseMenuItem).where(ClubhouseMenuItem.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(ClubhouseMenuItem.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(ClubhouseMenuItem.status == status_filter)
+    rows = await db.scalars(statement.order_by(ClubhouseMenuItem.category, ClubhouseMenuItem.name))
+    return [clubhouse_menu_item_read(row) for row in rows.all()]
+
+
+async def update_clubhouse_menu_item(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    menu_item_id: UUID,
+    payload: ClubhouseMenuItemUpdate,
+    authz: AuthorizationService,
+) -> ClubhouseMenuItemRead:
+    item = await get_clubhouse_menu_item(db, menu_item_id)
+    await ensure_manage_assets(authz, identity, item.organization_id)
+    for field in [
+        "name",
+        "category",
+        "description",
+        "unit_price",
+        "unit_cost",
+        "stock_quantity",
+        "reorder_point",
+        "nutrition_summary",
+        "dietary_tags",
+        "taxable",
+        "status",
+    ]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(item, field, value.strip().lower() if field == "category" else value)
+    if payload.notes:
+        item.notes = append_note(item.notes, payload.notes)
+    await db.commit()
+    await db.refresh(item)
+    return clubhouse_menu_item_read(item)
+
+
+async def create_clubhouse_pos_order(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ClubhousePOSOrderCreate,
+    authz: AuthorizationService,
+) -> ClubhousePOSOrderRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.person_id is not None:
+        await get_person_member_for_organization(db, payload.person_id, payload.organization_id)
+    if payload.visit_id is not None:
+        visit = await get_clubhouse_visit(db, payload.visit_id)
+        if visit.organization_id != payload.organization_id or visit.facility_id != payload.facility_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse visit not found")
+    if payload.reservation_id is not None:
+        reservation = await get_clubhouse_reservation(db, payload.reservation_id)
+        if reservation.organization_id != payload.organization_id or reservation.facility_id != payload.facility_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse reservation not found")
+
+    order_items: list[tuple[ClubhouseMenuItem, int, Decimal, str | None]] = []
+    for line in payload.lines:
+        item = await get_clubhouse_menu_item(db, line.menu_item_id)
+        if item.organization_id != payload.organization_id or item.facility_id != payload.facility_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse menu item not found")
+        if item.status != "active":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{item.name} is not available")
+        if item.stock_quantity is not None and item.stock_quantity < line.quantity:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{item.name} does not have enough stock")
+        unit_price = (line.unit_price if line.unit_price is not None else item.unit_price).quantize(Decimal("0.01"))
+        order_items.append((item, line.quantity, unit_price, line.notes))
+
+    subtotal = sum((unit_price * quantity for _, quantity, unit_price, _ in order_items), Decimal("0")).quantize(Decimal("0.01"))
+    taxable_subtotal = sum(
+        (unit_price * quantity for item, quantity, unit_price, _ in order_items if item.taxable),
+        Decimal("0"),
+    ).quantize(Decimal("0.01"))
+    tax_total = (taxable_subtotal * payload.tax_rate).quantize(Decimal("0.01"))
+    ordered_at = datetime.now(UTC)
+    order = ClubhousePOSOrder(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        visit_id=payload.visit_id,
+        reservation_id=payload.reservation_id,
+        person_id=payload.person_id,
+        guest_name=payload.guest_name,
+        guest_email=payload.guest_email,
+        order_type=payload.order_type,
+        table_label=payload.table_label,
+        pickup_location=payload.pickup_location,
+        subtotal=subtotal,
+        tax_total=tax_total,
+        total=(subtotal + tax_total).quantize(Decimal("0.01")),
+        currency=payload.currency.upper(),
+        payment_method=payload.payment_method,
+        ordered_at=ordered_at,
+        notes=payload.notes,
+    )
+    db.add(order)
+    await db.flush()
+    for item, quantity, unit_price, line_notes in order_items:
+        if item.stock_quantity is not None:
+            item.stock_quantity -= quantity
+            if item.stock_quantity <= 0:
+                item.status = "sold_out"
+        db.add(
+            ClubhousePOSOrderLine(
+                organization_id=payload.organization_id,
+                order_id=order.id,
+                menu_item_id=item.id,
+                item_name=item.name,
+                quantity=quantity,
+                unit_price=unit_price,
+                line_total=(unit_price * quantity).quantize(Decimal("0.01")),
+                notes=line_notes,
+            )
+        )
+    await db.commit()
+    await db.refresh(order)
+    return await clubhouse_pos_order_read(db, order)
+
+
+async def list_clubhouse_pos_orders(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[ClubhousePOSOrderRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(ClubhousePOSOrder).where(ClubhousePOSOrder.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(ClubhousePOSOrder.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(ClubhousePOSOrder.status == status_filter)
+    rows = list((await db.scalars(statement.order_by(ClubhousePOSOrder.ordered_at.desc()).limit(50))).all())
+    return [await clubhouse_pos_order_read(db, row) for row in rows]
+
+
+async def update_clubhouse_pos_order(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    order_id: UUID,
+    payload: ClubhousePOSOrderUpdate,
+    authz: AuthorizationService,
+) -> ClubhousePOSOrderRead:
+    order = await get_clubhouse_pos_order(db, order_id)
+    await ensure_manage_assets(authz, identity, order.organization_id)
+    previous_status = order.status
+    if previous_status == "cancelled" and payload.status != "cancelled":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Cancelled clubhouse orders cannot be reopened")
+    order.status = payload.status
+    if payload.payment_method is not None:
+        order.payment_method = payload.payment_method
+    if payload.status in {"completed", "paid"} and order.fulfilled_at is None:
+        order.fulfilled_at = datetime.now(UTC)
+    if payload.status == "paid" and order.paid_at is None:
+        await settle_clubhouse_pos_order(db, order)
+    if payload.status == "cancelled" and previous_status != "cancelled":
+        await restock_clubhouse_pos_order(db, order)
+    if payload.notes:
+        order.notes = append_note(order.notes, payload.notes)
+    await db.commit()
+    await db.refresh(order)
+    return await clubhouse_pos_order_read(db, order)
+
+
+async def clubhouse_pos_dashboard(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> ClubhousePOSDashboardRead:
+    await get_organization(db, organization_id)
+    order_statement = select(ClubhousePOSOrder).where(ClubhousePOSOrder.organization_id == organization_id)
+    item_statement = select(ClubhouseMenuItem).where(ClubhouseMenuItem.organization_id == organization_id)
+    if facility_id is not None:
+        order_statement = order_statement.where(ClubhousePOSOrder.facility_id == facility_id)
+        item_statement = item_statement.where(ClubhouseMenuItem.facility_id == facility_id)
+    now = datetime.now(UTC)
+    day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=UTC)
+    day_end = day_start + timedelta(days=1)
+    orders = list((await db.scalars(order_statement.order_by(ClubhousePOSOrder.ordered_at.desc()).limit(100))).all())
+    items = list((await db.scalars(item_statement.order_by(ClubhouseMenuItem.category, ClubhouseMenuItem.name))).all())
+    open_orders = [order for order in orders if order.status in {"placed", "preparing", "ready"}]
+    today_orders = [order for order in orders if day_start <= normalize_datetime(order.ordered_at) < day_end]
+    low_stock = [
+        item
+        for item in items
+        if item.stock_quantity is not None and item.stock_quantity <= item.reorder_point
+    ][:10]
+    return ClubhousePOSDashboardRead(
+        organization_id=organization_id,
+        facility_id=facility_id,
+        open_order_count=len(open_orders),
+        ready_order_count=len([order for order in open_orders if order.status == "ready"]),
+        completed_order_count_today=len([order for order in today_orders if order.status in {"completed", "paid"}]),
+        revenue_today=sum((order.total for order in today_orders if order.status == "paid"), Decimal("0")).quantize(Decimal("0.01")),
+        low_stock_count=len(low_stock),
+        popular_items=await clubhouse_pos_popular_items(db, today_orders),
+        open_orders=[await clubhouse_pos_order_read(db, order) for order in open_orders[:10]],
+        low_stock_items=[clubhouse_menu_item_read(item) for item in low_stock],
+        recommendation=clubhouse_pos_recommendation(open_orders, low_stock, items),
+    )
+
+
 async def create_facility_booking(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -4007,6 +4265,20 @@ async def get_clubhouse_reservation(
     return reservation
 
 
+async def get_clubhouse_menu_item(db: AsyncSession, menu_item_id: UUID) -> ClubhouseMenuItem:
+    item = await db.get(ClubhouseMenuItem, menu_item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse menu item not found")
+    return item
+
+
+async def get_clubhouse_pos_order(db: AsyncSession, order_id: UUID) -> ClubhousePOSOrder:
+    order = await db.get(ClubhousePOSOrder, order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse POS order not found")
+    return order
+
+
 async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> SupplierOrder:
     order = await db.get(SupplierOrder, supplier_order_id)
     if order is None:
@@ -5027,6 +5299,170 @@ def clubhouse_reservation_read(
         expected_fee=reservation.expected_fee,
         notes=reservation.notes,
     )
+
+
+def clubhouse_menu_item_read(item: ClubhouseMenuItem) -> ClubhouseMenuItemRead:
+    return ClubhouseMenuItemRead(
+        id=item.id,
+        organization_id=item.organization_id,
+        facility_id=item.facility_id,
+        name=item.name,
+        category=item.category,
+        description=item.description,
+        unit_price=item.unit_price,
+        unit_cost=item.unit_cost,
+        stock_quantity=item.stock_quantity,
+        reorder_point=item.reorder_point,
+        nutrition_summary=item.nutrition_summary,
+        dietary_tags=item.dietary_tags,
+        taxable=item.taxable,
+        status=item.status,
+        notes=item.notes,
+    )
+
+
+def clubhouse_pos_order_line_read(line: ClubhousePOSOrderLine) -> ClubhousePOSOrderLineRead:
+    return ClubhousePOSOrderLineRead(
+        id=line.id,
+        organization_id=line.organization_id,
+        order_id=line.order_id,
+        menu_item_id=line.menu_item_id,
+        item_name=line.item_name,
+        quantity=line.quantity,
+        unit_price=line.unit_price,
+        line_total=line.line_total,
+        notes=line.notes,
+    )
+
+
+async def clubhouse_pos_order_read(
+    db: AsyncSession,
+    order: ClubhousePOSOrder,
+) -> ClubhousePOSOrderRead:
+    lines = list(
+        (
+            await db.scalars(
+                select(ClubhousePOSOrderLine)
+                .where(ClubhousePOSOrderLine.order_id == order.id)
+                .order_by(ClubhousePOSOrderLine.created_at.asc())
+            )
+        ).all()
+    )
+    return ClubhousePOSOrderRead(
+        id=order.id,
+        organization_id=order.organization_id,
+        facility_id=order.facility_id,
+        visit_id=order.visit_id,
+        reservation_id=order.reservation_id,
+        person_id=order.person_id,
+        guest_name=order.guest_name,
+        guest_email=order.guest_email,
+        order_type=order.order_type,
+        table_label=order.table_label,
+        pickup_location=order.pickup_location,
+        status=order.status,
+        subtotal=order.subtotal,
+        tax_total=order.tax_total,
+        total=order.total,
+        currency=order.currency,
+        payment_method=order.payment_method,
+        ordered_at=order.ordered_at,
+        fulfilled_at=order.fulfilled_at,
+        paid_at=order.paid_at,
+        finance_invoice_id=order.finance_invoice_id,
+        finance_payment_id=order.finance_payment_id,
+        notes=order.notes,
+        lines=[clubhouse_pos_order_line_read(line) for line in lines],
+    )
+
+
+async def settle_clubhouse_pos_order(db: AsyncSession, order: ClubhousePOSOrder) -> None:
+    now = datetime.now(UTC)
+    invoice = FinanceInvoice(
+        organization_id=order.organization_id,
+        person_id=order.person_id,
+        invoice_number=f"CLUB-POS-{now:%Y%m%d}-{str(order.id)[:8]}",
+        title=f"Clubhouse order {str(order.id)[:8]}",
+        amount_due=order.total,
+        amount_paid=order.total,
+        currency=order.currency,
+        due_on=now.date(),
+        status=CommercialStatus.PAID,
+        memo=(
+            f"Clubhouse {order.order_type} order for "
+            f"{order.guest_name or order.person_id or order.table_label or 'counter guest'}."
+        ),
+    )
+    db.add(invoice)
+    await db.flush()
+    payment = FinancePayment(
+        organization_id=order.organization_id,
+        invoice_id=invoice.id,
+        amount=order.total,
+        currency=order.currency,
+        method=order.payment_method,
+        external_reference=f"clubhouse-pos:{order.id}",
+        received_at=now,
+        notes=order.notes,
+    )
+    db.add(payment)
+    await db.flush()
+    order.finance_invoice_id = invoice.id
+    order.finance_payment_id = payment.id
+    order.paid_at = now
+    order.fulfilled_at = order.fulfilled_at or now
+
+
+async def restock_clubhouse_pos_order(db: AsyncSession, order: ClubhousePOSOrder) -> None:
+    lines = list(
+        (
+            await db.scalars(
+                select(ClubhousePOSOrderLine).where(ClubhousePOSOrderLine.order_id == order.id)
+            )
+        ).all()
+    )
+    for line in lines:
+        item = await db.get(ClubhouseMenuItem, line.menu_item_id)
+        if item is not None and item.stock_quantity is not None:
+            item.stock_quantity += line.quantity
+            if item.status == "sold_out" and item.stock_quantity > 0:
+                item.status = "active"
+
+
+async def clubhouse_pos_popular_items(
+    db: AsyncSession,
+    orders: list[ClubhousePOSOrder],
+) -> list[str]:
+    order_ids = [order.id for order in orders]
+    if not order_ids:
+        return []
+    lines = list(
+        (
+            await db.scalars(
+                select(ClubhousePOSOrderLine).where(ClubhousePOSOrderLine.order_id.in_(order_ids))
+            )
+        ).all()
+    )
+    counts: dict[str, int] = {}
+    for line in lines:
+        counts[line.item_name] = counts.get(line.item_name, 0) + line.quantity
+    return [name for name, _ in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:5]]
+
+
+def clubhouse_pos_recommendation(
+    open_orders: list[ClubhousePOSOrder],
+    low_stock: list[ClubhouseMenuItem],
+    items: list[ClubhouseMenuItem],
+) -> str:
+    if low_stock:
+        return "Restock low clubhouse cafe inventory before the next peak member window."
+    if any(order.status == "ready" for order in open_orders):
+        return "Ready clubhouse orders are waiting; prioritize pickup or table delivery."
+    if len(open_orders) >= 8:
+        return "Cafe queue is building; add staff or pause mobile ordering temporarily."
+    if not items:
+        return "Create clubhouse menu items so staff can take food, beverage, and retail orders."
+    return "Clubhouse POS is clear; keep mobile ordering and inventory counts current."
 
 
 async def clubhouse_current_occupancy(

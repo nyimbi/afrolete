@@ -18,6 +18,9 @@ from app.models.agent import (  # noqa: F401,E402
 from app.models.assets import (  # noqa: F401,E402
     ClubhouseAmenity,
     ClubhouseAmenityReservation,
+    ClubhouseMenuItem,
+    ClubhousePOSOrder,
+    ClubhousePOSOrderLine,
     ClubhouseVisit,
     EmergencyActionPlan,
     EmergencyPlanActivation,
