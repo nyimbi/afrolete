@@ -988,6 +988,20 @@ async def create_match_tracking_run(
             for item in normalized_samples
         ]
     )
+    agent_task = await queue_match_tracking_analysis_agent_review(
+        db,
+        identity,
+        organization_id=video_asset.organization_id,
+        video_asset_id=video_asset.id,
+        tracking_run_id=run.id,
+        title=video_asset.clip_label or video_asset.opponent_name or "match tracking run",
+        source_provider=source_provider,
+        readiness_level=str(summary.get("readiness_level", "unknown")),
+        tracking_quality_score=float(summary.get("tracking_quality_score", 0.0) or 0.0),
+        player_count=len(summary["player_metrics"]),
+        sample_count=len(normalized_samples),
+    )
+    run.analysis_agent_task_id = agent_task.id
     video_asset.status = "tracked"
     video_asset.analyzed_at = now
     await db.commit()
@@ -1034,6 +1048,69 @@ async def create_match_tracking_provider_import(
             quality_warnings=warnings,
         ),
         authz,
+    )
+
+
+async def queue_match_tracking_analysis_agent_review(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    *,
+    organization_id: UUID,
+    video_asset_id: UUID,
+    tracking_run_id: UUID,
+    title: str,
+    source_provider: str,
+    readiness_level: str,
+    tracking_quality_score: float,
+    player_count: int,
+    sample_count: int,
+) -> AgentTask:
+    agent = await db.scalar(
+        select(Agent)
+        .where(
+            Agent.organization_id == organization_id,
+            Agent.kind == AgentKind.SCOUTING,
+            Agent.name == "Match Intelligence Agent",
+        )
+        .order_by(Agent.created_at)
+        .limit(1)
+    )
+    if agent is None:
+        agent = Agent(
+            organization_id=organization_id,
+            name="Match Intelligence Agent",
+            kind=AgentKind.SCOUTING,
+            purpose=(
+                "Review match tracking runs, tactical signals, player load metrics, and "
+                "coach-readiness warnings before analysis is shared with teams or players."
+            ),
+            status="active",
+            model_policy="human_review_required",
+        )
+        db.add(agent)
+        await db.flush()
+    input_ref = (
+        f"match-tracking-review:{organization_id};"
+        f"video:{video_asset_id};"
+        f"tracking:{tracking_run_id};"
+        f"provider:{source_provider};"
+        f"readiness:{readiness_level};"
+        f"quality:{tracking_quality_score:.3f};"
+        f"players:{player_count};"
+        f"samples:{sample_count}"
+    )
+    return await queue_agent_task(
+        db,
+        identity,
+        agent.id,
+        AgentTaskCreate(
+            organization_id=organization_id,
+            task_type="match_tracking_run_analysis_review",
+            title=f"Review match tracking analysis: {title}"[:240],
+            input_ref=input_ref[:500],
+        ),
+        None,
+        enforce_manage_organization=False,
     )
 
 
@@ -16103,6 +16180,7 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "max_speed_mps": run.max_speed_mps,
         "high_speed_distance_m": run.high_speed_distance_m,
         "sprint_count": run.sprint_count,
+        "analysis_agent_task_id": run.analysis_agent_task_id,
         "tracking_quality_score": summary.get("tracking_quality_score", 0.0),
         "identity_continuity_score": summary.get("identity_continuity_score", 0.0),
         "calibration_quality_score": summary.get("calibration_quality_score", 0.0),

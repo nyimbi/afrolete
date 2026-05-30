@@ -3582,6 +3582,18 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert tracking["max_speed_mps"] == 10.0
     assert tracking["high_speed_distance_m"] == 20.0
     assert tracking["sprint_count"] == 1
+    assert tracking["analysis_agent_task_id"] is not None
+    agent_tasks_response = client.get(
+        f"/api/v1/agents/tasks?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert agent_tasks_response.status_code == 200
+    agent_task = next(
+        task for task in agent_tasks_response.json() if task["id"] == tracking["analysis_agent_task_id"]
+    )
+    assert agent_task["task_type"] == "match_tracking_run_analysis_review"
+    assert f"tracking:{tracking['id']}" in agent_task["input_ref"]
+    assert "readiness:coach_ready" in agent_task["input_ref"]
     assert tracking["tracking_quality_score"] >= 0.8
     assert tracking["identity_continuity_score"] == 1.0
     assert tracking["readiness_level"] == "coach_ready"

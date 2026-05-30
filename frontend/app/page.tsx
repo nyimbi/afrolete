@@ -27910,6 +27910,7 @@ export default function HomePage() {
                       <small>
                         {performanceMatchTrackingRun.source_provider.replaceAll("_", " ")} · {performanceMatchTrackingRun.readiness_level.replaceAll("_", " ")} · pitch {performanceMatchTrackingRun.pitch_length_m}m x {performanceMatchTrackingRun.pitch_width_m}m
                         {performanceMatchTrackingRun.calibration ? ` · calibrated ${Math.round(performanceMatchTrackingRun.calibration.quality_score * 100)}%` : " · uncalibrated"}
+                        {performanceMatchTrackingRun.analysis_agent_task_id ? ` · AI review ${performanceMatchTrackingRun.analysis_agent_task_id.slice(0, 8)}` : ""}
                       </small>
                     </div>
                     <span>

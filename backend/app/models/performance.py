@@ -463,6 +463,7 @@ class PerformanceMatchTrackingRun(IdMixin, TimestampMixin, Base):
     max_speed_mps: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     high_speed_distance_m: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     sprint_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    analysis_agent_task_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("agent_tasks.id"), index=True)
     summary_json: Mapped[str] = mapped_column(Text, nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

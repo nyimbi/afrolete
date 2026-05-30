@@ -3718,6 +3718,9 @@ def execute_with_deterministic_planner(
     if task.task_type == "team_match_training_followup_review":
         task.review_notes = deterministic_team_match_followup_notes(agent, task, model_name)
         return
+    if task.task_type == "match_tracking_run_analysis_review":
+        task.review_notes = deterministic_match_tracking_review_notes(agent, task, model_name)
+        return
     if task.task_type == "highlight_reel_feedback_followup_review":
         task.review_notes = deterministic_highlight_reel_feedback_notes(agent, task, model_name)
         return
@@ -3882,6 +3885,28 @@ def deterministic_team_match_followup_notes(agent: Agent, task: AgentTask, model
             "- Keep high-speed, pressing, and restart work bounded by soreness and recovery evidence.",
             "- Record session feedback so the next Training Strategy Agent review can compare prescription to outcome.",
             "Human review: coaches must approve team load changes, player availability decisions, and medical escalations.",
+        ]
+    )
+
+
+def deterministic_match_tracking_review_notes(agent: Agent, task: AgentTask, model_name: str) -> str:
+    context = parse_agent_input_ref(task.input_ref)
+    tracking = context.get("tracking", "unknown")
+    provider = context.get("provider", "unknown")
+    readiness = context.get("readiness", "unknown")
+    quality = context.get("quality", "unknown")
+    players = context.get("players", "unknown")
+    samples = context.get("samples", "unknown")
+    return "\n".join(
+        [
+            f"{agent.name} prepared a deterministic match tracking review using {model_name}.",
+            f"Tracking run {tracking} from {provider} reports readiness {readiness}, quality {quality}, {players} player(s), and {samples} sample(s).",
+            "Review checklist:",
+            "- Confirm pitch calibration, camera angle, and identity continuity before trusting distance or speed totals.",
+            "- Check high-speed distance, sprint count, pressure events, and tactical phase snapshots against match context.",
+            "- Flag any low-confidence tracks for identity review before publishing player cards or highlight reels.",
+            "- Convert coach-approved insights into training follow-ups only after load, recovery, and schedule context are checked.",
+            "Human review: coaches own all tactical conclusions and player-facing interpretation.",
         ]
     )
 
