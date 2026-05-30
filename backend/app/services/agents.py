@@ -3718,6 +3718,9 @@ def execute_with_deterministic_planner(
     if task.task_type == "team_match_training_followup_review":
         task.review_notes = deterministic_team_match_followup_notes(agent, task, model_name)
         return
+    if task.task_type == "highlight_reel_feedback_followup_review":
+        task.review_notes = deterministic_highlight_reel_feedback_notes(agent, task, model_name)
+        return
     task.review_notes = (
         f"{agent.name} prepared a deterministic draft using {model_name}. "
         f"Task: {task.title}. Input: {task.input_ref or 'none'}. "
@@ -3879,6 +3882,28 @@ def deterministic_team_match_followup_notes(agent: Agent, task: AgentTask, model
             "- Keep high-speed, pressing, and restart work bounded by soreness and recovery evidence.",
             "- Record session feedback so the next Training Strategy Agent review can compare prescription to outcome.",
             "Human review: coaches must approve team load changes, player availability decisions, and medical escalations.",
+        ]
+    )
+
+
+def deterministic_highlight_reel_feedback_notes(agent: Agent, task: AgentTask, model_name: str) -> str:
+    context = parse_agent_input_ref(task.input_ref)
+    highlight = context.get("highlight", "unknown")
+    person = context.get("person", "unknown")
+    feedback = context.get("feedback", "unknown")
+    focus = context.get("focus", "highlight follow-up")
+    clip = context.get("clip", "none")
+    return "\n".join(
+        [
+            f"{agent.name} prepared a deterministic highlight reel feedback review using {model_name}.",
+            f"Feedback {feedback} from person {person} is linked to highlight reel {highlight}.",
+            f"Requested focus: {focus}; clip anchor: {clip}.",
+            "Recommended coach actions:",
+            "- Review the exact shared clip and confirm the player's question or concern.",
+            "- Convert the feedback into one concrete training cue, video annotation, or self-assessment prompt.",
+            "- Avoid increasing load from highlight feedback alone; check readiness, soreness, and schedule context.",
+            "- Close the loop with the player after the next session.",
+            "Human review: coaches own all player-facing guidance and any guardian-visible interpretation.",
         ]
     )
 

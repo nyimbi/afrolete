@@ -840,6 +840,7 @@ class PerformanceHighlightReelFeedback(IdMixin, TimestampMixin, Base):
     priority_focus: Mapped[str | None] = mapped_column(String(120))
     requested_follow_up: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     clip_time_seconds: Mapped[float | None] = mapped_column(Float)
+    agent_task_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("agent_tasks.id"), index=True)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 

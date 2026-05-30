@@ -3506,6 +3506,7 @@ async def list_performance_highlight_reel_engagement(
                 "feedback_priority_focus": feedback.priority_focus if feedback is not None else None,
                 "feedback_response_preview": feedback_response_preview,
                 "feedback_submitted_at": feedback.submitted_at if feedback is not None else None,
+                "feedback_agent_task_id": feedback.agent_task_id if feedback is not None else None,
             }
         )
     counts = await delivery_counts_for_messages(db, message_ids)
@@ -4091,6 +4092,7 @@ def highlight_reel_feedback_read(feedback: PerformanceHighlightReelFeedback) -> 
         "priority_focus": feedback.priority_focus,
         "requested_follow_up": feedback.requested_follow_up,
         "clip_time_seconds": feedback.clip_time_seconds,
+        "agent_task_id": feedback.agent_task_id,
         "submitted_at": feedback.submitted_at,
         "created_at": feedback.created_at,
         "updated_at": feedback.updated_at,
@@ -4258,9 +4260,88 @@ async def submit_my_shared_highlight_reel_feedback(
     if recipient.delivery_status != MessageDeliveryStatus.READ:
         recipient.delivery_status = MessageDeliveryStatus.READ
         recipient.read_at = now
+    if payload.requested_follow_up and feedback.agent_task_id is None:
+        await db.flush()
+        agent_task = await queue_highlight_reel_feedback_agent_review(
+            db,
+            identity,
+            organization_id=audit.organization_id,
+            highlight_reel_id=reel.id,
+            share_audit_id=audit.id,
+            message_recipient_id=recipient.id,
+            person_id=identity.person_id,
+            feedback_id=feedback.id,
+            title=reel.title,
+            priority_focus=priority_focus or payload.status,
+            clip_time_seconds=payload.clip_time_seconds,
+        )
+        feedback.agent_task_id = agent_task.id
     await db.commit()
     await db.refresh(feedback)
     return feedback
+
+
+async def queue_highlight_reel_feedback_agent_review(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    *,
+    organization_id: UUID,
+    highlight_reel_id: UUID,
+    share_audit_id: UUID,
+    message_recipient_id: UUID,
+    person_id: UUID,
+    feedback_id: UUID,
+    title: str,
+    priority_focus: str,
+    clip_time_seconds: float | None,
+) -> AgentTask:
+    agent = await db.scalar(
+        select(Agent)
+        .where(
+            Agent.organization_id == organization_id,
+            Agent.kind == AgentKind.COACHING,
+            Agent.name == "Training Strategy Agent",
+        )
+        .order_by(Agent.created_at)
+        .limit(1)
+    )
+    if agent is None:
+        agent = Agent(
+            organization_id=organization_id,
+            name="Training Strategy Agent",
+            kind=AgentKind.COACHING,
+            purpose=(
+                "Review training plans, match-derived action plans, athlete readiness, "
+                "highlight feedback, and player help requests so coaches can adjust safely."
+            ),
+            status="active",
+            model_policy="human_review_required",
+        )
+        db.add(agent)
+        await db.flush()
+    input_ref = (
+        f"highlight-feedback:{organization_id};"
+        f"highlight:{highlight_reel_id};"
+        f"share:{share_audit_id};"
+        f"recipient:{message_recipient_id};"
+        f"person:{person_id};"
+        f"feedback:{feedback_id};"
+        f"focus:{priority_focus};"
+        f"clip:{clip_time_seconds if clip_time_seconds is not None else 'none'}"
+    )
+    return await queue_agent_task(
+        db,
+        identity,
+        agent.id,
+        AgentTaskCreate(
+            organization_id=organization_id,
+            task_type="highlight_reel_feedback_followup_review",
+            title=f"Review highlight reel follow-up: {title}"[:240],
+            input_ref=input_ref[:500],
+        ),
+        None,
+        enforce_manage_organization=False,
+    )
 
 
 async def render_performance_highlight_reel_export(

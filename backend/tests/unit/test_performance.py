@@ -5350,6 +5350,16 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert feedback["rating"] == 4
     assert feedback["priority_focus"] == "transition_timing"
     assert feedback["requested_follow_up"] is True
+    assert feedback["agent_task_id"] is not None
+    agent_tasks_response = client.get(
+        f"/api/v1/agents/tasks?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert agent_tasks_response.status_code == 200
+    agent_task = next(task for task in agent_tasks_response.json() if task["id"] == feedback["agent_task_id"])
+    assert agent_task["task_type"] == "highlight_reel_feedback_followup_review"
+    assert f"highlight:{reel['id']}" in agent_task["input_ref"]
+    assert f"feedback:{feedback['id']}" in agent_task["input_ref"]
     shared_after_feedback = client.get(
         f"/api/v1/performance/my-highlight-reels?organization_id={organization['id']}",
         headers=player_headers,
@@ -5357,6 +5367,7 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert shared_after_feedback.status_code == 200
     assert shared_after_feedback.json()[0]["feedback"]["id"] == feedback["id"]
     assert shared_after_feedback.json()[0]["feedback"]["status"] == "needs_help"
+    assert shared_after_feedback.json()[0]["feedback"]["agent_task_id"] == feedback["agent_task_id"]
     reminder_after_download_response = client.post(
         f"/api/v1/performance/scouting/highlight-reel-shares/{share['audit']['id']}/reminders",
         headers=identity_headers,
@@ -5394,6 +5405,7 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert engagement[0]["recipients"][0]["feedback_rating"] == 4
     assert engagement[0]["recipients"][0]["feedback_requested_follow_up"] is True
     assert "coach follow-up" in engagement[0]["recipients"][0]["feedback_response_preview"]
+    assert engagement[0]["recipients"][0]["feedback_agent_task_id"] == feedback["agent_task_id"]
     share_audits = client.get(
         f"/api/v1/performance/scouting/highlight-reel-shares?organization_id={organization['id']}&highlight_reel_id={reel['id']}",
         headers=identity_headers,

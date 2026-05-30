@@ -1399,6 +1399,7 @@ class PerformanceSharedHighlightReelFeedbackRead(BaseModel):
     priority_focus: str | None
     requested_follow_up: bool
     clip_time_seconds: float | None
+    agent_task_id: UUID | None = None
     submitted_at: datetime
     created_at: datetime
     updated_at: datetime
@@ -1454,6 +1455,7 @@ class PerformanceHighlightReelRecipientEngagementRead(BaseModel):
     feedback_priority_focus: str | None = None
     feedback_response_preview: str | None = None
     feedback_submitted_at: datetime | None = None
+    feedback_agent_task_id: UUID | None = None
 
 
 class PerformanceHighlightReelEngagementRead(BaseModel):

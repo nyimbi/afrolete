@@ -7702,6 +7702,7 @@ export type PerformanceSharedHighlightReelFeedbackRead = {
   priority_focus: string | null;
   requested_follow_up: boolean;
   clip_time_seconds: number | null;
+  agent_task_id: UUID | null;
   submitted_at: string;
   created_at: string;
   updated_at: string;
@@ -7757,6 +7758,7 @@ export type PerformanceHighlightReelRecipientEngagementRead = {
   feedback_priority_focus: string | null;
   feedback_response_preview: string | null;
   feedback_submitted_at: string | null;
+  feedback_agent_task_id: UUID | null;
 };
 
 export type PerformanceHighlightReelEngagementRead = {

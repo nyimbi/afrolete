@@ -28622,6 +28622,9 @@ export default function HomePage() {
                             ? `${reel.feedback.status.replaceAll("_", " ")}${reel.feedback.rating ? ` · ${reel.feedback.rating}/5` : ""}${reel.feedback.requested_follow_up ? " · coach follow-up requested" : ""}`
                             : "waiting for player acknowledgement"}
                         </small>
+                        {reel.feedback?.agent_task_id ? (
+                          <small>AI coach review queued · {reel.feedback.agent_task_id.slice(0, 8)}</small>
+                        ) : null}
                       </div>
                       <span>
                         <button
@@ -28692,6 +28695,7 @@ export default function HomePage() {
                             {recipient.feedback_status
                               ? ` · ${recipient.feedback_status.replaceAll("_", " ")}${recipient.feedback_requested_follow_up ? " · wants follow-up" : ""}`
                               : ""}
+                            {recipient.feedback_agent_task_id ? ` · AI task ${recipient.feedback_agent_task_id.slice(0, 8)}` : ""}
                           </small>
                         ))}
                       </div>
