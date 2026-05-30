@@ -79,8 +79,13 @@ import type {
   AssetUtilizationRecommendationRead,
   AthleteAssessmentRead,
   AthleteAssessmentReviewQueueItemRead,
+  AthleteAcademicRecordRead,
+  AthleteDevelopmentDashboardRead,
+  AthleteLifeSkillAssignmentRead,
   AthletePathwayProjectionRead,
   AthletePerformanceSummaryRead,
+  AthleteScholarshipApplicationRead,
+  AthleteWellnessCheckInRead,
   AttendanceRecordRead,
   EventAttendancePolicyRead,
   AttendanceSeedRead,
@@ -1648,6 +1653,11 @@ export default function HomePage() {
   const [athletePathwayProjections, setAthletePathwayProjections] = useState<AthletePathwayProjectionRead[]>([]);
   const [athletePathwayProjection, setAthletePathwayProjection] =
     useState<AthletePathwayProjectionRead | null>(null);
+  const [developmentDashboard, setDevelopmentDashboard] = useState<AthleteDevelopmentDashboardRead | null>(null);
+  const [wellnessCheckIns, setWellnessCheckIns] = useState<AthleteWellnessCheckInRead[]>([]);
+  const [academicRecords, setAcademicRecords] = useState<AthleteAcademicRecordRead[]>([]);
+  const [lifeSkillAssignments, setLifeSkillAssignments] = useState<AthleteLifeSkillAssignmentRead[]>([]);
+  const [scholarshipApplications, setScholarshipApplications] = useState<AthleteScholarshipApplicationRead[]>([]);
   const [performanceForecastValidationRun, setPerformanceForecastValidationRun] =
     useState<PerformanceForecastValidationRunRead | null>(null);
   const [performanceForecastValidationRuns, setPerformanceForecastValidationRuns] =
@@ -2264,6 +2274,47 @@ export default function HomePage() {
     recruiting_profile_url: "https://profiles.afrolete.local/performance-athlete",
     notes: "Prioritize a dual academic and football pathway with consent-gated scout sharing.",
     share_with_guardians: true
+  });
+  const [wellnessForm, setWellnessForm] = useState({
+    mood_score: 6,
+    stress_score: 5,
+    sleep_hours: 7,
+    energy_score: 7,
+    soreness_score: 4,
+    resilience_score: 7,
+    support_requested: false,
+    notes: "Balanced week with exams and training load."
+  });
+  const [academicForm, setAcademicForm] = useState({
+    school_name: "AfroLete Academy",
+    term_label: "2026 Term 2",
+    grade_level: "Form 3",
+    gpa: 3.3,
+    attendance_rate: 93,
+    study_hours_weekly: 8,
+    missing_assignment_count: 1,
+    next_review_on: "2026-07-01",
+    notes: "Eligible with math support."
+  });
+  const [lifeSkillForm, setLifeSkillForm] = useState({
+    module_code: "media-training-101",
+    title: "Media Training 101",
+    category: "media_training",
+    level: "intermediate",
+    due_on: "2026-07-15",
+    progress_percent: 60,
+    evidence_notes: "Complete mock interview and social media responsibility checklist."
+  });
+  const [scholarshipForm, setScholarshipForm] = useState({
+    program_name: "Future Leaders Athletic Scholarship",
+    scholarship_type: "need_based_athletic",
+    donor_or_fund: "Alumni Opportunity Fund",
+    amount_requested: 1500,
+    currency: "USD",
+    deadline_on: "2026-08-01",
+    submitted_on: "2026-06-01",
+    amount_awarded: 1000,
+    notes: "Family needs partial fee support and donor impact story."
   });
   const [assessmentForm, setAssessmentForm] = useState({
     physical_score: 70,
@@ -3475,6 +3526,42 @@ export default function HomePage() {
     ]
   );
 
+  const loadAthleteDevelopment = useCallback(async (organizationId: string, athleteProfileId: string) => {
+    const [
+      dashboardData,
+      wellnessData,
+      academicData,
+      lifeSkillData,
+      scholarshipData
+    ] = await Promise.all([
+      apiRequest<AthleteDevelopmentDashboardRead>(
+        `/development/athletes/${athleteProfileId}/dashboard?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<AthleteWellnessCheckInRead[]>(
+        `/development/athletes/${athleteProfileId}/wellness-check-ins?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<AthleteAcademicRecordRead[]>(
+        `/development/athletes/${athleteProfileId}/academic-records?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<AthleteLifeSkillAssignmentRead[]>(
+        `/development/athletes/${athleteProfileId}/life-skill-assignments?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<AthleteScholarshipApplicationRead[]>(
+        `/development/athletes/${athleteProfileId}/scholarship-applications?organization_id=${organizationId}`,
+        { identity }
+      )
+    ]);
+    setDevelopmentDashboard(dashboardData);
+    setWellnessCheckIns(wellnessData);
+    setAcademicRecords(academicData);
+    setLifeSkillAssignments(lifeSkillData);
+    setScholarshipApplications(scholarshipData);
+  }, [identity]);
+
   const loadTraining = useCallback(async (organizationId: string, teamId?: string) => {
     const teamQuery = teamId ? `&team_id=${teamId}` : "";
     const [drills, plans, sessions, commandCenter] = await Promise.all([
@@ -4216,6 +4303,11 @@ export default function HomePage() {
       setPerformanceForecastValidationAlert(null);
       setAthletePathwayProjections([]);
       setAthletePathwayProjection(null);
+      setDevelopmentDashboard(null);
+      setWellnessCheckIns([]);
+      setAcademicRecords([]);
+      setLifeSkillAssignments([]);
+      setScholarshipApplications([]);
       setPerformanceWebhookIngest(null);
       setWearableConnections([]);
       setWearableSyncRun(null);
@@ -4666,6 +4758,11 @@ export default function HomePage() {
       setPerformanceWhatIfScenarios([]);
       setAthletePathwayProjections([]);
       setAthletePathwayProjection(null);
+      setDevelopmentDashboard(null);
+      setWellnessCheckIns([]);
+      setAcademicRecords([]);
+      setLifeSkillAssignments([]);
+      setScholarshipApplications([]);
       setPerformanceForecastValidationRun(null);
       setPerformanceForecastValidationRuns([]);
       setPerformanceForecastValidationAlert(null);
@@ -4683,6 +4780,7 @@ export default function HomePage() {
       async () => {
         await Promise.all([
           loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId),
+          loadAthleteDevelopment(selectedOrganizationId, selectedAthlete.athleteProfileId),
           loadMovementReferenceProfiles(selectedOrganizationId, videoCoachingForm.sport)
         ]);
       },
@@ -4691,6 +4789,7 @@ export default function HomePage() {
   }, [
     selectedAthlete,
     selectedOrganizationId,
+    loadAthleteDevelopment,
     loadAthletePerformance,
     loadMovementReferenceProfiles,
     runAction,
@@ -9906,6 +10005,185 @@ export default function HomePage() {
           "good"
         );
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const recordWellnessCheckIn = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before recording wellness", "bad");
+      return;
+    }
+    runAction(
+      "record-wellness-check-in",
+      () =>
+        apiRequest<AthleteWellnessCheckInRead>(
+          `/development/athletes/${selectedAthlete.athleteProfileId}/wellness-check-ins`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              ...wellnessForm
+            }
+          }
+        ),
+      (checkIn) => {
+        setWellnessCheckIns((current) => [checkIn, ...current.filter((item) => item.id !== checkIn.id)]);
+        addLog(`Wellness check-in is ${checkIn.risk_band}`, checkIn.risk_band === "steady" ? "good" : "neutral");
+        void loadAthleteDevelopment(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const recordAcademicRecord = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before recording academics", "bad");
+      return;
+    }
+    runAction(
+      "record-academic-record",
+      () =>
+        apiRequest<AthleteAcademicRecordRead>(
+          `/development/athletes/${selectedAthlete.athleteProfileId}/academic-records`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              ...academicForm
+            }
+          }
+        ),
+      (record) => {
+        setAcademicRecords((current) => [record, ...current.filter((item) => item.id !== record.id)]);
+        addLog(`Academic status: ${record.eligibility_status.replaceAll("_", " ")}`, record.risk_level === "steady" ? "good" : "neutral");
+        void loadAthleteDevelopment(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const assignLifeSkillModule = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before assigning life skills", "bad");
+      return;
+    }
+    runAction(
+      "assign-life-skill-module",
+      () =>
+        apiRequest<AthleteLifeSkillAssignmentRead>(
+          `/development/athletes/${selectedAthlete.athleteProfileId}/life-skill-assignments`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              module_code: lifeSkillForm.module_code,
+              title: lifeSkillForm.title,
+              category: lifeSkillForm.category,
+              level: lifeSkillForm.level,
+              due_on: lifeSkillForm.due_on || null,
+              evidence_notes: lifeSkillForm.evidence_notes || null
+            }
+          }
+        ),
+      (assignment) => {
+        setLifeSkillAssignments((current) => [assignment, ...current.filter((item) => item.id !== assignment.id)]);
+        addLog(`Life skill assigned: ${assignment.title}`, "good");
+        void loadAthleteDevelopment(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const updateFirstLifeSkillProgress = () => {
+    const assignment = lifeSkillAssignments[0];
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || !assignment) {
+      addLog("Assign a life-skill module before updating progress", "bad");
+      return;
+    }
+    runAction(
+      "update-life-skill-progress",
+      () =>
+        apiRequest<AthleteLifeSkillAssignmentRead>(
+          `/development/life-skill-assignments/${assignment.id}`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              status: lifeSkillForm.progress_percent >= 100 ? "completed" : "in_progress",
+              progress_percent: lifeSkillForm.progress_percent,
+              evidence_notes: lifeSkillForm.evidence_notes
+            }
+          }
+        ),
+      (updated) => {
+        setLifeSkillAssignments((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        addLog(`${updated.title} is ${updated.progress_percent}% complete`, "good");
+        void loadAthleteDevelopment(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const createScholarshipApplication = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before creating scholarship application", "bad");
+      return;
+    }
+    runAction(
+      "create-scholarship-application",
+      () =>
+        apiRequest<AthleteScholarshipApplicationRead>(
+          `/development/athletes/${selectedAthlete.athleteProfileId}/scholarship-applications`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              program_name: scholarshipForm.program_name,
+              scholarship_type: scholarshipForm.scholarship_type,
+              donor_or_fund: scholarshipForm.donor_or_fund || null,
+              amount_requested: scholarshipForm.amount_requested,
+              currency: scholarshipForm.currency,
+              deadline_on: scholarshipForm.deadline_on || null,
+              submitted_on: scholarshipForm.submitted_on || null,
+              notes: scholarshipForm.notes || null
+            }
+          }
+        ),
+      (application) => {
+        setScholarshipApplications((current) => [application, ...current.filter((item) => item.id !== application.id)]);
+        addLog(`Scholarship readiness ${application.eligibility_score}/100`, "good");
+        void loadAthleteDevelopment(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const approveFirstScholarshipApplication = () => {
+    const application = scholarshipApplications[0];
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || !application) {
+      addLog("Create a scholarship application before approval", "bad");
+      return;
+    }
+    runAction(
+      "approve-scholarship-application",
+      () =>
+        apiRequest<AthleteScholarshipApplicationRead>(
+          `/development/scholarship-applications/${application.id}`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              status: "approved",
+              amount_awarded: scholarshipForm.amount_awarded,
+              decided_on: new Date().toISOString().slice(0, 10),
+              notes: scholarshipForm.notes
+            }
+          }
+        ),
+      (updated) => {
+        setScholarshipApplications((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        addLog(`${updated.program_name} approved for ${updated.amount_awarded ?? 0} ${updated.currency}`, "good");
+        void loadAthleteDevelopment(selectedOrganizationId, selectedAthlete.athleteProfileId);
       }
     );
   };
@@ -15218,6 +15496,7 @@ export default function HomePage() {
           <a href="#competition">Competition</a>
           <a href="#communications">Comms</a>
           <a href="#performance">Performance</a>
+          <a href="#development">Development</a>
           <a href="#training">Training</a>
           <a href="#agents">Agents</a>
           <a href="#safeguarding">Safeguarding</a>
@@ -21481,6 +21760,181 @@ export default function HomePage() {
                       <button type="button" onClick={() => reviewAssessment(assessment, "rejected")} disabled={busyAction !== null}>Reject</button>
                     </span>
                   ) : null}
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid" id="development">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Development</p>
+                <h2>Wellness, academics, life skills</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={recordWellnessCheckIn} disabled={busyAction !== null}>Wellness</button>
+                <button type="button" onClick={recordAcademicRecord} disabled={busyAction !== null}>Academic</button>
+                <button type="button" onClick={assignLifeSkillModule} disabled={busyAction !== null}>Life skill</button>
+                <button type="button" onClick={updateFirstLifeSkillProgress} disabled={busyAction !== null}>Progress</button>
+                <button type="button" onClick={createScholarshipApplication} disabled={busyAction !== null}>Scholarship</button>
+                <button type="button" onClick={approveFirstScholarshipApplication} disabled={busyAction !== null}>Approve</button>
+              </div>
+            </div>
+            {developmentDashboard ? (
+              <div className="score-summary">
+                <strong>{developmentDashboard.development_score}</strong>
+                <span>{developmentDashboard.wellness_risk_band.replaceAll("_", " ")} wellness</span>
+                <small>
+                  {developmentDashboard.academic_eligibility_status.replaceAll("_", " ")} · scholarship{" "}
+                  {developmentDashboard.scholarship_readiness_score}/100 · life skills{" "}
+                  {developmentDashboard.life_skill_progress_percent}%
+                </small>
+              </div>
+            ) : null}
+            <div className="form-grid">
+              <label>
+                Mood
+                <input type="number" min="1" max="10" value={wellnessForm.mood_score} onChange={(event) => setWellnessForm({ ...wellnessForm, mood_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Stress
+                <input type="number" min="1" max="10" value={wellnessForm.stress_score} onChange={(event) => setWellnessForm({ ...wellnessForm, stress_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Sleep
+                <input type="number" min="0" max="24" step="0.5" value={wellnessForm.sleep_hours} onChange={(event) => setWellnessForm({ ...wellnessForm, sleep_hours: Number(event.target.value) })} />
+              </label>
+              <label>
+                Energy
+                <input type="number" min="1" max="10" value={wellnessForm.energy_score} onChange={(event) => setWellnessForm({ ...wellnessForm, energy_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Soreness
+                <input type="number" min="1" max="10" value={wellnessForm.soreness_score} onChange={(event) => setWellnessForm({ ...wellnessForm, soreness_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Resilience
+                <input type="number" min="1" max="10" value={wellnessForm.resilience_score} onChange={(event) => setWellnessForm({ ...wellnessForm, resilience_score: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Wellness notes
+                <input value={wellnessForm.notes} onChange={(event) => setWellnessForm({ ...wellnessForm, notes: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Support
+                <span className="check-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={wellnessForm.support_requested}
+                      onChange={(event) => setWellnessForm({ ...wellnessForm, support_requested: event.target.checked })}
+                    />
+                    Athlete requested support
+                  </label>
+                </span>
+              </label>
+              <label>
+                School
+                <input value={academicForm.school_name} onChange={(event) => setAcademicForm({ ...academicForm, school_name: event.target.value })} />
+              </label>
+              <label>
+                Term
+                <input value={academicForm.term_label} onChange={(event) => setAcademicForm({ ...academicForm, term_label: event.target.value })} />
+              </label>
+              <label>
+                GPA
+                <input type="number" min="0" max="5" step="0.1" value={academicForm.gpa} onChange={(event) => setAcademicForm({ ...academicForm, gpa: Number(event.target.value) })} />
+              </label>
+              <label>
+                Attendance
+                <input type="number" min="0" max="100" value={academicForm.attendance_rate} onChange={(event) => setAcademicForm({ ...academicForm, attendance_rate: Number(event.target.value) })} />
+              </label>
+              <label>
+                Study hours
+                <input type="number" min="0" max="80" value={academicForm.study_hours_weekly} onChange={(event) => setAcademicForm({ ...academicForm, study_hours_weekly: Number(event.target.value) })} />
+              </label>
+              <label>
+                Missing work
+                <input type="number" min="0" value={academicForm.missing_assignment_count} onChange={(event) => setAcademicForm({ ...academicForm, missing_assignment_count: Number(event.target.value) })} />
+              </label>
+              <label>
+                Module
+                <input value={lifeSkillForm.title} onChange={(event) => setLifeSkillForm({ ...lifeSkillForm, title: event.target.value })} />
+              </label>
+              <label>
+                Category
+                <input value={lifeSkillForm.category} onChange={(event) => setLifeSkillForm({ ...lifeSkillForm, category: event.target.value })} />
+              </label>
+              <label>
+                Progress
+                <input type="number" min="0" max="100" value={lifeSkillForm.progress_percent} onChange={(event) => setLifeSkillForm({ ...lifeSkillForm, progress_percent: Number(event.target.value) })} />
+              </label>
+              <label>
+                Program
+                <input value={scholarshipForm.program_name} onChange={(event) => setScholarshipForm({ ...scholarshipForm, program_name: event.target.value })} />
+              </label>
+              <label>
+                Requested
+                <input type="number" min="0" value={scholarshipForm.amount_requested} onChange={(event) => setScholarshipForm({ ...scholarshipForm, amount_requested: Number(event.target.value) })} />
+              </label>
+              <label>
+                Awarded
+                <input type="number" min="0" value={scholarshipForm.amount_awarded} onChange={(event) => setScholarshipForm({ ...scholarshipForm, amount_awarded: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Scholarship notes
+                <input value={scholarshipForm.notes} onChange={(event) => setScholarshipForm({ ...scholarshipForm, notes: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {developmentDashboard?.actions.map((action) => (
+                <article key={action.key} className="task-card">
+                  <div>
+                    <strong>{action.title} · {action.priority}</strong>
+                    <span>{action.owner}</span>
+                    <small>{action.detail}</small>
+                  </div>
+                </article>
+              ))}
+              {wellnessCheckIns.slice(0, 2).map((checkIn) => (
+                <article key={checkIn.id} className="task-card">
+                  <div>
+                    <strong>Wellness · {checkIn.risk_band}</strong>
+                    <span>mood {checkIn.mood_score}/10 · stress {checkIn.stress_score}/10 · sleep {checkIn.sleep_hours}h</span>
+                    <small>{checkIn.notes ?? "No notes"}</small>
+                  </div>
+                </article>
+              ))}
+              {academicRecords.slice(0, 2).map((record) => (
+                <article key={record.id} className="task-card">
+                  <div>
+                    <strong>{record.term_label} · {record.eligibility_status.replaceAll("_", " ")}</strong>
+                    <span>GPA {record.gpa ?? "n/a"} · attendance {record.attendance_rate ?? "n/a"}% · {record.risk_level}</span>
+                    <small>{record.notes ?? record.school_name ?? "Academic record"}</small>
+                  </div>
+                </article>
+              ))}
+              {lifeSkillAssignments.slice(0, 3).map((assignment) => (
+                <article key={assignment.id} className="task-card">
+                  <div>
+                    <strong>{assignment.title} · {assignment.progress_percent}%</strong>
+                    <span>{assignment.category.replaceAll("_", " ")} · {assignment.status.replaceAll("_", " ")}</span>
+                    <small>{assignment.evidence_notes ?? "Life-skill module"}</small>
+                  </div>
+                </article>
+              ))}
+              {scholarshipApplications.slice(0, 3).map((application) => (
+                <article key={application.id} className="task-card">
+                  <div>
+                    <strong>{application.program_name} · {application.status}</strong>
+                    <span>
+                      {application.eligibility_score}/100 · requested {application.amount_requested} {application.currency}
+                      {application.amount_awarded !== null ? ` · awarded ${application.amount_awarded}` : ""}
+                    </span>
+                    <small>{application.committee_recommendation}</small>
+                  </div>
                 </article>
               ))}
             </div>

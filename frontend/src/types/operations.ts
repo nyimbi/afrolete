@@ -6479,6 +6479,106 @@ export type AthletePathwayProjectionRead = {
   created_at: string;
 };
 
+export type AthleteWellnessCheckInRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  submitted_by_person_id: UUID | null;
+  check_in_at: string;
+  mood_score: number;
+  stress_score: number;
+  sleep_hours: number;
+  energy_score: number;
+  soreness_score: number;
+  resilience_score: number | null;
+  support_requested: boolean;
+  risk_band: string;
+  notes: string | null;
+  created_at: string;
+};
+
+export type AthleteAcademicRecordRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  recorded_by_person_id: UUID | null;
+  school_name: string | null;
+  term_label: string;
+  grade_level: string | null;
+  gpa: number | null;
+  attendance_rate: number | null;
+  study_hours_weekly: number | null;
+  missing_assignment_count: number;
+  eligibility_status: string;
+  risk_level: string;
+  next_review_on: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+export type AthleteLifeSkillAssignmentRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  assigned_by_person_id: UUID | null;
+  module_code: string;
+  title: string;
+  category: string;
+  level: string;
+  status: string;
+  progress_percent: number;
+  due_on: string | null;
+  completed_at: string | null;
+  evidence_notes: string | null;
+  created_at: string;
+};
+
+export type AthleteScholarshipApplicationRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  created_by_person_id: UUID | null;
+  program_name: string;
+  scholarship_type: string;
+  donor_or_fund: string | null;
+  amount_requested: number;
+  amount_awarded: number | null;
+  currency: string;
+  status: string;
+  eligibility_score: number;
+  committee_recommendation: string;
+  deadline_on: string | null;
+  submitted_on: string | null;
+  decided_on: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+export type AthleteDevelopmentActionRead = {
+  key: string;
+  priority: string;
+  title: string;
+  detail: string;
+  owner: string;
+};
+
+export type AthleteDevelopmentDashboardRead = {
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  athlete_name: string;
+  generated_at: string;
+  development_score: number;
+  wellness_risk_band: string;
+  academic_eligibility_status: string;
+  scholarship_readiness_score: number;
+  life_skill_progress_percent: number;
+  latest_wellness: AthleteWellnessCheckInRead | null;
+  latest_academic: AthleteAcademicRecordRead | null;
+  scholarship_applications: AthleteScholarshipApplicationRead[];
+  life_skill_assignments: AthleteLifeSkillAssignmentRead[];
+  actions: AthleteDevelopmentActionRead[];
+};
+
 export type PerformanceForecastValidationMetricRead = {
   athlete_profile_id: UUID;
   metric_definition_id: UUID;

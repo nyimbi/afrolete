@@ -91,6 +91,12 @@ from app.models.developer import (  # noqa: F401,E402
     DeveloperWebhookDelivery,
     DeveloperWebhookSubscription,
 )
+from app.models.development import (  # noqa: F401,E402
+    AthleteAcademicRecord,
+    AthleteLifeSkillAssignment,
+    AthleteScholarshipApplication,
+    AthleteWellnessCheckIn,
+)
 from app.models.communication import (  # noqa: F401,E402
     CommunicationMessage,
     CommunicationTemplate,
