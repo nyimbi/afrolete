@@ -9,6 +9,8 @@ import type {
   CommercialInvoiceProviderCheckoutRead,
   EventTravelFeeCheckoutSettlementRead,
   EventTravelFeeHostedCheckoutRead,
+  FacilityHireCheckoutSettlementRead,
+  FacilityHireHostedCheckoutRead,
   RegistrationPaymentHostedCheckoutRead,
   RegistrationPaymentSettlementRead,
   SaaSInvoiceCheckoutSettlementRead,
@@ -19,13 +21,15 @@ type HostedCheckoutRead =
   | EventTravelFeeHostedCheckoutRead
   | CommercialInvoiceHostedCheckoutRead
   | SaaSInvoiceHostedCheckoutRead
-  | RegistrationPaymentHostedCheckoutRead;
+  | RegistrationPaymentHostedCheckoutRead
+  | FacilityHireHostedCheckoutRead;
 type HostedCheckoutSettlementRead =
   | EventTravelFeeCheckoutSettlementRead
   | CommercialInvoiceCheckoutSettlementRead
   | SaaSInvoiceCheckoutSettlementRead
-  | RegistrationPaymentSettlementRead;
-type CheckoutKind = "travel" | "commercial" | "saas" | "registration";
+  | RegistrationPaymentSettlementRead
+  | FacilityHireCheckoutSettlementRead;
+type CheckoutKind = "travel" | "commercial" | "saas" | "registration" | "facility";
 
 export default function HostedPaymentPage() {
   return (
@@ -39,12 +43,13 @@ function HostedPaymentExperience() {
   const params = useParams<{ sessionId: string }>();
   const searchParams = useSearchParams();
   const invoiceId = searchParams.get("invoice_id") ?? "";
+  const bookingId = searchParams.get("booking_id") ?? "";
   const inquiryId = searchParams.get("inquiry_id") ?? "";
   const site = searchParams.get("site") ?? "";
   const provider = searchParams.get("provider") ?? "manual_gateway";
   const requestedKind = searchParams.get("kind");
   const checkoutKind: CheckoutKind =
-    requestedKind === "commercial" || requestedKind === "saas" || requestedKind === "registration"
+    requestedKind === "commercial" || requestedKind === "saas" || requestedKind === "registration" || requestedKind === "facility"
       ? requestedKind
       : "travel";
   const [checkout, setCheckout] = useState<HostedCheckoutRead | null>(null);
@@ -56,7 +61,7 @@ function HostedPaymentExperience() {
 
   useEffect(() => {
     let cancelled = false;
-    const missingContext = checkoutKind === "registration" ? !inquiryId || !site : !invoiceId;
+    const missingContext = checkoutKind === "registration" ? !inquiryId || !site : !invoiceId || (checkoutKind === "facility" && !bookingId);
     if (!params.sessionId || missingContext) {
       setError(checkoutKind === "registration" ? "Payment session link is missing registration context." : "Payment session link is missing invoice context.");
       return;
@@ -68,7 +73,9 @@ function HostedPaymentExperience() {
           ? `/commercial/invoice-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`
           : checkoutKind === "saas"
             ? `/billing/invoice-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`
-            : `/events/travel-fee-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`;
+            : checkoutKind === "facility"
+              ? `/assets/facility-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&booking_id=${encodeURIComponent(bookingId)}&provider=${encodeURIComponent(provider)}`
+              : `/events/travel-fee-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`;
     apiRequest<HostedCheckoutRead>(
       checkoutPath
     )
@@ -86,7 +93,7 @@ function HostedPaymentExperience() {
     return () => {
       cancelled = true;
     };
-  }, [checkoutKind, inquiryId, invoiceId, params.sessionId, provider, site]);
+  }, [bookingId, checkoutKind, inquiryId, invoiceId, params.sessionId, provider, site]);
 
   const displayAmount = useMemo(() => {
     if (!checkout) {
@@ -113,7 +120,9 @@ function HostedPaymentExperience() {
             ? `/commercial/invoice-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`
             : checkoutKind === "saas"
               ? `/billing/invoice-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`
-              : `/events/travel-fee-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`;
+              : checkoutKind === "facility"
+                ? `/assets/facility-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`
+                : `/events/travel-fee-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`;
       const result = await apiRequest<HostedCheckoutSettlementRead>(
         settlementPath,
         {
@@ -121,6 +130,11 @@ function HostedPaymentExperience() {
           body: {
             ...(checkoutKind === "registration"
               ? { inquiry_id: (checkout as RegistrationPaymentHostedCheckoutRead).inquiry_id }
+              : checkoutKind === "facility"
+                ? {
+                    invoice_id: checkoutInvoiceId,
+                    booking_id: (checkout as FacilityHireHostedCheckoutRead).booking_id
+                  }
               : { invoice_id: checkoutInvoiceId }),
             provider: checkout.provider,
             amount: checkout.open_amount,
@@ -191,6 +205,8 @@ function HostedPaymentExperience() {
                   ? "Secure subscription invoice portal"
                   : checkoutKind === "registration"
                     ? "Secure registration fee portal"
+                    : checkoutKind === "facility"
+                      ? "Secure facility booking portal"
                     : "Secure travel fee portal"}
             </span>
           </div>
@@ -210,7 +226,7 @@ function HostedPaymentExperience() {
                   <dd>
                     {checkoutKind === "registration"
                       ? (checkout as RegistrationPaymentHostedCheckoutRead).registration_reference
-                      : (checkout as CommercialInvoiceHostedCheckoutRead | EventTravelFeeHostedCheckoutRead | SaaSInvoiceHostedCheckoutRead).invoice_number}
+                      : (checkout as CommercialInvoiceHostedCheckoutRead | EventTravelFeeHostedCheckoutRead | SaaSInvoiceHostedCheckoutRead | FacilityHireHostedCheckoutRead).invoice_number}
                   </dd>
                 </div>
                 <div>
@@ -245,7 +261,11 @@ function HostedPaymentExperience() {
                   {busy ? "Preparing" : "Provider checkout"}
                 </button>
               ) : null}
-              {settlement ? <p className="payment-result">{settlement.message}</p> : null}
+              {settlement ? (
+                <p className="payment-result">
+                  {"message" in settlement ? settlement.message : `Payment ${settlement.session_status}`}
+                </p>
+              ) : null}
               {checkoutKind === "registration" && settlement ? (
                 <div className="payment-followups">
                   <a href={(checkout as RegistrationPaymentHostedCheckoutRead).public_registration_path}>

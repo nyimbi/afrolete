@@ -11,6 +11,7 @@ from hashlib import sha256
 from pathlib import Path
 from re import sub
 from secrets import token_urlsafe
+from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
@@ -90,9 +91,15 @@ from app.schemas.assets import (
     EquipmentItemCreate,
     FacilityAvailabilityRead,
     FacilityAvailabilitySlotRead,
+    FacilityBookingCheckoutRead,
     FacilityBookingCreate,
     FacilityBookingRuleCreate,
     FacilityCreate,
+    FacilityHireCheckoutSettlementCreate,
+    FacilityHireCheckoutSettlementRead,
+    FacilityHireHostedCheckoutRead,
+    FacilityPublicBookingCreate,
+    FacilityPublicListingRead,
     FacilityRecurringBookingCreate,
     FacilityUtilizationRead,
     MaintenanceWorkOrderCreate,
@@ -112,6 +119,7 @@ from app.schemas.safeguarding import SafeguardingIncidentCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
 from app.services.communications import create_message
+from app.services.organizations import get_public_site_organization
 from app.services.safeguarding import create_safeguarding_incident
 from app.services.secrets import resolve_secret
 from app.services.storage.objects import get_object, put_object
@@ -1305,6 +1313,214 @@ async def facility_utilization(
     )
 
 
+async def list_public_facility_hire(
+    db: AsyncSession,
+    site: str,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> list[FacilityPublicListingRead]:
+    organization = await get_public_site_organization(db, site)
+    if ends_at <= starts_at:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="ends_at must be after starts_at")
+    rules = list(
+        (
+            await db.scalars(
+                select(FacilityBookingRule)
+                .where(FacilityBookingRule.organization_id == organization.id)
+                .where(FacilityBookingRule.allow_public_booking.is_(True))
+                .where(FacilityBookingRule.status == "active")
+                .order_by(FacilityBookingRule.created_at.desc())
+            )
+        ).all()
+    )
+    listings: list[FacilityPublicListingRead] = []
+    for rule in rules:
+        facility = await get_facility_for_organization(db, rule.facility_id, organization.id)
+        availability = await facility_availability(db, organization.id, facility.id, starts_at, ends_at)
+        public_rate = facility_public_hourly_rate(facility, rule, starts_at)
+        listings.append(
+            FacilityPublicListingRead(
+                id=facility.id,
+                organization_id=facility.organization_id,
+                name=facility.name,
+                facility_type=facility.facility_type,
+                status=facility.status,
+                sport=facility.sport,
+                surface=facility.surface,
+                capacity=facility.capacity,
+                location=facility.location,
+                dimensions=facility.dimensions,
+                amenities=facility.amenities,
+                hourly_rate=facility.hourly_rate,
+                maintenance_budget=facility.maintenance_budget,
+                condition=facility.condition,
+                insurance_policy_ref=facility.insurance_policy_ref,
+                last_inspection_on=facility.last_inspection_on,
+                notes=facility.notes,
+                rule=rule,
+                availability=availability,
+                public_rate=public_rate,
+                rate_summary=facility_rate_summary(public_rate, rule),
+                next_available_slot=next_available_public_slot(
+                    availability.slots,
+                    starts_at,
+                    ends_at,
+                    rule.min_booking_minutes,
+                    rule.buffer_minutes,
+                ),
+            )
+        )
+    return listings
+
+
+async def create_public_facility_booking(
+    db: AsyncSession,
+    site: str,
+    payload: FacilityPublicBookingCreate,
+) -> FacilityBookingCheckoutRead:
+    organization = await get_public_site_organization(db, site)
+    facility = await get_facility_for_organization(db, payload.facility_id, organization.id)
+    rule = await get_facility_booking_rule(db, organization.id, facility.id)
+    if rule is None or not rule.allow_public_booking or rule.status != "active":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility is not publicly bookable")
+    validate_booking_against_rule(payload.starts_at, payload.ends_at, rule)
+    await ensure_facility_available(db, facility.id, payload.starts_at, payload.ends_at, rule=rule)
+
+    reference = f"FAC-{token_urlsafe(6).upper()}"
+    rate = facility_public_hourly_rate(facility, rule, payload.starts_at)
+    duration_hours = Decimal(str(max((payload.ends_at - payload.starts_at).total_seconds() / 3600, 0)))
+    amount_due = (duration_hours * rate).quantize(Decimal("0.01"))
+    invoice = FinanceInvoice(
+        organization_id=organization.id,
+        invoice_number=f"{reference}-{payload.starts_at:%m%d}",
+        title=f"Facility hire: {facility.name}",
+        amount_due=amount_due,
+        amount_paid=Decimal("0"),
+        currency="USD",
+        due_on=payload.starts_at.date(),
+        status=CommercialStatus.DRAFT,
+        memo=(
+            f"Public facility hire for {payload.requester_name} ({payload.requester_email}). "
+            f"Activity: {payload.activity_type}. Facility: {facility.name}. "
+            f"Add-ons: {payload.add_ons or 'none'}."
+        ),
+    )
+    db.add(invoice)
+    await db.flush()
+
+    session_id = facility_checkout_session_id(invoice.id, payload.provider)
+    booking = FacilityBooking(
+        organization_id=organization.id,
+        facility_id=facility.id,
+        requested_by_person_id=None,
+        title=payload.title,
+        starts_at=payload.starts_at,
+        ends_at=payload.ends_at,
+        status=FacilityBookingStatus.REQUESTED if rule.requires_approval else FacilityBookingStatus.APPROVED,
+        requester_name=payload.requester_name,
+        requester_email=payload.requester_email,
+        expected_attendees=payload.expected_attendees,
+        rate=rate,
+        deposit_required=amount_due,
+        finance_invoice_id=invoice.id,
+        insurance_certificate_ref=payload.insurance_certificate_ref,
+        special_requirements=public_booking_requirements(payload),
+        access_code=None,
+        public_visible=True,
+        booking_source="public_site",
+        public_booking_reference=reference,
+        payment_status="payment_pending",
+        payment_checkout_url=None,
+        conflict_note="Public booking created from branded site; payment and approval state tracked by invoice.",
+    )
+    db.add(booking)
+    await db.flush()
+    checkout_url = facility_checkout_url(payload.checkout_base_url, session_id, invoice.id, booking.id, payload.provider)
+    booking.payment_checkout_url = checkout_url
+    await db.commit()
+    await db.refresh(invoice)
+    await db.refresh(booking)
+    return FacilityBookingCheckoutRead(
+        booking=booking,
+        invoice=finance_invoice_read(invoice),
+        checkout_url=checkout_url,
+        session_id=session_id,
+        access_window_summary="Access opens 15 minutes before the booking after payment confirmation.",
+    )
+
+
+async def get_facility_hire_hosted_checkout(
+    db: AsyncSession,
+    session_id: str,
+    invoice_id: UUID,
+    booking_id: UUID,
+    provider: str,
+) -> FacilityHireHostedCheckoutRead:
+    invoice, booking = await get_facility_checkout_records(db, invoice_id, booking_id)
+    expected_session_id = facility_checkout_session_id(invoice.id, provider)
+    if not hmac.compare_digest(expected_session_id, session_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid facility checkout session")
+    return facility_hire_checkout_read(invoice, booking, provider, session_id)
+
+
+async def settle_facility_hire_checkout(
+    db: AsyncSession,
+    session_id: str,
+    payload: FacilityHireCheckoutSettlementCreate,
+) -> FacilityHireCheckoutSettlementRead:
+    invoice, booking = await get_facility_checkout_records(db, payload.invoice_id, payload.booking_id)
+    expected_session_id = facility_checkout_session_id(invoice.id, payload.provider)
+    if not hmac.compare_digest(expected_session_id, session_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid facility checkout session")
+    if payload.currency != invoice.currency:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Currency does not match invoice")
+
+    open_amount = invoice_open_amount(invoice)
+    payment: FinancePayment | None = None
+    if payload.status == "succeeded" and open_amount > 0:
+        amount = min(payload.amount, open_amount)
+        if amount <= 0:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment amount must be positive")
+        if payload.external_payment_id:
+            existing = await db.scalar(
+                select(FinancePayment)
+                .where(FinancePayment.invoice_id == invoice.id)
+                .where(FinancePayment.external_reference == payload.external_payment_id)
+            )
+            if existing is not None:
+                return facility_settlement_read(invoice, booking, existing, payload.provider)
+        payment = FinancePayment(
+            organization_id=invoice.organization_id,
+            invoice_id=invoice.id,
+            amount=amount,
+            currency=invoice.currency,
+            method=payload.method,
+            external_reference=payload.external_payment_id,
+            received_at=datetime.now(UTC),
+            notes=payload.raw_reference,
+        )
+        db.add(payment)
+        invoice.amount_paid += amount
+        invoice.status = CommercialStatus.PAID if invoice_open_amount(invoice) <= 0 else CommercialStatus.PARTIAL
+    if invoice_open_amount(invoice) <= 0:
+        booking.payment_status = "paid"
+        booking.status = FacilityBookingStatus.CONFIRMED if booking.status != FacilityBookingStatus.CANCELLED else booking.status
+        booking.access_code = booking.access_code or f"FAC-{token_urlsafe(4).upper()}"
+        booking.access_starts_at = booking.starts_at - timedelta(minutes=15)
+        booking.access_ends_at = booking.ends_at + timedelta(minutes=15)
+        booking.conflict_note = "Payment received; booking confirmed with access window."
+    elif invoice.amount_paid > 0:
+        booking.payment_status = "partial"
+    else:
+        booking.payment_status = "payment_pending"
+    await db.commit()
+    if payment is not None:
+        await db.refresh(payment)
+    await db.refresh(invoice)
+    await db.refresh(booking)
+    return facility_settlement_read(invoice, booking, payment, payload.provider)
+
+
 async def asset_summary(db: AsyncSession, organization_id: UUID) -> AssetSummaryRead:
     now = datetime.now(UTC)
     facilities = await list_facilities(db, organization_id)
@@ -2339,6 +2555,148 @@ def facility_utilization_recommendation(utilization_percent: int, projected_reve
     if projected_revenue > 0:
         return "Revenue exists but capacity remains; market open slots and bundle facility time with programs."
     return "Low utilization; publish availability, seed recurring training blocks, and review pricing."
+
+
+def facility_public_hourly_rate(
+    facility: Facility,
+    rule: FacilityBookingRule,
+    starts_at: datetime,
+) -> Decimal:
+    base_rate = facility.hourly_rate or Decimal("0")
+    multiplier = rule.peak_hour_rate_multiplier or Decimal("1.00")
+    if starts_at.weekday() >= 5 or 17 <= starts_at.hour <= 21:
+        return (base_rate * multiplier).quantize(Decimal("0.01"))
+    return base_rate.quantize(Decimal("0.01"))
+
+
+def facility_rate_summary(public_rate: Decimal, rule: FacilityBookingRule) -> str:
+    approval = "approval required" if rule.requires_approval else "instant confirmation after payment"
+    return (
+        f"USD {public_rate}/hr · {rule.min_booking_minutes}-{rule.max_booking_minutes} min · "
+        f"{rule.buffer_minutes} min buffer · {approval}"
+    )
+
+
+def next_available_public_slot(
+    booked_slots: list[FacilityAvailabilitySlotRead],
+    starts_at: datetime,
+    ends_at: datetime,
+    min_booking_minutes: int,
+    buffer_minutes: int,
+) -> datetime | None:
+    cursor = starts_at
+    slot_delta = timedelta(minutes=min_booking_minutes)
+    buffer_delta = timedelta(minutes=buffer_minutes)
+    for booked in sorted(booked_slots, key=lambda slot: slot.starts_at):
+        if cursor + slot_delta <= booked.starts_at - buffer_delta:
+            return cursor
+        cursor = max(cursor, booked.ends_at + buffer_delta)
+    return cursor if cursor + slot_delta <= ends_at else None
+
+
+def public_booking_requirements(payload: FacilityPublicBookingCreate) -> str:
+    parts = [payload.special_requirements or "No special requirements."]
+    if payload.requester_phone:
+        parts.append(f"Requester phone: {payload.requester_phone}.")
+    if payload.add_ons:
+        parts.append(f"Requested add-ons: {payload.add_ons}.")
+    return " ".join(parts)
+
+
+def facility_checkout_session_id(invoice_id: UUID, provider: str) -> str:
+    digest = sha256(f"facility-hire:{invoice_id}:{provider}".encode()).hexdigest()[:24]
+    return f"fac_{digest}"
+
+
+def facility_checkout_url(base_url: str, session_id: str, invoice_id: UUID, booking_id: UUID, provider: str) -> str:
+    normalized_base = base_url.rstrip("/") or "/pay/sessions"
+    query = urlencode(
+        {
+            "kind": "facility",
+            "invoice_id": str(invoice_id),
+            "booking_id": str(booking_id),
+            "provider": provider,
+        }
+    )
+    return f"{normalized_base}/{session_id}?{query}"
+
+
+def invoice_open_amount(invoice: FinanceInvoice) -> Decimal:
+    return max((invoice.amount_due - invoice.amount_paid).quantize(Decimal("0.01")), Decimal("0"))
+
+
+async def get_facility_checkout_records(
+    db: AsyncSession,
+    invoice_id: UUID,
+    booking_id: UUID,
+) -> tuple[FinanceInvoice, FacilityBooking]:
+    invoice = await db.get(FinanceInvoice, invoice_id)
+    booking = await db.get(FacilityBooking, booking_id)
+    if (
+        invoice is None
+        or booking is None
+        or booking.finance_invoice_id != invoice.id
+        or booking.organization_id != invoice.organization_id
+        or booking.booking_source != "public_site"
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility checkout session not found")
+    return invoice, booking
+
+
+def facility_hire_checkout_read(
+    invoice: FinanceInvoice,
+    booking: FacilityBooking,
+    provider: str,
+    session_id: str,
+) -> FacilityHireHostedCheckoutRead:
+    open_amount = invoice_open_amount(invoice)
+    return FacilityHireHostedCheckoutRead(
+        invoice_id=invoice.id,
+        booking_id=booking.id,
+        invoice_number=invoice.invoice_number,
+        organization_id=invoice.organization_id,
+        facility_id=booking.facility_id,
+        title=invoice.title,
+        memo=invoice.memo,
+        due_on=invoice.due_on,
+        amount_due=invoice.amount_due,
+        amount_paid=invoice.amount_paid,
+        open_amount=open_amount,
+        currency=invoice.currency,
+        status=invoice.status.value,
+        provider=provider,
+        session_id=session_id,
+        session_status="paid" if open_amount <= 0 else "open",
+        client_reference=f"facility-hire:{booking.id}",
+        payment_methods=["card", "mobile_money", "bank_transfer"],
+        settlement_endpoint=f"/api/v1/assets/facility-checkout-sessions/{session_id}/settle",
+        checkout_summary=f"{booking.title} from {booking.starts_at:%Y-%m-%d %H:%M} to {booking.ends_at:%H:%M}.",
+    )
+
+
+def facility_settlement_read(
+    invoice: FinanceInvoice,
+    booking: FacilityBooking,
+    payment: FinancePayment | None,
+    provider: str,
+) -> FacilityHireCheckoutSettlementRead:
+    open_amount = invoice_open_amount(invoice)
+    return FacilityHireCheckoutSettlementRead(
+        booking_id=booking.id,
+        invoice_id=invoice.id,
+        payment_id=payment.id if payment else None,
+        provider=provider,
+        amount_paid=invoice.amount_paid,
+        open_amount=open_amount,
+        currency=invoice.currency,
+        invoice_status=invoice.status.value,
+        booking_status=booking.status,
+        payment_status=booking.payment_status,
+        session_status="paid" if open_amount <= 0 else "open",
+        access_code=booking.access_code,
+        access_starts_at=booking.access_starts_at,
+        access_ends_at=booking.access_ends_at,
+    )
 
 
 def equipment_status_for_quantity(quantity_available: int) -> EquipmentStatus:

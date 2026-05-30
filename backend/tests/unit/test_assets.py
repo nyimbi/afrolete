@@ -369,6 +369,117 @@ def test_facility_booking_rules_recurring_availability_and_utilization(client, i
     assert "open slots" in utilization.json()["recommendation"].lower()
 
 
+def test_public_facility_hire_creates_invoice_checkout_and_access_window(client, identity_headers) -> None:
+    organization, _, _, _ = create_assets_context(client, identity_headers, "Public Hire Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Community Field",
+            "facility_type": "field",
+            "hourly_rate": "100.00",
+            "capacity": 120,
+            "amenities": "Lights, goals, changing rooms",
+        },
+    ).json()
+    client.post(
+        "/api/v1/assets/facility-booking-rules",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "min_booking_minutes": 60,
+            "max_booking_minutes": 240,
+            "buffer_minutes": 30,
+            "advance_booking_days": 90,
+            "requires_approval": False,
+            "allow_public_booking": True,
+            "cancellation_notice_hours": 24,
+            "peak_hour_rate_multiplier": "1.50",
+            "public_booking_note": "External renters must keep insurance on file.",
+        },
+    )
+
+    public_facilities = client.get(
+        f"/api/v1/assets/public/{organization['slug']}/facilities"
+        "?starts_at=2026-06-13T08:00:00Z&ends_at=2026-06-13T20:00:00Z"
+    )
+    assert public_facilities.status_code == 200
+    listing = public_facilities.json()[0]
+    assert listing["name"] == "Community Field"
+    assert listing["public_rate"] == "150.00"
+    assert listing["rule"]["allow_public_booking"] is True
+    assert listing["next_available_slot"] == "2026-06-13T08:00:00Z"
+
+    booking_response = client.post(
+        f"/api/v1/assets/public/{organization['slug']}/bookings",
+        json={
+            "facility_id": facility["id"],
+            "activity_type": "football training",
+            "title": "Community league field hire",
+            "starts_at": "2026-06-13T10:00:00Z",
+            "ends_at": "2026-06-13T12:00:00Z",
+            "requester_name": "Public Renter",
+            "requester_email": "renter@example.com",
+            "requester_phone": "+15550001111",
+            "expected_attendees": 36,
+            "insurance_certificate_ref": "INS-PUBLIC-1",
+            "special_requirements": "Goals and scoreboard access.",
+            "add_ons": "Locker room",
+            "checkout_base_url": "https://book.example.test/pay/sessions",
+            "provider": "manual_gateway",
+        },
+    )
+    assert booking_response.status_code == 201
+    checkout = booking_response.json()
+    booking = checkout["booking"]
+    invoice = checkout["invoice"]
+    assert booking["status"] == "approved"
+    assert booking["booking_source"] == "public_site"
+    assert booking["payment_status"] == "payment_pending"
+    assert booking["finance_invoice_id"] == invoice["id"]
+    assert invoice["amount_due"] == "300.00"
+    assert "booking_id=" in checkout["checkout_url"]
+
+    hosted = client.get(
+        f"/api/v1/assets/facility-checkout-sessions/{checkout['session_id']}"
+        f"?invoice_id={invoice['id']}&booking_id={booking['id']}&provider=manual_gateway"
+    )
+    assert hosted.status_code == 200
+    assert hosted.json()["open_amount"] == "300.00"
+    assert hosted.json()["session_status"] == "open"
+
+    settlement = client.post(
+        f"/api/v1/assets/facility-checkout-sessions/{checkout['session_id']}/settle",
+        json={
+            "invoice_id": invoice["id"],
+            "booking_id": booking["id"],
+            "provider": "manual_gateway",
+            "amount": "300.00",
+            "currency": "USD",
+            "method": "mobile_money",
+            "status": "succeeded",
+            "external_payment_id": "facility-payment-1",
+            "raw_reference": "Public hosted checkout confirmation.",
+        },
+    )
+    assert settlement.status_code == 200
+    paid = settlement.json()
+    assert paid["invoice_status"] == "paid"
+    assert paid["booking_status"] == "confirmed"
+    assert paid["payment_status"] == "paid"
+    assert paid["access_code"].startswith("FAC-")
+    assert paid["access_starts_at"].startswith("2026-06-13T09:45:00")
+    assert paid["access_ends_at"].startswith("2026-06-13T12:15:00")
+
+    bookings = client.get(
+        f"/api/v1/assets/bookings?organization_id={organization['id']}&facility_id={facility['id']}"
+    ).json()
+    assert bookings[0]["public_booking_reference"].startswith("FAC-")
+    assert bookings[0]["payment_checkout_url"].startswith("https://book.example.test/pay/sessions/")
+
+
 def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
     plan = client.post(

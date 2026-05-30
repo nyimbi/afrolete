@@ -44,11 +44,17 @@ from app.schemas.assets import (
     EquipmentScanEventRead,
     EquipmentScanRead,
     FacilityAvailabilityRead,
+    FacilityBookingCheckoutRead,
     FacilityBookingCreate,
     FacilityBookingRead,
     FacilityBookingRuleCreate,
     FacilityBookingRuleRead,
     FacilityCreate,
+    FacilityHireCheckoutSettlementCreate,
+    FacilityHireCheckoutSettlementRead,
+    FacilityHireHostedCheckoutRead,
+    FacilityPublicBookingCreate,
+    FacilityPublicListingRead,
     FacilityRead,
     FacilityRecurringBookingCreate,
     FacilityUtilizationRead,
@@ -86,7 +92,10 @@ from app.services.assets import (
     ensure_manage_assets,
     facility_availability,
     facility_utilization,
+    create_public_facility_booking,
     get_facility_booking_rule,
+    get_facility_hire_hosted_checkout,
+    list_public_facility_hire,
     list_equipment_files,
     list_equipment_scan_events,
     list_checkouts,
@@ -109,6 +118,7 @@ from app.services.assets import (
     submit_supplier_order,
     sync_asset_accounting_export,
     sync_supplier_invoice,
+    settle_facility_hire_checkout,
     supplier_scorecard,
     update_emergency_action_plan,
     update_emergency_plan_activation,
@@ -358,12 +368,19 @@ def to_booking_read(booking) -> FacilityBookingRead:
         expected_attendees=booking.expected_attendees,
         rate=booking.rate,
         deposit_required=booking.deposit_required,
+        finance_invoice_id=booking.finance_invoice_id,
         insurance_certificate_ref=booking.insurance_certificate_ref,
         special_requirements=booking.special_requirements,
         access_code=booking.access_code,
         public_visible=booking.public_visible,
         recurrence_group_id=booking.recurrence_group_id,
         occurrence_index=booking.occurrence_index,
+        booking_source=booking.booking_source,
+        public_booking_reference=booking.public_booking_reference,
+        payment_status=booking.payment_status,
+        payment_checkout_url=booking.payment_checkout_url,
+        access_starts_at=booking.access_starts_at,
+        access_ends_at=booking.access_ends_at,
         conflict_note=booking.conflict_note,
     )
 
@@ -449,6 +466,55 @@ async def facility_utilization_route(
     db: AsyncSession = Depends(get_db),
 ) -> FacilityUtilizationRead:
     return await facility_utilization(db, organization_id, facility_id, starts_at, ends_at)
+
+
+@router.get("/public/{site}/facilities", response_model=list[FacilityPublicListingRead])
+async def public_facility_hire_route(
+    site: str,
+    starts_at: datetime = Query(),
+    ends_at: datetime = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[FacilityPublicListingRead]:
+    return await list_public_facility_hire(db, site, starts_at, ends_at)
+
+
+@router.post(
+    "/public/{site}/bookings",
+    response_model=FacilityBookingCheckoutRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_public_facility_booking_route(
+    site: str,
+    payload: FacilityPublicBookingCreate,
+    db: AsyncSession = Depends(get_db),
+) -> FacilityBookingCheckoutRead:
+    return await create_public_facility_booking(db, site, payload)
+
+
+@router.get(
+    "/facility-checkout-sessions/{session_id}",
+    response_model=FacilityHireHostedCheckoutRead,
+)
+async def get_facility_checkout_session_route(
+    session_id: str,
+    invoice_id: UUID = Query(),
+    booking_id: UUID = Query(),
+    provider: str = Query(default="manual_gateway"),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityHireHostedCheckoutRead:
+    return await get_facility_hire_hosted_checkout(db, session_id, invoice_id, booking_id, provider)
+
+
+@router.post(
+    "/facility-checkout-sessions/{session_id}/settle",
+    response_model=FacilityHireCheckoutSettlementRead,
+)
+async def settle_facility_checkout_session_route(
+    session_id: str,
+    payload: FacilityHireCheckoutSettlementCreate,
+    db: AsyncSession = Depends(get_db),
+) -> FacilityHireCheckoutSettlementRead:
+    return await settle_facility_hire_checkout(db, session_id, payload)
 
 
 @router.post("/emergency-plans", response_model=EmergencyActionPlanRead, status_code=status.HTTP_201_CREATED)

@@ -2697,12 +2697,19 @@ export type FacilityBookingRead = {
   expected_attendees: number | null;
   rate: string | null;
   deposit_required: string | null;
+  finance_invoice_id: UUID | null;
   insurance_certificate_ref: string | null;
   special_requirements: string | null;
   access_code: string | null;
   public_visible: boolean;
   recurrence_group_id: string | null;
   occurrence_index: number | null;
+  booking_source: string;
+  public_booking_reference: string | null;
+  payment_status: string;
+  payment_checkout_url: string | null;
+  access_starts_at: string | null;
+  access_ends_at: string | null;
   conflict_note: string | null;
 };
 
@@ -2737,6 +2744,62 @@ export type FacilityUtilizationRead = {
   projected_revenue: string;
   average_attendance: number | null;
   recommendation: string;
+};
+
+export type FacilityPublicListingRead = FacilityRead & {
+  rule: FacilityBookingRuleRead;
+  availability: FacilityAvailabilityRead;
+  public_rate: string;
+  rate_summary: string;
+  next_available_slot: string | null;
+};
+
+export type FacilityBookingCheckoutRead = {
+  booking: FacilityBookingRead;
+  invoice: FinanceInvoiceRead;
+  checkout_url: string;
+  session_id: string;
+  access_window_summary: string;
+};
+
+export type FacilityHireHostedCheckoutRead = {
+  invoice_id: UUID;
+  booking_id: UUID;
+  invoice_number: string;
+  organization_id: UUID;
+  facility_id: UUID;
+  title: string;
+  memo: string | null;
+  due_on: string | null;
+  amount_due: string;
+  amount_paid: string;
+  open_amount: string;
+  currency: string;
+  status: string;
+  provider: string;
+  session_id: string;
+  session_status: string;
+  client_reference: string;
+  payment_methods: string[];
+  settlement_endpoint: string;
+  checkout_summary: string;
+};
+
+export type FacilityHireCheckoutSettlementRead = {
+  booking_id: UUID;
+  invoice_id: UUID;
+  payment_id: UUID | null;
+  provider: string;
+  amount_paid: string;
+  open_amount: string;
+  currency: string;
+  invoice_status: string;
+  booking_status: FacilityBookingStatus;
+  payment_status: string;
+  session_status: string;
+  access_code: string | null;
+  access_starts_at: string | null;
+  access_ends_at: string | null;
 };
 
 export type AssetSummaryRead = {

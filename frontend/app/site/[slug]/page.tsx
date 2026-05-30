@@ -14,6 +14,8 @@ import {
 import { afroleteAuthMode } from "@/lib/config";
 import type {
   AgentEthicalScorecardRead,
+  FacilityBookingCheckoutRead,
+  FacilityPublicListingRead,
   OrganizationPublicSiteRead,
   PublicSupporterChallengeProgressRead,
   PublicSupporterSignupRead,
@@ -77,6 +79,7 @@ export default function PublicOrganizationSitePage() {
   const [site, setSite] = useState<OrganizationPublicSiteRead | null>(null);
   const [scorecard, setScorecard] = useState<AgentEthicalScorecardRead | null>(null);
   const [volunteerOpportunities, setVolunteerOpportunities] = useState<VolunteerOpportunityRead[]>([]);
+  const [publicFacilities, setPublicFacilities] = useState<FacilityPublicListingRead[]>([]);
   const [inquiry, setInquiry] = useState({
     team_id: "",
     athlete_name: "",
@@ -117,6 +120,20 @@ export default function PublicOrganizationSitePage() {
     interests: "matchday updates, challenges, merchandise",
     message: ""
   });
+  const [facilityHireForm, setFacilityHireForm] = useState({
+    facility_id: "",
+    activity_type: "football training",
+    title: "Community field hire",
+    starts_at: "2026-06-13T10:00",
+    duration_hours: 2,
+    requester_name: "",
+    requester_email: "",
+    requester_phone: "",
+    expected_attendees: 30,
+    insurance_certificate_ref: "",
+    special_requirements: "Goals and changing room access.",
+    add_ons: "Locker room"
+  });
   const [submittedInquiry, setSubmittedInquiry] = useState<RegistrationInquiryRead | null>(null);
   const [accountReadiness, setAccountReadiness] = useState<RegistrationInquiryAccountReadinessRead | null>(null);
   const [packetForm, setPacketForm] = useState(defaultPacketForm);
@@ -126,6 +143,7 @@ export default function PublicOrganizationSitePage() {
   const [submittedVolunteerSignup, setSubmittedVolunteerSignup] = useState<PublicVolunteerSignupRead | null>(null);
   const [submittedVolunteerGroup, setSubmittedVolunteerGroup] = useState<VolunteerGroupApplicationRead | null>(null);
   const [submittedSupporter, setSubmittedSupporter] = useState<PublicSupporterSignupRead | null>(null);
+  const [facilityBookingCheckout, setFacilityBookingCheckout] = useState<FacilityBookingCheckoutRead | null>(null);
   const [supporterChallengeProgress, setSupporterChallengeProgress] =
     useState<PublicSupporterChallengeProgressRead | null>(null);
   const [error, setError] = useState("");
@@ -140,6 +158,8 @@ export default function PublicOrganizationSitePage() {
   const [volunteerGroupBusy, setVolunteerGroupBusy] = useState(false);
   const [supporterBusy, setSupporterBusy] = useState("");
   const [supporterFormError, setSupporterFormError] = useState("");
+  const [facilityHireBusy, setFacilityHireBusy] = useState(false);
+  const [facilityHireError, setFacilityHireError] = useState("");
   const [loadedResumeKey, setLoadedResumeKey] = useState("");
 
   useEffect(() => {
@@ -173,6 +193,22 @@ export default function PublicOrganizationSitePage() {
             .catch(() => {
               if (!cancelled) {
                 setVolunteerOpportunities([]);
+              }
+            });
+          void apiRequest<FacilityPublicListingRead[]>(
+            `/assets/public/${encodeURIComponent(data.slug)}/facilities?starts_at=2026-06-01T00:00:00Z&ends_at=2026-07-15T00:00:00Z`
+          )
+            .then((facilities) => {
+              if (!cancelled) {
+                setPublicFacilities(facilities);
+                setFacilityHireForm((current) =>
+                  current.facility_id ? current : { ...current, facility_id: facilities[0]?.id ?? "" }
+                );
+              }
+            })
+            .catch(() => {
+              if (!cancelled) {
+                setPublicFacilities([]);
               }
             });
           void apiRequest<AgentEthicalScorecardRead>(`/agents/ethical-scorecard?organization_id=${data.id}`)
@@ -529,6 +565,48 @@ export default function PublicOrganizationSitePage() {
     });
   };
 
+  const submitFacilityHire = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!site || !facilityHireForm.facility_id) {
+      setFacilityHireError("Choose a public facility first.");
+      return;
+    }
+    setFacilityHireBusy(true);
+    setFacilityHireError("");
+    try {
+      const startsAt = new Date(facilityHireForm.starts_at);
+      const endsAt = new Date(startsAt.getTime() + facilityHireForm.duration_hours * 60 * 60_000);
+      const checkout = await apiRequest<FacilityBookingCheckoutRead>(
+        `/assets/public/${encodeURIComponent(site.slug)}/bookings`,
+        {
+          method: "POST",
+          body: {
+            facility_id: facilityHireForm.facility_id,
+            activity_type: facilityHireForm.activity_type,
+            title: facilityHireForm.title,
+            starts_at: startsAt.toISOString(),
+            ends_at: endsAt.toISOString(),
+            requester_name: facilityHireForm.requester_name,
+            requester_email: facilityHireForm.requester_email,
+            requester_phone: facilityHireForm.requester_phone || null,
+            expected_attendees: facilityHireForm.expected_attendees,
+            insurance_certificate_ref: facilityHireForm.insurance_certificate_ref || null,
+            special_requirements: facilityHireForm.special_requirements,
+            add_ons: facilityHireForm.add_ons || null,
+            provider: "manual_gateway",
+            checkout_base_url: `${window.location.origin}/pay/sessions`
+          }
+        }
+      );
+      setFacilityBookingCheckout(checkout);
+      window.open(checkout.checkout_url, "_blank", "noopener,noreferrer");
+    } catch (caught) {
+      setFacilityHireError(caught instanceof Error ? caught.message : "Facility booking could not be created");
+    } finally {
+      setFacilityHireBusy(false);
+    }
+  };
+
   const submitSupporterSignup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSupporterBusy("signup");
@@ -796,6 +874,150 @@ export default function PublicOrganizationSitePage() {
               </div>
             </article>
           </div>
+        </section>
+      ) : null}
+
+      {publicFacilities.length > 0 ? (
+        <section className="public-site-shell public-site-inquiry public-site-facilities">
+          <div>
+            <p className="section-label">Facility hire</p>
+            <h2>Book public facility time</h2>
+            <p>External teams, community groups, and event organizers can reserve published facilities and pay online.</p>
+            <div className="public-site-list">
+              {publicFacilities.slice(0, 4).map((facility) => (
+                <div key={facility.id}>
+                  <strong>{facility.name}</strong>
+                  <span>
+                    {facility.facility_type} · {facility.rate_summary}
+                  </span>
+                  <small>
+                    {facility.next_available_slot ? `Next open ${formatDate(facility.next_available_slot)}` : "Staff calendar is full for this window"} ·{" "}
+                    {facility.availability.conflict_count} conflicts
+                  </small>
+                </div>
+              ))}
+            </div>
+            {facilityBookingCheckout ? (
+              <div className="public-site-success">
+                <strong>{facilityBookingCheckout.booking.public_booking_reference}</strong>
+                <span>
+                  {facilityBookingCheckout.booking.status} · {facilityBookingCheckout.invoice.currency}{" "}
+                  {facilityBookingCheckout.invoice.amount_due} due
+                </span>
+                <a href={facilityBookingCheckout.checkout_url}>Open payment link</a>
+              </div>
+            ) : null}
+          </div>
+          <form onSubmit={submitFacilityHire}>
+            <label className="public-site-wide">
+              Facility
+              <select
+                value={facilityHireForm.facility_id}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, facility_id: event.target.value })}
+                required
+              >
+                <option value="">Choose a facility</option>
+                {publicFacilities.map((facility) => (
+                  <option value={facility.id} key={facility.id}>
+                    {facility.name} · {facility.public_rate}/hr
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Activity
+              <input
+                value={facilityHireForm.activity_type}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, activity_type: event.target.value })}
+                required
+              />
+            </label>
+            <label>
+              Starts
+              <input
+                type="datetime-local"
+                value={facilityHireForm.starts_at}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, starts_at: event.target.value })}
+                required
+              />
+            </label>
+            <label>
+              Hours
+              <input
+                type="number"
+                min="1"
+                max="8"
+                value={facilityHireForm.duration_hours}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, duration_hours: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Attendees
+              <input
+                type="number"
+                min="0"
+                value={facilityHireForm.expected_attendees}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, expected_attendees: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Name
+              <input
+                value={facilityHireForm.requester_name}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, requester_name: event.target.value })}
+                required
+              />
+            </label>
+            <label>
+              Email
+              <input
+                type="email"
+                value={facilityHireForm.requester_email}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, requester_email: event.target.value })}
+                required
+              />
+            </label>
+            <label>
+              Phone
+              <input
+                value={facilityHireForm.requester_phone}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, requester_phone: event.target.value })}
+              />
+            </label>
+            <label>
+              Insurance
+              <input
+                value={facilityHireForm.insurance_certificate_ref}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, insurance_certificate_ref: event.target.value })}
+              />
+            </label>
+            <label className="public-site-wide">
+              Booking title
+              <input
+                value={facilityHireForm.title}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, title: event.target.value })}
+                required
+              />
+            </label>
+            <label className="public-site-wide">
+              Requirements
+              <textarea
+                value={facilityHireForm.special_requirements}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, special_requirements: event.target.value })}
+              />
+            </label>
+            <label className="public-site-wide">
+              Add-ons
+              <input
+                value={facilityHireForm.add_ons}
+                onChange={(event) => setFacilityHireForm({ ...facilityHireForm, add_ons: event.target.value })}
+              />
+            </label>
+            {facilityHireError ? <p className="form-error public-site-wide">{facilityHireError}</p> : null}
+            <button type="submit" disabled={facilityHireBusy}>
+              {facilityHireBusy ? "Preparing" : "Book and pay"}
+            </button>
+          </form>
         </section>
       ) : null}
 

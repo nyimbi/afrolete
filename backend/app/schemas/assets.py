@@ -47,6 +47,14 @@ class FacilityRead(FacilityCreate):
     status: FacilityStatus
 
 
+class FacilityPublicListingRead(FacilityRead):
+    rule: "FacilityBookingRuleRead"
+    availability: "FacilityAvailabilityRead"
+    public_rate: Decimal
+    rate_summary: str
+    next_available_slot: datetime | None = None
+
+
 class FacilityBookingRuleCreate(BaseModel):
     organization_id: UUID
     facility_id: UUID
@@ -698,17 +706,49 @@ class FacilityBookingCreate(BaseModel):
 
 
 class FacilityBookingRead(FacilityBookingCreate):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     status: FacilityBookingStatus
     requested_by_person_id: UUID | None
+    finance_invoice_id: UUID | None
     recurrence_group_id: str | None
     occurrence_index: int | None
+    booking_source: str
+    public_booking_reference: str | None
+    payment_status: str
+    payment_checkout_url: str | None
+    access_starts_at: datetime | None
+    access_ends_at: datetime | None
     conflict_note: str | None
 
 
 class FacilityRecurringBookingCreate(FacilityBookingCreate):
     recurrence_frequency: str = Field(default="weekly", pattern="^(daily|weekly)$")
     occurrence_count: int = Field(default=4, ge=1, le=52)
+
+
+class FacilityPublicBookingCreate(BaseModel):
+    facility_id: UUID
+    activity_type: str = Field(default="training", min_length=2, max_length=120)
+    title: str = Field(min_length=2, max_length=220)
+    starts_at: datetime
+    ends_at: datetime
+    requester_name: str = Field(min_length=2, max_length=180)
+    requester_email: str = Field(min_length=5, max_length=255)
+    requester_phone: str | None = Field(default=None, max_length=80)
+    expected_attendees: int | None = Field(default=None, ge=0)
+    insurance_certificate_ref: str | None = Field(default=None, max_length=240)
+    special_requirements: str | None = Field(default=None, max_length=4000)
+    add_ons: str | None = Field(default=None, max_length=1000)
+    provider: str = Field(default="manual_gateway", min_length=2, max_length=80)
+    checkout_base_url: str = Field(default="/pay/sessions", min_length=1, max_length=800)
+
+    @model_validator(mode="after")
+    def valid_period(self) -> "FacilityPublicBookingCreate":
+        if self.ends_at <= self.starts_at:
+            raise ValueError("ends_at must be after starts_at")
+        return self
 
 
 class FacilityAvailabilitySlotRead(BaseModel):
@@ -742,6 +782,66 @@ class FacilityUtilizationRead(BaseModel):
     projected_revenue: Decimal
     average_attendance: float | None
     recommendation: str
+
+
+class FacilityBookingCheckoutRead(BaseModel):
+    booking: FacilityBookingRead
+    invoice: FinanceInvoiceRead
+    checkout_url: str
+    session_id: str
+    access_window_summary: str
+
+
+class FacilityHireHostedCheckoutRead(BaseModel):
+    invoice_id: UUID
+    booking_id: UUID
+    invoice_number: str
+    organization_id: UUID
+    facility_id: UUID
+    title: str
+    memo: str | None
+    due_on: date | None
+    amount_due: Decimal
+    amount_paid: Decimal
+    open_amount: Decimal
+    currency: str
+    status: str
+    provider: str
+    session_id: str
+    session_status: str
+    client_reference: str
+    payment_methods: list[str]
+    settlement_endpoint: str
+    checkout_summary: str
+
+
+class FacilityHireCheckoutSettlementCreate(BaseModel):
+    invoice_id: UUID
+    booking_id: UUID
+    provider: str = Field(default="manual_gateway", min_length=2, max_length=80)
+    amount: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    method: str = Field(default="card", min_length=2, max_length=80)
+    status: str = Field(default="succeeded", min_length=2, max_length=40)
+    external_payment_id: str | None = Field(default=None, max_length=240)
+    raw_reference: str | None = Field(default=None, max_length=2000)
+
+
+class FacilityHireCheckoutSettlementRead(BaseModel):
+    booking_id: UUID
+    invoice_id: UUID
+    payment_id: UUID | None
+    provider: str
+    amount_paid: Decimal
+    open_amount: Decimal
+    currency: str
+    invoice_status: str
+    booking_status: FacilityBookingStatus
+    payment_status: str
+    session_status: str
+    access_code: str | None
+    access_starts_at: datetime | None
+    access_ends_at: datetime | None
 
 
 class AssetSummaryRead(BaseModel):
