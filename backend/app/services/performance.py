@@ -111,6 +111,8 @@ from app.schemas.performance import (
     PerformanceHighlightReelCreate,
     PerformanceHighlightReelExportCreate,
     PerformanceHighlightReelReminderCreate,
+    PerformanceHighlightReelReminderRunCreate,
+    PerformanceHighlightReelReminderRunRead,
     PerformanceHighlightReelShareCreate,
     PerformanceIngestionCreate,
     PerformanceModelExtractionBulkReviewCreate,
@@ -164,6 +166,8 @@ from app.services.communications import (
 )
 from app.services.secrets import resolve_secret
 from app.services.storage.objects import get_object, put_object
+
+HIGHLIGHT_REEL_REMINDER_ESCALATION_REASON = "highlight_reel_unread_recipient_reminder"
 
 
 async def ensure_manage_performance(
@@ -3247,6 +3251,26 @@ async def send_performance_highlight_reel_reminder(
         if audit.highlight_reel_export_id is not None
         else None
     )
+    reminder_recipient_rows, skipped_read_count, skipped_downloaded_count = (
+        await highlight_reel_unread_reminder_recipient_rows(db, audit)
+    )
+    return await create_highlight_reel_reminder_from_candidates(
+        db,
+        audit,
+        reel,
+        export,
+        payload,
+        reminder_recipient_rows=reminder_recipient_rows,
+        skipped_read_count=skipped_read_count,
+        skipped_downloaded_count=skipped_downloaded_count,
+        created_by_person_id=identity.person_id,
+    )
+
+
+async def highlight_reel_unread_reminder_recipient_rows(
+    db: AsyncSession,
+    audit: PerformanceHighlightReelShareAudit,
+) -> tuple[list[tuple[MessageRecipient, Person, int]], int, int]:
     recipient_rows = list(
         (
             await db.execute(
@@ -3292,7 +3316,21 @@ async def send_performance_highlight_reel_reminder(
         if has_read or download_count > 0:
             continue
         reminder_recipient_rows.append((recipient, person, download_count))
+    return reminder_recipient_rows, skipped_read_count, skipped_downloaded_count
 
+
+async def create_highlight_reel_reminder_from_candidates(
+    db: AsyncSession,
+    audit: PerformanceHighlightReelShareAudit,
+    reel: PerformanceHighlightReel,
+    export: PerformanceHighlightReelExport | None,
+    payload: PerformanceHighlightReelReminderCreate,
+    *,
+    reminder_recipient_rows: list[tuple[MessageRecipient, Person, int]],
+    skipped_read_count: int,
+    skipped_downloaded_count: int,
+    created_by_person_id: UUID | None,
+) -> dict[str, object]:
     created_at = datetime.now(UTC)
     subject = f"{payload.subject_prefix}: {reel.title}"[:240]
     message: CommunicationMessage | None = None
@@ -3312,11 +3350,11 @@ async def send_performance_highlight_reel_reminder(
                 payload,
                 share_policy=audit.share_policy,
             ),
-            created_by_person_id=identity.person_id,
+            created_by_person_id=created_by_person_id,
             escalates_message_id=audit.message_id,
             escalation_level=1,
             escalation_triggered_at=created_at,
-            escalation_reason="highlight_reel_unread_recipient_reminder",
+            escalation_reason=HIGHLIGHT_REEL_REMINDER_ESCALATION_REASON,
         )
         created_at = message.created_at
     return {
@@ -3343,6 +3381,151 @@ async def send_performance_highlight_reel_reminder(
         ],
         "created_at": created_at,
     }
+
+
+async def run_performance_highlight_reel_reminders(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: PerformanceHighlightReelReminderRunCreate,
+    authz: AuthorizationService,
+) -> PerformanceHighlightReelReminderRunRead:
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    return await run_performance_highlight_reel_reminder_worker(
+        db,
+        organization_id=payload.organization_id,
+        channel=payload.channel,
+        shared_before_hours=payload.shared_before_hours,
+        repeat_after_hours=payload.repeat_after_hours,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+        subject_prefix=payload.subject_prefix,
+        message_intro=payload.message_intro,
+        include_download_link=payload.include_download_link,
+        created_by_person_id=identity.person_id,
+    )
+
+
+async def run_performance_highlight_reel_reminder_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    channel: CommunicationChannel = CommunicationChannel.IN_APP,
+    shared_before_hours: int = 24,
+    repeat_after_hours: int = 24,
+    limit: int = 50,
+    dry_run: bool = False,
+    subject_prefix: str = "Reminder: highlight reel ready",
+    message_intro: str | None = None,
+    include_download_link: bool = True,
+    created_by_person_id: UUID | None = None,
+) -> PerformanceHighlightReelReminderRunRead:
+    now = datetime.now(UTC)
+    stale_before = now - timedelta(hours=shared_before_hours)
+    statement = (
+        select(PerformanceHighlightReelShareAudit, PerformanceHighlightReel)
+        .join(PerformanceHighlightReel, PerformanceHighlightReel.id == PerformanceHighlightReelShareAudit.highlight_reel_id)
+        .where(PerformanceHighlightReelShareAudit.status == "shared")
+        .where(PerformanceHighlightReelShareAudit.published_at <= stale_before)
+        .order_by(PerformanceHighlightReelShareAudit.published_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(PerformanceHighlightReelShareAudit.organization_id == organization_id)
+    share_rows = list((await db.execute(statement)).all())
+    eligible_count = len(share_rows)
+    reminded_count = 0
+    skipped_count = 0
+    failed_count = 0
+    recipient_count = 0
+    suppressed_recent_count = 0
+    no_unread_count = 0
+    message_ids: list[UUID] = []
+    share_audit_ids: list[UUID] = []
+    payload = PerformanceHighlightReelReminderCreate(
+        organization_id=organization_id or UUID(int=0),
+        channel=channel,
+        subject_prefix=subject_prefix,
+        message_intro=message_intro,
+        include_download_link=include_download_link,
+    )
+
+    for audit, reel in share_rows:
+        try:
+            if repeat_after_hours > 0 and await recent_highlight_reel_reminder_exists(
+                db,
+                audit.message_id,
+                repeat_after_hours,
+            ):
+                suppressed_recent_count += 1
+                skipped_count += 1
+                continue
+            export = (
+                await db.get(PerformanceHighlightReelExport, audit.highlight_reel_export_id)
+                if audit.highlight_reel_export_id is not None
+                else None
+            )
+            reminder_recipient_rows, skipped_read_count, skipped_downloaded_count = (
+                await highlight_reel_unread_reminder_recipient_rows(db, audit)
+            )
+            if not reminder_recipient_rows:
+                no_unread_count += 1
+                skipped_count += 1
+                continue
+            recipient_count += len(reminder_recipient_rows)
+            if dry_run:
+                share_audit_ids.append(audit.id)
+                continue
+            reminder = await create_highlight_reel_reminder_from_candidates(
+                db,
+                audit,
+                reel,
+                export,
+                payload.model_copy(update={"organization_id": audit.organization_id}),
+                reminder_recipient_rows=reminder_recipient_rows,
+                skipped_read_count=skipped_read_count,
+                skipped_downloaded_count=skipped_downloaded_count,
+                created_by_person_id=created_by_person_id,
+            )
+            share_audit_ids.append(audit.id)
+            if reminder["message_id"] is not None:
+                reminded_count += 1
+                message_ids.append(reminder["message_id"])
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+
+    return PerformanceHighlightReelReminderRunRead(
+        organization_id=organization_id,
+        eligible_count=eligible_count,
+        reminded_count=reminded_count,
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        stale_before=stale_before,
+        repeat_after_hours=repeat_after_hours,
+        recipient_count=recipient_count,
+        suppressed_recent_count=suppressed_recent_count,
+        no_unread_count=no_unread_count,
+        message_ids=message_ids,
+        share_audit_ids=share_audit_ids,
+    )
+
+
+async def recent_highlight_reel_reminder_exists(
+    db: AsyncSession,
+    original_message_id: UUID,
+    repeat_after_hours: int,
+) -> bool:
+    cutoff = datetime.now(UTC) - timedelta(hours=repeat_after_hours)
+    return bool(
+        await db.scalar(
+            select(CommunicationMessage.id)
+            .where(CommunicationMessage.escalates_message_id == original_message_id)
+            .where(CommunicationMessage.escalation_reason == HIGHLIGHT_REEL_REMINDER_ESCALATION_REASON)
+            .where(CommunicationMessage.created_at >= cutoff)
+            .limit(1)
+        )
+    )
 
 
 def highlight_reel_reminder_message_body(

@@ -45,6 +45,8 @@ from app.schemas.performance import (
     PerformanceHighlightReelEngagementRead,
     PerformanceHighlightReelReminderCreate,
     PerformanceHighlightReelReminderRead,
+    PerformanceHighlightReelReminderRunCreate,
+    PerformanceHighlightReelReminderRunRead,
     PerformanceHighlightReelShareAuditRead,
     PerformanceHighlightReelShareCreate,
     PerformanceHighlightReelShareRead,
@@ -232,6 +234,7 @@ from app.services.performance import (
     run_performance_hardware_sync,
     render_performance_highlight_reel_export,
     send_performance_highlight_reel_reminder,
+    run_performance_highlight_reel_reminders,
     run_wearable_provider_sync,
     refresh_wearable_provider_token,
     register_wearable_provider_webhook,
@@ -1671,6 +1674,19 @@ async def send_performance_highlight_reel_reminder_route(
             authz,
         )
     )
+
+
+@router.post(
+    "/scouting/highlight-reel-reminders/run",
+    response_model=PerformanceHighlightReelReminderRunRead,
+)
+async def run_performance_highlight_reel_reminders_route(
+    payload: PerformanceHighlightReelReminderRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceHighlightReelReminderRunRead:
+    return await run_performance_highlight_reel_reminders(db, identity, payload, authz)
 
 
 @router.post(

@@ -5089,6 +5089,23 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert reminder["skipped_read_count"] == 0
     assert reminder["skipped_downloaded_count"] == 0
     assert reminder["recipients"][0]["person_id"] == member["subject_id"]
+    reminder_run_response = client.post(
+        "/api/v1/performance/scouting/highlight-reel-reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "shared_before_hours": 0,
+            "repeat_after_hours": 24,
+            "limit": 10,
+        },
+    )
+    assert reminder_run_response.status_code == 200
+    reminder_run = reminder_run_response.json()
+    assert reminder_run["eligible_count"] == 1
+    assert reminder_run["reminded_count"] == 0
+    assert reminder_run["suppressed_recent_count"] == 1
+    assert reminder_run["skipped_count"] == 1
     player_headers = {
         "X-Afrolete-Sub": "kc-athlete-1",
         "X-Afrolete-Email": "performance-athlete@example.com",

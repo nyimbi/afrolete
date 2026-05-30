@@ -30,6 +30,7 @@ from app.services.performance import (
     run_assessment_review_escalation_worker,
     run_performance_achievement_worker,
     run_performance_forecast_validation_worker,
+    run_performance_highlight_reel_reminder_worker,
     run_performance_injury_risk_alert_scan_worker,
     run_performance_video_pose_worker,
     run_wearable_pull_retry_worker,
@@ -61,6 +62,7 @@ WORKER_LANES = (
     "object-storage-lifecycle",
     "performance-achievements",
     "performance-forecast-validations",
+    "performance-highlight-reel-reminders",
     "performance-review-escalations",
     "performance-injury-risk-alerts",
     "performance-video-pose",
@@ -168,6 +170,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run-object-storage-lifecycle", action="store_true")
     parser.add_argument("--performance-limit", type=int, default=None)
     parser.add_argument("--performance-forecast-validation-limit", type=int, default=None)
+    parser.add_argument("--performance-highlight-reel-reminder-limit", type=int, default=None)
+    parser.add_argument("--performance-highlight-reel-reminder-shared-before-hours", type=int, default=24)
+    parser.add_argument("--performance-highlight-reel-reminder-repeat-after-hours", type=int, default=24)
+    parser.add_argument(
+        "--performance-highlight-reel-reminder-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        default=CommunicationChannel.IN_APP.value,
+    )
+    parser.add_argument("--dry-run-performance-highlight-reel-reminders", action="store_true")
     parser.add_argument("--auto-alert-performance-forecast-drift", action="store_true")
     parser.add_argument("--performance-forecast-drift-repeat-after-hours", type=int, default=24)
     parser.add_argument(
@@ -332,6 +343,11 @@ async def run_due_workers(
     dry_run_object_storage_lifecycle: bool = False,
     performance_limit: int | None = None,
     performance_forecast_validation_limit: int | None = None,
+    performance_highlight_reel_reminder_limit: int | None = None,
+    performance_highlight_reel_reminder_shared_before_hours: int = 24,
+    performance_highlight_reel_reminder_repeat_after_hours: int = 24,
+    performance_highlight_reel_reminder_channel: CommunicationChannel = CommunicationChannel.IN_APP,
+    dry_run_performance_highlight_reel_reminders: bool = False,
     auto_alert_performance_forecast_drift: bool = False,
     performance_forecast_drift_repeat_after_hours: int = 24,
     performance_forecast_drift_channels: Sequence[CommunicationChannel] | None = None,
@@ -559,6 +575,18 @@ async def run_due_workers(
                 dry_run_alerts=dry_run_performance_forecast_drift_alerts,
             )
         ).model_dump(mode="json")
+    if "performance-highlight-reel-reminders" in active_lanes:
+        results["performance_highlight_reel_reminders"] = (
+            await run_performance_highlight_reel_reminder_worker(
+                db,
+                organization_id=organization_id,
+                channel=performance_highlight_reel_reminder_channel,
+                shared_before_hours=performance_highlight_reel_reminder_shared_before_hours,
+                repeat_after_hours=performance_highlight_reel_reminder_repeat_after_hours,
+                limit=performance_highlight_reel_reminder_limit or performance_limit or limit,
+                dry_run=dry_run_performance_highlight_reel_reminders,
+            )
+        ).model_dump(mode="json")
     if "performance-review-escalations" in active_lanes:
         results["performance_review_escalations"] = (
             await run_assessment_review_escalation_worker(
@@ -744,6 +772,17 @@ async def run() -> None:
             dry_run_object_storage_lifecycle=args.dry_run_object_storage_lifecycle,
             performance_limit=args.performance_limit,
             performance_forecast_validation_limit=args.performance_forecast_validation_limit,
+            performance_highlight_reel_reminder_limit=args.performance_highlight_reel_reminder_limit,
+            performance_highlight_reel_reminder_shared_before_hours=(
+                args.performance_highlight_reel_reminder_shared_before_hours
+            ),
+            performance_highlight_reel_reminder_repeat_after_hours=(
+                args.performance_highlight_reel_reminder_repeat_after_hours
+            ),
+            performance_highlight_reel_reminder_channel=CommunicationChannel(
+                args.performance_highlight_reel_reminder_channel
+            ),
+            dry_run_performance_highlight_reel_reminders=args.dry_run_performance_highlight_reel_reminders,
             auto_alert_performance_forecast_drift=args.auto_alert_performance_forecast_drift,
             performance_forecast_drift_repeat_after_hours=args.performance_forecast_drift_repeat_after_hours,
             performance_forecast_drift_channels=[

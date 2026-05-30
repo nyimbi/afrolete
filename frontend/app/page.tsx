@@ -381,6 +381,7 @@ import type {
   PerformanceHighlightReelExportRead,
   PerformanceHighlightReelRead,
   PerformanceHighlightReelReminderRead,
+  PerformanceHighlightReelReminderRunRead,
   PerformanceHighlightReelShareAuditRead,
   PerformanceHighlightReelShareRead,
   PerformanceInjuryRiskAlertRead,
@@ -1909,6 +1910,8 @@ export default function HomePage() {
     useState<PerformanceHighlightReelEngagementRead[]>([]);
   const [performanceHighlightReelReminder, setPerformanceHighlightReelReminder] =
     useState<PerformanceHighlightReelReminderRead | null>(null);
+  const [performanceHighlightReelReminderRun, setPerformanceHighlightReelReminderRun] =
+    useState<PerformanceHighlightReelReminderRunRead | null>(null);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -5361,6 +5364,7 @@ export default function HomePage() {
       setPerformanceHighlightReelShare(null);
       setPerformanceHighlightReelEngagements([]);
       setPerformanceHighlightReelReminder(null);
+      setPerformanceHighlightReelReminderRun(null);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
@@ -11373,6 +11377,43 @@ export default function HomePage() {
             ? `${reminder.recipient_count} unread highlight recipient(s) reminded`
             : "No unread highlight recipients needed a reminder",
           reminder.recipient_count ? "good" : "neutral"
+        );
+        void loadOppositionScouting(selectedOrganizationId, selectedTeam?.id);
+      }
+    );
+  };
+
+  const runPerformanceHighlightReelReminderScan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before scanning highlight reminders", "bad");
+      return;
+    }
+    runAction(
+      `highlight-reel-reminder-run-${selectedOrganizationId}`,
+      () =>
+        apiRequest<PerformanceHighlightReelReminderRunRead>(
+          "/performance/scouting/highlight-reel-reminders/run",
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "in_app",
+              shared_before_hours: 0,
+              repeat_after_hours: 24,
+              limit: 50,
+              dry_run: false,
+              subject_prefix: "Reminder: highlight reel ready",
+              message_intro: "Please review your shared highlight reel before the next training block.",
+              include_download_link: true
+            }
+          }
+        ),
+      (run) => {
+        setPerformanceHighlightReelReminderRun(run);
+        addLog(
+          `Highlight reminder scan: ${run.reminded_count} message(s), ${run.recipient_count} recipient(s)`,
+          run.failed_count ? "bad" : run.reminded_count ? "good" : "neutral"
         );
         void loadOppositionScouting(selectedOrganizationId, selectedTeam?.id);
       }
@@ -27398,6 +27439,15 @@ export default function HomePage() {
                   </p>
                 </article>
                 <article className="mini-card">
+                  <span className="muted">Reel reminders</span>
+                  <strong>{performanceHighlightReelReminderRun?.reminded_count ?? 0} sent</strong>
+                  <p>
+                    {performanceHighlightReelReminderRun
+                      ? `${performanceHighlightReelReminderRun.recipient_count} recipient(s) · ${performanceHighlightReelReminderRun.skipped_count} skipped · ${performanceHighlightReelReminderRun.failed_count} failed`
+                      : "Run a reminder scan to follow up with recipients who have not opened or downloaded shared reels."}
+                  </p>
+                </article>
+                <article className="mini-card">
                   <span className="muted">Player guidance</span>
                   <strong>{performanceMatchAnalysisReport?.status ?? "not generated"}</strong>
                   <p>
@@ -28149,6 +28199,7 @@ export default function HomePage() {
                         <button type="button" onClick={() => exportPerformanceHighlightReel("social_caption_pack")} disabled={busyAction !== null}>Captions</button>
                         <button type="button" onClick={sharePerformanceHighlightReel} disabled={busyAction !== null}>Share</button>
                         <button type="button" onClick={() => remindPerformanceHighlightReelRecipients()} disabled={busyAction !== null}>Remind</button>
+                        <button type="button" onClick={runPerformanceHighlightReelReminderScan} disabled={busyAction !== null}>Scan reminders</button>
                       </span>
                     </article>
                   ) : null}
@@ -28188,6 +28239,24 @@ export default function HomePage() {
                             {recipient.person_name} · {recipient.delivery_status.replaceAll("_", " ")}
                           </small>
                         ))}
+                      </div>
+                    </article>
+                  ) : null}
+                  {performanceHighlightReelReminderRun ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>Highlight reminder scan · {performanceHighlightReelReminderRun.reminded_count} message(s)</strong>
+                        <span>
+                          {performanceHighlightReelReminderRun.eligible_count} stale share(s) ·{" "}
+                          {performanceHighlightReelReminderRun.recipient_count} recipient(s) ·{" "}
+                          {performanceHighlightReelReminderRun.skipped_count} skipped
+                        </span>
+                        <small>
+                          stale before {new Date(performanceHighlightReelReminderRun.stale_before).toLocaleString()} ·{" "}
+                          repeat window {performanceHighlightReelReminderRun.repeat_after_hours}h ·{" "}
+                          {performanceHighlightReelReminderRun.suppressed_recent_count} recently reminded ·{" "}
+                          {performanceHighlightReelReminderRun.no_unread_count} already clear
+                        </small>
                       </div>
                     </article>
                   ) : null}

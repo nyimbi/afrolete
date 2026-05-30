@@ -7759,6 +7759,34 @@ export type PerformanceHighlightReelReminderRead = {
   created_at: string;
 };
 
+export type PerformanceHighlightReelReminderRunCreate = {
+  organization_id: UUID;
+  channel?: CommunicationChannel;
+  shared_before_hours?: number;
+  repeat_after_hours?: number;
+  limit?: number;
+  dry_run?: boolean;
+  subject_prefix?: string;
+  message_intro?: string | null;
+  include_download_link?: boolean;
+};
+
+export type PerformanceHighlightReelReminderRunRead = {
+  organization_id: UUID | null;
+  eligible_count: number;
+  reminded_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  stale_before: string;
+  repeat_after_hours: number;
+  recipient_count: number;
+  suppressed_recent_count: number;
+  no_unread_count: number;
+  message_ids: UUID[];
+  share_audit_ids: UUID[];
+};
+
 export type PerformanceVideoAnnotationRead = {
   id: UUID;
   organization_id: UUID;

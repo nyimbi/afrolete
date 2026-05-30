@@ -114,6 +114,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
         "object-storage-lifecycle",
         "performance-achievements",
         "performance-forecast-validations",
+        "performance-highlight-reel-reminders",
         "performance-injury-risk-alerts",
         "performance-review-escalations",
         "performance-video-pose",
@@ -139,6 +140,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["results"]["object_storage_lifecycle"]["eligible_count"] == 0
     assert result["results"]["performance_achievements"]["eligible_count"] == 0
     assert result["results"]["performance_forecast_validations"]["eligible_count"] == 0
+    assert result["results"]["performance_highlight_reel_reminders"]["eligible_count"] == 0
     assert result["results"]["performance_injury_risk_alerts"]["eligible_count"] == 0
     assert result["results"]["performance_review_escalations"]["eligible_count"] == 0
     assert result["results"]["performance_video_pose"]["eligible_count"] == 0
@@ -171,6 +173,7 @@ def test_selected_lanes_expands_all() -> None:
         "object-storage-lifecycle",
         "performance-achievements",
         "performance-forecast-validations",
+        "performance-highlight-reel-reminders",
         "performance-injury-risk-alerts",
         "performance-review-escalations",
         "performance-video-pose",
