@@ -209,6 +209,43 @@ class FamilyPerformanceSummaryRead(BaseModel):
     awards: list[FamilyPerformanceAwardRead]
 
 
+class FamilyMatchGuidanceRead(BaseModel):
+    athlete_person_id: UUID
+    athlete_name: str
+    relationship: str
+    tracking_run_id: UUID
+    video_asset_id: UUID
+    guidance_message_id: UUID
+    guidance_published_at: datetime
+    guidance_delivery_status: str
+    guidance_recipient_count: int
+    opponent_name: str
+    match_label: str | None
+    tracked_at: datetime
+    track_id: str
+    team_label: str | None
+    player_label: str | None
+    jersey_number: str | None
+    readiness_level: str
+    tracking_quality_score: float
+    distance_m: float
+    high_speed_distance_m: float
+    max_speed_mps: float
+    sprint_count: int
+    work_rate_m_per_min: float
+    dominant_zone: str
+    pressure_applied_count: int = 0
+    off_ball_run_count: int = 0
+    pass_accuracy_percent: float = 0.0
+    shot_count: int = 0
+    expected_goals: float = 0.0
+    coaching_flags: list[str] = Field(default_factory=list)
+    player_guidance: list[str] = Field(default_factory=list)
+    action_plan: list[dict[str, Any]] = Field(default_factory=list)
+    tactical_context: list[str] = Field(default_factory=list)
+    quality_warnings: list[str] = Field(default_factory=list)
+
+
 class FamilyDashboardActionRead(BaseModel):
     priority: str
     action_type: str

@@ -2165,6 +2165,43 @@ export type FamilyPerformanceSummaryRead = {
   awards: FamilyPerformanceAwardRead[];
 };
 
+export type FamilyMatchGuidanceRead = {
+  athlete_person_id: UUID;
+  athlete_name: string;
+  relationship: string;
+  tracking_run_id: UUID;
+  video_asset_id: UUID;
+  guidance_message_id: UUID;
+  guidance_published_at: string;
+  guidance_delivery_status: string;
+  guidance_recipient_count: number;
+  opponent_name: string;
+  match_label: string | null;
+  tracked_at: string;
+  track_id: string;
+  team_label: string | null;
+  player_label: string | null;
+  jersey_number: string | null;
+  readiness_level: string;
+  tracking_quality_score: number;
+  distance_m: number;
+  high_speed_distance_m: number;
+  max_speed_mps: number;
+  sprint_count: number;
+  work_rate_m_per_min: number;
+  dominant_zone: string;
+  pressure_applied_count: number;
+  off_ball_run_count: number;
+  pass_accuracy_percent: number;
+  shot_count: number;
+  expected_goals: number;
+  coaching_flags: string[];
+  player_guidance: string[];
+  action_plan: Record<string, unknown>[];
+  tactical_context: string[];
+  quality_warnings: string[];
+};
+
 export type FamilyDashboardActionRead = {
   priority: string;
   action_type: string;

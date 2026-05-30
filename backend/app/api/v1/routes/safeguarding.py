@@ -44,6 +44,7 @@ from app.schemas.safeguarding import (
     FamilyConsentResponseCreate,
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
+    FamilyMatchGuidanceRead,
     FamilyPerformanceSummaryRead,
     GuardianAccountReadinessRead,
     GuardianPortalInviteBatchCreate,
@@ -138,6 +139,7 @@ from app.services.safeguarding import (
     list_safeguarding_incidents,
     list_my_family_consent_requests,
     list_my_family,
+    list_my_family_match_guidance,
     list_my_family_events,
     list_my_family_performance,
     respond_to_family_consent_request,
@@ -441,6 +443,16 @@ async def list_my_family_performance_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[FamilyPerformanceSummaryRead]:
     return await list_my_family_performance(db, identity, organization_id)
+
+
+@router.get("/my-family/match-guidance", response_model=list[FamilyMatchGuidanceRead])
+async def list_my_family_match_guidance_route(
+    organization_id: UUID = Query(),
+    limit: int = Query(default=20, ge=1, le=100),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> list[FamilyMatchGuidanceRead]:
+    return await list_my_family_match_guidance(db, identity, organization_id, limit)
 
 
 @router.get("/my-family/dashboard", response_model=FamilyDashboardRead)

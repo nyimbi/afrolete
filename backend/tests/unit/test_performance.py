@@ -449,6 +449,165 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert filtered_profile["what_if_scenarios"][0]["horizon"] == 3
 
 
+def test_family_portal_shows_only_guardian_copied_match_guidance(client, identity_headers) -> None:
+    organization, team, member, _ = create_rostered_athlete(client, identity_headers)
+    guardian_response = client.post(
+        "/api/v1/safeguarding/guardians",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_person_id": member["subject_id"],
+            "guardian_email": "family-guidance-parent@example.com",
+            "guardian_display_name": "Family Guidance Parent",
+            "relationship_kind": "parent",
+            "can_sign_consent": True,
+            "emergency_contact": True,
+        },
+    )
+    assert guardian_response.status_code == 201
+    guardian = guardian_response.json()
+    guardian_headers = {
+        "X-Afrolete-Sub": "kc-family-guidance-parent",
+        "X-Afrolete-Email": "family-guidance-parent@example.com",
+        "X-Afrolete-Name": "Family Guidance Parent",
+    }
+    unrelated_guardian_headers = {
+        "X-Afrolete-Sub": "kc-unrelated-family-guidance-parent",
+        "X-Afrolete-Email": "unrelated-family-guidance-parent@example.com",
+        "X-Afrolete-Name": "Unrelated Family Guidance Parent",
+    }
+
+    video_response = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Guardian Shared FC",
+            "sport": "football",
+            "filename": "guardian-shared-fc.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(b"guardian shared match video").decode(),
+            "clip_label": "Guardian shared match",
+            "match_context": "Coach-reviewed tracking for family-visible guidance.",
+            "analysis_focus": "guardian match guidance visibility",
+        },
+    )
+    assert video_response.status_code == 201
+    video = video_response.json()
+    tracking_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video['id']}/tracking-runs",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "source_provider": "coach_reviewed_tracking",
+            "samples": [
+                {
+                    "track_id": "home-11",
+                    "person_id": member["subject_id"],
+                    "team_label": "Home",
+                    "player_label": "Performance Athlete",
+                    "jersey_number": "11",
+                    "timestamp_seconds": 0,
+                    "x_percent": 10,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "home-11",
+                    "person_id": member["subject_id"],
+                    "team_label": "Home",
+                    "player_label": "Performance Athlete",
+                    "jersey_number": "11",
+                    "timestamp_seconds": 1,
+                    "x_percent": 20,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "home-11",
+                    "person_id": member["subject_id"],
+                    "team_label": "Home",
+                    "player_label": "Performance Athlete",
+                    "jersey_number": "11",
+                    "timestamp_seconds": 2,
+                    "x_percent": 30,
+                    "y_percent": 50,
+                },
+            ],
+        },
+    )
+    assert tracking_response.status_code == 201
+    tracking = tracking_response.json()
+
+    family_before_publish = client.get(
+        f"/api/v1/safeguarding/my-family/match-guidance?organization_id={organization['id']}",
+        headers=guardian_headers,
+    )
+    assert family_before_publish.status_code == 200
+    assert family_before_publish.json() == []
+
+    player_only_publish = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/player-guidance-publish",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "include_guardians": False,
+            "require_publishable": False,
+            "subject_prefix": "Player-only guidance",
+        },
+    )
+    assert player_only_publish.status_code == 201
+    assert player_only_publish.json()["recipient_count"] == 1
+    family_after_player_only_publish = client.get(
+        f"/api/v1/safeguarding/my-family/match-guidance?organization_id={organization['id']}",
+        headers=guardian_headers,
+    )
+    assert family_after_player_only_publish.status_code == 200
+    assert family_after_player_only_publish.json() == []
+
+    guardian_publish = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/player-guidance-publish",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "include_guardians": True,
+            "require_publishable": False,
+            "subject_prefix": "Family-copied guidance",
+        },
+    )
+    assert guardian_publish.status_code == 201
+    published = guardian_publish.json()
+    assert published["recipient_count"] == 2
+
+    family_response = client.get(
+        f"/api/v1/safeguarding/my-family/match-guidance?organization_id={organization['id']}",
+        headers=guardian_headers,
+    )
+    assert family_response.status_code == 200
+    guidance = family_response.json()
+    assert len(guidance) == 1
+    assert guidance[0]["athlete_person_id"] == member["subject_id"]
+    assert guidance[0]["athlete_name"] == "Performance Athlete"
+    assert guidance[0]["relationship"] == guardian["relationship"]
+    assert guidance[0]["tracking_run_id"] == tracking["id"]
+    assert guidance[0]["guidance_message_id"] == published["messages"][0]["message_id"]
+    assert guidance[0]["guidance_delivery_status"] == "queued"
+    assert guidance[0]["guidance_recipient_count"] == 2
+    assert guidance[0]["opponent_name"] == "Guardian Shared FC"
+    assert guidance[0]["jersey_number"] == "11"
+    assert guidance[0]["distance_m"] > 0
+    assert guidance[0]["player_guidance"]
+    assert guidance[0]["action_plan"]
+
+    unrelated_response = client.get(
+        f"/api/v1/safeguarding/my-family/match-guidance?organization_id={organization['id']}",
+        headers=unrelated_guardian_headers,
+    )
+    assert unrelated_response.status_code == 200
+    assert unrelated_response.json() == []
+
+
 def test_athlete_pathway_projection_builds_recruiting_roadmap(client, identity_headers) -> None:
     organization, _, _, roster = create_rostered_athlete(client, identity_headers)
     metrics = [

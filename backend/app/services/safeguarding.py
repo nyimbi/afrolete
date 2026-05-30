@@ -58,7 +58,14 @@ from app.models.agent import AgentDecisionAppeal
 from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.identity import AppUser, Person
 from app.models.organization import Organization
-from app.models.performance import PerformanceAchievementAward, PerformanceGoal
+from app.models.performance import (
+    OppositionScoutingVideoAsset,
+    PerformanceAchievementAward,
+    PerformanceGoal,
+    PerformanceMatchPlayerGuidancePublishAudit,
+    PerformanceMatchTrackingRun,
+    PerformanceMatchTrackingSample,
+)
 from app.models.team import AthleteProfile, GuardianRelationship, Team, TeamRosterEntry
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
@@ -91,6 +98,7 @@ from app.schemas.safeguarding import (
     FamilyConsentResponseCreate,
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
+    FamilyMatchGuidanceRead,
     GuardianAccountReadinessRead,
     GuardianPortalInviteBatchCreate,
     GuardianPortalInviteBatchRead,
@@ -5680,6 +5688,107 @@ async def list_my_family_performance(
             )
         )
     return summaries
+
+
+async def list_my_family_match_guidance(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    limit: int = 20,
+) -> list[FamilyMatchGuidanceRead]:
+    from app.services.performance import build_player_match_guidance, decode_match_tracking_summary
+
+    relationship_rows = (
+        await db.execute(
+            select(GuardianRelationship, Person, AthleteProfile)
+            .join(Person, Person.id == GuardianRelationship.athlete_person_id)
+            .join(AthleteProfile, AthleteProfile.person_id == GuardianRelationship.athlete_person_id)
+            .where(AthleteProfile.organization_id == organization_id)
+            .where(GuardianRelationship.guardian_person_id == identity.person_id)
+            .order_by(GuardianRelationship.is_primary.desc(), Person.display_name)
+        )
+    ).all()
+    child_context = {
+        relationship.athlete_person_id: (athlete.display_name, relationship.relationship)
+        for relationship, athlete, _profile in relationship_rows
+    }
+    if not child_context:
+        return []
+
+    audit_rows = (
+        await db.execute(
+            select(PerformanceMatchPlayerGuidancePublishAudit, MessageRecipient)
+            .join(
+                MessageRecipient,
+                MessageRecipient.message_id == PerformanceMatchPlayerGuidancePublishAudit.message_id,
+            )
+            .where(PerformanceMatchPlayerGuidancePublishAudit.organization_id == organization_id)
+            .where(PerformanceMatchPlayerGuidancePublishAudit.player_person_id.in_(list(child_context)))
+            .where(PerformanceMatchPlayerGuidancePublishAudit.status == "published")
+            .where(MessageRecipient.person_id == identity.person_id)
+            .order_by(
+                PerformanceMatchPlayerGuidancePublishAudit.published_at.desc(),
+                PerformanceMatchPlayerGuidancePublishAudit.created_at.desc(),
+            )
+            .limit(limit * 4)
+        )
+    ).all()
+
+    guidance: list[FamilyMatchGuidanceRead] = []
+    seen: set[tuple[UUID, UUID, str]] = set()
+    for audit, recipient in audit_rows:
+        key = (audit.player_person_id, audit.tracking_run_id, audit.track_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        run = await db.get(PerformanceMatchTrackingRun, audit.tracking_run_id)
+        if run is None or run.organization_id != organization_id:
+            continue
+        sample = await db.scalar(
+            select(PerformanceMatchTrackingSample)
+            .where(PerformanceMatchTrackingSample.tracking_run_id == run.id)
+            .where(PerformanceMatchTrackingSample.track_id == audit.track_id)
+            .where(PerformanceMatchTrackingSample.person_id == audit.player_person_id)
+            .order_by(PerformanceMatchTrackingSample.timestamp_seconds.desc())
+            .limit(1)
+        )
+        if sample is None:
+            continue
+        video_asset = await db.get(OppositionScoutingVideoAsset, run.video_asset_id)
+        if video_asset is None:
+            continue
+        summary = decode_match_tracking_summary(run.summary_json)
+        metric = next(
+            (
+                item
+                for item in summary.get("player_metrics", [])
+                if isinstance(item, dict) and str(item.get("track_id")) == audit.track_id
+            ),
+            None,
+        )
+        if metric is None:
+            continue
+        athlete_name, relationship = child_context[audit.player_person_id]
+        card = build_player_match_guidance(
+            run=run,
+            video_asset=video_asset,
+            sample=sample,
+            metric=metric,
+            summary=summary,
+            publish_audit=audit,
+            player_recipient=recipient,
+        )
+        guidance.append(
+            FamilyMatchGuidanceRead(
+                athlete_person_id=audit.player_person_id,
+                athlete_name=athlete_name,
+                relationship=relationship,
+                **card,
+            )
+        )
+        if len(guidance) >= limit:
+            break
+    return guidance
 
 
 async def get_my_family_dashboard(

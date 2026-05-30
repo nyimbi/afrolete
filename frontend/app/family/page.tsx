@@ -25,6 +25,7 @@ import type {
   FamilyCoordinationRowRead,
   FamilyDashboardRead,
   FamilyEventSummaryRead,
+  FamilyMatchGuidanceRead,
   FamilyRegistrationInquiryRead,
   FamilyPerformanceSummaryRead,
   LocalIdentity,
@@ -82,6 +83,7 @@ export default function FamilyPortalPage() {
   const [coordinationRows, setCoordinationRows] = useState<FamilyCoordinationRowRead[]>([]);
   const [coordinationDigest, setCoordinationDigest] = useState<FamilyCoordinationDigestRead | null>(null);
   const [performance, setPerformance] = useState<FamilyPerformanceSummaryRead[]>([]);
+  const [matchGuidance, setMatchGuidance] = useState<FamilyMatchGuidanceRead[]>([]);
   const [events, setEvents] = useState<FamilyEventSummaryRead[]>([]);
   const [consentRequests, setConsentRequests] = useState<FamilyConsentRequestRead[]>([]);
   const [aiAppeals, setAiAppeals] = useState<AgentDecisionAppealRead[]>([]);
@@ -231,6 +233,7 @@ export default function FamilyPortalPage() {
         familyRows,
         registrationRows,
         performanceRows,
+        matchGuidanceRows,
         eventRows,
         coordination,
         pendingRequests,
@@ -252,6 +255,10 @@ export default function FamilyPortalPage() {
         ),
         apiRequest<FamilyPerformanceSummaryRead[]>(
           `/safeguarding/my-family/performance?organization_id=${organizationQuery}`,
+          { identity: requestIdentity }
+        ),
+        apiRequest<FamilyMatchGuidanceRead[]>(
+          `/safeguarding/my-family/match-guidance?organization_id=${organizationQuery}`,
           { identity: requestIdentity }
         ),
         apiRequest<FamilyEventSummaryRead[]>(`/safeguarding/my-family/events?organization_id=${organizationQuery}`, {
@@ -279,6 +286,7 @@ export default function FamilyPortalPage() {
       setRegistrations(registrationRows);
       setCoordinationDigest(null);
       setPerformance(performanceRows);
+      setMatchGuidance(matchGuidanceRows);
       setEvents(eventRows);
       setCoordinationRows(coordination);
       setConsentRequests(pendingRequests);
@@ -643,6 +651,10 @@ export default function FamilyPortalPage() {
             <span>AI</span>
             <strong>{dashboard?.ai_recommendation_count ?? aiTasks.length}</strong>
           </div>
+          <div>
+            <span>Match video</span>
+            <strong>{matchGuidance.length}</strong>
+          </div>
         </div>
 
         {dashboard ? (
@@ -814,6 +826,44 @@ export default function FamilyPortalPage() {
             </article>
           ))}
         </div>
+
+        <section className="family-ai-appeals">
+          <div>
+            <p className="section-label">Match video</p>
+            <h2>Coach-published player guidance</h2>
+            <p>Private match-analysis cards appear here only when coaches copy this guardian on the player guidance message.</p>
+          </div>
+          <div className="family-appeal-list">
+            {matchGuidance.slice(0, 6).map((guidance) => {
+              const firstAction = guidance.action_plan[0] as { focus?: unknown; drill_recommendation?: unknown } | undefined;
+              return (
+                <article key={`${guidance.guidance_message_id}-${guidance.athlete_person_id}`}>
+                  <strong>{guidance.athlete_name} · {guidance.opponent_name}</strong>
+                  <span>
+                    {Math.round(guidance.distance_m)}m · {Math.round(guidance.high_speed_distance_m)}m high-speed · max{" "}
+                    {guidance.max_speed_mps.toFixed(1)} m/s
+                  </span>
+                  <small>
+                    {guidance.relationship} · {guidance.guidance_delivery_status.replaceAll("_", " ")} · shared{" "}
+                    {formatDate(guidance.guidance_published_at)}
+                  </small>
+                  <small>
+                    {guidance.player_guidance[0] ?? guidance.tactical_context[0] ?? "Review the coach-published match card with the player."}
+                  </small>
+                  {firstAction ? (
+                    <small>
+                      {String(firstAction.focus ?? "Follow-up drill")} ·{" "}
+                      {String(firstAction.drill_recommendation ?? "Coach review")}
+                    </small>
+                  ) : null}
+                </article>
+              );
+            })}
+            {matchGuidance.length === 0 ? (
+              <span>No coach-published match guidance has been shared with this guardian yet</span>
+            ) : null}
+          </div>
+        </section>
 
         <section className="family-ai-appeals">
           <div>
