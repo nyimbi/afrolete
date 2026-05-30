@@ -3131,6 +3131,114 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert "## Data Quality" in report_text
 
 
+def test_match_video_auto_tracking_uses_video_frame_extractor(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    video_bytes = b"raw football match bytes"
+    upload_response = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Auto Track FC",
+            "sport": "football",
+            "filename": "auto-track-fc.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(video_bytes).decode(),
+            "clip_label": "Broadcast feed",
+            "match_context": "Raw football match feed for OpenCV player tracking.",
+            "analysis_focus": "automated player tracking",
+        },
+    )
+    assert upload_response.status_code == 201
+    video_asset = upload_response.json()
+
+    def fake_extract(content: bytes, **kwargs: object) -> dict[str, object]:
+        assert content == video_bytes
+        assert kwargs["max_frames"] == 12
+        assert kwargs["sample_every_seconds"] == 0.25
+        return {
+            "samples": [
+                {
+                    "track_id": "cv-1",
+                    "team_label": None,
+                    "player_label": "Track cv-1",
+                    "timestamp_seconds": 0,
+                    "x_percent": 10,
+                    "y_percent": 50,
+                    "confidence": 0.82,
+                    "source": "opencv_motion_tracker",
+                },
+                {
+                    "track_id": "cv-1",
+                    "team_label": None,
+                    "player_label": "Track cv-1",
+                    "timestamp_seconds": 1,
+                    "x_percent": 20,
+                    "y_percent": 50,
+                    "confidence": 0.84,
+                    "source": "opencv_motion_tracker",
+                },
+                {
+                    "track_id": "cv-2",
+                    "team_label": None,
+                    "player_label": "Track cv-2",
+                    "timestamp_seconds": 0,
+                    "x_percent": 40,
+                    "y_percent": 25,
+                    "confidence": 0.76,
+                    "source": "opencv_motion_tracker",
+                },
+                {
+                    "track_id": "cv-2",
+                    "team_label": None,
+                    "player_label": "Track cv-2",
+                    "timestamp_seconds": 1,
+                    "x_percent": 45,
+                    "y_percent": 30,
+                    "confidence": 0.78,
+                    "source": "opencv_motion_tracker",
+                },
+            ],
+            "decoded_frame_count": 24,
+            "processed_frame_count": 4,
+            "source_provider": "opencv_motion_tracker",
+            "model_policy": "opencv-background-subtraction-match-tracker-v1",
+            "warnings": ["Synthetic extractor warning"],
+        }
+
+    monkeypatch.setattr(performance_service, "extract_match_tracking_samples_from_video_content", fake_extract)
+
+    tracking_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/tracking-runs",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "source_provider": "opencv_motion_tracker",
+            "auto_track": True,
+            "replace_existing": True,
+            "max_frames": 12,
+            "sample_every_seconds": 0.25,
+            "min_detection_confidence": 0.3,
+            "samples": [],
+        },
+    )
+
+    assert tracking_response.status_code == 201
+    tracking = tracking_response.json()
+    assert tracking["source_provider"] == "opencv_motion_tracker"
+    assert tracking["model_policy"] == "opencv-background-subtraction-match-tracker-v1"
+    assert tracking["sample_count"] == 4
+    assert tracking["player_count"] == 2
+    assert tracking["total_distance_m"] > 0
+    assert any("Synthetic extractor warning" in warning for warning in tracking["quality_warnings"])
+    assert any(sample["source"] == "opencv_motion_tracker" for sample in tracking["samples"])
+
+
 def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, identity_headers, monkeypatch) -> None:
     organization, team, _, _ = create_rostered_athlete(client, identity_headers)
     upload_response = client.post(

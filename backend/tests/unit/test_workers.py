@@ -48,7 +48,9 @@ from app.models.identity import AppUser, Person
 from app.models.organization import Membership, Organization, RegistrationInquiry
 from app.models.performance import (
     AthletePerformanceObservation,
+    OppositionScoutingVideoAsset,
     PerformanceForecastValidationRun,
+    PerformanceMatchPitchCalibration,
     PerformanceMetricDefinition,
     PerformanceVideoAsset,
     PerformanceWearableProviderConnection,
@@ -58,7 +60,9 @@ from app.models.team import AthleteProfile, GuardianRelationship
 from app.services import performance as performance_service
 from app.services.storage.objects import put_object
 from app.workers.due import performance_video_pose_request_headers, run_due_workers, selected_lanes
+from app.workers import match_tracking as match_tracking_worker
 from app.workers import video_pose as video_pose_worker
+from app.workers.match_tracking import run_opposition_match_tracking_endpoint_worker
 from app.workers.video_pose import run_performance_video_pose_endpoint_worker
 
 
@@ -405,6 +409,123 @@ async def test_video_pose_worker_batches_pose_samples_for_endpoint_limits() -> N
     assert [len(payload["samples"]) for payload in captured_payloads] == [600, 5]
     assert [payload["replace_existing"] for payload in captured_payloads] == [True, False]
     assert captured_payloads[0]["organization_id"] == str(organization_id)
+
+
+async def test_match_tracking_worker_posts_auto_track_runs_to_endpoint(db_session) -> None:
+    organization = Organization(
+        name="Endpoint Match Worker Club",
+        slug="endpoint-match-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    video = OppositionScoutingVideoAsset(
+        organization_id=organization.id,
+        opponent_name="Worker United",
+        sport="football",
+        filename="worker-united.mp4",
+        content_type="video/mp4",
+        size_bytes=12,
+        checksum=hashlib.sha256(b"match-video").hexdigest(),
+        storage_url="local://performance-videos/worker-united.mp4",
+        storage_path="worker-united.mp4",
+        video_uri=f"opposition-video://{organization.id}/worker-united",
+        status="uploaded",
+    )
+    unselected_video = OppositionScoutingVideoAsset(
+        organization_id=organization.id,
+        opponent_name="Skipped United",
+        sport="football",
+        filename="skipped-united.mp4",
+        content_type="video/mp4",
+        size_bytes=12,
+        checksum=hashlib.sha256(b"skipped-match-video").hexdigest(),
+        storage_url="local://performance-videos/skipped-united.mp4",
+        storage_path="skipped-united.mp4",
+        video_uri=f"opposition-video://{organization.id}/skipped-united",
+        status="uploaded",
+    )
+    db_session.add_all([video, unselected_video])
+    await db_session.flush()
+    calibration = PerformanceMatchPitchCalibration(
+        organization_id=organization.id,
+        video_asset_id=video.id,
+        name="Worker camera",
+        calibration_method="manual_four_corner",
+        pitch_length_m=105,
+        pitch_width_m=68,
+        quality_score=0.92,
+        points_json="[]",
+        transform_json="{}",
+        status="active",
+    )
+    db_session.add(calibration)
+    await db_session.commit()
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["path"] = request.url.path
+        captured["auth_sub"] = request.headers["x-afrolete-sub"]
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            status_code=201,
+            json={
+                "id": str(uuid4()),
+                "player_count": 4,
+                "sample_count": 28,
+                "tracking_quality_score": 0.71,
+            },
+        )
+
+    result = await run_opposition_match_tracking_endpoint_worker(
+        db_session,
+        api_base_url="http://api.test",
+        organization_id=organization.id,
+        video_asset_id=video.id,
+        request_headers={"X-Afrolete-Sub": "kc-match-worker"},
+        settings=Settings(performance_match_tracking_worker_provider="opencv"),
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result["ingest_mode"] == "api_endpoint"
+    assert result["eligible_count"] == 1
+    assert result["processed_count"] == 1
+    assert result["results"][0]["player_count"] == 4
+    assert captured["path"] == f"/api/v1/performance/scouting/videos/{video.id}/tracking-runs"
+    assert captured["auth_sub"] == "kc-match-worker"
+    payload = captured["payload"]
+    assert payload["organization_id"] == str(organization.id)
+    assert payload["calibration_id"] == str(calibration.id)
+    assert payload["auto_track"] is True
+    assert payload["replace_existing"] is True
+    assert payload["max_frames"] == 180
+    await db_session.refresh(unselected_video)
+    assert unselected_video.status == "uploaded"
+
+
+def test_match_tracking_worker_uses_configured_endpoint_headers() -> None:
+    settings = Settings(
+        performance_match_tracking_worker_bearer_token="env-token",
+        performance_match_tracking_worker_local_auth_sub="env-sub",
+        performance_match_tracking_worker_local_auth_email="env@example.com",
+        performance_match_tracking_worker_local_auth_name="Env Worker",
+    )
+    args = SimpleNamespace(
+        bearer_token=None,
+        local_auth_sub=None,
+        local_auth_email=None,
+        local_auth_name=None,
+        api_header=["X-Trace-Id: trace-1"],
+    )
+
+    headers = match_tracking_worker.match_tracking_worker_api_headers(args, settings)
+
+    assert headers["Authorization"] == "Bearer env-token"
+    assert headers["X-Afrolete-Sub"] == "env-sub"
+    assert headers["X-Afrolete-Email"] == "env@example.com"
+    assert headers["X-Afrolete-Name"] == "Env Worker"
+    assert headers["X-Trace-Id"] == "trace-1"
 
 
 async def test_video_pose_endpoint_worker_skips_when_pose_provider_disabled(

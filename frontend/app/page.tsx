@@ -376,6 +376,7 @@ import type {
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchAnalysisReportRead,
   PerformanceMatchPitchCalibrationRead,
+  PerformanceMatchTrackingRunCreate,
   PerformanceMatchTrackingIdentityReviewRead,
   PerformanceMatchTrackingIdentityReviewResultRead,
   PerformanceMatchTrackingRunRead,
@@ -10011,6 +10012,60 @@ export default function HomePage() {
             : current
         );
         addLog(`Tracked ${run.player_count} players for ${Math.round(run.total_distance_m)}m`, "good");
+      }
+    );
+  };
+
+  const autoTrackOppositionMatchVideo = () => {
+    if (!selectedOrganizationId || !oppositionScoutingVideo) {
+      addLog("Upload or select an opponent match video before auto-tracking players", "bad");
+      return;
+    }
+    const payload: PerformanceMatchTrackingRunCreate = {
+      organization_id: selectedOrganizationId,
+      calibration_id: performanceMatchPitchCalibration?.video_asset_id === oppositionScoutingVideo.id
+        ? performanceMatchPitchCalibration.id
+        : null,
+      source_provider: "opencv_motion_tracker",
+      pitch_length_m: 105,
+      pitch_width_m: 68,
+      replace_existing: true,
+      auto_track: true,
+      max_frames: 180,
+      sample_every_seconds: 0.5,
+      min_detection_confidence: 0.35,
+      samples: []
+    };
+    runAction(
+      "auto-track-opposition-match-video",
+      () =>
+        apiRequest<PerformanceMatchTrackingRunRead>(
+          `/performance/scouting/videos/${oppositionScoutingVideo.id}/tracking-runs`,
+          {
+            method: "POST",
+            identity,
+            body: payload
+          }
+        ),
+      (run) => {
+        setPerformanceMatchTrackingRun(run);
+        setPerformanceMatchTrackingRuns((current) => [
+          run,
+          ...current.filter((item) => item.id !== run.id)
+        ]);
+        setOppositionScoutingVideos((current) =>
+          current.map((video) =>
+            video.id === run.video_asset_id
+              ? { ...video, status: "tracked", analyzed_at: run.completed_at }
+              : video
+          )
+        );
+        setOppositionScoutingVideo((current) =>
+          current && current.id === run.video_asset_id
+            ? { ...current, status: "tracked", analyzed_at: run.completed_at }
+            : current
+        );
+        addLog(`Auto-tracked ${run.player_count} tracks from video frames`, "good");
       }
     );
   };
@@ -25042,6 +25097,7 @@ export default function HomePage() {
                   <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Generate report</button>
                   <button type="button" onClick={calibrateOppositionMatchVideo} disabled={busyAction !== null}>Calibrate pitch</button>
                   <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
+                  <button type="button" onClick={autoTrackOppositionMatchVideo} disabled={busyAction !== null}>Auto-track video</button>
                   <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Player guidance</button>
                   <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>Export reel</button>
                 </div>
@@ -25072,7 +25128,7 @@ export default function HomePage() {
                   <p>
                     {performanceMatchTrackingRun
                       ? `${Math.round(performanceMatchTrackingRun.total_distance_m)}m total · max ${performanceMatchTrackingRun.max_speed_mps.toFixed(1)} m/s`
-                      : "Track the match to calculate locations, distance, high-speed work, and heatmaps."}
+                      : "Track imported samples or auto-track video frames to calculate locations, distance, high-speed work, and heatmaps."}
                   </p>
                 </article>
                 <article className="mini-card">
@@ -25170,6 +25226,9 @@ export default function HomePage() {
                         {performanceMatchTrackingRun.calibration ? ` · calibrated ${Math.round(performanceMatchTrackingRun.calibration.quality_score * 100)}%` : " · uncalibrated"}
                       </small>
                     </div>
+                    <span>
+                      <button type="button" onClick={autoTrackOppositionMatchVideo} disabled={busyAction !== null}>Auto-track</button>
+                    </span>
                   </article>
                   <article className="task-card">
                     <div>

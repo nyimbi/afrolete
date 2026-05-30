@@ -6944,6 +6944,20 @@ export type PerformanceMatchTrackingRunRead = {
   completed_at: string | null;
 };
 
+export type PerformanceMatchTrackingRunCreate = {
+  organization_id: UUID;
+  calibration_id?: UUID | null;
+  source_provider?: string;
+  pitch_length_m?: number;
+  pitch_width_m?: number;
+  replace_existing?: boolean;
+  auto_track?: boolean;
+  max_frames?: number;
+  sample_every_seconds?: number;
+  min_detection_confidence?: number;
+  samples?: Record<string, unknown>[];
+};
+
 export type PerformanceMatchTrackingIdentityReviewRead = {
   id: UUID;
   organization_id: UUID;

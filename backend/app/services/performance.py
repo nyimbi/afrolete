@@ -8565,6 +8565,7 @@ def enrich_match_tracking_summary(
         player_count=player_count,
         speed_spike_count=speed_spikes,
     )
+    quality_warnings.extend(str(warning) for warning in summary.get("warnings", []) if str(warning))
     coaching_guidance = match_tracking_coaching_guidance(summary, readiness_level=readiness_level)
     tactical_guidance = match_tracking_tactical_guidance(summary)
     return {
@@ -9543,8 +9544,6 @@ def extract_match_tracking_samples_from_video_content(
                         "timestamp_seconds": frame_index / fps,
                         "x_percent": x_percent,
                         "y_percent": y_percent,
-                        "x_meters": x_percent / 100 * pitch_length_m,
-                        "y_meters": y_percent / 100 * pitch_width_m,
                         "confidence": detection[2],
                         "source": "opencv_motion_tracker",
                     }

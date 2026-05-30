@@ -271,6 +271,16 @@ class Settings(BaseSettings):
     performance_pose_worker_local_auth_email: str = ""
     performance_pose_worker_local_auth_name: str = ""
     performance_pose_worker_api_timeout_seconds: float = 30.0
+    performance_match_tracking_worker_provider: Literal["opencv", "disabled"] = "opencv"
+    performance_match_tracking_worker_max_frames: int = 180
+    performance_match_tracking_worker_sample_every_seconds: float = 0.5
+    performance_match_tracking_worker_min_detection_confidence: float = 0.35
+    performance_match_tracking_worker_api_base_url: str = ""
+    performance_match_tracking_worker_bearer_token: str = ""
+    performance_match_tracking_worker_local_auth_sub: str = ""
+    performance_match_tracking_worker_local_auth_email: str = ""
+    performance_match_tracking_worker_local_auth_name: str = ""
+    performance_match_tracking_worker_api_timeout_seconds: float = 30.0
     object_storage_mode: Literal["local", "s3"] = "local"
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_region: str = "us-east-1"
