@@ -8003,6 +8003,21 @@ export type PlayerMatchGuidanceRead = {
   quality_warnings: string[];
 };
 
+export type PlayerMatchTrainingFollowupRead = {
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  tracking_run_id: UUID;
+  track_id: string;
+  plan_id: UUID;
+  item_ids: UUID[];
+  title: string;
+  focus_area: string;
+  period_start: string;
+  period_end: string;
+  item_count: number;
+  action_plan: PlayerMatchGuidanceRead["action_plan"];
+};
+
 export type PlayerPerformanceProfileRead = {
   organization_id: UUID;
   athlete_profile_id: UUID;

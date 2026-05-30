@@ -2,7 +2,14 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
-import type { AthleteAssessmentRead, LocalIdentity, MetricCategory, PlayerPerformanceProfileRead } from "@/types/operations";
+import type {
+  AthleteAssessmentRead,
+  LocalIdentity,
+  MetricCategory,
+  PlayerMatchGuidanceRead,
+  PlayerMatchTrainingFollowupRead,
+  PlayerPerformanceProfileRead
+} from "@/types/operations";
 
 const defaultPlayerIdentity: LocalIdentity = {
   sub: "kc-athlete-1",
@@ -47,6 +54,12 @@ function playerRiskColor(riskBand: string) {
     return "var(--amber)";
   }
   return "var(--green)";
+}
+
+function isoDateOffset(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function goalProgress(goal: PlayerPerformanceProfileRead["goals"][number]) {
@@ -542,6 +555,7 @@ export default function PlayerPerformancePage() {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [trainingFollowups, setTrainingFollowups] = useState<PlayerMatchTrainingFollowupRead[]>([]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("afrolete.playerPortal");
@@ -685,6 +699,42 @@ export default function PlayerPerformancePage() {
       await loadProfiles();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Self-assessment submission failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createTrainingFollowup = async (guidance: PlayerMatchGuidanceRead) => {
+    if (!selectedProfile || !organizationId) {
+      setError("Load a player profile before creating a follow-up plan");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const followup = await apiRequest<PlayerMatchTrainingFollowupRead>(
+        `/performance/my-profiles/${selectedProfile.athlete_profile_id}/match-guidance/training-followups`,
+        {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: organizationId,
+            tracking_run_id: guidance.tracking_run_id,
+            track_id: guidance.track_id,
+            period_start: isoDateOffset(1),
+            period_end: isoDateOffset(14),
+            max_items: 3
+          }
+        }
+      );
+      setTrainingFollowups((current) => [
+        followup,
+        ...current.filter(
+          (item) => !(item.tracking_run_id === followup.tracking_run_id && item.track_id === followup.track_id)
+        )
+      ]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Training follow-up creation failed");
     } finally {
       setBusy(false);
     }
@@ -834,6 +884,12 @@ export default function PlayerPerformancePage() {
             <section className="player-visual-grid">
               {selectedProfile.match_guidance.slice(0, 4).map((guidance) => (
                 <article className="player-chart-card" key={`${guidance.tracking_run_id}-${guidance.track_id}`}>
+                  {(() => {
+                    const followup = trainingFollowups.find(
+                      (item) => item.tracking_run_id === guidance.tracking_run_id && item.track_id === guidance.track_id
+                    );
+                    return (
+                      <>
                   <div>
                     <span>Match guidance</span>
                     <strong>{guidance.match_label ?? guidance.opponent_name}</strong>
@@ -913,6 +969,23 @@ export default function PlayerPerformancePage() {
                   {guidance.tactical_context.slice(0, 2).map((item, index) => (
                     <small key={`${guidance.track_id}-context-${index}`}>{item}</small>
                   ))}
+                  <button
+                    className="player-inline-action"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => createTrainingFollowup(guidance)}
+                  >
+                    {followup ? "Rebuild follow-up" : "Create follow-up"}
+                  </button>
+                  {followup ? (
+                    <small>
+                      Training plan ready: {followup.title} · {followup.item_count} item(s) · {followup.period_start} to{" "}
+                      {followup.period_end}
+                    </small>
+                  ) : null}
+                      </>
+                    );
+                  })()}
                 </article>
               ))}
               {selectedProfile.match_guidance.length === 0 ? (

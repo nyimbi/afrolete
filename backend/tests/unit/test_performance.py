@@ -309,6 +309,39 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert all(item["drill_recommendation"] for item in match_guidance[0]["action_plan"])
     assert any("Home phase" in item for item in match_guidance[0]["tactical_context"])
 
+    followup_response = client.post(
+        f"/api/v1/performance/my-profiles/{roster['athlete_profile_id']}/match-guidance/training-followups",
+        headers=player_headers,
+        json={
+            "organization_id": organization["id"],
+            "tracking_run_id": tracking.json()["id"],
+            "track_id": "home-9",
+            "period_start": "2026-03-01",
+            "period_end": "2026-03-14",
+            "max_items": 2,
+        },
+    )
+    assert followup_response.status_code == 201
+    followup = followup_response.json()
+    assert followup["athlete_profile_id"] == roster["athlete_profile_id"]
+    assert followup["tracking_run_id"] == tracking.json()["id"]
+    assert followup["track_id"] == "home-9"
+    assert followup["item_count"] == 2
+    assert followup["action_plan"][0]["drill_recommendation"]
+
+    plan_response = client.get(
+        f"/api/v1/training/plans?organization_id={organization['id']}&athlete_profile_id={roster['athlete_profile_id']}",
+        headers=identity_headers,
+    )
+    assert plan_response.status_code == 200
+    assert plan_response.json()[0]["id"] == followup["plan_id"]
+    assert plan_response.json()[0]["ai_generated"] is True
+
+    items_response = client.get(f"/api/v1/training/plans/{followup['plan_id']}/items", headers=identity_headers)
+    assert items_response.status_code == 200
+    assert len(items_response.json()) == 2
+    assert "Cue:" in items_response.json()[0]["notes"]
+
     touch_metric = client.post(
         "/api/v1/performance/metrics",
         headers=identity_headers,

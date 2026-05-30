@@ -37,6 +37,7 @@ from app.models.enums import (
     RosterStatus,
     SafeguardingIncidentStatus,
     SafeguardingIncidentType,
+    TrainingPlanStatus,
     WeatherAlertLevel,
 )
 from app.models.assets import Facility
@@ -75,7 +76,7 @@ from app.models.performance import (
     PerformanceWearableProviderSyncRun,
 )
 from app.models.team import AthleteProfile, Team, TeamRosterEntry
-from app.models.training import TrainingSessionFeedback, TrainingSessionPlan
+from app.models.training import TrainingPlan, TrainingPlanItem, TrainingSessionFeedback, TrainingSessionPlan
 from app.schemas.performance import (
     AssessmentReviewLoadRead,
     AssessmentReviewQueueSummaryRead,
@@ -108,6 +109,7 @@ from app.schemas.performance import (
     PerformanceMatchTrackingIdentityReviewCreate,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingSampleCreate,
+    PlayerMatchTrainingFollowupCreate,
     PerformanceMovementReferenceProfileCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
@@ -5019,6 +5021,125 @@ async def player_match_guidance_for_profile(
     return guidance
 
 
+async def create_player_match_training_followup(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    athlete_profile_id: UUID,
+    payload: PlayerMatchTrainingFollowupCreate,
+) -> dict[str, object]:
+    profile = await get_athlete_profile(db, athlete_profile_id, payload.organization_id)
+    if profile.person_id != identity.person_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    run = await get_match_tracking_run(db, payload.tracking_run_id)
+    if run.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    samples = list(
+        (
+            await db.scalars(
+                select(PerformanceMatchTrackingSample)
+                .where(PerformanceMatchTrackingSample.tracking_run_id == run.id)
+                .where(PerformanceMatchTrackingSample.track_id == payload.track_id)
+                .where(PerformanceMatchTrackingSample.person_id == profile.person_id)
+                .order_by(PerformanceMatchTrackingSample.timestamp_seconds.asc())
+            )
+        ).all()
+    )
+    if not samples:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Confirmed player track not found")
+    video_asset = await db.get(OppositionScoutingVideoAsset, run.video_asset_id)
+    if video_asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match video not found")
+    summary = decode_match_tracking_summary(run.summary_json)
+    metric = next(
+        (
+            item
+            for item in summary.get("player_metrics", [])
+            if isinstance(item, dict) and str(item.get("track_id")) == payload.track_id
+        ),
+        None,
+    )
+    if metric is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Player metric not found")
+    guidance = build_player_match_guidance(
+        run=run,
+        video_asset=video_asset,
+        sample=samples[-1],
+        metric=metric,
+        summary=summary,
+    )
+    selected_priorities = {priority.lower() for priority in payload.selected_priorities if priority.strip()}
+    action_plan = [
+        item
+        for item in guidance["action_plan"]
+        if not selected_priorities or str(item["priority"]).lower() in selected_priorities
+    ][: payload.max_items]
+    if not action_plan:
+        action_plan = list(guidance["action_plan"])[: payload.max_items]
+    focus_area = str(action_plan[0]["focus"]) if action_plan else "Match video follow-up"
+    title = f"{video_asset.opponent_name} match follow-up"
+    plan = TrainingPlan(
+        organization_id=payload.organization_id,
+        team_id=run.team_id,
+        athlete_profile_id=profile.id,
+        created_by_person_id=identity.person_id,
+        title=title[:240],
+        focus_area=focus_area[:160],
+        period_start=payload.period_start,
+        period_end=payload.period_end,
+        status=TrainingPlanStatus.DRAFT,
+        ai_generated=True,
+        source_summary=(
+            f"Generated from match tracking run {run.id} for track {payload.track_id} "
+            f"against {video_asset.opponent_name}."
+        ),
+        load_guidance=(
+            f"Use match evidence: {guidance['distance_m']}m total, "
+            f"{guidance['high_speed_distance_m']}m high-speed, max {guidance['max_speed_mps']} m/s."
+        ),
+        recovery_protocol="Confirm soreness/readiness after high-speed or repeated sprint follow-up work.",
+        progress_checkpoints="Review the clip, complete the listed action items, then submit a self-assessment.",
+    )
+    db.add(plan)
+    await db.flush()
+    items: list[TrainingPlanItem] = []
+    for index, action in enumerate(action_plan, start=1):
+        item = TrainingPlanItem(
+            plan_id=plan.id,
+            drill_id=None,
+            sequence=index,
+            day_label=f"Follow-up {index}",
+            title=str(action["focus"])[:180],
+            focus_area=str(action["focus"])[:120],
+            duration_minutes=player_match_action_duration(str(action["priority"])),
+            intensity=player_match_action_intensity(str(action["priority"])),
+            notes=(
+                f"Cue: {action['cue']}\n"
+                f"Drill: {action['drill_recommendation']}\n"
+                f"Evidence: {action['evidence']}"
+            ),
+        )
+        db.add(item)
+        items.append(item)
+    await db.commit()
+    await db.refresh(plan)
+    for item in items:
+        await db.refresh(item)
+    return {
+        "organization_id": payload.organization_id,
+        "athlete_profile_id": profile.id,
+        "tracking_run_id": run.id,
+        "track_id": payload.track_id,
+        "plan_id": plan.id,
+        "item_ids": [item.id for item in items],
+        "title": plan.title,
+        "focus_area": plan.focus_area,
+        "period_start": plan.period_start,
+        "period_end": plan.period_end,
+        "item_count": len(items),
+        "action_plan": action_plan,
+    }
+
+
 def decode_match_tracking_summary(value: str | None) -> dict[str, object]:
     if not value:
         return {}
@@ -5027,6 +5148,26 @@ def decode_match_tracking_summary(value: str | None) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def player_match_action_duration(priority: str) -> int:
+    normalized = priority.lower()
+    if normalized in {"high", "confirm"}:
+        return 30
+    if normalized == "medium":
+        return 24
+    return 18
+
+
+def player_match_action_intensity(priority: str) -> int:
+    normalized = priority.lower()
+    if normalized == "high":
+        return 8
+    if normalized == "medium":
+        return 6
+    if normalized == "confirm":
+        return 3
+    return 5
 
 
 def build_player_match_guidance(

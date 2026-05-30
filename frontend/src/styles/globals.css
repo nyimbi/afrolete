@@ -2181,6 +2181,12 @@ textarea:focus {
   line-height: 1.35;
 }
 
+.player-inline-action {
+  margin-top: 10px;
+  width: 100%;
+  min-height: 38px;
+}
+
 .player-self-check {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) repeat(6, minmax(76px, 0.36fr)) auto;

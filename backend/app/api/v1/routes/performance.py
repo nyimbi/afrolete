@@ -106,6 +106,8 @@ from app.schemas.performance import (
     PerformanceWearableWebhookRegistrationRead,
     PerformanceWearableWebhookRead,
     PlayerMatchGuidanceRead,
+    PlayerMatchTrainingFollowupCreate,
+    PlayerMatchTrainingFollowupRead,
     PlayerSelfAssessmentCreate,
     PlayerPerformanceProfileRead,
 )
@@ -134,6 +136,7 @@ from app.services.performance import (
     create_performance_highlight_reel,
     create_performance_highlight_reel_export,
     create_performance_model_extraction_benchmark_dataset,
+    create_player_match_training_followup,
     create_player_self_assessment,
     create_wearable_provider_connection,
     decode_string_list,
@@ -833,6 +836,22 @@ async def create_player_self_assessment_route(
 ) -> AthleteAssessmentRead:
     return to_assessment_read(
         await create_player_self_assessment(db, identity, athlete_profile_id, payload)
+    )
+
+
+@router.post(
+    "/my-profiles/{athlete_profile_id}/match-guidance/training-followups",
+    response_model=PlayerMatchTrainingFollowupRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_player_match_training_followup_route(
+    athlete_profile_id: UUID,
+    payload: PlayerMatchTrainingFollowupCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> PlayerMatchTrainingFollowupRead:
+    return PlayerMatchTrainingFollowupRead(
+        **await create_player_match_training_followup(db, identity, athlete_profile_id, payload)
     )
 
 

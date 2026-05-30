@@ -1848,6 +1848,37 @@ class PlayerMatchActionPlanRead(BaseModel):
     evidence: str
 
 
+class PlayerMatchTrainingFollowupCreate(BaseModel):
+    organization_id: UUID
+    tracking_run_id: UUID
+    track_id: str = Field(min_length=1, max_length=120)
+    period_start: date
+    period_end: date
+    max_items: int = Field(default=3, ge=1, le=6)
+    selected_priorities: list[str] = Field(default_factory=list, max_length=6)
+
+    @model_validator(mode="after")
+    def valid_period(self) -> "PlayerMatchTrainingFollowupCreate":
+        if self.period_end < self.period_start:
+            raise ValueError("period_end must be on or after period_start")
+        return self
+
+
+class PlayerMatchTrainingFollowupRead(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID
+    tracking_run_id: UUID
+    track_id: str
+    plan_id: UUID
+    item_ids: list[UUID]
+    title: str
+    focus_area: str
+    period_start: date
+    period_end: date
+    item_count: int
+    action_plan: list[PlayerMatchActionPlanRead]
+
+
 class PlayerMatchGuidanceRead(BaseModel):
     tracking_run_id: UUID
     video_asset_id: UUID
