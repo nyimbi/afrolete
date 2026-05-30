@@ -236,8 +236,13 @@ import type {
   EquipmentScanEventRead,
   EquipmentScanRead,
   FacilityAccessCredentialRead,
+  FacilityAccessCommandRead,
   FacilityAccessDashboardRead,
+  FacilityAccessDeviceHealthRead,
+  FacilityAccessDeviceProvisionRead,
+  FacilityAccessDeviceRead,
   FacilityAccessEventRead,
+  FacilityAccessGatewayScanRead,
   FacilityAvailabilityRead,
   FacilityBookingCheckoutRead,
   FacilityBookingRead,
@@ -1801,6 +1806,11 @@ export default function HomePage() {
   const [facilityAccessCredentials, setFacilityAccessCredentials] = useState<FacilityAccessCredentialRead[]>([]);
   const [facilityAccessDashboard, setFacilityAccessDashboard] = useState<FacilityAccessDashboardRead | null>(null);
   const [facilityAccessEvent, setFacilityAccessEvent] = useState<FacilityAccessEventRead | null>(null);
+  const [facilityAccessDevices, setFacilityAccessDevices] = useState<FacilityAccessDeviceRead[]>([]);
+  const [facilityAccessProvision, setFacilityAccessProvision] = useState<FacilityAccessDeviceProvisionRead | null>(null);
+  const [facilityAccessGatewayScan, setFacilityAccessGatewayScan] = useState<FacilityAccessGatewayScanRead | null>(null);
+  const [facilityAccessDeviceHealth, setFacilityAccessDeviceHealth] = useState<FacilityAccessDeviceHealthRead | null>(null);
+  const [facilityAccessCommands, setFacilityAccessCommands] = useState<FacilityAccessCommandRead[]>([]);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [facilityWaitlist, setFacilityWaitlist] = useState<FacilityBookingWaitlistRead[]>([]);
   const [facilityBookingRule, setFacilityBookingRule] = useState<FacilityBookingRuleRead | null>(null);
@@ -2692,7 +2702,16 @@ export default function HomePage() {
     valid_until: "2026-06-20T21:15",
     max_uses: 3,
     reader_id: "main-gate-reader",
-    reader_location: "Main Entrance"
+    reader_location: "Main Entrance",
+    device_id: "north-gate-controller",
+    device_name: "North Gate Door Controller",
+    device_location: "North Gate",
+    device_type: "door_controller",
+    unlock_method: "relay",
+    api_key: "local-access-device-key-0001",
+    battery_percent: 64,
+    firmware_version: "1.2.3",
+    network_status: "online"
   });
   const [bookingForm, setBookingForm] = useState({
     title: "U16 training block",
@@ -3982,6 +4001,8 @@ export default function HomePage() {
       facilityLeaseData,
       accessCredentialData,
       accessDashboardData,
+      accessDeviceData,
+      accessCommandData,
       bookingData,
       waitlistData,
       bookingRuleData,
@@ -4007,6 +4028,12 @@ export default function HomePage() {
       apiRequest<FacilityLeaseAgreementRead[]>(`/assets/facility-leases?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityAccessCredentialRead[]>(`/assets/access-credentials?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityAccessDashboardRead>(`/assets/access-dashboard?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<FacilityAccessDeviceRead[]>(`/assets/access-devices?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
+      apiRequest<FacilityAccessCommandRead[]>(`/assets/access-commands?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
       apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingWaitlistRead[]>(`/assets/waitlist?organization_id=${organizationId}${facilityQuery}`),
       facilityId
@@ -4056,6 +4083,8 @@ export default function HomePage() {
     setFacilityLeases(facilityLeaseData);
     setFacilityAccessCredentials(accessCredentialData);
     setFacilityAccessDashboard(accessDashboardData);
+    setFacilityAccessDevices(accessDeviceData);
+    setFacilityAccessCommands(accessCommandData);
     setFacilityBookings(bookingData);
     setFacilityWaitlist(waitlistData);
     setFacilityBookingRule(bookingRuleData);
@@ -13311,6 +13340,117 @@ export default function HomePage() {
     );
   };
 
+  const provisionFacilityAccessDevice = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before provisioning access hardware", "bad");
+      return;
+    }
+    runAction(
+      "provision-facility-access-device",
+      () =>
+        apiRequest<FacilityAccessDeviceProvisionRead>("/assets/access-devices", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            device_id: facilityAccessForm.device_id,
+            name: facilityAccessForm.device_name,
+            location: facilityAccessForm.device_location,
+            device_type: facilityAccessForm.device_type,
+            unlock_method: facilityAccessForm.unlock_method,
+            api_key: facilityAccessForm.api_key,
+            notes: "Provisioned from operations access console."
+          }
+        }),
+      (provision) => {
+        setFacilityAccessProvision(provision);
+        setFacilityAccessDevices((current) => [
+          provision.device,
+          ...current.filter((device) => device.id !== provision.device.id)
+        ]);
+        addLog(`${provision.device.name} provisioned for signed gateway scans`, "good");
+      }
+    );
+  };
+
+  const gatewayScanFacilityAccessDevice = (accessCode = facilityAccessForm.access_code) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running gateway access", "bad");
+      return;
+    }
+    const device = facilityAccessDevices[0];
+    const deviceId = device?.device_id ?? facilityAccessForm.device_id;
+    runAction(
+      "gateway-facility-access-scan",
+      () =>
+        apiRequest<FacilityAccessGatewayScanRead>(
+          `/assets/access-gateway/${selectedOrganizationId}/${encodeURIComponent(deviceId)}/scans`,
+          {
+            method: "POST",
+            headers: { "X-Afrolete-Access-Key": facilityAccessForm.api_key },
+            body: {
+              access_code: accessCode,
+              battery_percent: facilityAccessForm.battery_percent,
+              firmware_version: facilityAccessForm.firmware_version,
+              network_status: facilityAccessForm.network_status,
+              notes: "Physical gateway scan from operations console."
+            }
+          }
+        ),
+      (scan) => {
+        setFacilityAccessGatewayScan(scan);
+        setFacilityAccessEvent(scan.event);
+        setFacilityAccessDevices((current) => [
+          scan.device,
+          ...current.filter((item) => item.id !== scan.device.id)
+        ]);
+        if (scan.command) {
+          setFacilityAccessCommands((current) => [
+            scan.command as FacilityAccessCommandRead,
+            ...current.filter((item) => item.id !== scan.command?.id)
+          ]);
+        }
+        addLog(`${scan.device.device_id} ${scan.event.decision}: ${scan.command?.command_type ?? "no command"}`, scan.event.decision === "granted" ? "good" : "bad");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const reportFacilityAccessDeviceHealth = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before reporting device health", "bad");
+      return;
+    }
+    const device = facilityAccessDevices[0];
+    const deviceId = device?.device_id ?? facilityAccessForm.device_id;
+    runAction(
+      "facility-access-device-health",
+      () =>
+        apiRequest<FacilityAccessDeviceHealthRead>(
+          `/assets/access-gateway/${selectedOrganizationId}/${encodeURIComponent(deviceId)}/health`,
+          {
+            method: "POST",
+            headers: { "X-Afrolete-Access-Key": facilityAccessForm.api_key },
+            body: {
+              battery_percent: facilityAccessForm.battery_percent,
+              firmware_version: facilityAccessForm.firmware_version,
+              network_status: facilityAccessForm.network_status,
+              notes: "Health check from operations access console."
+            }
+          }
+        ),
+      (health) => {
+        setFacilityAccessDeviceHealth(health);
+        setFacilityAccessDevices((current) => [
+          health.device,
+          ...current.filter((item) => item.id !== health.device.id)
+        ]);
+        addLog(`${health.device.device_id} health: ${health.recommendation}`, health.device.status === "active" ? "good" : "neutral");
+      }
+    );
+  };
+
   const revokeFacilityAccessCredential = (credential: FacilityAccessCredentialRead) => {
     if (!selectedOrganizationId) {
       return;
@@ -18646,6 +18786,9 @@ export default function HomePage() {
                 <button type="button" onClick={createFacilityLease} disabled={busyAction !== null}>Lease</button>
                 <button type="button" onClick={issueFacilityAccessCredential} disabled={busyAction !== null}>Access</button>
                 <button type="button" onClick={() => scanFacilityAccessCredential()} disabled={busyAction !== null}>Scan</button>
+                <button type="button" onClick={provisionFacilityAccessDevice} disabled={busyAction !== null}>Device</button>
+                <button type="button" onClick={() => gatewayScanFacilityAccessDevice()} disabled={busyAction !== null}>Gateway</button>
+                <button type="button" onClick={reportFacilityAccessDeviceHealth} disabled={busyAction !== null}>Health</button>
                 <button type="button" onClick={createWorkOrder} disabled={busyAction !== null}>Work order</button>
               </div>
             </div>
@@ -18679,6 +18822,16 @@ export default function HomePage() {
                 <span className="muted">Gate scans</span>
                 <strong>{facilityAccessDashboard?.grants_last_24h ?? 0}</strong>
                 <span className="muted">{facilityAccessDashboard?.denials_last_24h ?? 0} denied</span>
+              </div>
+              <div>
+                <span className="muted">Access devices</span>
+                <strong>{facilityAccessDevices.filter((device) => device.status === "active").length}</strong>
+                <span className="muted">{facilityAccessDevices[0]?.battery_percent ?? "n/a"}% battery</span>
+              </div>
+              <div>
+                <span className="muted">Signed commands</span>
+                <strong>{facilityAccessCommands.length}</strong>
+                <span className="muted">{facilityAccessCommands[0]?.command_type ?? "none"}</span>
               </div>
             </div>
             <div className="form-grid">
@@ -18824,6 +18977,44 @@ export default function HomePage() {
             </div>
             <div className="form-grid">
               <label>
+                Device ID
+                <input value={facilityAccessForm.device_id} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, device_id: event.target.value })} />
+              </label>
+              <label>
+                Device name
+                <input value={facilityAccessForm.device_name} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, device_name: event.target.value })} />
+              </label>
+              <label>
+                Device location
+                <input value={facilityAccessForm.device_location} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, device_location: event.target.value })} />
+              </label>
+              <label>
+                Device type
+                <input value={facilityAccessForm.device_type} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, device_type: event.target.value })} />
+              </label>
+              <label>
+                Unlock method
+                <input value={facilityAccessForm.unlock_method} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, unlock_method: event.target.value })} />
+              </label>
+              <label>
+                Device key
+                <input value={facilityAccessForm.api_key} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, api_key: event.target.value })} />
+              </label>
+              <label>
+                Battery
+                <input type="number" min="0" max="100" value={facilityAccessForm.battery_percent} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, battery_percent: Number(event.target.value) })} />
+              </label>
+              <label>
+                Firmware
+                <input value={facilityAccessForm.firmware_version} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, firmware_version: event.target.value })} />
+              </label>
+              <label>
+                Network
+                <input value={facilityAccessForm.network_status} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, network_status: event.target.value })} />
+              </label>
+            </div>
+            <div className="form-grid">
+              <label>
                 Title
                 <input value={workOrderForm.title} onChange={(event) => setWorkOrderForm({ ...workOrderForm, title: event.target.value })} />
               </label>
@@ -18898,6 +19089,51 @@ export default function HomePage() {
                     <button type="button" onClick={() => generateFacilityLeaseInvoice(lease)}>Invoice</button>
                     <button type="button" onClick={() => updateFacilityLeaseStatus(lease, "active")}>Activate</button>
                     <button type="button" onClick={() => updateFacilityLeaseStatus(lease, "completed", "returned")}>Complete</button>
+                  </div>
+                </article>
+              ))}
+              {facilityAccessProvision ? (
+                <article className="task-card selected">
+                  <div>
+                    <strong>{facilityAccessProvision.device.name} provisioned</strong>
+                    <span>{facilityAccessProvision.device.device_id} · {facilityAccessProvision.device.unlock_method}</span>
+                    <span>Key returned once: {facilityAccessProvision.api_key}</span>
+                  </div>
+                </article>
+              ) : null}
+              {facilityAccessGatewayScan ? (
+                <article className={`task-card ${facilityAccessGatewayScan.event.decision === "granted" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{facilityAccessGatewayScan.device.device_id} · {facilityAccessGatewayScan.event.decision}</strong>
+                    <span>{facilityAccessGatewayScan.command?.command_type ?? "no command"} · signature {facilityAccessGatewayScan.signature_validated ? "validated" : "missing"}</span>
+                    <span>{facilityAccessGatewayScan.command?.command_signature.slice(0, 28) ?? facilityAccessGatewayScan.event.reason}</span>
+                  </div>
+                </article>
+              ) : null}
+              {facilityAccessDeviceHealth ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{facilityAccessDeviceHealth.device.device_id} health</strong>
+                    <span>{facilityAccessDeviceHealth.device.battery_percent ?? "n/a"}% · {facilityAccessDeviceHealth.device.network_status ?? "unknown"} · {facilityAccessDeviceHealth.device.firmware_version ?? "no firmware"}</span>
+                    <span>{facilityAccessDeviceHealth.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {facilityAccessDevices.slice(0, 3).map((device) => (
+                <article key={device.id} className="task-card">
+                  <div>
+                    <strong>{device.name}</strong>
+                    <span>{device.device_id} · {device.status} · {device.location ?? "No location"}</span>
+                    <span>{device.battery_percent ?? "n/a"}% battery · last scan {device.last_scan_at ? new Date(device.last_scan_at).toLocaleString() : "never"}</span>
+                  </div>
+                </article>
+              ))}
+              {facilityAccessCommands.slice(0, 3).map((command) => (
+                <article key={command.id} className="task-card">
+                  <div>
+                    <strong>{command.command_type} command</strong>
+                    <span>{command.status} · valid until {new Date(command.valid_until).toLocaleString()}</span>
+                    <span>{command.command_signature.slice(0, 36)}</span>
                   </div>
                 </article>
               ))}

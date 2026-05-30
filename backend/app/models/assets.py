@@ -436,6 +436,55 @@ class FacilityAccessEvent(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class FacilityAccessDevice(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_access_devices"
+    __table_args__ = (UniqueConstraint("organization_id", "device_id"),)
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    location: Mapped[str | None] = mapped_column(String(240), index=True)
+    device_type: Mapped[str] = mapped_column(String(80), default="door_controller", nullable=False, index=True)
+    unlock_method: Mapped[str] = mapped_column(String(80), default="relay", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    api_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_health_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    battery_percent: Mapped[int | None] = mapped_column(Integer)
+    firmware_version: Mapped[str | None] = mapped_column(String(120))
+    network_status: Mapped[str | None] = mapped_column(String(80), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class FacilityAccessCommand(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_access_commands"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    access_device_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("facility_access_devices.id"), nullable=False, index=True
+    )
+    access_event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("facility_access_events.id"), index=True)
+    credential_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("facility_access_credentials.id"), index=True
+    )
+    command_type: Mapped[str] = mapped_column(String(40), default="unlock", nullable=False, index=True)
+    command_payload: Mapped[str] = mapped_column(Text, nullable=False)
+    command_signature: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="issued", nullable=False, index=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    requested_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class FacilityBooking(IdMixin, TimestampMixin, Base):
     __tablename__ = "facility_bookings"
 

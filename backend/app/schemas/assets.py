@@ -909,6 +909,93 @@ class FacilityAccessDashboardRead(BaseModel):
     recommendation: str
 
 
+class FacilityAccessDeviceCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    device_id: str = Field(min_length=2, max_length=160)
+    name: str = Field(min_length=2, max_length=180)
+    location: str | None = Field(default=None, max_length=240)
+    device_type: str = Field(default="door_controller", min_length=2, max_length=80)
+    unlock_method: str = Field(default="relay", min_length=2, max_length=80)
+    status: str = Field(default="active", pattern="^(active|paused|maintenance|retired)$")
+    api_key: str | None = Field(default=None, min_length=16, max_length=200)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityAccessDeviceRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    device_id: str
+    name: str
+    location: str | None
+    device_type: str
+    unlock_method: str
+    status: str
+    last_seen_at: datetime | None
+    last_scan_at: datetime | None
+    last_health_at: datetime | None
+    battery_percent: int | None
+    firmware_version: str | None
+    network_status: str | None
+    notes: str | None
+
+
+class FacilityAccessDeviceProvisionRead(BaseModel):
+    device: FacilityAccessDeviceRead
+    api_key: str
+
+
+class FacilityAccessCommandRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    access_device_id: UUID
+    access_event_id: UUID | None
+    credential_id: UUID | None
+    command_type: str
+    command_payload: str
+    command_signature: str
+    status: str
+    issued_at: datetime
+    valid_until: datetime
+    acknowledged_at: datetime | None
+    requested_by_person_id: UUID | None
+    notes: str | None
+
+
+class FacilityAccessGatewayScanCreate(BaseModel):
+    access_code: str = Field(min_length=1, max_length=120)
+    occurred_at: datetime | None = None
+    external_reference: str | None = Field(default=None, max_length=240)
+    battery_percent: int | None = Field(default=None, ge=0, le=100)
+    firmware_version: str | None = Field(default=None, max_length=120)
+    network_status: str | None = Field(default=None, max_length=80)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityAccessGatewayScanRead(BaseModel):
+    device: FacilityAccessDeviceRead
+    event: FacilityAccessEventRead
+    command: FacilityAccessCommandRead | None
+    signature_validated: bool
+
+
+class FacilityAccessDeviceHealthCreate(BaseModel):
+    checked_at: datetime | None = None
+    battery_percent: int | None = Field(default=None, ge=0, le=100)
+    firmware_version: str | None = Field(default=None, max_length=120)
+    network_status: str | None = Field(default=None, max_length=80)
+    status: str | None = Field(default=None, pattern="^(active|paused|maintenance|retired)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityAccessDeviceHealthRead(BaseModel):
+    device: FacilityAccessDeviceRead
+    signature_validated: bool
+    recommendation: str
+
+
 class FacilityBookingCreate(BaseModel):
     organization_id: UUID
     facility_id: UUID

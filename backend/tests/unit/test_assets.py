@@ -1000,6 +1000,131 @@ def test_facility_access_credentials_scan_and_dashboard(client, identity_headers
     assert revoked.json()["status"] == "revoked"
 
 
+def test_facility_access_device_gateway_scan_health_and_commands(client, identity_headers) -> None:
+    organization, team, _, _ = create_assets_context(client, identity_headers, "Access Device Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "North Gate Controller",
+            "facility_type": "clubhouse",
+            "capacity": 80,
+        },
+    ).json()
+    booking = client.post(
+        "/api/v1/assets/bookings",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "team_id": team["id"],
+            "title": "North gate session",
+            "starts_at": "2026-07-02T10:00:00Z",
+            "ends_at": "2026-07-02T11:00:00Z",
+            "requester_name": "Facilities Manager",
+            "requester_email": "facilities@example.com",
+        },
+    ).json()
+    credential = client.post(
+        "/api/v1/assets/access-credentials",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "booking_id": booking["id"],
+            "guest_name": "Amina Visitor",
+            "credential_type": "mobile_key",
+            "access_code": "MOBILE-GATE-1",
+            "max_uses": 2,
+        },
+    ).json()
+
+    provision = client.post(
+        "/api/v1/assets/access-devices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "device_id": "north-gate-controller",
+            "name": "North Gate Door Controller",
+            "location": "North Gate",
+            "device_type": "door_controller",
+            "unlock_method": "relay",
+            "api_key": "local-access-device-key-0001",
+        },
+    )
+    assert provision.status_code == 201
+    device = provision.json()["device"]
+    assert provision.json()["api_key"] == "local-access-device-key-0001"
+    assert device["status"] == "active"
+
+    denied = client.post(
+        f"/api/v1/assets/access-gateway/{organization['id']}/north-gate-controller/scans",
+        headers={"X-Afrolete-Access-Key": "wrong-key"},
+        json={"access_code": "MOBILE-GATE-1", "occurred_at": "2026-07-02T10:05:00Z"},
+    )
+    assert denied.status_code == 401
+
+    scan = client.post(
+        f"/api/v1/assets/access-gateway/{organization['id']}/north-gate-controller/scans",
+        headers={"X-Afrolete-Access-Key": "local-access-device-key-0001"},
+        json={
+            "access_code": "MOBILE-GATE-1",
+            "occurred_at": "2026-07-02T10:05:00Z",
+            "battery_percent": 64,
+            "firmware_version": "1.2.3",
+            "network_status": "online",
+            "external_reference": "reader-event-001",
+        },
+    )
+    assert scan.status_code == 200
+    body = scan.json()
+    assert body["signature_validated"] is True
+    assert body["event"]["decision"] == "granted"
+    assert body["event"]["credential_id"] == credential["id"]
+    assert body["device"]["last_scan_at"].startswith("2026-07-02T10:05:00")
+    command = body["command"]
+    assert command["command_type"] == "unlock"
+    expected_signature = hmac.new(
+        b"local-access-device-key-0001",
+        command["command_payload"].encode("utf-8"),
+        sha256,
+    ).hexdigest()
+    assert command["command_signature"] == f"sha256={expected_signature}"
+    payload = json.loads(command["command_payload"])
+    assert payload["unlock_method"] == "relay"
+    assert payload["subject"] == "Amina Visitor"
+
+    health = client.post(
+        f"/api/v1/assets/access-gateway/{organization['id']}/north-gate-controller/health",
+        headers={"X-Afrolete-Access-Key": "local-access-device-key-0001"},
+        json={
+            "checked_at": "2026-07-02T10:10:00Z",
+            "battery_percent": 12,
+            "network_status": "online",
+            "firmware_version": "1.2.4",
+        },
+    )
+    assert health.status_code == 200
+    assert health.json()["device"]["battery_percent"] == 12
+    assert "Battery is low" in health.json()["recommendation"]
+
+    devices = client.get(
+        f"/api/v1/assets/access-devices?organization_id={organization['id']}&facility_id={facility['id']}",
+        headers=identity_headers,
+    )
+    assert devices.status_code == 200
+    assert devices.json()[0]["device_id"] == "north-gate-controller"
+
+    commands = client.get(
+        f"/api/v1/assets/access-commands?organization_id={organization['id']}&facility_id={facility['id']}",
+        headers=identity_headers,
+    )
+    assert commands.status_code == 200
+    assert commands.json()[0]["command_signature"] == command["command_signature"]
+
+
 def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
     plan = client.post(

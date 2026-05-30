@@ -2823,6 +2823,61 @@ export type FacilityAccessDashboardRead = {
   recommendation: string;
 };
 
+export type FacilityAccessDeviceRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  device_id: string;
+  name: string;
+  location: string | null;
+  device_type: string;
+  unlock_method: string;
+  status: "active" | "paused" | "maintenance" | "retired";
+  last_seen_at: string | null;
+  last_scan_at: string | null;
+  last_health_at: string | null;
+  battery_percent: number | null;
+  firmware_version: string | null;
+  network_status: string | null;
+  notes: string | null;
+};
+
+export type FacilityAccessDeviceProvisionRead = {
+  device: FacilityAccessDeviceRead;
+  api_key: string;
+};
+
+export type FacilityAccessCommandRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  access_device_id: UUID;
+  access_event_id: UUID | null;
+  credential_id: UUID | null;
+  command_type: "unlock" | "deny" | string;
+  command_payload: string;
+  command_signature: string;
+  status: "issued" | "acknowledged" | "expired" | string;
+  issued_at: string;
+  valid_until: string;
+  acknowledged_at: string | null;
+  requested_by_person_id: UUID | null;
+  notes: string | null;
+};
+
+export type FacilityAccessGatewayScanRead = {
+  device: FacilityAccessDeviceRead;
+  event: FacilityAccessEventRead;
+  command: FacilityAccessCommandRead | null;
+  signature_validated: boolean;
+};
+
+export type FacilityAccessDeviceHealthRead = {
+  device: FacilityAccessDeviceRead;
+  signature_validated: boolean;
+  recommendation: string;
+};
+
 export type FacilityBookingRead = {
   id: UUID;
   organization_id: UUID;

@@ -46,8 +46,16 @@ from app.schemas.assets import (
     FacilityAccessCredentialCreate,
     FacilityAccessCredentialRead,
     FacilityAccessCredentialUpdate,
+    FacilityAccessCommandRead,
     FacilityAccessDashboardRead,
+    FacilityAccessDeviceCreate,
+    FacilityAccessDeviceHealthCreate,
+    FacilityAccessDeviceHealthRead,
+    FacilityAccessDeviceProvisionRead,
+    FacilityAccessDeviceRead,
     FacilityAccessEventRead,
+    FacilityAccessGatewayScanCreate,
+    FacilityAccessGatewayScanRead,
     FacilityAccessScanCreate,
     FacilityAvailabilityRead,
     FacilityBookingCheckoutRead,
@@ -134,6 +142,8 @@ from app.services.assets import (
     list_equipment_lease_schedules,
     list_facilities,
     list_facility_access_credentials,
+    list_facility_access_commands,
+    list_facility_access_devices,
     list_facility_bookings,
     list_facility_lease_agreements,
     list_facility_maintenance_schedules,
@@ -143,6 +153,8 @@ from app.services.assets import (
     receive_supplier_order,
     reconcile_equipment_lease_payment,
     record_facility_access_scan,
+    record_facility_access_device_health,
+    record_gateway_facility_access_scan,
     record_gateway_equipment_scan,
     record_equipment_scan_event,
     return_equipment,
@@ -164,6 +176,7 @@ from app.services.assets import (
     upsert_facility_booking_rule,
     upload_equipment_file,
     provision_equipment_reader,
+    provision_facility_access_device,
     update_work_order,
     utilization_recommendations,
     convert_facility_waitlist_entry,
@@ -1151,6 +1164,68 @@ async def facility_access_dashboard_route(
     db: AsyncSession = Depends(get_db),
 ) -> FacilityAccessDashboardRead:
     return await facility_access_dashboard(db, organization_id, facility_id=facility_id)
+
+
+@router.post("/access-devices", response_model=FacilityAccessDeviceProvisionRead, status_code=status.HTTP_201_CREATED)
+async def provision_facility_access_device_route(
+    payload: FacilityAccessDeviceCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityAccessDeviceProvisionRead:
+    return await provision_facility_access_device(db, identity, payload, authz)
+
+
+@router.get("/access-devices", response_model=list[FacilityAccessDeviceRead])
+async def list_facility_access_devices_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[FacilityAccessDeviceRead]:
+    return await list_facility_access_devices(db, identity, organization_id, authz, facility_id=facility_id)
+
+
+@router.get("/access-commands", response_model=list[FacilityAccessCommandRead])
+async def list_facility_access_commands_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    device_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[FacilityAccessCommandRead]:
+    return await list_facility_access_commands(
+        db,
+        identity,
+        organization_id,
+        authz,
+        facility_id=facility_id,
+        device_id=device_id,
+    )
+
+
+@router.post("/access-gateway/{organization_id}/{device_id}/scans", response_model=FacilityAccessGatewayScanRead)
+async def record_gateway_facility_access_scan_route(
+    organization_id: UUID,
+    device_id: str,
+    payload: FacilityAccessGatewayScanCreate,
+    x_afrolete_access_key: str | None = Header(default=None, alias="X-Afrolete-Access-Key"),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityAccessGatewayScanRead:
+    return await record_gateway_facility_access_scan(db, organization_id, device_id, x_afrolete_access_key, payload)
+
+
+@router.post("/access-gateway/{organization_id}/{device_id}/health", response_model=FacilityAccessDeviceHealthRead)
+async def record_facility_access_device_health_route(
+    organization_id: UUID,
+    device_id: str,
+    payload: FacilityAccessDeviceHealthCreate,
+    x_afrolete_access_key: str | None = Header(default=None, alias="X-Afrolete-Access-Key"),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityAccessDeviceHealthRead:
+    return await record_facility_access_device_health(db, organization_id, device_id, x_afrolete_access_key, payload)
 
 
 @router.post("/bookings", response_model=FacilityBookingRead, status_code=status.HTTP_201_CREATED)

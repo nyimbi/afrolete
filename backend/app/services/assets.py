@@ -30,7 +30,9 @@ from app.models.assets import (
     EquipmentReader,
     EquipmentScanEvent,
     Facility,
+    FacilityAccessCommand,
     FacilityAccessCredential,
+    FacilityAccessDevice,
     FacilityAccessEvent,
     FacilityBooking,
     FacilityBookingRule,
@@ -109,8 +111,16 @@ from app.schemas.assets import (
     FacilityAccessCredentialCreate,
     FacilityAccessCredentialRead,
     FacilityAccessCredentialUpdate,
+    FacilityAccessCommandRead,
     FacilityAccessDashboardRead,
+    FacilityAccessDeviceCreate,
+    FacilityAccessDeviceHealthCreate,
+    FacilityAccessDeviceHealthRead,
+    FacilityAccessDeviceProvisionRead,
+    FacilityAccessDeviceRead,
     FacilityAccessEventRead,
+    FacilityAccessGatewayScanCreate,
+    FacilityAccessGatewayScanRead,
     FacilityAccessScanCreate,
     FacilityHireCheckoutSettlementCreate,
     FacilityHireCheckoutSettlementRead,
@@ -1647,6 +1657,178 @@ async def facility_access_dashboard(
     )
 
 
+async def provision_facility_access_device(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityAccessDeviceCreate,
+    authz: AuthorizationService,
+) -> FacilityAccessDeviceProvisionRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    device_id = payload.device_id.strip()
+    existing = await db.scalar(
+        select(FacilityAccessDevice).where(
+            FacilityAccessDevice.organization_id == payload.organization_id,
+            FacilityAccessDevice.device_id == device_id,
+        )
+    )
+    api_key = payload.api_key or token_urlsafe(32)
+    if existing is None:
+        device = FacilityAccessDevice(
+            organization_id=payload.organization_id,
+            facility_id=payload.facility_id,
+            device_id=device_id,
+            name=payload.name,
+            location=payload.location,
+            device_type=payload.device_type.strip().lower(),
+            unlock_method=payload.unlock_method.strip().lower(),
+            status=payload.status.strip().lower(),
+            api_key_hash=hash_reader_key(api_key),
+            notes=payload.notes,
+        )
+        db.add(device)
+    else:
+        device = existing
+        device.facility_id = payload.facility_id
+        device.name = payload.name
+        device.location = payload.location
+        device.device_type = payload.device_type.strip().lower()
+        device.unlock_method = payload.unlock_method.strip().lower()
+        device.status = payload.status.strip().lower()
+        device.api_key_hash = hash_reader_key(api_key)
+        device.notes = payload.notes
+    await db.commit()
+    await db.refresh(device)
+    return FacilityAccessDeviceProvisionRead(device=facility_access_device_read(device), api_key=api_key)
+
+
+async def list_facility_access_devices(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+) -> list[FacilityAccessDeviceRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(FacilityAccessDevice).where(FacilityAccessDevice.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(FacilityAccessDevice.facility_id == facility_id)
+    devices = await db.scalars(statement.order_by(FacilityAccessDevice.location, FacilityAccessDevice.name))
+    return [facility_access_device_read(device) for device in devices.all()]
+
+
+async def list_facility_access_commands(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+    device_id: UUID | None = None,
+) -> list[FacilityAccessCommandRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(FacilityAccessCommand).where(FacilityAccessCommand.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(FacilityAccessCommand.facility_id == facility_id)
+    if device_id is not None:
+        statement = statement.where(FacilityAccessCommand.access_device_id == device_id)
+    commands = await db.scalars(statement.order_by(FacilityAccessCommand.issued_at.desc()).limit(25))
+    return [facility_access_command_read(command) for command in commands.all()]
+
+
+async def record_gateway_facility_access_scan(
+    db: AsyncSession,
+    organization_id: UUID,
+    device_id: str,
+    api_key: str | None,
+    payload: FacilityAccessGatewayScanCreate,
+) -> FacilityAccessGatewayScanRead:
+    device = await get_facility_access_device_by_device_id(db, organization_id, device_id.strip())
+    validate_facility_access_device_key(device, api_key)
+    occurred_at = payload.occurred_at or datetime.now(UTC)
+    device.last_seen_at = occurred_at
+    device.last_scan_at = occurred_at
+    update_facility_access_device_health_fields(
+        device,
+        checked_at=occurred_at,
+        battery_percent=payload.battery_percent,
+        firmware_version=payload.firmware_version,
+        network_status=payload.network_status,
+    )
+    credential = await db.scalar(
+        select(FacilityAccessCredential)
+        .where(FacilityAccessCredential.organization_id == organization_id)
+        .where(FacilityAccessCredential.facility_id == device.facility_id)
+        .where(FacilityAccessCredential.access_code == payload.access_code)
+        .order_by(FacilityAccessCredential.created_at.desc())
+    )
+    decision, reason = facility_access_decision(credential, occurred_at)
+    if credential is not None and decision == "granted":
+        credential.uses_count += 1
+        credential.last_used_at = occurred_at
+    event = FacilityAccessEvent(
+        organization_id=organization_id,
+        facility_id=device.facility_id,
+        credential_id=credential.id if credential else None,
+        booking_id=credential.booking_id if credential else None,
+        lease_agreement_id=credential.lease_agreement_id if credential else None,
+        access_code=payload.access_code,
+        reader_id=device.device_id,
+        reader_location=device.location,
+        subject_summary=facility_access_subject(credential),
+        decision=decision,
+        reason=reason,
+        occurred_at=occurred_at,
+        notes=append_note(payload.notes, f"external_reference={payload.external_reference}") if payload.external_reference else payload.notes,
+    )
+    db.add(event)
+    await db.flush()
+    command = facility_access_command_from_event(device, event, credential, api_key or "", occurred_at)
+    db.add(command)
+    await db.commit()
+    await db.refresh(device)
+    await db.refresh(event)
+    await db.refresh(command)
+    return FacilityAccessGatewayScanRead(
+        device=facility_access_device_read(device),
+        event=facility_access_event_read(event),
+        command=facility_access_command_read(command),
+        signature_validated=True,
+    )
+
+
+async def record_facility_access_device_health(
+    db: AsyncSession,
+    organization_id: UUID,
+    device_id: str,
+    api_key: str | None,
+    payload: FacilityAccessDeviceHealthCreate,
+) -> FacilityAccessDeviceHealthRead:
+    device = await get_facility_access_device_by_device_id(db, organization_id, device_id.strip())
+    validate_facility_access_device_key(device, api_key)
+    checked_at = payload.checked_at or datetime.now(UTC)
+    device.last_seen_at = checked_at
+    device.last_health_at = checked_at
+    if payload.status is not None:
+        device.status = payload.status
+    update_facility_access_device_health_fields(
+        device,
+        checked_at=checked_at,
+        battery_percent=payload.battery_percent,
+        firmware_version=payload.firmware_version,
+        network_status=payload.network_status,
+    )
+    if payload.notes:
+        device.notes = append_note(device.notes, payload.notes)
+    await db.commit()
+    await db.refresh(device)
+    return FacilityAccessDeviceHealthRead(
+        device=facility_access_device_read(device),
+        signature_validated=True,
+        recommendation=facility_access_device_health_recommendation(device),
+    )
+
+
 async def create_facility_booking(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3120,6 +3302,22 @@ async def get_facility_access_credential(
     return credential
 
 
+async def get_facility_access_device_by_device_id(
+    db: AsyncSession,
+    organization_id: UUID,
+    device_id: str,
+) -> FacilityAccessDevice:
+    device = await db.scalar(
+        select(FacilityAccessDevice).where(
+            FacilityAccessDevice.organization_id == organization_id,
+            FacilityAccessDevice.device_id == device_id,
+        )
+    )
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility access device not found")
+    return device
+
+
 async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> SupplierOrder:
     order = await db.get(SupplierOrder, supplier_order_id)
     if order is None:
@@ -3624,6 +3822,47 @@ def facility_access_event_read(event: FacilityAccessEvent) -> FacilityAccessEven
     )
 
 
+def facility_access_device_read(device: FacilityAccessDevice) -> FacilityAccessDeviceRead:
+    return FacilityAccessDeviceRead(
+        id=device.id,
+        organization_id=device.organization_id,
+        facility_id=device.facility_id,
+        device_id=device.device_id,
+        name=device.name,
+        location=device.location,
+        device_type=device.device_type,
+        unlock_method=device.unlock_method,
+        status=device.status,
+        last_seen_at=device.last_seen_at,
+        last_scan_at=device.last_scan_at,
+        last_health_at=device.last_health_at,
+        battery_percent=device.battery_percent,
+        firmware_version=device.firmware_version,
+        network_status=device.network_status,
+        notes=device.notes,
+    )
+
+
+def facility_access_command_read(command: FacilityAccessCommand) -> FacilityAccessCommandRead:
+    return FacilityAccessCommandRead(
+        id=command.id,
+        organization_id=command.organization_id,
+        facility_id=command.facility_id,
+        access_device_id=command.access_device_id,
+        access_event_id=command.access_event_id,
+        credential_id=command.credential_id,
+        command_type=command.command_type,
+        command_payload=command.command_payload,
+        command_signature=command.command_signature,
+        status=command.status,
+        issued_at=command.issued_at,
+        valid_until=command.valid_until,
+        acknowledged_at=command.acknowledged_at,
+        requested_by_person_id=command.requested_by_person_id,
+        notes=command.notes,
+    )
+
+
 def facility_access_window(
     payload: FacilityAccessCredentialCreate,
     booking: FacilityBooking | None,
@@ -3688,6 +3927,85 @@ def facility_access_recommendation(
     if expiring:
         return "Renew or revoke expiring credentials before the next scheduled access window."
     return "Access control is stable; keep temporary guest credentials time-boxed."
+
+
+def validate_facility_access_device_key(device: FacilityAccessDevice, api_key: str | None) -> None:
+    if device.status not in {"active", "maintenance"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Facility access device is not active")
+    if not api_key or not compare_digest(device.api_key_hash, hash_reader_key(api_key)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid facility access device key")
+
+
+def update_facility_access_device_health_fields(
+    device: FacilityAccessDevice,
+    *,
+    checked_at: datetime,
+    battery_percent: int | None,
+    firmware_version: str | None,
+    network_status: str | None,
+) -> None:
+    if battery_percent is not None:
+        device.battery_percent = battery_percent
+    if firmware_version:
+        device.firmware_version = firmware_version
+    if network_status:
+        device.network_status = network_status.strip().lower()
+    if battery_percent is not None or firmware_version or network_status:
+        device.last_health_at = checked_at
+
+
+def facility_access_command_from_event(
+    device: FacilityAccessDevice,
+    event: FacilityAccessEvent,
+    credential: FacilityAccessCredential | None,
+    api_key: str,
+    issued_at: datetime,
+) -> FacilityAccessCommand:
+    command_type = "unlock" if event.decision == "granted" else "deny"
+    valid_until = issued_at + timedelta(seconds=30 if command_type == "unlock" else 10)
+    payload = {
+        "command_type": command_type,
+        "device_id": device.device_id,
+        "facility_id": str(device.facility_id),
+        "event_id": str(event.id),
+        "credential_id": str(credential.id) if credential else None,
+        "subject": facility_access_subject(credential),
+        "unlock_method": device.unlock_method,
+        "issued_at": issued_at.isoformat(),
+        "valid_until": valid_until.isoformat(),
+        "nonce": token_urlsafe(12),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    signature = facility_access_command_signature(api_key, encoded)
+    return FacilityAccessCommand(
+        organization_id=device.organization_id,
+        facility_id=device.facility_id,
+        access_device_id=device.id,
+        access_event_id=event.id,
+        credential_id=credential.id if credential else None,
+        command_type=command_type,
+        command_payload=encoded,
+        command_signature=signature,
+        status="issued",
+        issued_at=issued_at,
+        valid_until=valid_until,
+        notes=event.reason,
+    )
+
+
+def facility_access_command_signature(api_key: str, payload: str) -> str:
+    digest = hmac.new(api_key.encode("utf-8"), payload.encode("utf-8"), sha256).hexdigest()
+    return f"sha256={digest}"
+
+
+def facility_access_device_health_recommendation(device: FacilityAccessDevice) -> str:
+    if device.status != "active":
+        return "Device is not active; keep a staffed manual entry fallback until service is restored."
+    if device.battery_percent is not None and device.battery_percent < 20:
+        return "Battery is low; charge or swap the controller before the next booking window."
+    if device.network_status and device.network_status not in {"online", "good", "connected"}:
+        return "Network status needs attention before relying on unattended entry."
+    return "Device is ready for controlled access windows."
 
 
 def maintenance_work_order_notes(schedule: FacilityMaintenanceSchedule) -> str:
