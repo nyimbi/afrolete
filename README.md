@@ -310,6 +310,12 @@ standalone profile with `docker compose --profile video-pose up
 video-pose-worker`; the worker can also target one stored clip with
 `--video-asset-id` for manual retries or demos.
 
+Football opposition videos can also run through the match-tracking worker. The
+Docker `match-tracking` profile asks the backend to decode stored match video,
+extract OpenCV player motion tracks plus a best-effort ball contour track, and
+create tracking runs that feed distance, speed, heatmaps, estimated possession,
+pass/turnover cues, tactical shape, highlights, and coach/player reports.
+
 Object storage can run in local mode for demos or S3-compatible mode for MinIO.
 The same storage adapter supports retention policy enforcement: local mode
 prunes stale artifacts from configured storage roots, while S3 mode writes a

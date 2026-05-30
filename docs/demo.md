@@ -83,9 +83,10 @@ keypoints through the same endpoint without enabling every due-worker lane.
 For a focused football match-tracking demo, run `docker compose --profile
 match-tracking up match-tracking-worker` alongside the API. That worker loops
 over stored opposition scouting football videos, asks the backend to auto-track
-players with the OpenCV motion-tracking path, and creates `/api/v1/performance/
-scouting/videos/{video_asset_id}/tracking-runs` records that feed distance,
-speed, heatmap, tactical-shape, highlight, and player-guidance workflows.
+players and a best-effort ball track with the OpenCV motion-tracking path, and
+creates `/api/v1/performance/scouting/videos/{video_asset_id}/tracking-runs`
+records that feed distance, speed, heatmap, possession, pass/turnover,
+tactical-shape, highlight, and player-guidance workflows.
 
 ## Reset
 

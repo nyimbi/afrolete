@@ -25155,7 +25155,7 @@ export default function HomePage() {
                   <p>
                     {performanceMatchTrackingRun?.possession_estimates[0]
                       ? `${String(performanceMatchTrackingRun.possession_estimates[0].team_label ?? "Team")} ${Math.round(Number(performanceMatchTrackingRun.possession_estimates[0].possession_percent ?? 0))}% · ${Number(performanceMatchTrackingRun.ball_tracking_metrics.turnover_count ?? 0)} turnover(s)`
-                      : "Add a ball track to estimate possession, passes, turnovers, and carries."}
+                      : "Auto-track or add a ball track to estimate possession, passes, turnovers, and carries."}
                   </p>
                 </article>
                 <article className="mini-card">

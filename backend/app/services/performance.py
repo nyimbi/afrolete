@@ -10007,6 +10007,7 @@ def extract_match_tracking_samples_from_video_content(
         step = max(int(fps * sample_every_seconds), 1)
         subtractor = cv2.createBackgroundSubtractorMOG2(history=120, varThreshold=36, detectShadows=False)
         tracks: dict[str, tuple[float, float]] = {}
+        ball_track: tuple[float, float] | None = None
         samples: list[dict[str, object]] = []
         decoded_frames = 0
         processed_frames = 0
@@ -10023,14 +10024,44 @@ def extract_match_tracking_samples_from_video_content(
             mask = cv2.medianBlur(mask, 5)
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             detections: list[tuple[float, float, float]] = []
+            ball_candidates: list[tuple[float, float, float]] = []
             frame_area = max(width * height, 1.0)
             for contour in contours:
                 area = float(cv2.contourArea(contour))
-                confidence = min(area / (frame_area * 0.015), 1.0)
-                if confidence < min_detection_confidence or area < frame_area * 0.0003:
-                    continue
                 x, y, w, h = cv2.boundingRect(contour)
-                detections.append((x + w / 2, y + h, confidence))
+                perimeter = float(cv2.arcLength(contour, True))
+                contour_kind = match_tracking_contour_kind(
+                    area=area,
+                    width=float(w),
+                    height=float(h),
+                    perimeter=perimeter,
+                    frame_area=frame_area,
+                    min_detection_confidence=min_detection_confidence,
+                )
+                if contour_kind is None:
+                    continue
+                kind, confidence = contour_kind
+                if kind == "ball":
+                    ball_candidates.append((x + w / 2, y + h / 2, confidence))
+                else:
+                    detections.append((x + w / 2, y + h, confidence))
+            selected_ball = select_match_ball_candidate(ball_candidates, ball_track)
+            if selected_ball is not None:
+                ball_track = (selected_ball[0], selected_ball[1])
+                samples.append(
+                    {
+                        "track_id": "ball",
+                        "team_label": "ball",
+                        "player_label": "Ball",
+                        "jersey_number": None,
+                        "frame_index": frame_index,
+                        "timestamp_seconds": frame_index / fps,
+                        "x_percent": selected_ball[0] / width * 100,
+                        "y_percent": selected_ball[1] / height * 100,
+                        "confidence": selected_ball[2],
+                        "source": "opencv_ball_tracker",
+                    }
+                )
             for detection in detections[:22]:
                 track_id = nearest_match_track_id(tracks, detection[0], detection[1])
                 tracks[track_id] = (detection[0], detection[1])
@@ -10057,8 +10088,11 @@ def extract_match_tracking_samples_from_video_content(
         "decoded_frame_count": decoded_frames,
         "processed_frame_count": processed_frames,
         "source_provider": "opencv_motion_tracker",
-        "model_policy": "opencv-background-subtraction-match-tracker-v1",
-        "warnings": ["No pitch homography calibration applied; coordinates are frame-normalized estimates."],
+        "model_policy": "opencv-background-subtraction-match-tracker-v2",
+        "warnings": [
+            "No pitch homography calibration applied; coordinates are frame-normalized estimates.",
+            "Ball tracks are best-effort OpenCV contour estimates and require coach review.",
+        ],
     }
 
 
@@ -10069,6 +10103,53 @@ def nearest_match_track_id(tracks: dict[str, tuple[float, float]], x: float, y: 
     if math.dist(tracks[nearest_id], (x, y)) <= 80:
         return nearest_id
     return str(len(tracks) + 1)
+
+
+def match_tracking_contour_kind(
+    *,
+    area: float,
+    width: float,
+    height: float,
+    perimeter: float,
+    frame_area: float,
+    min_detection_confidence: float,
+) -> tuple[str, float] | None:
+    if area <= 0 or width <= 0 or height <= 0 or frame_area <= 0:
+        return None
+    area_ratio = area / frame_area
+    aspect_ratio = width / height
+    compactness = min(aspect_ratio, 1 / aspect_ratio)
+    circularity = 4 * math.pi * area / (perimeter * perimeter) if perimeter > 0 else 0.0
+    ball_confidence = min(
+        circularity * 0.45 + compactness * 0.35 + min(area_ratio / 0.0015, 1.0) * 0.2,
+        1.0,
+    )
+    ball_threshold = max(0.2, min_detection_confidence * 0.5)
+    if (
+        frame_area * 0.00003 <= area <= frame_area * 0.003
+        and 0.55 <= compactness <= 1.0
+        and 0.42 <= circularity <= 1.25
+        and ball_confidence >= ball_threshold
+    ):
+        return ("ball", round(ball_confidence, 3))
+    player_confidence = min(area / (frame_area * 0.015), 1.0)
+    if player_confidence >= min_detection_confidence and area >= frame_area * 0.0003:
+        return ("player", round(player_confidence, 3))
+    return None
+
+
+def select_match_ball_candidate(
+    candidates: list[tuple[float, float, float]],
+    previous_ball: tuple[float, float] | None,
+) -> tuple[float, float, float] | None:
+    if not candidates:
+        return None
+    if previous_ball is None:
+        return max(candidates, key=lambda candidate: candidate[2])
+    return max(
+        candidates,
+        key=lambda candidate: candidate[2] - min(math.dist(previous_ball, (candidate[0], candidate[1])) / 240, 1.0) * 0.25,
+    )
 
 
 def decode_annotation_tags(value: str | None) -> list[str]:

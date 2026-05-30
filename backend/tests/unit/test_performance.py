@@ -3224,11 +3224,31 @@ def test_match_video_auto_tracking_uses_video_frame_extractor(
                     "confidence": 0.78,
                     "source": "opencv_motion_tracker",
                 },
+                {
+                    "track_id": "ball",
+                    "team_label": "ball",
+                    "player_label": "Ball",
+                    "timestamp_seconds": 0,
+                    "x_percent": 10,
+                    "y_percent": 50,
+                    "confidence": 0.72,
+                    "source": "opencv_ball_tracker",
+                },
+                {
+                    "track_id": "ball",
+                    "team_label": "ball",
+                    "player_label": "Ball",
+                    "timestamp_seconds": 1,
+                    "x_percent": 20,
+                    "y_percent": 50,
+                    "confidence": 0.74,
+                    "source": "opencv_ball_tracker",
+                },
             ],
             "decoded_frame_count": 24,
             "processed_frame_count": 4,
             "source_provider": "opencv_motion_tracker",
-            "model_policy": "opencv-background-subtraction-match-tracker-v1",
+            "model_policy": "opencv-background-subtraction-match-tracker-v2",
             "warnings": ["Synthetic extractor warning"],
         }
 
@@ -3252,12 +3272,54 @@ def test_match_video_auto_tracking_uses_video_frame_extractor(
     assert tracking_response.status_code == 201
     tracking = tracking_response.json()
     assert tracking["source_provider"] == "opencv_motion_tracker"
-    assert tracking["model_policy"] == "opencv-background-subtraction-match-tracker-v1"
-    assert tracking["sample_count"] == 4
+    assert tracking["model_policy"] == "opencv-background-subtraction-match-tracker-v2"
+    assert tracking["sample_count"] == 6
     assert tracking["player_count"] == 2
     assert tracking["total_distance_m"] > 0
+    assert tracking["ball_tracking_metrics"]["ball_sample_count"] == 2
+    assert tracking["ball_tracking_metrics"]["carry_count"] == 1
     assert any("Synthetic extractor warning" in warning for warning in tracking["quality_warnings"])
     assert any(sample["source"] == "opencv_motion_tracker" for sample in tracking["samples"])
+    assert any(sample["source"] == "opencv_ball_tracker" for sample in tracking["samples"])
+
+
+def test_match_tracking_contour_classifier_separates_ball_and_player_candidates() -> None:
+    frame_area = 1920 * 1080
+
+    ball = performance_service.match_tracking_contour_kind(
+        area=900,
+        width=32,
+        height=31,
+        perimeter=100,
+        frame_area=frame_area,
+        min_detection_confidence=0.35,
+    )
+    player = performance_service.match_tracking_contour_kind(
+        area=12000,
+        width=42,
+        height=190,
+        perimeter=470,
+        frame_area=frame_area,
+        min_detection_confidence=0.35,
+    )
+    noise = performance_service.match_tracking_contour_kind(
+        area=8,
+        width=4,
+        height=3,
+        perimeter=14,
+        frame_area=frame_area,
+        min_detection_confidence=0.35,
+    )
+
+    assert ball is not None
+    assert ball[0] == "ball"
+    assert player is not None
+    assert player[0] == "player"
+    assert noise is None
+    assert performance_service.select_match_ball_candidate(
+        [(100, 100, 0.8), (220, 220, 0.9)],
+        previous_ball=(105, 104),
+    ) == (100, 100, 0.8)
 
 
 def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, identity_headers, monkeypatch) -> None:
