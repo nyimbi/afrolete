@@ -807,6 +807,35 @@ class PerformanceHighlightReelRead(BaseModel):
     created_at: datetime
 
 
+class PerformanceHighlightReelExportCreate(BaseModel):
+    organization_id: UUID
+    export_format: str = Field(default="timeline_json", min_length=2, max_length=80)
+    delivery_channel: str = Field(default="coach_review", min_length=2, max_length=80)
+    include_branding: bool = True
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PerformanceHighlightReelExportRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    highlight_reel_id: UUID
+    video_asset_id: UUID
+    tracking_run_id: UUID | None
+    requested_by_person_id: UUID | None
+    export_format: str
+    status: str
+    renderer_policy: str
+    filename: str
+    content_type: str
+    storage_url: str
+    checksum: str
+    size_bytes: int
+    message: str | None
+    manifest: dict[str, Any]
+    generated_at: datetime
+    created_at: datetime
+
+
 class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
     case_id: str = Field(min_length=2, max_length=120)
     metric_code: str = Field(min_length=2, max_length=80)

@@ -3116,6 +3116,59 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert any(clip["category"] == "high_speed_run" for clip in reel["clips"])
     assert any("scouting" in clip["tags"] for clip in reel["clips"])
 
+    timeline_response = client.post(
+        f"/api/v1/performance/scouting/highlight-reels/{reel['id']}/exports",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "export_format": "timeline_json",
+            "delivery_channel": "scout_packet",
+            "notes": "Test export for a scout packet.",
+        },
+    )
+    assert timeline_response.status_code == 201
+    timeline = timeline_response.json()
+    assert timeline["status"] == "rendered"
+    assert timeline["export_format"] == "timeline_json"
+    assert timeline["filename"].endswith("-timeline.json")
+    assert timeline["content_type"] == "application/json"
+    assert timeline["size_bytes"] > 100
+    assert len(timeline["checksum"]) == 64
+    assert timeline["manifest"]["reel"]["id"] == reel["id"]
+    assert timeline["manifest"]["source_video"]["id"] == video_asset["id"]
+
+    edl_response = client.post(
+        f"/api/v1/performance/scouting/highlight-reels/{reel['id']}/exports",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "export_format": "mp4",
+            "delivery_channel": "coach_review",
+        },
+    )
+    assert edl_response.status_code == 201
+    edl = edl_response.json()
+    assert edl["export_format"] == "mp4_edit_decision_list"
+    assert edl["status"] == "needs_renderer"
+    assert edl["manifest"]["renderer_status"] == "needs_renderer"
+    assert len(edl["manifest"]["edit_decisions"]) == reel["clip_count"]
+
+    exports = client.get(
+        f"/api/v1/performance/scouting/highlight-reel-exports?organization_id={organization['id']}&highlight_reel_id={reel['id']}",
+        headers=identity_headers,
+    )
+    assert exports.status_code == 200
+    assert {artifact["id"] for artifact in exports.json()} == {timeline["id"], edl["id"]}
+
+    download_response = client.get(
+        f"/api/v1/performance/scouting/highlight-reel-exports/{timeline['id']}/content",
+        headers=identity_headers,
+    )
+    assert download_response.status_code == 200
+    assert download_response.headers["X-Afrolete-Highlight-Export-Checksum"] == timeline["checksum"]
+    downloaded = json.loads(download_response.content)
+    assert downloaded["reel"]["title"] == reel["title"]
+
     reels = client.get(
         f"/api/v1/performance/scouting/highlight-reels?organization_id={organization['id']}&video_asset_id={video_asset['id']}",
         headers=identity_headers,

@@ -31,10 +31,12 @@ services:
       AFROLETE_COMMUNICATION_DELIVERY_MODE: record_only
       AFROLETE_AGENT_EXECUTION_MODE: deterministic
       AFROLETE_PERFORMANCE_VIDEO_FILE_DIR: /app/data/performance-videos
+      AFROLETE_PERFORMANCE_HIGHLIGHT_EXPORT_DIR: /app/data/performance-highlight-exports
     ports:
       - "8000:8000"
     volumes:
       - afrolete-performance-videos:/app/data/performance-videos
+      - afrolete-performance-highlight-exports:/app/data/performance-highlight-exports
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,8 +83,10 @@ services:
       AFROLETE_COMMUNICATION_DELIVERY_MODE: record_only
       AFROLETE_AGENT_EXECUTION_MODE: deterministic
       AFROLETE_PERFORMANCE_VIDEO_FILE_DIR: /app/data/performance-videos
+      AFROLETE_PERFORMANCE_HIGHLIGHT_EXPORT_DIR: /app/data/performance-highlight-exports
     volumes:
       - afrolete-performance-videos:/app/data/performance-videos
+      - afrolete-performance-highlight-exports:/app/data/performance-highlight-exports
     depends_on:
       backend:
         condition: service_healthy
@@ -106,12 +110,14 @@ services:
       AFROLETE_RUN_MIGRATIONS: "0"
       AFROLETE_SEED_DEMO: "0"
       AFROLETE_PERFORMANCE_VIDEO_FILE_DIR: /app/data/performance-videos
+      AFROLETE_PERFORMANCE_HIGHLIGHT_EXPORT_DIR: /app/data/performance-highlight-exports
       AFROLETE_PERFORMANCE_POSE_WORKER_API_BASE_URL: http://backend:8000
       AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_SUB: kc-owner-1
       AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_EMAIL: owner@example.com
       AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_NAME: Owner Example
     volumes:
       - afrolete-performance-videos:/app/data/performance-videos
+      - afrolete-performance-highlight-exports:/app/data/performance-highlight-exports
     depends_on:
       backend:
         condition: service_healthy
@@ -125,3 +131,4 @@ services:
 volumes:
   afrolete-postgres:
   afrolete-performance-videos:
+  afrolete-performance-highlight-exports:

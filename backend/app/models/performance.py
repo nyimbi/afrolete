@@ -524,6 +524,36 @@ class PerformanceHighlightReel(IdMixin, TimestampMixin, Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class PerformanceHighlightReelExport(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_highlight_reel_exports"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    highlight_reel_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_highlight_reels.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    tracking_run_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("performance_match_tracking_runs.id"), index=True
+    )
+    requested_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    export_format: Mapped[str] = mapped_column(String(80), default="timeline_json", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="rendered", nullable=False, index=True)
+    renderer_policy: Mapped[str] = mapped_column(String(180), default="afrolete-highlight-export-v1", nullable=False)
+    filename: Mapped[str] = mapped_column(String(220), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    storage_url: Mapped[str] = mapped_column(String(800), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    message: Mapped[str | None] = mapped_column(Text)
+    manifest_json: Mapped[str] = mapped_column(Text, nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class PerformanceMovementReferenceProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_movement_reference_profiles"
     __table_args__ = (

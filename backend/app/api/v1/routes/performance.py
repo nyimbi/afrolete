@@ -39,6 +39,8 @@ from app.schemas.performance import (
     PerformanceHardwareSyncRunCreate,
     PerformanceHardwareSyncRunRead,
     PerformanceHighlightReelCreate,
+    PerformanceHighlightReelExportCreate,
+    PerformanceHighlightReelExportRead,
     PerformanceHighlightReelRead,
     PerformanceInjuryRiskAlertRead,
     PerformanceInjuryRiskAlertRunRead,
@@ -117,6 +119,7 @@ from app.services.performance import (
     create_performance_goal,
     create_performance_hardware_kit,
     create_performance_highlight_reel,
+    create_performance_highlight_reel_export,
     create_performance_model_extraction_benchmark_dataset,
     create_player_self_assessment,
     create_wearable_provider_connection,
@@ -136,11 +139,13 @@ from app.services.performance import (
     list_performance_hardware_kits,
     list_performance_hardware_sync_runs,
     list_performance_highlight_reels,
+    list_performance_highlight_reel_exports,
     list_metric_definitions,
     list_match_tracking_runs,
     list_match_pitch_calibrations,
     match_pitch_calibration_read,
     highlight_reel_read,
+    highlight_reel_export_read,
     list_movement_reference_profiles,
     list_my_player_performance,
     list_observations,
@@ -181,6 +186,7 @@ from app.services.performance import (
     decode_reference_metric_targets,
     decode_reference_pose_samples,
     decode_scouting_findings,
+    downloadable_performance_highlight_reel_export,
     downloadable_performance_video_asset,
     upload_performance_video_asset,
     upload_opposition_scouting_video_asset,
@@ -979,6 +985,45 @@ async def list_performance_highlight_reels_route(
     ]
 
 
+@router.post(
+    "/scouting/highlight-reels/{highlight_reel_id}/exports",
+    response_model=PerformanceHighlightReelExportRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_performance_highlight_reel_export_route(
+    highlight_reel_id: UUID,
+    payload: PerformanceHighlightReelExportCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceHighlightReelExportRead:
+    return PerformanceHighlightReelExportRead(
+        **highlight_reel_export_read(
+            await create_performance_highlight_reel_export(db, identity, highlight_reel_id, payload, authz)
+        )
+    )
+
+
+@router.get("/scouting/highlight-reel-exports", response_model=list[PerformanceHighlightReelExportRead])
+async def list_performance_highlight_reel_exports_route(
+    organization_id: UUID = Query(),
+    highlight_reel_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceHighlightReelExportRead]:
+    return [
+        PerformanceHighlightReelExportRead(**highlight_reel_export_read(export))
+        for export in await list_performance_highlight_reel_exports(
+            db,
+            identity,
+            organization_id,
+            authz,
+            highlight_reel_id=highlight_reel_id,
+        )
+    ]
+
+
 @router.get("/scouting/reports", response_model=list[OppositionScoutingReportRead])
 async def list_opposition_scouting_reports_route(
     organization_id: UUID = Query(),
@@ -1070,6 +1115,24 @@ async def download_performance_video_asset_route(
         headers={
             "Content-Disposition": f"inline; filename={artifact['filename']}",
             "X-Afrolete-Performance-Video-Checksum": str(artifact["checksum"]),
+        },
+    )
+
+
+@router.get("/scouting/highlight-reel-exports/{export_id}/content")
+async def download_performance_highlight_reel_export_route(
+    export_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> Response:
+    artifact = await downloadable_performance_highlight_reel_export(db, identity, export_id, authz)
+    return Response(
+        content=artifact["content"],
+        media_type=str(artifact["content_type"]),
+        headers={
+            "Content-Disposition": f"attachment; filename={artifact['filename']}",
+            "X-Afrolete-Highlight-Export-Checksum": str(artifact["checksum"]),
         },
     )
 

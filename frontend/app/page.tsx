@@ -363,6 +363,7 @@ import type {
   PerformanceHardwareDeviceRead,
   PerformanceHardwareKitRead,
   PerformanceHardwareSyncRunRead,
+  PerformanceHighlightReelExportRead,
   PerformanceHighlightReelRead,
   PerformanceInjuryRiskAlertRead,
   PerformanceInjuryRiskAlertRunRead,
@@ -1680,6 +1681,10 @@ export default function HomePage() {
     useState<PerformanceHardwareSyncRunRead | null>(null);
   const [performanceHighlightReels, setPerformanceHighlightReels] = useState<PerformanceHighlightReelRead[]>([]);
   const [performanceHighlightReel, setPerformanceHighlightReel] = useState<PerformanceHighlightReelRead | null>(null);
+  const [performanceHighlightReelExports, setPerformanceHighlightReelExports] =
+    useState<PerformanceHighlightReelExportRead[]>([]);
+  const [performanceHighlightReelExport, setPerformanceHighlightReelExport] =
+    useState<PerformanceHighlightReelExportRead | null>(null);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -3699,7 +3704,8 @@ export default function HomePage() {
       calibrationData,
       hardwareKitData,
       hardwareDeviceData,
-      highlightReelData
+      highlightReelData,
+      highlightExportData
     ] = await Promise.all([
       apiRequest<OppositionScoutingVideoAssetRead[]>(
         `/performance/scouting/videos?${params.toString()}`,
@@ -3728,6 +3734,10 @@ export default function HomePage() {
       apiRequest<PerformanceHighlightReelRead[]>(
         `/performance/scouting/highlight-reels?organization_id=${organizationId}`,
         { identity }
+      ),
+      apiRequest<PerformanceHighlightReelExportRead[]>(
+        `/performance/scouting/highlight-reel-exports?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setOppositionScoutingVideos(videoData);
@@ -3737,6 +3747,7 @@ export default function HomePage() {
     setPerformanceHardwareKits(hardwareKitData);
     setPerformanceHardwareDevices(hardwareDeviceData);
     setPerformanceHighlightReels(highlightReelData);
+    setPerformanceHighlightReelExports(highlightExportData);
     setOppositionScoutingVideo((current) =>
       current && videoData.some((video) => video.id === current.id) ? current : videoData[0] ?? null
     );
@@ -3753,6 +3764,11 @@ export default function HomePage() {
     );
     setPerformanceHighlightReel((current) =>
       current && highlightReelData.some((reel) => reel.id === current.id) ? current : highlightReelData[0] ?? null
+    );
+    setPerformanceHighlightReelExport((current) =>
+      current && highlightExportData.some((artifact) => artifact.id === current.id)
+        ? current
+        : highlightExportData[0] ?? null
     );
   }, [identity]);
 
@@ -4831,6 +4847,8 @@ export default function HomePage() {
       setPerformanceMatchPitchCalibration(null);
       setPerformanceHighlightReels([]);
       setPerformanceHighlightReel(null);
+      setPerformanceHighlightReelExports([]);
+      setPerformanceHighlightReelExport(null);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
@@ -10148,6 +10166,81 @@ export default function HomePage() {
           )
         );
         addLog(`${reel.title} generated with ${reel.clip_count} clip(s)`, "good");
+      }
+    );
+  };
+
+  const exportPerformanceHighlightReel = (exportFormat = "timeline_json") => {
+    if (!selectedOrganizationId || !performanceHighlightReel) {
+      addLog("Generate or select a highlight reel before exporting artifacts", "bad");
+      return;
+    }
+    runAction(
+      `export-performance-highlight-reel-${exportFormat}`,
+      () =>
+        apiRequest<PerformanceHighlightReelExportRead>(
+          `/performance/scouting/highlight-reels/${performanceHighlightReel.id}/exports`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              export_format: exportFormat,
+              delivery_channel: Array.isArray(performanceHighlightReel.distribution.channels)
+                ? String(performanceHighlightReel.distribution.channels[0] ?? "coach_review")
+                : "coach_review",
+              include_branding: true,
+              notes: `Console export for ${performanceHighlightReel.audience} ${performanceHighlightReel.purpose}.`
+            }
+          }
+        ),
+      (artifact) => {
+        setPerformanceHighlightReelExport(artifact);
+        setPerformanceHighlightReelExports((current) => [
+          artifact,
+          ...current.filter((item) => item.id !== artifact.id)
+        ]);
+        addLog(`${artifact.filename} ${artifact.status}`, artifact.status === "rendered" ? "good" : "neutral");
+      }
+    );
+  };
+
+  const downloadPerformanceHighlightReelExport = (artifact: PerformanceHighlightReelExportRead) => {
+    runAction(
+      `download-performance-highlight-export-${artifact.id}`,
+      async () => {
+        const headers = new Headers({ Accept: "*/*" });
+        if (authSession) {
+          headers.set("Authorization", `Bearer ${authSession.accessToken}`);
+        } else {
+          headers.set("X-Afrolete-Sub", identity.sub);
+          headers.set("X-Afrolete-Email", identity.email);
+          headers.set("X-Afrolete-Name", identity.name);
+        }
+        const response = await fetch(
+          `${apiBaseUrl}/api/v1/performance/scouting/highlight-reel-exports/${artifact.id}/content`,
+          { headers }
+        );
+        if (!response.ok) {
+          throw new Error(`Highlight reel export download failed: ${response.status}`);
+        }
+        const blob = await response.blob();
+        const href = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = href;
+        anchor.download = artifact.filename;
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(href);
+        return {
+          filename: artifact.filename,
+          checksum: response.headers.get("X-Afrolete-Highlight-Export-Checksum") ?? artifact.checksum,
+          size: blob.size
+        };
+      },
+      (download) => {
+        addLog(`${download.filename} downloaded (${download.size} bytes, ${download.checksum.slice(0, 8)})`, "good");
       }
     );
   };
@@ -24755,6 +24848,7 @@ export default function HomePage() {
                   <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Generate report</button>
                   <button type="button" onClick={calibrateOppositionMatchVideo} disabled={busyAction !== null}>Calibrate pitch</button>
                   <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
+                  <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>Export reel</button>
                 </div>
               </div>
               <div className="mini-grid">
@@ -24845,6 +24939,9 @@ export default function HomePage() {
                           );
                           setPerformanceHighlightReel(
                             performanceHighlightReels.find((reel) => reel.video_asset_id === video.id) ?? null
+                          );
+                          setPerformanceHighlightReelExport(
+                            performanceHighlightReelExports.find((artifact) => artifact.video_asset_id === video.id) ?? null
                           );
                         }} disabled={busyAction !== null}>Select</button>
                       </span>
@@ -24956,8 +25053,53 @@ export default function HomePage() {
                         </span>
                         <small>{String(performanceHighlightReel.distribution.caption ?? performanceHighlightReel.model_policy)}</small>
                       </div>
+                      <span>
+                        <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>JSON</button>
+                        <button type="button" onClick={() => exportPerformanceHighlightReel("mp4_edit_decision_list")} disabled={busyAction !== null}>EDL</button>
+                        <button type="button" onClick={() => exportPerformanceHighlightReel("social_caption_pack")} disabled={busyAction !== null}>Captions</button>
+                      </span>
                     </article>
                   ) : null}
+                  {performanceHighlightReelExport ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>{performanceHighlightReelExport.filename} · {performanceHighlightReelExport.status}</strong>
+                        <span>
+                          {performanceHighlightReelExport.export_format.replaceAll("_", " ")} ·{" "}
+                          {Math.round(performanceHighlightReelExport.size_bytes / 1024)} KB ·{" "}
+                          {performanceHighlightReelExport.content_type}
+                        </span>
+                        <small>
+                          {performanceHighlightReelExport.message ?? performanceHighlightReelExport.renderer_policy} ·{" "}
+                          checksum {performanceHighlightReelExport.checksum.slice(0, 12)}
+                        </small>
+                      </div>
+                      <span>
+                        <button
+                          type="button"
+                          onClick={() => downloadPerformanceHighlightReelExport(performanceHighlightReelExport)}
+                          disabled={busyAction !== null}
+                        >
+                          Download
+                        </button>
+                      </span>
+                    </article>
+                  ) : null}
+                  {performanceHighlightReelExports
+                    .filter((artifact) => artifact.highlight_reel_id === performanceHighlightReel?.id)
+                    .slice(0, 3)
+                    .map((artifact) => (
+                      <article key={artifact.id} className="task-card">
+                        <div>
+                          <strong>{artifact.export_format.replaceAll("_", " ")} · {artifact.status}</strong>
+                          <span>{artifact.filename} · {Math.round(artifact.size_bytes / 1024)} KB</span>
+                          <small>{artifact.message ?? artifact.storage_url}</small>
+                        </div>
+                        <span>
+                          <button type="button" onClick={() => setPerformanceHighlightReelExport(artifact)} disabled={busyAction !== null}>Open</button>
+                        </span>
+                      </article>
+                    ))}
                   {performanceHighlightReel?.clips.slice(0, 6).map((clip, index) => (
                     <article key={`${clip.title}-${index}`} className="task-card">
                       <div>

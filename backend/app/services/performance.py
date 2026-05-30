@@ -54,6 +54,7 @@ from app.models.performance import (
     PerformanceHardwareKit,
     PerformanceHardwareSyncRun,
     PerformanceHighlightReel,
+    PerformanceHighlightReelExport,
     PerformanceMatchPitchCalibration,
     PerformanceMatchTrackingRun,
     PerformanceMatchTrackingSample,
@@ -92,6 +93,7 @@ from app.schemas.performance import (
     PerformanceHardwareKitCreate,
     PerformanceHardwareSyncRunCreate,
     PerformanceHighlightReelCreate,
+    PerformanceHighlightReelExportCreate,
     PerformanceIngestionCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
@@ -1011,6 +1013,115 @@ async def list_performance_highlight_reels(
     if video_asset_id is not None:
         statement = statement.where(PerformanceHighlightReel.video_asset_id == video_asset_id)
     return list((await db.scalars(statement.order_by(PerformanceHighlightReel.generated_at.desc()).limit(25))).all())
+
+
+async def create_performance_highlight_reel_export(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    highlight_reel_id: UUID,
+    payload: PerformanceHighlightReelExportCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> PerformanceHighlightReelExport:
+    reel = await get_performance_highlight_reel(db, highlight_reel_id)
+    if reel.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, reel.organization_id)
+    video_asset = await get_opposition_scouting_video_asset(db, reel.video_asset_id)
+    selected_settings = settings or get_settings()
+    export_format = normalize_highlight_export_format(payload.export_format)
+    artifact = build_highlight_reel_export_artifact(
+        reel,
+        video_asset,
+        export_format=export_format,
+        delivery_channel=payload.delivery_channel,
+        include_branding=payload.include_branding,
+        notes=payload.notes,
+    )
+    now = datetime.now(UTC)
+    checksum = hashlib.sha256(artifact["content"]).hexdigest()
+    export_id = uuid4()
+    key = highlight_reel_export_object_key(reel.organization_id, reel.id, export_id, str(artifact["filename"]))
+    stored = put_object(
+        selected_settings,
+        local_root=selected_settings.performance_highlight_export_dir,
+        local_url_prefix=selected_settings.performance_highlight_export_url_prefix,
+        key=key,
+        content=artifact["content"],
+        content_type=str(artifact["content_type"]),
+    )
+    export = PerformanceHighlightReelExport(
+        id=export_id,
+        organization_id=reel.organization_id,
+        highlight_reel_id=reel.id,
+        video_asset_id=reel.video_asset_id,
+        tracking_run_id=reel.tracking_run_id,
+        requested_by_person_id=identity.person_id,
+        export_format=export_format,
+        status=str(artifact["status"]),
+        renderer_policy=str(artifact["renderer_policy"]),
+        filename=str(artifact["filename"]),
+        content_type=str(artifact["content_type"]),
+        storage_url=stored.url,
+        storage_path=stored.path,
+        checksum=checksum,
+        size_bytes=len(artifact["content"]),
+        message=str(artifact["message"]),
+        manifest_json=json.dumps(artifact["manifest"], default=str),
+        generated_at=now,
+    )
+    db.add(export)
+    await db.commit()
+    await db.refresh(export)
+    return export
+
+
+async def list_performance_highlight_reel_exports(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    highlight_reel_id: UUID | None = None,
+) -> list[PerformanceHighlightReelExport]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceHighlightReelExport).where(
+        PerformanceHighlightReelExport.organization_id == organization_id
+    )
+    if highlight_reel_id is not None:
+        statement = statement.where(PerformanceHighlightReelExport.highlight_reel_id == highlight_reel_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(PerformanceHighlightReelExport.generated_at.desc()).limit(50)
+            )
+        ).all()
+    )
+
+
+async def downloadable_performance_highlight_reel_export(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    export_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    export = await get_performance_highlight_reel_export(db, export_id)
+    await ensure_manage_performance(authz, identity, export.organization_id)
+    selected_settings = settings or get_settings()
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.performance_highlight_export_dir,
+        key=performance_highlight_reel_export_object_key(export, selected_settings),
+    )
+    checksum = hashlib.sha256(content).hexdigest()
+    if checksum != export.checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Highlight export checksum mismatch")
+    return {
+        "content": content,
+        "content_type": export.content_type,
+        "filename": export.filename,
+        "checksum": checksum,
+    }
 
 
 async def downloadable_performance_video_asset(
@@ -7400,6 +7511,41 @@ def opposition_scouting_video_object_key(video_asset: OppositionScoutingVideoAss
         return (Path(str(video_asset.organization_id)) / "scouting" / Path(video_asset.storage_path).name).as_posix()
 
 
+def highlight_reel_export_object_key(
+    organization_id: UUID,
+    highlight_reel_id: UUID,
+    export_id: UUID,
+    filename: str,
+) -> str:
+    return (
+        Path(str(organization_id))
+        / "highlight-exports"
+        / str(highlight_reel_id)
+        / f"{export_id}-{safe_highlight_export_filename(filename)}"
+    ).as_posix()
+
+
+def performance_highlight_reel_export_object_key(
+    export: PerformanceHighlightReelExport,
+    settings: Settings,
+) -> str:
+    if export.storage_path.startswith("s3://"):
+        prefix = f"s3://{settings.object_storage_bucket}/"
+        if export.storage_path.startswith(prefix):
+            return export.storage_path[len(prefix):]
+    local_root = Path(settings.performance_highlight_export_dir)
+    storage_path = Path(export.storage_path)
+    try:
+        return storage_path.relative_to(local_root).as_posix()
+    except ValueError:
+        return highlight_reel_export_object_key(
+            export.organization_id,
+            export.highlight_reel_id,
+            export.id,
+            export.filename,
+        )
+
+
 def match_pitch_calibration_read(calibration: PerformanceMatchPitchCalibration) -> dict[str, object]:
     return {
         "id": calibration.id,
@@ -8086,6 +8232,187 @@ def highlight_reel_read(reel: PerformanceHighlightReel) -> dict[str, object]:
         "generated_at": reel.generated_at,
         "created_at": reel.created_at,
     }
+
+
+def highlight_reel_export_read(export: PerformanceHighlightReelExport) -> dict[str, object]:
+    return {
+        "id": export.id,
+        "organization_id": export.organization_id,
+        "highlight_reel_id": export.highlight_reel_id,
+        "video_asset_id": export.video_asset_id,
+        "tracking_run_id": export.tracking_run_id,
+        "requested_by_person_id": export.requested_by_person_id,
+        "export_format": export.export_format,
+        "status": export.status,
+        "renderer_policy": export.renderer_policy,
+        "filename": export.filename,
+        "content_type": export.content_type,
+        "storage_url": export.storage_url,
+        "checksum": export.checksum,
+        "size_bytes": export.size_bytes,
+        "message": export.message,
+        "manifest": decode_json_dict(export.manifest_json),
+        "generated_at": export.generated_at,
+        "created_at": export.created_at,
+    }
+
+
+async def get_performance_highlight_reel(db: AsyncSession, highlight_reel_id: UUID) -> PerformanceHighlightReel:
+    reel = await db.get(PerformanceHighlightReel, highlight_reel_id)
+    if reel is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Highlight reel not found")
+    return reel
+
+
+async def get_performance_highlight_reel_export(
+    db: AsyncSession,
+    export_id: UUID,
+) -> PerformanceHighlightReelExport:
+    export = await db.get(PerformanceHighlightReelExport, export_id)
+    if export is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Highlight reel export not found")
+    return export
+
+
+def normalize_highlight_export_format(value: str) -> str:
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "json": "timeline_json",
+        "timeline": "timeline_json",
+        "edl": "mp4_edit_decision_list",
+        "mp4": "mp4_edit_decision_list",
+        "mp4_stub": "mp4_edit_decision_list",
+        "caption": "social_caption_pack",
+        "captions": "social_caption_pack",
+        "caption_pack": "social_caption_pack",
+        "social": "social_caption_pack",
+    }
+    normalized = aliases.get(normalized, normalized)
+    allowed = {"timeline_json", "mp4_edit_decision_list", "social_caption_pack"}
+    if normalized not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unsupported highlight export format",
+        )
+    return normalized
+
+
+def build_highlight_reel_export_artifact(
+    reel: PerformanceHighlightReel,
+    video_asset: OppositionScoutingVideoAsset,
+    *,
+    export_format: str,
+    delivery_channel: str,
+    include_branding: bool,
+    notes: str | None,
+) -> dict[str, object]:
+    reel_payload = highlight_reel_read(reel)
+    base_manifest: dict[str, object] = {
+        "render_policy": "afrolete-highlight-export-v1",
+        "export_format": export_format,
+        "delivery_channel": delivery_channel.strip().lower(),
+        "source_video": {
+            "id": str(video_asset.id),
+            "filename": video_asset.filename,
+            "storage_url": video_asset.storage_url,
+            "video_uri": video_asset.video_uri,
+            "content_type": video_asset.content_type,
+            "checksum": video_asset.checksum,
+            "sport": video_asset.sport,
+            "opponent_name": video_asset.opponent_name,
+            "match_context": video_asset.match_context,
+        },
+        "reel": reel_payload,
+        "clips": reel_payload["clips"],
+        "distribution": reel_payload["distribution"],
+        "branding": reel_payload["branding"] if include_branding else None,
+        "operator_notes": notes,
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
+    safe_title = safe_highlight_export_filename(reel.title)
+    if export_format == "timeline_json":
+        content = json.dumps(base_manifest, indent=2, default=str).encode()
+        return {
+            "filename": f"{safe_title}-timeline.json",
+            "content_type": "application/json",
+            "content": content,
+            "status": "rendered",
+            "renderer_policy": "afrolete-highlight-export-v1",
+            "message": "Timeline JSON is ready for review, archive, or renderer handoff.",
+            "manifest": base_manifest,
+        }
+    if export_format == "mp4_edit_decision_list":
+        edit_decisions = [
+            {
+                "clip_number": index,
+                "source_in_seconds": clip.get("start_seconds"),
+                "source_out_seconds": clip.get("end_seconds"),
+                "timeline_in_seconds": round(sum(float(item.get("duration_seconds") or 0.0) for item in base_manifest["clips"][: index - 1]), 2),
+                "duration_seconds": clip.get("duration_seconds"),
+                "title": clip.get("title"),
+                "overlay_note": clip.get("coaching_note"),
+                "tags": clip.get("tags"),
+            }
+            for index, clip in enumerate(base_manifest["clips"], start=1)
+            if isinstance(clip, dict)
+        ]
+        manifest = {
+            **base_manifest,
+            "edit_decisions": edit_decisions,
+            "renderer_status": "needs_renderer",
+            "ffmpeg_policy": "Render source clips in order, preserve audio, add title/coach-note overlays where allowed.",
+        }
+        content = json.dumps(manifest, indent=2, default=str).encode()
+        return {
+            "filename": f"{safe_title}-edl.json",
+            "content_type": "application/json",
+            "content": content,
+            "status": "needs_renderer",
+            "renderer_policy": "afrolete-highlight-edl-v1",
+            "message": "Edit decision list is ready; MP4 clipping/rendering worker must render final video.",
+            "manifest": manifest,
+        }
+    caption_lines = [
+        f"# {reel.title}",
+        "",
+        str(base_manifest["distribution"].get("caption") if isinstance(base_manifest["distribution"], dict) else ""),
+        "",
+        f"Audience: {reel.audience}",
+        f"Purpose: {reel.purpose}",
+        f"Delivery: {delivery_channel.strip().lower()}",
+        "",
+        "## Clip Captions",
+    ]
+    for index, clip in enumerate(base_manifest["clips"], start=1):
+        if not isinstance(clip, dict):
+            continue
+        caption_lines.extend(
+            [
+                "",
+                f"{index}. {clip.get('title')}",
+                f"   - Window: {clip.get('start_seconds')}s-{clip.get('end_seconds')}s",
+                f"   - Evidence: {clip.get('evidence')}",
+                f"   - Coach note: {clip.get('coaching_note')}",
+            ]
+        )
+    if notes:
+        caption_lines.extend(["", "## Operator Notes", notes])
+    content = "\n".join(caption_lines).encode()
+    manifest = {**base_manifest, "caption_count": len(base_manifest["clips"])}
+    return {
+        "filename": f"{safe_title}-captions.md",
+        "content_type": "text/markdown; charset=utf-8",
+        "content": content,
+        "status": "rendered",
+        "renderer_policy": "afrolete-highlight-caption-pack-v1",
+        "message": "Caption pack is ready for social, family, scout, or coach distribution review.",
+        "manifest": manifest,
+    }
+
+
+def safe_highlight_export_filename(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip().lower()).strip("-")
+    return safe[:120] or "highlight-reel"
 
 
 def decode_json_list(value: str | None) -> list[dict[str, object]]:

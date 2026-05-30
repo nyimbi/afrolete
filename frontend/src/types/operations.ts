@@ -7038,6 +7038,27 @@ export type PerformanceHighlightReelRead = {
   created_at: string;
 };
 
+export type PerformanceHighlightReelExportRead = {
+  id: UUID;
+  organization_id: UUID;
+  highlight_reel_id: UUID;
+  video_asset_id: UUID;
+  tracking_run_id: UUID | null;
+  requested_by_person_id: UUID | null;
+  export_format: string;
+  status: string;
+  renderer_policy: string;
+  filename: string;
+  content_type: string;
+  storage_url: string;
+  checksum: string;
+  size_bytes: number;
+  message: string | null;
+  manifest: Record<string, unknown>;
+  generated_at: string;
+  created_at: string;
+};
+
 export type PerformanceVideoAnnotationRead = {
   id: UUID;
   organization_id: UUID;
