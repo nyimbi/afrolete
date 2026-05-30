@@ -88,9 +88,11 @@ creates `/api/v1/performance/scouting/videos/{video_asset_id}/tracking-runs`
 records that feed distance, speed, heatmap, possession, pass/turnover,
 pass-type accuracy, defensive ball-win labels, pass-network, shot/xG,
 tactical-shape, highlight, tracking-informed opposition scouting, and
-player-guidance workflows. The operations console can review those samples on a
-pitch replay with player/ball dots, recent trails, a time slider, and team
-legend before coaches rely on the derived metrics.
+player-guidance workflows. The same run now emits basic recognized actions for
+passes, shots, defensive ball wins, pressure, high-speed runs, carries, and
+off-ball runs with confidence and coaching cues. The operations console can
+review those samples on a pitch replay with player/ball dots, recent trails, a
+time slider, and team legend before coaches rely on the derived metrics.
 
 ## Reset
 

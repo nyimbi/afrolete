@@ -3131,6 +3131,11 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert tracking["possession_estimates"][0]["team_label"] == "Home"
     assert tracking["possession_estimates"][0]["possession_percent"] > 60
     assert {event["event_type"] for event in tracking["ball_action_events"]} == {"pass", "turnover"}
+    recognized_actions = {event["action_type"] for event in tracking["recognized_action_events"]}
+    assert {"pass_completion", "tackle", "pressure", "high_speed_run"} <= recognized_actions
+    assert tracking["action_recognition_metrics"]["model_policy"] == "afrolete-tracking-action-recognition-v1"
+    assert tracking["action_recognition_metrics"]["event_count"] == len(tracking["recognized_action_events"])
+    assert tracking["action_recognition_metrics"]["average_confidence"] > 0
     assert any(snapshot["team_label"] == "Home" for snapshot in tracking["formation_snapshots"])
     assert any("Home" in guidance for guidance in tracking["tactical_guidance"])
 

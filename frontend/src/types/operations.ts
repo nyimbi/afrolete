@@ -6962,6 +6962,8 @@ export type PerformanceMatchTrackingRunRead = {
   ball_tracking_metrics: Record<string, unknown>;
   possession_estimates: Record<string, unknown>[];
   ball_action_events: Record<string, unknown>[];
+  recognized_action_events: Record<string, unknown>[];
+  action_recognition_metrics: Record<string, unknown>;
   shot_events: Record<string, unknown>[];
   pass_network: Record<string, unknown>[];
   pass_type_metrics: Record<string, unknown>[];

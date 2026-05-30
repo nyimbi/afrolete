@@ -666,6 +666,8 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     ball_tracking_metrics: dict[str, Any] = Field(default_factory=dict)
     possession_estimates: list[dict[str, Any]] = Field(default_factory=list)
     ball_action_events: list[dict[str, Any]] = Field(default_factory=list)
+    recognized_action_events: list[dict[str, Any]] = Field(default_factory=list)
+    action_recognition_metrics: dict[str, Any] = Field(default_factory=dict)
     shot_events: list[dict[str, Any]] = Field(default_factory=list)
     pass_network: list[dict[str, Any]] = Field(default_factory=list)
     pass_type_metrics: list[dict[str, Any]] = Field(default_factory=list)

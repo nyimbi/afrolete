@@ -8658,6 +8658,11 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
     team_shape = derive_match_team_shape(player_samples)
     football_context = derive_match_football_context(player_samples, player_metrics)
     ball_context = derive_match_ball_context(samples, player_metrics)
+    action_context = derive_match_action_recognition(
+        player_metrics=player_metrics,
+        pressure_events=football_context["pressure_events"],
+        ball_action_events=ball_context["ball_action_events"],
+    )
     return {
         "sample_count": len(samples),
         "player_count": len(player_metrics),
@@ -8677,6 +8682,8 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         "ball_tracking_metrics": ball_context["ball_tracking_metrics"],
         "possession_estimates": ball_context["possession_estimates"],
         "ball_action_events": ball_context["ball_action_events"],
+        "recognized_action_events": action_context["recognized_action_events"],
+        "action_recognition_metrics": action_context["action_recognition_metrics"],
         "shot_events": ball_context["shot_events"],
         "pass_network": ball_context["pass_network"],
         "pass_type_metrics": ball_context["pass_type_metrics"],
@@ -9206,6 +9213,206 @@ def nearest_ball_holder(
         (float(nearest["x_meters"]), float(nearest["y_meters"])),
     )
     return nearest if distance <= 12.0 else None
+
+
+def derive_match_action_recognition(
+    *,
+    player_metrics: list[dict[str, object]],
+    pressure_events: list[dict[str, object]],
+    ball_action_events: list[dict[str, object]],
+) -> dict[str, object]:
+    events: list[dict[str, object]] = []
+
+    def add_event(
+        *,
+        action_type: str,
+        title: str,
+        timestamp_seconds: float | None,
+        primary_track_id: str | None,
+        team_label: str | None,
+        zone: str | None,
+        confidence: float,
+        evidence: str,
+        coaching_cue: str,
+        secondary_track_id: str | None = None,
+        source: str = "tracking_heuristic",
+    ) -> None:
+        if len(events) >= 100:
+            return
+        events.append(
+            {
+                "action_type": action_type,
+                "title": title,
+                "timestamp_seconds": round(timestamp_seconds, 2) if timestamp_seconds is not None else None,
+                "primary_track_id": primary_track_id,
+                "secondary_track_id": secondary_track_id,
+                "team_label": team_label,
+                "zone": zone,
+                "confidence": round(max(0.0, min(confidence, 0.96)), 3),
+                "evidence": evidence,
+                "coaching_cue": coaching_cue,
+                "source": source,
+            }
+        )
+
+    for event in ball_action_events:
+        event_type = str(event.get("event_type") or "")
+        timestamp = float(event.get("timestamp_seconds") or 0.0)
+        zone = str(event.get("zone") or "unknown")
+        if event_type == "shot":
+            xg = float(event.get("expected_goals") or 0.0)
+            add_event(
+                action_type="shot_attempt",
+                title="Shot attempt",
+                timestamp_seconds=timestamp,
+                primary_track_id=str(event.get("shooter_track_id") or "unknown"),
+                team_label=str(event.get("shooter_team_label") or "unassigned"),
+                zone=zone,
+                confidence=0.78 + min(xg, 0.5) * 0.2,
+                evidence=(
+                    f"Ball movement reached the {event.get('target_goal', 'goal')} goal zone "
+                    f"with {xg:.2f} xG."
+                ),
+                coaching_cue="Review shot selection, support options, and rebound positioning.",
+            )
+        elif event_type == "pass":
+            pass_type = str(event.get("pass_type") or "pass").replace("_", " ")
+            add_event(
+                action_type="pass_completion",
+                title=f"{pass_type.title()} completed",
+                timestamp_seconds=timestamp,
+                primary_track_id=str(event.get("from_track_id") or "unknown"),
+                secondary_track_id=str(event.get("to_track_id") or "unknown"),
+                team_label=str(event.get("from_team_label") or "unassigned"),
+                zone=zone,
+                confidence=0.84 if event.get("outcome") == "completed" else 0.72,
+                evidence=f"Ball travelled {event.get('ball_distance_m', 0)}m between same-team holders.",
+                coaching_cue="Tag the receiving body shape and next action after the pass.",
+            )
+        elif event_type == "turnover":
+            defensive_action = str(event.get("defensive_action_type") or "ball_win")
+            add_event(
+                action_type=defensive_action,
+                title=defensive_action.replace("_", " ").title(),
+                timestamp_seconds=timestamp,
+                primary_track_id=str(event.get("to_track_id") or "unknown"),
+                secondary_track_id=str(event.get("from_track_id") or "unknown"),
+                team_label=str(event.get("to_team_label") or "unassigned"),
+                zone=zone,
+                confidence=0.82 if defensive_action == "interception" else 0.76,
+                evidence=f"Possession changed teams after {event.get('ball_distance_m', 0)}m ball movement.",
+                coaching_cue="Review counter-press spacing and the first pass after the ball win.",
+            )
+
+    for event in pressure_events[:40]:
+        distance = float(event.get("distance_m") or 0.0)
+        add_event(
+            action_type="pressure",
+            title="Pressure applied",
+            timestamp_seconds=float(event.get("timestamp_seconds") or 0.0),
+            primary_track_id=str(event.get("presser_track_id") or "unknown"),
+            secondary_track_id=str(event.get("receiver_track_id") or "unknown"),
+            team_label=str(event.get("pressing_team_label") or "unassigned"),
+            zone=str(event.get("zone") or "unknown"),
+            confidence=0.88 if distance <= 4.0 else 0.72,
+            evidence=f"Nearest-opponent distance closed to {distance:.1f}m.",
+            coaching_cue="Check pressing cover: nearest support, escape route, and foul risk.",
+        )
+
+    for metric in player_metrics:
+        label = str(metric.get("player_label") or metric.get("track_id") or "player")
+        track_id = str(metric.get("track_id") or "unknown")
+        team_label = str(metric.get("team_label") or "unassigned")
+        zone = str(metric.get("dominant_zone") or "unknown")
+        sprint_count = int(metric.get("sprint_count") or 0)
+        if sprint_count > 0:
+            add_event(
+                action_type="high_speed_run",
+                title=f"{label} high-speed run",
+                timestamp_seconds=None,
+                primary_track_id=track_id,
+                team_label=team_label,
+                zone=zone,
+                confidence=0.82 if sprint_count >= 2 else 0.74,
+                evidence=(
+                    f"{sprint_count} sprint(s), {metric.get('high_speed_distance_m', 0)}m high-speed "
+                    f"distance, max {metric.get('max_speed_mps', 0)} m/s."
+                ),
+                coaching_cue="Review run timing, deceleration, and recovery spacing.",
+            )
+        off_ball_runs = int(metric.get("off_ball_run_count") or 0)
+        if off_ball_runs > 0:
+            add_event(
+                action_type="off_ball_run",
+                title=f"{label} off-ball run",
+                timestamp_seconds=None,
+                primary_track_id=track_id,
+                team_label=team_label,
+                zone=zone,
+                confidence=0.74,
+                evidence=f"{off_ball_runs} off-ball run(s) detected away from nearest opponent pressure.",
+                coaching_cue="Review whether the run opened a passing lane or dragged a defender.",
+            )
+        territorial_advances = int(metric.get("territorial_advance_count") or 0)
+        if territorial_advances > 0:
+            add_event(
+                action_type="territorial_advance",
+                title=f"{label} territorial advance",
+                timestamp_seconds=None,
+                primary_track_id=track_id,
+                team_label=team_label,
+                zone=zone,
+                confidence=0.72,
+                evidence=f"{territorial_advances} forward territorial advance(s) from tracking deltas.",
+                coaching_cue="Review support angles behind the advancing player.",
+            )
+        ball_carry = float(metric.get("ball_carry_m") or 0.0)
+        if ball_carry >= 5.0:
+            add_event(
+                action_type="ball_carry",
+                title=f"{label} ball carry",
+                timestamp_seconds=None,
+                primary_track_id=track_id,
+                team_label=team_label,
+                zone=zone,
+                confidence=0.78,
+                evidence=f"{ball_carry:.1f}m of ball-carry distance while nearest to the ball.",
+                coaching_cue="Review carry timing, defender engagement, and release point.",
+            )
+
+    events.sort(
+        key=lambda event: (
+            float(event["timestamp_seconds"]) if event["timestamp_seconds"] is not None else 10_000.0,
+            str(event["action_type"]),
+            str(event["primary_track_id"] or ""),
+        )
+    )
+    action_counts: dict[str, int] = {}
+    confidence_total = 0.0
+    high_confidence_count = 0
+    for event in events:
+        action_type = str(event["action_type"])
+        action_counts[action_type] = action_counts.get(action_type, 0) + 1
+        confidence = float(event["confidence"])
+        confidence_total += confidence
+        if confidence >= 0.8:
+            high_confidence_count += 1
+    primary_actions = [
+        {"action_type": action_type, "count": count}
+        for action_type, count in sorted(action_counts.items(), key=lambda item: (-item[1], item[0]))[:8]
+    ]
+    return {
+        "recognized_action_events": events[:100],
+        "action_recognition_metrics": {
+            "model_policy": "afrolete-tracking-action-recognition-v1",
+            "event_count": len(events),
+            "action_type_counts": action_counts,
+            "primary_actions": primary_actions,
+            "high_confidence_count": high_confidence_count,
+            "average_confidence": round(confidence_total / len(events), 3) if events else 0.0,
+            "review_required": True,
+        },
+    }
 
 
 def match_tracking_pass_type(
@@ -10440,6 +10647,8 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "ball_tracking_metrics": summary.get("ball_tracking_metrics", {}),
         "possession_estimates": summary.get("possession_estimates", []),
         "ball_action_events": summary.get("ball_action_events", []),
+        "recognized_action_events": summary.get("recognized_action_events", []),
+        "action_recognition_metrics": summary.get("action_recognition_metrics", {}),
         "shot_events": summary.get("shot_events", []),
         "pass_network": summary.get("pass_network", []),
         "pass_type_metrics": summary.get("pass_type_metrics", []),

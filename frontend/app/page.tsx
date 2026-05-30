@@ -25326,6 +25326,15 @@ export default function HomePage() {
                   </p>
                 </article>
                 <article className="mini-card">
+                  <span className="muted">Actions</span>
+                  <strong>{Number(performanceMatchTrackingRun?.action_recognition_metrics.event_count ?? 0)} event(s)</strong>
+                  <p>
+                    {performanceMatchTrackingRun?.recognized_action_events[0]
+                      ? `${Number(performanceMatchTrackingRun.action_recognition_metrics.high_confidence_count ?? 0)} high-confidence · ${Math.round(Number(performanceMatchTrackingRun.action_recognition_metrics.average_confidence ?? 0) * 100)}% avg`
+                      : "Passes, shots, pressure, defensive wins, sprints, carries, and off-ball runs appear after tracking."}
+                  </p>
+                </article>
+                <article className="mini-card">
                   <span className="muted">Calibration</span>
                   <strong>{performanceMatchPitchCalibration ? `${Math.round(performanceMatchPitchCalibration.quality_score * 100)}%` : "none"}</strong>
                   <p>
@@ -25418,6 +25427,40 @@ export default function HomePage() {
                   {performanceMatchTrackingRun.samples.length > 0 ? (
                     <MatchTrackingPitchReplay key={performanceMatchTrackingRun.id} run={performanceMatchTrackingRun} />
                   ) : null}
+                  {performanceMatchTrackingRun.recognized_action_events.length > 0 ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>Action recognition</strong>
+                        <span>
+                          {Number(performanceMatchTrackingRun.action_recognition_metrics.event_count ?? 0)} event(s) ·{" "}
+                          {Math.round(Number(performanceMatchTrackingRun.action_recognition_metrics.average_confidence ?? 0) * 100)}% average confidence
+                        </span>
+                        <small>
+                          {String(performanceMatchTrackingRun.action_recognition_metrics.model_policy ?? "tracking-action-recognition")} · coach review required
+                        </small>
+                      </div>
+                    </article>
+                  ) : null}
+                  {performanceMatchTrackingRun.recognized_action_events.slice(0, 8).map((event, index) => (
+                    <article key={`recognized-action-${index}-${String(event.action_type ?? "action")}`} className="task-card">
+                      <div>
+                        <strong>
+                          {String(event.title ?? event.action_type ?? "Recognized action")} · {Math.round(Number(event.confidence ?? 0) * 100)}%
+                        </strong>
+                        <span>
+                          {String(event.action_type ?? "action").replaceAll("_", " ")}
+                          {event.team_label ? ` · ${String(event.team_label)}` : ""}
+                          {event.timestamp_seconds !== null && event.timestamp_seconds !== undefined
+                            ? ` · ${Number(event.timestamp_seconds).toFixed(1)}s`
+                            : " · aggregate"}
+                        </span>
+                        <small>
+                          {String(event.evidence ?? "Tracking-derived action evidence.")}
+                          {event.coaching_cue ? ` ${String(event.coaching_cue)}` : ""}
+                        </small>
+                      </div>
+                    </article>
+                  ))}
                   <article className="task-card">
                     <div>
                       <strong>Shareable player guidance</strong>
