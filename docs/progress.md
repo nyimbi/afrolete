@@ -1264,6 +1264,7 @@ Latest slices:
 - Coaches can now review match-guidance engagement summaries by published player card, including read rates, feedback counts, completed action plans, help requests, player response previews, and queued Training Strategy Agent task status in the operations console.
 - Coach match-guidance engagement cards can now send targeted follow-up messages back to players from feedback/help requests, persist the coach response on the feedback record, and show follow-up delivery state in the operations console.
 - Player match-guidance cards now show coach follow-up messages and timestamps after a coach replies to an athlete help request, so the player guidance loop closes on the same card that originated the request.
+- Family-copied match-guidance cards now accept guardian feedback and help requests, queue Training Strategy Agent review tasks, appear in coach engagement summaries, and show coach replies back inside the family portal card.
 
 ## Next Actions
 

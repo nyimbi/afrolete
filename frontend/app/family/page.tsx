@@ -30,6 +30,7 @@ import type {
   FamilyPerformanceSummaryRead,
   LocalIdentity,
   MessageRecipientRead,
+  PlayerMatchGuidanceFeedbackRead,
   PerformanceSharedHighlightReelRead
 } from "@/types/operations";
 
@@ -403,6 +404,48 @@ export default function FamilyPortalPage() {
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Read update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitMatchGuidanceFeedback = async (
+    guidance: FamilyMatchGuidanceRead,
+    status: "acknowledged" | "needs_help" | "completed" | "confused" | "inspired",
+    requestedFollowUp = false
+  ) => {
+    setBusy(true);
+    setError("");
+    try {
+      const feedback = await apiRequest<PlayerMatchGuidanceFeedbackRead>(
+        `/safeguarding/my-family/match-guidance/${guidance.guidance_recipient_id}/feedback`,
+        {
+          method: "POST",
+          identity: requestIdentity,
+          body: {
+            organization_id: organizationId,
+            status,
+            rating: requestedFollowUp ? 3 : status === "completed" ? 5 : 4,
+            response_text: requestedFollowUp
+              ? "Guardian reviewed this match guidance and needs coach help."
+              : status === "completed"
+                ? "Guardian reviewed this guidance with the athlete."
+                : "Guardian reviewed this match guidance.",
+            priority_focus: requestedFollowUp ? "guardian_question" : "family_review",
+            requested_follow_up: requestedFollowUp,
+            completed_action_count: status === "completed" ? guidance.action_plan.length : 0
+          }
+        }
+      );
+      setMatchGuidance((current) =>
+        current.map((item) =>
+          item.guidance_recipient_id === guidance.guidance_recipient_id
+            ? { ...item, feedback, guidance_delivery_status: "read" }
+            : item
+        )
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Match guidance feedback failed");
     } finally {
       setBusy(false);
     }
@@ -911,12 +954,37 @@ export default function FamilyPortalPage() {
                       {String(firstAction.drill_recommendation ?? "Coach review")}
                     </small>
                   ) : null}
+                  <small>
+                    {guidance.feedback
+                      ? `${guidance.feedback.status.replaceAll("_", " ")}${guidance.feedback.requested_follow_up ? " · coach help requested" : ""}`
+                      : "waiting for family feedback"}
+                  </small>
+                  {guidance.feedback?.coach_followup_sent_at ? (
+                    <small>
+                      Coach follow-up {formatDate(guidance.feedback.coach_followup_sent_at)} ·{" "}
+                      {guidance.feedback.coach_followup_notes ?? "open your inbox for the full response"}
+                    </small>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => markRead(guidance.guidance_recipient_id)}
                     disabled={busy || guidance.guidance_delivery_status === "read"}
                   >
                     Mark reviewed
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => submitMatchGuidanceFeedback(guidance, "needs_help", true)}
+                    disabled={busy}
+                  >
+                    Ask coach
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => submitMatchGuidanceFeedback(guidance, "completed")}
+                    disabled={busy}
+                  >
+                    Reviewed with player
                   </button>
                 </article>
               );

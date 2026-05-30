@@ -2208,6 +2208,7 @@ export type FamilyMatchGuidanceRead = {
   action_plan: Record<string, unknown>[];
   tactical_context: string[];
   quality_warnings: string[];
+  feedback: PlayerMatchGuidanceFeedbackRead | null;
 };
 
 export type FamilyDashboardActionRead = {

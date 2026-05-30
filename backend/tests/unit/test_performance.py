@@ -724,6 +724,65 @@ def test_family_portal_shows_only_guardian_copied_match_guidance(client, identit
     assert family_after_read_response.status_code == 200
     assert family_after_read_response.json()[0]["guidance_delivery_status"] == "read"
 
+    family_feedback_response = client.post(
+        f"/api/v1/safeguarding/my-family/match-guidance/{guidance[0]['guidance_recipient_id']}/feedback",
+        headers=guardian_headers,
+        json={
+            "organization_id": organization["id"],
+            "status": "needs_help",
+            "rating": 3,
+            "response_text": "Please help us understand this match load guidance.",
+            "priority_focus": "family recovery support",
+            "requested_follow_up": True,
+            "completed_action_count": 0,
+        },
+    )
+    assert family_feedback_response.status_code == 201
+    family_feedback = family_feedback_response.json()
+    assert family_feedback["message_recipient_id"] == guidance[0]["guidance_recipient_id"]
+    assert family_feedback["person_id"] == guardian["guardian_person_id"]
+    assert family_feedback["status"] == "needs_help"
+    assert family_feedback["agent_task_id"] is not None
+
+    family_after_feedback_response = client.get(
+        f"/api/v1/safeguarding/my-family/match-guidance?organization_id={organization['id']}",
+        headers=guardian_headers,
+    )
+    assert family_after_feedback_response.status_code == 200
+    family_feedback_card = family_after_feedback_response.json()[0]
+    assert family_feedback_card["feedback"]["id"] == family_feedback["id"]
+    assert family_feedback_card["feedback"]["agent_task_id"] == family_feedback["agent_task_id"]
+
+    engagement_response = client.get(
+        f"/api/v1/performance/scouting/match-guidance-engagement?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert engagement_response.status_code == 200
+    guardian_recipient = next(recipient for recipient in engagement_response.json()[0]["recipients"] if not recipient["is_player"])
+    assert guardian_recipient["feedback_id"] == family_feedback["id"]
+    assert guardian_recipient["feedback_requested_follow_up"] is True
+
+    coach_family_followup_response = client.post(
+        f"/api/v1/performance/scouting/match-guidance-feedback/{family_feedback['id']}/followup",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "subject_prefix": "Family follow-up",
+            "coach_notes": "Use a lighter recovery day and contact the coach if soreness rises.",
+            "include_agent_review": True,
+        },
+    )
+    assert coach_family_followup_response.status_code == 201
+    family_after_coach_response = client.get(
+        f"/api/v1/safeguarding/my-family/match-guidance?organization_id={organization['id']}",
+        headers=guardian_headers,
+    )
+    assert family_after_coach_response.status_code == 200
+    guardian_feedback = family_after_coach_response.json()[0]["feedback"]
+    assert guardian_feedback["coach_followup_message_id"] == coach_family_followup_response.json()["message_id"]
+    assert guardian_feedback["coach_followup_notes"] == "Use a lighter recovery day and contact the coach if soreness rises."
+
     unrelated_response = client.get(
         f"/api/v1/safeguarding/my-family/match-guidance?organization_id={organization['id']}",
         headers=unrelated_guardian_headers,

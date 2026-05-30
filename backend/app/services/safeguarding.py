@@ -62,6 +62,7 @@ from app.models.performance import (
     OppositionScoutingVideoAsset,
     PerformanceAchievementAward,
     PerformanceGoal,
+    PerformanceMatchPlayerGuidanceFeedback,
     PerformanceMatchPlayerGuidancePublishAudit,
     PerformanceMatchTrackingRun,
     PerformanceMatchTrackingSample,
@@ -96,6 +97,7 @@ from app.schemas.safeguarding import (
     FamilyScheduleConflictRead,
     FamilyConsentRequestRead,
     FamilyConsentResponseCreate,
+    FamilyMatchGuidanceFeedbackCreate,
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
     FamilyMatchGuidanceRead,
@@ -5696,7 +5698,11 @@ async def list_my_family_match_guidance(
     organization_id: UUID,
     limit: int = 20,
 ) -> list[FamilyMatchGuidanceRead]:
-    from app.services.performance import build_player_match_guidance, decode_match_tracking_summary
+    from app.services.performance import (
+        build_player_match_guidance,
+        decode_match_tracking_summary,
+        player_match_guidance_feedback_for_recipient,
+    )
 
     relationship_rows = (
         await db.execute(
@@ -5777,6 +5783,7 @@ async def list_my_family_match_guidance(
             summary=summary,
             publish_audit=audit,
             player_recipient=recipient,
+            feedback=await player_match_guidance_feedback_for_recipient(db, recipient.id),
         )
         guidance.append(
             FamilyMatchGuidanceRead(
@@ -5789,6 +5796,97 @@ async def list_my_family_match_guidance(
         if len(guidance) >= limit:
             break
     return guidance
+
+
+async def submit_my_family_match_guidance_feedback(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    recipient_id: UUID,
+    payload: FamilyMatchGuidanceFeedbackCreate,
+) -> PerformanceMatchPlayerGuidanceFeedback:
+    from app.services.performance import (
+        player_match_guidance_feedback_for_recipient,
+        queue_player_match_guidance_feedback_agent_review,
+    )
+
+    recipient = await db.get(MessageRecipient, recipient_id)
+    if recipient is None or recipient.person_id != identity.person_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Family match guidance recipient not found")
+    audit = await db.scalar(
+        select(PerformanceMatchPlayerGuidancePublishAudit)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.message_id == recipient.message_id)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.status == "published")
+        .limit(1)
+    )
+    if audit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published match guidance not found")
+    if audit.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    guardian_relationship = await db.scalar(
+        select(GuardianRelationship)
+        .join(AthleteProfile, AthleteProfile.person_id == GuardianRelationship.athlete_person_id)
+        .where(AthleteProfile.organization_id == audit.organization_id)
+        .where(GuardianRelationship.athlete_person_id == audit.player_person_id)
+        .where(GuardianRelationship.guardian_person_id == identity.person_id)
+        .limit(1)
+    )
+    if guardian_relationship is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Family match guidance not found")
+
+    existing = await player_match_guidance_feedback_for_recipient(db, recipient.id)
+    now = datetime.now(UTC)
+    response_text = (payload.response_text or "").strip() or None
+    priority_focus = (payload.priority_focus or "").strip() or None
+    if existing is None:
+        feedback = PerformanceMatchPlayerGuidanceFeedback(
+            organization_id=audit.organization_id,
+            tracking_run_id=audit.tracking_run_id,
+            video_asset_id=audit.video_asset_id,
+            publish_audit_id=audit.id,
+            message_id=audit.message_id,
+            message_recipient_id=recipient.id,
+            person_id=identity.person_id,
+            status=payload.status.strip().lower(),
+            rating=payload.rating,
+            response_text=response_text,
+            priority_focus=priority_focus,
+            requested_follow_up=payload.requested_follow_up,
+            completed_action_count=payload.completed_action_count,
+            submitted_at=now,
+        )
+        db.add(feedback)
+    else:
+        feedback = existing
+        feedback.status = payload.status.strip().lower()
+        feedback.rating = payload.rating
+        feedback.response_text = response_text
+        feedback.priority_focus = priority_focus
+        feedback.requested_follow_up = payload.requested_follow_up
+        feedback.completed_action_count = payload.completed_action_count
+        feedback.submitted_at = now
+    if recipient.delivery_status != MessageDeliveryStatus.READ:
+        recipient.delivery_status = MessageDeliveryStatus.READ
+        recipient.read_at = now
+    if payload.requested_follow_up and feedback.agent_task_id is None:
+        await db.flush()
+        agent_task = await queue_player_match_guidance_feedback_agent_review(
+            db,
+            identity,
+            organization_id=audit.organization_id,
+            tracking_run_id=audit.tracking_run_id,
+            video_asset_id=audit.video_asset_id,
+            publish_audit_id=audit.id,
+            message_recipient_id=recipient.id,
+            person_id=identity.person_id,
+            track_id=audit.track_id,
+            player_label=f"{audit.player_label} family",
+            status_value=feedback.status,
+            priority_focus=priority_focus or feedback.status,
+        )
+        feedback.agent_task_id = agent_task.id
+    await db.commit()
+    await db.refresh(feedback)
+    return feedback
 
 
 async def get_my_family_dashboard(

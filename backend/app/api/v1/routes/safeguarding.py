@@ -14,6 +14,7 @@ from app.models.enums import (
     MedicalClearanceStatus,
     SafeguardingIncidentStatus,
 )
+from app.schemas.performance import PlayerMatchGuidanceFeedbackRead
 from app.schemas.safeguarding import (
     ActivityConsentCreate,
     ActivityConsentRead,
@@ -44,6 +45,7 @@ from app.schemas.safeguarding import (
     FamilyConsentResponseCreate,
     FamilyEventSummaryRead,
     FamilyEventRsvpCreate,
+    FamilyMatchGuidanceFeedbackCreate,
     FamilyMatchGuidanceRead,
     FamilyPerformanceSummaryRead,
     GuardianAccountReadinessRead,
@@ -142,6 +144,7 @@ from app.services.safeguarding import (
     list_my_family_match_guidance,
     list_my_family_events,
     list_my_family_performance,
+    submit_my_family_match_guidance_feedback,
     respond_to_family_consent_request,
     respond_to_family_event,
     reconcile_compliance_statuses,
@@ -166,6 +169,7 @@ from app.services.safeguarding import (
     update_safeguarding_evidence_policy_rule,
     update_safeguarding_incident,
 )
+from app.services.performance import player_match_guidance_feedback_read
 
 router = APIRouter(prefix="/safeguarding", tags=["safeguarding"])
 
@@ -453,6 +457,24 @@ async def list_my_family_match_guidance_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[FamilyMatchGuidanceRead]:
     return await list_my_family_match_guidance(db, identity, organization_id, limit)
+
+
+@router.post(
+    "/my-family/match-guidance/{recipient_id}/feedback",
+    response_model=PlayerMatchGuidanceFeedbackRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_my_family_match_guidance_feedback_route(
+    recipient_id: UUID,
+    payload: FamilyMatchGuidanceFeedbackCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> PlayerMatchGuidanceFeedbackRead:
+    return PlayerMatchGuidanceFeedbackRead(
+        **player_match_guidance_feedback_read(
+            await submit_my_family_match_guidance_feedback(db, identity, recipient_id, payload)
+        )
+    )
 
 
 @router.get("/my-family/dashboard", response_model=FamilyDashboardRead)
