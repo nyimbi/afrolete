@@ -358,6 +358,9 @@ import type {
   ProductExperienceDashboardRead,
   ProductHelpSearchRead,
   ProductTourProgressRead,
+  VoiceCoachProfileRead,
+  VoiceCoachingSessionRead,
+  VoiceMetricQueryRead,
   OppositionScoutingReportRead,
   OppositionScoutingVideoAssetRead,
   PerformanceAchievementAwardRead,
@@ -2013,6 +2016,9 @@ export default function HomePage() {
     useState<ProductExperienceDashboardRead | null>(null);
   const [productTourProgress, setProductTourProgress] = useState<ProductTourProgressRead[]>([]);
   const [productHelpSearch, setProductHelpSearch] = useState<ProductHelpSearchRead | null>(null);
+  const [voiceCoachProfiles, setVoiceCoachProfiles] = useState<VoiceCoachProfileRead[]>([]);
+  const [voiceCoachingSessions, setVoiceCoachingSessions] = useState<VoiceCoachingSessionRead[]>([]);
+  const [voiceMetricQuery, setVoiceMetricQuery] = useState<VoiceMetricQueryRead | null>(null);
   const [volunteerProfiles, setVolunteerProfiles] = useState<VolunteerProfileRead[]>([]);
   const [volunteerOpportunities, setVolunteerOpportunities] = useState<VolunteerOpportunityRead[]>([]);
   const [volunteerAssignments, setVolunteerAssignments] = useState<VolunteerAssignmentRead[]>([]);
@@ -2832,6 +2838,23 @@ export default function HomePage() {
     role: "coach",
     help_query: "tracking distance quality",
     feedback: "Completed this guided step from the operations console."
+  });
+  const [voiceCoachingForm, setVoiceCoachingForm] = useState({
+    sport: "football",
+    voice_style: "professional_coach",
+    feedback_frequency: "moderate",
+    language: "en",
+    terminology_level: "intermediate",
+    preferred_device: "bone_conduction_headphones",
+    activity_type: "football sprint training",
+    stage: "main",
+    intensity: 78,
+    elapsed_seconds: 300,
+    distance_m: 820,
+    heart_rate_bpm: 168,
+    speed_mps: 7.4,
+    context_note: "Acceleration block before small-sided game.",
+    metric_query: "How far have I run?"
   });
   const [volunteerForm, setVolunteerForm] = useState({
     display_name: "Maria Volunteer",
@@ -4326,7 +4349,9 @@ export default function HomePage() {
       coachEnrollments,
       experienceCatalog,
       experienceDashboard,
-      tourProgress
+      tourProgress,
+      voiceProfiles,
+      voiceSessions
     ] = await Promise.all([
       apiRequest<TrainingDrillRead[]>(`/training/drills?organization_id=${organizationId}`),
       apiRequest<TrainingPlanRead[]>(`/training/plans?organization_id=${organizationId}${teamQuery}`),
@@ -4354,6 +4379,14 @@ export default function HomePage() {
       apiRequest<ProductTourProgressRead[]>(
         `/experience/tours/progress?organization_id=${organizationId}`,
         { identity }
+      ),
+      apiRequest<VoiceCoachProfileRead[]>(
+        `/voice-coaching/profiles?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<VoiceCoachingSessionRead[]>(
+        `/voice-coaching/sessions?organization_id=${organizationId}&limit=8`,
+        { identity }
       )
     ]);
     setTrainingDrills(drills);
@@ -4366,6 +4399,8 @@ export default function HomePage() {
     setProductExperienceCatalog(experienceCatalog);
     setProductExperienceDashboard(experienceDashboard);
     setProductTourProgress(tourProgress);
+    setVoiceCoachProfiles(voiceProfiles);
+    setVoiceCoachingSessions(voiceSessions);
     setSelectedTrainingPlanId((current) =>
       plans.some((plan) => plan.id === current) ? current : plans[0]?.id ?? ""
     );
@@ -5295,6 +5330,9 @@ export default function HomePage() {
       setProductTourProgress([]);
       setProductHelpSearch(null);
       setSelectedProductTourProgressId("");
+      setVoiceCoachProfiles([]);
+      setVoiceCoachingSessions([]);
+      setVoiceMetricQuery(null);
       setVolunteerProfiles([]);
       setVolunteerOpportunities([]);
       setVolunteerAssignments([]);
@@ -12808,6 +12846,100 @@ export default function HomePage() {
     );
   };
 
+  const createVoiceCoachProfile = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-voice-coach-profile",
+      () =>
+        apiRequest<VoiceCoachProfileRead>("/voice-coaching/profiles", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            sport: voiceCoachingForm.sport,
+            voice_style: voiceCoachingForm.voice_style,
+            feedback_frequency: voiceCoachingForm.feedback_frequency,
+            language: voiceCoachingForm.language,
+            terminology_level: voiceCoachingForm.terminology_level,
+            preferred_device: voiceCoachingForm.preferred_device
+          }
+        }),
+      (profile) => {
+        setVoiceCoachProfiles((current) => [
+          profile,
+          ...current.filter((item) => item.id !== profile.id)
+        ]);
+        addLog(`${profile.voice_style.replaceAll("_", " ")} voice profile ready`, "good");
+      }
+    );
+  };
+
+  const createVoiceCoachingSession = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-voice-coaching-session",
+      () =>
+        apiRequest<VoiceCoachingSessionRead>("/voice-coaching/sessions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            profile_id: voiceCoachProfiles[0]?.id,
+            team_id: selectedTeamId || undefined,
+            activity_type: voiceCoachingForm.activity_type,
+            stage: voiceCoachingForm.stage,
+            intensity: voiceCoachingForm.intensity,
+            elapsed_seconds: voiceCoachingForm.elapsed_seconds,
+            distance_m: voiceCoachingForm.distance_m,
+            heart_rate_bpm: voiceCoachingForm.heart_rate_bpm,
+            speed_mps: voiceCoachingForm.speed_mps,
+            context_note: voiceCoachingForm.context_note
+          }
+        }),
+      (session) => {
+        setVoiceCoachingSessions((current) => [
+          session,
+          ...current.filter((item) => item.id !== session.id)
+        ]);
+        addLog(
+          `${session.delivered_count} voice cue(s) delivered · ${session.suppressed_count} suppressed`,
+          session.safety_flags.length ? "bad" : "good"
+        );
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const askVoiceMetricQuery = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "voice-metric-query",
+      () =>
+        apiRequest<VoiceMetricQueryRead>("/voice-coaching/metric-query", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            profile_id: voiceCoachProfiles[0]?.id,
+            query: voiceCoachingForm.metric_query
+          }
+        }),
+      (result) => {
+        setVoiceMetricQuery(result);
+        addLog(`Voice query answered: ${result.query_type}`, "good");
+      }
+    );
+  };
+
   const createTrainingSession = () => {
     if (!selectedOrganizationId || !selectedTeamId) {
       addLog("Select an organization and team first", "bad");
@@ -19578,6 +19710,120 @@ export default function HomePage() {
               {logs.length === 0 ? <span className="muted">No activity yet</span> : null}
               {logs.map((log) => (
                 <p key={log.id} className={`log-line ${log.tone}`}>{log.message}</p>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Voice coaching</p>
+                <h2>Audio cues and hands-free metrics</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createVoiceCoachProfile} disabled={busyAction !== null}>Profile</button>
+                <button type="button" onClick={createVoiceCoachingSession} disabled={busyAction !== null}>Cue</button>
+                <button type="button" onClick={askVoiceMetricQuery} disabled={busyAction !== null}>Ask</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{voiceCoachingSessions[0]?.delivered_count ?? 0}</strong>
+              <span>{voiceCoachingSessions[0]?.suppressed_count ?? 0} suppressed cue(s)</span>
+              <small>
+                {voiceCoachingSessions[0]?.summary ?? "Create a voice profile, generate context-aware audio cues, and answer player metric queries."}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Sport
+                <input value={voiceCoachingForm.sport} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, sport: event.target.value })} />
+              </label>
+              <label>
+                Voice
+                <select value={voiceCoachingForm.voice_style} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, voice_style: event.target.value })}>
+                  <option value="professional_coach">Professional coach</option>
+                  <option value="motivational_speaker">Motivational speaker</option>
+                  <option value="teammate">Teammate</option>
+                </select>
+              </label>
+              <label>
+                Frequency
+                <select value={voiceCoachingForm.feedback_frequency} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, feedback_frequency: event.target.value })}>
+                  <option value="minimal">Minimal</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="detailed">Detailed</option>
+                </select>
+              </label>
+              <label>
+                Language
+                <input value={voiceCoachingForm.language} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, language: event.target.value })} />
+              </label>
+              <label>
+                Activity
+                <input value={voiceCoachingForm.activity_type} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, activity_type: event.target.value })} />
+              </label>
+              <label>
+                Stage
+                <select value={voiceCoachingForm.stage} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, stage: event.target.value })}>
+                  <option value="warmup">Warmup</option>
+                  <option value="main">Main</option>
+                  <option value="match">Match</option>
+                  <option value="cool_down">Cool down</option>
+                  <option value="recovery">Recovery</option>
+                </select>
+              </label>
+              <label>
+                Intensity
+                <input type="number" min="0" max="100" value={voiceCoachingForm.intensity} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, intensity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Heart rate
+                <input type="number" min="30" max="240" value={voiceCoachingForm.heart_rate_bpm} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, heart_rate_bpm: Number(event.target.value) })} />
+              </label>
+              <label>
+                Distance
+                <input type="number" min="0" value={voiceCoachingForm.distance_m} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, distance_m: Number(event.target.value) })} />
+              </label>
+              <label>
+                Speed
+                <input type="number" min="0" step="0.1" value={voiceCoachingForm.speed_mps} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, speed_mps: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Context
+                <input value={voiceCoachingForm.context_note} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, context_note: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Hands-free query
+                <input value={voiceCoachingForm.metric_query} onChange={(event) => setVoiceCoachingForm({ ...voiceCoachingForm, metric_query: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {voiceMetricQuery ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{voiceMetricQuery.query_type.replaceAll("_", " ")}</strong>
+                    <span>{voiceMetricQuery.answer}</span>
+                    <small>{voiceMetricQuery.recommended_actions[0] ?? voiceMetricQuery.model_policy}</small>
+                  </div>
+                </article>
+              ) : null}
+              {voiceCoachProfiles.slice(0, 2).map((profile) => (
+                <article key={profile.id} className="task-card">
+                  <div>
+                    <strong>{profile.voice_style.replaceAll("_", " ")} · {profile.feedback_frequency}</strong>
+                    <span>{profile.sport} · {profile.language} · {profile.preferred_device ?? "device not set"}</span>
+                    <small>{profile.person_name ?? "Profile"} · {profile.terminology_level}</small>
+                  </div>
+                </article>
+              ))}
+              {voiceCoachingSessions.slice(0, 3).map((session) => (
+                <article key={session.id} className="task-card">
+                  <div>
+                    <strong>{session.activity_type.replaceAll("_", " ")} · {session.intensity}/100</strong>
+                    <span>{session.delivered_count} delivered · {session.suppressed_count} suppressed · {session.stage.replaceAll("_", " ")}</span>
+                    <small>{session.cues[0]?.message ?? session.debrief}</small>
+                  </div>
+                </article>
               ))}
             </div>
           </div>

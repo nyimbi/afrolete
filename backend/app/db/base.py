@@ -243,5 +243,10 @@ from app.models.volunteer import (  # noqa: F401,E402
     VolunteerSubstitutePoolMember,
     VolunteerTrainingRecord,
 )
+from app.models.voice_coaching import (  # noqa: F401,E402
+    VoiceCoachProfile,
+    VoiceCoachingCue,
+    VoiceCoachingSession,
+)
 
 __all__ = ["Base"]

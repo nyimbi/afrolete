@@ -8498,6 +8498,69 @@ export type ProductExperienceDashboardRead = {
   suggested_actions: string[];
 };
 
+export type VoiceCoachProfileRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID | null;
+  person_name: string | null;
+  athlete_profile_id: UUID | null;
+  sport: string;
+  voice_style: string;
+  feedback_frequency: string;
+  language: string;
+  terminology_level: string;
+  preferred_device: string | null;
+  safety_alerts_enabled: boolean;
+  status: string;
+  created_at: string;
+};
+
+export type VoiceCoachingCueRead = {
+  id: UUID;
+  category: string;
+  priority: string;
+  audio_layer: string;
+  trigger: string;
+  message: string;
+  delivery_mode: string;
+  suppressed_reason: string | null;
+};
+
+export type VoiceCoachingSessionRead = {
+  id: UUID;
+  organization_id: UUID;
+  profile_id: UUID;
+  team_id: UUID | null;
+  athlete_profile_id: UUID | null;
+  activity_type: string;
+  stage: string;
+  intensity: number;
+  elapsed_seconds: number | null;
+  distance_m: number | null;
+  heart_rate_bpm: number | null;
+  speed_mps: number | null;
+  context_note: string | null;
+  summary: string;
+  debrief: string;
+  next_actions: string[];
+  safety_flags: string[];
+  delivered_count: number;
+  suppressed_count: number;
+  model_policy: string;
+  started_at: string;
+  cues: VoiceCoachingCueRead[];
+};
+
+export type VoiceMetricQueryRead = {
+  organization_id: UUID;
+  query: string;
+  query_type: string;
+  answer: string;
+  evidence: string[];
+  recommended_actions: string[];
+  model_policy: string;
+};
+
 export type TrainingDrillRead = {
   id: UUID;
   organization_id: UUID;
