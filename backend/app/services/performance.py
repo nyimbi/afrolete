@@ -1439,6 +1439,7 @@ def match_tracking_player_guidance_markdown(
         match_player_guidance_card(
             metric,
             publishable=float(metric.get("tracking_quality_score") or 0.0) >= 0.45,
+            summary=summary,
         )
         for metric in sorted(
             metrics,
@@ -1522,6 +1523,13 @@ def match_tracking_player_guidance_markdown(
                 f"- Evidence: {card.get('evidence')}",
             ]
         )
+        clip_start = card.get("clip_start_seconds")
+        clip_end = card.get("clip_end_seconds")
+        if isinstance(clip_start, (int, float)) and isinstance(clip_end, (int, float)):
+            lines.append(
+                f"- Review window: {card.get('clip_label') or 'Review match clip'} "
+                f"({float(clip_start):.1f}s-{float(clip_end):.1f}s)"
+            )
         if card.get("caution"):
             lines.append(f"- Caution: {card.get('caution')}")
         lines.append("")
@@ -2253,7 +2261,11 @@ async def review_match_tracking_player_guidance(
     publishable = not required_actions
     guidance_status = "player_shareable" if publishable else "coach_review_required"
     player_guidance = [
-        match_player_guidance_card(card, publishable=publishable and card not in low_quality_cards)
+        match_player_guidance_card(
+            card,
+            publishable=publishable and card not in low_quality_cards,
+            summary=tracking,
+        )
         for card in player_cards
     ]
     return {
@@ -2586,7 +2598,12 @@ def match_moment_duration(action_type: str) -> float:
     return 14.0
 
 
-def match_player_guidance_card(card: dict[str, object], *, publishable: bool) -> dict[str, object]:
+def match_player_guidance_card(
+    card: dict[str, object],
+    *,
+    publishable: bool,
+    summary: dict[str, object] | None = None,
+) -> dict[str, object]:
     label = str(card.get("player_label") or card.get("track_id") or "Player")
     distance = round(float(card.get("distance_m") or 0.0))
     high_speed = round(float(card.get("high_speed_distance_m") or 0.0))
@@ -2617,7 +2634,7 @@ def match_player_guidance_card(card: dict[str, object], *, publishable: bool) ->
         next_action = "Review passing decisions and receiving body shape with the player."
     else:
         next_action = "Pair this metric card with video clips before giving individual feedback."
-    return {
+    result = {
         "track_id": card.get("track_id"),
         "player_label": label,
         "team_label": card.get("team_label"),
@@ -2637,6 +2654,24 @@ def match_player_guidance_card(card: dict[str, object], *, publishable: bool) ->
         "evidence": role_recommendation or recovery_recommendation or actions[0],
         "caution": None if publishable else "Coach review required before sharing this guidance with the player.",
     }
+    track_id = str(card.get("track_id") or "").strip()
+    if summary is not None and track_id:
+        preferred_actions = {"pass_completion", "pressure", "ball_carry", "shot_attempt"}
+        if high_speed > 0 or sprints > 0:
+            preferred_actions.update({"high_speed_run", "high_speed_load"})
+        if pressure or received_pressure:
+            preferred_actions.update({"pressure", "interception", "tackle"})
+        if int(card.get("pass_attempt_count") or 0) > 0:
+            preferred_actions.update({"pass_completion", "turnover", "key_pass"})
+        result.update(
+            player_match_action_clip_context(
+                summary=summary,
+                track_id=track_id,
+                preferred_actions=preferred_actions,
+                fallback_timestamp_seconds=max(float(card.get("duration_seconds") or 0.0) / 2, 0.0),
+            )
+        )
+    return result
 
 
 async def publish_match_tracking_player_guidance(
@@ -2893,9 +2928,20 @@ def match_player_guidance_message_body(
         str(guidance.get("load_summary") or ""),
         str(guidance.get("tactical_summary") or ""),
         "",
-        f"Next action: {guidance.get('recommended_next_action') or 'Review the match clip with your coach.'}",
-        f"Evidence: {guidance.get('evidence') or 'Tracking-derived match metrics.'}",
     ]
+    clip_start = guidance.get("clip_start_seconds")
+    clip_end = guidance.get("clip_end_seconds")
+    if isinstance(clip_start, (int, float)) and isinstance(clip_end, (int, float)):
+        lines.append(
+            f"Review window: {guidance.get('clip_label') or 'Review match clip'} "
+            f"({float(clip_start):.1f}s-{float(clip_end):.1f}s)."
+        )
+    lines.extend(
+        [
+            f"Next action: {guidance.get('recommended_next_action') or 'Review the match clip with your coach.'}",
+            f"Evidence: {guidance.get('evidence') or 'Tracking-derived match metrics.'}",
+        ]
+    )
     caution = guidance.get("caution")
     if caution:
         lines.extend(["", f"Coach note: {caution}"])

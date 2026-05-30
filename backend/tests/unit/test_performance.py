@@ -4070,6 +4070,8 @@ def test_publishable_match_guidance_sends_private_player_messages(client, identi
     review = review_response.json()
     assert review["publishable"] is True
     assert review["guidance_status"] == "player_shareable"
+    assert review["player_guidance"][0]["clip_start_seconds"] is not None
+    assert review["player_guidance"][0]["clip_end_seconds"] > review["player_guidance"][0]["clip_start_seconds"]
 
     publish_response = client.post(
         f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/player-guidance-publish",
@@ -4104,6 +4106,11 @@ def test_publishable_match_guidance_sends_private_player_messages(client, identi
         headers=identity_headers,
     ).json()
     assert any(message["subject"].startswith("Coach-reviewed match guidance") for message in messages)
+    published_message = next(
+        message for message in messages if message["id"] == published["messages"][0]["message_id"]
+    )
+    assert "Review window:" in published_message["body"]
+    assert "Open your AfroLete player portal" in published_message["body"]
 
     publish_audits = client.get(
         f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/player-guidance-publishes",

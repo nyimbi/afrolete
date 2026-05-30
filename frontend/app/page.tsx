@@ -27886,6 +27886,12 @@ export default function HomePage() {
                         <small>
                           {String(guidance.recommended_next_action ?? guidance.evidence ?? "Attach video evidence before sharing.")}
                         </small>
+                        {typeof guidance.clip_start_seconds === "number" && typeof guidance.clip_end_seconds === "number" ? (
+                          <small>
+                            {String(guidance.clip_label ?? "Review match clip")} ·{" "}
+                            {guidance.clip_start_seconds.toFixed(1)}s-{guidance.clip_end_seconds.toFixed(1)}s
+                          </small>
+                        ) : null}
                       </div>
                     </article>
                   ))}
