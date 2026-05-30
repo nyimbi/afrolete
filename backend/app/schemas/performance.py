@@ -611,6 +611,7 @@ class PerformanceMatchTrackingRunCreate(BaseModel):
     organization_id: UUID
     calibration_id: UUID | None = None
     source_provider: str = Field(default="manual_tracking", min_length=2, max_length=80)
+    model_policy: str | None = Field(default=None, min_length=2, max_length=160)
     pitch_length_m: float = Field(default=105.0, ge=80, le=130)
     pitch_width_m: float = Field(default=68.0, ge=45, le=90)
     replace_existing: bool = False
@@ -619,6 +620,64 @@ class PerformanceMatchTrackingRunCreate(BaseModel):
     sample_every_seconds: float = Field(default=0.5, ge=0.04, le=10)
     min_detection_confidence: float = Field(default=0.35, ge=0, le=1)
     samples: list[PerformanceMatchTrackingSampleCreate] = Field(default_factory=list, max_length=5000)
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
+    quality_warnings: list[str] = Field(default_factory=list, max_length=20)
+
+
+class PerformanceMatchTrackingProviderDetection(BaseModel):
+    track_id: str = Field(min_length=1, max_length=120)
+    object_type: str = Field(default="player", pattern="^(player|ball)$")
+    person_id: UUID | None = None
+    team_label: str | None = Field(default=None, max_length=120)
+    player_label: str | None = Field(default=None, max_length=180)
+    jersey_number: str | None = Field(default=None, max_length=20)
+    x_percent: float | None = Field(default=None, ge=0, le=100)
+    y_percent: float | None = Field(default=None, ge=0, le=100)
+    x_meters: float | None = Field(default=None, ge=0, le=130)
+    y_meters: float | None = Field(default=None, ge=0, le=90)
+    bbox_x_percent: float | None = Field(default=None, ge=0, le=100)
+    bbox_y_percent: float | None = Field(default=None, ge=0, le=100)
+    bbox_width_percent: float | None = Field(default=None, ge=0, le=100)
+    bbox_height_percent: float | None = Field(default=None, ge=0, le=100)
+    foot_x_percent: float | None = Field(default=None, ge=0, le=100)
+    foot_y_percent: float | None = Field(default=None, ge=0, le=100)
+    speed_mps: float | None = Field(default=None, ge=0, le=15)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    source: str | None = Field(default=None, max_length=80)
+
+    @model_validator(mode="after")
+    def has_detection_position(self) -> "PerformanceMatchTrackingProviderDetection":
+        has_percent = self.x_percent is not None and self.y_percent is not None
+        has_meters = self.x_meters is not None and self.y_meters is not None
+        has_foot = self.foot_x_percent is not None and self.foot_y_percent is not None
+        has_bbox = (
+            self.bbox_x_percent is not None
+            and self.bbox_y_percent is not None
+            and self.bbox_width_percent is not None
+            and self.bbox_height_percent is not None
+        )
+        if not any([has_percent, has_meters, has_foot, has_bbox]):
+            raise ValueError("Provide percent, meter, foot-point, or bounding-box coordinates")
+        return self
+
+
+class PerformanceMatchTrackingProviderFrame(BaseModel):
+    timestamp_seconds: float = Field(ge=0)
+    frame_index: int | None = Field(default=None, ge=0)
+    detections: list[PerformanceMatchTrackingProviderDetection] = Field(min_length=1, max_length=80)
+
+
+class PerformanceMatchTrackingProviderImportCreate(BaseModel):
+    organization_id: UUID
+    calibration_id: UUID | None = None
+    source_provider: str = Field(default="external_tracking_provider", min_length=2, max_length=80)
+    model_policy: str = Field(default="external-tracker-provider-v1", min_length=2, max_length=160)
+    pitch_length_m: float = Field(default=105.0, ge=80, le=130)
+    pitch_width_m: float = Field(default=68.0, ge=45, le=90)
+    replace_existing: bool = True
+    frames: list[PerformanceMatchTrackingProviderFrame] = Field(min_length=1, max_length=2000)
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
+    quality_warnings: list[str] = Field(default_factory=list, max_length=20)
 
 
 class PerformanceMatchTrackingSampleRead(BaseModel):

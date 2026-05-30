@@ -7106,6 +7106,7 @@ export type PerformanceMatchTrackingRunCreate = {
   organization_id: UUID;
   calibration_id?: UUID | null;
   source_provider?: string;
+  model_policy?: string | null;
   pitch_length_m?: number;
   pitch_width_m?: number;
   replace_existing?: boolean;
@@ -7114,6 +7115,49 @@ export type PerformanceMatchTrackingRunCreate = {
   sample_every_seconds?: number;
   min_detection_confidence?: number;
   samples?: Record<string, unknown>[];
+  provider_metadata?: Record<string, unknown>;
+  quality_warnings?: string[];
+};
+
+export type PerformanceMatchTrackingProviderDetection = {
+  track_id: string;
+  object_type?: "player" | "ball";
+  person_id?: UUID | null;
+  team_label?: string | null;
+  player_label?: string | null;
+  jersey_number?: string | null;
+  x_percent?: number | null;
+  y_percent?: number | null;
+  x_meters?: number | null;
+  y_meters?: number | null;
+  bbox_x_percent?: number | null;
+  bbox_y_percent?: number | null;
+  bbox_width_percent?: number | null;
+  bbox_height_percent?: number | null;
+  foot_x_percent?: number | null;
+  foot_y_percent?: number | null;
+  speed_mps?: number | null;
+  confidence?: number | null;
+  source?: string | null;
+};
+
+export type PerformanceMatchTrackingProviderFrame = {
+  timestamp_seconds: number;
+  frame_index?: number | null;
+  detections: PerformanceMatchTrackingProviderDetection[];
+};
+
+export type PerformanceMatchTrackingProviderImportCreate = {
+  organization_id: UUID;
+  calibration_id?: UUID | null;
+  source_provider?: string;
+  model_policy?: string;
+  pitch_length_m?: number;
+  pitch_width_m?: number;
+  replace_existing?: boolean;
+  frames: PerformanceMatchTrackingProviderFrame[];
+  provider_metadata?: Record<string, unknown>;
+  quality_warnings?: string[];
 };
 
 export type PerformanceMatchTrackingIdentityReviewRead = {

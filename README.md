@@ -333,7 +333,12 @@ pass-type accuracy, defensive ball-win labels, pass networks, shot/xG estimates,
 tactical shape, highlights, coach/player reports, and player-portal match
 guidance cards with action-plan drills and one-click training follow-up plans
 for coach-confirmed tracks, including queued Training Strategy Agent review
-status for the generated follow-up plan. Manual pitch calibration now prefers an OpenCV perspective homography
+status for the generated follow-up plan. The same match analysis pipeline now
+accepts external tracker frame packages from YOLO/ByteTrack-compatible cameras,
+GPS/video providers, or analyst tooling through a provider-neutral import API,
+converting bounding boxes, foot points, ball detections, confidence, model
+policy, and provider metadata into calibrated AfroLete tracking samples. Manual
+pitch calibration now prefers an OpenCV perspective homography
 from field control points, with residual/error metadata and a linear fallback,
 so trapezoid broadcast camera views produce more trustworthy pitch-meter
 coordinates for distance and speed estimates. The tracking summary also

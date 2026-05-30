@@ -3621,6 +3621,172 @@ def test_match_video_auto_tracking_uses_video_frame_extractor(
     assert any(sample["source"] == "opencv_ball_tracker" for sample in tracking["samples"])
 
 
+def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(client, identity_headers) -> None:
+    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    upload_response = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Provider Track FC",
+            "sport": "football",
+            "filename": "provider-track-fc.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(b"provider tracking video").decode(),
+            "clip_label": "Provider tracked broadcast",
+            "match_context": "Imported YOLO/ByteTrack style tracking package.",
+            "analysis_focus": "provider player tracking, ball tracking, player guidance",
+        },
+    )
+    assert upload_response.status_code == 201
+    video_asset = upload_response.json()
+
+    import_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/tracking-provider-imports",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "source_provider": "bytetrack_yolo_provider",
+            "model_policy": "yolo-bytetrack-provider-import-v1",
+            "replace_existing": True,
+            "provider_metadata": {"detector": "yolov9", "tracker": "bytetrack", "camera_id": "main"},
+            "quality_warnings": ["Provider confidence below match-publication threshold on two detections."],
+            "frames": [
+                {
+                    "timestamp_seconds": 0,
+                    "frame_index": 0,
+                    "detections": [
+                        {
+                            "track_id": "home-9",
+                            "team_label": "Home",
+                            "player_label": "Forward",
+                            "jersey_number": "9",
+                            "bbox_x_percent": 10,
+                            "bbox_y_percent": 40,
+                            "bbox_width_percent": 4,
+                            "bbox_height_percent": 18,
+                            "confidence": 0.96,
+                        },
+                        {
+                            "track_id": "away-4",
+                            "team_label": "Opponent",
+                            "player_label": "Center back",
+                            "jersey_number": "4",
+                            "foot_x_percent": 58,
+                            "foot_y_percent": 58,
+                            "confidence": 0.93,
+                        },
+                        {
+                            "track_id": "ball",
+                            "object_type": "ball",
+                            "x_percent": 12,
+                            "y_percent": 58,
+                            "confidence": 0.88,
+                        },
+                    ],
+                },
+                {
+                    "timestamp_seconds": 1,
+                    "frame_index": 25,
+                    "detections": [
+                        {
+                            "track_id": "home-9",
+                            "team_label": "Home",
+                            "player_label": "Forward",
+                            "jersey_number": "9",
+                            "bbox_x_percent": 24,
+                            "bbox_y_percent": 39,
+                            "bbox_width_percent": 4,
+                            "bbox_height_percent": 18,
+                            "confidence": 0.97,
+                        },
+                        {
+                            "track_id": "away-4",
+                            "team_label": "Opponent",
+                            "player_label": "Center back",
+                            "jersey_number": "4",
+                            "foot_x_percent": 63,
+                            "foot_y_percent": 57,
+                            "confidence": 0.94,
+                        },
+                        {
+                            "track_id": "ball",
+                            "object_type": "ball",
+                            "x_percent": 27,
+                            "y_percent": 57,
+                            "confidence": 0.9,
+                        },
+                    ],
+                },
+                {
+                    "timestamp_seconds": 2,
+                    "frame_index": 50,
+                    "detections": [
+                        {
+                            "track_id": "home-9",
+                            "team_label": "Home",
+                            "player_label": "Forward",
+                            "jersey_number": "9",
+                            "bbox_x_percent": 40,
+                            "bbox_y_percent": 39,
+                            "bbox_width_percent": 4,
+                            "bbox_height_percent": 18,
+                            "confidence": 0.95,
+                        },
+                        {
+                            "track_id": "away-4",
+                            "team_label": "Opponent",
+                            "player_label": "Center back",
+                            "jersey_number": "4",
+                            "foot_x_percent": 69,
+                            "foot_y_percent": 56,
+                            "confidence": 0.92,
+                        },
+                        {
+                            "track_id": "ball",
+                            "object_type": "ball",
+                            "x_percent": 43,
+                            "y_percent": 57,
+                            "confidence": 0.9,
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert import_response.status_code == 201
+    tracking = import_response.json()
+    assert tracking["source_provider"] == "bytetrack_yolo_provider"
+    assert tracking["model_policy"] == "yolo-bytetrack-provider-import-v1"
+    assert tracking["sample_count"] == 9
+    assert tracking["player_count"] == 2
+    assert tracking["total_distance_m"] > 20
+    assert tracking["ball_tracking_metrics"]["ball_sample_count"] == 3
+    assert any("Provider confidence" in warning for warning in tracking["quality_warnings"])
+    forward = next(metric for metric in tracking["player_metrics"] if metric["track_id"] == "home-9")
+    assert forward["player_label"] == "Forward"
+    assert forward["distance_m"] > 20
+
+    report_response = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/analysis-reports",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "audience": "player",
+            "report_scope": "provider_tracking_review",
+            "title": "Provider tracking player report",
+            "include_player_cards": True,
+            "include_tactical_shape": True,
+        },
+    )
+    assert report_response.status_code == 201
+    report = report_response.json()
+    assert report["summary"]["player_count"] == 2
+    assert any(card["track_id"] == "home-9" for card in report["player_cards"])
+
+
 def test_match_tracking_derives_shot_xg_and_key_pass_network() -> None:
     samples = [
         {

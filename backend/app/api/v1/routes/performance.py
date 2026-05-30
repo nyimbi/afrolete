@@ -65,6 +65,7 @@ from app.schemas.performance import (
     PerformanceMatchTrackingIdentityReviewCreate,
     PerformanceMatchTrackingIdentityReviewRead,
     PerformanceMatchTrackingIdentityReviewResultRead,
+    PerformanceMatchTrackingProviderImportCreate,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingRunRead,
     PerformanceMatchPitchCalibrationCreate,
@@ -123,6 +124,7 @@ from app.services.performance import (
     create_athlete_pathway_projection,
     create_metric_definition,
     create_match_tracking_identity_review,
+    create_match_tracking_provider_import,
     create_match_tracking_run,
     create_match_pitch_calibration,
     create_performance_match_analysis_report,
@@ -1071,6 +1073,23 @@ async def create_match_tracking_run_route(
 ) -> PerformanceMatchTrackingRunRead:
     return PerformanceMatchTrackingRunRead(
         **await create_match_tracking_run(db, identity, video_asset_id, payload, authz)
+    )
+
+
+@router.post(
+    "/scouting/videos/{video_asset_id}/tracking-provider-imports",
+    response_model=PerformanceMatchTrackingRunRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_match_tracking_provider_import_route(
+    video_asset_id: UUID,
+    payload: PerformanceMatchTrackingProviderImportCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchTrackingRunRead:
+    return PerformanceMatchTrackingRunRead(
+        **await create_match_tracking_provider_import(db, identity, video_asset_id, payload, authz)
     )
 
 

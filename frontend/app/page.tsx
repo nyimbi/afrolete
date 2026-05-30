@@ -379,6 +379,7 @@ import type {
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchAnalysisReportRead,
   PerformanceMatchPitchCalibrationRead,
+  PerformanceMatchTrackingProviderImportCreate,
   PerformanceMatchTrackingRunCreate,
   PerformanceMatchTrackingIdentityReviewRead,
   PerformanceMatchTrackingIdentityReviewResultRead,
@@ -10242,6 +10243,106 @@ export default function HomePage() {
             : current
         );
         addLog(`Tracked ${run.player_count} players for ${Math.round(run.total_distance_m)}m`, "good");
+      }
+    );
+  };
+
+  const importProviderMatchTracking = () => {
+    if (!selectedOrganizationId || !oppositionScoutingVideo) {
+      addLog("Upload or select an opponent match video before importing provider tracks", "bad");
+      return;
+    }
+    const frames: PerformanceMatchTrackingProviderImportCreate["frames"] = [
+      {
+        timestamp_seconds: 0,
+        frame_index: 0,
+        detections: [
+          { track_id: "bt-home-9", team_label: "Home", player_label: "Forward", jersey_number: "9", bbox_x_percent: 8, bbox_y_percent: 42, bbox_width_percent: 5, bbox_height_percent: 18, confidence: 0.96 },
+          { track_id: "bt-home-10", team_label: "Home", player_label: "Playmaker", jersey_number: "10", foot_x_percent: 38, foot_y_percent: 54, confidence: 0.94 },
+          { track_id: "bt-away-4", team_label: "Opponent", player_label: "Center back", jersey_number: "4", bbox_x_percent: 63, bbox_y_percent: 40, bbox_width_percent: 5, bbox_height_percent: 17, confidence: 0.93 },
+          { track_id: "ball", object_type: "ball", x_percent: 39, y_percent: 55, confidence: 0.89 }
+        ]
+      },
+      {
+        timestamp_seconds: 1,
+        frame_index: 25,
+        detections: [
+          { track_id: "bt-home-9", team_label: "Home", player_label: "Forward", jersey_number: "9", bbox_x_percent: 20, bbox_y_percent: 41, bbox_width_percent: 5, bbox_height_percent: 18, confidence: 0.97 },
+          { track_id: "bt-home-10", team_label: "Home", player_label: "Playmaker", jersey_number: "10", foot_x_percent: 47, foot_y_percent: 52, confidence: 0.95 },
+          { track_id: "bt-away-4", team_label: "Opponent", player_label: "Center back", jersey_number: "4", bbox_x_percent: 67, bbox_y_percent: 40, bbox_width_percent: 5, bbox_height_percent: 17, confidence: 0.93 },
+          { track_id: "ball", object_type: "ball", x_percent: 48, y_percent: 53, confidence: 0.9 }
+        ]
+      },
+      {
+        timestamp_seconds: 2,
+        frame_index: 50,
+        detections: [
+          { track_id: "bt-home-9", team_label: "Home", player_label: "Forward", jersey_number: "9", bbox_x_percent: 33, bbox_y_percent: 40, bbox_width_percent: 5, bbox_height_percent: 18, confidence: 0.96 },
+          { track_id: "bt-home-10", team_label: "Home", player_label: "Playmaker", jersey_number: "10", foot_x_percent: 58, foot_y_percent: 50, confidence: 0.95 },
+          { track_id: "bt-away-4", team_label: "Opponent", player_label: "Center back", jersey_number: "4", bbox_x_percent: 73, bbox_y_percent: 39, bbox_width_percent: 5, bbox_height_percent: 17, confidence: 0.92 },
+          { track_id: "ball", object_type: "ball", x_percent: 60, y_percent: 50, confidence: 0.91 }
+        ]
+      },
+      {
+        timestamp_seconds: 3,
+        frame_index: 75,
+        detections: [
+          { track_id: "bt-home-9", team_label: "Home", player_label: "Forward", jersey_number: "9", bbox_x_percent: 48, bbox_y_percent: 40, bbox_width_percent: 5, bbox_height_percent: 18, confidence: 0.95 },
+          { track_id: "bt-home-10", team_label: "Home", player_label: "Playmaker", jersey_number: "10", foot_x_percent: 70, foot_y_percent: 49, confidence: 0.94 },
+          { track_id: "bt-away-4", team_label: "Opponent", player_label: "Center back", jersey_number: "4", bbox_x_percent: 79, bbox_y_percent: 39, bbox_width_percent: 5, bbox_height_percent: 17, confidence: 0.91 },
+          { track_id: "ball", object_type: "ball", x_percent: 72, y_percent: 49, confidence: 0.9 }
+        ]
+      }
+    ];
+    const payload: PerformanceMatchTrackingProviderImportCreate = {
+      organization_id: selectedOrganizationId,
+      calibration_id: performanceMatchPitchCalibration?.video_asset_id === oppositionScoutingVideo.id
+        ? performanceMatchPitchCalibration.id
+        : null,
+      source_provider: "bytetrack_yolo_provider",
+      model_policy: "yolo-bytetrack-provider-import-v1",
+      pitch_length_m: 105,
+      pitch_width_m: 68,
+      replace_existing: true,
+      frames,
+      provider_metadata: {
+        detector: "YOLO-compatible",
+        tracker: "ByteTrack-compatible",
+        camera_view: "broadcast_demo",
+        imported_by: "operations_console"
+      },
+      quality_warnings: ["Demo provider package uses synthetic detections; replace with camera-provider JSON for real matches."]
+    };
+    runAction(
+      "import-provider-match-tracking",
+      () =>
+        apiRequest<PerformanceMatchTrackingRunRead>(
+          `/performance/scouting/videos/${oppositionScoutingVideo.id}/tracking-provider-imports`,
+          {
+            method: "POST",
+            identity,
+            body: payload
+          }
+        ),
+      (run) => {
+        setPerformanceMatchTrackingRun(run);
+        setPerformanceMatchTrackingRuns((current) => [
+          run,
+          ...current.filter((item) => item.id !== run.id)
+        ]);
+        setOppositionScoutingVideos((current) =>
+          current.map((video) =>
+            video.id === run.video_asset_id
+              ? { ...video, status: "tracked", analyzed_at: run.completed_at }
+              : video
+          )
+        );
+        setOppositionScoutingVideo((current) =>
+          current && current.id === run.video_asset_id
+            ? { ...current, status: "tracked", analyzed_at: run.completed_at }
+            : current
+        );
+        addLog(`Imported ${run.sample_count} provider detections into ${run.player_count} player tracks`, "good");
       }
     );
   };
@@ -25513,6 +25614,7 @@ export default function HomePage() {
                   <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Generate report</button>
                   <button type="button" onClick={calibrateOppositionMatchVideo} disabled={busyAction !== null}>Calibrate pitch</button>
                   <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
+                  <button type="button" onClick={importProviderMatchTracking} disabled={busyAction !== null}>Import tracker</button>
                   <button type="button" onClick={autoTrackOppositionMatchVideo} disabled={busyAction !== null}>Auto-track video</button>
                   <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Player guidance</button>
                   <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>Export reel</button>

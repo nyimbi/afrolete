@@ -109,6 +109,9 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkRunCreate,
     PerformanceMatchPitchCalibrationCreate,
     PerformanceMatchTrackingIdentityReviewCreate,
+    PerformanceMatchTrackingProviderDetection,
+    PerformanceMatchTrackingProviderFrame,
+    PerformanceMatchTrackingProviderImportCreate,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingSampleCreate,
     PlayerMatchTrainingFollowupCreate,
@@ -818,8 +821,8 @@ async def create_match_tracking_run(
     selected_settings = settings or get_settings()
     sample_payloads = list(payload.samples)
     source_provider = payload.source_provider.strip().lower()
-    model_policy = "afrolete-match-tracking-import-v1"
-    warnings: list[str] = []
+    model_policy = (payload.model_policy or "afrolete-match-tracking-import-v1").strip()
+    warnings = list(payload.quality_warnings)
     if payload.auto_track and not sample_payloads:
         content = get_object(
             selected_settings,
@@ -871,6 +874,8 @@ async def create_match_tracking_run(
     summary = summarize_match_tracking_samples(normalized_samples)
     if warnings:
         summary["warnings"] = warnings
+    if payload.provider_metadata:
+        summary["provider_metadata"] = payload.provider_metadata
     if calibration is not None:
         summary["calibration_id"] = str(calibration.id)
         summary["calibration_quality_score"] = calibration.quality_score
@@ -933,6 +938,124 @@ async def create_match_tracking_run(
     await db.commit()
     await db.refresh(run)
     return await match_tracking_run_read(db, run)
+
+
+async def create_match_tracking_provider_import(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    video_asset_id: UUID,
+    payload: PerformanceMatchTrackingProviderImportCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    samples = match_tracking_provider_frames_to_samples(
+        payload.frames,
+        source_provider=payload.source_provider,
+    )
+    if not samples:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Provider import contained no tracks")
+    warnings = list(payload.quality_warnings)
+    warnings.append(
+        "Provider tracking import preserves external detector confidence; coach review remains required before publishing player decisions."
+    )
+    return await create_match_tracking_run(
+        db,
+        identity,
+        video_asset_id,
+        PerformanceMatchTrackingRunCreate(
+            organization_id=payload.organization_id,
+            calibration_id=payload.calibration_id,
+            source_provider=payload.source_provider,
+            model_policy=payload.model_policy,
+            pitch_length_m=payload.pitch_length_m,
+            pitch_width_m=payload.pitch_width_m,
+            replace_existing=payload.replace_existing,
+            samples=samples,
+            provider_metadata={
+                **payload.provider_metadata,
+                "frame_count": len(payload.frames),
+                "detection_count": sum(len(frame.detections) for frame in payload.frames),
+                "ingest_contract": "afrolete-provider-tracking-frames-v1",
+            },
+            quality_warnings=warnings,
+        ),
+        authz,
+    )
+
+
+def match_tracking_provider_frames_to_samples(
+    frames: list[PerformanceMatchTrackingProviderFrame],
+    *,
+    source_provider: str,
+) -> list[PerformanceMatchTrackingSampleCreate]:
+    source = f"{source_provider.strip().lower()}_provider_import"[:80] or "provider_tracking_import"
+    samples: list[PerformanceMatchTrackingSampleCreate] = []
+    for frame in frames:
+        for detection in frame.detections:
+            position = match_tracking_provider_detection_position(detection)
+            track_id = detection.track_id
+            team_label = detection.team_label
+            player_label = detection.player_label
+            if detection.object_type == "ball":
+                team_label = team_label or "ball"
+                player_label = player_label or "Ball"
+            samples.append(
+                PerformanceMatchTrackingSampleCreate(
+                    track_id=track_id,
+                    person_id=detection.person_id,
+                    team_label=team_label,
+                    player_label=player_label,
+                    jersey_number=detection.jersey_number,
+                    frame_index=frame.frame_index,
+                    timestamp_seconds=frame.timestamp_seconds,
+                    x_percent=position["x_percent"],
+                    y_percent=position["y_percent"],
+                    x_meters=position["x_meters"],
+                    y_meters=position["y_meters"],
+                    speed_mps=detection.speed_mps,
+                    confidence=detection.confidence,
+                    source=detection.source or source,
+                )
+            )
+    samples.sort(key=lambda sample: (sample.timestamp_seconds, sample.track_id, sample.frame_index or 0))
+    return samples
+
+
+def match_tracking_provider_detection_position(
+    detection: PerformanceMatchTrackingProviderDetection,
+) -> dict[str, float | None]:
+    if detection.x_meters is not None and detection.y_meters is not None:
+        return {
+            "x_percent": detection.x_percent,
+            "y_percent": detection.y_percent,
+            "x_meters": detection.x_meters,
+            "y_meters": detection.y_meters,
+        }
+    if detection.foot_x_percent is not None and detection.foot_y_percent is not None:
+        return {
+            "x_percent": detection.foot_x_percent,
+            "y_percent": detection.foot_y_percent,
+            "x_meters": None,
+            "y_meters": None,
+        }
+    if detection.x_percent is not None and detection.y_percent is not None:
+        return {
+            "x_percent": detection.x_percent,
+            "y_percent": detection.y_percent,
+            "x_meters": None,
+            "y_meters": None,
+        }
+    bbox_x = float(detection.bbox_x_percent or 0.0)
+    bbox_y = float(detection.bbox_y_percent or 0.0)
+    bbox_width = float(detection.bbox_width_percent or 0.0)
+    bbox_height = float(detection.bbox_height_percent or 0.0)
+    x_percent = bbox_x + bbox_width / 2
+    y_percent = bbox_y + (bbox_height / 2 if detection.object_type == "ball" else bbox_height)
+    return {
+        "x_percent": clamp_percent(x_percent),
+        "y_percent": clamp_percent(y_percent),
+        "x_meters": None,
+        "y_meters": None,
+    }
 
 
 async def list_match_tracking_runs(
