@@ -3749,6 +3749,9 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert report["summary"]["set_piece_count"] >= 1
     assert report["summary"]["set_piece_highest_danger_score"] > 0
     assert report["summary"]["training_prescription_count"] >= 1
+    assert report["summary"]["analysis_agent_review"]["status"] == "waiting_for_review"
+    assert "pitch calibration" in report["summary"]["analysis_agent_review"]["review_notes"]
+    assert report["analysis_agent_review"]["task_id"] == tracking["analysis_agent_task_id"]
     assert report["player_cards"][0]["player_label"] == "Confirmed Forward"
     assert report["player_cards"][0]["inferred_role"] != "unknown"
     assert report["player_cards"][0]["role_evidence"]
@@ -3785,6 +3788,8 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert "## Team Phase And Pressure" in report_text
     assert "## Possession And Ball Actions" in report_text
     assert "## Set Pieces And Restarts" in report_text
+    assert "## Match Intelligence Review" in report_text
+    assert "pitch calibration" in report_text
     assert "## Training Prescription" in report_text
     assert "## Data Quality" in report_text
 

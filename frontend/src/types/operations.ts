@@ -7363,6 +7363,7 @@ export type PerformanceMatchAnalysisReportRead = {
   status: string;
   model_policy: string;
   summary: Record<string, unknown>;
+  analysis_agent_review: Record<string, unknown> | null;
   player_cards: Record<string, unknown>[];
   team_shape: Record<string, unknown>[];
   recommendations: string[];

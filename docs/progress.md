@@ -1259,6 +1259,7 @@ Latest slices:
 - Shared highlight reel follow-up requests now queue Coaching agent review tasks and return the task id through player inbox and coach engagement surfaces.
 - Football match tracking runs now queue Match Intelligence Agent review tasks and expose the queued task id beside run quality/readiness signals.
 - Executed Match Intelligence Agent reviews now flow back onto match tracking run payloads and the coach UI with review status, first-line notes, and an inline AI review action.
+- Match analysis reports now embed Match Intelligence Agent review status and notes in both API payloads and Markdown exports so governed AI context travels with coach report artifacts.
 
 ## Next Actions
 

@@ -978,6 +978,7 @@ class PerformanceMatchAnalysisReportRead(BaseModel):
     status: str
     model_policy: str
     summary: dict[str, Any]
+    analysis_agent_review: dict[str, Any] | None = None
     player_cards: list[dict[str, Any]]
     team_shape: list[dict[str, Any]]
     recommendations: list[str]

@@ -28492,7 +28492,13 @@ export default function HomePage() {
                           <span>
                             {report.player_cards.length} player card(s) · {report.recommendations.length} recommendation(s) · {Math.round(report.size_bytes / 1024)} KB
                           </span>
-                          <small>{report.content_type} · {report.checksum.slice(0, 12)}</small>
+                          <small>
+                            {report.content_type} · {report.checksum.slice(0, 12)}
+                            {report.analysis_agent_review?.status ? ` · AI ${String(report.analysis_agent_review.status).replaceAll("_", " ")}` : ""}
+                          </small>
+                          {report.analysis_agent_review?.review_summary ? (
+                            <small>{String(report.analysis_agent_review.review_summary)}</small>
+                          ) : null}
                         </div>
                         <span>
                           <button

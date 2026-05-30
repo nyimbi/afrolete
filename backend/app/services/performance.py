@@ -1945,6 +1945,7 @@ async def downloadable_performance_match_analysis_report(
 
 
 def match_analysis_report_read(report: PerformanceMatchAnalysisReport) -> dict[str, object]:
+    summary = decode_json_dict(report.summary_json)
     return {
         "id": report.id,
         "organization_id": report.organization_id,
@@ -1956,7 +1957,8 @@ def match_analysis_report_read(report: PerformanceMatchAnalysisReport) -> dict[s
         "report_scope": report.report_scope,
         "status": report.status,
         "model_policy": report.model_policy,
-        "summary": decode_json_dict(report.summary_json),
+        "summary": summary,
+        "analysis_agent_review": summary.get("analysis_agent_review"),
         "player_cards": decode_json_list(report.player_cards_json),
         "team_shape": decode_json_list(report.team_shape_json),
         "recommendations": decode_string_list(report.recommendations_json),
@@ -12598,6 +12600,7 @@ def build_match_analysis_report_artifact(
         tracking.get("set_piece_metrics") if isinstance(tracking.get("set_piece_metrics"), dict) else {}
     )
     ball_tracking_metrics = tracking.get("ball_tracking_metrics") if isinstance(tracking.get("ball_tracking_metrics"), dict) else {}
+    analysis_agent_review = match_analysis_agent_review_context(tracking)
     summary = {
         "video_asset_id": str(video_asset.id),
         "filename": video_asset.filename,
@@ -12630,6 +12633,7 @@ def build_match_analysis_report_artifact(
         "set_piece_highest_danger_score": round(float(set_piece_metrics.get("highest_danger_score") or 0.0), 3),
         "training_prescription_count": len(training_prescriptions),
         "top_training_focus": training_prescriptions[0].get("focus_area") if training_prescriptions else None,
+        "analysis_agent_review": analysis_agent_review,
     }
     recommendations = match_analysis_report_recommendations(tracking, player_cards, team_shape, team_phase)
     report_title = title.strip() if title and title.strip() else f"{video_asset.opponent_name} match analysis"
@@ -12654,6 +12658,7 @@ def build_match_analysis_report_artifact(
         chance_creation_metrics=chance_creation_metrics,
         set_piece_metrics=set_piece_metrics,
         ball_tracking_metrics=ball_tracking_metrics,
+        analysis_agent_review=analysis_agent_review,
         quality_warnings=[str(item) for item in (tracking.get("quality_warnings") or [])],
         notes=notes,
     ).encode()
@@ -12669,6 +12674,23 @@ def build_match_analysis_report_artifact(
         "set_piece_events": set_piece_events,
         "training_prescriptions": training_prescriptions,
         "recommendations": recommendations,
+        "analysis_agent_review": analysis_agent_review,
+    }
+
+
+def match_analysis_agent_review_context(tracking: dict[str, object]) -> dict[str, object] | None:
+    task_id = tracking.get("analysis_agent_task_id")
+    status_value = tracking.get("analysis_agent_task_status")
+    review_notes = str(tracking.get("analysis_agent_task_review_notes") or "").strip()
+    if task_id is None and not status_value and not review_notes:
+        return None
+    first_line = next((line.strip() for line in review_notes.splitlines() if line.strip()), None)
+    return {
+        "task_id": str(task_id) if task_id is not None else None,
+        "status": str(status_value) if status_value is not None else None,
+        "review_notes": review_notes or None,
+        "review_summary": first_line,
+        "human_review_required": True,
     }
 
 
@@ -12759,6 +12781,7 @@ def match_analysis_report_markdown(
     chance_creation_metrics: dict[str, object],
     set_piece_metrics: dict[str, object],
     ball_tracking_metrics: dict[str, object],
+    analysis_agent_review: dict[str, object] | None,
     quality_warnings: list[str],
     notes: str | None,
 ) -> str:
@@ -12793,6 +12816,20 @@ def match_analysis_report_markdown(
         "## Coaching Guidance",
     ]
     lines.extend(f"- {item}" for item in recommendations)
+    lines.extend(["", "## Match Intelligence Review"])
+    if analysis_agent_review:
+        lines.append(f"- Agent task: {analysis_agent_review.get('task_id') or 'not recorded'}")
+        lines.append(f"- Status: {analysis_agent_review.get('status') or 'queued'}")
+        if analysis_agent_review.get("review_summary"):
+            lines.append(f"- Summary: {analysis_agent_review['review_summary']}")
+        if analysis_agent_review.get("review_notes"):
+            lines.append("- Review notes:")
+            for line in str(analysis_agent_review["review_notes"]).splitlines():
+                if line.strip():
+                    lines.append(f"  - {line.strip()}")
+        lines.append("- Human review: required before player-facing or tactical decisions are published.")
+    else:
+        lines.append("- Match Intelligence Agent review has not run yet; keep findings coach-reviewed.")
     lines.extend(["", "## Training Prescription"])
     if training_prescriptions:
         for prescription in training_prescriptions[:6]:
