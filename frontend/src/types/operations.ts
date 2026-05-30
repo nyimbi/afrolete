@@ -1049,6 +1049,22 @@ export type VolunteerReminderRunRead = {
   message_ids: UUID[];
 };
 
+export type VolunteerCoordinationMessageRead = {
+  organization_id: UUID;
+  opportunity_id: UUID;
+  opportunity_title: string;
+  channel: CommunicationChannel;
+  subject: string;
+  body: string;
+  urgent: boolean;
+  eligible_assignment_count: number;
+  recipient_count: number;
+  assignment_ids: UUID[];
+  recipient_person_ids: UUID[];
+  message_id: UUID | null;
+  skipped_reasons: string[];
+};
+
 export type VolunteerSubstitutePoolMemberRead = {
   id: UUID;
   organization_id: UUID;

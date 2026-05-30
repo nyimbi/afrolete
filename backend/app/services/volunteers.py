@@ -35,6 +35,8 @@ from app.schemas.volunteer import (
     PublicVolunteerSignupCreate,
     VolunteerAssignmentCreate,
     VolunteerAssignmentUpdate,
+    VolunteerCoordinationMessageCreate,
+    VolunteerCoordinationMessageRead,
     VolunteerGroupApplicationUpdate,
     VolunteerNeedRequestCreate,
     VolunteerNeedRequestUpdate,
@@ -712,6 +714,102 @@ async def dispatch_volunteer_substitutes(
         message_id=message_id,
         recipient_count=recipient_count,
         skipped_reasons=[] if selected else ["No available substitute pool members matched this opportunity."],
+    )
+
+
+def volunteer_coordination_scope(opportunity: VolunteerOpportunity) -> tuple[CommunicationScopeType, UUID]:
+    if opportunity.event_id is not None:
+        return CommunicationScopeType.EVENT, opportunity.event_id
+    if opportunity.team_id is not None:
+        return CommunicationScopeType.TEAM, opportunity.team_id
+    return CommunicationScopeType.ORGANIZATION, opportunity.organization_id
+
+
+async def send_volunteer_coordination_message(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: VolunteerCoordinationMessageCreate,
+    authz: AuthorizationService,
+) -> VolunteerCoordinationMessageRead:
+    await ensure_manage_volunteers(authz, identity, payload.organization_id)
+    opportunity = await get_volunteer_opportunity(db, payload.opportunity_id)
+    if opportunity.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    statuses = [status_value.strip().lower() for status_value in payload.include_statuses if status_value.strip()]
+    if not statuses:
+        statuses = ["assigned", "confirmed", "checked_in", "invited"]
+    rows = list(
+        (
+            await db.execute(
+                select(VolunteerAssignment, Person)
+                .join(Person, Person.id == VolunteerAssignment.person_id)
+                .where(VolunteerAssignment.organization_id == payload.organization_id)
+                .where(VolunteerAssignment.opportunity_id == opportunity.id)
+                .where(VolunteerAssignment.status.in_(statuses))
+                .order_by(Person.display_name)
+            )
+        ).all()
+    )
+    assignment_ids = [assignment.id for assignment, _person in rows]
+    recipient_person_ids = list(dict.fromkeys([person.id for _assignment, person in rows]))
+    subject = payload.subject or f"Volunteer briefing: {opportunity.title}"
+    skipped_reasons: list[str] = []
+    if not recipient_person_ids:
+        skipped_reasons.append("No volunteer assignments matched the selected statuses.")
+        return VolunteerCoordinationMessageRead(
+            organization_id=payload.organization_id,
+            opportunity_id=opportunity.id,
+            opportunity_title=opportunity.title,
+            channel=payload.channel,
+            subject=subject,
+            body=payload.body,
+            urgent=payload.urgent,
+            eligible_assignment_count=0,
+            recipient_count=0,
+            assignment_ids=[],
+            recipient_person_ids=[],
+            message_id=None,
+            skipped_reasons=skipped_reasons,
+        )
+    scope_type, scope_id = volunteer_coordination_scope(opportunity)
+    message = await create_message_for_recipients(
+        db,
+        organization_id=payload.organization_id,
+        message_type=CommunicationMessageType.ANNOUNCEMENT,
+        channel=payload.channel,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        recipient_person_ids=recipient_person_ids,
+        subject=subject,
+        body=(
+            f"{payload.body}\n\n"
+            f"Opportunity: {opportunity.title}\n"
+            f"Role: {opportunity.role_type}\n"
+            f"Starts: {opportunity.starts_at.isoformat()}\n"
+            f"Location: {opportunity.location or 'TBC'}"
+        ),
+        urgent=payload.urgent,
+        quiet_hours_override=payload.urgent,
+        created_by_person_id=identity.person_id,
+    )
+    recipient_count = int(
+        await db.scalar(select(func.count(MessageRecipient.id)).where(MessageRecipient.message_id == message.id))
+        or 0
+    )
+    return VolunteerCoordinationMessageRead(
+        organization_id=payload.organization_id,
+        opportunity_id=opportunity.id,
+        opportunity_title=opportunity.title,
+        channel=payload.channel,
+        subject=message.subject,
+        body=message.body,
+        urgent=message.urgent,
+        eligible_assignment_count=len(assignment_ids),
+        recipient_count=recipient_count,
+        assignment_ids=assignment_ids,
+        recipient_person_ids=recipient_person_ids,
+        message_id=message.id,
+        skipped_reasons=skipped_reasons,
     )
 
 

@@ -11,6 +11,8 @@ from app.schemas.volunteer import (
     VolunteerAssignmentCreate,
     VolunteerAssignmentRead,
     VolunteerAssignmentUpdate,
+    VolunteerCoordinationMessageCreate,
+    VolunteerCoordinationMessageRead,
     VolunteerGroupApplicationRead,
     VolunteerGroupApplicationUpdate,
     VolunteerNeedRequestCreate,
@@ -63,6 +65,7 @@ from app.services.volunteers import (
     list_volunteer_substitute_pool_members,
     list_volunteer_training_records,
     run_volunteer_reminders,
+    send_volunteer_coordination_message,
     update_volunteer_group_application,
     update_volunteer_need_request,
     update_volunteer_obligation,
@@ -484,6 +487,16 @@ async def run_volunteer_reminders_route(
 ) -> VolunteerReminderRunRead:
     await ensure_manage_volunteers(authz, identity, payload.organization_id)
     return await run_volunteer_reminders(db, payload)
+
+
+@router.post("/coordination-messages", response_model=VolunteerCoordinationMessageRead)
+async def send_volunteer_coordination_message_route(
+    payload: VolunteerCoordinationMessageCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> VolunteerCoordinationMessageRead:
+    return await send_volunteer_coordination_message(db, identity, payload, authz)
 
 
 @router.post(

@@ -109,6 +109,35 @@ def test_volunteer_management_covers_profiles_shifts_training_and_recognition(cl
     assert assignment["person_name"] == "Maria Volunteer"
     assert assignment["match_score"] >= 0.8
 
+    coordination_response = client.post(
+        "/api/v1/volunteers/coordination-messages",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "opportunity_id": opportunity["id"],
+            "channel": "in_app",
+            "subject": "Matchday volunteer briefing",
+            "body": "Meet at the medical tent 45 minutes before kickoff.",
+            "urgent": True,
+        },
+    )
+    assert coordination_response.status_code == 200
+    coordination = coordination_response.json()
+    assert coordination["opportunity_id"] == opportunity["id"]
+    assert coordination["recipient_count"] == 1
+    assert coordination["eligible_assignment_count"] == 1
+    assert coordination["assignment_ids"] == [assignment["id"]]
+    assert coordination["message_id"] is not None
+    assert coordination["skipped_reasons"] == []
+    recipients_response = client.get(
+        f"/api/v1/communications/messages/{coordination['message_id']}/recipients",
+        headers=identity_headers,
+    )
+    assert recipients_response.status_code == 200
+    recipients = recipients_response.json()
+    assert recipients[0]["person_name"] == "Maria Volunteer"
+    assert recipients[0]["delivery_status"] in {"queued", "sent", "delivered"}
+
     full_response = client.post(
         "/api/v1/volunteers/assignments",
         headers=identity_headers,

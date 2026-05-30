@@ -472,6 +472,7 @@ import type {
   UsageRecordRead,
   UsageUnit,
   VolunteerAssignmentRead,
+  VolunteerCoordinationMessageRead,
   VolunteerGroupApplicationRead,
   VolunteerNeedRequestRead,
   VolunteerObligationRead,
@@ -1956,6 +1957,8 @@ export default function HomePage() {
   const [volunteerRecognitions, setVolunteerRecognitions] = useState<VolunteerRecognitionRead[]>([]);
   const [volunteerSummary, setVolunteerSummary] = useState<VolunteerSummaryRead | null>(null);
   const [volunteerReminderRun, setVolunteerReminderRun] = useState<VolunteerReminderRunRead | null>(null);
+  const [volunteerCoordinationMessage, setVolunteerCoordinationMessage] =
+    useState<VolunteerCoordinationMessageRead | null>(null);
   const [volunteerSubstitutePool, setVolunteerSubstitutePool] = useState<VolunteerSubstitutePoolMemberRead[]>([]);
   const [volunteerSubstituteDispatch, setVolunteerSubstituteDispatch] =
     useState<VolunteerSubstituteDispatchRead | null>(null);
@@ -2791,6 +2794,11 @@ export default function HomePage() {
     max_dispatches_per_month: 6,
     notes: "Available for emergency substitute cover.",
     dispatch_message: "Can you cover this emergency volunteer assignment?"
+  });
+  const [volunteerCoordinationForm, setVolunteerCoordinationForm] = useState({
+    subject: "Matchday volunteer briefing",
+    body: "Meet at the volunteer desk 45 minutes before the event starts. Bring your badge and confirm any late changes in the app.",
+    urgent: false
   });
   const [volunteerTrainingForm, setVolunteerTrainingForm] = useState({
     module_name: "Safeguarding for Matchday Volunteers",
@@ -5125,6 +5133,7 @@ export default function HomePage() {
       setVolunteerRecognitions([]);
       setVolunteerSummary(null);
       setVolunteerReminderRun(null);
+      setVolunteerCoordinationMessage(null);
       setVolunteerSubstitutePool([]);
       setVolunteerSubstituteDispatch(null);
       setSelectedVolunteerProfileId("");
@@ -12455,6 +12464,36 @@ export default function HomePage() {
           run.failed_count ? "bad" : "good"
         );
         void loadVolunteers(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const sendVolunteerCoordinationMessage = () => {
+    if (!selectedOrganizationId || !selectedVolunteerOpportunityId) {
+      addLog("Select a volunteer opportunity before sending a briefing", "bad");
+      return;
+    }
+    runAction(
+      "send-volunteer-coordination-message",
+      () =>
+        apiRequest<VolunteerCoordinationMessageRead>("/volunteers/coordination-messages", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            opportunity_id: selectedVolunteerOpportunityId,
+            channel: "in_app",
+            subject: volunteerCoordinationForm.subject,
+            body: volunteerCoordinationForm.body,
+            urgent: volunteerCoordinationForm.urgent
+          }
+        }),
+      (message) => {
+        setVolunteerCoordinationMessage(message);
+        addLog(
+          `Volunteer briefing reached ${message.recipient_count} recipient(s) for ${message.opportunity_title}`,
+          message.recipient_count ? "good" : "neutral"
+        );
       }
     );
   };
@@ -27458,6 +27497,7 @@ export default function HomePage() {
                 <button type="button" onClick={createVolunteerOpportunity} disabled={busyAction !== null}>Shift</button>
                 <button type="button" onClick={createVolunteerNeedRequest} disabled={busyAction !== null}>Need</button>
                 <button type="button" onClick={assignVolunteer} disabled={busyAction !== null}>Assign</button>
+                <button type="button" onClick={sendVolunteerCoordinationMessage} disabled={busyAction !== null}>Brief</button>
                 <button type="button" onClick={dispatchVolunteerSubstitutes} disabled={busyAction !== null}>Dispatch</button>
                 <button type="button" onClick={completeVolunteerAssignment} disabled={busyAction !== null}>Complete</button>
               </div>
@@ -27548,8 +27588,34 @@ export default function HomePage() {
                 Dispatch message
                 <input value={volunteerSubstituteForm.dispatch_message} onChange={(event) => setVolunteerSubstituteForm({ ...volunteerSubstituteForm, dispatch_message: event.target.value })} />
               </label>
+              <label className="wide-field">
+                Briefing subject
+                <input value={volunteerCoordinationForm.subject} onChange={(event) => setVolunteerCoordinationForm({ ...volunteerCoordinationForm, subject: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Briefing body
+                <input value={volunteerCoordinationForm.body} onChange={(event) => setVolunteerCoordinationForm({ ...volunteerCoordinationForm, body: event.target.value })} />
+              </label>
+              <label>
+                <input type="checkbox" checked={volunteerCoordinationForm.urgent} onChange={(event) => setVolunteerCoordinationForm({ ...volunteerCoordinationForm, urgent: event.target.checked })} />
+                Urgent briefing
+              </label>
             </div>
             <div className="task-list">
+              {volunteerCoordinationMessage ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Volunteer briefing · {volunteerCoordinationMessage.recipient_count} recipients</strong>
+                    <span>
+                      {volunteerCoordinationMessage.eligible_assignment_count} eligible assignment(s) · {volunteerCoordinationMessage.channel.replaceAll("_", " ")}
+                      {volunteerCoordinationMessage.message_id ? ` · message ${volunteerCoordinationMessage.message_id.slice(0, 8)}` : ""}
+                    </span>
+                    <small>
+                      {volunteerCoordinationMessage.skipped_reasons.join(", ") || volunteerCoordinationMessage.subject}
+                    </small>
+                  </div>
+                </article>
+              ) : null}
               {volunteerSubstituteDispatch ? (
                 <article className="task-card">
                   <div>

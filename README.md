@@ -165,6 +165,10 @@ Major capability areas include:
 - Communications: templates, scoped broadcasts, inboxes, preferences, quiet
   hours, urgent escalation, digests, provider callbacks, family onboarding, and
   multi-channel delivery.
+- Volunteer operations: profiles, opportunities, public and group signup,
+  team needs, family service obligations, automated reminders, substitute
+  pools, opportunity-scoped briefings, training, recognition, and coverage
+  analytics.
 - Equipment, facilities, maintenance, bookings, RFID/QR scanning, files, object
   storage, procurement, supplier orders, supplier-specific adapter payloads,
   leases, asset accounting sync, utilization, and emergency response.

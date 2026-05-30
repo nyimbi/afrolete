@@ -358,6 +358,35 @@ class VolunteerReminderRunRead(BaseModel):
     message_ids: list[UUID]
 
 
+class VolunteerCoordinationMessageCreate(BaseModel):
+    organization_id: UUID
+    opportunity_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.IN_APP
+    subject: str | None = Field(default=None, min_length=2, max_length=240)
+    body: str = Field(min_length=2, max_length=8000)
+    urgent: bool = False
+    include_statuses: list[str] = Field(
+        default_factory=lambda: ["assigned", "confirmed", "checked_in", "invited"],
+        max_length=12,
+    )
+
+
+class VolunteerCoordinationMessageRead(BaseModel):
+    organization_id: UUID
+    opportunity_id: UUID
+    opportunity_title: str
+    channel: CommunicationChannel
+    subject: str
+    body: str
+    urgent: bool
+    eligible_assignment_count: int
+    recipient_count: int
+    assignment_ids: list[UUID]
+    recipient_person_ids: list[UUID]
+    message_id: UUID | None
+    skipped_reasons: list[str]
+
+
 class VolunteerSubstitutePoolMemberCreate(BaseModel):
     organization_id: UUID
     volunteer_profile_id: UUID
