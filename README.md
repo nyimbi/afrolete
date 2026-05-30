@@ -346,8 +346,10 @@ specific match moment that triggered it, and those review windows also appear
 in published player guidance messages and player-pack exports. AI moment
 detection promotes those player-guidance windows into durable review moments
 that feed highlight and reel workflows, with coach approval, featured, and
-rejection controls in the operations console. The same match analysis pipeline
-now
+rejection controls in the operations console. Highlight reel generation now
+prioritizes featured moments, then approved moments, and skips rejected moments
+so coach curation governs what appears in downstream reels. The same match
+analysis pipeline now
 accepts external tracker frame packages from YOLO/ByteTrack-compatible cameras,
 GPS/video providers, or analyst tooling through a provider-neutral import API,
 converting bounding boxes, foot points, ball detections, confidence, model

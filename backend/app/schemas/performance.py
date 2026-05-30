@@ -1261,6 +1261,7 @@ class PerformanceHighlightClipRead(BaseModel):
     moment_score: float | None = None
     moment_category: str | None = None
     source_policy: str | None = None
+    source_moment_status: str | None = None
     source_event: dict[str, Any] = Field(default_factory=dict)
 
 

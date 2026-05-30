@@ -14931,16 +14931,17 @@ async def generate_highlight_clips_from_match(
                 await db.scalars(
                     select(PerformanceMatchMoment)
                     .where(PerformanceMatchMoment.tracking_run_id == tracking_run.id)
+                    .where(PerformanceMatchMoment.status != "rejected")
                     .order_by(
                         PerformanceMatchMoment.moment_score.desc(),
                         PerformanceMatchMoment.start_seconds.asc(),
                     )
-                    .limit(12)
+                    .limit(30)
                 )
             ).all()
         )
         if persisted_moments:
-            clips.extend(highlight_clips_from_match_moments(persisted_moments, audience))
+            clips.extend(highlight_clips_from_match_moments(match_moments_ranked_for_reel(persisted_moments)[:12], audience))
         else:
             clips.extend(
                 highlight_clips_from_match_moment_payloads(
@@ -15061,6 +15062,27 @@ def highlight_clips_from_player_metrics(
     return clips
 
 
+MATCH_MOMENT_REEL_STATUS_PRIORITY = {
+    "featured": 0,
+    "approved": 1,
+    "detected": 2,
+    "needs_review": 3,
+}
+
+
+def match_moments_ranked_for_reel(
+    moments: list[PerformanceMatchMoment],
+) -> list[PerformanceMatchMoment]:
+    return sorted(
+        [moment for moment in moments if moment.status != "rejected"],
+        key=lambda moment: (
+            MATCH_MOMENT_REEL_STATUS_PRIORITY.get(moment.status, 9),
+            -float(moment.moment_score or 0.0),
+            float(moment.start_seconds or 0.0),
+        ),
+    )
+
+
 def highlight_clips_from_match_moments(
     moments: list[PerformanceMatchMoment],
     audience: str,
@@ -15100,20 +15122,27 @@ def highlight_clip_from_match_moment(
 ) -> dict[str, object]:
     action_type = str(moment.get("action_type") or "match_moment")
     moment_category = str(moment.get("moment_category") or "coach_review")
+    moment_status = str(moment.get("status") or "detected").strip().lower()
     tags = [
         *[str(tag) for tag in moment.get("tags", []) if str(tag)],
         "ai_moment",
         "moment_backed_highlight",
         action_type,
         moment_category,
+        f"moment_status_{moment_status}",
         audience,
     ]
+    confidence = float(moment.get("confidence") or 0.65)
+    if moment_status == "featured":
+        confidence = max(confidence, 0.99)
+    elif moment_status == "approved":
+        confidence = max(confidence, 0.94)
     return highlight_clip(
         title=str(moment.get("title") or action_type.replace("_", " ").title()),
         start_seconds=float(moment.get("start_seconds") or 0.0),
         duration_seconds=float(moment.get("duration_seconds") or 8.0),
         category=action_type,
-        confidence=float(moment.get("confidence") or 0.65),
+        confidence=confidence,
         evidence=str(moment.get("evidence") or "AI-scored match moment from tracking evidence."),
         coaching_note=str(moment.get("coaching_note") or "Review this moment with the player."),
         tags=tags,
@@ -15124,6 +15153,7 @@ def highlight_clip_from_match_moment(
         moment_score=float(moment.get("moment_score") or 0.0),
         moment_category=moment_category,
         source_policy=source_policy,
+        source_moment_status=moment_status if source_moment_id is not None else None,
         source_event=moment.get("source_event") if isinstance(moment.get("source_event"), dict) else {},
     )
 
@@ -15172,6 +15202,7 @@ def highlight_clip(
     moment_score: float | None = None,
     moment_category: str | None = None,
     source_policy: str | None = None,
+    source_moment_status: str | None = None,
     source_event: dict[str, object] | None = None,
 ) -> dict[str, object]:
     clip: dict[str, object] = {
@@ -15196,6 +15227,8 @@ def highlight_clip(
         clip["moment_category"] = moment_category
     if source_policy is not None:
         clip["source_policy"] = source_policy
+    if source_moment_status is not None:
+        clip["source_moment_status"] = source_moment_status
     if source_event is not None:
         clip["source_event"] = source_event
     return clip
@@ -15228,6 +15261,23 @@ def trim_highlight_clips(clips: list[dict[str, object]], target_duration_seconds
                 ),
             )
             selected[replacement_index] = best_scouting
+    high_speed_candidates = [
+        clip for clip in clips if str(clip.get("category") or "") == "high_speed_run"
+    ]
+    if high_speed_candidates and not any(str(clip.get("category") or "") == "high_speed_run" for clip in selected):
+        best_high_speed = max(high_speed_candidates, key=lambda item: float(item.get("confidence") or 0.0))
+        if not selected:
+            selected.append(best_high_speed)
+        else:
+            replacement_index = min(
+                range(len(selected)),
+                key=lambda index: (
+                    str(selected[index].get("category") or "") == "scouting",
+                    str(selected[index].get("source_moment_status") or "") == "featured",
+                    float(selected[index].get("confidence") or 0.0),
+                ),
+            )
+            selected[replacement_index] = best_high_speed
     return sorted(selected, key=lambda item: float(item["start_seconds"]))
 
 

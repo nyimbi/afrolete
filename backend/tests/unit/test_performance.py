@@ -5161,7 +5161,31 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     )
     assert moments_response.status_code == 201
     moments = moments_response.json()
-    assert moments
+    assert len(moments) >= 2
+
+    rejected_moment = moments[0]
+    featured_moment = moments[-1]
+    reject_response = client.patch(
+        f"/api/v1/performance/scouting/match-moments/{rejected_moment['id']}/review",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "status": "rejected",
+            "review_notes": "Do not use this model-selected clip in scout reels.",
+        },
+    )
+    assert reject_response.status_code == 200
+    feature_response = client.patch(
+        f"/api/v1/performance/scouting/match-moments/{featured_moment['id']}/review",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "status": "featured",
+            "review_notes": "Lead with this clip despite the lower raw moment score.",
+        },
+    )
+    assert feature_response.status_code == 200
+    featured_moment = feature_response.json()
 
     reel_response = client.post(
         f"/api/v1/performance/scouting/videos/{video_asset['id']}/highlight-reels",
@@ -5186,7 +5210,10 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert reel["distribution"]["share_policy"] == "guardian_approval_required"
     assert "scout_packet" in reel["distribution"]["channels"]
     assert any(clip["category"] == "high_speed_run" for clip in reel["clips"])
-    assert any(clip["source_moment_id"] == moments[0]["id"] for clip in reel["clips"])
+    assert all(clip.get("source_moment_id") != rejected_moment["id"] for clip in reel["clips"])
+    featured_clip = next(clip for clip in reel["clips"] if clip.get("source_moment_id") == featured_moment["id"])
+    assert featured_clip["source_moment_status"] == "featured"
+    assert "moment_status_featured" in featured_clip["tags"]
     assert any("moment_backed_highlight" in clip["tags"] for clip in reel["clips"])
     assert any((clip["moment_score"] or 0) >= 55 for clip in reel["clips"])
     assert any("scouting" in clip["tags"] for clip in reel["clips"])
