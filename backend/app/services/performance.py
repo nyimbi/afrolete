@@ -12490,6 +12490,33 @@ async def generate_highlight_clips_from_match(
     clips: list[dict[str, object]] = []
     if tracking_run is not None:
         tracking = await match_tracking_run_read(db, tracking_run)
+        persisted_moments = list(
+            (
+                await db.scalars(
+                    select(PerformanceMatchMoment)
+                    .where(PerformanceMatchMoment.tracking_run_id == tracking_run.id)
+                    .order_by(
+                        PerformanceMatchMoment.moment_score.desc(),
+                        PerformanceMatchMoment.start_seconds.asc(),
+                    )
+                    .limit(12)
+                )
+            ).all()
+        )
+        if persisted_moments:
+            clips.extend(highlight_clips_from_match_moments(persisted_moments, audience))
+        else:
+            clips.extend(
+                highlight_clips_from_match_moment_payloads(
+                    build_match_moment_payloads(
+                        tracking,
+                        min_score=55,
+                        max_moments=6,
+                        audience=audience,
+                    ),
+                    audience,
+                )
+            )
         player_metrics = list(tracking.get("player_metrics") or [])
         clips.extend(highlight_clips_from_player_metrics(player_metrics, target_duration_seconds, audience))
         guidance = list(tracking.get("coaching_guidance") or [])
@@ -12598,18 +12625,85 @@ def highlight_clips_from_player_metrics(
     return clips
 
 
+def highlight_clips_from_match_moments(
+    moments: list[PerformanceMatchMoment],
+    audience: str,
+) -> list[dict[str, object]]:
+    return [
+        highlight_clip_from_match_moment(
+            performance_match_moment_read(moment),
+            audience,
+            source_moment_id=str(moment.id),
+            source_policy=moment.model_policy,
+        )
+        for moment in moments
+    ]
+
+
+def highlight_clips_from_match_moment_payloads(
+    moments: list[dict[str, object]],
+    audience: str,
+) -> list[dict[str, object]]:
+    return [
+        highlight_clip_from_match_moment(
+            moment,
+            audience,
+            source_moment_id=None,
+            source_policy="afrolete-match-moment-detector-v1",
+        )
+        for moment in moments
+    ]
+
+
+def highlight_clip_from_match_moment(
+    moment: dict[str, object],
+    audience: str,
+    *,
+    source_moment_id: str | None,
+    source_policy: str,
+) -> dict[str, object]:
+    action_type = str(moment.get("action_type") or "match_moment")
+    moment_category = str(moment.get("moment_category") or "coach_review")
+    tags = [
+        *[str(tag) for tag in moment.get("tags", []) if str(tag)],
+        "ai_moment",
+        "moment_backed_highlight",
+        action_type,
+        moment_category,
+        audience,
+    ]
+    return highlight_clip(
+        title=str(moment.get("title") or action_type.replace("_", " ").title()),
+        start_seconds=float(moment.get("start_seconds") or 0.0),
+        duration_seconds=float(moment.get("duration_seconds") or 8.0),
+        category=action_type,
+        confidence=float(moment.get("confidence") or 0.65),
+        evidence=str(moment.get("evidence") or "AI-scored match moment from tracking evidence."),
+        coaching_note=str(moment.get("coaching_note") or "Review this moment with the player."),
+        tags=tags,
+        player_label=cleaned_optional_text(moment.get("player_label")),
+        team_label=moment.get("team_label"),
+        jersey_number=moment.get("jersey_number"),
+        source_moment_id=source_moment_id,
+        moment_score=float(moment.get("moment_score") or 0.0),
+        moment_category=moment_category,
+        source_policy=source_policy,
+        source_event=moment.get("source_event") if isinstance(moment.get("source_event"), dict) else {},
+    )
+
+
 def highlight_clips_from_scouting_report(
     report: OppositionScoutingReport,
     existing_count: int,
     target_duration_seconds: float,
 ) -> list[dict[str, object]]:
-    if existing_count >= 8 or target_duration_seconds < 45:
+    if target_duration_seconds < 45:
         return []
     findings: list[dict[str, str]] = []
     for raw in [report.weaknesses_json, report.threats_json, report.recommendations_json, report.set_pieces_json]:
         findings.extend(decode_scouting_findings(raw))
     clips: list[dict[str, object]] = []
-    for index, finding in enumerate(findings[: max(0, 8 - existing_count)]):
+    for index, finding in enumerate(findings[: max(1, 8 - existing_count)]):
         clips.append(
             highlight_clip(
                 title=finding.get("title") or f"Scouting highlight {index + 1}",
@@ -12638,8 +12732,13 @@ def highlight_clip(
     player_label: str | None = None,
     team_label: object | None = None,
     jersey_number: object | None = None,
+    source_moment_id: str | None = None,
+    moment_score: float | None = None,
+    moment_category: str | None = None,
+    source_policy: str | None = None,
+    source_event: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    return {
+    clip: dict[str, object] = {
         "title": title[:180],
         "start_seconds": round(max(start_seconds, 0.0), 2),
         "end_seconds": round(max(start_seconds, 0.0) + max(duration_seconds, 1.0), 2),
@@ -12653,6 +12752,17 @@ def highlight_clip(
         "coaching_note": coaching_note,
         "tags": sorted({tag.strip().lower() for tag in tags if tag and tag.strip()}),
     }
+    if source_moment_id is not None:
+        clip["source_moment_id"] = source_moment_id
+    if moment_score is not None:
+        clip["moment_score"] = round(max(0.0, min(moment_score, 100.0)), 2)
+    if moment_category is not None:
+        clip["moment_category"] = moment_category
+    if source_policy is not None:
+        clip["source_policy"] = source_policy
+    if source_event is not None:
+        clip["source_event"] = source_event
+    return clip
 
 
 def trim_highlight_clips(clips: list[dict[str, object]], target_duration_seconds: float) -> list[dict[str, object]]:
@@ -12666,6 +12776,22 @@ def trim_highlight_clips(clips: list[dict[str, object]], target_duration_seconds
         total += duration
         if len(selected) >= 10 or total >= target_duration_seconds:
             break
+    scouting_candidates = [
+        clip for clip in clips if "scouting" in [str(tag) for tag in clip.get("tags", []) if str(tag)]
+    ]
+    if scouting_candidates and not any("scouting" in [str(tag) for tag in clip.get("tags", []) if str(tag)] for clip in selected):
+        best_scouting = max(scouting_candidates, key=lambda item: float(item.get("confidence") or 0.0))
+        if not selected:
+            selected.append(best_scouting)
+        else:
+            replacement_index = min(
+                range(len(selected)),
+                key=lambda index: (
+                    "ai_moment" in [str(tag) for tag in selected[index].get("tags", []) if str(tag)],
+                    float(selected[index].get("confidence") or 0.0),
+                ),
+            )
+            selected[replacement_index] = best_scouting
     return sorted(selected, key=lambda item: float(item["start_seconds"]))
 
 
@@ -12823,6 +12949,9 @@ def build_highlight_reel_export_artifact(
                 "title": clip.get("title"),
                 "overlay_note": clip.get("coaching_note"),
                 "tags": clip.get("tags"),
+                "source_moment_id": clip.get("source_moment_id"),
+                "moment_score": clip.get("moment_score"),
+                "moment_category": clip.get("moment_category"),
             }
             for index, clip in enumerate(base_manifest["clips"], start=1)
             if isinstance(clip, dict)
@@ -12862,6 +12991,7 @@ def build_highlight_reel_export_artifact(
                 "",
                 f"{index}. {clip.get('title')}",
                 f"   - Window: {clip.get('start_seconds')}s-{clip.get('end_seconds')}s",
+                f"   - Moment score: {clip.get('moment_score') or 'n/a'}",
                 f"   - Evidence: {clip.get('evidence')}",
                 f"   - Coach note: {clip.get('coaching_note')}",
             ]

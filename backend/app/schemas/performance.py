@@ -1231,6 +1231,11 @@ class PerformanceHighlightClipRead(BaseModel):
     evidence: str
     coaching_note: str
     tags: list[str] = Field(default_factory=list)
+    source_moment_id: UUID | None = None
+    moment_score: float | None = None
+    moment_category: str | None = None
+    source_policy: str | None = None
+    source_event: dict[str, Any] = Field(default_factory=dict)
 
 
 class PerformanceHighlightReelRead(BaseModel):

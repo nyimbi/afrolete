@@ -4979,6 +4979,21 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert tracking_response.status_code == 201
     tracking = tracking_response.json()
 
+    moments_response = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/moments",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "min_score": 55,
+            "max_moments": 8,
+            "audience": "scout",
+            "replace_existing": True,
+        },
+    )
+    assert moments_response.status_code == 201
+    moments = moments_response.json()
+    assert moments
+
     reel_response = client.post(
         f"/api/v1/performance/scouting/videos/{video_asset['id']}/highlight-reels",
         headers=identity_headers,
@@ -5001,6 +5016,9 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert reel["distribution"]["share_policy"] == "guardian_approval_required"
     assert "scout_packet" in reel["distribution"]["channels"]
     assert any(clip["category"] == "high_speed_run" for clip in reel["clips"])
+    assert any(clip["source_moment_id"] == moments[0]["id"] for clip in reel["clips"])
+    assert any("moment_backed_highlight" in clip["tags"] for clip in reel["clips"])
+    assert any((clip["moment_score"] or 0) >= 55 for clip in reel["clips"])
     assert any("scouting" in clip["tags"] for clip in reel["clips"])
 
     timeline_response = client.post(

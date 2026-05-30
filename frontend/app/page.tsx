@@ -28069,12 +28069,19 @@ export default function HomePage() {
                   {performanceHighlightReel?.clips.slice(0, 6).map((clip, index) => (
                     <article key={`${clip.title}-${index}`} className="task-card">
                       <div>
-                        <strong>{clip.title} · {clip.category.replaceAll("_", " ")}</strong>
+                        <strong>
+                          {clip.title} · {clip.category.replaceAll("_", " ")}
+                          {clip.moment_score !== null ? ` · ${Math.round(clip.moment_score)}` : ""}
+                        </strong>
                         <span>
                           {clip.start_seconds}s-{clip.end_seconds}s · {Math.round(clip.confidence * 100)}% confidence
                           {clip.player_label ? ` · ${clip.player_label}${clip.jersey_number ? ` #${clip.jersey_number}` : ""}` : ""}
                         </span>
-                        <small>{clip.coaching_note}</small>
+                        <small>
+                          {clip.source_moment_id ? "AI moment-backed clip · " : ""}
+                          {clip.moment_category ? `${clip.moment_category.replaceAll("_", " ")} · ` : ""}
+                          {clip.coaching_note}
+                        </small>
                       </div>
                     </article>
                   ))}

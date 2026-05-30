@@ -7548,6 +7548,11 @@ export type PerformanceHighlightClipRead = {
   evidence: string;
   coaching_note: string;
   tags: string[];
+  source_moment_id: UUID | null;
+  moment_score: number | null;
+  moment_category: string | null;
+  source_policy: string | null;
+  source_event: Record<string, unknown>;
 };
 
 export type PerformanceHighlightReelRead = {
