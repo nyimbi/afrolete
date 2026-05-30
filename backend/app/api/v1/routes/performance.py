@@ -62,6 +62,7 @@ from app.schemas.performance import (
     PerformanceMetricTrendSeriesRead,
     PerformanceMatchAnalysisReportCreate,
     PerformanceMatchAnalysisReportRead,
+    PerformanceMatchPlayerGuidanceReviewRead,
     PerformanceMatchTrackingIdentityReviewCreate,
     PerformanceMatchTrackingIdentityReviewRead,
     PerformanceMatchTrackingIdentityReviewResultRead,
@@ -207,6 +208,7 @@ from app.services.performance import (
     refresh_wearable_provider_token,
     register_wearable_provider_webhook,
     reprocess_match_tracking_provider_ingest_event,
+    review_match_tracking_player_guidance,
     start_wearable_provider_oauth,
     review_assessment,
     review_observation,
@@ -1154,6 +1156,21 @@ async def list_match_tracking_runs_route(
             video_asset_id=video_asset_id,
         )
     ]
+
+
+@router.get(
+    "/scouting/tracking-runs/{tracking_run_id}/player-guidance-review",
+    response_model=PerformanceMatchPlayerGuidanceReviewRead,
+)
+async def review_match_tracking_player_guidance_route(
+    tracking_run_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchPlayerGuidanceReviewRead:
+    return PerformanceMatchPlayerGuidanceReviewRead(
+        **await review_match_tracking_player_guidance(db, identity, tracking_run_id, authz)
+    )
 
 
 @router.get("/scouting/tracking-runs/{tracking_run_id}/export")

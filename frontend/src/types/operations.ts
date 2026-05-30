@@ -7266,6 +7266,30 @@ export type PerformanceMatchAnalysisReportRead = {
   created_at: string;
 };
 
+export type PerformanceMatchPlayerGuidanceReviewRead = {
+  tracking_run_id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  publishable: boolean;
+  guidance_status: string;
+  readiness_level: string;
+  tracking_quality_score: number;
+  identity_continuity_score: number;
+  calibration_quality_score: number;
+  sample_count: number;
+  player_count: number;
+  reviewed_identity_count: number;
+  unreviewed_track_count: number;
+  player_card_count: number;
+  required_actions: string[];
+  review_notes: string[];
+  coach_guidance: string[];
+  player_guidance: Record<string, unknown>[];
+  player_cards: Record<string, unknown>[];
+  quality_warnings: string[];
+  generated_at: string;
+};
+
 export type PerformanceHardwareKitRead = {
   id: UUID;
   organization_id: UUID;

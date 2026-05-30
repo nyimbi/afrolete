@@ -917,6 +917,30 @@ class PerformanceMatchAnalysisReportRead(BaseModel):
     created_at: datetime
 
 
+class PerformanceMatchPlayerGuidanceReviewRead(BaseModel):
+    tracking_run_id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    publishable: bool
+    guidance_status: str
+    readiness_level: str
+    tracking_quality_score: float
+    identity_continuity_score: float
+    calibration_quality_score: float
+    sample_count: int
+    player_count: int
+    reviewed_identity_count: int
+    unreviewed_track_count: int
+    player_card_count: int
+    required_actions: list[str]
+    review_notes: list[str]
+    coach_guidance: list[str]
+    player_guidance: list[dict[str, Any]]
+    player_cards: list[dict[str, Any]]
+    quality_warnings: list[str]
+    generated_at: datetime
+
+
 class PerformanceHardwareKitCreate(BaseModel):
     organization_id: UUID
     name: str = Field(min_length=2, max_length=180)

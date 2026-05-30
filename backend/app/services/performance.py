@@ -1720,6 +1720,148 @@ def match_analysis_report_read(report: PerformanceMatchAnalysisReport) -> dict[s
     }
 
 
+async def review_match_tracking_player_guidance(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    tracking_run_id: UUID,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    run = await get_match_tracking_run(db, tracking_run_id)
+    await ensure_manage_performance(authz, identity, run.organization_id)
+    video_asset = await get_opposition_scouting_video_asset(db, run.video_asset_id)
+    tracking = await match_tracking_run_read(db, run)
+    artifact = build_match_analysis_report_artifact(
+        tracking,
+        video_asset,
+        audience="player",
+        report_scope="player_feedback",
+        title=f"{video_asset.opponent_name} player guidance readiness",
+        include_player_cards=True,
+        include_tactical_shape=True,
+        notes=None,
+    )
+    reviews = list(
+        (
+            await db.scalars(
+                select(PerformanceMatchTrackingIdentityReview)
+                .where(PerformanceMatchTrackingIdentityReview.tracking_run_id == run.id)
+                .where(PerformanceMatchTrackingIdentityReview.decision.in_(["confirmed", "corrected"]))
+            )
+        ).all()
+    )
+    reviewed_track_ids = {review.track_id for review in reviews}
+    player_cards = [card for card in artifact["player_cards"] if isinstance(card, dict)]
+    anonymous_cards = [
+        card
+        for card in player_cards
+        if str(card.get("player_label") or "").strip().lower().startswith("track ")
+        and str(card.get("track_id") or "") not in reviewed_track_ids
+    ]
+    low_quality_cards = [
+        card for card in player_cards if float(card.get("tracking_quality_score") or 0.0) < 0.55
+    ]
+    tracking_quality = float(tracking.get("tracking_quality_score") or 0.0)
+    identity_continuity = float(tracking.get("identity_continuity_score") or 0.0)
+    calibration_quality = float(tracking.get("calibration_quality_score") or 0.0)
+    sample_count = int(tracking.get("sample_count") or 0)
+    player_count = int(tracking.get("player_count") or 0)
+    readiness_level = str(tracking.get("readiness_level") or "unknown")
+    required_actions: list[str] = []
+    review_notes: list[str] = []
+    if not player_cards:
+        required_actions.append("Create a tracking run with player samples before sharing player guidance.")
+    if calibration_quality < 0.75:
+        required_actions.append("Calibrate the pitch or import calibrated provider coordinates before publishing distance and speed guidance.")
+    if tracking_quality < 0.72:
+        required_actions.append("Raise tracking quality above 72% through better footage, provider tracking, calibration, or identity review.")
+    if identity_continuity < 0.72:
+        required_actions.append("Review identity continuity because track gaps or camera cuts may have swapped players.")
+    if anonymous_cards:
+        required_actions.append(f"Confirm identities for {len(anonymous_cards)} anonymous track(s) before player-facing sharing.")
+    if low_quality_cards:
+        required_actions.append(f"Review {len(low_quality_cards)} low-confidence player card(s) before using them for player feedback.")
+    if sample_count < max(player_count * 6, 6):
+        required_actions.append("Capture or import a longer sample window for reliable player load comparisons.")
+
+    quality_warnings = [str(item) for item in (tracking.get("quality_warnings") or []) if str(item)]
+    review_notes.extend(quality_warnings)
+    if not required_actions:
+        review_notes.append("Player guidance is ready for coach-approved sharing.")
+    else:
+        review_notes.append("Player guidance is draft-only until required review actions are closed.")
+
+    publishable = not required_actions
+    guidance_status = "player_shareable" if publishable else "coach_review_required"
+    player_guidance = [
+        match_player_guidance_card(card, publishable=publishable and card not in low_quality_cards)
+        for card in player_cards
+    ]
+    return {
+        "tracking_run_id": run.id,
+        "organization_id": run.organization_id,
+        "video_asset_id": run.video_asset_id,
+        "publishable": publishable,
+        "guidance_status": guidance_status,
+        "readiness_level": readiness_level,
+        "tracking_quality_score": round(tracking_quality, 3),
+        "identity_continuity_score": round(identity_continuity, 3),
+        "calibration_quality_score": round(calibration_quality, 3),
+        "sample_count": sample_count,
+        "player_count": player_count,
+        "reviewed_identity_count": len(reviewed_track_ids),
+        "unreviewed_track_count": len(anonymous_cards),
+        "player_card_count": len(player_cards),
+        "required_actions": list(dict.fromkeys(required_actions)),
+        "review_notes": list(dict.fromkeys(review_notes)),
+        "coach_guidance": [str(item) for item in artifact["recommendations"]],
+        "player_guidance": player_guidance,
+        "player_cards": player_cards,
+        "quality_warnings": quality_warnings,
+        "generated_at": datetime.now(UTC),
+    }
+
+
+def match_player_guidance_card(card: dict[str, object], *, publishable: bool) -> dict[str, object]:
+    label = str(card.get("player_label") or card.get("track_id") or "Player")
+    distance = round(float(card.get("distance_m") or 0.0))
+    high_speed = round(float(card.get("high_speed_distance_m") or 0.0))
+    max_speed = round(float(card.get("max_speed_mps") or 0.0), 1)
+    sprints = int(card.get("sprint_count") or 0)
+    pressure = int(card.get("pressure_applied_count") or 0)
+    received_pressure = int(card.get("pressure_received_count") or 0)
+    actions = [
+        str(flag)
+        for flag in (card.get("coaching_flags") or [])
+        if str(flag).strip()
+    ]
+    if not actions:
+        actions = ["Review match clips with the player and agree one training focus."]
+    if high_speed >= 40 or sprints >= 3:
+        next_action = "Schedule recovery and sprint-mechanics review before the next high-load session."
+    elif pressure or received_pressure:
+        next_action = "Review scanning, first touch, and support angles in the pressure clips."
+    elif int(card.get("pass_attempt_count") or 0) > 0:
+        next_action = "Review passing decisions and receiving body shape with the player."
+    else:
+        next_action = "Pair this metric card with video clips before giving individual feedback."
+    return {
+        "track_id": card.get("track_id"),
+        "player_label": label,
+        "team_label": card.get("team_label"),
+        "jersey_number": card.get("jersey_number"),
+        "publishable": publishable,
+        "headline": f"{label}: {distance}m total, {high_speed}m high-speed, max {max_speed} m/s.",
+        "load_summary": f"{sprints} sprint(s), {card.get('work_rate_m_per_min', 0)} m/min work rate.",
+        "tactical_summary": (
+            f"{pressure} pressure action(s), {received_pressure} pressure received, "
+            f"dominant zone {str(card.get('dominant_zone') or 'unknown').replace('_', ' ')}."
+        ),
+        "recommended_next_action": next_action,
+        "evidence": actions[0],
+        "caution": None if publishable else "Coach review required before sharing this guidance with the player.",
+    }
+
+
 async def create_performance_highlight_reel(
     db: AsyncSession,
     identity: CurrentIdentity,

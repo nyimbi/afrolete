@@ -3494,6 +3494,19 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert "## Possession And Ball Actions" in report_text
     assert "## Data Quality" in report_text
 
+    guidance_review_response = client.get(
+        f"/api/v1/performance/scouting/tracking-runs/{revised_tracking['id']}/player-guidance-review",
+        headers=identity_headers,
+    )
+    assert guidance_review_response.status_code == 200
+    guidance_review = guidance_review_response.json()
+    assert guidance_review["guidance_status"] == "coach_review_required"
+    assert guidance_review["player_card_count"] == len(guidance_review["player_cards"])
+    assert guidance_review["player_guidance"][0]["player_label"] == "Confirmed Forward"
+    assert any("longer sample window" in action for action in guidance_review["required_actions"])
+    assert any("draft-only" in note for note in guidance_review["review_notes"])
+    assert guidance_review["coach_guidance"]
+
 
 def test_match_video_auto_tracking_uses_video_frame_extractor(
     client,

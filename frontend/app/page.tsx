@@ -378,6 +378,7 @@ import type {
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchAnalysisReportRead,
+  PerformanceMatchPlayerGuidanceReviewRead,
   PerformanceMatchPitchCalibrationRead,
   PerformanceMatchTrackingProviderIngestEventRead,
   PerformanceMatchTrackingProviderWebhookRead,
@@ -1851,6 +1852,8 @@ export default function HomePage() {
     useState<PerformanceMatchAnalysisReportRead[]>([]);
   const [performanceMatchAnalysisReport, setPerformanceMatchAnalysisReport] =
     useState<PerformanceMatchAnalysisReportRead | null>(null);
+  const [performanceMatchPlayerGuidanceReview, setPerformanceMatchPlayerGuidanceReview] =
+    useState<PerformanceMatchPlayerGuidanceReviewRead | null>(null);
   const [performanceMatchPitchCalibrations, setPerformanceMatchPitchCalibrations] =
     useState<PerformanceMatchPitchCalibrationRead[]>([]);
   const [performanceMatchPitchCalibration, setPerformanceMatchPitchCalibration] =
@@ -1875,6 +1878,13 @@ export default function HomePage() {
     useState<PerformanceVideoPoseProcessingRead | null>(null);
   const [movementReferenceProfiles, setMovementReferenceProfiles] =
     useState<PerformanceMovementReferenceProfileRead[]>([]);
+
+  useEffect(() => {
+    setPerformanceMatchPlayerGuidanceReview((current) =>
+      current?.tracking_run_id === performanceMatchTrackingRun?.id ? current : null
+    );
+  }, [performanceMatchTrackingRun?.id]);
+
   const [selectedMovementReferenceProfileId, setSelectedMovementReferenceProfileId] = useState("");
   const [selectedPerformanceVideoFile, setSelectedPerformanceVideoFile] = useState<File | null>(null);
   const [selectedOppositionScoutingFile, setSelectedOppositionScoutingFile] = useState<File | null>(null);
@@ -5094,6 +5104,7 @@ export default function HomePage() {
       setPerformanceMatchTrackingIdentityReviews([]);
       setPerformanceMatchAnalysisReports([]);
       setPerformanceMatchAnalysisReport(null);
+      setPerformanceMatchPlayerGuidanceReview(null);
       setPerformanceMatchPitchCalibrations([]);
       setPerformanceMatchPitchCalibration(null);
       setPerformanceHighlightReels([]);
@@ -10541,6 +10552,30 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== report.id)
         ]);
         addLog(`${report.title} ready for download`, "good");
+      }
+    );
+  };
+
+  const reviewPerformanceMatchPlayerGuidance = () => {
+    if (!performanceMatchTrackingRun) {
+      addLog("Track a match before reviewing player guidance readiness", "bad");
+      return;
+    }
+    runAction(
+      `review-player-guidance-${performanceMatchTrackingRun.id}`,
+      () =>
+        apiRequest<PerformanceMatchPlayerGuidanceReviewRead>(
+          `/performance/scouting/tracking-runs/${performanceMatchTrackingRun.id}/player-guidance-review`,
+          { identity }
+        ),
+      (review) => {
+        setPerformanceMatchPlayerGuidanceReview(review);
+        addLog(
+          review.publishable
+            ? "Player guidance is ready for coach-approved sharing"
+            : `${review.required_actions.length} player guidance review action(s) remain`,
+          review.publishable ? "good" : "neutral"
+        );
       }
     );
   };
@@ -25719,6 +25754,7 @@ export default function HomePage() {
                   <button type="button" onClick={importProviderMatchTracking} disabled={busyAction !== null}>Import tracker</button>
                   <button type="button" onClick={autoTrackOppositionMatchVideo} disabled={busyAction !== null}>Auto-track video</button>
                   <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Player guidance</button>
+                  <button type="button" onClick={reviewPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Review share</button>
                   <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>Export reel</button>
                 </div>
               </div>
@@ -25843,6 +25879,19 @@ export default function HomePage() {
                     {performanceMatchAnalysisReport
                       ? `${performanceMatchAnalysisReport.player_cards.length} player card(s) · ${Math.round(performanceMatchAnalysisReport.size_bytes / 1024)} KB`
                       : "Generate a shareable coach/player report from tracking, shape, and quality signals."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Share readiness</span>
+                  <strong>
+                    {performanceMatchPlayerGuidanceReview
+                      ? performanceMatchPlayerGuidanceReview.guidance_status.replaceAll("_", " ")
+                      : "not reviewed"}
+                  </strong>
+                  <p>
+                    {performanceMatchPlayerGuidanceReview
+                      ? `${performanceMatchPlayerGuidanceReview.player_card_count} card(s) · ${performanceMatchPlayerGuidanceReview.required_actions.length} action(s)`
+                      : "Review player-facing guidance before sending metric cards outside the coaching team."}
                   </p>
                 </article>
               </div>
@@ -25998,11 +26047,42 @@ export default function HomePage() {
                     </div>
                     <span>
                       <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Generate</button>
+                      <button type="button" onClick={reviewPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Review</button>
                       {performanceMatchAnalysisReport?.tracking_run_id === performanceMatchTrackingRun.id ? (
                         <button type="button" onClick={() => downloadPerformanceMatchAnalysisReport(performanceMatchAnalysisReport)} disabled={busyAction !== null}>Download</button>
                       ) : null}
                     </span>
                   </article>
+                  {performanceMatchPlayerGuidanceReview ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>
+                          Player guidance {performanceMatchPlayerGuidanceReview.publishable ? "shareable" : "needs coach review"}
+                        </strong>
+                        <span>
+                          quality {Math.round(performanceMatchPlayerGuidanceReview.tracking_quality_score * 100)}% · identity{" "}
+                          {Math.round(performanceMatchPlayerGuidanceReview.identity_continuity_score * 100)}% · calibration{" "}
+                          {Math.round(performanceMatchPlayerGuidanceReview.calibration_quality_score * 100)}%
+                        </span>
+                        <small>
+                          {performanceMatchPlayerGuidanceReview.required_actions[0]
+                            ?? performanceMatchPlayerGuidanceReview.review_notes[0]
+                            ?? "Guidance review complete."}
+                        </small>
+                      </div>
+                    </article>
+                  ) : null}
+                  {performanceMatchPlayerGuidanceReview?.player_guidance.slice(0, 4).map((guidance, index) => (
+                    <article key={`player-guidance-${index}-${String(guidance.track_id ?? "track")}`} className="task-card">
+                      <div>
+                        <strong>{String(guidance.player_label ?? guidance.track_id ?? "Player guidance")}</strong>
+                        <span>{String(guidance.headline ?? "Metric card ready for coach review.")}</span>
+                        <small>
+                          {String(guidance.recommended_next_action ?? guidance.evidence ?? "Attach video evidence before sharing.")}
+                        </small>
+                      </div>
+                    </article>
+                  ))}
                   <article className="task-card">
                     <div>
                       <strong>Portable match data</strong>
