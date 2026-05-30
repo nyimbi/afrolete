@@ -681,6 +681,116 @@ def test_facility_approval_and_waitlist_conversion_flow(client, identity_headers
     assert converted_waitlist[0]["offered_booking_id"] == converted_checkout["booking"]["id"]
 
 
+def test_facility_preventive_maintenance_schedule_dashboard_and_costs(client, identity_headers) -> None:
+    organization, _, member, _ = create_assets_context(client, identity_headers, "Maintenance Program Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Maintenance Field",
+            "facility_type": "field",
+            "hourly_rate": "110.00",
+            "maintenance_budget": "5000.00",
+            "condition": "good",
+        },
+    ).json()
+    equipment = client.post(
+        "/api/v1/assets/equipment",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "name": "Field Light Controller",
+            "category": "facility_equipment",
+            "quantity_total": 1,
+            "quantity_available": 1,
+            "condition": "good",
+        },
+    ).json()
+
+    schedule_response = client.post(
+        "/api/v1/assets/maintenance-schedules",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "equipment_item_id": equipment["id"],
+            "assigned_to_person_id": member["subject_id"],
+            "title": "Weekly field safety inspection",
+            "category": "preventive",
+            "frequency": "weekly",
+            "interval_days": 7,
+            "next_due_at": "2026-06-01T09:00:00Z",
+            "vendor": "Grounds Crew",
+            "estimated_cost": "175.00",
+            "safety_related": True,
+            "compliance_reference": "Field safety checklist",
+            "condition_metric": "surface hardness",
+            "condition_threshold": "below 120 Gmax",
+            "warranty_expires_on": "2027-06-01",
+            "notes": "Inspect surface, goals, lights, drainage, and emergency access.",
+        },
+    )
+    assert schedule_response.status_code == 201
+    schedule = schedule_response.json()
+    assert schedule["status"] == "active"
+    assert schedule["condition_metric"] == "surface hardness"
+
+    dashboard = client.get(
+        f"/api/v1/assets/maintenance-dashboard?organization_id={organization['id']}&facility_id={facility['id']}"
+    )
+    assert dashboard.status_code == 200
+    assert dashboard.json()["due_count"] == 1
+    assert dashboard.json()["safety_due_count"] == 1
+    assert "safety-related" in dashboard.json()["recommendation"]
+
+    run_response = client.post(
+        f"/api/v1/assets/maintenance-schedules/{schedule['id']}/work-order",
+        headers=identity_headers,
+    )
+    assert run_response.status_code == 200
+    run = run_response.json()
+    work_order = run["work_order"]
+    assert work_order["facility_maintenance_schedule_id"] == schedule["id"]
+    assert work_order["priority"] == "high"
+    assert work_order["estimated_cost"] == "175.00"
+    assert run["schedule"]["last_generated_at"] is not None
+    assert run["schedule"]["next_due_at"].startswith("2026-06-08T09:00:00")
+
+    completed = client.patch(
+        f"/api/v1/assets/work-orders/{work_order['id']}",
+        headers=identity_headers,
+        json={
+            "status": "completed",
+            "actual_cost": "150.00",
+            "notes": "Surface, lighting, and emergency access passed.",
+        },
+    )
+    assert completed.status_code == 200
+    assert completed.json()["completed_at"] is not None
+
+    refreshed_schedules = client.get(
+        f"/api/v1/assets/maintenance-schedules?organization_id={organization['id']}&facility_id={facility['id']}"
+    ).json()
+    assert refreshed_schedules[0]["last_completed_at"] is not None
+
+    refreshed_dashboard = client.get(
+        f"/api/v1/assets/maintenance-dashboard?organization_id={organization['id']}&facility_id={facility['id']}"
+    ).json()
+    assert refreshed_dashboard["maintenance_cost_ytd"] == "150.00"
+    assert refreshed_dashboard["budget_remaining"] == "4850.00"
+    assert refreshed_dashboard["cost_by_facility"][0]["actual_cost"] == "150.00"
+
+    paused = client.patch(
+        f"/api/v1/assets/maintenance-schedules/{schedule['id']}",
+        headers=identity_headers,
+        json={"status": "paused", "notes": "Paused during field renovation."},
+    )
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
+
+
 def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
     plan = client.post(

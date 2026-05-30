@@ -664,6 +664,7 @@ class MaintenanceWorkOrderUpdate(BaseModel):
 class MaintenanceWorkOrderRead(BaseModel):
     id: UUID
     organization_id: UUID
+    facility_maintenance_schedule_id: UUID | None
     facility_id: UUID | None
     equipment_item_id: UUID | None
     assigned_to_person_id: UUID | None
@@ -678,6 +679,72 @@ class MaintenanceWorkOrderRead(BaseModel):
     safety_related: bool
     compliance_reference: str | None
     notes: str | None
+
+
+class FacilityMaintenanceScheduleCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    equipment_item_id: UUID | None = None
+    assigned_to_person_id: UUID | None = None
+    title: str = Field(min_length=2, max_length=220)
+    category: str = Field(default="preventive", min_length=2, max_length=120)
+    frequency: str = Field(default="weekly", pattern="^(daily|weekly|monthly|quarterly|annual|custom)$")
+    interval_days: int = Field(default=7, ge=1, le=730)
+    next_due_at: datetime
+    vendor: str | None = Field(default=None, max_length=180)
+    estimated_cost: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    safety_related: bool = False
+    compliance_reference: str | None = Field(default=None, max_length=240)
+    condition_metric: str | None = Field(default=None, max_length=120)
+    condition_threshold: str | None = Field(default=None, max_length=120)
+    warranty_expires_on: date | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityMaintenanceScheduleUpdate(BaseModel):
+    status: str | None = Field(default=None, pattern="^(active|paused|retired)$")
+    next_due_at: datetime | None = None
+    interval_days: int | None = Field(default=None, ge=1, le=730)
+    estimated_cost: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityMaintenanceScheduleRead(FacilityMaintenanceScheduleCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    status: str
+    last_generated_at: datetime | None
+    last_completed_at: datetime | None
+
+
+class FacilityMaintenanceScheduleRunRead(BaseModel):
+    schedule: FacilityMaintenanceScheduleRead
+    work_order: MaintenanceWorkOrderRead
+    next_due_at: datetime
+
+
+class FacilityMaintenanceCostRead(BaseModel):
+    facility_id: UUID
+    facility_name: str
+    maintenance_budget: Decimal | None
+    actual_cost: Decimal
+    estimated_open_cost: Decimal
+    net_budget_remaining: Decimal | None
+
+
+class FacilityMaintenanceDashboardRead(BaseModel):
+    organization_id: UUID
+    due_count: int
+    overdue_count: int
+    safety_due_count: int
+    maintenance_cost_ytd: Decimal
+    estimated_open_cost: Decimal
+    budget_remaining: Decimal | None
+    upcoming_schedules: list[FacilityMaintenanceScheduleRead]
+    recent_work_orders: list[MaintenanceWorkOrderRead]
+    cost_by_facility: list[FacilityMaintenanceCostRead]
+    recommendation: str
 
 
 class FacilityBookingCreate(BaseModel):

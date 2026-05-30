@@ -33,6 +33,7 @@ from app.models.assets import (
     FacilityBooking,
     FacilityBookingRule,
     FacilityBookingWaitlistEntry,
+    FacilityMaintenanceSchedule,
     MaintenanceWorkOrder,
     SupplierOrder,
 )
@@ -49,6 +50,7 @@ from app.models.enums import (
     MemberSubjectType,
     SafeguardingIncidentSeverity,
     SafeguardingIncidentType,
+    WorkOrderPriority,
     WorkOrderStatus,
 )
 from app.models.enums import CommercialStatus
@@ -104,11 +106,18 @@ from app.schemas.assets import (
     FacilityHireCheckoutSettlementCreate,
     FacilityHireCheckoutSettlementRead,
     FacilityHireHostedCheckoutRead,
+    FacilityMaintenanceCostRead,
+    FacilityMaintenanceDashboardRead,
+    FacilityMaintenanceScheduleCreate,
+    FacilityMaintenanceScheduleRead,
+    FacilityMaintenanceScheduleRunRead,
+    FacilityMaintenanceScheduleUpdate,
     FacilityPublicBookingCreate,
     FacilityPublicListingRead,
     FacilityRecurringBookingCreate,
     FacilityUtilizationRead,
     MaintenanceWorkOrderCreate,
+    MaintenanceWorkOrderRead,
     MaintenanceWorkOrderUpdate,
     ProcurementRecommendationRead,
     SupplierOrderCreate,
@@ -1115,6 +1124,115 @@ async def create_work_order(
     return work_order
 
 
+async def create_facility_maintenance_schedule(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityMaintenanceScheduleCreate,
+    authz: AuthorizationService,
+) -> FacilityMaintenanceScheduleRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.equipment_item_id is not None:
+        await get_equipment_for_organization(db, payload.equipment_item_id, payload.organization_id)
+    if payload.assigned_to_person_id is not None:
+        await get_person_member_for_organization(db, payload.assigned_to_person_id, payload.organization_id)
+
+    schedule = FacilityMaintenanceSchedule(
+        status="active",
+        **payload.model_dump(),
+    )
+    db.add(schedule)
+    await db.commit()
+    await db.refresh(schedule)
+    return facility_maintenance_schedule_read(schedule)
+
+
+async def list_facility_maintenance_schedules(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[FacilityMaintenanceScheduleRead]:
+    await get_organization(db, organization_id)
+    statement = select(FacilityMaintenanceSchedule).where(
+        FacilityMaintenanceSchedule.organization_id == organization_id
+    )
+    if facility_id is not None:
+        statement = statement.where(FacilityMaintenanceSchedule.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(FacilityMaintenanceSchedule.status == status_filter)
+    rows = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    FacilityMaintenanceSchedule.next_due_at.asc(),
+                    FacilityMaintenanceSchedule.title.asc(),
+                )
+            )
+        ).all()
+    )
+    return [facility_maintenance_schedule_read(row) for row in rows]
+
+
+async def update_facility_maintenance_schedule(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    schedule_id: UUID,
+    payload: FacilityMaintenanceScheduleUpdate,
+    authz: AuthorizationService,
+) -> FacilityMaintenanceScheduleRead:
+    schedule = await get_facility_maintenance_schedule(db, schedule_id)
+    await ensure_manage_assets(authz, identity, schedule.organization_id)
+    for field in ["status", "next_due_at", "interval_days", "estimated_cost", "notes"]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(schedule, field, value)
+    await db.commit()
+    await db.refresh(schedule)
+    return facility_maintenance_schedule_read(schedule)
+
+
+async def generate_facility_maintenance_work_order(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    schedule_id: UUID,
+    authz: AuthorizationService,
+) -> FacilityMaintenanceScheduleRunRead:
+    schedule = await get_facility_maintenance_schedule(db, schedule_id)
+    await ensure_manage_assets(authz, identity, schedule.organization_id)
+    if schedule.status != "active":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Maintenance schedule is not active")
+    due_at = schedule.next_due_at
+    work_order = MaintenanceWorkOrder(
+        organization_id=schedule.organization_id,
+        facility_maintenance_schedule_id=schedule.id,
+        facility_id=schedule.facility_id,
+        equipment_item_id=schedule.equipment_item_id,
+        assigned_to_person_id=schedule.assigned_to_person_id,
+        title=schedule.title,
+        priority=WorkOrderPriority.HIGH if schedule.safety_related else WorkOrderPriority.MEDIUM,
+        due_at=due_at,
+        vendor=schedule.vendor,
+        estimated_cost=schedule.estimated_cost,
+        safety_related=schedule.safety_related,
+        compliance_reference=schedule.compliance_reference,
+        notes=maintenance_work_order_notes(schedule),
+    )
+    db.add(work_order)
+    now = datetime.now(UTC)
+    schedule.last_generated_at = now
+    schedule.next_due_at = advance_schedule_due_at(schedule.next_due_at, schedule.interval_days)
+    await db.commit()
+    await db.refresh(work_order)
+    await db.refresh(schedule)
+    return FacilityMaintenanceScheduleRunRead(
+        schedule=facility_maintenance_schedule_read(schedule),
+        work_order=maintenance_work_order_read(work_order),
+        next_due_at=schedule.next_due_at,
+    )
+
+
 async def update_work_order(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -1130,6 +1248,10 @@ async def update_work_order(
         work_order.notes = payload.notes
     if payload.status == WorkOrderStatus.COMPLETED:
         work_order.completed_at = datetime.now(UTC)
+        if work_order.facility_maintenance_schedule_id is not None:
+            schedule = await db.get(FacilityMaintenanceSchedule, work_order.facility_maintenance_schedule_id)
+            if schedule is not None:
+                schedule.last_completed_at = work_order.completed_at
     await db.commit()
     await db.refresh(work_order)
     return work_order
@@ -1151,6 +1273,69 @@ async def list_work_orders(
         )
     return list(
         (await db.scalars(statement.order_by(MaintenanceWorkOrder.due_at, MaintenanceWorkOrder.title))).all()
+    )
+
+
+async def facility_maintenance_dashboard(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> FacilityMaintenanceDashboardRead:
+    await get_organization(db, organization_id)
+    now = datetime.now(UTC)
+    soon = now + timedelta(days=14)
+    schedule_statement = select(FacilityMaintenanceSchedule).where(
+        FacilityMaintenanceSchedule.organization_id == organization_id,
+        FacilityMaintenanceSchedule.status == "active",
+    )
+    work_order_statement = select(MaintenanceWorkOrder).where(MaintenanceWorkOrder.organization_id == organization_id)
+    facility_statement = select(Facility).where(Facility.organization_id == organization_id)
+    if facility_id is not None:
+        schedule_statement = schedule_statement.where(FacilityMaintenanceSchedule.facility_id == facility_id)
+        work_order_statement = work_order_statement.where(MaintenanceWorkOrder.facility_id == facility_id)
+        facility_statement = facility_statement.where(Facility.id == facility_id)
+
+    schedules = list((await db.scalars(schedule_statement)).all())
+    work_orders = list((await db.scalars(work_order_statement)).all())
+    facilities = list((await db.scalars(facility_statement)).all())
+
+    upcoming = sorted(
+        [schedule for schedule in schedules if normalize_datetime(schedule.next_due_at) <= soon],
+        key=lambda item: item.next_due_at,
+    )[:8]
+    recent = sorted(
+        [order for order in work_orders if order.completed_at is not None],
+        key=lambda item: item.completed_at or item.updated_at,
+        reverse=True,
+    )[:8]
+    year_start = datetime(now.year, 1, 1, tzinfo=UTC)
+    cost_orders = [order for order in work_orders if normalize_datetime(order.created_at) >= year_start]
+    actual_cost = sum((order.actual_cost or Decimal("0") for order in cost_orders), Decimal("0")).quantize(Decimal("0.01"))
+    estimated_open = sum(
+        (
+            order.estimated_cost or Decimal("0")
+            for order in work_orders
+            if order.status != WorkOrderStatus.COMPLETED
+        ),
+        Decimal("0"),
+    ).quantize(Decimal("0.01"))
+    total_budget = sum((facility.maintenance_budget or Decimal("0") for facility in facilities), Decimal("0")).quantize(Decimal("0.01"))
+    budget_remaining = (total_budget - actual_cost).quantize(Decimal("0.01")) if total_budget > 0 else None
+    cost_by_facility = facility_maintenance_costs(facilities, work_orders)
+    overdue_count = len([schedule for schedule in schedules if normalize_datetime(schedule.next_due_at) < now])
+    safety_due_count = len([schedule for schedule in upcoming if schedule.safety_related])
+    return FacilityMaintenanceDashboardRead(
+        organization_id=organization_id,
+        due_count=len(upcoming),
+        overdue_count=overdue_count,
+        safety_due_count=safety_due_count,
+        maintenance_cost_ytd=actual_cost,
+        estimated_open_cost=estimated_open,
+        budget_remaining=budget_remaining,
+        upcoming_schedules=[facility_maintenance_schedule_read(schedule) for schedule in upcoming],
+        recent_work_orders=[maintenance_work_order_read(order) for order in recent],
+        cost_by_facility=cost_by_facility,
+        recommendation=facility_maintenance_recommendation(overdue_count, safety_due_count, budget_remaining),
     )
 
 
@@ -2597,6 +2782,16 @@ async def get_work_order(db: AsyncSession, work_order_id: UUID) -> MaintenanceWo
     return work_order
 
 
+async def get_facility_maintenance_schedule(
+    db: AsyncSession,
+    schedule_id: UUID,
+) -> FacilityMaintenanceSchedule:
+    schedule = await db.get(FacilityMaintenanceSchedule, schedule_id)
+    if schedule is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Maintenance schedule not found")
+    return schedule
+
+
 async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> SupplierOrder:
     order = await db.get(SupplierOrder, supplier_order_id)
     if order is None:
@@ -2947,6 +3142,123 @@ def facility_waitlist_read(entry: FacilityBookingWaitlistEntry) -> FacilityBooki
         expires_at=entry.expires_at,
         notes=entry.notes,
     )
+
+
+def maintenance_work_order_read(work_order: MaintenanceWorkOrder) -> MaintenanceWorkOrderRead:
+    return MaintenanceWorkOrderRead(
+        id=work_order.id,
+        organization_id=work_order.organization_id,
+        facility_maintenance_schedule_id=work_order.facility_maintenance_schedule_id,
+        facility_id=work_order.facility_id,
+        equipment_item_id=work_order.equipment_item_id,
+        assigned_to_person_id=work_order.assigned_to_person_id,
+        title=work_order.title,
+        priority=work_order.priority,
+        status=work_order.status,
+        due_at=work_order.due_at,
+        completed_at=work_order.completed_at,
+        vendor=work_order.vendor,
+        estimated_cost=work_order.estimated_cost,
+        actual_cost=work_order.actual_cost,
+        safety_related=work_order.safety_related,
+        compliance_reference=work_order.compliance_reference,
+        notes=work_order.notes,
+    )
+
+
+def facility_maintenance_schedule_read(schedule: FacilityMaintenanceSchedule) -> FacilityMaintenanceScheduleRead:
+    return FacilityMaintenanceScheduleRead(
+        id=schedule.id,
+        organization_id=schedule.organization_id,
+        facility_id=schedule.facility_id,
+        equipment_item_id=schedule.equipment_item_id,
+        assigned_to_person_id=schedule.assigned_to_person_id,
+        title=schedule.title,
+        category=schedule.category,
+        frequency=schedule.frequency,
+        interval_days=schedule.interval_days,
+        next_due_at=schedule.next_due_at,
+        last_generated_at=schedule.last_generated_at,
+        last_completed_at=schedule.last_completed_at,
+        vendor=schedule.vendor,
+        estimated_cost=schedule.estimated_cost,
+        safety_related=schedule.safety_related,
+        compliance_reference=schedule.compliance_reference,
+        condition_metric=schedule.condition_metric,
+        condition_threshold=schedule.condition_threshold,
+        warranty_expires_on=schedule.warranty_expires_on,
+        status=schedule.status,
+        notes=schedule.notes,
+    )
+
+
+def maintenance_work_order_notes(schedule: FacilityMaintenanceSchedule) -> str:
+    parts = [schedule.notes or f"Generated from {schedule.frequency} preventive maintenance schedule."]
+    if schedule.condition_metric or schedule.condition_threshold:
+        parts.append(
+            f"Condition trigger: {schedule.condition_metric or 'metric'} "
+            f"{schedule.condition_threshold or 'threshold'}."
+        )
+    if schedule.warranty_expires_on:
+        parts.append(f"Warranty expires on {schedule.warranty_expires_on.isoformat()}.")
+    return " ".join(parts)
+
+
+def advance_schedule_due_at(next_due_at: datetime, interval_days: int) -> datetime:
+    due_at = normalize_datetime(next_due_at) + timedelta(days=interval_days)
+    now = datetime.now(UTC)
+    interval = timedelta(days=interval_days)
+    while due_at <= now:
+        due_at += interval
+    return due_at
+
+
+def facility_maintenance_costs(
+    facilities: list[Facility],
+    work_orders: list[MaintenanceWorkOrder],
+) -> list[FacilityMaintenanceCostRead]:
+    costs: list[FacilityMaintenanceCostRead] = []
+    for facility in facilities:
+        facility_orders = [order for order in work_orders if order.facility_id == facility.id]
+        actual_cost = sum((order.actual_cost or Decimal("0") for order in facility_orders), Decimal("0")).quantize(Decimal("0.01"))
+        estimated_open = sum(
+            (
+                order.estimated_cost or Decimal("0")
+                for order in facility_orders
+                if order.status != WorkOrderStatus.COMPLETED
+            ),
+            Decimal("0"),
+        ).quantize(Decimal("0.01"))
+        budget_remaining = (
+            (facility.maintenance_budget - actual_cost).quantize(Decimal("0.01"))
+            if facility.maintenance_budget is not None
+            else None
+        )
+        costs.append(
+            FacilityMaintenanceCostRead(
+                facility_id=facility.id,
+                facility_name=facility.name,
+                maintenance_budget=facility.maintenance_budget,
+                actual_cost=actual_cost,
+                estimated_open_cost=estimated_open,
+                net_budget_remaining=budget_remaining,
+            )
+        )
+    return sorted(costs, key=lambda item: item.actual_cost + item.estimated_open_cost, reverse=True)
+
+
+def facility_maintenance_recommendation(
+    overdue_count: int,
+    safety_due_count: int,
+    budget_remaining: Decimal | None,
+) -> str:
+    if safety_due_count:
+        return "Prioritize safety-related preventive work before approving heavy facility use."
+    if overdue_count:
+        return "Clear overdue preventive tasks and review staffing or vendor capacity."
+    if budget_remaining is not None and budget_remaining < 0:
+        return "Maintenance spend is above budget; review vendor costs and defer non-critical tasks."
+    return "Preventive schedule is current; keep generating work orders ahead of peak usage windows."
 
 
 def equipment_status_for_quantity(quantity_available: int) -> EquipmentStatus:

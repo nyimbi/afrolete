@@ -2665,6 +2665,7 @@ export type EquipmentCheckoutRead = {
 export type MaintenanceWorkOrderRead = {
   id: UUID;
   organization_id: UUID;
+  facility_maintenance_schedule_id: UUID | null;
   facility_id: UUID | null;
   equipment_item_id: UUID | null;
   assigned_to_person_id: UUID | null;
@@ -2679,6 +2680,59 @@ export type MaintenanceWorkOrderRead = {
   safety_related: boolean;
   compliance_reference: string | null;
   notes: string | null;
+};
+
+export type FacilityMaintenanceScheduleRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  equipment_item_id: UUID | null;
+  assigned_to_person_id: UUID | null;
+  title: string;
+  category: string;
+  frequency: "daily" | "weekly" | "monthly" | "quarterly" | "annual" | "custom";
+  interval_days: number;
+  next_due_at: string;
+  last_generated_at: string | null;
+  last_completed_at: string | null;
+  vendor: string | null;
+  estimated_cost: string | null;
+  safety_related: boolean;
+  compliance_reference: string | null;
+  condition_metric: string | null;
+  condition_threshold: string | null;
+  warranty_expires_on: string | null;
+  status: "active" | "paused" | "retired";
+  notes: string | null;
+};
+
+export type FacilityMaintenanceScheduleRunRead = {
+  schedule: FacilityMaintenanceScheduleRead;
+  work_order: MaintenanceWorkOrderRead;
+  next_due_at: string;
+};
+
+export type FacilityMaintenanceCostRead = {
+  facility_id: UUID;
+  facility_name: string;
+  maintenance_budget: string | null;
+  actual_cost: string;
+  estimated_open_cost: string;
+  net_budget_remaining: string | null;
+};
+
+export type FacilityMaintenanceDashboardRead = {
+  organization_id: UUID;
+  due_count: number;
+  overdue_count: number;
+  safety_due_count: number;
+  maintenance_cost_ytd: string;
+  estimated_open_cost: string;
+  budget_remaining: string | null;
+  upcoming_schedules: FacilityMaintenanceScheduleRead[];
+  recent_work_orders: MaintenanceWorkOrderRead[];
+  cost_by_facility: FacilityMaintenanceCostRead[];
+  recommendation: string;
 };
 
 export type FacilityBookingRead = {

@@ -291,6 +291,9 @@ class MaintenanceWorkOrder(IdMixin, TimestampMixin, Base):
     organization_id: Mapped[UUID] = mapped_column(
         GUID(), ForeignKey("organizations.id"), index=True
     )
+    facility_maintenance_schedule_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("facility_maintenance_schedules.id"), index=True
+    )
     facility_id: Mapped[UUID | None] = mapped_column(
         GUID(), ForeignKey("facilities.id"), index=True
     )
@@ -320,6 +323,33 @@ class MaintenanceWorkOrder(IdMixin, TimestampMixin, Base):
     actual_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     safety_related: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     compliance_reference: Mapped[str | None] = mapped_column(String(240))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class FacilityMaintenanceSchedule(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_maintenance_schedules"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    equipment_item_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("equipment_items.id"), index=True)
+    assigned_to_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(120), default="preventive", nullable=False, index=True)
+    frequency: Mapped[str] = mapped_column(String(40), default="weekly", nullable=False, index=True)
+    interval_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
+    next_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    last_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    vendor: Mapped[str | None] = mapped_column(String(180), index=True)
+    estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    safety_related: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    compliance_reference: Mapped[str | None] = mapped_column(String(240))
+    condition_metric: Mapped[str | None] = mapped_column(String(120))
+    condition_threshold: Mapped[str | None] = mapped_column(String(120))
+    warranty_expires_on: Mapped[date | None] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

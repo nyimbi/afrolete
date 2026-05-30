@@ -240,6 +240,9 @@ import type {
   FacilityBookingRead,
   FacilityBookingRuleRead,
   FacilityBookingWaitlistRead,
+  FacilityMaintenanceDashboardRead,
+  FacilityMaintenanceScheduleRead,
+  FacilityMaintenanceScheduleRunRead,
   FacilityRead,
   FacilityType,
   FacilityUtilizationRead,
@@ -1786,6 +1789,8 @@ export default function HomePage() {
   const [rfidProvision, setRfidProvision] = useState<EquipmentReaderProvisionRead | null>(null);
   const [equipmentCheckouts, setEquipmentCheckouts] = useState<EquipmentCheckoutRead[]>([]);
   const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
+  const [maintenanceSchedules, setMaintenanceSchedules] = useState<FacilityMaintenanceScheduleRead[]>([]);
+  const [maintenanceDashboard, setMaintenanceDashboard] = useState<FacilityMaintenanceDashboardRead | null>(null);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [facilityWaitlist, setFacilityWaitlist] = useState<FacilityBookingWaitlistRead[]>([]);
   const [facilityBookingRule, setFacilityBookingRule] = useState<FacilityBookingRuleRead | null>(null);
@@ -2630,6 +2635,21 @@ export default function HomePage() {
     safety_related: true,
     compliance_reference: "Monthly equipment inspection",
     notes: "Pre-match safety check."
+  });
+  const [maintenanceScheduleForm, setMaintenanceScheduleForm] = useState({
+    title: "Weekly field safety inspection",
+    category: "preventive",
+    frequency: "weekly" as FacilityMaintenanceScheduleRead["frequency"],
+    interval_days: 7,
+    next_due_at: "2026-06-02T09:00",
+    vendor: "Grounds Crew",
+    estimated_cost: 175,
+    safety_related: true,
+    compliance_reference: "Field safety checklist",
+    condition_metric: "surface hardness",
+    condition_threshold: "below 120 Gmax",
+    warranty_expires_on: "2027-06-01",
+    notes: "Inspect surface, goals, lights, drainage, and emergency access."
   });
   const [bookingForm, setBookingForm] = useState({
     title: "U16 training block",
@@ -3914,6 +3934,8 @@ export default function HomePage() {
       equipmentData,
       checkoutData,
       workOrderData,
+      maintenanceScheduleData,
+      maintenanceDashboardData,
       bookingData,
       waitlistData,
       bookingRuleData,
@@ -3934,6 +3956,8 @@ export default function HomePage() {
       apiRequest<EquipmentItemRead[]>(`/assets/equipment?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<EquipmentCheckoutRead[]>(`/assets/checkouts?organization_id=${organizationId}`),
       apiRequest<MaintenanceWorkOrderRead[]>(`/assets/work-orders?organization_id=${organizationId}`),
+      apiRequest<FacilityMaintenanceScheduleRead[]>(`/assets/maintenance-schedules?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<FacilityMaintenanceDashboardRead>(`/assets/maintenance-dashboard?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingWaitlistRead[]>(`/assets/waitlist?organization_id=${organizationId}${facilityQuery}`),
       facilityId
@@ -3978,6 +4002,8 @@ export default function HomePage() {
     setEquipmentItems(equipmentData);
     setEquipmentCheckouts(checkoutData);
     setWorkOrders(workOrderData);
+    setMaintenanceSchedules(maintenanceScheduleData);
+    setMaintenanceDashboard(maintenanceDashboardData);
     setFacilityBookings(bookingData);
     setFacilityWaitlist(waitlistData);
     setFacilityBookingRule(bookingRuleData);
@@ -12962,6 +12988,105 @@ export default function HomePage() {
     );
   };
 
+  const createMaintenanceSchedule = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before scheduling maintenance", "bad");
+      return;
+    }
+    runAction(
+      "create-maintenance-schedule",
+      () =>
+        apiRequest<FacilityMaintenanceScheduleRead>("/assets/maintenance-schedules", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            equipment_item_id: selectedEquipmentId || null,
+            assigned_to_person_id: selectedAthleteId || null,
+            title: maintenanceScheduleForm.title,
+            category: maintenanceScheduleForm.category,
+            frequency: maintenanceScheduleForm.frequency,
+            interval_days: maintenanceScheduleForm.interval_days,
+            next_due_at: new Date(maintenanceScheduleForm.next_due_at).toISOString(),
+            vendor: maintenanceScheduleForm.vendor || null,
+            estimated_cost: String(maintenanceScheduleForm.estimated_cost),
+            safety_related: maintenanceScheduleForm.safety_related,
+            compliance_reference: maintenanceScheduleForm.compliance_reference || null,
+            condition_metric: maintenanceScheduleForm.condition_metric || null,
+            condition_threshold: maintenanceScheduleForm.condition_threshold || null,
+            warranty_expires_on: maintenanceScheduleForm.warranty_expires_on || null,
+            notes: maintenanceScheduleForm.notes
+          }
+        }),
+      (schedule) => {
+        setMaintenanceSchedules((current) => [
+          schedule,
+          ...current.filter((item) => item.id !== schedule.id)
+        ]);
+        addLog(`${schedule.title} schedule activated`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const generateMaintenanceWorkOrder = (schedule: FacilityMaintenanceScheduleRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before generating maintenance work", "bad");
+      return;
+    }
+    runAction(
+      "generate-maintenance-work-order",
+      () =>
+        apiRequest<FacilityMaintenanceScheduleRunRead>(
+          `/assets/maintenance-schedules/${schedule.id}/work-order`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (run) => {
+        setMaintenanceSchedules((current) => [
+          run.schedule,
+          ...current.filter((item) => item.id !== run.schedule.id)
+        ]);
+        setWorkOrders((current) => [
+          run.work_order,
+          ...current.filter((item) => item.id !== run.work_order.id)
+        ]);
+        setSelectedWorkOrderId(run.work_order.id);
+        addLog(`${run.work_order.title} generated; next due ${new Date(run.next_due_at).toLocaleDateString()}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const pauseMaintenanceSchedule = (schedule: FacilityMaintenanceScheduleRead) => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "pause-maintenance-schedule",
+      () =>
+        apiRequest<FacilityMaintenanceScheduleRead>(`/assets/maintenance-schedules/${schedule.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: schedule.status === "active" ? "paused" : "active",
+            notes: schedule.status === "active" ? "Paused from operations console." : "Reactivated from operations console."
+          }
+        }),
+      (updated) => {
+        setMaintenanceSchedules((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.title} is ${updated.status}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
   const updateWorkOrderStatus = (workOrderId: string, status: WorkOrderStatus) => {
     if (!selectedOrganizationId) {
       return;
@@ -18266,7 +18391,81 @@ export default function HomePage() {
                 <p className="section-label">Maintenance</p>
                 <h2>Work orders and safety compliance</h2>
               </div>
-              <button type="button" onClick={createWorkOrder} disabled={busyAction !== null}>Work order</button>
+              <div className="event-toolbar">
+                <button type="button" onClick={createMaintenanceSchedule} disabled={busyAction !== null}>Schedule</button>
+                <button type="button" onClick={createWorkOrder} disabled={busyAction !== null}>Work order</button>
+              </div>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Due soon</span>
+                <strong>{maintenanceDashboard?.due_count ?? 0}</strong>
+                <span className="muted">{maintenanceDashboard?.overdue_count ?? 0} overdue</span>
+              </div>
+              <div>
+                <span className="muted">Safety due</span>
+                <strong>{maintenanceDashboard?.safety_due_count ?? 0}</strong>
+                <span className="muted">compliance-sensitive</span>
+              </div>
+              <div>
+                <span className="muted">Cost YTD</span>
+                <strong>${maintenanceDashboard?.maintenance_cost_ytd ?? "0.00"}</strong>
+                <span className="muted">${maintenanceDashboard?.estimated_open_cost ?? "0.00"} open</span>
+              </div>
+              <div>
+                <span className="muted">Budget left</span>
+                <strong>{maintenanceDashboard?.budget_remaining ?? "n/a"}</strong>
+                <span className="muted">{maintenanceDashboard?.recommendation ?? "No maintenance recommendation"}</span>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Schedule title
+                <input value={maintenanceScheduleForm.title} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, title: event.target.value })} />
+              </label>
+              <label>
+                Frequency
+                <select value={maintenanceScheduleForm.frequency} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, frequency: event.target.value as FacilityMaintenanceScheduleRead["frequency"] })}>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="annual">Annual</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label>
+                Interval days
+                <input type="number" min="1" value={maintenanceScheduleForm.interval_days} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, interval_days: Number(event.target.value) })} />
+              </label>
+              <label>
+                Next due
+                <input type="datetime-local" value={maintenanceScheduleForm.next_due_at} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, next_due_at: event.target.value })} />
+              </label>
+              <label>
+                Vendor
+                <input value={maintenanceScheduleForm.vendor} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, vendor: event.target.value })} />
+              </label>
+              <label>
+                Scheduled cost
+                <input type="number" min="0" value={maintenanceScheduleForm.estimated_cost} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, estimated_cost: Number(event.target.value) })} />
+              </label>
+              <label>
+                Condition metric
+                <input value={maintenanceScheduleForm.condition_metric} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, condition_metric: event.target.value })} />
+              </label>
+              <label>
+                Threshold
+                <input value={maintenanceScheduleForm.condition_threshold} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, condition_threshold: event.target.value })} />
+              </label>
+              <label>
+                Warranty
+                <input type="date" value={maintenanceScheduleForm.warranty_expires_on} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, warranty_expires_on: event.target.value })} />
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={maintenanceScheduleForm.safety_related} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, safety_related: event.target.checked })} />
+                Safety schedule
+              </label>
             </div>
             <div className="form-grid">
               <label>
@@ -18300,6 +18499,30 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {maintenanceSchedules.slice(0, 4).map((schedule) => (
+                <article key={schedule.id} className="task-card">
+                  <div>
+                    <strong>{schedule.title}</strong>
+                    <span>{schedule.frequency} · due {new Date(schedule.next_due_at).toLocaleString()} · {schedule.status}</span>
+                    <span>{schedule.vendor ?? "Internal"} · {schedule.condition_metric ?? "calendar"} {schedule.condition_threshold ?? ""}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => generateMaintenanceWorkOrder(schedule)}>Generate</button>
+                    <button type="button" onClick={() => pauseMaintenanceSchedule(schedule)}>
+                      {schedule.status === "active" ? "Pause" : "Activate"}
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {maintenanceDashboard?.cost_by_facility.slice(0, 3).map((cost) => (
+                <article key={cost.facility_id} className="task-card">
+                  <div>
+                    <strong>{cost.facility_name}</strong>
+                    <span>${cost.actual_cost} actual · ${cost.estimated_open_cost} open maintenance</span>
+                    <span>Budget {cost.maintenance_budget ?? "not set"} · remaining {cost.net_budget_remaining ?? "n/a"}</span>
+                  </div>
+                </article>
+              ))}
               {workOrders.map((workOrder) => (
                 <article
                   key={workOrder.id}
@@ -18309,6 +18532,7 @@ export default function HomePage() {
                   <div>
                     <strong>{workOrder.title}</strong>
                     <span>{workOrder.priority} · {workOrder.status} · {workOrder.compliance_reference ?? "No standard"}</span>
+                    <span>{workOrder.facility_maintenance_schedule_id ? "Generated from preventive schedule" : workOrder.vendor ?? "Manual work order"}</span>
                   </div>
                   <button
                     type="button"

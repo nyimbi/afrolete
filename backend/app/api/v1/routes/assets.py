@@ -58,6 +58,11 @@ from app.schemas.assets import (
     FacilityHireCheckoutSettlementCreate,
     FacilityHireCheckoutSettlementRead,
     FacilityHireHostedCheckoutRead,
+    FacilityMaintenanceDashboardRead,
+    FacilityMaintenanceScheduleCreate,
+    FacilityMaintenanceScheduleRead,
+    FacilityMaintenanceScheduleRunRead,
+    FacilityMaintenanceScheduleUpdate,
     FacilityPublicBookingCreate,
     FacilityPublicListingRead,
     FacilityRead,
@@ -85,6 +90,7 @@ from app.services.assets import (
     create_equipment_item,
     create_facility,
     create_facility_booking,
+    create_facility_maintenance_schedule,
     create_public_facility_waitlist_entry,
     create_recurring_facility_bookings,
     create_equipment_lease_invoice,
@@ -97,6 +103,7 @@ from app.services.assets import (
     equipment_lease_quote,
     ensure_manage_assets,
     facility_availability,
+    facility_maintenance_dashboard,
     facility_utilization,
     create_public_facility_booking,
     get_facility_booking_rule,
@@ -112,6 +119,7 @@ from app.services.assets import (
     list_equipment_lease_schedules,
     list_facilities,
     list_facility_bookings,
+    list_facility_maintenance_schedules,
     list_supplier_orders,
     list_work_orders,
     procurement_recommendations,
@@ -127,6 +135,7 @@ from app.services.assets import (
     sync_supplier_invoice,
     settle_facility_hire_checkout,
     update_facility_booking_status,
+    update_facility_maintenance_schedule,
     update_facility_waitlist_entry,
     supplier_scorecard,
     update_emergency_action_plan,
@@ -138,6 +147,7 @@ from app.services.assets import (
     update_work_order,
     utilization_recommendations,
     convert_facility_waitlist_entry,
+    generate_facility_maintenance_work_order,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -344,6 +354,7 @@ def to_work_order_read(work_order) -> MaintenanceWorkOrderRead:
     return MaintenanceWorkOrderRead(
         id=work_order.id,
         organization_id=work_order.organization_id,
+        facility_maintenance_schedule_id=work_order.facility_maintenance_schedule_id,
         facility_id=work_order.facility_id,
         equipment_item_id=work_order.equipment_item_id,
         assigned_to_person_id=work_order.assigned_to_person_id,
@@ -961,6 +972,65 @@ async def update_work_order_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> MaintenanceWorkOrderRead:
     return to_work_order_read(await update_work_order(db, identity, work_order_id, payload, authz))
+
+
+@router.post(
+    "/maintenance-schedules",
+    response_model=FacilityMaintenanceScheduleRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_facility_maintenance_schedule_route(
+    payload: FacilityMaintenanceScheduleCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityMaintenanceScheduleRead:
+    return await create_facility_maintenance_schedule(db, identity, payload, authz)
+
+
+@router.get("/maintenance-schedules", response_model=list[FacilityMaintenanceScheduleRead])
+async def list_facility_maintenance_schedules_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    db: AsyncSession = Depends(get_db),
+) -> list[FacilityMaintenanceScheduleRead]:
+    return await list_facility_maintenance_schedules(
+        db,
+        organization_id,
+        facility_id=facility_id,
+        status_filter=status_filter,
+    )
+
+
+@router.patch("/maintenance-schedules/{schedule_id}", response_model=FacilityMaintenanceScheduleRead)
+async def update_facility_maintenance_schedule_route(
+    schedule_id: UUID,
+    payload: FacilityMaintenanceScheduleUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityMaintenanceScheduleRead:
+    return await update_facility_maintenance_schedule(db, identity, schedule_id, payload, authz)
+
+
+@router.post("/maintenance-schedules/{schedule_id}/work-order", response_model=FacilityMaintenanceScheduleRunRead)
+async def generate_facility_maintenance_work_order_route(
+    schedule_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityMaintenanceScheduleRunRead:
+    return await generate_facility_maintenance_work_order(db, identity, schedule_id, authz)
+
+
+@router.get("/maintenance-dashboard", response_model=FacilityMaintenanceDashboardRead)
+async def facility_maintenance_dashboard_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityMaintenanceDashboardRead:
+    return await facility_maintenance_dashboard(db, organization_id, facility_id=facility_id)
 
 
 @router.post("/bookings", response_model=FacilityBookingRead, status_code=status.HTTP_201_CREATED)
