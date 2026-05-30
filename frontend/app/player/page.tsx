@@ -7,6 +7,7 @@ import type {
   LocalIdentity,
   MessageRecipientRead,
   MetricCategory,
+  PerformanceSharedHighlightReelFeedbackRead,
   PerformanceSharedHighlightReelRead,
   PlayerMatchGuidanceFeedbackRead,
   PlayerMatchGuidanceRead,
@@ -868,6 +869,52 @@ export default function PlayerPerformancePage() {
     }
   };
 
+  const submitSharedHighlightFeedback = async (
+    highlight: PerformanceSharedHighlightReelRead,
+    status: "acknowledged" | "needs_help" | "completed" | "confused" | "inspired",
+    requestedFollowUp = false
+  ) => {
+    if (!organizationId) {
+      setError("Organization id is required before sending highlight feedback");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const feedback = await apiRequest<PerformanceSharedHighlightReelFeedbackRead>(
+        `/performance/my-highlight-reels/${highlight.recipient_id}/feedback`,
+        {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: organizationId,
+            status,
+            rating: requestedFollowUp ? 3 : status === "completed" ? 5 : 4,
+            response_text: requestedFollowUp
+              ? "I reviewed this highlight reel and need coach help."
+              : status === "completed"
+                ? "I reviewed this highlight reel and completed the clips."
+                : "I reviewed this highlight reel.",
+            priority_focus: requestedFollowUp ? "coach_review" : status === "completed" ? "clip_followup" : "self_review",
+            requested_follow_up: requestedFollowUp,
+            clip_time_seconds: highlight.clips[0]?.start_seconds ?? null
+          }
+        }
+      );
+      setSharedHighlights((current) =>
+        current.map((item) =>
+          item.recipient_id === highlight.recipient_id
+            ? { ...item, feedback, delivery_status: "read", read_at: feedback.submitted_at }
+            : item
+        )
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Highlight feedback failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const downloadSharedHighlight = async (highlight: PerformanceSharedHighlightReelRead) => {
     if (!highlight.download_path) {
       setError("This highlight reel does not have a downloadable export yet");
@@ -1228,6 +1275,20 @@ export default function PlayerPerformancePage() {
                       {highlight.delivery_status.replaceAll("_", " ")} · shared{" "}
                       {new Date(highlight.published_at).toLocaleDateString()}
                     </small>
+                    <small>
+                      {highlight.feedback
+                        ? `${highlight.feedback.status.replaceAll("_", " ")}${highlight.feedback.rating ? ` · ${highlight.feedback.rating}/5` : ""}${highlight.feedback.requested_follow_up ? " · coach help requested" : ""}`
+                        : "waiting for your reel feedback"}
+                    </small>
+                    {highlight.feedback?.agent_task_id ? (
+                      <small>AI coach review queued · {highlight.feedback.agent_task_id.slice(0, 8)}</small>
+                    ) : null}
+                    {highlight.feedback?.coach_followup_sent_at ? (
+                      <small>
+                        Coach follow-up {new Date(highlight.feedback.coach_followup_sent_at).toLocaleString()} ·{" "}
+                        {highlight.feedback.coach_followup_notes ?? "open your inbox for the full message"}
+                      </small>
+                    ) : null}
                   </div>
                   <div className="chart-bars">
                     <div className="chart-bar-row">
@@ -1277,6 +1338,30 @@ export default function PlayerPerformancePage() {
                     onClick={() => markSharedHighlightReviewed(highlight)}
                   >
                     Mark reviewed
+                  </button>
+                  <button
+                    className="player-inline-action"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => submitSharedHighlightFeedback(highlight, "acknowledged")}
+                  >
+                    Ack
+                  </button>
+                  <button
+                    className="player-inline-action"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => submitSharedHighlightFeedback(highlight, "needs_help", true)}
+                  >
+                    Need help
+                  </button>
+                  <button
+                    className="player-inline-action"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => submitSharedHighlightFeedback(highlight, "completed")}
+                  >
+                    Completed clips
                   </button>
                 </article>
               ))}

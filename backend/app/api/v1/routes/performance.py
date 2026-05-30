@@ -50,6 +50,8 @@ from app.schemas.performance import (
     PerformanceHighlightReelShareAuditRead,
     PerformanceHighlightReelShareCreate,
     PerformanceHighlightReelShareRead,
+    PerformanceHighlightReelFeedbackFollowupCreate,
+    PerformanceHighlightReelFeedbackFollowupRead,
     PerformanceSharedHighlightReelFeedbackCreate,
     PerformanceSharedHighlightReelFeedbackRead,
     PerformanceSharedHighlightReelRead,
@@ -248,6 +250,7 @@ from app.services.performance import (
     run_performance_injury_risk_alert_scan,
     run_performance_hardware_sync,
     render_performance_highlight_reel_export,
+    send_performance_highlight_reel_feedback_followup,
     send_performance_highlight_reel_reminder,
     run_performance_highlight_reel_reminders,
     run_wearable_provider_sync,
@@ -1783,6 +1786,29 @@ async def list_performance_highlight_reel_engagement_route(
             highlight_reel_id=highlight_reel_id,
         )
     ]
+
+
+@router.post(
+    "/scouting/highlight-reel-feedback/{feedback_id}/followup",
+    response_model=PerformanceHighlightReelFeedbackFollowupRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_performance_highlight_reel_feedback_followup_route(
+    feedback_id: UUID,
+    payload: PerformanceHighlightReelFeedbackFollowupCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceHighlightReelFeedbackFollowupRead:
+    return PerformanceHighlightReelFeedbackFollowupRead(
+        **await send_performance_highlight_reel_feedback_followup(
+            db,
+            identity,
+            feedback_id,
+            payload,
+            authz,
+        )
+    )
 
 
 @router.post(

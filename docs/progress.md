@@ -1221,6 +1221,7 @@ athlete-development platform:
 | 536 - Curation-aware highlight exports | Complete | Focused highlight export test; backend lint; frontend typecheck; diff check | Highlight timeline JSON, MP4 edit-decision lists, and social caption packs now include curation summaries, per-clip source moment status, rejected-moment exclusion policy, and editor-facing review overlays so renderers, scouts, families, and coaches can see which clips were coach-featured, approved, or only AI-detected. |
 | 537 - Highlight curation UI visibility | Complete | Frontend typecheck; diff check | The operations console now surfaces curation provenance directly on selected highlight reels, export artifacts, export history cards, and clip cards, showing curated/featured/approved counts, rejected-moment exclusion, and per-clip coach-featured/approved/AI-detected labels without forcing staff to inspect raw JSON. |
 | 538 - Player highlight reel inbox UI | Complete | Frontend typecheck; diff check | The frontend now loads recipient-scoped `/performance/my-highlight-reels` data, shows player-inbox highlight reel cards with delivery/read state, share policy, export format, and curation counts, and provides an authenticated Open action for the recipient-scoped export download path. |
+| 539 - Shared highlight reel feedback follow-ups | Complete | Focused highlight-reel feedback test; backend lint; frontend typecheck; Alembic heads; diff check | Shared highlight reel feedback now supports coach follow-up messages through the communications ledger, persists follow-up metadata on feedback records, exposes reply state in coach engagement summaries, and gives player/family portals direct acknowledgement/help controls plus visible coach replies. |
 
 ## Capability Coverage
 
@@ -1265,6 +1266,7 @@ Latest slices:
 - Coach match-guidance engagement cards can now send targeted follow-up messages back to players from feedback/help requests, persist the coach response on the feedback record, and show follow-up delivery state in the operations console.
 - Player match-guidance cards now show coach follow-up messages and timestamps after a coach replies to an athlete help request, so the player guidance loop closes on the same card that originated the request.
 - Family-copied match-guidance cards now accept guardian feedback and help requests, queue Training Strategy Agent review tasks, appear in coach engagement summaries, and show coach replies back inside the family portal card.
+- Shared highlight reels now close the same loop: players and guardians can acknowledge or ask for help, coaches can reply from highlight engagement summaries, and player/family cards show coach follow-up metadata.
 
 ## Next Actions
 

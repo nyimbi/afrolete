@@ -880,6 +880,11 @@ class PerformanceHighlightReelFeedback(IdMixin, TimestampMixin, Base):
     requested_follow_up: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     clip_time_seconds: Mapped[float | None] = mapped_column(Float)
     agent_task_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("agent_tasks.id"), index=True)
+    coach_followup_message_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("communication_messages.id"), index=True
+    )
+    coach_followup_notes: Mapped[str | None] = mapped_column(Text)
+    coach_followup_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 

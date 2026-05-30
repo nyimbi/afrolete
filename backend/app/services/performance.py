@@ -117,6 +117,7 @@ from app.schemas.performance import (
     PerformanceHighlightReelReminderRunRead,
     PerformanceHighlightReelShareCreate,
     PerformanceSharedHighlightReelFeedbackCreate,
+    PerformanceHighlightReelFeedbackFollowupCreate,
     PerformanceIngestionCreate,
     PerformanceModelExtractionBulkReviewCreate,
     PerformanceMatchAnalysisReportCreate,
@@ -3760,6 +3761,7 @@ async def list_performance_highlight_reel_engagement(
                 "read_at": recipient.read_at,
                 "download_count": download_stats["download_count"],
                 "last_downloaded_at": download_stats["last_downloaded_at"],
+                "feedback_id": feedback.id if feedback is not None else None,
                 "feedback_status": feedback.status if feedback is not None else None,
                 "feedback_rating": feedback.rating if feedback is not None else None,
                 "feedback_requested_follow_up": feedback.requested_follow_up if feedback is not None else False,
@@ -3767,6 +3769,12 @@ async def list_performance_highlight_reel_engagement(
                 "feedback_response_preview": feedback_response_preview,
                 "feedback_submitted_at": feedback.submitted_at if feedback is not None else None,
                 "feedback_agent_task_id": feedback.agent_task_id if feedback is not None else None,
+                "feedback_coach_followup_message_id": (
+                    feedback.coach_followup_message_id if feedback is not None else None
+                ),
+                "feedback_coach_followup_sent_at": (
+                    feedback.coach_followup_sent_at if feedback is not None else None
+                ),
             }
         )
     counts = await delivery_counts_for_messages(db, message_ids)
@@ -4353,6 +4361,9 @@ def highlight_reel_feedback_read(feedback: PerformanceHighlightReelFeedback) -> 
         "requested_follow_up": feedback.requested_follow_up,
         "clip_time_seconds": feedback.clip_time_seconds,
         "agent_task_id": feedback.agent_task_id,
+        "coach_followup_message_id": feedback.coach_followup_message_id,
+        "coach_followup_notes": feedback.coach_followup_notes,
+        "coach_followup_sent_at": feedback.coach_followup_sent_at,
         "submitted_at": feedback.submitted_at,
         "created_at": feedback.created_at,
         "updated_at": feedback.updated_at,
@@ -4539,6 +4550,85 @@ async def submit_my_shared_highlight_reel_feedback(
     await db.commit()
     await db.refresh(feedback)
     return feedback
+
+
+async def send_performance_highlight_reel_feedback_followup(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    feedback_id: UUID,
+    payload: PerformanceHighlightReelFeedbackFollowupCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    feedback = await db.get(PerformanceHighlightReelFeedback, feedback_id)
+    if feedback is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Highlight reel feedback not found")
+    if feedback.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, feedback.organization_id)
+    reel = await db.get(PerformanceHighlightReel, feedback.highlight_reel_id)
+    audit = await db.get(PerformanceHighlightReelShareAudit, feedback.share_audit_id)
+    export = (
+        await db.get(PerformanceHighlightReelExport, feedback.highlight_reel_export_id)
+        if feedback.highlight_reel_export_id is not None
+        else None
+    )
+    if reel is None or audit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Highlight reel context not found")
+    agent_review = None
+    if payload.include_agent_review and feedback.agent_task_id is not None:
+        task = await db.get(AgentTask, feedback.agent_task_id)
+        if task is not None and task.review_notes:
+            agent_review = task.review_notes.strip()
+    subject = f"{payload.subject_prefix}: {reel.title}"[:240]
+    body_parts = [
+        payload.coach_notes.strip(),
+        "",
+        f"Highlight reel: {reel.title}",
+        f"Share audience: {audit.audience.replace('_', ' ')}",
+        f"Recipient response: {feedback.status.replace('_', ' ')}",
+    ]
+    if feedback.response_text:
+        body_parts.append(f"Recipient note: {feedback.response_text}")
+    if feedback.priority_focus:
+        body_parts.append(f"Priority focus: {feedback.priority_focus}")
+    if feedback.clip_time_seconds is not None:
+        body_parts.append(f"Clip time: {feedback.clip_time_seconds:.1f}s")
+    if export is not None:
+        body_parts.append(f"Export: {export.filename}")
+    if agent_review:
+        body_parts.extend(["", "Coaching Agent review:", agent_review])
+    body_parts.extend(
+        [
+            "",
+            "Coach review remains required before changing training load, medical, or selection decisions.",
+        ]
+    )
+    message = await create_message_for_recipients(
+        db,
+        organization_id=feedback.organization_id,
+        message_type=CommunicationMessageType.REPORT,
+        channel=payload.channel,
+        scope_type=CommunicationScopeType.PERSON,
+        scope_id=feedback.person_id,
+        recipient_person_ids=[feedback.person_id],
+        subject=subject,
+        body="\n".join(body_parts),
+        created_by_person_id=identity.person_id,
+    )
+    feedback.coach_followup_message_id = message.id
+    feedback.coach_followup_notes = payload.coach_notes.strip()
+    feedback.coach_followup_sent_at = message.sent_at or datetime.now(UTC)
+    await db.commit()
+    await db.refresh(feedback)
+    return {
+        "feedback": highlight_reel_feedback_read(feedback),
+        "message_id": message.id,
+        "subject": message.subject,
+        "channel": message.channel,
+        "recipient_person_id": feedback.person_id,
+        "recipient_count": 1,
+        "sent_at": feedback.coach_followup_sent_at,
+    }
 
 
 async def queue_highlight_reel_feedback_agent_review(

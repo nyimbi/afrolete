@@ -7771,6 +7771,9 @@ export type PerformanceSharedHighlightReelFeedbackRead = {
   requested_follow_up: boolean;
   clip_time_seconds: number | null;
   agent_task_id: UUID | null;
+  coach_followup_message_id: UUID | null;
+  coach_followup_notes: string | null;
+  coach_followup_sent_at: string | null;
   submitted_at: string;
   created_at: string;
   updated_at: string;
@@ -7811,6 +7814,7 @@ export type PerformanceSharedHighlightReelRead = {
 };
 
 export type PerformanceHighlightReelRecipientEngagementRead = {
+  feedback_id: UUID | null;
   recipient_id: UUID;
   person_id: UUID;
   person_name: string;
@@ -7827,6 +7831,18 @@ export type PerformanceHighlightReelRecipientEngagementRead = {
   feedback_response_preview: string | null;
   feedback_submitted_at: string | null;
   feedback_agent_task_id: UUID | null;
+  feedback_coach_followup_message_id: UUID | null;
+  feedback_coach_followup_sent_at: string | null;
+};
+
+export type PerformanceHighlightReelFeedbackFollowupRead = {
+  feedback: PerformanceSharedHighlightReelFeedbackRead;
+  message_id: UUID;
+  subject: string;
+  channel: CommunicationChannel;
+  recipient_person_id: UUID;
+  recipient_count: number;
+  sent_at: string;
 };
 
 export type PerformanceHighlightReelEngagementRead = {

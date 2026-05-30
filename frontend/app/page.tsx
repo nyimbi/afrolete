@@ -381,10 +381,12 @@ import type {
   PerformanceHighlightReelEngagementRead,
   PerformanceHighlightReelExportRead,
   PerformanceHighlightReelRead,
+  PerformanceHighlightReelRecipientEngagementRead,
   PerformanceHighlightReelReminderRead,
   PerformanceHighlightReelReminderRunRead,
   PerformanceHighlightReelShareAuditRead,
   PerformanceHighlightReelShareRead,
+  PerformanceHighlightReelFeedbackFollowupRead,
   PerformanceSharedHighlightReelFeedbackRead,
   PerformanceSharedHighlightReelRead,
   PerformanceInjuryRiskAlertRead,
@@ -1973,6 +1975,8 @@ export default function HomePage() {
     useState<PerformanceHighlightReelShareRead | null>(null);
   const [performanceHighlightReelEngagements, setPerformanceHighlightReelEngagements] =
     useState<PerformanceHighlightReelEngagementRead[]>([]);
+  const [performanceHighlightReelFeedbackFollowup, setPerformanceHighlightReelFeedbackFollowup] =
+    useState<PerformanceHighlightReelFeedbackFollowupRead | null>(null);
   const [performanceHighlightReelReminder, setPerformanceHighlightReelReminder] =
     useState<PerformanceHighlightReelReminderRead | null>(null);
   const [performanceHighlightReelReminderRun, setPerformanceHighlightReelReminderRun] =
@@ -11621,6 +11625,62 @@ export default function HomePage() {
           reminder.recipient_count ? "good" : "neutral"
         );
         void loadOppositionScouting(selectedOrganizationId, selectedTeam?.id);
+      }
+    );
+  };
+
+  const sendPerformanceHighlightReelFeedbackFollowup = (
+    engagement: PerformanceHighlightReelEngagementRead,
+    recipient: PerformanceHighlightReelRecipientEngagementRead
+  ) => {
+    if (!selectedOrganizationId || !recipient.feedback_id) {
+      addLog("Select highlight feedback before sending a coach follow-up", "bad");
+      return;
+    }
+    const notes = recipient.feedback_requested_follow_up
+      ? `Coach follow-up for ${recipient.person_name} on ${engagement.title}: we will review ${recipient.feedback_priority_focus ?? "your highlight reel"} and adjust the next training block.`
+      : `Coach follow-up for ${recipient.person_name} on ${engagement.title}: reel feedback received and noted for the next review.`;
+    runAction(
+      `highlight-reel-feedback-followup-${recipient.feedback_id}`,
+      () =>
+        apiRequest<PerformanceHighlightReelFeedbackFollowupRead>(
+          `/performance/scouting/highlight-reel-feedback/${recipient.feedback_id}/followup`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "in_app",
+              subject_prefix: "Coach follow-up",
+              coach_notes: notes,
+              include_agent_review: true
+            }
+          }
+        ),
+      (followup) => {
+        setPerformanceHighlightReelFeedbackFollowup(followup);
+        setPerformanceHighlightReelEngagements((current) =>
+          current.map((item) => ({
+            ...item,
+            recipients: item.recipients.map((currentRecipient) =>
+              currentRecipient.feedback_id === followup.feedback.id
+                ? {
+                    ...currentRecipient,
+                    feedback_coach_followup_message_id: followup.message_id,
+                    feedback_coach_followup_sent_at: followup.sent_at
+                  }
+                : currentRecipient
+            )
+          }))
+        );
+        setMyPerformanceHighlightReels((current) =>
+          current.map((item) =>
+            item.feedback?.id === followup.feedback.id
+              ? { ...item, feedback: followup.feedback }
+              : item
+          )
+        );
+        addLog(`Coach follow-up sent to ${recipient.person_name}`, "good");
       }
     );
   };
@@ -28959,6 +29019,12 @@ export default function HomePage() {
                         {reel.feedback?.agent_task_id ? (
                           <small>AI coach review queued · {reel.feedback.agent_task_id.slice(0, 8)}</small>
                         ) : null}
+                        {reel.feedback?.coach_followup_sent_at ? (
+                          <small>
+                            Coach follow-up {new Date(reel.feedback.coach_followup_sent_at).toLocaleString()} ·{" "}
+                            {reel.feedback.coach_followup_notes ?? "message sent"}
+                          </small>
+                        ) : null}
                       </div>
                       <span>
                         <button
@@ -29030,14 +29096,63 @@ export default function HomePage() {
                               ? ` · ${recipient.feedback_status.replaceAll("_", " ")}${recipient.feedback_requested_follow_up ? " · wants follow-up" : ""}`
                               : ""}
                             {recipient.feedback_agent_task_id ? ` · AI task ${recipient.feedback_agent_task_id.slice(0, 8)}` : ""}
+                            {recipient.feedback_response_preview ? ` · "${recipient.feedback_response_preview}"` : ""}
+                            {recipient.feedback_coach_followup_sent_at
+                              ? ` · coach follow-up ${new Date(recipient.feedback_coach_followup_sent_at).toLocaleString()}`
+                              : ""}
                           </small>
                         ))}
                       </div>
                       <span>
+                        {engagement.recipients.some((recipient) => recipient.feedback_id && !recipient.feedback_coach_followup_sent_at) ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const recipient =
+                                engagement.recipients.find((item) => item.feedback_requested_follow_up && item.feedback_id && !item.feedback_coach_followup_sent_at) ??
+                                engagement.recipients.find((item) => item.feedback_id && !item.feedback_coach_followup_sent_at);
+                              if (recipient) {
+                                sendPerformanceHighlightReelFeedbackFollowup(engagement, recipient);
+                              }
+                            }}
+                            disabled={busyAction !== null}
+                          >
+                            Reply
+                          </button>
+                        ) : null}
+                        {engagement.recipients.some((recipient) => recipient.feedback_agent_task_id) ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const taskId = engagement.recipients.find((recipient) => recipient.feedback_agent_task_id)?.feedback_agent_task_id;
+                              if (taskId) {
+                                executeAgentTask(taskId);
+                              }
+                            }}
+                            disabled={busyAction !== null}
+                          >
+                            AI help
+                          </button>
+                        ) : null}
                         <button type="button" onClick={() => remindPerformanceHighlightReelRecipients(engagement.share_audit_id)} disabled={busyAction !== null}>Remind unread</button>
                       </span>
                     </article>
                   ))}
+                  {performanceHighlightReelFeedbackFollowup ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>Highlight reel coach follow-up sent</strong>
+                        <span>
+                          {performanceHighlightReelFeedbackFollowup.subject} ·{" "}
+                          {performanceHighlightReelFeedbackFollowup.channel}
+                        </span>
+                        <small>
+                          message {performanceHighlightReelFeedbackFollowup.message_id.slice(0, 8)} ·{" "}
+                          {new Date(performanceHighlightReelFeedbackFollowup.sent_at).toLocaleString()}
+                        </small>
+                      </div>
+                    </article>
+                  ) : null}
                   {performanceHighlightReelExport ? (
                     <article className="task-card">
                       <div>

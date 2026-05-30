@@ -1457,6 +1457,9 @@ class PerformanceSharedHighlightReelFeedbackRead(BaseModel):
     requested_follow_up: bool
     clip_time_seconds: float | None
     agent_task_id: UUID | None = None
+    coach_followup_message_id: UUID | None = None
+    coach_followup_notes: str | None = None
+    coach_followup_sent_at: datetime | None = None
     submitted_at: datetime
     created_at: datetime
     updated_at: datetime
@@ -1497,6 +1500,7 @@ class PerformanceSharedHighlightReelRead(BaseModel):
 
 
 class PerformanceHighlightReelRecipientEngagementRead(BaseModel):
+    feedback_id: UUID | None = None
     recipient_id: UUID
     person_id: UUID
     person_name: str
@@ -1513,6 +1517,26 @@ class PerformanceHighlightReelRecipientEngagementRead(BaseModel):
     feedback_response_preview: str | None = None
     feedback_submitted_at: datetime | None = None
     feedback_agent_task_id: UUID | None = None
+    feedback_coach_followup_message_id: UUID | None = None
+    feedback_coach_followup_sent_at: datetime | None = None
+
+
+class PerformanceHighlightReelFeedbackFollowupCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.IN_APP
+    subject_prefix: str = Field(default="Coach follow-up", min_length=2, max_length=120)
+    coach_notes: str = Field(min_length=2, max_length=2000)
+    include_agent_review: bool = True
+
+
+class PerformanceHighlightReelFeedbackFollowupRead(BaseModel):
+    feedback: PerformanceSharedHighlightReelFeedbackRead
+    message_id: UUID
+    subject: str
+    channel: CommunicationChannel
+    recipient_person_id: UUID
+    recipient_count: int
+    sent_at: datetime
 
 
 class PerformanceHighlightReelEngagementRead(BaseModel):

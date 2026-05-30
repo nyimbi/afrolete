@@ -31,6 +31,7 @@ import type {
   LocalIdentity,
   MessageRecipientRead,
   PlayerMatchGuidanceFeedbackRead,
+  PerformanceSharedHighlightReelFeedbackRead,
   PerformanceSharedHighlightReelRead
 } from "@/types/operations";
 
@@ -470,6 +471,52 @@ export default function FamilyPortalPage() {
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Highlight download failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitSharedHighlightFeedback = async (
+    highlight: PerformanceSharedHighlightReelRead,
+    status: "acknowledged" | "needs_help" | "completed" | "confused" | "inspired",
+    requestedFollowUp = false
+  ) => {
+    if (!organizationId) {
+      setError("Organization id is required before sending highlight feedback");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const feedback = await apiRequest<PerformanceSharedHighlightReelFeedbackRead>(
+        `/performance/my-highlight-reels/${highlight.recipient_id}/feedback`,
+        {
+          method: "POST",
+          identity: requestIdentity,
+          body: {
+            organization_id: organizationId,
+            status,
+            rating: requestedFollowUp ? 3 : status === "completed" ? 5 : 4,
+            response_text: requestedFollowUp
+              ? "Guardian reviewed this highlight reel and needs coach help."
+              : status === "completed"
+                ? "Guardian reviewed this highlight reel with the athlete."
+                : "Guardian reviewed this highlight reel.",
+            priority_focus: requestedFollowUp ? "guardian_question" : "family_review",
+            requested_follow_up: requestedFollowUp,
+            clip_time_seconds: highlight.clips[0]?.start_seconds ?? null
+          }
+        }
+      );
+      setSharedHighlights((current) =>
+        current.map((item) =>
+          item.recipient_id === highlight.recipient_id
+            ? { ...item, feedback, delivery_status: "read", read_at: feedback.submitted_at }
+            : item
+        )
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Highlight feedback failed");
     } finally {
       setBusy(false);
     }
@@ -1015,6 +1062,20 @@ export default function FamilyPortalPage() {
                 <small>
                   {highlight.clips[0]?.title ?? highlight.message_body_preview ?? "Review the coach-published reel with the player."}
                 </small>
+                <small>
+                  {highlight.feedback
+                    ? `${highlight.feedback.status.replaceAll("_", " ")}${highlight.feedback.requested_follow_up ? " · coach help requested" : ""}`
+                    : "waiting for family feedback"}
+                </small>
+                {highlight.feedback?.agent_task_id ? (
+                  <small>AI coach review queued · {highlight.feedback.agent_task_id.slice(0, 8)}</small>
+                ) : null}
+                {highlight.feedback?.coach_followup_sent_at ? (
+                  <small>
+                    Coach follow-up {formatDate(highlight.feedback.coach_followup_sent_at)} ·{" "}
+                    {highlight.feedback.coach_followup_notes ?? "open your inbox for the full response"}
+                  </small>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => downloadSharedHighlight(highlight)}
@@ -1028,6 +1089,20 @@ export default function FamilyPortalPage() {
                   disabled={busy || highlight.delivery_status === "read"}
                 >
                   Mark reviewed
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submitSharedHighlightFeedback(highlight, "acknowledged")}
+                  disabled={busy}
+                >
+                  Reviewed
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submitSharedHighlightFeedback(highlight, "needs_help", true)}
+                  disabled={busy}
+                >
+                  Ask coach
                 </button>
               </article>
             ))}

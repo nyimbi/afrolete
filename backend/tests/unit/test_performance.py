@@ -5555,6 +5555,30 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert shared_after_feedback.json()[0]["feedback"]["id"] == feedback["id"]
     assert shared_after_feedback.json()[0]["feedback"]["status"] == "needs_help"
     assert shared_after_feedback.json()[0]["feedback"]["agent_task_id"] == feedback["agent_task_id"]
+    highlight_followup_response = client.post(
+        f"/api/v1/performance/scouting/highlight-reel-feedback/{feedback['id']}/followup",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "subject_prefix": "Coach follow-up",
+            "coach_notes": "Review the transition clip with your next acceleration cue.",
+            "include_agent_review": True,
+        },
+    )
+    assert highlight_followup_response.status_code == 201
+    highlight_followup = highlight_followup_response.json()
+    assert highlight_followup["feedback"]["id"] == feedback["id"]
+    assert highlight_followup["feedback"]["coach_followup_message_id"] == highlight_followup["message_id"]
+    assert highlight_followup["feedback"]["coach_followup_notes"].startswith("Review the transition")
+    assert highlight_followup["recipient_person_id"] == member["subject_id"]
+    shared_after_followup = client.get(
+        f"/api/v1/performance/my-highlight-reels?organization_id={organization['id']}",
+        headers=player_headers,
+    )
+    assert shared_after_followup.status_code == 200
+    assert shared_after_followup.json()[0]["feedback"]["coach_followup_message_id"] == highlight_followup["message_id"]
+    assert shared_after_followup.json()[0]["feedback"]["coach_followup_sent_at"] is not None
     reminder_after_download_response = client.post(
         f"/api/v1/performance/scouting/highlight-reel-shares/{share['audit']['id']}/reminders",
         headers=identity_headers,
@@ -5593,6 +5617,9 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert engagement[0]["recipients"][0]["feedback_requested_follow_up"] is True
     assert "coach follow-up" in engagement[0]["recipients"][0]["feedback_response_preview"]
     assert engagement[0]["recipients"][0]["feedback_agent_task_id"] == feedback["agent_task_id"]
+    assert engagement[0]["recipients"][0]["feedback_id"] == feedback["id"]
+    assert engagement[0]["recipients"][0]["feedback_coach_followup_message_id"] == highlight_followup["message_id"]
+    assert engagement[0]["recipients"][0]["feedback_coach_followup_sent_at"] is not None
     share_audits = client.get(
         f"/api/v1/performance/scouting/highlight-reel-shares?organization_id={organization['id']}&highlight_reel_id={reel['id']}",
         headers=identity_headers,
