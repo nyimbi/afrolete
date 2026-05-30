@@ -8,6 +8,9 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.competition import CompetitionFixture, FixtureMatchEvent
+from app.models.enums import MatchEventType
+from app.models.team import AthleteProfile
 from app.models.voice_commands import (
     CoachVoiceCommand,
     CoachVoiceCommandSession,
@@ -15,6 +18,7 @@ from app.models.voice_commands import (
 )
 from app.schemas.voice_commands import (
     CoachVoiceCommandCreate,
+    CoachVoiceCommandReviewCreate,
     CoachVoiceCommandSessionCreate,
     CoachVoiceCommandShortcutCreate,
 )
@@ -146,6 +150,173 @@ async def process_coach_voice_command(
     await db.refresh(session)
     await db.refresh(command)
     return {"session": session, "command": command}
+
+
+async def review_coach_voice_command(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    command_id: UUID,
+    payload: CoachVoiceCommandReviewCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    command = await db.get(CoachVoiceCommand, command_id)
+    if command is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice command not found")
+    session = await db.get(CoachVoiceCommandSession, command.session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice command session not found")
+    await ensure_manage_training(authz, identity, command.organization_id)
+
+    review_result: dict[str, Any] = {
+        "decision": payload.decision,
+        "applied_to_official_record": False,
+        "reviewed_at": datetime.now(UTC).isoformat(),
+        "reviewed_by_person_id": str(identity.person_id) if identity.person_id else None,
+        "notes": payload.notes,
+    }
+    if payload.decision == "confirm":
+        command.confirmed_at = datetime.now(UTC)
+        command.command_status = "confirmed"
+        if payload.apply_to_official_record:
+            review_result.update(await apply_confirmed_voice_command(db, command, session, payload))
+    elif payload.decision == "reject":
+        command.confirmed_at = None
+        command.command_status = "rejected"
+        review_result["reason"] = payload.notes or "Rejected during coach review."
+    else:
+        command.confirmed_at = None
+        command.command_status = "held_for_review"
+        review_result["reason"] = payload.notes or "Held for additional review."
+
+    command.reviewed_by_person_id = identity.person_id
+    command.review_decision = payload.decision
+    command.review_notes = payload.notes
+    command.review_result_json = json.dumps(review_result, default=str)
+    action_result = decode_dict(command.action_result_json)
+    action_result["last_review"] = review_result
+    command.action_result_json = json.dumps(action_result, default=str)
+    await db.commit()
+    await db.refresh(command)
+    return {"session": session, "command": command}
+
+
+async def apply_confirmed_voice_command(
+    db: AsyncSession,
+    command: CoachVoiceCommand,
+    session: CoachVoiceCommandSession,
+    payload: CoachVoiceCommandReviewCreate,
+) -> dict[str, Any]:
+    if command.intent not in OFFICIAL_RECORD_INTENTS:
+        return {
+            "application": "non_official_command_confirmed",
+            "applied_to_official_record": False,
+        }
+    fixture = await resolve_voice_command_fixture(db, session, payload.fixture_id)
+    team_id = payload.team_id or session.team_id
+    if fixture is None:
+        return {
+            "application": "official_record_not_applied",
+            "applied_to_official_record": False,
+            "reason": "No fixture was supplied or linked to the voice command session.",
+        }
+    if team_id is None:
+        team_id = fixture.home_team_id
+    if team_id not in {fixture.home_team_id, fixture.away_team_id}:
+        return {
+            "application": "official_record_not_applied",
+            "applied_to_official_record": False,
+            "reason": "Selected team is not part of the fixture.",
+        }
+    athlete_profile_id = payload.athlete_profile_id
+    if athlete_profile_id is not None:
+        athlete_profile = await db.get(AthleteProfile, athlete_profile_id)
+        if athlete_profile is None or athlete_profile.organization_id != command.organization_id:
+            return {
+                "application": "official_record_not_applied",
+                "applied_to_official_record": False,
+                "reason": "Selected athlete is not part of this organization.",
+            }
+    event_type = voice_command_match_event_type(command, payload.event_type)
+    entities = decode_dict(command.entities_json)
+    minute = entities.get("minute") if isinstance(entities.get("minute"), int) else None
+    description = voice_command_match_event_description(command, entities, payload.notes)
+    match_event = FixtureMatchEvent(
+        fixture_id=fixture.id,
+        team_id=team_id,
+        athlete_profile_id=athlete_profile_id,
+        minute=minute,
+        event_type=event_type,
+        description=description,
+    )
+    db.add(match_event)
+    await db.flush()
+    return {
+        "application": "fixture_match_event_created",
+        "applied_to_official_record": True,
+        "fixture_id": str(fixture.id),
+        "team_id": str(team_id),
+        "athlete_profile_id": str(athlete_profile_id) if athlete_profile_id else None,
+        "match_event_id": str(match_event.id),
+        "match_event_type": event_type.value,
+    }
+
+
+async def resolve_voice_command_fixture(
+    db: AsyncSession,
+    session: CoachVoiceCommandSession,
+    fixture_id: UUID | None,
+) -> CompetitionFixture | None:
+    if fixture_id is not None:
+        fixture = await db.get(CompetitionFixture, fixture_id)
+        if fixture is None or fixture.organization_id != session.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fixture not found")
+        return fixture
+    if session.event_id is None:
+        return None
+    return await db.scalar(
+        select(CompetitionFixture).where(
+            CompetitionFixture.organization_id == session.organization_id,
+            CompetitionFixture.event_id == session.event_id,
+        )
+    )
+
+
+def voice_command_match_event_type(command: CoachVoiceCommand, override: str | None) -> MatchEventType:
+    if override:
+        normalized = normalize_key(override)
+        try:
+            return MatchEventType(normalized)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported match event type") from exc
+    if command.intent == "score_event":
+        return MatchEventType.GOAL
+    if command.intent == "card_event":
+        entities = decode_dict(command.entities_json)
+        return MatchEventType.RED_CARD if entities.get("card_type") == "red" else MatchEventType.YELLOW_CARD
+    if command.intent == "substitution":
+        return MatchEventType.SUBSTITUTION
+    if command.intent == "injury_log":
+        return MatchEventType.INJURY
+    return MatchEventType.NOTE
+
+
+def voice_command_match_event_description(
+    command: CoachVoiceCommand,
+    entities: dict[str, Any],
+    review_notes: str | None,
+) -> str:
+    parts = [
+        f"Confirmed from coach voice command: {command.transcript}",
+        f"Intent: {command.intent}",
+    ]
+    player_label = entities.get("player_label") or entities.get("player_out_label")
+    if player_label:
+        parts.append(f"Player: {player_label}")
+    if entities.get("player_in_label"):
+        parts.append(f"Player in: {entities['player_in_label']}")
+    if review_notes:
+        parts.append(f"Review notes: {review_notes}")
+    return " | ".join(parts)
 
 
 async def create_coach_voice_command_shortcut(

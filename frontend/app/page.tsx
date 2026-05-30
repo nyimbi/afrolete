@@ -13049,6 +13049,56 @@ export default function HomePage() {
     );
   };
 
+  const reviewCoachVoiceCommand = (
+    command: CoachVoiceCommandSessionRead["commands"][number],
+    decision: "confirm" | "reject" | "hold"
+  ) => {
+    const fixtureId = selectedFixtureId || selectedFixture?.id || undefined;
+    const teamId = selectedTeamId || selectedFixture?.home_team_id || undefined;
+    runAction(
+      `review-coach-voice-command-${decision}`,
+      () =>
+        apiRequest<CoachVoiceCommandSessionRead["commands"][number]>(
+          `/voice-commands/commands/${command.id}/review`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              decision,
+              notes:
+                decision === "confirm"
+                  ? "Confirmed from operations console review."
+                  : decision === "reject"
+                    ? "Rejected from operations console review."
+                    : "Held for additional staff review.",
+              apply_to_official_record: decision === "confirm",
+              fixture_id: fixtureId,
+              team_id: teamId
+            }
+          }
+        ),
+      (reviewed) => {
+        setCoachVoiceCommandSessions((current) =>
+          current.map((session) =>
+            session.id === reviewed.session_id
+              ? {
+                  ...session,
+                  commands: session.commands.map((item) => (item.id === reviewed.id ? reviewed : item))
+                }
+              : session
+          )
+        );
+        addLog(
+          `${reviewed.intent.replaceAll("_", " ")} ${reviewed.command_status.replaceAll("_", " ")}`,
+          reviewed.review_result.applied_to_official_record ? "good" : decision === "reject" ? "bad" : "neutral"
+        );
+        if (selectedFixtureId) {
+          void loadFixtureEvents(selectedFixtureId);
+        }
+      }
+    );
+  };
+
   const createCoachVoiceShortcut = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -20046,8 +20096,8 @@ export default function HomePage() {
               </article>
               <article className="mini-card">
                 <span className="muted">Review</span>
-                <strong>{coachVoiceCommandSessions[0]?.commands.filter((command) => command.requires_confirmation).length ?? 0}</strong>
-                <p>Official records, substitutions, injuries, and safety commands require review.</p>
+                <strong>{coachVoiceCommandSessions[0]?.commands.filter((command) => command.command_status === "needs_confirmation").length ?? 0}</strong>
+                <p>Official records, substitutions, injuries, and safety commands move from review to fixture logs only after confirmation.</p>
               </article>
             </div>
             <div className="task-list">
@@ -20069,7 +20119,23 @@ export default function HomePage() {
                       {command.command_status.replaceAll("_", " ")} · {String(command.action_result.action ?? command.permission_scope).replaceAll("_", " ")}
                       {command.safety_flags[0] ? ` · ${command.safety_flags[0].replaceAll("_", " ")}` : ""}
                     </small>
+                    {command.review_decision ? (
+                      <small>
+                        Review {command.review_decision} · {String(command.review_result.application ?? command.review_result.reason ?? "recorded").replaceAll("_", " ")}
+                      </small>
+                    ) : null}
                   </div>
+                  <span>
+                    {command.command_status === "needs_confirmation" || command.command_status === "held_for_review" ? (
+                      <>
+                        <button type="button" onClick={() => reviewCoachVoiceCommand(command, "confirm")} disabled={busyAction !== null}>Confirm</button>
+                        <button type="button" onClick={() => reviewCoachVoiceCommand(command, "hold")} disabled={busyAction !== null}>Hold</button>
+                        <button type="button" onClick={() => reviewCoachVoiceCommand(command, "reject")} disabled={busyAction !== null}>Reject</button>
+                      </>
+                    ) : (
+                      <small>{command.confirmed_at ? new Date(command.confirmed_at).toLocaleTimeString() : command.review_decision ?? "captured"}</small>
+                    )}
+                  </span>
                 </article>
               ))}
               {coachVoiceCommandShortcuts.slice(0, 3).map((shortcut) => (

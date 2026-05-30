@@ -8566,6 +8566,7 @@ export type CoachVoiceCommandRead = {
   organization_id: UUID;
   session_id: UUID;
   issued_by_person_id: UUID | null;
+  reviewed_by_person_id: UUID | null;
   transcript: string;
   normalized_transcript: string;
   intent: string;
@@ -8575,8 +8576,11 @@ export type CoachVoiceCommandRead = {
   entities: Record<string, unknown>;
   action_result: Record<string, unknown>;
   safety_flags: string[];
+  review_result: Record<string, unknown>;
   permission_scope: string;
   requires_confirmation: boolean;
+  review_decision: string | null;
+  review_notes: string | null;
   confirmed_at: string | null;
   source_device: string | null;
   latency_ms: number | null;

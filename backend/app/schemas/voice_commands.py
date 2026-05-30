@@ -29,6 +29,16 @@ class CoachVoiceCommandCreate(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class CoachVoiceCommandReviewCreate(BaseModel):
+    decision: str = Field(default="confirm", pattern="^(confirm|reject|hold)$")
+    notes: str | None = Field(default=None, max_length=4000)
+    apply_to_official_record: bool = True
+    fixture_id: UUID | None = None
+    team_id: UUID | None = None
+    athlete_profile_id: UUID | None = None
+    event_type: str | None = Field(default=None, max_length=80)
+
+
 class CoachVoiceCommandShortcutCreate(BaseModel):
     organization_id: UUID
     phrase: str = Field(min_length=2, max_length=240)
@@ -62,6 +72,7 @@ class CoachVoiceCommandRead(BaseModel):
     organization_id: UUID
     session_id: UUID
     issued_by_person_id: UUID | None
+    reviewed_by_person_id: UUID | None
     transcript: str
     normalized_transcript: str
     intent: str
@@ -71,8 +82,11 @@ class CoachVoiceCommandRead(BaseModel):
     entities: dict[str, Any]
     action_result: dict[str, Any]
     safety_flags: list[str]
+    review_result: dict[str, Any]
     permission_scope: str
     requires_confirmation: bool
+    review_decision: str | None
+    review_notes: str | None
     confirmed_at: datetime | None
     source_device: str | None
     latency_ms: int | None

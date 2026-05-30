@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.schemas.voice_commands import (
     CoachVoiceCommandCreate,
     CoachVoiceCommandRead,
+    CoachVoiceCommandReviewCreate,
     CoachVoiceCommandSessionCreate,
     CoachVoiceCommandSessionRead,
     CoachVoiceCommandShortcutCreate,
@@ -23,6 +24,7 @@ from app.services.voice_commands import (
     list_coach_voice_command_sessions,
     list_coach_voice_command_shortcuts,
     process_coach_voice_command,
+    review_coach_voice_command,
 )
 
 router = APIRouter(prefix="/voice-commands", tags=["voice-commands"])
@@ -34,6 +36,7 @@ def command_read(command) -> CoachVoiceCommandRead:
         organization_id=command.organization_id,
         session_id=command.session_id,
         issued_by_person_id=command.issued_by_person_id,
+        reviewed_by_person_id=command.reviewed_by_person_id,
         transcript=command.transcript,
         normalized_transcript=command.normalized_transcript,
         intent=command.intent,
@@ -43,8 +46,11 @@ def command_read(command) -> CoachVoiceCommandRead:
         entities=decode_dict(command.entities_json),
         action_result=decode_dict(command.action_result_json),
         safety_flags=decode_list(command.safety_flags_json),
+        review_result=decode_dict(command.review_result_json),
         permission_scope=command.permission_scope,
         requires_confirmation=command.requires_confirmation,
+        review_decision=command.review_decision,
+        review_notes=command.review_notes,
         confirmed_at=command.confirmed_at,
         source_device=command.source_device,
         latency_ms=command.latency_ms,
@@ -133,6 +139,20 @@ async def process_coach_voice_command_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> CoachVoiceCommandRead:
     return command_read((await process_coach_voice_command(db, identity, session_id, payload, authz))["command"])
+
+
+@router.post(
+    "/commands/{command_id}/review",
+    response_model=CoachVoiceCommandRead,
+)
+async def review_coach_voice_command_route(
+    command_id: UUID,
+    payload: CoachVoiceCommandReviewCreate,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CoachVoiceCommandRead:
+    return command_read((await review_coach_voice_command(db, identity, command_id, payload, authz))["command"])
 
 
 @router.post("/shortcuts", response_model=CoachVoiceCommandShortcutRead, status_code=status.HTTP_201_CREATED)
