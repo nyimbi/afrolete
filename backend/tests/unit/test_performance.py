@@ -3037,6 +3037,125 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert runs.json()[0]["id"] == tracking["id"]
 
 
+def test_performance_hardware_kit_device_sync_creates_tracking_run(client, identity_headers) -> None:
+    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    video_response = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Hardware City",
+            "sport": "football",
+            "filename": "hardware-city.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(b"hardware sync match video").decode(),
+            "clip_label": "Hardware tracking feed",
+            "match_context": "Camera and GPS synced match sample.",
+            "analysis_focus": "hardware tracking samples, distance, speed, acceleration",
+        },
+    )
+    assert video_response.status_code == 201
+    video_asset = video_response.json()
+
+    calibration_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/pitch-calibrations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Veo halfway camera",
+            "pitch_length_m": 100,
+            "pitch_width_m": 50,
+            "points": [
+                {"label": "top left", "image_x_percent": 0, "image_y_percent": 0, "pitch_x_meters": 0, "pitch_y_meters": 0},
+                {"label": "top right", "image_x_percent": 100, "image_y_percent": 0, "pitch_x_meters": 100, "pitch_y_meters": 0},
+                {"label": "bottom right", "image_x_percent": 100, "image_y_percent": 100, "pitch_x_meters": 100, "pitch_y_meters": 50},
+                {"label": "bottom left", "image_x_percent": 0, "image_y_percent": 100, "pitch_x_meters": 0, "pitch_y_meters": 50},
+            ],
+        },
+    )
+    assert calibration_response.status_code == 201
+    calibration = calibration_response.json()
+
+    kit_response = client.post(
+        "/api/v1/performance/hardware-kits",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Football match analysis kit",
+            "kit_type": "hybrid",
+            "provider": "veo",
+            "sport": "football",
+            "level": "club",
+            "recommended_camera_count": 2,
+            "recommended_gps_unit_count": 24,
+            "supported_metrics": ["speed", "distance", "acceleration", "heatmap"],
+            "setup_steps": ["Mount cameras", "Pair GPS units", "Run pitch calibration"],
+            "estimated_cost": 4200,
+            "currency": "USD",
+        },
+    )
+    assert kit_response.status_code == 201
+    kit = kit_response.json()
+    assert kit["recommended_gps_unit_count"] == 24
+    assert "heatmap" in kit["supported_metrics"]
+
+    device_response = client.post(
+        "/api/v1/performance/hardware-devices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "kit_id": kit["id"],
+            "team_id": team["id"],
+            "device_type": "camera",
+            "provider": "veo",
+            "device_label": "Veo Cam 1",
+            "external_device_id": "veo-cam-001",
+            "api_key": "sample-api-key",
+            "api_key_secret_path": "secret/data/afrolete/performance/devices/veo-cam-001",
+            "metrics_supported": ["player_location", "distance", "speed", "heatmap"],
+            "calibration_id": calibration["id"],
+            "battery_percent": 91,
+        },
+    )
+    assert device_response.status_code == 201
+    device = device_response.json()
+    assert device["api_key_configured"] is True
+    assert device["calibration_id"] == calibration["id"]
+
+    sync_response = client.post(
+        f"/api/v1/performance/hardware-devices/{device['id']}/sync-runs",
+        headers=identity_headers,
+        json={
+            "video_asset_id": video_asset["id"],
+            "sync_mode": "match_tracking_payload",
+            "battery_percent": 84,
+            "metrics": {"camera_uptime_minutes": 92},
+            "tracking_samples": [
+                {"track_id": "home-11", "team_label": "Home", "player_label": "Winger", "jersey_number": "11", "timestamp_seconds": 0, "x_percent": 10, "y_percent": 30},
+                {"track_id": "home-11", "team_label": "Home", "player_label": "Winger", "jersey_number": "11", "timestamp_seconds": 1, "x_percent": 19, "y_percent": 30},
+                {"track_id": "home-11", "team_label": "Home", "player_label": "Winger", "jersey_number": "11", "timestamp_seconds": 2, "x_percent": 28, "y_percent": 30},
+            ],
+        },
+    )
+    assert sync_response.status_code == 202
+    sync = sync_response.json()
+    assert sync["status"] == "completed"
+    assert sync["sample_count"] == 3
+    assert sync["metrics_ingested"] == 1
+    assert sync["tracking_run_id"] is not None
+    assert sync["tracking_run"]["source_provider"] == "veo_camera_hardware"
+    assert sync["tracking_run"]["player_metrics"][0]["player_label"] == "Winger"
+
+    devices = client.get(
+        f"/api/v1/performance/hardware-devices?organization_id={organization['id']}&kit_id={kit['id']}",
+        headers=identity_headers,
+    )
+    assert devices.status_code == 200
+    assert devices.json()[0]["last_seen_at"] is not None
+    assert devices.json()[0]["battery_percent"] == 84
+
+
 def test_performance_video_upload_pose_gait_analysis_and_annotations(
     client,
     identity_headers,

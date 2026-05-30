@@ -6941,6 +6941,66 @@ export type PerformanceMatchTrackingRunRead = {
   completed_at: string | null;
 };
 
+export type PerformanceHardwareKitRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  kit_type: string;
+  provider: string;
+  sport: string;
+  level: string;
+  recommended_camera_count: number;
+  recommended_gps_unit_count: number;
+  supported_metrics: string[];
+  setup_steps: string[];
+  estimated_cost: number | null;
+  currency: string;
+  status: string;
+  notes: string | null;
+  created_at: string;
+};
+
+export type PerformanceHardwareDeviceRead = {
+  id: UUID;
+  organization_id: UUID;
+  kit_id: UUID | null;
+  team_id: UUID | null;
+  facility_id: UUID | null;
+  device_type: string;
+  provider: string;
+  device_label: string;
+  external_device_id: string;
+  firmware_version: string | null;
+  status: string;
+  api_key_configured: boolean;
+  api_key_secret_path: string | null;
+  custody_mode: string;
+  metrics_supported: string[];
+  calibration_id: UUID | null;
+  last_seen_at: string | null;
+  battery_percent: number | null;
+  notes: string | null;
+  created_at: string;
+};
+
+export type PerformanceHardwareSyncRunRead = {
+  id: UUID;
+  organization_id: UUID;
+  device_id: UUID;
+  video_asset_id: UUID | null;
+  tracking_run_id: UUID | null;
+  provider: string;
+  sync_mode: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  metrics_ingested: number;
+  sample_count: number;
+  payload_hash: string | null;
+  message: string | null;
+  tracking_run: PerformanceMatchTrackingRunRead | null;
+};
+
 export type PerformanceVideoAnnotationRead = {
   id: UUID;
   organization_id: UUID;

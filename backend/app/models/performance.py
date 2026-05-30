@@ -183,6 +183,88 @@ class PerformanceWearableProviderSyncRun(IdMixin, TimestampMixin, Base):
     message: Mapped[str | None] = mapped_column(Text)
 
 
+class PerformanceHardwareKit(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_hardware_kits"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    kit_type: Mapped[str] = mapped_column(String(80), default="hybrid", nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="afrolete", nullable=False, index=True)
+    sport: Mapped[str] = mapped_column(String(80), default="football", nullable=False, index=True)
+    level: Mapped[str] = mapped_column(String(80), default="club", nullable=False, index=True)
+    recommended_camera_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    recommended_gps_unit_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    supported_metrics_json: Mapped[str] = mapped_column(Text, nullable=False)
+    setup_steps_json: Mapped[str] = mapped_column(Text, nullable=False)
+    estimated_cost: Mapped[float | None] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(10), default="USD", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="planned", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class PerformanceHardwareDevice(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_hardware_devices"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "provider",
+            "external_device_id",
+            name="uq_performance_hardware_devices_external_device",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    kit_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("performance_hardware_kits.id"), index=True)
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    facility_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("facilities.id"), index=True)
+    device_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    device_label: Mapped[str] = mapped_column(String(180), nullable=False)
+    external_device_id: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    firmware_version: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(40), default="provisioned", nullable=False, index=True)
+    api_key_secret_path: Mapped[str | None] = mapped_column(String(500))
+    api_key_hash: Mapped[str | None] = mapped_column(String(64))
+    custody_mode: Mapped[str] = mapped_column(String(40), default="openbao_reference", nullable=False, index=True)
+    metrics_supported_json: Mapped[str] = mapped_column(Text, nullable=False)
+    calibration_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("performance_match_pitch_calibrations.id"), index=True
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    battery_percent: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class PerformanceHardwareSyncRun(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_hardware_sync_runs"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    device_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_hardware_devices.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), index=True
+    )
+    tracking_run_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("performance_match_tracking_runs.id"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    sync_mode: Mapped[str] = mapped_column(String(80), default="sample_payload", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    metrics_ingested: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    payload_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    message: Mapped[str | None] = mapped_column(Text)
+
+
 class PerformanceVideoAsset(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_video_assets"
     __table_args__ = (

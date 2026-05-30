@@ -50,6 +50,9 @@ from app.models.performance import (
     OppositionScoutingVideoAsset,
     PerformanceAchievementAward,
     PerformanceGoal,
+    PerformanceHardwareDevice,
+    PerformanceHardwareKit,
+    PerformanceHardwareSyncRun,
     PerformanceMatchPitchCalibration,
     PerformanceMatchTrackingRun,
     PerformanceMatchTrackingSample,
@@ -84,6 +87,9 @@ from app.schemas.performance import (
     PerformanceForecastValidationWorkerRunRead,
     PerformanceGoalCreate,
     PerformanceForecastValidationRunCreate,
+    PerformanceHardwareDeviceCreate,
+    PerformanceHardwareKitCreate,
+    PerformanceHardwareSyncRunCreate,
     PerformanceIngestionCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
@@ -1741,6 +1747,265 @@ async def list_wearable_provider_sync_runs(
             )
         ).all()
     )
+
+
+async def create_performance_hardware_kit(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: PerformanceHardwareKitCreate,
+    authz: AuthorizationService,
+) -> PerformanceHardwareKit:
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    kit = PerformanceHardwareKit(
+        organization_id=payload.organization_id,
+        name=payload.name,
+        kit_type=payload.kit_type.strip().lower(),
+        provider=normalized_provider_name(payload.provider) or payload.provider.strip().lower(),
+        sport=payload.sport.strip().lower(),
+        level=payload.level.strip().lower(),
+        recommended_camera_count=payload.recommended_camera_count,
+        recommended_gps_unit_count=payload.recommended_gps_unit_count,
+        supported_metrics_json=encode_string_list(payload.supported_metrics),
+        setup_steps_json=encode_string_list(
+            payload.setup_steps or default_performance_hardware_setup_steps(payload.kit_type, payload.provider)
+        ),
+        estimated_cost=payload.estimated_cost,
+        currency=payload.currency.upper(),
+        status=payload.status.strip().lower(),
+        notes=payload.notes,
+    )
+    db.add(kit)
+    await db.commit()
+    await db.refresh(kit)
+    return kit
+
+
+async def list_performance_hardware_kits(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    sport: str | None = None,
+) -> list[PerformanceHardwareKit]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceHardwareKit).where(PerformanceHardwareKit.organization_id == organization_id)
+    if sport:
+        statement = statement.where(PerformanceHardwareKit.sport == sport.strip().lower())
+    return list((await db.scalars(statement.order_by(PerformanceHardwareKit.created_at.desc()))).all())
+
+
+async def provision_performance_hardware_device(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: PerformanceHardwareDeviceCreate,
+    authz: AuthorizationService,
+) -> PerformanceHardwareDevice:
+    await ensure_manage_performance(authz, identity, payload.organization_id)
+    if payload.kit_id is not None:
+        kit = await db.get(PerformanceHardwareKit, payload.kit_id)
+        if kit is None or kit.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Performance hardware kit not found")
+    if payload.team_id is not None:
+        team = await db.get(Team, payload.team_id)
+        if team is None or team.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if payload.facility_id is not None:
+        facility = await db.get(Facility, payload.facility_id)
+        if facility is None or facility.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility not found")
+    if payload.calibration_id is not None:
+        calibration = await db.get(PerformanceMatchPitchCalibration, payload.calibration_id)
+        if calibration is None or calibration.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match pitch calibration not found")
+    provider = normalized_provider_name(payload.provider) or payload.provider.strip().lower()
+    api_key_hash = hashlib.sha256(payload.api_key.encode()).hexdigest() if payload.api_key else None
+    device = PerformanceHardwareDevice(
+        organization_id=payload.organization_id,
+        kit_id=payload.kit_id,
+        team_id=payload.team_id,
+        facility_id=payload.facility_id,
+        device_type=payload.device_type.strip().lower(),
+        provider=provider,
+        device_label=payload.device_label,
+        external_device_id=payload.external_device_id,
+        firmware_version=payload.firmware_version,
+        status=payload.status.strip().lower(),
+        api_key_secret_path=payload.api_key_secret_path,
+        api_key_hash=api_key_hash,
+        custody_mode=payload.custody_mode.strip().lower(),
+        metrics_supported_json=encode_string_list(payload.metrics_supported or default_hardware_device_metrics(payload.device_type)),
+        calibration_id=payload.calibration_id,
+        battery_percent=payload.battery_percent,
+        notes=payload.notes,
+    )
+    db.add(device)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Performance hardware device already exists for this provider",
+        ) from exc
+    await db.refresh(device)
+    return device
+
+
+async def list_performance_hardware_devices(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    kit_id: UUID | None = None,
+) -> list[PerformanceHardwareDevice]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceHardwareDevice).where(PerformanceHardwareDevice.organization_id == organization_id)
+    if kit_id is not None:
+        statement = statement.where(PerformanceHardwareDevice.kit_id == kit_id)
+    return list((await db.scalars(statement.order_by(PerformanceHardwareDevice.created_at.desc()))).all())
+
+
+async def run_performance_hardware_sync(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    device_id: UUID,
+    payload: PerformanceHardwareSyncRunCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    device = await db.get(PerformanceHardwareDevice, device_id)
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Performance hardware device not found")
+    await ensure_manage_performance(authz, identity, device.organization_id)
+    started_at = datetime.now(UTC)
+    tracking_run_id: UUID | None = None
+    message = f"{device.provider} {device.device_type} sync recorded."
+    if payload.battery_percent is not None:
+        device.battery_percent = payload.battery_percent
+    device.last_seen_at = started_at
+    device.status = "active"
+    if payload.tracking_samples:
+        if payload.video_asset_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Hardware tracking sync requires a match video asset",
+            )
+        calibration_id = payload.calibration_id or device.calibration_id
+        tracking = await create_match_tracking_run(
+            db,
+            identity,
+            payload.video_asset_id,
+            PerformanceMatchTrackingRunCreate(
+                organization_id=device.organization_id,
+                calibration_id=calibration_id,
+                source_provider=f"{device.provider}_{device.device_type}_hardware",
+                replace_existing=payload.replace_existing_tracking,
+                samples=payload.tracking_samples,
+            ),
+            authz,
+        )
+        tracking_run_id = tracking["id"] if isinstance(tracking["id"], UUID) else UUID(str(tracking["id"]))
+        message = (
+            f"Synced {len(payload.tracking_samples)} tracking sample(s) from {device.device_label} "
+            f"into match run {tracking_run_id}."
+        )
+    payload_hash = hardware_sync_payload_hash(payload)
+    run = PerformanceHardwareSyncRun(
+        organization_id=device.organization_id,
+        device_id=device.id,
+        video_asset_id=payload.video_asset_id,
+        tracking_run_id=tracking_run_id,
+        provider=device.provider,
+        sync_mode=payload.sync_mode.strip().lower(),
+        status="completed" if payload.metrics or payload.tracking_samples or payload.payload else "heartbeat",
+        started_at=started_at,
+        completed_at=datetime.now(UTC),
+        metrics_ingested=len(payload.metrics),
+        sample_count=len(payload.tracking_samples),
+        payload_hash=payload_hash,
+        message=message,
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    return await performance_hardware_sync_run_read(db, run)
+
+
+async def list_performance_hardware_sync_runs(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    device_id: UUID,
+    authz: AuthorizationService,
+) -> list[dict[str, object]]:
+    device = await db.get(PerformanceHardwareDevice, device_id)
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Performance hardware device not found")
+    await ensure_manage_performance(authz, identity, device.organization_id)
+    runs = list(
+        (
+            await db.scalars(
+                select(PerformanceHardwareSyncRun)
+                .where(PerformanceHardwareSyncRun.device_id == device.id)
+                .order_by(PerformanceHardwareSyncRun.started_at.desc())
+            )
+        ).all()
+    )
+    return [await performance_hardware_sync_run_read(db, run) for run in runs]
+
+
+async def performance_hardware_sync_run_read(
+    db: AsyncSession,
+    run: PerformanceHardwareSyncRun,
+) -> dict[str, object]:
+    tracking_run = await db.get(PerformanceMatchTrackingRun, run.tracking_run_id) if run.tracking_run_id else None
+    return {
+        "id": run.id,
+        "organization_id": run.organization_id,
+        "device_id": run.device_id,
+        "video_asset_id": run.video_asset_id,
+        "tracking_run_id": run.tracking_run_id,
+        "provider": run.provider,
+        "sync_mode": run.sync_mode,
+        "status": run.status,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "metrics_ingested": run.metrics_ingested,
+        "sample_count": run.sample_count,
+        "payload_hash": run.payload_hash,
+        "message": run.message,
+        "tracking_run": await match_tracking_run_read(db, tracking_run) if tracking_run is not None else None,
+    }
+
+
+def default_performance_hardware_setup_steps(kit_type: str, provider: str) -> list[str]:
+    normalized = f"{kit_type} {provider}".lower()
+    if "gps" in normalized:
+        return [
+            "Charge and label every GPS unit before assignment.",
+            "Pair each tracker to athlete or jersey identifiers.",
+            "Run a five-minute warm-up sync and verify speed/distance packets.",
+            "Upload match or training payloads after the session.",
+        ]
+    return [
+        "Mount cameras high and stable with full pitch visibility.",
+        "Create or attach a pitch calibration profile before match tracking.",
+        "Record a short test clip and verify player tracks before kickoff.",
+        "Sync tracking samples into AfroLete for coach review.",
+    ]
+
+
+def default_hardware_device_metrics(device_type: str) -> list[str]:
+    normalized = device_type.lower()
+    if "gps" in normalized:
+        return ["speed", "distance", "acceleration", "sprint_count", "player_load"]
+    if "camera" in normalized:
+        return ["player_location", "distance", "speed", "heatmap", "tactical_shape"]
+    return ["speed", "distance", "acceleration"]
+
+
+def hardware_sync_payload_hash(payload: PerformanceHardwareSyncRunCreate) -> str:
+    return hashlib.sha256(
+        json.dumps(payload.model_dump(mode="json"), sort_keys=True, default=str).encode()
+    ).hexdigest()
 
 
 async def register_wearable_provider_webhook(

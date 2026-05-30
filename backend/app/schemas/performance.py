@@ -645,6 +645,118 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     completed_at: datetime | None
 
 
+class PerformanceHardwareKitCreate(BaseModel):
+    organization_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    kit_type: str = Field(default="hybrid", min_length=2, max_length=80)
+    provider: str = Field(default="afrolete", min_length=2, max_length=80)
+    sport: str = Field(default="football", min_length=2, max_length=80)
+    level: str = Field(default="club", min_length=2, max_length=80)
+    recommended_camera_count: int = Field(default=1, ge=0, le=24)
+    recommended_gps_unit_count: int = Field(default=0, ge=0, le=200)
+    supported_metrics: list[str] = Field(
+        default_factory=lambda: ["speed", "distance", "acceleration", "heatmap"],
+        max_length=40,
+    )
+    setup_steps: list[str] = Field(default_factory=list, max_length=30)
+    estimated_cost: float | None = Field(default=None, ge=0)
+    currency: str = Field(default="USD", min_length=3, max_length=10)
+    status: str = Field(default="planned", min_length=2, max_length=40)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class PerformanceHardwareKitRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    name: str
+    kit_type: str
+    provider: str
+    sport: str
+    level: str
+    recommended_camera_count: int
+    recommended_gps_unit_count: int
+    supported_metrics: list[str]
+    setup_steps: list[str]
+    estimated_cost: float | None
+    currency: str
+    status: str
+    notes: str | None
+    created_at: datetime
+
+
+class PerformanceHardwareDeviceCreate(BaseModel):
+    organization_id: UUID
+    kit_id: UUID | None = None
+    team_id: UUID | None = None
+    facility_id: UUID | None = None
+    device_type: str = Field(default="camera", min_length=2, max_length=80)
+    provider: str = Field(default="veo", min_length=2, max_length=80)
+    device_label: str = Field(min_length=2, max_length=180)
+    external_device_id: str = Field(min_length=2, max_length=180)
+    firmware_version: str | None = Field(default=None, max_length=80)
+    status: str = Field(default="provisioned", min_length=2, max_length=40)
+    api_key: str | None = Field(default=None, max_length=500)
+    api_key_secret_path: str | None = Field(default=None, max_length=500)
+    custody_mode: str = Field(default="openbao_reference", min_length=2, max_length=40)
+    metrics_supported: list[str] = Field(default_factory=list, max_length=40)
+    calibration_id: UUID | None = None
+    battery_percent: int | None = Field(default=None, ge=0, le=100)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class PerformanceHardwareDeviceRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    kit_id: UUID | None
+    team_id: UUID | None
+    facility_id: UUID | None
+    device_type: str
+    provider: str
+    device_label: str
+    external_device_id: str
+    firmware_version: str | None
+    status: str
+    api_key_configured: bool
+    api_key_secret_path: str | None
+    custody_mode: str
+    metrics_supported: list[str]
+    calibration_id: UUID | None
+    last_seen_at: datetime | None
+    battery_percent: int | None
+    notes: str | None
+    created_at: datetime
+
+
+class PerformanceHardwareSyncRunCreate(BaseModel):
+    video_asset_id: UUID | None = None
+    calibration_id: UUID | None = None
+    sync_mode: str = Field(default="sample_payload", min_length=2, max_length=80)
+    external_event_id: str | None = Field(default=None, max_length=180)
+    metrics: dict[str, float] = Field(default_factory=dict)
+    tracking_samples: list[PerformanceMatchTrackingSampleCreate] = Field(default_factory=list, max_length=5000)
+    replace_existing_tracking: bool = False
+    battery_percent: int | None = Field(default=None, ge=0, le=100)
+    payload: dict[str, Any] | None = None
+
+
+class PerformanceHardwareSyncRunRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    device_id: UUID
+    video_asset_id: UUID | None
+    tracking_run_id: UUID | None
+    provider: str
+    sync_mode: str
+    status: str
+    started_at: datetime
+    completed_at: datetime | None
+    metrics_ingested: int
+    sample_count: int
+    payload_hash: str | None
+    message: str | None
+    tracking_run: PerformanceMatchTrackingRunRead | None = None
+
+
 class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
     case_id: str = Field(min_length=2, max_length=120)
     metric_code: str = Field(min_length=2, max_length=80)

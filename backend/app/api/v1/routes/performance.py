@@ -32,6 +32,12 @@ from app.schemas.performance import (
     PerformanceForecastValidationRunRead,
     PerformanceGoalCreate,
     PerformanceGoalRead,
+    PerformanceHardwareDeviceCreate,
+    PerformanceHardwareDeviceRead,
+    PerformanceHardwareKitCreate,
+    PerformanceHardwareKitRead,
+    PerformanceHardwareSyncRunCreate,
+    PerformanceHardwareSyncRunRead,
     PerformanceInjuryRiskAlertRead,
     PerformanceInjuryRiskAlertRunRead,
     PerformanceInjuryRiskRead,
@@ -107,6 +113,7 @@ from app.services.performance import (
     create_performance_video_annotation,
     create_performance_video_pose_samples,
     create_performance_goal,
+    create_performance_hardware_kit,
     create_performance_model_extraction_benchmark_dataset,
     create_player_self_assessment,
     create_wearable_provider_connection,
@@ -122,6 +129,9 @@ from app.services.performance import (
     list_athlete_pathway_projections,
     list_performance_awards,
     list_performance_goals,
+    list_performance_hardware_devices,
+    list_performance_hardware_kits,
+    list_performance_hardware_sync_runs,
     list_metric_definitions,
     list_match_tracking_runs,
     list_match_pitch_calibrations,
@@ -144,11 +154,13 @@ from app.services.performance import (
     performance_cohort_comparisons,
     performance_metric_trend_series,
     performance_metric_trends,
+    provision_performance_hardware_device,
     performance_summary,
     run_performance_forecast_validation,
     send_performance_forecast_validation_alert,
     run_assessment_review_escalations,
     run_performance_injury_risk_alert_scan,
+    run_performance_hardware_sync,
     run_wearable_provider_sync,
     refresh_wearable_provider_token,
     register_wearable_provider_webhook,
@@ -281,6 +293,52 @@ def to_wearable_sync_run_read(run) -> PerformanceWearableSyncRunRead:
         provider_rate_limited=run.provider_rate_limited,
         provider_retry_after_seconds=run.provider_retry_after_seconds,
         message=run.message,
+    )
+
+
+def to_hardware_kit_read(kit) -> PerformanceHardwareKitRead:
+    return PerformanceHardwareKitRead(
+        id=kit.id,
+        organization_id=kit.organization_id,
+        name=kit.name,
+        kit_type=kit.kit_type,
+        provider=kit.provider,
+        sport=kit.sport,
+        level=kit.level,
+        recommended_camera_count=kit.recommended_camera_count,
+        recommended_gps_unit_count=kit.recommended_gps_unit_count,
+        supported_metrics=decode_string_list(kit.supported_metrics_json),
+        setup_steps=decode_string_list(kit.setup_steps_json),
+        estimated_cost=kit.estimated_cost,
+        currency=kit.currency,
+        status=kit.status,
+        notes=kit.notes,
+        created_at=kit.created_at,
+    )
+
+
+def to_hardware_device_read(device) -> PerformanceHardwareDeviceRead:
+    return PerformanceHardwareDeviceRead(
+        id=device.id,
+        organization_id=device.organization_id,
+        kit_id=device.kit_id,
+        team_id=device.team_id,
+        facility_id=device.facility_id,
+        device_type=device.device_type,
+        provider=device.provider,
+        device_label=device.device_label,
+        external_device_id=device.external_device_id,
+        firmware_version=device.firmware_version,
+        status=device.status,
+        api_key_configured=bool(device.api_key_secret_path or device.api_key_hash),
+        api_key_secret_path=device.api_key_secret_path,
+        custody_mode=device.custody_mode,
+        metrics_supported=decode_string_list(device.metrics_supported_json),
+        calibration_id=device.calibration_id,
+        last_seen_at=device.last_seen_at,
+        battery_percent=device.battery_percent,
+        notes=device.notes,
+        created_at=device.created_at,
     )
 
 
@@ -1333,6 +1391,95 @@ async def list_wearable_connection_sync_runs_route(
     return [
         to_wearable_sync_run_read(run)
         for run in await list_wearable_provider_sync_runs(db, identity, connection_id, authz)
+    ]
+
+
+@router.post(
+    "/hardware-kits",
+    response_model=PerformanceHardwareKitRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_performance_hardware_kit_route(
+    payload: PerformanceHardwareKitCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceHardwareKitRead:
+    return to_hardware_kit_read(await create_performance_hardware_kit(db, identity, payload, authz))
+
+
+@router.get("/hardware-kits", response_model=list[PerformanceHardwareKitRead])
+async def list_performance_hardware_kits_route(
+    organization_id: UUID = Query(),
+    sport: str | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceHardwareKitRead]:
+    return [
+        to_hardware_kit_read(kit)
+        for kit in await list_performance_hardware_kits(db, identity, organization_id, authz, sport=sport)
+    ]
+
+
+@router.post(
+    "/hardware-devices",
+    response_model=PerformanceHardwareDeviceRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def provision_performance_hardware_device_route(
+    payload: PerformanceHardwareDeviceCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceHardwareDeviceRead:
+    return to_hardware_device_read(await provision_performance_hardware_device(db, identity, payload, authz))
+
+
+@router.get("/hardware-devices", response_model=list[PerformanceHardwareDeviceRead])
+async def list_performance_hardware_devices_route(
+    organization_id: UUID = Query(),
+    kit_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceHardwareDeviceRead]:
+    return [
+        to_hardware_device_read(device)
+        for device in await list_performance_hardware_devices(db, identity, organization_id, authz, kit_id=kit_id)
+    ]
+
+
+@router.post(
+    "/hardware-devices/{device_id}/sync-runs",
+    response_model=PerformanceHardwareSyncRunRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def run_performance_hardware_sync_route(
+    device_id: UUID,
+    payload: PerformanceHardwareSyncRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceHardwareSyncRunRead:
+    return PerformanceHardwareSyncRunRead(
+        **await run_performance_hardware_sync(db, identity, device_id, payload, authz)
+    )
+
+
+@router.get(
+    "/hardware-devices/{device_id}/sync-runs",
+    response_model=list[PerformanceHardwareSyncRunRead],
+)
+async def list_performance_hardware_sync_runs_route(
+    device_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceHardwareSyncRunRead]:
+    return [
+        PerformanceHardwareSyncRunRead(**run)
+        for run in await list_performance_hardware_sync_runs(db, identity, device_id, authz)
     ]
 
 

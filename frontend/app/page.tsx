@@ -360,6 +360,9 @@ import type {
   PerformanceForecastValidationRunRead,
   PerformanceForecastWhatIfRead,
   PerformanceGoalRead,
+  PerformanceHardwareDeviceRead,
+  PerformanceHardwareKitRead,
+  PerformanceHardwareSyncRunRead,
   PerformanceInjuryRiskAlertRead,
   PerformanceInjuryRiskAlertRunRead,
   PerformanceInjuryRiskRead,
@@ -1670,6 +1673,10 @@ export default function HomePage() {
     useState<PerformanceMatchPitchCalibrationRead[]>([]);
   const [performanceMatchPitchCalibration, setPerformanceMatchPitchCalibration] =
     useState<PerformanceMatchPitchCalibrationRead | null>(null);
+  const [performanceHardwareKits, setPerformanceHardwareKits] = useState<PerformanceHardwareKitRead[]>([]);
+  const [performanceHardwareDevices, setPerformanceHardwareDevices] = useState<PerformanceHardwareDeviceRead[]>([]);
+  const [performanceHardwareSyncRun, setPerformanceHardwareSyncRun] =
+    useState<PerformanceHardwareSyncRunRead | null>(null);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -2334,6 +2341,20 @@ export default function HomePage() {
     analysis_focus: "formation, pressing triggers, transition defense, set pieces, chance creation, and tactical weaknesses",
     evidence_text:
       "Opponent uses a 4-2-3-1 high press, jumps on back passes, leaves weak-side fullback space, and uses zonal corner marking that loses runners on the second phase."
+  });
+  const [performanceHardwareForm, setPerformanceHardwareForm] = useState({
+    kit_name: "Football match analysis kit",
+    kit_type: "hybrid",
+    provider: "veo",
+    device_type: "camera",
+    device_label: "Veo Cam 1",
+    external_device_id: "veo-cam-001",
+    firmware_version: "2026.5",
+    api_key_secret_path: "secret/data/afrolete/performance/devices/veo-cam-001",
+    metrics_supported: "player_location,distance,speed,heatmap,acceleration",
+    recommended_camera_count: 2,
+    recommended_gps_unit_count: 24,
+    battery_percent: 88
   });
   const [poseGaitEvidenceText, setPoseGaitEvidenceText] = useState(
     "Torso lean angle 18 degrees with late torso collapse. Front knee drive 64 degrees. Ground contact time 138 ms. Arm swing symmetry 6.5 with cross-body movement. Stride frequency 4.1 Hz."
@@ -3661,7 +3682,7 @@ export default function HomePage() {
     if (teamId) {
       params.set("team_id", teamId);
     }
-    const [videoData, reportData, trackingData, calibrationData] = await Promise.all([
+    const [videoData, reportData, trackingData, calibrationData, hardwareKitData, hardwareDeviceData] = await Promise.all([
       apiRequest<OppositionScoutingVideoAssetRead[]>(
         `/performance/scouting/videos?${params.toString()}`,
         { identity }
@@ -3677,12 +3698,22 @@ export default function HomePage() {
       apiRequest<PerformanceMatchPitchCalibrationRead[]>(
         `/performance/scouting/pitch-calibrations?${params.toString()}`,
         { identity }
+      ),
+      apiRequest<PerformanceHardwareKitRead[]>(
+        `/performance/hardware-kits?organization_id=${organizationId}&sport=football`,
+        { identity }
+      ),
+      apiRequest<PerformanceHardwareDeviceRead[]>(
+        `/performance/hardware-devices?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setOppositionScoutingVideos(videoData);
     setOppositionScoutingReports(reportData);
     setPerformanceMatchTrackingRuns(trackingData);
     setPerformanceMatchPitchCalibrations(calibrationData);
+    setPerformanceHardwareKits(hardwareKitData);
+    setPerformanceHardwareDevices(hardwareDeviceData);
     setOppositionScoutingVideo((current) =>
       current && videoData.some((video) => video.id === current.id) ? current : videoData[0] ?? null
     );
@@ -9897,6 +9928,150 @@ export default function HomePage() {
             : current
         );
         addLog(`Tracked ${run.player_count} players for ${Math.round(run.total_distance_m)}m`, "good");
+      }
+    );
+  };
+
+  const createPerformanceHardwareKit = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a hardware kit", "bad");
+      return;
+    }
+    runAction(
+      "create-performance-hardware-kit",
+      () =>
+        apiRequest<PerformanceHardwareKitRead>("/performance/hardware-kits", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: performanceHardwareForm.kit_name,
+            kit_type: performanceHardwareForm.kit_type,
+            provider: performanceHardwareForm.provider,
+            sport: oppositionScoutingForm.sport || "football",
+            level: "club",
+            recommended_camera_count: performanceHardwareForm.recommended_camera_count,
+            recommended_gps_unit_count: performanceHardwareForm.recommended_gps_unit_count,
+            supported_metrics: performanceHardwareForm.metrics_supported.split(",").map((item) => item.trim()).filter(Boolean),
+            setup_steps: ["Mount cameras", "Pair GPS units", "Verify pitch calibration", "Sync match tracking samples"],
+            estimated_cost: 4200,
+            currency: "USD"
+          }
+        }),
+      (kit) => {
+        setPerformanceHardwareKits((current) => [
+          kit,
+          ...current.filter((item) => item.id !== kit.id)
+        ]);
+        addLog(`${kit.name} ready with ${kit.recommended_camera_count} camera(s)`, "good");
+      }
+    );
+  };
+
+  const provisionPerformanceHardwareDevice = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before provisioning hardware", "bad");
+      return;
+    }
+    const kit = performanceHardwareKits[0] ?? null;
+    runAction(
+      "provision-performance-hardware-device",
+      () =>
+        apiRequest<PerformanceHardwareDeviceRead>("/performance/hardware-devices", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            kit_id: kit?.id ?? null,
+            team_id: selectedTeamId || null,
+            device_type: performanceHardwareForm.device_type,
+            provider: performanceHardwareForm.provider,
+            device_label: performanceHardwareForm.device_label,
+            external_device_id: performanceHardwareForm.external_device_id,
+            firmware_version: performanceHardwareForm.firmware_version,
+            api_key_secret_path: performanceHardwareForm.api_key_secret_path,
+            custody_mode: "openbao_reference",
+            metrics_supported: performanceHardwareForm.metrics_supported.split(",").map((item) => item.trim()).filter(Boolean),
+            calibration_id: performanceMatchPitchCalibration?.id ?? null,
+            battery_percent: performanceHardwareForm.battery_percent
+          }
+        }),
+      (device) => {
+        setPerformanceHardwareDevices((current) => [
+          device,
+          ...current.filter((item) => item.id !== device.id)
+        ]);
+        addLog(`${device.device_label} provisioned for ${device.provider} tracking`, "good");
+      }
+    );
+  };
+
+  const syncPerformanceHardwareDevice = () => {
+    const device = performanceHardwareDevices[0] ?? null;
+    if (!selectedOrganizationId || !device || !oppositionScoutingVideo) {
+      addLog("Provision a hardware device and select a match video before syncing", "bad");
+      return;
+    }
+    const samples = [
+      ["home-7", "Home", "Winger", "7", 0, 18, 16],
+      ["home-7", "Home", "Winger", "7", 1, 28, 18],
+      ["home-7", "Home", "Winger", "7", 2, 40, 22],
+      ["home-7", "Home", "Winger", "7", 3, 54, 27],
+      ["away-10", "Opponent", "Playmaker", "10", 0, 60, 42],
+      ["away-10", "Opponent", "Playmaker", "10", 1, 58, 39],
+      ["away-10", "Opponent", "Playmaker", "10", 2, 54, 35],
+      ["away-10", "Opponent", "Playmaker", "10", 3, 50, 31]
+    ].map(([trackId, teamLabel, playerLabel, jerseyNumber, timestamp, xMeters, yMeters], index) => ({
+      track_id: trackId,
+      team_label: teamLabel,
+      player_label: playerLabel,
+      jersey_number: jerseyNumber,
+      frame_index: index * 25,
+      timestamp_seconds: timestamp,
+      x_meters: xMeters,
+      y_meters: yMeters,
+      confidence: 0.94,
+      source: `${device.provider}_${device.device_type}_sync`
+    }));
+    runAction(
+      "sync-performance-hardware-device",
+      () =>
+        apiRequest<PerformanceHardwareSyncRunRead>(`/performance/hardware-devices/${device.id}/sync-runs`, {
+          method: "POST",
+          identity,
+          body: {
+            video_asset_id: oppositionScoutingVideo.id,
+            calibration_id: performanceMatchPitchCalibration?.video_asset_id === oppositionScoutingVideo.id
+              ? performanceMatchPitchCalibration.id
+              : device.calibration_id,
+            sync_mode: "match_tracking_payload",
+            metrics: {
+              camera_uptime_minutes: 92,
+              gps_unit_count: performanceHardwareForm.recommended_gps_unit_count
+            },
+            tracking_samples: samples,
+            replace_existing_tracking: true,
+            battery_percent: Math.max(performanceHardwareForm.battery_percent - 4, 0),
+            payload: { source: "console_hardware_sync", device: device.external_device_id }
+          }
+        }),
+      (syncRun) => {
+        setPerformanceHardwareSyncRun(syncRun);
+        setPerformanceHardwareDevices((current) =>
+          current.map((item) =>
+            item.id === syncRun.device_id
+              ? { ...item, last_seen_at: syncRun.completed_at, battery_percent: Math.max(performanceHardwareForm.battery_percent - 4, 0), status: "active" }
+              : item
+          )
+        );
+        if (syncRun.tracking_run) {
+          setPerformanceMatchTrackingRun(syncRun.tracking_run);
+          setPerformanceMatchTrackingRuns((current) => [
+            syncRun.tracking_run as PerformanceMatchTrackingRunRead,
+            ...current.filter((item) => item.id !== syncRun.tracking_run?.id)
+          ]);
+        }
+        addLog(`${device.device_label} sync ${syncRun.status}: ${syncRun.sample_count} tracking sample(s)`, "good");
       }
     );
   };
@@ -23892,6 +24067,9 @@ export default function HomePage() {
                 <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Scout report</button>
                 <button type="button" onClick={calibrateOppositionMatchVideo} disabled={busyAction !== null}>Calibrate</button>
                 <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
+                <button type="button" onClick={createPerformanceHardwareKit} disabled={busyAction !== null}>Kit</button>
+                <button type="button" onClick={provisionPerformanceHardwareDevice} disabled={busyAction !== null}>Device</button>
+                <button type="button" onClick={syncPerformanceHardwareDevice} disabled={busyAction !== null}>Hardware sync</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
                 <button type="button" onClick={runPerformanceForecastValidation} disabled={busyAction !== null}>Forecast QA</button>
@@ -24054,6 +24232,38 @@ export default function HomePage() {
               <label className="wide-field">
                 Opponent video
                 <input type="file" accept="video/*" onChange={(event) => setSelectedOppositionScoutingFile(event.target.files?.[0] ?? null)} />
+              </label>
+              <label>
+                Hardware kit
+                <input value={performanceHardwareForm.kit_name} onChange={(event) => setPerformanceHardwareForm({ ...performanceHardwareForm, kit_name: event.target.value })} />
+              </label>
+              <label>
+                Hardware provider
+                <input value={performanceHardwareForm.provider} onChange={(event) => setPerformanceHardwareForm({ ...performanceHardwareForm, provider: event.target.value })} />
+              </label>
+              <label>
+                Cameras
+                <input type="number" min={0} value={performanceHardwareForm.recommended_camera_count} onChange={(event) => setPerformanceHardwareForm({ ...performanceHardwareForm, recommended_camera_count: Number(event.target.value) })} />
+              </label>
+              <label>
+                GPS units
+                <input type="number" min={0} value={performanceHardwareForm.recommended_gps_unit_count} onChange={(event) => setPerformanceHardwareForm({ ...performanceHardwareForm, recommended_gps_unit_count: Number(event.target.value) })} />
+              </label>
+              <label>
+                Device label
+                <input value={performanceHardwareForm.device_label} onChange={(event) => setPerformanceHardwareForm({ ...performanceHardwareForm, device_label: event.target.value })} />
+              </label>
+              <label>
+                Device ID
+                <input value={performanceHardwareForm.external_device_id} onChange={(event) => setPerformanceHardwareForm({ ...performanceHardwareForm, external_device_id: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Hardware metrics
+                <input value={performanceHardwareForm.metrics_supported} onChange={(event) => setPerformanceHardwareForm({ ...performanceHardwareForm, metrics_supported: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Device secret path
+                <input value={performanceHardwareForm.api_key_secret_path} onChange={(event) => setPerformanceHardwareForm({ ...performanceHardwareForm, api_key_secret_path: event.target.value })} />
               </label>
               <label className="wide-field">
                 Pose/gait evidence
@@ -24495,6 +24705,17 @@ export default function HomePage() {
                       : "Create a pitch map before trusting distance metrics from camera footage."}
                   </p>
                 </article>
+                <article className="mini-card">
+                  <span className="muted">Hardware</span>
+                  <strong>{performanceHardwareDevices.length} device(s)</strong>
+                  <p>
+                    {performanceHardwareSyncRun
+                      ? `${performanceHardwareSyncRun.sample_count} synced samples · ${performanceHardwareSyncRun.status}`
+                      : performanceHardwareKits[0]
+                        ? `${performanceHardwareKits[0].provider} ${performanceHardwareKits[0].kit_type} kit · ${performanceHardwareKits[0].recommended_gps_unit_count} GPS`
+                        : "Create camera/GPS kits and sync device samples into match tracking."}
+                  </p>
+                </article>
               </div>
               {oppositionScoutingVideo ? (
                 <div className="task-list">
@@ -24564,6 +24785,46 @@ export default function HomePage() {
                         <small>
                           {metric.dominant_zone.replaceAll("_", " ")} · quality {Math.round(metric.tracking_quality_score * 100)}% ·{" "}
                           {metric.coaching_flags[0] ?? `${metric.sample_count} samples`}
+                        </small>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+              {(performanceHardwareKits.length || performanceHardwareDevices.length || performanceHardwareSyncRun) ? (
+                <div className="task-list">
+                  {performanceHardwareSyncRun ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>{performanceHardwareSyncRun.provider} hardware sync · {performanceHardwareSyncRun.status}</strong>
+                        <span>
+                          {performanceHardwareSyncRun.sample_count} tracking sample(s) · {performanceHardwareSyncRun.metrics_ingested} metric(s)
+                          {performanceHardwareSyncRun.tracking_run ? ` · ${performanceHardwareSyncRun.tracking_run.player_count} tracked player(s)` : ""}
+                        </span>
+                        <small>{performanceHardwareSyncRun.message ?? performanceHardwareSyncRun.payload_hash ?? "Hardware sync recorded."}</small>
+                      </div>
+                    </article>
+                  ) : null}
+                  {performanceHardwareKits.slice(0, 3).map((kit) => (
+                    <article key={kit.id} className="task-card">
+                      <div>
+                        <strong>{kit.name} · {kit.status}</strong>
+                        <span>{kit.provider} {kit.kit_type} · {kit.recommended_camera_count} camera(s) · {kit.recommended_gps_unit_count} GPS</span>
+                        <small>{kit.supported_metrics.join(", ")} · {kit.setup_steps[0] ?? "Setup guide ready"}</small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceHardwareDevices.slice(0, 4).map((device) => (
+                    <article key={device.id} className="task-card">
+                      <div>
+                        <strong>{device.device_label} · {device.status}</strong>
+                        <span>
+                          {device.provider}:{device.external_device_id} · {device.device_type}
+                          {device.battery_percent !== null ? ` · ${device.battery_percent}% battery` : ""}
+                        </span>
+                        <small>
+                          {device.api_key_configured ? "Secret configured" : "No device secret"} ·{" "}
+                          {device.last_seen_at ? `last seen ${new Date(device.last_seen_at).toLocaleString()}` : "not synced yet"}
                         </small>
                       </div>
                     </article>
