@@ -2354,6 +2354,9 @@ class PlayerMatchActionPlanRead(BaseModel):
     cue: str
     drill_recommendation: str
     evidence: str
+    clip_start_seconds: float | None = None
+    clip_end_seconds: float | None = None
+    clip_label: str | None = None
 
 
 class PlayerMatchTrainingFollowupCreate(BaseModel):

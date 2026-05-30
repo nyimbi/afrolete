@@ -1067,6 +1067,12 @@ export default function PlayerPerformancePage() {
                       <strong>{item.focus}</strong>
                       <span>{item.cue}</span>
                       <small>{item.drill_recommendation}</small>
+                      {typeof item.clip_start_seconds === "number" && typeof item.clip_end_seconds === "number" ? (
+                        <small>
+                          {item.clip_label ?? "Review match clip"} ·{" "}
+                          {item.clip_start_seconds.toFixed(1)}s-{item.clip_end_seconds.toFixed(1)}s
+                        </small>
+                      ) : null}
                       <small>{item.priority} · {item.evidence}</small>
                     </div>
                   ))}

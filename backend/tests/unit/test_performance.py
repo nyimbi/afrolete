@@ -352,6 +352,9 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
         "Pressing angle and recovery cover",
     }
     assert all(item["drill_recommendation"] for item in match_guidance[0]["action_plan"])
+    assert all(item["clip_start_seconds"] is not None for item in match_guidance[0]["action_plan"])
+    assert all(item["clip_end_seconds"] > item["clip_start_seconds"] for item in match_guidance[0]["action_plan"])
+    assert any("Review" in item["clip_label"] for item in match_guidance[0]["action_plan"])
     assert any("Home phase" in item for item in match_guidance[0]["tactical_context"])
 
     player_read_response = client.post(

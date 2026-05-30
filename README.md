@@ -340,7 +340,9 @@ idempotent reuse on repeated coach clicks, scheduled training sessions for each
 prescription, highlights, coach/player reports, and player-portal
 match guidance cards with action-plan drills and one-click training follow-up
 plans for coach-confirmed tracks, including queued Training Strategy Agent
-review status for the generated follow-up plan. The same match analysis pipeline
+review status for the generated follow-up plan. Player action plans include
+clip-window labels so athletes and coaches can connect each drill to the
+specific match moment that triggered it. The same match analysis pipeline
 now
 accepts external tracker frame packages from YOLO/ByteTrack-compatible cameras,
 GPS/video providers, or analyst tooling through a provider-neutral import API,

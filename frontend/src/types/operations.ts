@@ -8579,6 +8579,9 @@ export type PlayerMatchGuidanceRead = {
     cue: string;
     drill_recommendation: string;
     evidence: string;
+    clip_start_seconds: number | null;
+    clip_end_seconds: number | null;
+    clip_label: string | null;
   }[];
   tactical_context: string[];
   quality_warnings: string[];
