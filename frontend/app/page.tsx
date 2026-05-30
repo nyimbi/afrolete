@@ -25159,6 +25159,15 @@ export default function HomePage() {
                   </p>
                 </article>
                 <article className="mini-card">
+                  <span className="muted">Chance quality</span>
+                  <strong>{Number(performanceMatchTrackingRun?.ball_tracking_metrics.shot_count ?? 0)} shot(s)</strong>
+                  <p>
+                    {performanceMatchTrackingRun?.shot_events[0]
+                      ? `${Number(performanceMatchTrackingRun.ball_tracking_metrics.expected_goals ?? 0).toFixed(2)} xG · ${Number(performanceMatchTrackingRun.ball_tracking_metrics.shot_on_target_count ?? 0)} on target`
+                      : "Shot, xG, and key-pass estimates appear when the ball track reaches goal zones."}
+                  </p>
+                </article>
+                <article className="mini-card">
                   <span className="muted">Calibration</span>
                   <strong>{performanceMatchPitchCalibration ? `${Math.round(performanceMatchPitchCalibration.quality_score * 100)}%` : "none"}</strong>
                   <p>
@@ -25386,9 +25395,34 @@ export default function HomePage() {
                       <div>
                         <strong>{String(event.event_type ?? "ball action").replaceAll("_", " ")}</strong>
                         <span>
-                          {String(event.from_track_id ?? "source")} to {String(event.to_track_id ?? "target")} · {Number(event.ball_distance_m ?? 0).toFixed(1)}m
+                          {String(event.shooter_track_id ?? event.from_track_id ?? "source")} to {String(event.target_goal ?? event.to_track_id ?? "target")} · {Number(event.ball_distance_m ?? 0).toFixed(1)}m
                         </span>
-                        <small>{Number(event.timestamp_seconds ?? 0).toFixed(1)}s · {String(event.zone ?? "unknown").replaceAll("_", " ")}</small>
+                        <small>
+                          {Number(event.timestamp_seconds ?? 0).toFixed(1)}s · {String(event.zone ?? "unknown").replaceAll("_", " ")}
+                          {event.expected_goals ? ` · ${Number(event.expected_goals).toFixed(2)} xG` : ""}
+                        </small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceMatchTrackingRun.pass_network.slice(0, 4).map((link, index) => (
+                    <article key={`pass-network-${String(link.from_track_id ?? index)}-${String(link.to_track_id ?? index)}`} className="task-card">
+                      <div>
+                        <strong>{String(link.from_track_id ?? "source")} to {String(link.to_track_id ?? "target")}</strong>
+                        <span>
+                          {Number(link.pass_count ?? 0)} pass(es) · {Number(link.key_pass_count ?? 0)} key pass(es) · {Number(link.expected_assists ?? 0).toFixed(2)} xA
+                        </span>
+                        <small>{String(link.team_label ?? "team")} · {Number(link.total_distance_m ?? 0).toFixed(1)}m combined passing distance</small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceMatchTrackingRun.shot_events.slice(0, 4).map((shot, index) => (
+                    <article key={`shot-event-${index}`} className="task-card">
+                      <div>
+                        <strong>{String(shot.shooter_track_id ?? "Shooter")} shot · {String(shot.target_goal ?? "goal")} goal</strong>
+                        <span>
+                          {Number(shot.expected_goals ?? 0).toFixed(2)} xG · {shot.on_target ? "on target" : "off target"} · {Number(shot.ball_distance_m ?? 0).toFixed(1)}m ball travel
+                        </span>
+                        <small>{Number(shot.timestamp_seconds ?? 0).toFixed(1)}s · {String(shot.zone ?? "unknown").replaceAll("_", " ")}</small>
                       </div>
                     </article>
                   ))}
@@ -25411,6 +25445,9 @@ export default function HomePage() {
                         </small>
                         <small>
                           passes {metric.pass_completed_count ?? 0}/{metric.pass_received_count ?? 0} · turnovers {metric.turnover_involved_count ?? 0} · carry {Math.round(metric.ball_carry_m ?? 0)}m
+                        </small>
+                        <small>
+                          shots {metric.shot_count ?? 0} · xG {(metric.expected_goals ?? 0).toFixed(2)} · key passes {metric.key_pass_count ?? 0} · xA {(metric.expected_assists ?? 0).toFixed(2)}
                         </small>
                       </div>
                       <span>

@@ -617,6 +617,11 @@ class PerformanceMatchTrackingPlayerMetricRead(BaseModel):
     turnover_involved_count: int = 0
     ball_carry_m: float = 0.0
     ball_possession_sample_count: int = 0
+    shot_count: int = 0
+    shot_on_target_count: int = 0
+    expected_goals: float = 0.0
+    key_pass_count: int = 0
+    expected_assists: float = 0.0
     tracking_quality_score: float = 0.0
     coaching_flags: list[str] = Field(default_factory=list)
     dominant_zone: str
@@ -656,6 +661,9 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     ball_tracking_metrics: dict[str, Any] = Field(default_factory=dict)
     possession_estimates: list[dict[str, Any]] = Field(default_factory=list)
     ball_action_events: list[dict[str, Any]] = Field(default_factory=list)
+    shot_events: list[dict[str, Any]] = Field(default_factory=list)
+    pass_network: list[dict[str, Any]] = Field(default_factory=list)
+    chance_creation_metrics: dict[str, Any] = Field(default_factory=dict)
     formation_snapshots: list[dict[str, Any]] = Field(default_factory=list)
     player_metrics: list[PerformanceMatchTrackingPlayerMetricRead]
     samples: list[PerformanceMatchTrackingSampleRead]

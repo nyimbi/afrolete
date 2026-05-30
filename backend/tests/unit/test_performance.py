@@ -3283,6 +3283,101 @@ def test_match_video_auto_tracking_uses_video_frame_extractor(
     assert any(sample["source"] == "opencv_ball_tracker" for sample in tracking["samples"])
 
 
+def test_match_tracking_derives_shot_xg_and_key_pass_network() -> None:
+    samples = [
+        {
+            "track_id": "home-8",
+            "team_label": "Home",
+            "player_label": "Midfielder",
+            "timestamp_seconds": 0,
+            "x_percent": 40,
+            "y_percent": 50,
+            "x_meters": 40,
+            "y_meters": 25,
+        },
+        {
+            "track_id": "home-9",
+            "team_label": "Home",
+            "player_label": "Forward",
+            "timestamp_seconds": 0,
+            "x_percent": 70,
+            "y_percent": 50,
+            "x_meters": 70,
+            "y_meters": 25,
+        },
+        {
+            "track_id": "home-9",
+            "team_label": "Home",
+            "player_label": "Forward",
+            "timestamp_seconds": 1,
+            "x_percent": 70,
+            "y_percent": 50,
+            "x_meters": 70,
+            "y_meters": 25,
+        },
+        {
+            "track_id": "home-9",
+            "team_label": "Home",
+            "player_label": "Forward",
+            "timestamp_seconds": 2,
+            "x_percent": 82,
+            "y_percent": 50,
+            "x_meters": 82,
+            "y_meters": 25,
+        },
+        {
+            "track_id": "ball",
+            "team_label": "ball",
+            "player_label": "Ball",
+            "timestamp_seconds": 0,
+            "x_percent": 40,
+            "y_percent": 50,
+            "x_meters": 40,
+            "y_meters": 25,
+        },
+        {
+            "track_id": "ball",
+            "team_label": "ball",
+            "player_label": "Ball",
+            "timestamp_seconds": 1,
+            "x_percent": 70,
+            "y_percent": 50,
+            "x_meters": 70,
+            "y_meters": 25,
+        },
+        {
+            "track_id": "ball",
+            "team_label": "ball",
+            "player_label": "Ball",
+            "timestamp_seconds": 2,
+            "x_percent": 98,
+            "y_percent": 50,
+            "x_meters": 98,
+            "y_meters": 25,
+        },
+    ]
+
+    summary = performance_service.summarize_match_tracking_samples(samples)
+
+    assert summary["ball_tracking_metrics"]["pass_count"] == 1
+    assert summary["ball_tracking_metrics"]["shot_count"] == 1
+    assert summary["ball_tracking_metrics"]["shot_on_target_count"] == 1
+    assert summary["ball_tracking_metrics"]["expected_goals"] > 0.3
+    assert summary["chance_creation_metrics"]["key_pass_count"] == 1
+    assert summary["shot_events"][0]["shooter_track_id"] == "home-9"
+    assert summary["shot_events"][0]["target_goal"] == "right"
+    assert summary["shot_events"][0]["on_target"] is True
+    assert summary["pass_network"][0]["from_track_id"] == "home-8"
+    assert summary["pass_network"][0]["to_track_id"] == "home-9"
+    assert summary["pass_network"][0]["key_pass_count"] == 1
+    midfielder = next(metric for metric in summary["player_metrics"] if metric["track_id"] == "home-8")
+    forward = next(metric for metric in summary["player_metrics"] if metric["track_id"] == "home-9")
+    assert midfielder["key_pass_count"] == 1
+    assert midfielder["expected_assists"] == summary["shot_events"][0]["expected_goals"]
+    assert forward["shot_count"] == 1
+    assert forward["expected_goals"] == summary["shot_events"][0]["expected_goals"]
+
+
 def test_match_tracking_contour_classifier_separates_ball_and_player_candidates() -> None:
     frame_area = 1920 * 1080
 

@@ -86,7 +86,8 @@ over stored opposition scouting football videos, asks the backend to auto-track
 players and a best-effort ball track with the OpenCV motion-tracking path, and
 creates `/api/v1/performance/scouting/videos/{video_asset_id}/tracking-runs`
 records that feed distance, speed, heatmap, possession, pass/turnover,
-tactical-shape, highlight, and player-guidance workflows.
+pass-network, shot/xG, tactical-shape, highlight, and player-guidance
+workflows.
 
 ## Reset
 
