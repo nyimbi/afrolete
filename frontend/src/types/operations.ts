@@ -6022,6 +6022,19 @@ export type AgentTaskReviewTrendRead = {
   recommendation: string;
 };
 
+export type AgentTaskWorkerRunRead = {
+  organization_id: UUID | null;
+  eligible_count: number;
+  executed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  task_ids: UUID[];
+  statuses: Record<string, number>;
+  organization_count: number;
+  execution_mode: string;
+  limit: number;
+};
+
 export type AgentWorkerCallbackRead = {
   accepted: boolean;
   duplicate: boolean;

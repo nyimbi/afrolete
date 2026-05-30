@@ -67,6 +67,7 @@ from app.schemas.agent import (
     AgentTaskReviewQueueItemRead,
     AgentTaskReviewQueueSummaryRead,
     AgentTaskReviewTrendRead,
+    AgentTaskWorkerRunRead,
     AgentTaskRead,
     AgentTaskUpdate,
     AgentWorkerCallbackCreate,
@@ -95,6 +96,7 @@ from app.services.agents import (
     get_agent_scorecard_publication_artifact,
     get_agent_model_governance_evidence_artifact,
     get_my_agent_decision_appeal_form,
+    ensure_manage_organization,
     list_scorecard_artifact_accesses,
     list_agent_assignments,
     list_agent_bias_audits,
@@ -117,6 +119,7 @@ from app.services.agents import (
     publish_agent_scorecard,
     read_signed_agent_scorecard_publication_artifact,
     record_scorecard_artifact_access,
+    run_agent_task_worker,
     run_agent_scorecard_automation,
     run_agent_scorecard_publication_reminder,
     run_agent_bias_audit,
@@ -1110,6 +1113,18 @@ async def agent_task_review_trends_route(
             horizon_days=horizon_days,
         )
     )
+
+
+@router.post("/tasks/worker-runs", response_model=AgentTaskWorkerRunRead)
+async def run_agent_task_worker_route(
+    organization_id: UUID = Query(),
+    limit: int = Query(default=25, ge=1, le=100),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> AgentTaskWorkerRunRead:
+    await ensure_manage_organization(authz, identity, organization_id)
+    return await run_agent_task_worker(db, organization_id=organization_id, limit=limit)
 
 
 @router.get("/outcome-cohorts", response_model=AgentOutcomeComparisonRead)

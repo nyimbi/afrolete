@@ -550,6 +550,74 @@ def test_agent_governance_policy_requires_approvals_and_blocks_tasks(client, ide
     assert outcomes["recommendation"]
 
 
+def test_manager_can_run_agent_task_worker_from_api(client, identity_headers) -> None:
+    organization, team = create_org_and_team(client, identity_headers, suffix="worker-api")
+    agent = client.post(
+        "/api/v1/agents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Operations Copilot",
+            "kind": "operations",
+            "purpose": "Prepare coach-reviewed operations drafts from queued work.",
+            "model_policy": "deterministic-console-worker",
+        },
+    ).json()
+
+    task_ids: list[str] = []
+    for title in ("Review weekend travel", "Draft matchday checklist"):
+        response = client.post(
+            f"/api/v1/agents/{agent['id']}/tasks",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "task_type": "operations_review",
+                "title": title,
+                "input_ref": f"team:{team['id']}",
+            },
+        )
+        assert response.status_code == 201
+        task_ids.append(response.json()["id"])
+
+    worker_response = client.post(
+        f"/api/v1/agents/tasks/worker-runs?organization_id={organization['id']}&limit=10",
+        headers=identity_headers,
+    )
+
+    assert worker_response.status_code == 200
+    worker = worker_response.json()
+    assert worker["organization_id"] == organization["id"]
+    assert worker["eligible_count"] == 2
+    assert worker["executed_count"] == 2
+    assert worker["skipped_count"] == 0
+    assert worker["failed_count"] == 0
+    assert worker["statuses"]["waiting_for_review"] == 2
+    assert set(worker["task_ids"]) == set(task_ids)
+    assert worker["organization_count"] == 1
+    assert worker["execution_mode"] == "deterministic"
+
+    task_list = client.get(
+        f"/api/v1/agents/tasks?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert {task["id"]: task["status"] for task in task_list} == {
+        task_id: "waiting_for_review" for task_id in task_ids
+    }
+    assert all(task["output_ref"].startswith("agent://tasks/") for task in task_list)
+
+    runs = client.get(
+        f"/api/v1/agents/runs?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    event_types_by_task = {
+        task_id: [run["event_type"] for run in runs if run["task_id"] == task_id]
+        for task_id in task_ids
+    }
+    assert event_types_by_task == {
+        task_id: ["queued", "execution_started", "execution_finished"] for task_id in task_ids
+    }
+
+
 async def test_agent_task_worker_executes_queued_tasks(db_session) -> None:
     organization = Organization(
         name="Agent Worker Club",

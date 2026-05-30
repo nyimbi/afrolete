@@ -67,6 +67,7 @@ import type {
   AgentTaskReviewQueueItemRead,
   AgentTaskReviewQueueSummaryRead,
   AgentTaskReviewTrendRead,
+  AgentTaskWorkerRunRead,
   AgentTaskStatus,
   AgentWorkerCallbackRead,
   AccountingExportRead,
@@ -1783,6 +1784,7 @@ export default function HomePage() {
   const [agentOutcomeComparison, setAgentOutcomeComparison] = useState<AgentOutcomeComparisonRead | null>(null);
   const [agentTaskApprovals, setAgentTaskApprovals] = useState<AgentTaskApprovalRead[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRunRecordRead[]>([]);
+  const [agentTaskWorkerRun, setAgentTaskWorkerRun] = useState<AgentTaskWorkerRunRead | null>(null);
   const [agentLedgerVerification, setAgentLedgerVerification] =
     useState<AgentRunLedgerVerificationRead | null>(null);
   const [agentGovernance, setAgentGovernance] = useState<AgentGovernanceSummaryRead | null>(null);
@@ -9768,6 +9770,32 @@ export default function HomePage() {
         if (selectedOrganizationId) {
           void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
         }
+      }
+    );
+  };
+
+  const runAgentTaskWorkerNow = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running the agent worker", "bad");
+      return;
+    }
+    runAction(
+      "agent-task-worker-run",
+      () =>
+        apiRequest<AgentTaskWorkerRunRead>(
+          `/agents/tasks/worker-runs?organization_id=${selectedOrganizationId}&limit=25`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (run) => {
+        setAgentTaskWorkerRun(run);
+        addLog(
+          `Agent worker executed ${run.executed_count}/${run.eligible_count} queued task(s)`,
+          run.failed_count > 0 ? "neutral" : "good"
+        );
+        void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
       }
     );
   };
@@ -27662,6 +27690,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={refreshAgentTelemetry} disabled={busyAction !== null}>Telemetry</button>
+                <button type="button" onClick={runAgentTaskWorkerNow} disabled={busyAction !== null}>Run worker</button>
                 <button type="submit" disabled={busyAction !== null}>Queue</button>
               </div>
             </div>
@@ -28247,6 +28276,22 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {agentTaskWorkerRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Worker run · {agentTaskWorkerRun.execution_mode}</strong>
+                    <span>
+                      {agentTaskWorkerRun.executed_count}/{agentTaskWorkerRun.eligible_count} executed · {agentTaskWorkerRun.skipped_count} skipped · {agentTaskWorkerRun.failed_count} failed
+                    </span>
+                    <span>
+                      {Object.entries(agentTaskWorkerRun.statuses)
+                        .map(([status, count]) => `${status.replaceAll("_", " ")} ${count}`)
+                        .join(" · ") || "No queued tasks found"}
+                    </span>
+                    <span>{agentTaskWorkerRun.task_ids.length} task(s) across {agentTaskWorkerRun.organization_count} organization(s)</span>
+                  </div>
+                </article>
+              ) : null}
               {agentTasks.map((task) => {
                 const approvals = agentTaskApprovals.filter((approval) => approval.task_id === task.id);
                 return (

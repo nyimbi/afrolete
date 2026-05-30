@@ -208,6 +208,9 @@ They are expected to have:
 - Review workload trends and manager-facing queue balancing.
 - Cohort-level outcome comparisons for completion, failure, review, approval,
   and appeal rates.
+- Manager-triggered worker runs from the operations console/API, returning
+  eligible, executed, skipped, failed, status, execution-mode, and task-count
+  evidence while refreshing the human-review queue.
 - Policy enforcement.
 - Audit trails.
 - Run ledgers.
