@@ -1424,6 +1424,38 @@ class PerformanceHighlightReelEngagementRead(BaseModel):
     published_at: datetime
 
 
+class PerformanceHighlightReelReminderCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.IN_APP
+    subject_prefix: str = Field(default="Reminder: highlight reel ready", min_length=2, max_length=120)
+    message_intro: str | None = Field(default=None, max_length=1000)
+    include_download_link: bool = True
+
+
+class PerformanceHighlightReelReminderRecipientRead(BaseModel):
+    recipient_id: UUID
+    person_id: UUID
+    person_name: str
+    delivery_status: MessageDeliveryStatus
+    download_count: int = 0
+
+
+class PerformanceHighlightReelReminderRead(BaseModel):
+    share_audit_id: UUID
+    organization_id: UUID
+    highlight_reel_id: UUID
+    highlight_reel_export_id: UUID | None
+    original_message_id: UUID
+    message_id: UUID | None
+    channel: CommunicationChannel
+    recipient_count: int
+    skipped_read_count: int = 0
+    skipped_downloaded_count: int = 0
+    subject: str | None
+    recipients: list[PerformanceHighlightReelReminderRecipientRead]
+    created_at: datetime
+
+
 class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
     case_id: str = Field(min_length=2, max_length=120)
     metric_code: str = Field(min_length=2, max_length=80)

@@ -380,6 +380,7 @@ import type {
   PerformanceHighlightReelEngagementRead,
   PerformanceHighlightReelExportRead,
   PerformanceHighlightReelRead,
+  PerformanceHighlightReelReminderRead,
   PerformanceHighlightReelShareAuditRead,
   PerformanceHighlightReelShareRead,
   PerformanceInjuryRiskAlertRead,
@@ -1906,6 +1907,8 @@ export default function HomePage() {
     useState<PerformanceHighlightReelShareRead | null>(null);
   const [performanceHighlightReelEngagements, setPerformanceHighlightReelEngagements] =
     useState<PerformanceHighlightReelEngagementRead[]>([]);
+  const [performanceHighlightReelReminder, setPerformanceHighlightReelReminder] =
+    useState<PerformanceHighlightReelReminderRead | null>(null);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -5357,6 +5360,7 @@ export default function HomePage() {
       setPerformanceHighlightReelShares([]);
       setPerformanceHighlightReelShare(null);
       setPerformanceHighlightReelEngagements([]);
+      setPerformanceHighlightReelReminder(null);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
@@ -11331,6 +11335,46 @@ export default function HomePage() {
           `${share.recipient_count} highlight recipient(s) notified through ${share.channel}`,
           share.recipient_count ? "good" : "neutral"
         );
+      }
+    );
+  };
+
+  const remindPerformanceHighlightReelRecipients = (shareAuditId?: string) => {
+    const targetShareAuditId =
+      shareAuditId ??
+      performanceHighlightReelShare?.audit.id ??
+      selectedHighlightEngagements[0]?.share_audit_id ??
+      performanceHighlightReelShares.find((share) => share.highlight_reel_id === performanceHighlightReel?.id)?.id;
+    if (!selectedOrganizationId || !targetShareAuditId) {
+      addLog("Share the highlight reel before reminding unread recipients", "bad");
+      return;
+    }
+    runAction(
+      `remind-highlight-reel-${targetShareAuditId}`,
+      () =>
+        apiRequest<PerformanceHighlightReelReminderRead>(
+          `/performance/scouting/highlight-reel-shares/${targetShareAuditId}/reminders`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "in_app",
+              subject_prefix: "Reminder: highlight reel ready",
+              message_intro: "Please review the shared highlight reel before the next session.",
+              include_download_link: true
+            }
+          }
+        ),
+      (reminder) => {
+        setPerformanceHighlightReelReminder(reminder);
+        addLog(
+          reminder.recipient_count
+            ? `${reminder.recipient_count} unread highlight recipient(s) reminded`
+            : "No unread highlight recipients needed a reminder",
+          reminder.recipient_count ? "good" : "neutral"
+        );
+        void loadOppositionScouting(selectedOrganizationId, selectedTeam?.id);
       }
     );
   };
@@ -28104,6 +28148,7 @@ export default function HomePage() {
                         <button type="button" onClick={() => exportPerformanceHighlightReel("mp4_edit_decision_list")} disabled={busyAction !== null}>EDL</button>
                         <button type="button" onClick={() => exportPerformanceHighlightReel("social_caption_pack")} disabled={busyAction !== null}>Captions</button>
                         <button type="button" onClick={sharePerformanceHighlightReel} disabled={busyAction !== null}>Share</button>
+                        <button type="button" onClick={() => remindPerformanceHighlightReelRecipients()} disabled={busyAction !== null}>Remind</button>
                       </span>
                     </article>
                   ) : null}
@@ -28119,6 +28164,30 @@ export default function HomePage() {
                         <small>
                           {performanceHighlightReelShare.share_policy.replaceAll("_", " ")} · message {performanceHighlightReelShare.message_id.slice(0, 8)}
                         </small>
+                      </div>
+                      <span>
+                        <button type="button" onClick={() => remindPerformanceHighlightReelRecipients(performanceHighlightReelShare.audit.id)} disabled={busyAction !== null}>Remind unread</button>
+                      </span>
+                    </article>
+                  ) : null}
+                  {performanceHighlightReelReminder ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>Highlight reminder · {performanceHighlightReelReminder.recipient_count} sent</strong>
+                        <span>
+                          {performanceHighlightReelReminder.skipped_read_count} already read ·{" "}
+                          {performanceHighlightReelReminder.skipped_downloaded_count} already downloaded
+                        </span>
+                        <small>
+                          {performanceHighlightReelReminder.message_id
+                            ? `message ${performanceHighlightReelReminder.message_id.slice(0, 8)} · ${performanceHighlightReelReminder.channel}`
+                            : "No unread recipients remained for this share."}
+                        </small>
+                        {performanceHighlightReelReminder.recipients.slice(0, 3).map((recipient) => (
+                          <small key={recipient.recipient_id}>
+                            {recipient.person_name} · {recipient.delivery_status.replaceAll("_", " ")}
+                          </small>
+                        ))}
                       </div>
                     </article>
                   ) : null}
@@ -28137,6 +28206,9 @@ export default function HomePage() {
                             {share.share_policy.replaceAll("_", " ")} · delivered {share.delivered_count} · read {share.read_count}
                           </small>
                         </div>
+                        <span>
+                          <button type="button" onClick={() => remindPerformanceHighlightReelRecipients(share.id)} disabled={busyAction !== null}>Remind unread</button>
+                        </span>
                       </article>
                     ))}
                   {selectedHighlightEngagements.slice(0, 3).map((engagement) => (
@@ -28160,6 +28232,9 @@ export default function HomePage() {
                           </small>
                         ))}
                       </div>
+                      <span>
+                        <button type="button" onClick={() => remindPerformanceHighlightReelRecipients(engagement.share_audit_id)} disabled={busyAction !== null}>Remind unread</button>
+                      </span>
                     </article>
                   ))}
                   {performanceHighlightReelExport ? (

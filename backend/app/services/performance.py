@@ -110,6 +110,7 @@ from app.schemas.performance import (
     PerformanceHardwareSyncRunCreate,
     PerformanceHighlightReelCreate,
     PerformanceHighlightReelExportCreate,
+    PerformanceHighlightReelReminderCreate,
     PerformanceHighlightReelShareCreate,
     PerformanceIngestionCreate,
     PerformanceModelExtractionBulkReviewCreate,
@@ -3225,6 +3226,157 @@ async def list_performance_highlight_reel_engagement(
             }
         )
     return rows
+
+
+async def send_performance_highlight_reel_reminder(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    share_audit_id: UUID,
+    payload: PerformanceHighlightReelReminderCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    audit = await db.get(PerformanceHighlightReelShareAudit, share_audit_id)
+    if audit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Highlight reel share not found")
+    if audit.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, audit.organization_id)
+    reel = await get_performance_highlight_reel(db, audit.highlight_reel_id)
+    export = (
+        await db.get(PerformanceHighlightReelExport, audit.highlight_reel_export_id)
+        if audit.highlight_reel_export_id is not None
+        else None
+    )
+    recipient_rows = list(
+        (
+            await db.execute(
+                select(MessageRecipient, Person)
+                .join(Person, Person.id == MessageRecipient.person_id)
+                .where(MessageRecipient.message_id == audit.message_id)
+                .order_by(Person.display_name, MessageRecipient.created_at)
+            )
+        ).all()
+    )
+    recipient_ids = [recipient.id for recipient, _ in recipient_rows]
+    download_rows = []
+    if recipient_ids:
+        download_rows = list(
+            (
+                await db.execute(
+                    select(
+                        PerformanceHighlightReelDownloadAudit.message_recipient_id,
+                        func.count(PerformanceHighlightReelDownloadAudit.id),
+                    )
+                    .where(PerformanceHighlightReelDownloadAudit.message_recipient_id.in_(recipient_ids))
+                    .group_by(PerformanceHighlightReelDownloadAudit.message_recipient_id)
+                )
+            ).all()
+        )
+    downloads_by_recipient = {
+        recipient_id: int(count or 0)
+        for recipient_id, count in download_rows
+    }
+    skipped_read_count = 0
+    skipped_downloaded_count = 0
+    reminder_recipient_rows: list[tuple[MessageRecipient, Person, int]] = []
+    for recipient, person in recipient_rows:
+        download_count = downloads_by_recipient.get(recipient.id, 0)
+        has_read = (
+            recipient.delivery_status == MessageDeliveryStatus.READ
+            or str(recipient.delivery_status) == MessageDeliveryStatus.READ.value
+        )
+        if has_read:
+            skipped_read_count += 1
+        if download_count > 0:
+            skipped_downloaded_count += 1
+        if has_read or download_count > 0:
+            continue
+        reminder_recipient_rows.append((recipient, person, download_count))
+
+    created_at = datetime.now(UTC)
+    subject = f"{payload.subject_prefix}: {reel.title}"[:240]
+    message: CommunicationMessage | None = None
+    if reminder_recipient_rows:
+        message = await create_message_for_recipients(
+            db,
+            organization_id=audit.organization_id,
+            message_type=CommunicationMessageType.REPORT,
+            channel=payload.channel,
+            scope_type=CommunicationScopeType.ORGANIZATION,
+            scope_id=audit.organization_id,
+            recipient_person_ids=[person.id for _, person, _ in reminder_recipient_rows],
+            subject=subject,
+            body=highlight_reel_reminder_message_body(
+                reel,
+                export,
+                payload,
+                share_policy=audit.share_policy,
+            ),
+            created_by_person_id=identity.person_id,
+            escalates_message_id=audit.message_id,
+            escalation_level=1,
+            escalation_triggered_at=created_at,
+            escalation_reason="highlight_reel_unread_recipient_reminder",
+        )
+        created_at = message.created_at
+    return {
+        "share_audit_id": audit.id,
+        "organization_id": audit.organization_id,
+        "highlight_reel_id": audit.highlight_reel_id,
+        "highlight_reel_export_id": audit.highlight_reel_export_id,
+        "original_message_id": audit.message_id,
+        "message_id": message.id if message is not None else None,
+        "channel": payload.channel,
+        "recipient_count": len(reminder_recipient_rows),
+        "skipped_read_count": skipped_read_count,
+        "skipped_downloaded_count": skipped_downloaded_count,
+        "subject": subject if reminder_recipient_rows else None,
+        "recipients": [
+            {
+                "recipient_id": recipient.id,
+                "person_id": person.id,
+                "person_name": person.display_name,
+                "delivery_status": recipient.delivery_status,
+                "download_count": download_count,
+            }
+            for recipient, person, download_count in reminder_recipient_rows
+        ],
+        "created_at": created_at,
+    }
+
+
+def highlight_reel_reminder_message_body(
+    reel: PerformanceHighlightReel,
+    export: PerformanceHighlightReelExport | None,
+    payload: PerformanceHighlightReelReminderCreate,
+    *,
+    share_policy: str,
+) -> str:
+    clips = decode_json_list(reel.clips_json)
+    lines = [
+        payload.message_intro.strip() if payload.message_intro else "This is a reminder to review your shared highlight reel.",
+        "",
+        f"Highlight reel: {reel.title}",
+        f"Audience: {reel.audience}",
+        f"Purpose: {reel.purpose}",
+        f"Share policy: {share_policy.replace('_', ' ')}",
+        f"Clips: {reel.clip_count} | Duration: {round(reel.duration_seconds)}s",
+    ]
+    if payload.include_download_link and export is not None:
+        lines.extend(
+            [
+                f"Export: {export.filename}",
+                "Open your AfroLete player or family portal to review and download the recipient-scoped copy.",
+            ]
+        )
+    if clips:
+        lines.extend(["", "Review focus:"])
+    for index, clip in enumerate(clips[:3], start=1):
+        if not isinstance(clip, dict):
+            continue
+        lines.append(f"{index}. {clip.get('title')} - {clip.get('coaching_note')}")
+    lines.extend(["", "Please review this privately and follow your club or school sharing rules."])
+    return "\n".join(lines)
 
 
 async def highlight_reel_share_export(

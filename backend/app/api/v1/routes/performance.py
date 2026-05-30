@@ -43,6 +43,8 @@ from app.schemas.performance import (
     PerformanceHighlightReelExportRead,
     PerformanceHighlightReelRead,
     PerformanceHighlightReelEngagementRead,
+    PerformanceHighlightReelReminderCreate,
+    PerformanceHighlightReelReminderRead,
     PerformanceHighlightReelShareAuditRead,
     PerformanceHighlightReelShareCreate,
     PerformanceHighlightReelShareRead,
@@ -229,6 +231,7 @@ from app.services.performance import (
     run_performance_injury_risk_alert_scan,
     run_performance_hardware_sync,
     render_performance_highlight_reel_export,
+    send_performance_highlight_reel_reminder,
     run_wearable_provider_sync,
     refresh_wearable_provider_token,
     register_wearable_provider_webhook,
@@ -1645,6 +1648,29 @@ async def list_performance_highlight_reel_engagement_route(
             highlight_reel_id=highlight_reel_id,
         )
     ]
+
+
+@router.post(
+    "/scouting/highlight-reel-shares/{share_audit_id}/reminders",
+    response_model=PerformanceHighlightReelReminderRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_performance_highlight_reel_reminder_route(
+    share_audit_id: UUID,
+    payload: PerformanceHighlightReelReminderCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceHighlightReelReminderRead:
+    return PerformanceHighlightReelReminderRead(
+        **await send_performance_highlight_reel_reminder(
+            db,
+            identity,
+            share_audit_id,
+            payload,
+            authz,
+        )
+    )
 
 
 @router.post(

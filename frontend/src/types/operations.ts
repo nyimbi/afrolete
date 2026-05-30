@@ -7727,6 +7727,38 @@ export type PerformanceHighlightReelEngagementRead = {
   published_at: string;
 };
 
+export type PerformanceHighlightReelReminderCreate = {
+  organization_id: UUID;
+  channel?: CommunicationChannel;
+  subject_prefix?: string;
+  message_intro?: string | null;
+  include_download_link?: boolean;
+};
+
+export type PerformanceHighlightReelReminderRecipientRead = {
+  recipient_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  delivery_status: MessageDeliveryStatus;
+  download_count: number;
+};
+
+export type PerformanceHighlightReelReminderRead = {
+  share_audit_id: UUID;
+  organization_id: UUID;
+  highlight_reel_id: UUID;
+  highlight_reel_export_id: UUID | null;
+  original_message_id: UUID;
+  message_id: UUID | null;
+  channel: CommunicationChannel;
+  recipient_count: number;
+  skipped_read_count: number;
+  skipped_downloaded_count: number;
+  subject: string | null;
+  recipients: PerformanceHighlightReelReminderRecipientRead[];
+  created_at: string;
+};
+
 export type PerformanceVideoAnnotationRead = {
   id: UUID;
   organization_id: UUID;

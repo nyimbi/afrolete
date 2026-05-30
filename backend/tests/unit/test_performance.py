@@ -5069,6 +5069,26 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert share_recipients.status_code == 200
     recipient_rows = share_recipients.json()
     assert [recipient["person_id"] for recipient in recipient_rows] == [member["subject_id"]]
+    reminder_response = client.post(
+        f"/api/v1/performance/scouting/highlight-reel-shares/{share['audit']['id']}/reminders",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "subject_prefix": "Reminder: scout reel ready",
+            "message_intro": "Please review the controlled highlight reel before the next session.",
+            "include_download_link": True,
+        },
+    )
+    assert reminder_response.status_code == 201
+    reminder = reminder_response.json()
+    assert reminder["share_audit_id"] == share["audit"]["id"]
+    assert reminder["original_message_id"] == share["message_id"]
+    assert reminder["message_id"] != share["message_id"]
+    assert reminder["recipient_count"] == 1
+    assert reminder["skipped_read_count"] == 0
+    assert reminder["skipped_downloaded_count"] == 0
+    assert reminder["recipients"][0]["person_id"] == member["subject_id"]
     player_headers = {
         "X-Afrolete-Sub": "kc-athlete-1",
         "X-Afrolete-Email": "performance-athlete@example.com",
@@ -5097,6 +5117,20 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     )
     assert shared_after_download.status_code == 200
     assert shared_after_download.json()[0]["delivery_status"] == "read"
+    reminder_after_download_response = client.post(
+        f"/api/v1/performance/scouting/highlight-reel-shares/{share['audit']['id']}/reminders",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+        },
+    )
+    assert reminder_after_download_response.status_code == 201
+    reminder_after_download = reminder_after_download_response.json()
+    assert reminder_after_download["message_id"] is None
+    assert reminder_after_download["recipient_count"] == 0
+    assert reminder_after_download["skipped_read_count"] == 1
+    assert reminder_after_download["skipped_downloaded_count"] == 1
     engagement_response = client.get(
         f"/api/v1/performance/scouting/highlight-reel-engagement?organization_id={organization['id']}&highlight_reel_id={reel['id']}",
         headers=identity_headers,
