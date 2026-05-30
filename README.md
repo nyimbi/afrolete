@@ -357,6 +357,10 @@ coordinates for distance and speed estimates. The tracking summary also
 promotes basic recognized actions for completed passes, shots,
 tackles/interceptions, pressure, high-speed runs, off-ball runs, territorial
 advances, and ball carries, each with confidence, evidence, and a coaching cue.
+Tracking exports include raw JSON, time-series samples CSV, player metrics CSV,
+and a coach-ready Markdown player guidance pack with review checklists,
+per-player load/tactical/action cards, training follow-up cues, and a clear
+distribution boundary.
 Opposition scouting reports automatically
 incorporate the latest tracking run for the same video so tactical findings can
 cite possession, passing, chance-quality, defensive-action, shape, and pressure

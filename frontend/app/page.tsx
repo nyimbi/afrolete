@@ -11066,12 +11066,19 @@ export default function HomePage() {
 
   const downloadPerformanceMatchTrackingExport = (
     run: PerformanceMatchTrackingRunRead,
-    exportFormat: "analysis_json" | "samples_csv" | "player_metrics_csv"
+    exportFormat: "analysis_json" | "samples_csv" | "player_metrics_csv" | "player_guidance_markdown"
   ) => {
     runAction(
       `download-performance-match-tracking-${exportFormat}-${run.id}`,
       async () => {
-        const headers = new Headers({ Accept: exportFormat === "analysis_json" ? "application/json,*/*" : "text/csv,*/*" });
+        const headers = new Headers({
+          Accept:
+            exportFormat === "analysis_json"
+              ? "application/json,*/*"
+              : exportFormat === "player_guidance_markdown"
+                ? "text/markdown,text/plain,*/*"
+                : "text/csv,*/*"
+        });
         if (authSession) {
           headers.set("Authorization", `Bearer ${authSession.accessToken}`);
         } else {
@@ -11089,7 +11096,9 @@ export default function HomePage() {
         const blob = await response.blob();
         const disposition = response.headers.get("content-disposition") ?? "";
         const filenameMatch = disposition.match(/filename="([^"]+)"/);
-        const filename = filenameMatch?.[1] ?? `match-tracking-${run.id}-${exportFormat}.${exportFormat.endsWith("csv") ? "csv" : "json"}`;
+        const filename =
+          filenameMatch?.[1] ??
+          `match-tracking-${run.id}-${exportFormat}.${exportFormat.endsWith("csv") ? "csv" : exportFormat.endsWith("markdown") ? "md" : "json"}`;
         const href = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
         anchor.href = href;
@@ -27887,7 +27896,7 @@ export default function HomePage() {
                         {performanceMatchTrackingRun.sample_count} time-series samples · {performanceMatchTrackingRun.player_count} player metric row(s)
                       </span>
                       <small>
-                        Export JSON for APIs, sample CSV for analysts, or player-metrics CSV for spreadsheets and partner tools.
+                        Export JSON for APIs, sample CSV for analysts, player-metrics CSV for spreadsheets, or a coach-ready player guidance pack.
                       </small>
                     </div>
                     <span>
@@ -27911,6 +27920,13 @@ export default function HomePage() {
                         disabled={busyAction !== null}
                       >
                         Metrics
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadPerformanceMatchTrackingExport(performanceMatchTrackingRun, "player_guidance_markdown")}
+                        disabled={busyAction !== null}
+                      >
+                        Player pack
                       </button>
                     </span>
                   </article>

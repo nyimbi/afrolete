@@ -1371,6 +1371,10 @@ async def downloadable_match_tracking_run_export(
         )
         filename = f"match-tracking-{run.id}-player-metrics.csv"
         content_type = "text/csv; charset=utf-8"
+    elif normalized_format in {"player_guidance_markdown", "player_guidance_md", "player_pack_markdown"}:
+        content = match_tracking_player_guidance_markdown(run, summary).encode()
+        filename = f"match-tracking-{run.id}-player-guidance.md"
+        content_type = "text/markdown; charset=utf-8"
     else:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1424,6 +1428,112 @@ def match_tracking_player_metric_export_row(metric: dict[str, object]) -> dict[s
         else:
             row[key] = value
     return row
+
+
+def match_tracking_player_guidance_markdown(
+    run: PerformanceMatchTrackingRun,
+    summary: dict[str, object],
+) -> str:
+    metrics = [item for item in summary.get("player_metrics", []) if isinstance(item, dict)]
+    cards = [
+        match_player_guidance_card(
+            metric,
+            publishable=float(metric.get("tracking_quality_score") or 0.0) >= 0.45,
+        )
+        for metric in sorted(
+            metrics,
+            key=lambda item: (
+                -float(item.get("high_speed_distance_m") or 0.0),
+                -float(item.get("distance_m") or 0.0),
+                str(item.get("player_label") or item.get("track_id") or ""),
+            ),
+        )
+    ]
+    warnings = [
+        str(item)
+        for item in (
+            summary.get("quality_warnings")
+            or summary.get("warnings")
+            or []
+        )
+        if str(item).strip()
+    ]
+    coaching_guidance = [str(item) for item in summary.get("coaching_guidance", []) if str(item).strip()]
+    tactical_guidance = [str(item) for item in summary.get("tactical_guidance", []) if str(item).strip()]
+    training_prescriptions = [
+        item for item in summary.get("training_prescriptions", []) if isinstance(item, dict)
+    ]
+    lines = [
+        "# Player guidance pack",
+        "",
+        f"- Tracking run: {run.id}",
+        f"- Source: {run.source_provider} / {run.model_policy}",
+        f"- Players tracked: {len(cards)}",
+        f"- Total distance: {round(float(summary.get('total_distance_m') or run.total_distance_m or 0.0), 2)}m",
+        f"- High-speed distance: {round(float(summary.get('high_speed_distance_m') or run.high_speed_distance_m or 0.0), 2)}m",
+        f"- Max speed: {round(float(summary.get('max_speed_mps') or run.max_speed_mps or 0.0), 2)} m/s",
+        "",
+        "## Coach review checklist",
+        "",
+        "- Confirm track identity and jersey number before sharing an individual card.",
+        "- Pair each card with the relevant match clip before player feedback.",
+        "- Adjust load and recovery guidance for soreness, injury status, and match context.",
+        "- Treat distance and speed as estimates unless calibration and identity continuity are strong.",
+        "",
+    ]
+    if warnings:
+        lines.extend(["## Data quality notes", ""])
+        lines.extend(f"- {warning}" for warning in warnings[:8])
+        lines.append("")
+    if coaching_guidance or tactical_guidance:
+        lines.extend(["## Team guidance", ""])
+        lines.extend(f"- {item}" for item in [*coaching_guidance, *tactical_guidance][:10])
+        lines.append("")
+    if training_prescriptions:
+        lines.extend(["## Training follow-up", ""])
+        for prescription in training_prescriptions[:6]:
+            title = str(prescription.get("title") or prescription.get("focus_area") or "Training block")
+            evidence = str(prescription.get("evidence") or prescription.get("coaching_cue") or "").strip()
+            drill = str(
+                prescription.get("drill_recommendation")
+                or prescription.get("session_design")
+                or "Review the match evidence with the group."
+            )
+            lines.append(f"- **{title}**: {drill}")
+            if evidence:
+                lines.append(f"  Evidence: {evidence}")
+        lines.append("")
+    lines.extend(["## Player cards", ""])
+    if not cards:
+        lines.extend(["No player metric cards were available for this tracking run.", ""])
+    for card in cards:
+        label = str(card.get("player_label") or card.get("track_id") or "Player")
+        team = str(card.get("team_label") or "Unassigned")
+        jersey = str(card.get("jersey_number") or "").strip()
+        title = f"{label} ({team}{f' #{jersey}' if jersey else ''})"
+        lines.extend(
+            [
+                f"### {title}",
+                "",
+                f"- Headline: {card.get('headline')}",
+                f"- Load: {card.get('load_summary')}",
+                f"- Tactical: {card.get('tactical_summary')}",
+                f"- Next action: {card.get('recommended_next_action')}",
+                f"- Evidence: {card.get('evidence')}",
+            ]
+        )
+        if card.get("caution"):
+            lines.append(f"- Caution: {card.get('caution')}")
+        lines.append("")
+    lines.extend(
+        [
+            "## Distribution boundary",
+            "",
+            "This pack is coach review material, not an automated final decision. Keep the raw tracking run and video clip linked for auditability.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 async def list_match_tracking_provider_ingest_events(

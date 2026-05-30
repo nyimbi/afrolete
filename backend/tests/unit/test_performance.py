@@ -4306,6 +4306,18 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     assert any(row["track_id"] == "home-9" and row["fatigue_risk_score"] for row in metric_rows)
     assert any(row["track_id"] == "home-9" and row["inferred_role"] for row in metric_rows)
 
+    player_pack_export = client.get(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/export?export_format=player_guidance_markdown",
+        headers=identity_headers,
+    )
+    assert player_pack_export.status_code == 200
+    assert player_pack_export.headers["content-type"].startswith("text/markdown")
+    assert "# Player guidance pack" in player_pack_export.text
+    assert "## Player cards" in player_pack_export.text
+    assert "Forward" in player_pack_export.text
+    assert "Coach review checklist" in player_pack_export.text
+    assert "Distribution boundary" in player_pack_export.text
+
     json_export = client.get(
         f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/export?export_format=analysis_json",
         headers=identity_headers,
