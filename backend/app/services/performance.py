@@ -6028,26 +6028,40 @@ async def player_match_guidance_for_profile(
     profile: AthleteProfile,
     limit: int = 5,
 ) -> list[dict[str, object]]:
-    samples = list(
+    audits = list(
         (
             await db.scalars(
-                select(PerformanceMatchTrackingSample)
-                .where(PerformanceMatchTrackingSample.organization_id == organization_id)
-                .where(PerformanceMatchTrackingSample.person_id == profile.person_id)
-                .order_by(PerformanceMatchTrackingSample.created_at.desc())
-                .limit(300)
+                select(PerformanceMatchPlayerGuidancePublishAudit)
+                .where(PerformanceMatchPlayerGuidancePublishAudit.organization_id == organization_id)
+                .where(PerformanceMatchPlayerGuidancePublishAudit.player_person_id == profile.person_id)
+                .where(PerformanceMatchPlayerGuidancePublishAudit.status == "published")
+                .order_by(
+                    PerformanceMatchPlayerGuidancePublishAudit.published_at.desc(),
+                    PerformanceMatchPlayerGuidancePublishAudit.created_at.desc(),
+                )
+                .limit(limit * 4)
             )
         ).all()
     )
     seen: set[tuple[UUID, str]] = set()
     guidance: list[dict[str, object]] = []
-    for sample in samples:
-        key = (sample.tracking_run_id, sample.track_id)
+    for audit in audits:
+        key = (audit.tracking_run_id, audit.track_id)
         if key in seen:
             continue
         seen.add(key)
-        run = await db.get(PerformanceMatchTrackingRun, sample.tracking_run_id)
+        run = await db.get(PerformanceMatchTrackingRun, audit.tracking_run_id)
         if run is None or run.organization_id != organization_id:
+            continue
+        sample = await db.scalar(
+            select(PerformanceMatchTrackingSample)
+            .where(PerformanceMatchTrackingSample.tracking_run_id == run.id)
+            .where(PerformanceMatchTrackingSample.track_id == audit.track_id)
+            .where(PerformanceMatchTrackingSample.person_id == profile.person_id)
+            .order_by(PerformanceMatchTrackingSample.timestamp_seconds.desc())
+            .limit(1)
+        )
+        if sample is None:
             continue
         video_asset = await db.get(OppositionScoutingVideoAsset, run.video_asset_id)
         if video_asset is None:
@@ -6063,6 +6077,12 @@ async def player_match_guidance_for_profile(
         )
         if metric is None:
             continue
+        recipient = await db.scalar(
+            select(MessageRecipient)
+            .where(MessageRecipient.message_id == audit.message_id)
+            .where(MessageRecipient.person_id == profile.person_id)
+            .limit(1)
+        )
         guidance.append(
             build_player_match_guidance(
                 run=run,
@@ -6070,6 +6090,8 @@ async def player_match_guidance_for_profile(
                 sample=sample,
                 metric=metric,
                 summary=summary,
+                publish_audit=audit,
+                player_recipient=recipient,
             )
         )
         if len(guidance) >= limit:
@@ -6102,6 +6124,15 @@ async def create_player_match_training_followup(
     )
     if not samples:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Confirmed player track not found")
+    publish_audit = await player_match_guidance_publish_audit(
+        db,
+        organization_id=payload.organization_id,
+        player_person_id=profile.person_id,
+        tracking_run_id=run.id,
+        track_id=payload.track_id,
+    )
+    if publish_audit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published match guidance not found")
     video_asset = await db.get(OppositionScoutingVideoAsset, run.video_asset_id)
     if video_asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match video not found")
@@ -6122,6 +6153,7 @@ async def create_player_match_training_followup(
         sample=samples[-1],
         metric=metric,
         summary=summary,
+        publish_audit=publish_audit,
     )
     selected_priorities = {priority.lower() for priority in payload.selected_priorities if priority.strip()}
     action_plan = [
@@ -6209,6 +6241,29 @@ async def create_player_match_training_followup(
         "agent_task_status": agent_task.status.value if agent_task else None,
         "agent_task_title": agent_task.title if agent_task else None,
     }
+
+
+async def player_match_guidance_publish_audit(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    player_person_id: UUID,
+    tracking_run_id: UUID,
+    track_id: str,
+) -> PerformanceMatchPlayerGuidancePublishAudit | None:
+    return await db.scalar(
+        select(PerformanceMatchPlayerGuidancePublishAudit)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.organization_id == organization_id)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.player_person_id == player_person_id)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.tracking_run_id == tracking_run_id)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.track_id == track_id)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.status == "published")
+        .order_by(
+            PerformanceMatchPlayerGuidancePublishAudit.published_at.desc(),
+            PerformanceMatchPlayerGuidancePublishAudit.created_at.desc(),
+        )
+        .limit(1)
+    )
 
 
 async def queue_player_match_followup_agent_review(
@@ -6310,6 +6365,8 @@ def build_player_match_guidance(
     sample: PerformanceMatchTrackingSample,
     metric: dict[str, object],
     summary: dict[str, object],
+    publish_audit: PerformanceMatchPlayerGuidancePublishAudit,
+    player_recipient: MessageRecipient | None = None,
 ) -> dict[str, object]:
     team_label = str(metric.get("team_label") or sample.team_label or "").strip() or None
     track_id = str(metric.get("track_id") or sample.track_id)
@@ -6381,6 +6438,12 @@ def build_player_match_guidance(
     return {
         "tracking_run_id": run.id,
         "video_asset_id": video_asset.id,
+        "guidance_message_id": publish_audit.message_id,
+        "guidance_published_at": publish_audit.published_at,
+        "guidance_delivery_status": (
+            player_recipient.delivery_status.value if player_recipient is not None else "unknown"
+        ),
+        "guidance_recipient_count": publish_audit.recipient_count,
         "opponent_name": video_asset.opponent_name,
         "match_label": video_asset.clip_label,
         "tracked_at": run.completed_at or run.created_at,

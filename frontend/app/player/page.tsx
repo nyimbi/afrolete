@@ -900,6 +900,10 @@ export default function PlayerPerformancePage() {
                     <small>
                       {Math.round(guidance.tracking_quality_score * 100)}% quality · {guidance.readiness_level.replaceAll("_", " ")}
                     </small>
+                    <small>
+                      Shared {new Date(guidance.guidance_published_at).toLocaleDateString()} ·{" "}
+                      {guidance.guidance_delivery_status.replaceAll("_", " ")} · {guidance.guidance_recipient_count} recipient(s)
+                    </small>
                   </div>
                   <div className="chart-bars">
                     <div className="chart-bar-row">
@@ -998,8 +1002,8 @@ export default function PlayerPerformancePage() {
                 <article className="player-chart-card">
                   <div>
                     <span>Match guidance</span>
-                    <strong>No confirmed tracks</strong>
-                    <small>Coach-confirmed match tracks will appear here after video analysis.</small>
+                    <strong>No shared match cards</strong>
+                    <small>Coach-published match guidance will appear here after video review.</small>
                   </div>
                   <div className="chart-bars">
                     <div className="chart-bar-row">

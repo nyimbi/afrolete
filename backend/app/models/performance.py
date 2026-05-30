@@ -5,8 +5,7 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Te
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
-from app.models.enums import MetricCategory, MetricSource, MetricVerificationStatus
-from app.models.enums import CommunicationChannel
+from app.models.enums import CommunicationChannel, MetricCategory, MetricSource, MetricVerificationStatus
 
 
 class PerformanceMetricDefinition(IdMixin, TimestampMixin, Base):

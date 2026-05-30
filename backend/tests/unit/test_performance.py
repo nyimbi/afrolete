@@ -291,6 +291,42 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     )
     assert tracking.status_code == 201
 
+    unpublished_profile_response = client.get(
+        f"/api/v1/performance/my-profiles?organization_id={organization['id']}",
+        headers=player_headers,
+    )
+    assert unpublished_profile_response.status_code == 200
+    assert unpublished_profile_response.json()[0]["match_guidance"] == []
+
+    blocked_followup_response = client.post(
+        f"/api/v1/performance/my-profiles/{roster['athlete_profile_id']}/match-guidance/training-followups",
+        headers=player_headers,
+        json={
+            "organization_id": organization["id"],
+            "tracking_run_id": tracking.json()["id"],
+            "track_id": "home-9",
+            "period_start": "2026-03-01",
+            "period_end": "2026-03-14",
+            "max_items": 2,
+        },
+    )
+    assert blocked_followup_response.status_code == 404
+
+    publish_response = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking.json()['id']}/player-guidance-publish",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "include_guardians": False,
+            "require_publishable": False,
+            "subject_prefix": "Published player match guidance",
+        },
+    )
+    assert publish_response.status_code == 201
+    published = publish_response.json()
+    assert published["message_count"] == 1
+
     guided_profile_response = client.get(
         f"/api/v1/performance/my-profiles?organization_id={organization['id']}",
         headers=player_headers,
@@ -299,6 +335,9 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     match_guidance = guided_profile_response.json()[0]["match_guidance"]
     assert len(match_guidance) == 1
     assert match_guidance[0]["tracking_run_id"] == tracking.json()["id"]
+    assert match_guidance[0]["guidance_message_id"] == published["messages"][0]["message_id"]
+    assert match_guidance[0]["guidance_delivery_status"] == "queued"
+    assert match_guidance[0]["guidance_recipient_count"] == 1
     assert match_guidance[0]["opponent_name"] == "Player Guidance FC"
     assert match_guidance[0]["team_label"] == "Home"
     assert match_guidance[0]["jersey_number"] == "9"

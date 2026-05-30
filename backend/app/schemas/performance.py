@@ -2086,6 +2086,10 @@ class PlayerMatchTrainingFollowupRead(BaseModel):
 class PlayerMatchGuidanceRead(BaseModel):
     tracking_run_id: UUID
     video_asset_id: UUID
+    guidance_message_id: UUID
+    guidance_published_at: datetime
+    guidance_delivery_status: str
+    guidance_recipient_count: int
     opponent_name: str
     match_label: str | None
     tracked_at: datetime
