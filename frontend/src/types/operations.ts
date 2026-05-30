@@ -2878,6 +2878,84 @@ export type FacilityAccessDeviceHealthRead = {
   recommendation: string;
 };
 
+export type FacilityUtilityMeterRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  meter_id: string;
+  name: string;
+  utility_type: "electricity" | "water" | "gas" | "solar" | "waste" | "other";
+  unit: string;
+  location: string | null;
+  provider: string | null;
+  account_reference: string | null;
+  status: "active" | "paused" | "maintenance" | "retired";
+  cost_per_unit: string | null;
+  target_daily_usage: string | null;
+  last_reading_at: string | null;
+  last_value: string | null;
+  last_cost_estimate: string | null;
+  notes: string | null;
+};
+
+export type FacilityUtilityMeterProvisionRead = {
+  meter: FacilityUtilityMeterRead;
+  api_key: string;
+};
+
+export type FacilityUtilityReadingRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  utility_meter_id: UUID;
+  meter_id: string;
+  reading_value: string;
+  usage_delta: string | null;
+  unit: string;
+  cost_estimate: string | null;
+  reading_at: string;
+  source: string;
+  anomaly_level: "normal" | "warning" | "critical" | string;
+  external_reference: string | null;
+  notes: string | null;
+};
+
+export type FacilityUtilityAlertRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  utility_meter_id: UUID;
+  utility_reading_id: UUID | null;
+  alert_type: string;
+  severity: "warning" | "critical" | string;
+  status: "open" | "acknowledged" | "resolved" | "dismissed";
+  message: string;
+  recommended_action: string | null;
+  triggered_at: string;
+  resolved_at: string | null;
+  notes: string | null;
+};
+
+export type FacilityUtilityReadingResultRead = {
+  meter: FacilityUtilityMeterRead;
+  reading: FacilityUtilityReadingRead;
+  alert: FacilityUtilityAlertRead | null;
+  signature_validated: boolean;
+};
+
+export type FacilityUtilityDashboardRead = {
+  organization_id: UUID;
+  facility_id: UUID | null;
+  meter_count: number;
+  open_alert_count: number;
+  total_usage_last_30d: string;
+  total_cost_last_30d: string;
+  usage_by_type: Record<string, string>;
+  recent_readings: FacilityUtilityReadingRead[];
+  open_alerts: FacilityUtilityAlertRead[];
+  recommendation: string;
+};
+
 export type FacilityBookingRead = {
   id: UUID;
   organization_id: UUID;

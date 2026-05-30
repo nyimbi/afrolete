@@ -996,6 +996,128 @@ class FacilityAccessDeviceHealthRead(BaseModel):
     recommendation: str
 
 
+class FacilityUtilityMeterCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    meter_id: str = Field(min_length=2, max_length=160)
+    name: str = Field(min_length=2, max_length=180)
+    utility_type: str = Field(default="electricity", pattern="^(electricity|water|gas|solar|waste|other)$")
+    unit: str = Field(default="kWh", min_length=1, max_length=40)
+    location: str | None = Field(default=None, max_length=240)
+    provider: str | None = Field(default=None, max_length=120)
+    account_reference: str | None = Field(default=None, max_length=180)
+    status: str = Field(default="active", pattern="^(active|paused|maintenance|retired)$")
+    api_key: str | None = Field(default=None, min_length=16, max_length=200)
+    cost_per_unit: Decimal | None = Field(default=None, ge=0)
+    target_daily_usage: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityUtilityMeterRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    meter_id: str
+    name: str
+    utility_type: str
+    unit: str
+    location: str | None
+    provider: str | None
+    account_reference: str | None
+    status: str
+    cost_per_unit: Decimal | None
+    target_daily_usage: Decimal | None
+    last_reading_at: datetime | None
+    last_value: Decimal | None
+    last_cost_estimate: Decimal | None
+    notes: str | None
+
+
+class FacilityUtilityMeterProvisionRead(BaseModel):
+    meter: FacilityUtilityMeterRead
+    api_key: str
+
+
+class FacilityUtilityReadingCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    utility_meter_id: UUID
+    reading_value: Decimal = Field(ge=0)
+    usage_delta: Decimal | None = Field(default=None)
+    cost_estimate: Decimal | None = Field(default=None, ge=0)
+    reading_at: datetime | None = None
+    source: str = Field(default="manual", min_length=2, max_length=80)
+    external_reference: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityUtilityGatewayReadingCreate(BaseModel):
+    reading_value: Decimal = Field(ge=0)
+    usage_delta: Decimal | None = Field(default=None)
+    cost_estimate: Decimal | None = Field(default=None, ge=0)
+    reading_at: datetime | None = None
+    external_reference: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityUtilityReadingRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    utility_meter_id: UUID
+    meter_id: str
+    reading_value: Decimal
+    usage_delta: Decimal | None
+    unit: str
+    cost_estimate: Decimal | None
+    reading_at: datetime
+    source: str
+    anomaly_level: str
+    external_reference: str | None
+    notes: str | None
+
+
+class FacilityUtilityAlertUpdate(BaseModel):
+    status: str = Field(pattern="^(open|acknowledged|resolved|dismissed)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityUtilityAlertRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    utility_meter_id: UUID
+    utility_reading_id: UUID | None
+    alert_type: str
+    severity: str
+    status: str
+    message: str
+    recommended_action: str | None
+    triggered_at: datetime
+    resolved_at: datetime | None
+    notes: str | None
+
+
+class FacilityUtilityReadingResultRead(BaseModel):
+    meter: FacilityUtilityMeterRead
+    reading: FacilityUtilityReadingRead
+    alert: FacilityUtilityAlertRead | None
+    signature_validated: bool
+
+
+class FacilityUtilityDashboardRead(BaseModel):
+    organization_id: UUID
+    facility_id: UUID | None
+    meter_count: int
+    open_alert_count: int
+    total_usage_last_30d: Decimal
+    total_cost_last_30d: Decimal
+    usage_by_type: dict[str, Decimal]
+    recent_readings: list[FacilityUtilityReadingRead]
+    open_alerts: list[FacilityUtilityAlertRead]
+    recommendation: str
+
+
 class FacilityBookingCreate(BaseModel):
     organization_id: UUID
     facility_id: UUID

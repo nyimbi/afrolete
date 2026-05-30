@@ -1125,6 +1125,104 @@ def test_facility_access_device_gateway_scan_health_and_commands(client, identit
     assert commands.json()[0]["command_signature"] == command["command_signature"]
 
 
+def test_facility_utility_monitoring_gateway_alerts_and_dashboard(client, identity_headers) -> None:
+    organization, _, _, _ = create_assets_context(client, identity_headers, "Utility Monitor Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Utility Main Field",
+            "facility_type": "field",
+            "capacity": 300,
+        },
+    ).json()
+
+    provision = client.post(
+        "/api/v1/assets/utility-meters",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "meter_id": "main-field-power",
+            "name": "Main field electricity meter",
+            "utility_type": "electricity",
+            "unit": "kWh",
+            "location": "Plant room",
+            "provider": "City Power",
+            "account_reference": "ACC-POWER-001",
+            "api_key": "local-utility-meter-key-0001",
+            "cost_per_unit": "0.25",
+            "target_daily_usage": "100",
+        },
+    )
+    assert provision.status_code == 201
+    meter = provision.json()["meter"]
+    assert provision.json()["api_key"] == "local-utility-meter-key-0001"
+
+    baseline = client.post(
+        "/api/v1/assets/utility-readings",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "utility_meter_id": meter["id"],
+            "reading_value": "1000",
+            "reading_at": "2026-08-01T08:00:00Z",
+            "source": "manual",
+        },
+    )
+    assert baseline.status_code == 200
+    assert baseline.json()["reading"]["usage_delta"] == "0.000"
+    assert baseline.json()["alert"] is None
+
+    bad_key = client.post(
+        f"/api/v1/assets/utility-gateway/{organization['id']}/main-field-power/readings",
+        headers={"X-Afrolete-Utility-Key": "wrong-key"},
+        json={"reading_value": "1300", "reading_at": "2026-08-02T08:00:00Z"},
+    )
+    assert bad_key.status_code == 401
+
+    spike = client.post(
+        f"/api/v1/assets/utility-gateway/{organization['id']}/main-field-power/readings",
+        headers={"X-Afrolete-Utility-Key": "local-utility-meter-key-0001"},
+        json={
+            "reading_value": "1300",
+            "reading_at": "2026-08-02T08:00:00Z",
+            "external_reference": "meter-event-001",
+        },
+    )
+    assert spike.status_code == 200
+    body = spike.json()
+    assert body["signature_validated"] is True
+    assert body["reading"]["source"] == "utility_gateway"
+    assert body["reading"]["usage_delta"] == "300.000"
+    assert body["reading"]["cost_estimate"] == "75.00"
+    assert body["reading"]["anomaly_level"] == "critical"
+    assert body["alert"]["alert_type"] == "usage_spike"
+
+    dashboard = client.get(
+        f"/api/v1/assets/utility-dashboard?organization_id={organization['id']}&facility_id={facility['id']}"
+    )
+    assert dashboard.status_code == 200
+    summary = dashboard.json()
+    assert summary["meter_count"] == 1
+    assert summary["open_alert_count"] == 1
+    assert summary["total_usage_last_30d"] == "300.000"
+    assert summary["total_cost_last_30d"] == "75.00"
+    assert summary["usage_by_type"]["electricity"] == "300.000"
+    assert "critical utility anomalies" in summary["recommendation"]
+
+    resolved = client.patch(
+        f"/api/v1/assets/utility-alerts/{body['alert']['id']}",
+        headers=identity_headers,
+        json={"status": "resolved", "notes": "Leak check completed and floodlights timer repaired."},
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "resolved"
+    assert resolved.json()["resolved_at"] is not None
+
+
 def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
     plan = client.post(

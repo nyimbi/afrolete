@@ -485,6 +485,76 @@ class FacilityAccessCommand(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class FacilityUtilityMeter(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_utility_meters"
+    __table_args__ = (UniqueConstraint("organization_id", "meter_id"),)
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    meter_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    utility_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    unit: Mapped[str] = mapped_column(String(40), nullable=False)
+    location: Mapped[str | None] = mapped_column(String(240), index=True)
+    provider: Mapped[str | None] = mapped_column(String(120), index=True)
+    account_reference: Mapped[str | None] = mapped_column(String(180), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    api_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    cost_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    target_daily_usage: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    last_reading_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_value: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    last_cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class FacilityUtilityReading(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_utility_readings"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    utility_meter_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("facility_utility_meters.id"), nullable=False, index=True
+    )
+    meter_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    reading_value: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    usage_delta: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    unit: Mapped[str] = mapped_column(String(40), nullable=False)
+    cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    reading_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(80), default="manual", nullable=False, index=True)
+    anomaly_level: Mapped[str] = mapped_column(String(40), default="normal", nullable=False, index=True)
+    external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class FacilityUtilityAlert(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_utility_alerts"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    utility_meter_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("facility_utility_meters.id"), nullable=False, index=True
+    )
+    utility_reading_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("facility_utility_readings.id"), index=True
+    )
+    alert_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    recommended_action: Mapped[str | None] = mapped_column(String(500))
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class FacilityBooking(IdMixin, TimestampMixin, Base):
     __tablename__ = "facility_bookings"
 

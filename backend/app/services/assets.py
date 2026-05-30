@@ -39,6 +39,9 @@ from app.models.assets import (
     FacilityBookingWaitlistEntry,
     FacilityLeaseAgreement,
     FacilityMaintenanceSchedule,
+    FacilityUtilityAlert,
+    FacilityUtilityMeter,
+    FacilityUtilityReading,
     MaintenanceWorkOrder,
     SupplierOrder,
 )
@@ -136,6 +139,16 @@ from app.schemas.assets import (
     FacilityMaintenanceScheduleRead,
     FacilityMaintenanceScheduleRunRead,
     FacilityMaintenanceScheduleUpdate,
+    FacilityUtilityAlertRead,
+    FacilityUtilityAlertUpdate,
+    FacilityUtilityDashboardRead,
+    FacilityUtilityGatewayReadingCreate,
+    FacilityUtilityMeterCreate,
+    FacilityUtilityMeterProvisionRead,
+    FacilityUtilityMeterRead,
+    FacilityUtilityReadingCreate,
+    FacilityUtilityReadingRead,
+    FacilityUtilityReadingResultRead,
     FacilityPublicBookingCreate,
     FacilityPublicListingRead,
     FacilityRecurringBookingCreate,
@@ -1829,6 +1842,199 @@ async def record_facility_access_device_health(
     )
 
 
+async def provision_facility_utility_meter(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityUtilityMeterCreate,
+    authz: AuthorizationService,
+) -> FacilityUtilityMeterProvisionRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    meter_id = payload.meter_id.strip()
+    existing = await db.scalar(
+        select(FacilityUtilityMeter).where(
+            FacilityUtilityMeter.organization_id == payload.organization_id,
+            FacilityUtilityMeter.meter_id == meter_id,
+        )
+    )
+    api_key = payload.api_key or token_urlsafe(32)
+    if existing is None:
+        meter = FacilityUtilityMeter(
+            organization_id=payload.organization_id,
+            facility_id=payload.facility_id,
+            meter_id=meter_id,
+            name=payload.name,
+            utility_type=payload.utility_type,
+            unit=payload.unit,
+            location=payload.location,
+            provider=payload.provider,
+            account_reference=payload.account_reference,
+            status=payload.status,
+            api_key_hash=hash_reader_key(api_key),
+            cost_per_unit=payload.cost_per_unit,
+            target_daily_usage=payload.target_daily_usage,
+            notes=payload.notes,
+        )
+        db.add(meter)
+    else:
+        meter = existing
+        meter.facility_id = payload.facility_id
+        meter.name = payload.name
+        meter.utility_type = payload.utility_type
+        meter.unit = payload.unit
+        meter.location = payload.location
+        meter.provider = payload.provider
+        meter.account_reference = payload.account_reference
+        meter.status = payload.status
+        meter.api_key_hash = hash_reader_key(api_key)
+        meter.cost_per_unit = payload.cost_per_unit
+        meter.target_daily_usage = payload.target_daily_usage
+        meter.notes = payload.notes
+    await db.commit()
+    await db.refresh(meter)
+    return FacilityUtilityMeterProvisionRead(meter=facility_utility_meter_read(meter), api_key=api_key)
+
+
+async def list_facility_utility_meters(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+) -> list[FacilityUtilityMeterRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(FacilityUtilityMeter).where(FacilityUtilityMeter.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(FacilityUtilityMeter.facility_id == facility_id)
+    rows = await db.scalars(statement.order_by(FacilityUtilityMeter.utility_type, FacilityUtilityMeter.name))
+    return [facility_utility_meter_read(row) for row in rows.all()]
+
+
+async def record_facility_utility_reading(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityUtilityReadingCreate,
+    authz: AuthorizationService,
+) -> FacilityUtilityReadingResultRead:
+    meter = await get_facility_utility_meter(db, payload.utility_meter_id)
+    if meter.organization_id != payload.organization_id or meter.facility_id != payload.facility_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility utility meter not found")
+    await ensure_manage_assets(authz, identity, meter.organization_id)
+    return await persist_facility_utility_reading(
+        db,
+        meter,
+        reading_value=payload.reading_value,
+        usage_delta=payload.usage_delta,
+        cost_estimate=payload.cost_estimate,
+        reading_at=payload.reading_at or datetime.now(UTC),
+        source=payload.source,
+        external_reference=payload.external_reference,
+        notes=payload.notes,
+        signature_validated=False,
+    )
+
+
+async def record_gateway_facility_utility_reading(
+    db: AsyncSession,
+    organization_id: UUID,
+    meter_id: str,
+    api_key: str | None,
+    payload: FacilityUtilityGatewayReadingCreate,
+) -> FacilityUtilityReadingResultRead:
+    meter = await get_facility_utility_meter_by_meter_id(db, organization_id, meter_id.strip())
+    validate_facility_utility_meter_key(meter, api_key)
+    return await persist_facility_utility_reading(
+        db,
+        meter,
+        reading_value=payload.reading_value,
+        usage_delta=payload.usage_delta,
+        cost_estimate=payload.cost_estimate,
+        reading_at=payload.reading_at or datetime.now(UTC),
+        source="utility_gateway",
+        external_reference=payload.external_reference,
+        notes=payload.notes,
+        signature_validated=True,
+    )
+
+
+async def facility_utility_dashboard(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> FacilityUtilityDashboardRead:
+    await get_organization(db, organization_id)
+    meter_statement = select(FacilityUtilityMeter).where(FacilityUtilityMeter.organization_id == organization_id)
+    reading_statement = select(FacilityUtilityReading).where(FacilityUtilityReading.organization_id == organization_id)
+    alert_statement = select(FacilityUtilityAlert).where(FacilityUtilityAlert.organization_id == organization_id)
+    if facility_id is not None:
+        meter_statement = meter_statement.where(FacilityUtilityMeter.facility_id == facility_id)
+        reading_statement = reading_statement.where(FacilityUtilityReading.facility_id == facility_id)
+        alert_statement = alert_statement.where(FacilityUtilityAlert.facility_id == facility_id)
+    meters = list((await db.scalars(meter_statement)).all())
+    since = datetime.now(UTC) - timedelta(days=30)
+    readings = list(
+        (
+            await db.scalars(
+                reading_statement
+                .where(FacilityUtilityReading.reading_at >= since)
+                .order_by(FacilityUtilityReading.reading_at.desc())
+            )
+        ).all()
+    )
+    alerts = list(
+        (
+            await db.scalars(
+                alert_statement
+                .where(FacilityUtilityAlert.status.in_(["open", "acknowledged"]))
+                .order_by(FacilityUtilityAlert.triggered_at.desc())
+            )
+        ).all()
+    )
+    usage_by_type: dict[str, Decimal] = {}
+    total_usage = Decimal("0")
+    total_cost = Decimal("0")
+    meter_types = {meter.id: meter.utility_type for meter in meters}
+    for reading in readings:
+        usage = reading.usage_delta or Decimal("0")
+        cost = reading.cost_estimate or Decimal("0")
+        total_usage += usage
+        total_cost += cost
+        utility_type = meter_types.get(reading.utility_meter_id, "unknown")
+        usage_by_type[utility_type] = usage_by_type.get(utility_type, Decimal("0")) + usage
+    return FacilityUtilityDashboardRead(
+        organization_id=organization_id,
+        facility_id=facility_id,
+        meter_count=len(meters),
+        open_alert_count=len(alerts),
+        total_usage_last_30d=total_usage,
+        total_cost_last_30d=total_cost,
+        usage_by_type=usage_by_type,
+        recent_readings=[facility_utility_reading_read(reading) for reading in readings[:10]],
+        open_alerts=[facility_utility_alert_read(alert) for alert in alerts[:10]],
+        recommendation=facility_utility_dashboard_recommendation(alerts, meters),
+    )
+
+
+async def update_facility_utility_alert(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    alert_id: UUID,
+    payload: FacilityUtilityAlertUpdate,
+    authz: AuthorizationService,
+) -> FacilityUtilityAlertRead:
+    alert = await get_facility_utility_alert(db, alert_id)
+    await ensure_manage_assets(authz, identity, alert.organization_id)
+    alert.status = payload.status
+    if payload.status in {"resolved", "dismissed"}:
+        alert.resolved_at = datetime.now(UTC)
+    if payload.notes:
+        alert.notes = append_note(alert.notes, payload.notes)
+    await db.commit()
+    await db.refresh(alert)
+    return facility_utility_alert_read(alert)
+
+
 async def create_facility_booking(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3318,6 +3524,42 @@ async def get_facility_access_device_by_device_id(
     return device
 
 
+async def get_facility_utility_meter(
+    db: AsyncSession,
+    meter_pk: UUID,
+) -> FacilityUtilityMeter:
+    meter = await db.get(FacilityUtilityMeter, meter_pk)
+    if meter is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility utility meter not found")
+    return meter
+
+
+async def get_facility_utility_meter_by_meter_id(
+    db: AsyncSession,
+    organization_id: UUID,
+    meter_id: str,
+) -> FacilityUtilityMeter:
+    meter = await db.scalar(
+        select(FacilityUtilityMeter).where(
+            FacilityUtilityMeter.organization_id == organization_id,
+            FacilityUtilityMeter.meter_id == meter_id,
+        )
+    )
+    if meter is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility utility meter not found")
+    return meter
+
+
+async def get_facility_utility_alert(
+    db: AsyncSession,
+    alert_id: UUID,
+) -> FacilityUtilityAlert:
+    alert = await db.get(FacilityUtilityAlert, alert_id)
+    if alert is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility utility alert not found")
+    return alert
+
+
 async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> SupplierOrder:
     order = await db.get(SupplierOrder, supplier_order_id)
     if order is None:
@@ -4006,6 +4248,217 @@ def facility_access_device_health_recommendation(device: FacilityAccessDevice) -
     if device.network_status and device.network_status not in {"online", "good", "connected"}:
         return "Network status needs attention before relying on unattended entry."
     return "Device is ready for controlled access windows."
+
+
+async def persist_facility_utility_reading(
+    db: AsyncSession,
+    meter: FacilityUtilityMeter,
+    *,
+    reading_value: Decimal,
+    usage_delta: Decimal | None,
+    cost_estimate: Decimal | None,
+    reading_at: datetime,
+    source: str,
+    external_reference: str | None,
+    notes: str | None,
+    signature_validated: bool,
+) -> FacilityUtilityReadingResultRead:
+    if meter.status != "active":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Facility utility meter is not active")
+    normalized_at = normalize_datetime(reading_at)
+    computed_delta = facility_utility_usage_delta(meter, reading_value, usage_delta)
+    computed_cost = facility_utility_cost_estimate(meter, computed_delta, cost_estimate)
+    anomaly_level, alert_type, message, action = facility_utility_anomaly(meter, computed_delta, normalized_at)
+    reading = FacilityUtilityReading(
+        organization_id=meter.organization_id,
+        facility_id=meter.facility_id,
+        utility_meter_id=meter.id,
+        meter_id=meter.meter_id,
+        reading_value=reading_value,
+        usage_delta=computed_delta,
+        unit=meter.unit,
+        cost_estimate=computed_cost,
+        reading_at=normalized_at,
+        source=source.strip().lower(),
+        anomaly_level=anomaly_level,
+        external_reference=external_reference,
+        notes=notes,
+    )
+    db.add(reading)
+    await db.flush()
+    alert: FacilityUtilityAlert | None = None
+    if anomaly_level != "normal":
+        alert = FacilityUtilityAlert(
+            organization_id=meter.organization_id,
+            facility_id=meter.facility_id,
+            utility_meter_id=meter.id,
+            utility_reading_id=reading.id,
+            alert_type=alert_type,
+            severity=anomaly_level,
+            status="open",
+            message=message,
+            recommended_action=action,
+            triggered_at=normalized_at,
+        )
+        db.add(alert)
+    if meter.last_reading_at is None or normalized_at >= normalize_datetime(meter.last_reading_at):
+        meter.last_reading_at = normalized_at
+        meter.last_value = reading_value
+        meter.last_cost_estimate = computed_cost
+    await db.commit()
+    await db.refresh(meter)
+    await db.refresh(reading)
+    if alert is not None:
+        await db.refresh(alert)
+    return FacilityUtilityReadingResultRead(
+        meter=facility_utility_meter_read(meter),
+        reading=facility_utility_reading_read(reading),
+        alert=facility_utility_alert_read(alert) if alert else None,
+        signature_validated=signature_validated,
+    )
+
+
+def facility_utility_meter_read(meter: FacilityUtilityMeter) -> FacilityUtilityMeterRead:
+    return FacilityUtilityMeterRead(
+        id=meter.id,
+        organization_id=meter.organization_id,
+        facility_id=meter.facility_id,
+        meter_id=meter.meter_id,
+        name=meter.name,
+        utility_type=meter.utility_type,
+        unit=meter.unit,
+        location=meter.location,
+        provider=meter.provider,
+        account_reference=meter.account_reference,
+        status=meter.status,
+        cost_per_unit=meter.cost_per_unit,
+        target_daily_usage=meter.target_daily_usage,
+        last_reading_at=meter.last_reading_at,
+        last_value=meter.last_value,
+        last_cost_estimate=meter.last_cost_estimate,
+        notes=meter.notes,
+    )
+
+
+def facility_utility_reading_read(reading: FacilityUtilityReading) -> FacilityUtilityReadingRead:
+    return FacilityUtilityReadingRead(
+        id=reading.id,
+        organization_id=reading.organization_id,
+        facility_id=reading.facility_id,
+        utility_meter_id=reading.utility_meter_id,
+        meter_id=reading.meter_id,
+        reading_value=reading.reading_value,
+        usage_delta=reading.usage_delta,
+        unit=reading.unit,
+        cost_estimate=reading.cost_estimate,
+        reading_at=reading.reading_at,
+        source=reading.source,
+        anomaly_level=reading.anomaly_level,
+        external_reference=reading.external_reference,
+        notes=reading.notes,
+    )
+
+
+def facility_utility_alert_read(alert: FacilityUtilityAlert) -> FacilityUtilityAlertRead:
+    return FacilityUtilityAlertRead(
+        id=alert.id,
+        organization_id=alert.organization_id,
+        facility_id=alert.facility_id,
+        utility_meter_id=alert.utility_meter_id,
+        utility_reading_id=alert.utility_reading_id,
+        alert_type=alert.alert_type,
+        severity=alert.severity,
+        status=alert.status,
+        message=alert.message,
+        recommended_action=alert.recommended_action,
+        triggered_at=alert.triggered_at,
+        resolved_at=alert.resolved_at,
+        notes=alert.notes,
+    )
+
+
+def validate_facility_utility_meter_key(meter: FacilityUtilityMeter, api_key: str | None) -> None:
+    if meter.status != "active":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Facility utility meter is not active")
+    if not api_key or not compare_digest(meter.api_key_hash, hash_reader_key(api_key)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid facility utility meter key")
+
+
+def facility_utility_usage_delta(
+    meter: FacilityUtilityMeter,
+    reading_value: Decimal,
+    supplied_delta: Decimal | None,
+) -> Decimal | None:
+    if supplied_delta is not None:
+        return supplied_delta
+    if meter.last_value is None:
+        return Decimal("0")
+    return reading_value - meter.last_value
+
+
+def facility_utility_cost_estimate(
+    meter: FacilityUtilityMeter,
+    usage_delta: Decimal | None,
+    supplied_cost: Decimal | None,
+) -> Decimal | None:
+    if supplied_cost is not None:
+        return supplied_cost
+    if usage_delta is None or meter.cost_per_unit is None:
+        return None
+    return (usage_delta * meter.cost_per_unit).quantize(Decimal("0.01"))
+
+
+def facility_utility_anomaly(
+    meter: FacilityUtilityMeter,
+    usage_delta: Decimal | None,
+    reading_at: datetime,
+) -> tuple[str, str, str, str]:
+    if usage_delta is None:
+        return ("normal", "normal", "Utility reading recorded.", "Keep monitoring scheduled usage.")
+    if usage_delta < 0:
+        return (
+            "critical",
+            "meter_reset_or_bad_reading",
+            f"{meter.name} reported a negative usage delta.",
+            "Inspect the meter for reset, rollover, tampering, or bad gateway data.",
+        )
+    if meter.target_daily_usage is not None and meter.target_daily_usage > 0:
+        expected = meter.target_daily_usage * facility_utility_elapsed_days(meter, reading_at)
+        if expected > 0 and usage_delta > expected * Decimal("2"):
+            return (
+                "critical",
+                "usage_spike",
+                f"{meter.name} usage is more than double the target for this interval.",
+                "Check for leaks, lights left on, abnormal irrigation, or equipment running after hours.",
+            )
+        if expected > 0 and usage_delta > expected * Decimal("1.5"):
+            return (
+                "warning",
+                "usage_above_target",
+                f"{meter.name} usage is materially above target for this interval.",
+                "Review bookings, weather, and maintenance activity before the next reading.",
+            )
+    return ("normal", "normal", "Utility reading recorded.", "Keep monitoring scheduled usage.")
+
+
+def facility_utility_elapsed_days(meter: FacilityUtilityMeter, reading_at: datetime) -> Decimal:
+    if meter.last_reading_at is None:
+        return Decimal("1")
+    seconds = max((reading_at - normalize_datetime(meter.last_reading_at)).total_seconds(), 0)
+    return max(Decimal(str(seconds / 86400)), Decimal("1"))
+
+
+def facility_utility_dashboard_recommendation(
+    alerts: list[FacilityUtilityAlert],
+    meters: list[FacilityUtilityMeter],
+) -> str:
+    if any(alert.severity == "critical" for alert in alerts):
+        return "Investigate critical utility anomalies before approving additional high-load bookings."
+    if alerts:
+        return "Review open utility alerts and compare them with bookings, weather, and maintenance activity."
+    if any(meter.last_reading_at is None for meter in meters):
+        return "Seed initial readings for all active meters so cost and usage trends become reliable."
+    return "Utility monitoring is stable; keep gateway readings on a daily cadence."
 
 
 def maintenance_work_order_notes(schedule: FacilityMaintenanceSchedule) -> str:

@@ -243,6 +243,11 @@ import type {
   FacilityAccessDeviceRead,
   FacilityAccessEventRead,
   FacilityAccessGatewayScanRead,
+  FacilityUtilityAlertRead,
+  FacilityUtilityDashboardRead,
+  FacilityUtilityMeterProvisionRead,
+  FacilityUtilityMeterRead,
+  FacilityUtilityReadingResultRead,
   FacilityAvailabilityRead,
   FacilityBookingCheckoutRead,
   FacilityBookingRead,
@@ -1811,6 +1816,10 @@ export default function HomePage() {
   const [facilityAccessGatewayScan, setFacilityAccessGatewayScan] = useState<FacilityAccessGatewayScanRead | null>(null);
   const [facilityAccessDeviceHealth, setFacilityAccessDeviceHealth] = useState<FacilityAccessDeviceHealthRead | null>(null);
   const [facilityAccessCommands, setFacilityAccessCommands] = useState<FacilityAccessCommandRead[]>([]);
+  const [facilityUtilityMeters, setFacilityUtilityMeters] = useState<FacilityUtilityMeterRead[]>([]);
+  const [facilityUtilityDashboard, setFacilityUtilityDashboard] = useState<FacilityUtilityDashboardRead | null>(null);
+  const [facilityUtilityProvision, setFacilityUtilityProvision] = useState<FacilityUtilityMeterProvisionRead | null>(null);
+  const [facilityUtilityReading, setFacilityUtilityReading] = useState<FacilityUtilityReadingResultRead | null>(null);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [facilityWaitlist, setFacilityWaitlist] = useState<FacilityBookingWaitlistRead[]>([]);
   const [facilityBookingRule, setFacilityBookingRule] = useState<FacilityBookingRuleRead | null>(null);
@@ -2712,6 +2721,21 @@ export default function HomePage() {
     battery_percent: 64,
     firmware_version: "1.2.3",
     network_status: "online"
+  });
+  const [facilityUtilityForm, setFacilityUtilityForm] = useState({
+    meter_id: "main-field-power",
+    name: "Main field electricity meter",
+    utility_type: "electricity" as FacilityUtilityMeterRead["utility_type"],
+    unit: "kWh",
+    location: "Plant room",
+    provider: "City Power",
+    account_reference: "ACC-POWER-001",
+    api_key: "local-utility-meter-key-0001",
+    cost_per_unit: 0.25,
+    target_daily_usage: 100,
+    reading_value: 1300,
+    reading_at: "2026-08-02T08:00",
+    external_reference: "meter-event-001"
   });
   const [bookingForm, setBookingForm] = useState({
     title: "U16 training block",
@@ -4003,6 +4027,8 @@ export default function HomePage() {
       accessDashboardData,
       accessDeviceData,
       accessCommandData,
+      utilityMeterData,
+      utilityDashboardData,
       bookingData,
       waitlistData,
       bookingRuleData,
@@ -4034,6 +4060,10 @@ export default function HomePage() {
       apiRequest<FacilityAccessCommandRead[]>(`/assets/access-commands?organization_id=${organizationId}${facilityQuery}`, {
         identity
       }),
+      apiRequest<FacilityUtilityMeterRead[]>(`/assets/utility-meters?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
+      apiRequest<FacilityUtilityDashboardRead>(`/assets/utility-dashboard?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingWaitlistRead[]>(`/assets/waitlist?organization_id=${organizationId}${facilityQuery}`),
       facilityId
@@ -4085,6 +4115,8 @@ export default function HomePage() {
     setFacilityAccessDashboard(accessDashboardData);
     setFacilityAccessDevices(accessDeviceData);
     setFacilityAccessCommands(accessCommandData);
+    setFacilityUtilityMeters(utilityMeterData);
+    setFacilityUtilityDashboard(utilityDashboardData);
     setFacilityBookings(bookingData);
     setFacilityWaitlist(waitlistData);
     setFacilityBookingRule(bookingRuleData);
@@ -13451,6 +13483,149 @@ export default function HomePage() {
     );
   };
 
+  const provisionFacilityUtilityMeter = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before provisioning a utility meter", "bad");
+      return;
+    }
+    runAction(
+      "provision-facility-utility-meter",
+      () =>
+        apiRequest<FacilityUtilityMeterProvisionRead>("/assets/utility-meters", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            meter_id: facilityUtilityForm.meter_id,
+            name: facilityUtilityForm.name,
+            utility_type: facilityUtilityForm.utility_type,
+            unit: facilityUtilityForm.unit,
+            location: facilityUtilityForm.location,
+            provider: facilityUtilityForm.provider,
+            account_reference: facilityUtilityForm.account_reference,
+            api_key: facilityUtilityForm.api_key,
+            cost_per_unit: facilityUtilityForm.cost_per_unit,
+            target_daily_usage: facilityUtilityForm.target_daily_usage,
+            notes: "Provisioned from operations utility console."
+          }
+        }),
+      (provision) => {
+        setFacilityUtilityProvision(provision);
+        setFacilityUtilityMeters((current) => [
+          provision.meter,
+          ...current.filter((meter) => meter.id !== provision.meter.id)
+        ]);
+        addLog(`${provision.meter.name} utility meter provisioned`, "good");
+      }
+    );
+  };
+
+  const recordFacilityUtilityReading = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before recording utility usage", "bad");
+      return;
+    }
+    const meter = facilityUtilityMeters[0];
+    if (!meter) {
+      addLog("Provision a utility meter before recording usage", "bad");
+      return;
+    }
+    runAction(
+      "record-facility-utility-reading",
+      () =>
+        apiRequest<FacilityUtilityReadingResultRead>("/assets/utility-readings", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            utility_meter_id: meter.id,
+            reading_value: facilityUtilityForm.reading_value,
+            reading_at: new Date(facilityUtilityForm.reading_at).toISOString(),
+            source: "manual",
+            external_reference: facilityUtilityForm.external_reference,
+            notes: "Manual utility reading from operations console."
+          }
+        }),
+      (result) => {
+        setFacilityUtilityReading(result);
+        setFacilityUtilityMeters((current) => [
+          result.meter,
+          ...current.filter((item) => item.id !== result.meter.id)
+        ]);
+        addLog(`${result.meter.name} reading ${result.reading.anomaly_level}`, result.alert ? "bad" : "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const gatewayFacilityUtilityReading = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before gateway utility ingest", "bad");
+      return;
+    }
+    const meter = facilityUtilityMeters[0];
+    const meterId = meter?.meter_id ?? facilityUtilityForm.meter_id;
+    runAction(
+      "gateway-facility-utility-reading",
+      () =>
+        apiRequest<FacilityUtilityReadingResultRead>(
+          `/assets/utility-gateway/${selectedOrganizationId}/${encodeURIComponent(meterId)}/readings`,
+          {
+            method: "POST",
+            headers: { "X-Afrolete-Utility-Key": facilityUtilityForm.api_key },
+            body: {
+              reading_value: facilityUtilityForm.reading_value,
+              reading_at: new Date(facilityUtilityForm.reading_at).toISOString(),
+              external_reference: facilityUtilityForm.external_reference,
+              notes: "Gateway utility reading from operations console."
+            }
+          }
+        ),
+      (result) => {
+        setFacilityUtilityReading(result);
+        setFacilityUtilityMeters((current) => [
+          result.meter,
+          ...current.filter((item) => item.id !== result.meter.id)
+        ]);
+        addLog(`${result.meter.meter_id} gateway ${result.reading.anomaly_level}: ${result.reading.usage_delta ?? "0"} ${result.reading.unit}`, result.alert ? "bad" : "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const resolveFacilityUtilityAlert = (alert: FacilityUtilityAlertRead) => {
+    runAction(
+      `resolve-utility-alert-${alert.id}`,
+      () =>
+        apiRequest<FacilityUtilityAlertRead>(`/assets/utility-alerts/${alert.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: alert.status === "resolved" ? "open" : "resolved",
+            notes: alert.status === "resolved" ? "Reopened from operations console." : "Resolved from operations console."
+          }
+        }),
+      (updated) => {
+        setFacilityUtilityDashboard((current) =>
+          current
+            ? {
+                ...current,
+                open_alerts: updated.status === "resolved"
+                  ? current.open_alerts.filter((item) => item.id !== updated.id)
+                  : [updated, ...current.open_alerts.filter((item) => item.id !== updated.id)],
+                open_alert_count: updated.status === "resolved"
+                  ? Math.max(current.open_alert_count - 1, 0)
+                  : current.open_alert_count + 1
+              }
+            : current
+        );
+        addLog(`${updated.alert_type} ${updated.status}`, "good");
+      }
+    );
+  };
+
   const revokeFacilityAccessCredential = (credential: FacilityAccessCredentialRead) => {
     if (!selectedOrganizationId) {
       return;
@@ -18789,6 +18964,9 @@ export default function HomePage() {
                 <button type="button" onClick={provisionFacilityAccessDevice} disabled={busyAction !== null}>Device</button>
                 <button type="button" onClick={() => gatewayScanFacilityAccessDevice()} disabled={busyAction !== null}>Gateway</button>
                 <button type="button" onClick={reportFacilityAccessDeviceHealth} disabled={busyAction !== null}>Health</button>
+                <button type="button" onClick={provisionFacilityUtilityMeter} disabled={busyAction !== null}>Meter</button>
+                <button type="button" onClick={recordFacilityUtilityReading} disabled={busyAction !== null}>Utility</button>
+                <button type="button" onClick={gatewayFacilityUtilityReading} disabled={busyAction !== null}>Ingest</button>
                 <button type="button" onClick={createWorkOrder} disabled={busyAction !== null}>Work order</button>
               </div>
             </div>
@@ -18832,6 +19010,16 @@ export default function HomePage() {
                 <span className="muted">Signed commands</span>
                 <strong>{facilityAccessCommands.length}</strong>
                 <span className="muted">{facilityAccessCommands[0]?.command_type ?? "none"}</span>
+              </div>
+              <div>
+                <span className="muted">Utility meters</span>
+                <strong>{facilityUtilityDashboard?.meter_count ?? facilityUtilityMeters.length}</strong>
+                <span className="muted">{facilityUtilityDashboard?.open_alert_count ?? 0} alerts</span>
+              </div>
+              <div>
+                <span className="muted">Utility cost</span>
+                <strong>${facilityUtilityDashboard?.total_cost_last_30d ?? "0.00"}</strong>
+                <span className="muted">{facilityUtilityDashboard?.total_usage_last_30d ?? "0"} units</span>
               </div>
             </div>
             <div className="form-grid">
@@ -19015,6 +19203,63 @@ export default function HomePage() {
             </div>
             <div className="form-grid">
               <label>
+                Meter ID
+                <input value={facilityUtilityForm.meter_id} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, meter_id: event.target.value })} />
+              </label>
+              <label>
+                Meter name
+                <input value={facilityUtilityForm.name} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, name: event.target.value })} />
+              </label>
+              <label>
+                Utility
+                <select value={facilityUtilityForm.utility_type} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, utility_type: event.target.value as FacilityUtilityMeterRead["utility_type"] })}>
+                  <option value="electricity">Electricity</option>
+                  <option value="water">Water</option>
+                  <option value="gas">Gas</option>
+                  <option value="solar">Solar</option>
+                  <option value="waste">Waste</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                Unit
+                <input value={facilityUtilityForm.unit} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, unit: event.target.value })} />
+              </label>
+              <label>
+                Meter location
+                <input value={facilityUtilityForm.location} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, location: event.target.value })} />
+              </label>
+              <label>
+                Provider
+                <input value={facilityUtilityForm.provider} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, provider: event.target.value })} />
+              </label>
+              <label>
+                Account ref
+                <input value={facilityUtilityForm.account_reference} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, account_reference: event.target.value })} />
+              </label>
+              <label>
+                Meter key
+                <input value={facilityUtilityForm.api_key} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, api_key: event.target.value })} />
+              </label>
+              <label>
+                Cost/unit
+                <input type="number" min="0" step="0.01" value={facilityUtilityForm.cost_per_unit} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, cost_per_unit: Number(event.target.value) })} />
+              </label>
+              <label>
+                Daily target
+                <input type="number" min="0" value={facilityUtilityForm.target_daily_usage} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, target_daily_usage: Number(event.target.value) })} />
+              </label>
+              <label>
+                Reading
+                <input type="number" min="0" value={facilityUtilityForm.reading_value} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, reading_value: Number(event.target.value) })} />
+              </label>
+              <label>
+                Reading at
+                <input type="datetime-local" value={facilityUtilityForm.reading_at} onChange={(event) => setFacilityUtilityForm({ ...facilityUtilityForm, reading_at: event.target.value })} />
+              </label>
+            </div>
+            <div className="form-grid">
+              <label>
                 Title
                 <input value={workOrderForm.title} onChange={(event) => setWorkOrderForm({ ...workOrderForm, title: event.target.value })} />
               </label>
@@ -19134,6 +19379,52 @@ export default function HomePage() {
                     <strong>{command.command_type} command</strong>
                     <span>{command.status} · valid until {new Date(command.valid_until).toLocaleString()}</span>
                     <span>{command.command_signature.slice(0, 36)}</span>
+                  </div>
+                </article>
+              ))}
+              {facilityUtilityProvision ? (
+                <article className="task-card selected">
+                  <div>
+                    <strong>{facilityUtilityProvision.meter.name} provisioned</strong>
+                    <span>{facilityUtilityProvision.meter.utility_type} · {facilityUtilityProvision.meter.unit} · {facilityUtilityProvision.meter.location ?? "No location"}</span>
+                    <span>Key returned once: {facilityUtilityProvision.api_key}</span>
+                  </div>
+                </article>
+              ) : null}
+              {facilityUtilityReading ? (
+                <article className={`task-card ${facilityUtilityReading.alert ? "" : "selected"}`}>
+                  <div>
+                    <strong>{facilityUtilityReading.meter.name} · {facilityUtilityReading.reading.anomaly_level}</strong>
+                    <span>{facilityUtilityReading.reading.usage_delta ?? "0"} {facilityUtilityReading.reading.unit} · ${facilityUtilityReading.reading.cost_estimate ?? "0.00"}</span>
+                    <span>{facilityUtilityReading.alert?.message ?? "Reading accepted"} · signed {facilityUtilityReading.signature_validated ? "yes" : "no"}</span>
+                  </div>
+                </article>
+              ) : null}
+              {facilityUtilityMeters.slice(0, 3).map((meter) => (
+                <article key={meter.id} className="task-card">
+                  <div>
+                    <strong>{meter.name}</strong>
+                    <span>{meter.utility_type} · {meter.status} · {meter.provider ?? "No provider"}</span>
+                    <span>{meter.last_value ?? "no reading"} {meter.unit} · last {meter.last_reading_at ? new Date(meter.last_reading_at).toLocaleString() : "never"}</span>
+                  </div>
+                </article>
+              ))}
+              {facilityUtilityDashboard?.open_alerts.slice(0, 3).map((alert) => (
+                <article key={alert.id} className="task-card">
+                  <div>
+                    <strong>{alert.severity} · {alert.alert_type}</strong>
+                    <span>{alert.message}</span>
+                    <span>{alert.recommended_action ?? "Review utility usage."}</span>
+                  </div>
+                  <button type="button" onClick={() => resolveFacilityUtilityAlert(alert)}>Resolve</button>
+                </article>
+              ))}
+              {facilityUtilityDashboard?.recent_readings.slice(0, 3).map((reading) => (
+                <article key={reading.id} className="task-card">
+                  <div>
+                    <strong>{reading.meter_id} · {reading.source}</strong>
+                    <span>{reading.reading_value} {reading.unit} · delta {reading.usage_delta ?? "0"}</span>
+                    <span>{reading.anomaly_level} · {new Date(reading.reading_at).toLocaleString()}</span>
                   </div>
                 </article>
               ))}

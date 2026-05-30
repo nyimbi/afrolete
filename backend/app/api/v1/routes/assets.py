@@ -82,6 +82,15 @@ from app.schemas.assets import (
     FacilityMaintenanceScheduleRead,
     FacilityMaintenanceScheduleRunRead,
     FacilityMaintenanceScheduleUpdate,
+    FacilityUtilityAlertRead,
+    FacilityUtilityAlertUpdate,
+    FacilityUtilityDashboardRead,
+    FacilityUtilityGatewayReadingCreate,
+    FacilityUtilityMeterCreate,
+    FacilityUtilityMeterProvisionRead,
+    FacilityUtilityMeterRead,
+    FacilityUtilityReadingCreate,
+    FacilityUtilityReadingResultRead,
     FacilityPublicBookingCreate,
     FacilityPublicListingRead,
     FacilityRead,
@@ -126,6 +135,7 @@ from app.services.assets import (
     facility_access_dashboard,
     facility_availability,
     facility_maintenance_dashboard,
+    facility_utility_dashboard,
     facility_utilization,
     generate_facility_lease_invoice,
     create_public_facility_booking,
@@ -147,6 +157,7 @@ from app.services.assets import (
     list_facility_bookings,
     list_facility_lease_agreements,
     list_facility_maintenance_schedules,
+    list_facility_utility_meters,
     list_supplier_orders,
     list_work_orders,
     procurement_recommendations,
@@ -154,7 +165,9 @@ from app.services.assets import (
     reconcile_equipment_lease_payment,
     record_facility_access_scan,
     record_facility_access_device_health,
+    record_facility_utility_reading,
     record_gateway_facility_access_scan,
+    record_gateway_facility_utility_reading,
     record_gateway_equipment_scan,
     record_equipment_scan_event,
     return_equipment,
@@ -177,7 +190,9 @@ from app.services.assets import (
     upload_equipment_file,
     provision_equipment_reader,
     provision_facility_access_device,
+    provision_facility_utility_meter,
     update_work_order,
+    update_facility_utility_alert,
     utilization_recommendations,
     convert_facility_waitlist_entry,
     generate_facility_maintenance_work_order,
@@ -1226,6 +1241,68 @@ async def record_facility_access_device_health_route(
     db: AsyncSession = Depends(get_db),
 ) -> FacilityAccessDeviceHealthRead:
     return await record_facility_access_device_health(db, organization_id, device_id, x_afrolete_access_key, payload)
+
+
+@router.post("/utility-meters", response_model=FacilityUtilityMeterProvisionRead, status_code=status.HTTP_201_CREATED)
+async def provision_facility_utility_meter_route(
+    payload: FacilityUtilityMeterCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityUtilityMeterProvisionRead:
+    return await provision_facility_utility_meter(db, identity, payload, authz)
+
+
+@router.get("/utility-meters", response_model=list[FacilityUtilityMeterRead])
+async def list_facility_utility_meters_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[FacilityUtilityMeterRead]:
+    return await list_facility_utility_meters(db, identity, organization_id, authz, facility_id=facility_id)
+
+
+@router.post("/utility-readings", response_model=FacilityUtilityReadingResultRead)
+async def record_facility_utility_reading_route(
+    payload: FacilityUtilityReadingCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityUtilityReadingResultRead:
+    return await record_facility_utility_reading(db, identity, payload, authz)
+
+
+@router.post("/utility-gateway/{organization_id}/{meter_id}/readings", response_model=FacilityUtilityReadingResultRead)
+async def record_gateway_facility_utility_reading_route(
+    organization_id: UUID,
+    meter_id: str,
+    payload: FacilityUtilityGatewayReadingCreate,
+    x_afrolete_utility_key: str | None = Header(default=None, alias="X-Afrolete-Utility-Key"),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityUtilityReadingResultRead:
+    return await record_gateway_facility_utility_reading(db, organization_id, meter_id, x_afrolete_utility_key, payload)
+
+
+@router.get("/utility-dashboard", response_model=FacilityUtilityDashboardRead)
+async def facility_utility_dashboard_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityUtilityDashboardRead:
+    return await facility_utility_dashboard(db, organization_id, facility_id=facility_id)
+
+
+@router.patch("/utility-alerts/{alert_id}", response_model=FacilityUtilityAlertRead)
+async def update_facility_utility_alert_route(
+    alert_id: UUID,
+    payload: FacilityUtilityAlertUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityUtilityAlertRead:
+    return await update_facility_utility_alert(db, identity, alert_id, payload, authz)
 
 
 @router.post("/bookings", response_model=FacilityBookingRead, status_code=status.HTTP_201_CREATED)
