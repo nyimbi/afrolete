@@ -385,6 +385,7 @@ import type {
   PerformanceHighlightReelReminderRunRead,
   PerformanceHighlightReelShareAuditRead,
   PerformanceHighlightReelShareRead,
+  PerformanceSharedHighlightReelRead,
   PerformanceInjuryRiskAlertRead,
   PerformanceInjuryRiskAlertRunRead,
   PerformanceInjuryRiskRead,
@@ -1965,6 +1966,8 @@ export default function HomePage() {
     useState<PerformanceHighlightReelReminderRead | null>(null);
   const [performanceHighlightReelReminderRun, setPerformanceHighlightReelReminderRun] =
     useState<PerformanceHighlightReelReminderRunRead | null>(null);
+  const [myPerformanceHighlightReels, setMyPerformanceHighlightReels] =
+    useState<PerformanceSharedHighlightReelRead[]>([]);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -4138,7 +4141,8 @@ export default function HomePage() {
       highlightReelData,
       highlightExportData,
       highlightShareData,
-      highlightEngagementData
+      highlightEngagementData,
+      myHighlightReelData
     ] = await Promise.all([
       apiRequest<OppositionScoutingVideoAssetRead[]>(
         `/performance/scouting/videos?${params.toString()}`,
@@ -4199,6 +4203,10 @@ export default function HomePage() {
       apiRequest<PerformanceHighlightReelEngagementRead[]>(
         `/performance/scouting/highlight-reel-engagement?organization_id=${organizationId}`,
         { identity }
+      ),
+      apiRequest<PerformanceSharedHighlightReelRead[]>(
+        `/performance/my-highlight-reels?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setOppositionScoutingVideos(videoData);
@@ -4216,6 +4224,7 @@ export default function HomePage() {
     setPerformanceHighlightReelExports(highlightExportData);
     setPerformanceHighlightReelShares(highlightShareData);
     setPerformanceHighlightReelEngagements(highlightEngagementData);
+    setMyPerformanceHighlightReels(myHighlightReelData);
     setOppositionScoutingVideo((current) =>
       current && videoData.some((video) => video.id === current.id) ? current : videoData[0] ?? null
     );
@@ -5419,6 +5428,7 @@ export default function HomePage() {
       setPerformanceHighlightReelEngagements([]);
       setPerformanceHighlightReelReminder(null);
       setPerformanceHighlightReelReminderRun(null);
+      setMyPerformanceHighlightReels([]);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
@@ -11595,6 +11605,48 @@ export default function HomePage() {
       },
       (download) => {
         addLog(`${download.filename} downloaded (${download.size} bytes, ${download.checksum.slice(0, 8)})`, "good");
+      }
+    );
+  };
+
+  const downloadMyPerformanceHighlightReel = (reel: PerformanceSharedHighlightReelRead) => {
+    if (!reel.download_path) {
+      addLog("This shared highlight reel has no recipient download link yet", "bad");
+      return;
+    }
+    runAction(
+      `download-my-performance-highlight-reel-${reel.recipient_id}`,
+      async () => {
+        const headers = new Headers({ Accept: "*/*" });
+        if (authSession) {
+          headers.set("Authorization", `Bearer ${authSession.accessToken}`);
+        } else {
+          headers.set("X-Afrolete-Sub", identity.sub);
+          headers.set("X-Afrolete-Email", identity.email);
+          headers.set("X-Afrolete-Name", identity.name);
+        }
+        const response = await fetch(`${apiBaseUrl}/api/v1${reel.download_path}`, { headers });
+        if (!response.ok) {
+          throw new Error(`Shared highlight reel download failed: ${response.status}`);
+        }
+        const blob = await response.blob();
+        const href = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = href;
+        anchor.download = reel.export_filename ?? `${reel.title.replaceAll(" ", "-").toLowerCase()}-highlight-reel.json`;
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(href);
+        return {
+          title: reel.title,
+          checksum: response.headers.get("X-Afrolete-Highlight-Export-Checksum") ?? reel.export_checksum ?? "unverified",
+          size: blob.size
+        };
+      },
+      (download) => {
+        addLog(`${download.title} opened from player reel inbox (${download.size} bytes, ${download.checksum.slice(0, 8)})`, "good");
+        void loadOppositionScouting(selectedOrganizationId ?? reel.organization_id, selectedTeam?.id);
       }
     );
   };
@@ -28502,6 +28554,32 @@ export default function HomePage() {
                       </div>
                     </article>
                   ) : null}
+                  {myPerformanceHighlightReels.slice(0, 3).map((reel) => (
+                    <article key={`my-highlight-${reel.recipient_id}`} className="task-card">
+                      <div>
+                        <strong>{reel.title} · player inbox</strong>
+                        <span>
+                          {reel.clip_count} clip(s) · {Math.round(reel.duration_seconds)}s ·{" "}
+                          {reel.delivery_status.replaceAll("_", " ")}
+                          {reel.export_format ? ` · ${reel.export_format.replaceAll("_", " ")}` : ""}
+                        </span>
+                        <small>{highlightReelCurationLabel(reel.clips)} · {reel.share_policy.replaceAll("_", " ")}</small>
+                        <small>
+                          {reel.message_subject} ·{" "}
+                          {reel.read_at ? `opened ${new Date(reel.read_at).toLocaleString()}` : "not opened yet"}
+                        </small>
+                      </div>
+                      <span>
+                        <button
+                          type="button"
+                          onClick={() => downloadMyPerformanceHighlightReel(reel)}
+                          disabled={busyAction !== null || !reel.download_path}
+                        >
+                          Open
+                        </button>
+                      </span>
+                    </article>
+                  ))}
                   {performanceHighlightReelShares
                     .filter((share) => share.highlight_reel_id === performanceHighlightReel?.id)
                     .slice(0, 3)
