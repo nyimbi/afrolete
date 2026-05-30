@@ -361,6 +361,17 @@ class DeveloperSdkEndpointCatalogRead(BaseModel):
     webhook_events: list[str] = Field(default_factory=list)
 
 
+class DeveloperProviderCallbackCatalogRead(BaseModel):
+    method: str
+    path: str
+    category: str
+    description: str
+    auth_headers: list[str]
+    replay_key_fields: list[str]
+    payload_fields: list[str]
+    example_payload: dict[str, object]
+
+
 class DeveloperQuickstartRead(BaseModel):
     title: str
     language: str
@@ -378,6 +389,7 @@ class DeveloperIntegrationCatalogRead(BaseModel):
     webhook_events: list[DeveloperWebhookEventCatalogRead]
     sdks: list[DeveloperSdkCatalogRead]
     sdk_endpoints: list[DeveloperSdkEndpointCatalogRead]
+    provider_callbacks: list[DeveloperProviderCallbackCatalogRead]
     configured_event_types: list[str]
 
 
@@ -396,6 +408,7 @@ class DeveloperPublicDocsRead(BaseModel):
     webhook_events: list[DeveloperWebhookEventCatalogRead]
     sdks: list[DeveloperSdkCatalogRead]
     sdk_endpoints: list[DeveloperSdkEndpointCatalogRead]
+    provider_callbacks: list[DeveloperProviderCallbackCatalogRead]
     marketplace_categories: list[str]
     security_requirements: list[str]
 

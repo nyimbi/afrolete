@@ -45,6 +45,12 @@ def test_public_developer_docs(client) -> None:
     assert any(event["event_type"] == "training.drill.created" for event in docs["webhook_events"])
     assert any(event["event_type"] == "agents.task.queued" for event in docs["webhook_events"])
     assert any(
+        callback["path"] == "/api/v1/performance/webhooks/match-tracking"
+        and "X-Afrolete-Performance-Signature" in callback["auth_headers"]
+        and "external_event_id" in callback["replay_key_fields"]
+        for callback in docs["provider_callbacks"]
+    )
+    assert any(
         endpoint["method"] == "POST"
         and endpoint["path"] == "/sdk/agents/{agent_id}/tasks"
         and endpoint["typescript_entry_point"] == "client.agents.tasks.queue"
@@ -96,6 +102,22 @@ def test_public_developer_docs_search(client) -> None:
     assert docs["sdk_endpoints"]
     assert all("billing" in str(endpoint).lower() for endpoint in docs["sdk_endpoints"])
     assert docs["marketplace_categories"] == ["billing"]
+
+
+def test_public_developer_docs_search_match_tracking_callback(client) -> None:
+    response = client.get("/api/v1/developers/public/docs", params={"q": "match tracking"})
+    assert response.status_code == 200
+    docs = response.json()
+
+    assert docs["search_query"] == "match tracking"
+    assert docs["search_result_count"] > 0
+    assert any(quickstart["title"] == "Post match-tracking provider frames" for quickstart in docs["quickstarts"])
+    assert docs["provider_callbacks"] == [
+        callback
+        for callback in docs["provider_callbacks"]
+        if callback["path"] == "/api/v1/performance/webhooks/match-tracking"
+    ]
+    assert docs["provider_callbacks"][0]["payload_fields"]
 
 
 def test_generated_sdk_endpoint_manifests_are_current() -> None:

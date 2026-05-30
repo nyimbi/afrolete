@@ -101,6 +101,7 @@ export default function DeveloperDocsPage() {
         <Metric label="Scopes" value={docs.scopes.length} />
         <Metric label="SDK routes" value={docs.sdk_endpoints.length} />
         <Metric label="Webhook events" value={docs.webhook_events.length} />
+        <Metric label="Provider callbacks" value={docs.provider_callbacks.length} />
         <Metric label="SDK surfaces" value={docs.sdks.length} />
         <Metric label="Route groups" value={endpointCategoryCount} />
       </section>
@@ -229,6 +230,33 @@ export default function DeveloperDocsPage() {
               </div>
               <p>{event.description}</p>
               <small>{event.payload_fields.join(", ")}</small>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="developer-docs-shell developer-docs-section">
+        <div>
+          <p className="section-label">Provider callbacks</p>
+          <h2>Inbound partner contracts</h2>
+          <p className="developer-docs-muted">
+            Sign raw request bodies with the listed headers and reuse replay keys for provider retries.
+          </p>
+        </div>
+        <div className="developer-docs-endpoints">
+          {docs.provider_callbacks.map((callback) => (
+            <article key={`${callback.method}-${callback.path}`}>
+              <div>
+                <strong>{callback.path}</strong>
+                <span>{callback.category}</span>
+              </div>
+              <p>{callback.description}</p>
+              <div className="developer-docs-endpoint-meta">
+                <b>{callback.method}</b>
+                <span>{callback.auth_headers.join(", ")}</span>
+              </div>
+              <small>Replay key: {callback.replay_key_fields.join(", ")}</small>
+              <small>Payload: {callback.payload_fields.slice(0, 8).join(", ")}</small>
             </article>
           ))}
         </div>

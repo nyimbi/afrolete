@@ -45,6 +45,7 @@ from app.schemas.developer import (
     DeveloperMarketplaceListingCreate,
     DeveloperMarketplaceListingReview,
     DeveloperPortalSummaryRead,
+    DeveloperProviderCallbackCatalogRead,
     DeveloperPublicDocsRead,
     DeveloperQuickstartRead,
     DeveloperSdkCatalogRead,
@@ -980,6 +981,7 @@ async def developer_integration_catalog(
         webhook_events=developer_webhook_event_catalog(),
         sdks=developer_sdk_catalog(),
         sdk_endpoints=developer_sdk_endpoint_catalog(),
+        provider_callbacks=developer_provider_callback_catalog(),
         configured_event_types=configured_event_types,
     )
 
@@ -991,6 +993,7 @@ def developer_public_docs(search_query: str | None = None) -> DeveloperPublicDoc
     webhook_events = developer_webhook_event_catalog()
     sdks = developer_sdk_catalog()
     sdk_endpoints = developer_sdk_endpoint_catalog()
+    provider_callbacks = developer_provider_callback_catalog()
     marketplace_categories = [
         "operations",
         "performance",
@@ -1014,6 +1017,7 @@ def developer_public_docs(search_query: str | None = None) -> DeveloperPublicDoc
         webhook_events = [item for item in webhook_events if docs_match(query, item)]
         sdks = [item for item in sdks if docs_match(query, item)]
         sdk_endpoints = [item for item in sdk_endpoints if docs_match(query, item)]
+        provider_callbacks = [item for item in provider_callbacks if docs_match(query, item)]
         marketplace_categories = [item for item in marketplace_categories if docs_match(query, item)]
         security_requirements = [item for item in security_requirements if docs_match(query, item)]
     return DeveloperPublicDocsRead(
@@ -1026,6 +1030,7 @@ def developer_public_docs(search_query: str | None = None) -> DeveloperPublicDoc
             + len(webhook_events)
             + len(sdks)
             + len(sdk_endpoints)
+            + len(provider_callbacks)
             + len(marketplace_categories)
             + len(security_requirements)
         ),
@@ -1039,6 +1044,7 @@ def developer_public_docs(search_query: str | None = None) -> DeveloperPublicDoc
         webhook_events=webhook_events,
         sdks=sdks,
         sdk_endpoints=sdk_endpoints,
+        provider_callbacks=provider_callbacks,
         marketplace_categories=marketplace_categories,
         security_requirements=security_requirements,
     )
@@ -1052,7 +1058,9 @@ def normalized_docs_query(search_query: str | None) -> str | None:
 
 
 def docs_match(query: str, value: object) -> bool:
-    return query in docs_search_text(value)
+    haystack = docs_search_text(value)
+    normalized_haystack = " ".join(haystack.replace("-", " ").replace("_", " ").split())
+    return query in haystack or query in normalized_haystack
 
 
 def docs_search_text(value: object) -> str:
@@ -2340,6 +2348,118 @@ def developer_sdk_endpoint_catalog() -> list[DeveloperSdkEndpointCatalogRead]:
     ]
 
 
+def developer_provider_callback_catalog() -> list[DeveloperProviderCallbackCatalogRead]:
+    return [
+        DeveloperProviderCallbackCatalogRead(
+            method="POST",
+            path="/api/v1/performance/webhooks/wearables",
+            category="performance",
+            description=(
+                "Wearable providers post athlete metric payloads into the pending-review performance "
+                "observation pipeline with optional timestamped HMAC validation and durable replay protection."
+            ),
+            auth_headers=[
+                "X-Afrolete-Performance-Timestamp",
+                "X-Afrolete-Performance-Signature",
+            ],
+            replay_key_fields=[
+                "organization_id",
+                "athlete_profile_id",
+                "source_provider",
+                "external_event_id",
+            ],
+            payload_fields=[
+                "organization_id",
+                "athlete_profile_id",
+                "source_provider",
+                "external_event_id",
+                "payload",
+                "metric_definition_ids",
+            ],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "athlete_profile_id": "athlete-profile-uuid",
+                "source_provider": "whoop",
+                "external_event_id": "whoop-cycle-2026-06-05",
+                "payload": {
+                    "recovery": {
+                        "score": 77,
+                        "hrv_rmssd_milli": 54,
+                        "resting_heart_rate": 48,
+                    }
+                },
+            },
+        ),
+        DeveloperProviderCallbackCatalogRead(
+            method="POST",
+            path="/api/v1/performance/webhooks/match-tracking",
+            category="performance",
+            description=(
+                "Camera, GPS/video, and YOLO/ByteTrack-style providers post football frame detections into "
+                "the match-tracking pipeline; accepted payloads create replay-safe tracking runs, player "
+                "metrics, reports, and player guidance."
+            ),
+            auth_headers=[
+                "X-Afrolete-Performance-Timestamp",
+                "X-Afrolete-Performance-Signature",
+            ],
+            replay_key_fields=[
+                "organization_id",
+                "video_asset_id",
+                "source_provider",
+                "external_event_id",
+            ],
+            payload_fields=[
+                "organization_id",
+                "video_asset_id",
+                "external_event_id",
+                "source_provider",
+                "model_policy",
+                "frames[].timestamp_seconds",
+                "frames[].detections[].track_id",
+                "frames[].detections[].object_type",
+                "frames[].detections[].bbox_*",
+                "frames[].detections[].foot_*",
+                "frames[].detections[].x_percent/y_percent",
+                "frames[].detections[].x_meters/y_meters",
+                "provider_metadata",
+            ],
+            example_payload={
+                "organization_id": "tenant-uuid",
+                "video_asset_id": "opposition-video-uuid",
+                "external_event_id": "camera-main-match-2026-05-30T10:00:00Z",
+                "source_provider": "camera_bytetrack",
+                "model_policy": "camera-bytetrack-provider-v1",
+                "frames": [
+                    {
+                        "timestamp_seconds": 0,
+                        "frame_index": 0,
+                        "detections": [
+                            {
+                                "track_id": "home-7",
+                                "team_label": "Home",
+                                "player_label": "Winger",
+                                "jersey_number": "7",
+                                "foot_x_percent": 20,
+                                "foot_y_percent": 52,
+                                "confidence": 0.95,
+                            },
+                            {
+                                "track_id": "ball",
+                                "object_type": "ball",
+                                "x_percent": 22,
+                                "y_percent": 52,
+                                "confidence": 0.86,
+                            },
+                        ],
+                    }
+                ],
+                "provider_metadata": {"camera_id": "main-stand", "tracker": "bytetrack"},
+            },
+        ),
+    ]
+
+
 def developer_sdk_catalog() -> list[DeveloperSdkCatalogRead]:
     return [
         DeveloperSdkCatalogRead(
@@ -2612,6 +2732,30 @@ def developer_quickstarts() -> list[DeveloperQuickstartRead]:
                 "  -d '{\"organization_id\":\"'$ORG_ID'\",\"subscription_id\":\"'$SUBSCRIPTION_ID'\","
                 "\"usage_meter_id\":\"'$USAGE_METER_ID'\",\"quantity\":14,"
                 "\"source\":\"partner_billing_sync\",\"external_reference\":\"usage-sdk-001\"}'"
+            ),
+        ),
+        DeveloperQuickstartRead(
+            title="Post match-tracking provider frames",
+            language="HTTP",
+            description="Send football camera or tracker detections into AfroLete's signed match-tracking callback.",
+            steps=[
+                "Upload or select the opposition scouting video asset that the provider frames describe.",
+                "Prepare frames with stable track IDs plus percent, meter, foot-point, or bounding-box coordinates.",
+                "Sign the raw JSON body as HMAC-SHA256 over '<timestamp>.<raw-body>' with the configured match-tracking callback key.",
+                "POST to /api/v1/performance/webhooks/match-tracking and reuse external_event_id for safe provider retries.",
+            ],
+            code_sample=(
+                "BODY='{\"organization_id\":\"'$ORG_ID'\",\"video_asset_id\":\"'$VIDEO_ID'\","
+                "\"external_event_id\":\"camera-main-001\",\"source_provider\":\"camera_bytetrack\","
+                "\"frames\":[{\"timestamp_seconds\":0,\"detections\":[{\"track_id\":\"home-7\","
+                "\"team_label\":\"Home\",\"foot_x_percent\":20,\"foot_y_percent\":52}]}]}'\n"
+                "TS=$(date +%s)\n"
+                "SIG=$(printf \"%s.%s\" \"$TS\" \"$BODY\" | openssl dgst -sha256 -hmac \"$MATCH_TRACKING_SECRET\" -hex | awk '{print $2}')\n"
+                "curl -s \"$AFROLETE_API/api/v1/performance/webhooks/match-tracking\" \\\n"
+                "  -H \"Content-Type: application/json\" \\\n"
+                "  -H \"X-Afrolete-Performance-Timestamp: $TS\" \\\n"
+                "  -H \"X-Afrolete-Performance-Signature: sha256=$SIG\" \\\n"
+                "  -d \"$BODY\""
             ),
         ),
         DeveloperQuickstartRead(

@@ -185,7 +185,8 @@ Major capability areas include:
   SDK routes for roster, events, attendance, performance, training drills,
   training plans, sessions, feedback, availability, calendar exports,
   governed AI-agent tasks, communication templates/messages/dispatch, and
-  billing reads and usage metering, marketplace listings, webhooks, replay, retry workers, database or
+  billing reads and usage metering, marketplace listings, outbound webhooks,
+  inbound provider callback contracts, replay, retry workers, database or
   Redis-backed quotas, and integration catalogs.
 - SaaS billing and subscriptions: plans, tenant subscriptions, lifecycle
   actions, entitlements, enforcement, metering, recurring invoices, dunning,
@@ -489,6 +490,10 @@ catalog:
 cd backend
 uv run python ../scripts/generate_sdk_endpoint_manifest.py --check
 ```
+
+The public developer portal also catalogs inbound provider callbacks such as
+wearable evidence and signed match-tracking frame ingestion, including HMAC
+headers, replay keys, payload fields, and example payloads.
 
 ### Docker
 

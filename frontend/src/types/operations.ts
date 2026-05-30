@@ -5243,6 +5243,17 @@ export type DeveloperSdkEndpointCatalogRead = {
   webhook_events: string[];
 };
 
+export type DeveloperProviderCallbackCatalogRead = {
+  method: string;
+  path: string;
+  category: string;
+  description: string;
+  auth_headers: string[];
+  replay_key_fields: string[];
+  payload_fields: string[];
+  example_payload: Record<string, unknown>;
+};
+
 export type DeveloperQuickstartRead = {
   title: string;
   language: string;
@@ -5260,6 +5271,7 @@ export type DeveloperIntegrationCatalogRead = {
   webhook_events: DeveloperWebhookEventCatalogRead[];
   sdks: DeveloperSdkCatalogRead[];
   sdk_endpoints: DeveloperSdkEndpointCatalogRead[];
+  provider_callbacks: DeveloperProviderCallbackCatalogRead[];
   configured_event_types: string[];
 };
 
@@ -5278,6 +5290,7 @@ export type DeveloperPublicDocsRead = {
   webhook_events: DeveloperWebhookEventCatalogRead[];
   sdks: DeveloperSdkCatalogRead[];
   sdk_endpoints: DeveloperSdkEndpointCatalogRead[];
+  provider_callbacks: DeveloperProviderCallbackCatalogRead[];
   marketplace_categories: string[];
   security_requirements: string[];
 };
