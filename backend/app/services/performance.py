@@ -23,8 +23,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.agent import Agent
 from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.enums import (
+    AgentKind,
     CommunicationChannel,
     CommunicationMessageType,
     CommunicationScopeType,
@@ -130,9 +132,11 @@ from app.schemas.performance import (
     PerformanceWearableWebhookRegistrationCreate,
     PlayerSelfAssessmentCreate,
 )
+from app.schemas.agent import AgentTaskCreate
 from app.core.config import Settings, get_settings
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.agents import queue_agent_task
 from app.services.communications import (
     destination_for_channel,
     guardian_person_ids,
@@ -5124,6 +5128,18 @@ async def create_player_match_training_followup(
     await db.refresh(plan)
     for item in items:
         await db.refresh(item)
+    agent_task = await queue_player_match_followup_agent_review(
+        db,
+        identity,
+        organization_id=payload.organization_id,
+        team_id=run.team_id,
+        athlete_profile_id=profile.id,
+        plan_id=plan.id,
+        tracking_run_id=run.id,
+        track_id=payload.track_id,
+        focus_area=plan.focus_area,
+        item_count=len(items),
+    )
     return {
         "organization_id": payload.organization_id,
         "athlete_profile_id": profile.id,
@@ -5137,7 +5153,72 @@ async def create_player_match_training_followup(
         "period_end": plan.period_end,
         "item_count": len(items),
         "action_plan": action_plan,
+        "agent_task_id": agent_task.id if agent_task else None,
+        "agent_task_status": agent_task.status.value if agent_task else None,
+        "agent_task_title": agent_task.title if agent_task else None,
     }
+
+
+async def queue_player_match_followup_agent_review(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    *,
+    organization_id: UUID,
+    team_id: UUID | None,
+    athlete_profile_id: UUID,
+    plan_id: UUID,
+    tracking_run_id: UUID,
+    track_id: str,
+    focus_area: str,
+    item_count: int,
+):
+    agent = await db.scalar(
+        select(Agent)
+        .where(
+            Agent.organization_id == organization_id,
+            Agent.kind == AgentKind.COACHING,
+            Agent.name == "Training Strategy Agent",
+        )
+        .order_by(Agent.created_at)
+        .limit(1)
+    )
+    if agent is None:
+        agent = Agent(
+            organization_id=organization_id,
+            name="Training Strategy Agent",
+            kind=AgentKind.COACHING,
+            purpose=(
+                "Review training plans, match-derived action plans, athlete readiness, "
+                "and feedback loops so coaches can adjust the next block safely."
+            ),
+            status="active",
+            model_policy="human_review_required",
+        )
+        db.add(agent)
+        await db.flush()
+    input_ref = (
+        f"player-match-followup:{organization_id};"
+        f"team:{team_id or 'none'};"
+        f"athlete:{athlete_profile_id};"
+        f"plan:{plan_id};"
+        f"tracking:{tracking_run_id};"
+        f"track:{track_id};"
+        f"focus:{focus_area};"
+        f"items:{item_count}"
+    )
+    return await queue_agent_task(
+        db,
+        identity,
+        agent.id,
+        AgentTaskCreate(
+            organization_id=organization_id,
+            task_type="player_match_training_followup_review",
+            title=f"Review player match follow-up: {focus_area}"[:240],
+            input_ref=input_ref[:500],
+        ),
+        None,
+        enforce_manage_organization=False,
+    )
 
 
 def decode_match_tracking_summary(value: str | None) -> dict[str, object]:

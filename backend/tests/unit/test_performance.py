@@ -328,6 +328,9 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert followup["track_id"] == "home-9"
     assert followup["item_count"] == 2
     assert followup["action_plan"][0]["drill_recommendation"]
+    assert followup["agent_task_id"] is not None
+    assert followup["agent_task_status"] == "queued"
+    assert "Review player match follow-up" in followup["agent_task_title"]
 
     plan_response = client.get(
         f"/api/v1/training/plans?organization_id={organization['id']}&athlete_profile_id={roster['athlete_profile_id']}",
@@ -341,6 +344,15 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert items_response.status_code == 200
     assert len(items_response.json()) == 2
     assert "Cue:" in items_response.json()[0]["notes"]
+
+    agent_tasks_response = client.get(
+        f"/api/v1/agents/tasks?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert agent_tasks_response.status_code == 200
+    agent_task = next(task for task in agent_tasks_response.json() if task["id"] == followup["agent_task_id"])
+    assert agent_task["task_type"] == "player_match_training_followup_review"
+    assert f"plan:{followup['plan_id']}" in agent_task["input_ref"]
 
     touch_metric = client.post(
         "/api/v1/performance/metrics",

@@ -978,10 +978,16 @@ export default function PlayerPerformancePage() {
                     {followup ? "Rebuild follow-up" : "Create follow-up"}
                   </button>
                   {followup ? (
-                    <small>
-                      Training plan ready: {followup.title} · {followup.item_count} item(s) · {followup.period_start} to{" "}
-                      {followup.period_end}
-                    </small>
+                    <>
+                      <small>
+                        Training plan ready: {followup.title} · {followup.item_count} item(s) · {followup.period_start} to{" "}
+                        {followup.period_end}
+                      </small>
+                      <small>
+                        Agent review: {followup.agent_task_title ?? "Training Strategy Agent"} ·{" "}
+                        {(followup.agent_task_status ?? "queued").replaceAll("_", " ")}
+                      </small>
+                    </>
                   ) : null}
                       </>
                     );

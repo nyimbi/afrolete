@@ -1877,6 +1877,9 @@ class PlayerMatchTrainingFollowupRead(BaseModel):
     period_end: date
     item_count: int
     action_plan: list[PlayerMatchActionPlanRead]
+    agent_task_id: UUID | None = None
+    agent_task_status: str | None = None
+    agent_task_title: str | None = None
 
 
 class PlayerMatchGuidanceRead(BaseModel):

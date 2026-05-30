@@ -331,7 +331,8 @@ feed distance, speed, heatmaps, estimated possession, pass/turnover cues,
 pass-type accuracy, defensive ball-win labels, pass networks, shot/xG estimates,
 tactical shape, highlights, coach/player reports, and player-portal match
 guidance cards with action-plan drills and one-click training follow-up plans
-for coach-confirmed tracks. Manual pitch calibration now prefers an OpenCV perspective homography
+for coach-confirmed tracks, including queued Training Strategy Agent review
+status for the generated follow-up plan. Manual pitch calibration now prefers an OpenCV perspective homography
 from field control points, with residual/error metadata and a linear fallback,
 so trapezoid broadcast camera views produce more trustworthy pitch-meter
 coordinates for distance and speed estimates. The tracking summary also

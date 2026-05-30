@@ -8016,6 +8016,9 @@ export type PlayerMatchTrainingFollowupRead = {
   period_end: string;
   item_count: number;
   action_plan: PlayerMatchGuidanceRead["action_plan"];
+  agent_task_id: UUID | null;
+  agent_task_status: string | null;
+  agent_task_title: string | null;
 };
 
 export type PlayerPerformanceProfileRead = {

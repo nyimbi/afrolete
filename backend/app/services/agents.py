@@ -3712,6 +3712,9 @@ def execute_with_deterministic_planner(
     if task.task_type == "training_command_review":
         task.review_notes = deterministic_training_command_notes(agent, task, model_name)
         return
+    if task.task_type == "player_match_training_followup_review":
+        task.review_notes = deterministic_player_match_followup_notes(agent, task, model_name)
+        return
     task.review_notes = (
         f"{agent.name} prepared a deterministic draft using {model_name}. "
         f"Task: {task.title}. Input: {task.input_ref or 'none'}. "
@@ -3828,6 +3831,29 @@ def deterministic_training_command_notes(agent: Agent, task: AgentTask, model_na
             "- Use readiness/RPE feedback to adjust session duration, RPE targets, substitutions, and recovery work.",
             "- Keep attendance, bench status, and guardian consent visible before match or tournament activity.",
             "Human review: coaches must approve load changes, safeguarding escalations, and athlete availability decisions before execution.",
+        ]
+    )
+
+
+def deterministic_player_match_followup_notes(agent: Agent, task: AgentTask, model_name: str) -> str:
+    context = parse_agent_input_ref(task.input_ref)
+    plan = context.get("plan", "unknown")
+    athlete = context.get("athlete", "unknown")
+    tracking = context.get("tracking", "unknown")
+    track = context.get("track", "unknown")
+    focus = context.get("focus", "match follow-up")
+    items = context.get("items", "0")
+    return "\n".join(
+        [
+            f"{agent.name} prepared a deterministic player match follow-up review using {model_name}.",
+            f"Training plan {plan} for athlete {athlete} is linked to tracking run {tracking}, track {track}.",
+            f"Primary focus: {focus}; generated action items: {items}.",
+            "Recommended coach actions:",
+            "- Confirm the player identity and video evidence before increasing load.",
+            "- Check the follow-up items against the current team training block and match schedule.",
+            "- Adjust sprint, pressing, recovery, and technical-load prescriptions for readiness and soreness.",
+            "- Ask the player to complete a self-assessment after the follow-up block.",
+            "Human review: coaches must approve material load changes and any medical or availability decisions.",
         ]
     )
 
