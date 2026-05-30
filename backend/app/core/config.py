@@ -237,6 +237,10 @@ class Settings(BaseSettings):
     performance_wearable_webhook_signing_key_secret_path: str = ""
     performance_wearable_webhook_signing_key_secret_field: str = "value"
     performance_wearable_webhook_tolerance_seconds: int = 300
+    performance_match_tracking_webhook_signing_key: str = ""
+    performance_match_tracking_webhook_signing_key_secret_path: str = ""
+    performance_match_tracking_webhook_signing_key_secret_field: str = "value"
+    performance_match_tracking_webhook_tolerance_seconds: int = 300
     performance_wearable_provider_retry_after_seconds: dict[str, int] = Field(default_factory=dict)
     performance_wearable_provider_max_pages: dict[str, int] = Field(default_factory=dict)
     performance_model_extraction_mode: Literal["off", "deterministic", "webhook"] = "deterministic"

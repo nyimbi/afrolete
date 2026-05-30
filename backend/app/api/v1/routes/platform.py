@@ -665,6 +665,15 @@ def _secret_specs(settings: Settings) -> list[dict[str, object]]:
             "details": ["required when wearable webhook ingestion is exposed"],
         },
         {
+            "key": "performance-match-tracking-webhook-signing",
+            "name": "Performance match tracking provider webhook signing key",
+            "domain": "performance",
+            "inline_attr": "performance_match_tracking_webhook_signing_key",
+            "path_attr": "performance_match_tracking_webhook_signing_key_secret_path",
+            "required": False,
+            "details": ["required when external camera or match tracking provider callbacks are exposed"],
+        },
+        {
             "key": "performance-model-extraction",
             "name": "Performance model extraction webhook key",
             "domain": "performance",

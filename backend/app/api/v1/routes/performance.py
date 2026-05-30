@@ -66,6 +66,8 @@ from app.schemas.performance import (
     PerformanceMatchTrackingIdentityReviewRead,
     PerformanceMatchTrackingIdentityReviewResultRead,
     PerformanceMatchTrackingProviderImportCreate,
+    PerformanceMatchTrackingProviderWebhookCreate,
+    PerformanceMatchTrackingProviderWebhookRead,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingRunRead,
     PerformanceMatchPitchCalibrationCreate,
@@ -147,6 +149,7 @@ from app.services.performance import (
     ensure_manage_performance,
     ingest_performance_evidence,
     get_performance_video_asset,
+    ingest_match_tracking_provider_webhook,
     ingest_performance_wearable_webhook,
     list_assessment_review_queue,
     list_assessments,
@@ -205,6 +208,7 @@ from app.services.performance import (
     complete_wearable_provider_oauth,
     update_assessment_review_assignment,
     validate_performance_wearable_webhook_signature,
+    validate_performance_match_tracking_webhook_signature,
     decode_annotation_tags,
     decode_pose_keypoints,
     decode_reference_metric_targets,
@@ -1090,6 +1094,39 @@ async def create_match_tracking_provider_import_route(
 ) -> PerformanceMatchTrackingRunRead:
     return PerformanceMatchTrackingRunRead(
         **await create_match_tracking_provider_import(db, identity, video_asset_id, payload, authz)
+    )
+
+
+@router.post(
+    "/webhooks/match-tracking",
+    response_model=PerformanceMatchTrackingProviderWebhookRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_match_tracking_provider_webhook_route(
+    request: Request,
+    payload: PerformanceMatchTrackingProviderWebhookCreate,
+    x_afrolete_performance_timestamp: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Performance-Timestamp",
+    ),
+    x_afrolete_performance_signature: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Performance-Signature",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> PerformanceMatchTrackingProviderWebhookRead:
+    signature_required, signature_validated = await validate_performance_match_tracking_webhook_signature(
+        await request.body(),
+        x_afrolete_performance_timestamp,
+        x_afrolete_performance_signature,
+    )
+    return PerformanceMatchTrackingProviderWebhookRead(
+        **await ingest_match_tracking_provider_webhook(
+            db,
+            payload,
+            signature_required=signature_required,
+            signature_validated=signature_validated,
+        )
     )
 
 

@@ -680,6 +680,21 @@ class PerformanceMatchTrackingProviderImportCreate(BaseModel):
     quality_warnings: list[str] = Field(default_factory=list, max_length=20)
 
 
+class PerformanceMatchTrackingProviderWebhookCreate(BaseModel):
+    organization_id: UUID
+    video_asset_id: UUID
+    external_event_id: str = Field(min_length=2, max_length=180)
+    calibration_id: UUID | None = None
+    source_provider: str = Field(default="external_tracking_provider", min_length=2, max_length=80)
+    model_policy: str = Field(default="external-tracker-provider-v1", min_length=2, max_length=160)
+    pitch_length_m: float = Field(default=105.0, ge=80, le=130)
+    pitch_width_m: float = Field(default=68.0, ge=45, le=90)
+    replace_existing: bool = True
+    frames: list[PerformanceMatchTrackingProviderFrame] = Field(min_length=1, max_length=2000)
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
+    quality_warnings: list[str] = Field(default_factory=list, max_length=20)
+
+
 class PerformanceMatchTrackingSampleRead(BaseModel):
     id: UUID
     organization_id: UUID
@@ -787,6 +802,23 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     calibration: PerformanceMatchPitchCalibrationRead | None = None
     started_at: datetime
     completed_at: datetime | None
+
+
+class PerformanceMatchTrackingProviderWebhookRead(BaseModel):
+    ingest_event_id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    tracking_run_id: UUID | None
+    source_provider: str
+    external_event_id: str
+    replayed: bool
+    signature_required: bool
+    signature_validated: bool
+    sample_count: int
+    player_count: int
+    payload_hash: str
+    received_at: datetime
+    tracking_run: PerformanceMatchTrackingRunRead | None = None
 
 
 class PerformanceMatchTrackingIdentityReviewCreate(BaseModel):

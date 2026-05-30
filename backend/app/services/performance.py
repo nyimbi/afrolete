@@ -63,6 +63,7 @@ from app.models.performance import (
     PerformanceMatchAnalysisReport,
     PerformanceMatchPitchCalibration,
     PerformanceMatchTrackingIdentityReview,
+    PerformanceMatchTrackingProviderIngestEvent,
     PerformanceMatchTrackingRun,
     PerformanceMatchTrackingSample,
     PerformanceMetricDefinition,
@@ -112,6 +113,7 @@ from app.schemas.performance import (
     PerformanceMatchTrackingProviderDetection,
     PerformanceMatchTrackingProviderFrame,
     PerformanceMatchTrackingProviderImportCreate,
+    PerformanceMatchTrackingProviderWebhookCreate,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingSampleCreate,
     PlayerMatchTrainingFollowupCreate,
@@ -979,6 +981,120 @@ async def create_match_tracking_provider_import(
             quality_warnings=warnings,
         ),
         authz,
+    )
+
+
+async def ingest_match_tracking_provider_webhook(
+    db: AsyncSession,
+    payload: PerformanceMatchTrackingProviderWebhookCreate,
+    *,
+    signature_required: bool,
+    signature_validated: bool,
+) -> dict[str, object]:
+    video_asset = await get_opposition_scouting_video_asset(db, payload.video_asset_id)
+    if video_asset.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    provider = normalized_provider_name(payload.source_provider) or payload.source_provider.strip().lower()
+    payload_hash = stable_payload_hash(payload.model_dump(mode="json"))
+    existing = await db.scalar(
+        select(PerformanceMatchTrackingProviderIngestEvent)
+        .where(PerformanceMatchTrackingProviderIngestEvent.organization_id == payload.organization_id)
+        .where(PerformanceMatchTrackingProviderIngestEvent.video_asset_id == video_asset.id)
+        .where(PerformanceMatchTrackingProviderIngestEvent.provider == provider)
+        .where(PerformanceMatchTrackingProviderIngestEvent.external_event_id == payload.external_event_id)
+    )
+    if existing is not None:
+        tracking_run = (
+            await db.get(PerformanceMatchTrackingRun, existing.tracking_run_id)
+            if existing.tracking_run_id is not None
+            else None
+        )
+        return await match_tracking_provider_webhook_result(
+            db,
+            existing,
+            replayed=True,
+            tracking_run=tracking_run,
+        )
+
+    system_identity = CurrentIdentity(
+        user_id=video_asset.uploaded_by_person_id or video_asset.organization_id,
+        person_id=video_asset.uploaded_by_person_id or video_asset.organization_id,
+        keycloak_sub="system:performance-match-tracking-provider",
+        email="system@afrolete.local",
+        display_name="AfroLete Match Tracking Provider",
+    )
+    run = await create_match_tracking_provider_import(
+        db,
+        system_identity,
+        video_asset.id,
+        PerformanceMatchTrackingProviderImportCreate(
+            organization_id=payload.organization_id,
+            calibration_id=payload.calibration_id,
+            source_provider=payload.source_provider,
+            model_policy=payload.model_policy,
+            pitch_length_m=payload.pitch_length_m,
+            pitch_width_m=payload.pitch_width_m,
+            replace_existing=payload.replace_existing,
+            frames=payload.frames,
+            provider_metadata={
+                **payload.provider_metadata,
+                "external_event_id": payload.external_event_id,
+                "signature_required": signature_required,
+                "signature_validated": signature_validated,
+                "ingest_contract": "afrolete-provider-tracking-webhook-v1",
+            },
+            quality_warnings=payload.quality_warnings,
+        ),
+        AllowAllAuthorizationService(),
+    )
+    ingest_event = PerformanceMatchTrackingProviderIngestEvent(
+        organization_id=payload.organization_id,
+        video_asset_id=video_asset.id,
+        tracking_run_id=run["id"],
+        team_id=video_asset.team_id,
+        event_id=video_asset.event_id,
+        provider=provider,
+        external_event_id=payload.external_event_id,
+        payload_hash=payload_hash,
+        received_at=datetime.now(UTC),
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        sample_count=int(run["sample_count"]),
+        player_count=int(run["player_count"]),
+        status="accepted",
+    )
+    db.add(ingest_event)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existing = await db.scalar(
+            select(PerformanceMatchTrackingProviderIngestEvent)
+            .where(PerformanceMatchTrackingProviderIngestEvent.organization_id == payload.organization_id)
+            .where(PerformanceMatchTrackingProviderIngestEvent.video_asset_id == video_asset.id)
+            .where(PerformanceMatchTrackingProviderIngestEvent.provider == provider)
+            .where(PerformanceMatchTrackingProviderIngestEvent.external_event_id == payload.external_event_id)
+        )
+        if existing is None:
+            raise
+        tracking_run = (
+            await db.get(PerformanceMatchTrackingRun, existing.tracking_run_id)
+            if existing.tracking_run_id is not None
+            else None
+        )
+        return await match_tracking_provider_webhook_result(
+            db,
+            existing,
+            replayed=True,
+            tracking_run=tracking_run,
+        )
+    await db.refresh(ingest_event)
+    tracking_run = await db.get(PerformanceMatchTrackingRun, run["id"])
+    return await match_tracking_provider_webhook_result(
+        db,
+        ingest_event,
+        replayed=False,
+        tracking_run=tracking_run,
     )
 
 
@@ -3689,6 +3805,31 @@ def wearable_webhook_result(
     }
 
 
+async def match_tracking_provider_webhook_result(
+    db: AsyncSession,
+    ingest_event: PerformanceMatchTrackingProviderIngestEvent,
+    *,
+    replayed: bool,
+    tracking_run: PerformanceMatchTrackingRun | None,
+) -> dict[str, object]:
+    return {
+        "ingest_event_id": ingest_event.id,
+        "organization_id": ingest_event.organization_id,
+        "video_asset_id": ingest_event.video_asset_id,
+        "tracking_run_id": ingest_event.tracking_run_id,
+        "source_provider": ingest_event.provider,
+        "external_event_id": ingest_event.external_event_id,
+        "replayed": replayed,
+        "signature_required": ingest_event.signature_required,
+        "signature_validated": ingest_event.signature_validated,
+        "sample_count": ingest_event.sample_count,
+        "player_count": ingest_event.player_count,
+        "payload_hash": ingest_event.payload_hash,
+        "received_at": ingest_event.received_at,
+        "tracking_run": await match_tracking_run_read(db, tracking_run) if tracking_run is not None else None,
+    }
+
+
 async def validate_performance_wearable_webhook_signature(
     raw_body: bytes,
     timestamp_header: str | None,
@@ -3722,6 +3863,54 @@ async def validate_performance_wearable_webhook_signature(
     submitted = signature_header.removeprefix("sha256=")
     if not hmac.compare_digest(expected, submitted):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid wearable webhook signature")
+    return True, True
+
+
+async def validate_performance_match_tracking_webhook_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> tuple[bool, bool]:
+    selected_settings = settings or get_settings()
+    signing_key = await resolve_secret(
+        selected_settings,
+        env_value=selected_settings.performance_match_tracking_webhook_signing_key,
+        path=selected_settings.performance_match_tracking_webhook_signing_key_secret_path,
+        field_name=selected_settings.performance_match_tracking_webhook_signing_key_secret_field,
+        label="performance match tracking webhook signing key",
+    )
+    if not signing_key:
+        return False, False
+    if not timestamp_header or not signature_header:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing match tracking provider webhook signature",
+        )
+    try:
+        timestamp = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid match tracking provider webhook timestamp",
+        ) from exc
+    age = abs(int(time.time()) - timestamp)
+    if age > selected_settings.performance_match_tracking_webhook_tolerance_seconds:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Stale match tracking provider webhook signature",
+        )
+    expected = hmac.new(
+        signing_key.encode(),
+        timestamp_header.encode() + b"." + raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    submitted = signature_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, submitted):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid match tracking provider webhook signature",
+        )
     return True, True
 
 

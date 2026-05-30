@@ -337,7 +337,11 @@ status for the generated follow-up plan. The same match analysis pipeline now
 accepts external tracker frame packages from YOLO/ByteTrack-compatible cameras,
 GPS/video providers, or analyst tooling through a provider-neutral import API,
 converting bounding boxes, foot points, ball detections, confidence, model
-policy, and provider metadata into calibrated AfroLete tracking samples. Manual
+policy, and provider metadata into calibrated AfroLete tracking samples.
+External camera/provider systems can also post the same frame packages to the
+signed `/api/v1/performance/webhooks/match-tracking` callback, which validates
+timestamped HMAC signatures when configured and records durable replay keys
+before returning idempotent tracking-run results for provider retries. Manual
 pitch calibration now prefers an OpenCV perspective homography
 from field control points, with residual/error metadata and a linear fallback,
 so trapezoid broadcast camera views produce more trustworthy pitch-meter

@@ -1,6 +1,9 @@
 import base64
 from datetime import UTC, datetime, timedelta
+import hashlib
+import hmac
 import json
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -3785,6 +3788,191 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     report = report_response.json()
     assert report["summary"]["player_count"] == 2
     assert any(card["track_id"] == "home-9" for card in report["player_cards"])
+
+
+def test_match_tracking_provider_webhook_is_signed_and_replay_safe(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    performance_service.get_settings.cache_clear()
+    monkeypatch.setenv("AFROLETE_PERFORMANCE_MATCH_TRACKING_WEBHOOK_SIGNING_KEY", "tracking-secret")
+    performance_service.get_settings.cache_clear()
+    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    upload_response = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Webhook Camera FC",
+            "sport": "football",
+            "filename": "webhook-camera-fc.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(b"webhook tracking video").decode(),
+            "clip_label": "Signed provider callback",
+            "match_context": "External camera posts tracking frames.",
+            "analysis_focus": "provider callback replay and player metrics",
+        },
+    )
+    assert upload_response.status_code == 201
+    video_asset = upload_response.json()
+    payload = {
+        "organization_id": organization["id"],
+        "video_asset_id": video_asset["id"],
+        "external_event_id": "camera-main-match-2026-05-30T10:00:00Z",
+        "source_provider": "camera_bytetrack",
+        "model_policy": "camera-bytetrack-provider-v1",
+        "replace_existing": True,
+        "provider_metadata": {"camera_id": "main-stand", "detector": "yolov9"},
+        "frames": [
+            {
+                "timestamp_seconds": 0,
+                "frame_index": 0,
+                "detections": [
+                    {
+                        "track_id": "home-7",
+                        "team_label": "Home",
+                        "player_label": "Winger",
+                        "jersey_number": "7",
+                        "foot_x_percent": 20,
+                        "foot_y_percent": 52,
+                        "confidence": 0.95,
+                    },
+                    {
+                        "track_id": "ball",
+                        "object_type": "ball",
+                        "x_percent": 22,
+                        "y_percent": 52,
+                        "confidence": 0.86,
+                    },
+                ],
+            },
+            {
+                "timestamp_seconds": 1,
+                "frame_index": 25,
+                "detections": [
+                    {
+                        "track_id": "home-7",
+                        "team_label": "Home",
+                        "player_label": "Winger",
+                        "jersey_number": "7",
+                        "foot_x_percent": 36,
+                        "foot_y_percent": 50,
+                        "confidence": 0.96,
+                    },
+                    {
+                        "track_id": "ball",
+                        "object_type": "ball",
+                        "x_percent": 38,
+                        "y_percent": 50,
+                        "confidence": 0.87,
+                    },
+                ],
+            },
+        ],
+    }
+    raw_body = json.dumps(payload, separators=(",", ":")).encode()
+    timestamp = str(int(time.time()))
+    signature = hmac.new(
+        b"tracking-secret",
+        timestamp.encode() + b"." + raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    headers = {
+        "Content-Type": "application/json",
+        "X-Afrolete-Performance-Timestamp": timestamp,
+        "X-Afrolete-Performance-Signature": f"sha256={signature}",
+    }
+
+    response = client.post("/api/v1/performance/webhooks/match-tracking", content=raw_body, headers=headers)
+
+    assert response.status_code == 202
+    ingest = response.json()
+    assert ingest["source_provider"] == "camera_bytetrack"
+    assert ingest["external_event_id"] == payload["external_event_id"]
+    assert ingest["replayed"] is False
+    assert ingest["signature_required"] is True
+    assert ingest["signature_validated"] is True
+    assert ingest["sample_count"] == 4
+    assert ingest["player_count"] == 1
+    assert ingest["tracking_run"]["source_provider"] == "camera_bytetrack"
+    assert ingest["tracking_run"]["player_metrics"][0]["track_id"] == "home-7"
+
+    replay = client.post("/api/v1/performance/webhooks/match-tracking", content=raw_body, headers=headers)
+
+    assert replay.status_code == 202
+    replay_body = replay.json()
+    assert replay_body["replayed"] is True
+    assert replay_body["tracking_run_id"] == ingest["tracking_run_id"]
+    assert replay_body["sample_count"] == 4
+
+    runs = client.get(
+        f"/api/v1/performance/scouting/tracking-runs?organization_id={organization['id']}"
+        f"&video_asset_id={video_asset['id']}",
+        headers=identity_headers,
+    )
+    assert runs.status_code == 200
+    assert len(runs.json()) == 1
+    performance_service.get_settings.cache_clear()
+
+
+def test_match_tracking_provider_webhook_rejects_bad_signature(
+    client,
+    identity_headers,
+    monkeypatch,
+) -> None:
+    performance_service.get_settings.cache_clear()
+    monkeypatch.setenv("AFROLETE_PERFORMANCE_MATCH_TRACKING_WEBHOOK_SIGNING_KEY", "tracking-secret")
+    performance_service.get_settings.cache_clear()
+    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    video_asset = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Bad Signature FC",
+            "sport": "football",
+            "filename": "bad-signature-fc.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(b"bad signature video").decode(),
+            "clip_label": "Bad provider callback",
+            "match_context": "External camera posts tracking frames.",
+            "analysis_focus": "signature validation",
+        },
+    ).json()
+    payload = {
+        "organization_id": organization["id"],
+        "video_asset_id": video_asset["id"],
+        "external_event_id": "bad-signature-event",
+        "source_provider": "camera_bytetrack",
+        "frames": [
+            {
+                "timestamp_seconds": 0,
+                "detections": [
+                    {
+                        "track_id": "home-7",
+                        "team_label": "Home",
+                        "foot_x_percent": 20,
+                        "foot_y_percent": 52,
+                    }
+                ],
+            }
+        ],
+    }
+
+    response = client.post(
+        "/api/v1/performance/webhooks/match-tracking",
+        json=payload,
+        headers={
+            "X-Afrolete-Performance-Timestamp": str(int(time.time())),
+            "X-Afrolete-Performance-Signature": "sha256=invalid",
+        },
+    )
+
+    assert response.status_code == 401
+    performance_service.get_settings.cache_clear()
 
 
 def test_match_tracking_derives_shot_xg_and_key_pass_network() -> None:

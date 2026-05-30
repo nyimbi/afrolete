@@ -468,6 +468,40 @@ class PerformanceMatchTrackingRun(IdMixin, TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class PerformanceMatchTrackingProviderIngestEvent(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_match_tracking_provider_ingest_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "video_asset_id",
+            "provider",
+            "external_event_id",
+            name="uq_performance_match_tracking_provider_ingest_events_replay",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    tracking_run_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("performance_match_tracking_runs.id"), index=True
+    )
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    external_event_id: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    signature_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    signature_validated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    player_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="accepted", nullable=False, index=True)
+
+
 class PerformanceMatchTrackingSample(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_match_tracking_samples"
 
