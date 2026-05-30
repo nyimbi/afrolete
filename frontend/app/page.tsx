@@ -377,6 +377,7 @@ import type {
   PerformanceHardwareDeviceRead,
   PerformanceHardwareKitRead,
   PerformanceHardwareSyncRunRead,
+  PerformanceHighlightReelEngagementRead,
   PerformanceHighlightReelExportRead,
   PerformanceHighlightReelRead,
   PerformanceHighlightReelShareAuditRead,
@@ -1903,6 +1904,8 @@ export default function HomePage() {
     useState<PerformanceHighlightReelShareAuditRead[]>([]);
   const [performanceHighlightReelShare, setPerformanceHighlightReelShare] =
     useState<PerformanceHighlightReelShareRead | null>(null);
+  const [performanceHighlightReelEngagements, setPerformanceHighlightReelEngagements] =
+    useState<PerformanceHighlightReelEngagementRead[]>([]);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -4075,7 +4078,8 @@ export default function HomePage() {
       hardwareDeviceData,
       highlightReelData,
       highlightExportData,
-      highlightShareData
+      highlightShareData,
+      highlightEngagementData
     ] = await Promise.all([
       apiRequest<OppositionScoutingVideoAssetRead[]>(
         `/performance/scouting/videos?${params.toString()}`,
@@ -4132,6 +4136,10 @@ export default function HomePage() {
       apiRequest<PerformanceHighlightReelShareAuditRead[]>(
         `/performance/scouting/highlight-reel-shares?organization_id=${organizationId}`,
         { identity }
+      ),
+      apiRequest<PerformanceHighlightReelEngagementRead[]>(
+        `/performance/scouting/highlight-reel-engagement?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setOppositionScoutingVideos(videoData);
@@ -4148,6 +4156,7 @@ export default function HomePage() {
     setPerformanceHighlightReels(highlightReelData);
     setPerformanceHighlightReelExports(highlightExportData);
     setPerformanceHighlightReelShares(highlightShareData);
+    setPerformanceHighlightReelEngagements(highlightEngagementData);
     setOppositionScoutingVideo((current) =>
       current && videoData.some((video) => video.id === current.id) ? current : videoData[0] ?? null
     );
@@ -5347,6 +5356,7 @@ export default function HomePage() {
       setPerformanceHighlightReelExport(null);
       setPerformanceHighlightReelShares([]);
       setPerformanceHighlightReelShare(null);
+      setPerformanceHighlightReelEngagements([]);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
@@ -19740,6 +19750,10 @@ export default function HomePage() {
     (ingest) => !oppositionScoutingVideo || ingest.video_asset_id === oppositionScoutingVideo.id
   );
   const latestMatchTrackingProviderIngest = visibleMatchTrackingProviderIngests[0] ?? null;
+  const selectedHighlightEngagements = performanceHighlightReelEngagements.filter(
+    (engagement) => !performanceHighlightReel || engagement.highlight_reel_id === performanceHighlightReel.id
+  );
+  const latestHighlightEngagement = selectedHighlightEngagements[0] ?? null;
 
   return (
     <main className="app-shell">
@@ -27327,6 +27341,19 @@ export default function HomePage() {
                   </p>
                 </article>
                 <article className="mini-card">
+                  <span className="muted">Reel engagement</span>
+                  <strong>
+                    {latestHighlightEngagement
+                      ? `${latestHighlightEngagement.read_rate_percent.toFixed(0)}% read`
+                      : "no reads"}
+                  </strong>
+                  <p>
+                    {latestHighlightEngagement
+                      ? `${latestHighlightEngagement.unique_download_count}/${latestHighlightEngagement.recipient_count} downloaded · ${latestHighlightEngagement.download_count} total download(s)`
+                      : "Recipient reads and downloads appear after shared reel links are opened."}
+                  </p>
+                </article>
+                <article className="mini-card">
                   <span className="muted">Player guidance</span>
                   <strong>{performanceMatchAnalysisReport?.status ?? "not generated"}</strong>
                   <p>
@@ -28112,6 +28139,29 @@ export default function HomePage() {
                         </div>
                       </article>
                     ))}
+                  {selectedHighlightEngagements.slice(0, 3).map((engagement) => (
+                    <article key={engagement.share_audit_id} className="task-card">
+                      <div>
+                        <strong>{engagement.title} engagement</strong>
+                        <span>
+                          {engagement.read_count}/{engagement.recipient_count} read ·{" "}
+                          {engagement.unique_download_count} unique download(s) · {engagement.download_rate_percent.toFixed(0)}%
+                        </span>
+                        <small>
+                          {engagement.share_policy.replaceAll("_", " ")} ·{" "}
+                          {engagement.last_engagement_at
+                            ? `last ${new Date(engagement.last_engagement_at).toLocaleString()}`
+                            : "no recipient engagement yet"}
+                        </small>
+                        {engagement.recipients.slice(0, 3).map((recipient) => (
+                          <small key={recipient.recipient_id}>
+                            {recipient.person_name} · {recipient.delivery_status.replaceAll("_", " ")} ·{" "}
+                            {recipient.download_count} download(s)
+                          </small>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
                   {performanceHighlightReelExport ? (
                     <article className="task-card">
                       <div>

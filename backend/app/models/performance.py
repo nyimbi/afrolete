@@ -787,6 +787,28 @@ class PerformanceHighlightReelShareAudit(IdMixin, TimestampMixin, Base):
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class PerformanceHighlightReelDownloadAudit(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_highlight_reel_download_audits"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    highlight_reel_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_highlight_reels.id"), nullable=False, index=True
+    )
+    highlight_reel_export_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_highlight_reel_exports.id"), nullable=False, index=True
+    )
+    message_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("communication_messages.id"), nullable=False, index=True)
+    message_recipient_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("message_recipients.id"), nullable=False, index=True
+    )
+    person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), nullable=False, index=True)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    downloaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class PerformanceMovementReferenceProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_movement_reference_profiles"
     __table_args__ = (

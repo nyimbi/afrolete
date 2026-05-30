@@ -1386,6 +1386,44 @@ class PerformanceSharedHighlightReelRead(BaseModel):
     created_at: datetime
 
 
+class PerformanceHighlightReelRecipientEngagementRead(BaseModel):
+    recipient_id: UUID
+    person_id: UUID
+    person_name: str
+    destination: str | None
+    delivery_status: MessageDeliveryStatus
+    delivered_at: datetime | None
+    read_at: datetime | None
+    download_count: int = 0
+    last_downloaded_at: datetime | None = None
+
+
+class PerformanceHighlightReelEngagementRead(BaseModel):
+    share_audit_id: UUID
+    organization_id: UUID
+    highlight_reel_id: UUID
+    highlight_reel_export_id: UUID | None
+    message_id: UUID
+    title: str
+    audience: str
+    share_policy: str
+    channel: CommunicationChannel
+    recipient_count: int
+    queued_count: int = 0
+    sent_count: int = 0
+    delivered_count: int = 0
+    read_count: int = 0
+    failed_count: int = 0
+    suppressed_count: int = 0
+    read_rate_percent: float = 0.0
+    download_count: int = 0
+    unique_download_count: int = 0
+    download_rate_percent: float = 0.0
+    last_engagement_at: datetime | None = None
+    recipients: list[PerformanceHighlightReelRecipientEngagementRead]
+    published_at: datetime
+
+
 class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
     case_id: str = Field(min_length=2, max_length=120)
     metric_code: str = Field(min_length=2, max_length=80)

@@ -62,6 +62,7 @@ from app.models.performance import (
     PerformanceHardwareKit,
     PerformanceHardwareSyncRun,
     PerformanceHighlightReel,
+    PerformanceHighlightReelDownloadAudit,
     PerformanceHighlightReelExport,
     PerformanceHighlightReelShareAudit,
     PerformanceMatchAnalysisReport,
@@ -3106,6 +3107,126 @@ async def list_performance_highlight_reel_shares(
     return [highlight_reel_share_audit_read(audit, counts) for audit in audits]
 
 
+async def list_performance_highlight_reel_engagement(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    highlight_reel_id: UUID | None = None,
+) -> list[dict[str, object]]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceHighlightReelShareAudit, PerformanceHighlightReel).join(
+        PerformanceHighlightReel,
+        PerformanceHighlightReel.id == PerformanceHighlightReelShareAudit.highlight_reel_id,
+    ).where(PerformanceHighlightReelShareAudit.organization_id == organization_id)
+    if highlight_reel_id is not None:
+        statement = statement.where(PerformanceHighlightReelShareAudit.highlight_reel_id == highlight_reel_id)
+    share_rows = list(
+        (
+            await db.execute(
+                statement.order_by(
+                    PerformanceHighlightReelShareAudit.published_at.desc(),
+                    PerformanceHighlightReelShareAudit.created_at.desc(),
+                ).limit(100)
+            )
+        ).all()
+    )
+    if not share_rows:
+        return []
+    message_ids = [audit.message_id for audit, _ in share_rows]
+    recipient_rows = list(
+        (
+            await db.execute(
+                select(MessageRecipient, Person)
+                .join(Person, Person.id == MessageRecipient.person_id)
+                .where(MessageRecipient.message_id.in_(message_ids))
+                .order_by(Person.display_name, MessageRecipient.created_at)
+            )
+        ).all()
+    )
+    recipient_ids = [recipient.id for recipient, _ in recipient_rows]
+    download_rows = []
+    if recipient_ids:
+        download_rows = list(
+            (
+                await db.execute(
+                    select(
+                        PerformanceHighlightReelDownloadAudit.message_recipient_id,
+                        func.count(PerformanceHighlightReelDownloadAudit.id),
+                        func.max(PerformanceHighlightReelDownloadAudit.downloaded_at),
+                    )
+                    .where(PerformanceHighlightReelDownloadAudit.message_recipient_id.in_(recipient_ids))
+                    .group_by(PerformanceHighlightReelDownloadAudit.message_recipient_id)
+                )
+            ).all()
+        )
+    downloads_by_recipient = {
+        recipient_id: {"download_count": int(count or 0), "last_downloaded_at": last_downloaded_at}
+        for recipient_id, count, last_downloaded_at in download_rows
+    }
+    recipients_by_message: dict[UUID, list[dict[str, object]]] = {}
+    for recipient, person in recipient_rows:
+        download_stats = downloads_by_recipient.get(
+            recipient.id,
+            {"download_count": 0, "last_downloaded_at": None},
+        )
+        recipients_by_message.setdefault(recipient.message_id, []).append(
+            {
+                "recipient_id": recipient.id,
+                "person_id": recipient.person_id,
+                "person_name": person.display_name,
+                "destination": recipient.destination,
+                "delivery_status": recipient.delivery_status,
+                "delivered_at": recipient.delivered_at,
+                "read_at": recipient.read_at,
+                "download_count": download_stats["download_count"],
+                "last_downloaded_at": download_stats["last_downloaded_at"],
+            }
+        )
+    counts = await delivery_counts_for_messages(db, message_ids)
+    rows: list[dict[str, object]] = []
+    for audit, reel in share_rows:
+        recipients = recipients_by_message.get(audit.message_id, [])
+        delivery_counts = counts.get(audit.message_id, {})
+        recipient_count = max(audit.recipient_count, len(recipients), 1)
+        download_count = sum(int(recipient.get("download_count") or 0) for recipient in recipients)
+        unique_download_count = sum(1 for recipient in recipients if int(recipient.get("download_count") or 0) > 0)
+        engagement_times = [
+            value
+            for recipient in recipients
+            for value in (recipient.get("read_at"), recipient.get("last_downloaded_at"))
+            if isinstance(value, datetime)
+        ]
+        rows.append(
+            {
+                "share_audit_id": audit.id,
+                "organization_id": audit.organization_id,
+                "highlight_reel_id": audit.highlight_reel_id,
+                "highlight_reel_export_id": audit.highlight_reel_export_id,
+                "message_id": audit.message_id,
+                "title": reel.title,
+                "audience": audit.audience,
+                "share_policy": audit.share_policy,
+                "channel": audit.channel,
+                "recipient_count": audit.recipient_count,
+                "queued_count": delivery_counts.get("queued_count", 0),
+                "sent_count": delivery_counts.get("sent_count", 0),
+                "delivered_count": delivery_counts.get("delivered_count", 0),
+                "read_count": delivery_counts.get("read_count", 0),
+                "failed_count": delivery_counts.get("failed_count", 0),
+                "suppressed_count": delivery_counts.get("suppressed_count", 0),
+                "read_rate_percent": round(delivery_counts.get("read_count", 0) / recipient_count * 100, 2),
+                "download_count": download_count,
+                "unique_download_count": unique_download_count,
+                "download_rate_percent": round(unique_download_count / recipient_count * 100, 2),
+                "last_engagement_at": max(engagement_times) if engagement_times else None,
+                "recipients": recipients,
+                "published_at": audit.published_at,
+            }
+        )
+    return rows
+
+
 async def highlight_reel_share_export(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3446,6 +3567,7 @@ async def downloadable_my_shared_highlight_reel_export(
     db: AsyncSession,
     identity: CurrentIdentity,
     recipient_id: UUID,
+    user_agent: str | None = None,
     settings: Settings | None = None,
 ) -> dict[str, object]:
     row = (
@@ -3475,7 +3597,20 @@ async def downloadable_my_shared_highlight_reel_export(
     if recipient.delivery_status != MessageDeliveryStatus.READ:
         recipient.delivery_status = MessageDeliveryStatus.READ
         recipient.read_at = datetime.now(UTC)
-        await db.commit()
+    db.add(
+        PerformanceHighlightReelDownloadAudit(
+            organization_id=export.organization_id,
+            highlight_reel_id=export.highlight_reel_id,
+            highlight_reel_export_id=export.id,
+            message_id=recipient.message_id,
+            message_recipient_id=recipient.id,
+            person_id=identity.person_id,
+            checksum=checksum,
+            user_agent=user_agent[:500] if user_agent else None,
+            downloaded_at=datetime.now(UTC),
+        )
+    )
+    await db.commit()
     return {
         "content": content,
         "content_type": export.content_type,

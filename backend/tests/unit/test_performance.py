@@ -5097,6 +5097,22 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     )
     assert shared_after_download.status_code == 200
     assert shared_after_download.json()[0]["delivery_status"] == "read"
+    engagement_response = client.get(
+        f"/api/v1/performance/scouting/highlight-reel-engagement?organization_id={organization['id']}&highlight_reel_id={reel['id']}",
+        headers=identity_headers,
+    )
+    assert engagement_response.status_code == 200
+    engagement = engagement_response.json()
+    assert len(engagement) == 1
+    assert engagement[0]["highlight_reel_id"] == reel["id"]
+    assert engagement[0]["recipient_count"] == 1
+    assert engagement[0]["read_count"] == 1
+    assert engagement[0]["read_rate_percent"] == 100
+    assert engagement[0]["download_count"] == 1
+    assert engagement[0]["unique_download_count"] == 1
+    assert engagement[0]["download_rate_percent"] == 100
+    assert engagement[0]["recipients"][0]["person_id"] == member["subject_id"]
+    assert engagement[0]["recipients"][0]["download_count"] == 1
     share_audits = client.get(
         f"/api/v1/performance/scouting/highlight-reel-shares?organization_id={organization['id']}&highlight_reel_id={reel['id']}",
         headers=identity_headers,

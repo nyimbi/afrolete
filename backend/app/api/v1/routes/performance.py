@@ -42,6 +42,7 @@ from app.schemas.performance import (
     PerformanceHighlightReelExportCreate,
     PerformanceHighlightReelExportRead,
     PerformanceHighlightReelRead,
+    PerformanceHighlightReelEngagementRead,
     PerformanceHighlightReelShareAuditRead,
     PerformanceHighlightReelShareCreate,
     PerformanceHighlightReelShareRead,
@@ -179,6 +180,7 @@ from app.services.performance import (
     list_performance_hardware_sync_runs,
     list_performance_highlight_reels,
     list_performance_highlight_reel_exports,
+    list_performance_highlight_reel_engagement,
     list_performance_highlight_reel_shares,
     list_my_shared_highlight_reels,
     list_metric_definitions,
@@ -876,10 +878,11 @@ async def list_my_shared_highlight_reels_route(
 @router.get("/my-highlight-reels/{recipient_id}/content")
 async def download_my_shared_highlight_reel_route(
     recipient_id: UUID,
+    user_agent: str | None = Header(default=None, alias="User-Agent"),
     identity: CurrentIdentity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    artifact = await downloadable_my_shared_highlight_reel_export(db, identity, recipient_id)
+    artifact = await downloadable_my_shared_highlight_reel_export(db, identity, recipient_id, user_agent=user_agent)
     return Response(
         content=artifact["content"],
         media_type=str(artifact["content_type"]),
@@ -1615,6 +1618,26 @@ async def list_performance_highlight_reel_shares_route(
     return [
         PerformanceHighlightReelShareAuditRead(**audit)
         for audit in await list_performance_highlight_reel_shares(
+            db,
+            identity,
+            organization_id,
+            authz,
+            highlight_reel_id=highlight_reel_id,
+        )
+    ]
+
+
+@router.get("/scouting/highlight-reel-engagement", response_model=list[PerformanceHighlightReelEngagementRead])
+async def list_performance_highlight_reel_engagement_route(
+    organization_id: UUID = Query(),
+    highlight_reel_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceHighlightReelEngagementRead]:
+    return [
+        PerformanceHighlightReelEngagementRead(**item)
+        for item in await list_performance_highlight_reel_engagement(
             db,
             identity,
             organization_id,

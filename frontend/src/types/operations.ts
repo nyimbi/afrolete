@@ -7689,6 +7689,44 @@ export type PerformanceSharedHighlightReelRead = {
   created_at: string;
 };
 
+export type PerformanceHighlightReelRecipientEngagementRead = {
+  recipient_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  destination: string | null;
+  delivery_status: MessageDeliveryStatus;
+  delivered_at: string | null;
+  read_at: string | null;
+  download_count: number;
+  last_downloaded_at: string | null;
+};
+
+export type PerformanceHighlightReelEngagementRead = {
+  share_audit_id: UUID;
+  organization_id: UUID;
+  highlight_reel_id: UUID;
+  highlight_reel_export_id: UUID | null;
+  message_id: UUID;
+  title: string;
+  audience: string;
+  share_policy: string;
+  channel: CommunicationChannel;
+  recipient_count: number;
+  queued_count: number;
+  sent_count: number;
+  delivered_count: number;
+  read_count: number;
+  failed_count: number;
+  suppressed_count: number;
+  read_rate_percent: number;
+  download_count: number;
+  unique_download_count: number;
+  download_rate_percent: number;
+  last_engagement_at: string | null;
+  recipients: PerformanceHighlightReelRecipientEngagementRead[];
+  published_at: string;
+};
+
 export type PerformanceVideoAnnotationRead = {
   id: UUID;
   organization_id: UUID;
