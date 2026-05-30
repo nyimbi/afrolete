@@ -417,6 +417,38 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert player_recipient["feedback_agent_task_id"] == feedback["agent_task_id"]
     assert player_recipient["feedback_agent_task_status"] == "queued"
 
+    coach_followup_response = client.post(
+        f"/api/v1/performance/scouting/match-guidance-feedback/{feedback['id']}/followup",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "subject_prefix": "Coach follow-up",
+            "coach_notes": "We will review your pressing angle and adjust the next training block.",
+            "include_agent_review": True,
+        },
+    )
+    assert coach_followup_response.status_code == 201
+    coach_followup = coach_followup_response.json()
+    assert coach_followup["feedback"]["id"] == feedback["id"]
+    assert coach_followup["feedback"]["coach_followup_message_id"] == coach_followup["message_id"]
+    assert coach_followup["recipient_person_id"] == member["subject_id"]
+    assert coach_followup["recipient_count"] == 1
+
+    followup_engagement_response = client.get(
+        f"/api/v1/performance/scouting/match-guidance-engagement?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert followup_engagement_response.status_code == 200
+    followup_recipient = next(
+        recipient
+        for recipient in followup_engagement_response.json()[0]["recipients"]
+        if recipient["is_player"]
+    )
+    assert followup_recipient["feedback_id"] == feedback["id"]
+    assert followup_recipient["feedback_coach_followup_message_id"] == coach_followup["message_id"]
+    assert followup_recipient["feedback_coach_followup_sent_at"] is not None
+
     followup_response = client.post(
         f"/api/v1/performance/my-profiles/{roster['athlete_profile_id']}/match-guidance/training-followups",
         headers=player_headers,

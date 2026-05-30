@@ -399,10 +399,12 @@ import type {
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchAnalysisReportRead,
+  PerformanceMatchGuidanceFeedbackFollowupRead,
   PerformanceMatchMomentRead,
   PlayerMatchGuidanceFeedbackRead,
   PlayerMatchGuidanceRead,
   PerformanceMatchPlayerGuidanceEngagementRead,
+  PerformanceMatchPlayerGuidanceRecipientEngagementRead,
   PerformanceMatchPlayerGuidancePublishAuditRead,
   PerformanceMatchPlayerGuidancePublishRead,
   PerformanceMatchPlayerGuidanceReviewRead,
@@ -1945,6 +1947,8 @@ export default function HomePage() {
     useState<PerformanceMatchPlayerGuidancePublishAuditRead[]>([]);
   const [performanceMatchPlayerGuidanceEngagements, setPerformanceMatchPlayerGuidanceEngagements] =
     useState<PerformanceMatchPlayerGuidanceEngagementRead[]>([]);
+  const [performanceMatchGuidanceFeedbackFollowup, setPerformanceMatchGuidanceFeedbackFollowup] =
+    useState<PerformanceMatchGuidanceFeedbackFollowupRead | null>(null);
   const [performanceMatchPitchCalibrations, setPerformanceMatchPitchCalibrations] =
     useState<PerformanceMatchPitchCalibrationRead[]>([]);
   const [performanceMatchPitchCalibration, setPerformanceMatchPitchCalibration] =
@@ -5437,6 +5441,7 @@ export default function HomePage() {
       setPerformanceMatchTrainingFollowup(null);
       setPerformanceMatchPlayerGuidancePublishes([]);
       setPerformanceMatchPlayerGuidanceEngagements([]);
+      setPerformanceMatchGuidanceFeedbackFollowup(null);
       setPerformanceMatchPitchCalibrations([]);
       setPerformanceMatchPitchCalibration(null);
       setPerformanceMultiCameraAnalyses([]);
@@ -11023,6 +11028,55 @@ export default function HomePage() {
         );
         void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
         void loadTrainingPlanItems(followup.plan_id);
+      }
+    );
+  };
+
+  const sendMatchGuidanceFeedbackFollowup = (
+    engagement: PerformanceMatchPlayerGuidanceEngagementRead,
+    recipient: PerformanceMatchPlayerGuidanceRecipientEngagementRead
+  ) => {
+    if (!selectedOrganizationId || !recipient.feedback_id) {
+      addLog("Select feedback before sending a coach follow-up", "bad");
+      return;
+    }
+    const notes = recipient.feedback_requested_follow_up
+      ? `Coach follow-up for ${engagement.player_label}: we will review ${recipient.feedback_priority_focus ?? "your match guidance"} and adjust the next training block.`
+      : `Coach follow-up for ${engagement.player_label}: feedback received and noted for the next review.`;
+    runAction(
+      `match-guidance-feedback-followup-${recipient.feedback_id}`,
+      () =>
+        apiRequest<PerformanceMatchGuidanceFeedbackFollowupRead>(
+          `/performance/scouting/match-guidance-feedback/${recipient.feedback_id}/followup`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "in_app",
+              subject_prefix: "Coach follow-up",
+              coach_notes: notes,
+              include_agent_review: true
+            }
+          }
+        ),
+      (followup) => {
+        setPerformanceMatchGuidanceFeedbackFollowup(followup);
+        setPerformanceMatchPlayerGuidanceEngagements((current) =>
+          current.map((item) => ({
+            ...item,
+            recipients: item.recipients.map((currentRecipient) =>
+              currentRecipient.feedback_id === followup.feedback.id
+                ? {
+                    ...currentRecipient,
+                    feedback_coach_followup_message_id: followup.message_id,
+                    feedback_coach_followup_sent_at: followup.sent_at
+                  }
+                : currentRecipient
+            )
+          }))
+        );
+        addLog(`Coach follow-up sent to ${recipient.person_name}`, "good");
       }
     );
   };
@@ -28642,10 +28696,29 @@ export default function HomePage() {
                               : ""}
                             {recipient.feedback_agent_task_id ? ` · AI task ${recipient.feedback_agent_task_id.slice(0, 8)}` : ""}
                             {recipient.feedback_response_preview ? ` · "${recipient.feedback_response_preview}"` : ""}
+                            {recipient.feedback_coach_followup_sent_at
+                              ? ` · coach follow-up ${new Date(recipient.feedback_coach_followup_sent_at).toLocaleString()}`
+                              : ""}
                           </small>
                         ))}
                       </div>
                       <span>
+                        {engagement.recipients.some((recipient) => recipient.feedback_id && !recipient.feedback_coach_followup_sent_at) ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const recipient =
+                                engagement.recipients.find((item) => item.feedback_requested_follow_up && item.feedback_id && !item.feedback_coach_followup_sent_at) ??
+                                engagement.recipients.find((item) => item.feedback_id && !item.feedback_coach_followup_sent_at);
+                              if (recipient) {
+                                sendMatchGuidanceFeedbackFollowup(engagement, recipient);
+                              }
+                            }}
+                            disabled={busyAction !== null}
+                          >
+                            Reply
+                          </button>
+                        ) : null}
                         {engagement.recipients.some((recipient) => recipient.feedback_agent_task_id) ? (
                           <button
                             type="button"
@@ -28663,6 +28736,21 @@ export default function HomePage() {
                       </span>
                     </article>
                   ))}
+                  {performanceMatchGuidanceFeedbackFollowup ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>Coach follow-up sent</strong>
+                        <span>
+                          {performanceMatchGuidanceFeedbackFollowup.subject} ·{" "}
+                          {performanceMatchGuidanceFeedbackFollowup.channel}
+                        </span>
+                        <small>
+                          message {performanceMatchGuidanceFeedbackFollowup.message_id.slice(0, 8)} ·{" "}
+                          {new Date(performanceMatchGuidanceFeedbackFollowup.sent_at).toLocaleString()}
+                        </small>
+                      </div>
+                    </article>
+                  ) : null}
                 </div>
               ) : null}
               {(performanceHardwareKits.length || performanceHardwareDevices.length || performanceHardwareSyncRun) ? (

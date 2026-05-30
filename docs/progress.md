@@ -1262,6 +1262,7 @@ Latest slices:
 - Match analysis reports now embed Match Intelligence Agent review status and notes in both API payloads and Markdown exports so governed AI context travels with coach report artifacts.
 - Player match-guidance cards now accept athlete feedback, completed-action acknowledgements, and help requests that queue Training Strategy Agent review tasks, with feedback state visible in the player portal and operations console.
 - Coaches can now review match-guidance engagement summaries by published player card, including read rates, feedback counts, completed action plans, help requests, player response previews, and queued Training Strategy Agent task status in the operations console.
+- Coach match-guidance engagement cards can now send targeted follow-up messages back to players from feedback/help requests, persist the coach response on the feedback record, and show follow-up delivery state in the operations console.
 
 ## Next Actions
 

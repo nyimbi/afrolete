@@ -7442,6 +7442,7 @@ export type PerformanceMatchPlayerGuidanceRecipientEngagementRead = {
   delivery_status: MessageDeliveryStatus;
   delivered_at: string | null;
   read_at: string | null;
+  feedback_id: UUID | null;
   feedback_status: string | null;
   feedback_rating: number | null;
   feedback_requested_follow_up: boolean;
@@ -7452,6 +7453,8 @@ export type PerformanceMatchPlayerGuidanceRecipientEngagementRead = {
   feedback_agent_task_id: UUID | null;
   feedback_agent_task_status: string | null;
   feedback_agent_task_title: string | null;
+  feedback_coach_followup_message_id: UUID | null;
+  feedback_coach_followup_sent_at: string | null;
 };
 
 export type PerformanceMatchPlayerGuidanceEngagementRead = {
@@ -7481,6 +7484,16 @@ export type PerformanceMatchPlayerGuidanceEngagementRead = {
   last_engagement_at: string | null;
   recipients: PerformanceMatchPlayerGuidanceRecipientEngagementRead[];
   published_at: string;
+};
+
+export type PerformanceMatchGuidanceFeedbackFollowupRead = {
+  feedback: PlayerMatchGuidanceFeedbackRead;
+  message_id: UUID;
+  subject: string;
+  channel: CommunicationChannel;
+  recipient_person_id: UUID;
+  recipient_count: number;
+  sent_at: string;
 };
 
 export type PerformanceMatchPlayerGuidancePublishRead = {
@@ -8707,6 +8720,9 @@ export type PlayerMatchGuidanceFeedbackRead = {
   requested_follow_up: boolean;
   completed_action_count: number;
   agent_task_id: UUID | null;
+  coach_followup_message_id: UUID | null;
+  coach_followup_notes: string | null;
+  coach_followup_sent_at: string | null;
   submitted_at: string;
   created_at: string;
   updated_at: string;

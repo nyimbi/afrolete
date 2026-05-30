@@ -76,6 +76,8 @@ from app.schemas.performance import (
     PerformanceMatchMomentDetectionCreate,
     PerformanceMatchMomentRead,
     PerformanceMatchMomentReviewCreate,
+    PerformanceMatchGuidanceFeedbackFollowupCreate,
+    PerformanceMatchGuidanceFeedbackFollowupRead,
     PerformanceMatchPlayerGuidanceEngagementRead,
     PerformanceMatchPlayerGuidancePublishAuditRead,
     PerformanceMatchPlayerGuidancePublishCreate,
@@ -249,6 +251,7 @@ from app.services.performance import (
     send_performance_highlight_reel_reminder,
     run_performance_highlight_reel_reminders,
     run_wearable_provider_sync,
+    send_player_match_guidance_feedback_followup,
     refresh_wearable_provider_token,
     register_wearable_provider_webhook,
     reprocess_match_tracking_provider_ingest_event,
@@ -1328,6 +1331,29 @@ async def list_match_tracking_player_guidance_engagement_route(
             tracking_run_id=tracking_run_id,
         )
     ]
+
+
+@router.post(
+    "/scouting/match-guidance-feedback/{feedback_id}/followup",
+    response_model=PerformanceMatchGuidanceFeedbackFollowupRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_player_match_guidance_feedback_followup_route(
+    feedback_id: UUID,
+    payload: PerformanceMatchGuidanceFeedbackFollowupCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchGuidanceFeedbackFollowupRead:
+    return PerformanceMatchGuidanceFeedbackFollowupRead(
+        **await send_player_match_guidance_feedback_followup(
+            db,
+            identity,
+            feedback_id,
+            payload,
+            authz,
+        )
+    )
 
 
 @router.post(
