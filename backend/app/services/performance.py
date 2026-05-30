@@ -8681,6 +8681,10 @@ def match_pitch_calibration_transform(
     pitch_length_m: float,
     pitch_width_m: float,
 ) -> dict[str, float | str]:
+    perspective = match_pitch_perspective_transform(points, pitch_length_m, pitch_width_m)
+    if perspective is not None:
+        return perspective
+
     xs = [float(point["image_x_percent"]) for point in points]
     ys = [float(point["image_y_percent"]) for point in points]
     pitch_xs = [float(point["pitch_x_meters"]) for point in points]
@@ -8709,12 +8713,95 @@ def match_pitch_calibration_transform(
     }
 
 
+def match_pitch_perspective_transform(
+    points: list[dict[str, object]],
+    pitch_length_m: float,
+    pitch_width_m: float,
+) -> dict[str, float | str] | None:
+    if len(points) < 4:
+        return None
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+
+    image_points = np.array(
+        [
+            [float(point["image_x_percent"]), float(point["image_y_percent"])]
+            for point in points
+        ],
+        dtype=np.float32,
+    )
+    pitch_points = np.array(
+        [
+            [float(point["pitch_x_meters"]), float(point["pitch_y_meters"])]
+            for point in points
+        ],
+        dtype=np.float32,
+    )
+    matrix, _ = cv2.findHomography(image_points, pitch_points, method=0)
+    if matrix is None:
+        return None
+    projected = cv2.perspectiveTransform(image_points.reshape(-1, 1, 2), matrix).reshape(-1, 2)
+    residuals = [
+        math.dist((float(projected[index][0]), float(projected[index][1])), (float(point[0]), float(point[1])))
+        for index, point in enumerate(pitch_points)
+    ]
+    mean_residual_m = sum(residuals) / len(residuals)
+    max_residual_m = max(residuals)
+    pitch_xs = [float(point["pitch_x_meters"]) for point in points]
+    pitch_ys = [float(point["pitch_y_meters"]) for point in points]
+    coverage_x = min(max(pitch_xs) - min(pitch_xs), pitch_length_m) / pitch_length_m
+    coverage_y = min(max(pitch_ys) - min(pitch_ys), pitch_width_m) / pitch_width_m
+    point_bonus = min((len(points) - 4) / 4, 1.0) * 0.08
+    residual_penalty = min(mean_residual_m / 5, 0.45)
+    quality_score = max(0.2, min(((coverage_x + coverage_y) / 2) + 0.12 + point_bonus - residual_penalty, 0.99))
+    return {
+        "method": "perspective_homography",
+        "quality_score": round(quality_score, 3),
+        "mean_residual_m": round(mean_residual_m, 3),
+        "max_residual_m": round(max_residual_m, 3),
+        "h00": float(matrix[0][0]),
+        "h01": float(matrix[0][1]),
+        "h02": float(matrix[0][2]),
+        "h10": float(matrix[1][0]),
+        "h11": float(matrix[1][1]),
+        "h12": float(matrix[1][2]),
+        "h20": float(matrix[2][0]),
+        "h21": float(matrix[2][1]),
+        "h22": float(matrix[2][2]),
+    }
+
+
 def apply_match_pitch_calibration(
     calibration: PerformanceMatchPitchCalibration,
     x_percent: float,
     y_percent: float,
 ) -> tuple[float, float]:
     transform = decode_match_pitch_calibration_transform(calibration.transform_json)
+    if transform.get("method") == "perspective_homography":
+        denominator = (
+            float(transform.get("h20", 0.0)) * x_percent
+            + float(transform.get("h21", 0.0)) * y_percent
+            + float(transform.get("h22", 1.0))
+        )
+        if abs(denominator) > 0.000001:
+            x_meters = (
+                float(transform.get("h00", 1.0)) * x_percent
+                + float(transform.get("h01", 0.0)) * y_percent
+                + float(transform.get("h02", 0.0))
+            ) / denominator
+            y_meters = (
+                float(transform.get("h10", 0.0)) * x_percent
+                + float(transform.get("h11", 1.0)) * y_percent
+                + float(transform.get("h12", 0.0))
+            ) / denominator
+            return (
+                max(0.0, min(x_meters, calibration.pitch_length_m)),
+                max(0.0, min(y_meters, calibration.pitch_width_m)),
+            )
+
     image_min_x = float(transform.get("image_min_x", 0))
     image_max_x = float(transform.get("image_max_x", 100))
     image_min_y = float(transform.get("image_min_y", 0))

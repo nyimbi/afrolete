@@ -1,8 +1,36 @@
 import base64
 from datetime import UTC, datetime, timedelta
 import json
+from types import SimpleNamespace
 
 from app.services import performance as performance_service
+
+
+def test_match_pitch_calibration_uses_perspective_homography_for_trapezoid() -> None:
+    points = [
+        {"label": "top left", "image_x_percent": 20, "image_y_percent": 10, "pitch_x_meters": 0, "pitch_y_meters": 0},
+        {"label": "top right", "image_x_percent": 80, "image_y_percent": 10, "pitch_x_meters": 100, "pitch_y_meters": 0},
+        {"label": "bottom right", "image_x_percent": 100, "image_y_percent": 90, "pitch_x_meters": 100, "pitch_y_meters": 50},
+        {"label": "bottom left", "image_x_percent": 0, "image_y_percent": 90, "pitch_x_meters": 0, "pitch_y_meters": 50},
+    ]
+
+    transform = performance_service.match_pitch_calibration_transform(points, 100, 50)
+    calibration = SimpleNamespace(
+        transform_json=json.dumps(transform),
+        pitch_length_m=100,
+        pitch_width_m=50,
+    )
+
+    assert transform["method"] == "perspective_homography"
+    assert transform["quality_score"] >= 0.9
+    assert transform["mean_residual_m"] < 0.001
+    assert tuple(round(value, 2) for value in performance_service.apply_match_pitch_calibration(calibration, 20, 10)) == (0.0, 0.0)
+    assert tuple(round(value, 2) for value in performance_service.apply_match_pitch_calibration(calibration, 80, 10)) == (100.0, 0.0)
+    assert tuple(round(value, 2) for value in performance_service.apply_match_pitch_calibration(calibration, 100, 90)) == (100.0, 50.0)
+    assert tuple(round(value, 2) for value in performance_service.apply_match_pitch_calibration(calibration, 0, 90)) == (0.0, 50.0)
+    x_meters, y_meters = performance_service.apply_match_pitch_calibration(calibration, 50, 50)
+    assert round(x_meters, 2) == 50.0
+    assert round(y_meters, 2) == 31.25
 
 
 def test_performance_achievements_create_in_app_notification(client, identity_headers) -> None:
