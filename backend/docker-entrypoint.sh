@@ -8,7 +8,8 @@ mkdir -p \
   "${AFROLETE_TRAVEL_CHECKLIST_FILE_DIR:-data/travel-checklist-files}" \
   "${AFROLETE_TRAVEL_MANIFEST_FILE_DIR:-data/travel-manifests}" \
   "${AFROLETE_SAFEGUARDING_INCIDENT_ARTIFACT_DIR:-data/safeguarding-incident-artifacts}" \
-  "${AFROLETE_PERFORMANCE_HIGHLIGHT_EXPORT_DIR:-data/performance-highlight-exports}"
+  "${AFROLETE_PERFORMANCE_HIGHLIGHT_EXPORT_DIR:-data/performance-highlight-exports}" \
+  "${AFROLETE_PERFORMANCE_MATCH_REPORT_DIR:-data/performance-match-reports}"
 
 if [ "${AFROLETE_RUN_MIGRATIONS:-1}" = "1" ]; then
   alembic upgrade head

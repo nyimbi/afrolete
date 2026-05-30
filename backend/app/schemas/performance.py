@@ -683,6 +683,40 @@ class PerformanceMatchTrackingIdentityReviewResultRead(BaseModel):
     tracking_run: PerformanceMatchTrackingRunRead
 
 
+class PerformanceMatchAnalysisReportCreate(BaseModel):
+    organization_id: UUID
+    audience: str = Field(default="coach", min_length=2, max_length=80)
+    report_scope: str = Field(default="team_match_review", min_length=2, max_length=80)
+    title: str | None = Field(default=None, max_length=220)
+    include_player_cards: bool = True
+    include_tactical_shape: bool = True
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class PerformanceMatchAnalysisReportRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    tracking_run_id: UUID
+    video_asset_id: UUID
+    created_by_person_id: UUID | None
+    title: str
+    audience: str
+    report_scope: str
+    status: str
+    model_policy: str
+    summary: dict[str, Any]
+    player_cards: list[dict[str, Any]]
+    team_shape: list[dict[str, Any]]
+    recommendations: list[str]
+    artifact_format: str
+    content_type: str
+    storage_url: str
+    checksum: str
+    size_bytes: int
+    generated_at: datetime
+    created_at: datetime
+
+
 class PerformanceHardwareKitCreate(BaseModel):
     organization_id: UUID
     name: str = Field(min_length=2, max_length=180)

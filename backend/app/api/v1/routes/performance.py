@@ -56,6 +56,8 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkRunRead,
     PerformanceMetricTrendRead,
     PerformanceMetricTrendSeriesRead,
+    PerformanceMatchAnalysisReportCreate,
+    PerformanceMatchAnalysisReportRead,
     PerformanceMatchTrackingIdentityReviewCreate,
     PerformanceMatchTrackingIdentityReviewRead,
     PerformanceMatchTrackingIdentityReviewResultRead,
@@ -115,6 +117,7 @@ from app.services.performance import (
     create_match_tracking_identity_review,
     create_match_tracking_run,
     create_match_pitch_calibration,
+    create_performance_match_analysis_report,
     create_movement_reference_profile,
     create_observation,
     create_opposition_scouting_report,
@@ -148,7 +151,9 @@ from app.services.performance import (
     list_match_tracking_identity_reviews,
     list_match_tracking_runs,
     list_match_pitch_calibrations,
+    list_performance_match_analysis_reports,
     match_pitch_calibration_read,
+    match_analysis_report_read,
     match_tracking_identity_review_read,
     highlight_reel_read,
     highlight_reel_export_read,
@@ -193,6 +198,7 @@ from app.services.performance import (
     decode_reference_metric_targets,
     decode_reference_pose_samples,
     decode_scouting_findings,
+    downloadable_performance_match_analysis_report,
     downloadable_performance_highlight_reel_export,
     downloadable_performance_video_asset,
     upload_performance_video_asset,
@@ -988,6 +994,63 @@ async def list_match_tracking_identity_reviews_route(
             tracking_run_id=tracking_run_id,
         )
     ]
+
+
+@router.post(
+    "/scouting/tracking-runs/{tracking_run_id}/analysis-reports",
+    response_model=PerformanceMatchAnalysisReportRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_performance_match_analysis_report_route(
+    tracking_run_id: UUID,
+    payload: PerformanceMatchAnalysisReportCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchAnalysisReportRead:
+    return PerformanceMatchAnalysisReportRead(
+        **match_analysis_report_read(
+            await create_performance_match_analysis_report(db, identity, tracking_run_id, payload, authz)
+        )
+    )
+
+
+@router.get("/scouting/match-analysis-reports", response_model=list[PerformanceMatchAnalysisReportRead])
+async def list_performance_match_analysis_reports_route(
+    organization_id: UUID = Query(),
+    tracking_run_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMatchAnalysisReportRead]:
+    return [
+        PerformanceMatchAnalysisReportRead(**match_analysis_report_read(report))
+        for report in await list_performance_match_analysis_reports(
+            db,
+            identity,
+            organization_id,
+            authz,
+            tracking_run_id=tracking_run_id,
+        )
+    ]
+
+
+@router.get("/scouting/match-analysis-reports/{report_id}/download")
+async def download_performance_match_analysis_report_route(
+    report_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> Response:
+    artifact = await downloadable_performance_match_analysis_report(db, identity, report_id, authz)
+    return Response(
+        content=artifact["content"],
+        media_type=str(artifact["content_type"]),
+        headers={
+            "Content-Disposition": f"attachment; filename={artifact['filename']}",
+            "X-Afrolete-Match-Report-Checksum": str(artifact["checksum"]),
+        },
+    )
 
 
 @router.post(

@@ -374,6 +374,7 @@ import type {
   PerformanceModelExtractionBenchmarkRunRead,
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
+  PerformanceMatchAnalysisReportRead,
   PerformanceMatchPitchCalibrationRead,
   PerformanceMatchTrackingIdentityReviewRead,
   PerformanceMatchTrackingIdentityReviewResultRead,
@@ -1675,6 +1676,10 @@ export default function HomePage() {
     useState<PerformanceMatchTrackingRunRead | null>(null);
   const [performanceMatchTrackingIdentityReviews, setPerformanceMatchTrackingIdentityReviews] =
     useState<PerformanceMatchTrackingIdentityReviewRead[]>([]);
+  const [performanceMatchAnalysisReports, setPerformanceMatchAnalysisReports] =
+    useState<PerformanceMatchAnalysisReportRead[]>([]);
+  const [performanceMatchAnalysisReport, setPerformanceMatchAnalysisReport] =
+    useState<PerformanceMatchAnalysisReportRead | null>(null);
   const [performanceMatchPitchCalibrations, setPerformanceMatchPitchCalibrations] =
     useState<PerformanceMatchPitchCalibrationRead[]>([]);
   const [performanceMatchPitchCalibration, setPerformanceMatchPitchCalibration] =
@@ -3714,6 +3719,7 @@ export default function HomePage() {
       reportData,
       trackingData,
       trackingIdentityReviewData,
+      matchAnalysisReportData,
       calibrationData,
       hardwareKitData,
       hardwareDeviceData,
@@ -3734,6 +3740,10 @@ export default function HomePage() {
       ),
       apiRequest<PerformanceMatchTrackingIdentityReviewRead[]>(
         `/performance/scouting/tracking-identity-reviews?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<PerformanceMatchAnalysisReportRead[]>(
+        `/performance/scouting/match-analysis-reports?organization_id=${organizationId}`,
         { identity }
       ),
       apiRequest<PerformanceMatchPitchCalibrationRead[]>(
@@ -3761,6 +3771,7 @@ export default function HomePage() {
     setOppositionScoutingReports(reportData);
     setPerformanceMatchTrackingRuns(trackingData);
     setPerformanceMatchTrackingIdentityReviews(trackingIdentityReviewData);
+    setPerformanceMatchAnalysisReports(matchAnalysisReportData);
     setPerformanceMatchPitchCalibrations(calibrationData);
     setPerformanceHardwareKits(hardwareKitData);
     setPerformanceHardwareDevices(hardwareDeviceData);
@@ -3774,6 +3785,11 @@ export default function HomePage() {
     );
     setPerformanceMatchTrackingRun((current) =>
       current && trackingData.some((run) => run.id === current.id) ? current : trackingData[0] ?? null
+    );
+    setPerformanceMatchAnalysisReport((current) =>
+      current && matchAnalysisReportData.some((report) => report.id === current.id)
+        ? current
+        : matchAnalysisReportData[0] ?? null
     );
     setPerformanceMatchPitchCalibration((current) =>
       current && calibrationData.some((calibration) => calibration.id === current.id)
@@ -4862,6 +4878,8 @@ export default function HomePage() {
       setPerformanceMatchTrackingRuns([]);
       setPerformanceMatchTrackingRun(null);
       setPerformanceMatchTrackingIdentityReviews([]);
+      setPerformanceMatchAnalysisReports([]);
+      setPerformanceMatchAnalysisReport(null);
       setPerformanceMatchPitchCalibrations([]);
       setPerformanceMatchPitchCalibration(null);
       setPerformanceHighlightReels([]);
@@ -10051,6 +10069,83 @@ export default function HomePage() {
           jersey_number: result.review.jersey_number ?? ""
         }));
         addLog(`${result.review.track_id} identity ${result.review.decision}`, "good");
+      }
+    );
+  };
+
+  const createPerformanceMatchAnalysisReport = () => {
+    if (!selectedOrganizationId || !performanceMatchTrackingRun) {
+      addLog("Track a match before generating player guidance", "bad");
+      return;
+    }
+    runAction(
+      `create-match-analysis-report-${performanceMatchTrackingRun.id}`,
+      () =>
+        apiRequest<PerformanceMatchAnalysisReportRead>(
+          `/performance/scouting/tracking-runs/${performanceMatchTrackingRun.id}/analysis-reports`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              audience: "coach",
+              report_scope: "team_match_review",
+              title: oppositionScoutingVideo
+                ? `${oppositionScoutingVideo.opponent_name} player guidance`
+                : "Player guidance report",
+              include_player_cards: true,
+              include_tactical_shape: true,
+              notes: "Console-generated report for coach review and player feedback."
+            }
+          }
+        ),
+      (report) => {
+        setPerformanceMatchAnalysisReport(report);
+        setPerformanceMatchAnalysisReports((current) => [
+          report,
+          ...current.filter((item) => item.id !== report.id)
+        ]);
+        addLog(`${report.title} ready for download`, "good");
+      }
+    );
+  };
+
+  const downloadPerformanceMatchAnalysisReport = (report: PerformanceMatchAnalysisReportRead) => {
+    runAction(
+      `download-performance-match-analysis-report-${report.id}`,
+      async () => {
+        const headers = new Headers({ Accept: "text/markdown,*/*" });
+        if (authSession) {
+          headers.set("Authorization", `Bearer ${authSession.accessToken}`);
+        } else {
+          headers.set("X-Afrolete-Sub", identity.sub);
+          headers.set("X-Afrolete-Email", identity.email);
+          headers.set("X-Afrolete-Name", identity.name);
+        }
+        const response = await fetch(
+          `${apiBaseUrl}/api/v1/performance/scouting/match-analysis-reports/${report.id}/download`,
+          { headers }
+        );
+        if (!response.ok) {
+          throw new Error(`Match report download failed: ${response.status}`);
+        }
+        const blob = await response.blob();
+        const href = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = href;
+        anchor.download = `${report.title.replace(/[^A-Za-z0-9._-]+/g, "-").toLowerCase()}-${report.id}.md`;
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(href);
+        return {
+          title: report.title,
+          checksum: response.headers.get("X-Afrolete-Match-Report-Checksum") ?? report.checksum,
+          size: blob.size
+        };
+      },
+      (download) => {
+        addLog(`${download.title} downloaded (${download.size} bytes, ${download.checksum.slice(0, 8)})`, "good");
       }
     );
   };
@@ -24947,6 +25042,7 @@ export default function HomePage() {
                   <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Generate report</button>
                   <button type="button" onClick={calibrateOppositionMatchVideo} disabled={busyAction !== null}>Calibrate pitch</button>
                   <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
+                  <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Player guidance</button>
                   <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>Export reel</button>
                 </div>
               </div>
@@ -25014,7 +25110,16 @@ export default function HomePage() {
                   <p>
                     {performanceHighlightReel
                       ? `${Math.round(performanceHighlightReel.duration_seconds)}s · ${performanceHighlightReel.audience} · ${performanceHighlightReel.purpose}`
-                      : "Generate AI-selected reels for coaches, players, families, scouts, and fans."}
+                    : "Generate AI-selected reels for coaches, players, families, scouts, and fans."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Player guidance</span>
+                  <strong>{performanceMatchAnalysisReport?.status ?? "not generated"}</strong>
+                  <p>
+                    {performanceMatchAnalysisReport
+                      ? `${performanceMatchAnalysisReport.player_cards.length} player card(s) · ${Math.round(performanceMatchAnalysisReport.size_bytes / 1024)} KB`
+                      : "Generate a shareable coach/player report from tracking, shape, and quality signals."}
                   </p>
                 </article>
               </div>
@@ -25042,6 +25147,9 @@ export default function HomePage() {
                           setPerformanceHighlightReelExport(
                             performanceHighlightReelExports.find((artifact) => artifact.video_asset_id === video.id) ?? null
                           );
+                          setPerformanceMatchAnalysisReport(
+                            performanceMatchAnalysisReports.find((report) => report.video_asset_id === video.id) ?? null
+                          );
                         }} disabled={busyAction !== null}>Select</button>
                       </span>
                     </article>
@@ -25062,6 +25170,27 @@ export default function HomePage() {
                         {performanceMatchTrackingRun.calibration ? ` · calibrated ${Math.round(performanceMatchTrackingRun.calibration.quality_score * 100)}%` : " · uncalibrated"}
                       </small>
                     </div>
+                  </article>
+                  <article className="task-card">
+                    <div>
+                      <strong>Shareable player guidance</strong>
+                      <span>
+                        {performanceMatchAnalysisReport?.tracking_run_id === performanceMatchTrackingRun.id
+                          ? `${performanceMatchAnalysisReport.title} · ${performanceMatchAnalysisReport.player_cards.length} player card(s)`
+                          : "Generate a coach/player report from this tracking run."}
+                      </span>
+                      <small>
+                        {performanceMatchAnalysisReport?.tracking_run_id === performanceMatchTrackingRun.id
+                          ? `${performanceMatchAnalysisReport.model_policy} · ${performanceMatchAnalysisReport.checksum.slice(0, 8)} · ${Math.round(performanceMatchAnalysisReport.size_bytes / 1024)} KB`
+                          : "Includes load summary, player metrics, tactical shape, data quality, and action guidance."}
+                      </small>
+                    </div>
+                    <span>
+                      <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Generate</button>
+                      {performanceMatchAnalysisReport?.tracking_run_id === performanceMatchTrackingRun.id ? (
+                        <button type="button" onClick={() => downloadPerformanceMatchAnalysisReport(performanceMatchAnalysisReport)} disabled={busyAction !== null}>Download</button>
+                      ) : null}
+                    </span>
                   </article>
                   <article className="task-card">
                     <div>
@@ -25184,6 +25313,32 @@ export default function HomePage() {
                           </span>
                           <small>{review.sample_count} samples updated · {review.notes ?? new Date(review.reviewed_at).toLocaleString()}</small>
                         </div>
+                      </article>
+                    ))}
+                  {performanceMatchAnalysisReports
+                    .filter((report) => report.tracking_run_id === performanceMatchTrackingRun.id)
+                    .slice(0, 3)
+                    .map((report) => (
+                      <article key={report.id} className="task-card">
+                        <div>
+                          <strong>{report.title} · {report.status}</strong>
+                          <span>
+                            {report.player_cards.length} player card(s) · {report.recommendations.length} recommendation(s) · {Math.round(report.size_bytes / 1024)} KB
+                          </span>
+                          <small>{report.content_type} · {report.checksum.slice(0, 12)}</small>
+                        </div>
+                        <span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPerformanceMatchAnalysisReport(report);
+                              downloadPerformanceMatchAnalysisReport(report);
+                            }}
+                            disabled={busyAction !== null}
+                          >
+                            Download
+                          </button>
+                        </span>
                       </article>
                     ))}
                 </div>

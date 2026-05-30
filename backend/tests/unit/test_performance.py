@@ -3084,6 +3084,52 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert reviews.status_code == 200
     assert reviews.json()[0]["id"] == review["id"]
 
+    report_response = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{revised_tracking['id']}/analysis-reports",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "audience": "coach",
+            "report_scope": "team_match_review",
+            "title": "Tracking City player guidance",
+            "include_player_cards": True,
+            "include_tactical_shape": True,
+            "notes": "Share after coach review.",
+        },
+    )
+    assert report_response.status_code == 201
+    report = report_response.json()
+    assert report["status"] == "generated"
+    assert report["model_policy"] == "afrolete-match-analysis-report-v1"
+    assert report["summary"]["total_distance_m"] == 30.0
+    assert report["summary"]["player_count"] == 3
+    assert report["player_cards"][0]["player_label"] == "Confirmed Forward"
+    assert report["player_cards"][0]["high_speed_distance_m"] == 20.0
+    assert any(shape["team_label"] == "Home" for shape in report["team_shape"])
+    assert any("high-speed load" in recommendation for recommendation in report["recommendations"])
+    assert len(report["checksum"]) == 64
+    assert report["size_bytes"] > 400
+    assert report["storage_url"].startswith("local://performance-match-reports/")
+
+    reports = client.get(
+        f"/api/v1/performance/scouting/match-analysis-reports?organization_id={organization['id']}&tracking_run_id={tracking['id']}",
+        headers=identity_headers,
+    )
+    assert reports.status_code == 200
+    assert reports.json()[0]["id"] == report["id"]
+
+    download_response = client.get(
+        f"/api/v1/performance/scouting/match-analysis-reports/{report['id']}/download",
+        headers=identity_headers,
+    )
+    assert download_response.status_code == 200
+    assert download_response.headers["X-Afrolete-Match-Report-Checksum"] == report["checksum"]
+    report_text = download_response.text
+    assert "# Tracking City player guidance" in report_text
+    assert "Confirmed Forward" in report_text
+    assert "## Tactical Shape" in report_text
+    assert "## Data Quality" in report_text
+
 
 def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, identity_headers, monkeypatch) -> None:
     organization, team, _, _ = create_rostered_athlete(client, identity_headers)

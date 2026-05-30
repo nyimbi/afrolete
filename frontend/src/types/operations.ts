@@ -6969,6 +6969,30 @@ export type PerformanceMatchTrackingIdentityReviewResultRead = {
   tracking_run: PerformanceMatchTrackingRunRead;
 };
 
+export type PerformanceMatchAnalysisReportRead = {
+  id: UUID;
+  organization_id: UUID;
+  tracking_run_id: UUID;
+  video_asset_id: UUID;
+  created_by_person_id: UUID | null;
+  title: string;
+  audience: string;
+  report_scope: string;
+  status: string;
+  model_policy: string;
+  summary: Record<string, unknown>;
+  player_cards: Record<string, unknown>[];
+  team_shape: Record<string, unknown>[];
+  recommendations: string[];
+  artifact_format: string;
+  content_type: string;
+  storage_url: string;
+  checksum: string;
+  size_bytes: number;
+  generated_at: string;
+  created_at: string;
+};
+
 export type PerformanceHardwareKitRead = {
   id: UUID;
   organization_id: UUID;

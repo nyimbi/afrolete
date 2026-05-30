@@ -522,6 +522,37 @@ class PerformanceMatchTrackingIdentityReview(IdMixin, TimestampMixin, Base):
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class PerformanceMatchAnalysisReport(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_match_analysis_reports"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    tracking_run_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_match_tracking_runs.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    audience: Mapped[str] = mapped_column(String(80), default="coach", nullable=False, index=True)
+    report_scope: Mapped[str] = mapped_column(String(80), default="team_match_review", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="generated", nullable=False, index=True)
+    model_policy: Mapped[str] = mapped_column(String(180), default="afrolete-match-report-v1", nullable=False)
+    summary_json: Mapped[str] = mapped_column(Text, nullable=False)
+    player_cards_json: Mapped[str] = mapped_column(Text, nullable=False)
+    team_shape_json: Mapped[str] = mapped_column(Text, nullable=False)
+    recommendations_json: Mapped[str] = mapped_column(Text, nullable=False)
+    artifact_format: Mapped[str] = mapped_column(String(40), default="markdown", nullable=False, index=True)
+    content_type: Mapped[str] = mapped_column(String(120), default="text/markdown; charset=utf-8", nullable=False)
+    storage_url: Mapped[str] = mapped_column(String(800), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class PerformanceHighlightReel(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_highlight_reels"
 

@@ -32,11 +32,13 @@ services:
       AFROLETE_AGENT_EXECUTION_MODE: deterministic
       AFROLETE_PERFORMANCE_VIDEO_FILE_DIR: /app/data/performance-videos
       AFROLETE_PERFORMANCE_HIGHLIGHT_EXPORT_DIR: /app/data/performance-highlight-exports
+      AFROLETE_PERFORMANCE_MATCH_REPORT_DIR: /app/data/performance-match-reports
     ports:
       - "8000:8000"
     volumes:
       - afrolete-performance-videos:/app/data/performance-videos
       - afrolete-performance-highlight-exports:/app/data/performance-highlight-exports
+      - afrolete-performance-match-reports:/app/data/performance-match-reports
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,9 +86,11 @@ services:
       AFROLETE_AGENT_EXECUTION_MODE: deterministic
       AFROLETE_PERFORMANCE_VIDEO_FILE_DIR: /app/data/performance-videos
       AFROLETE_PERFORMANCE_HIGHLIGHT_EXPORT_DIR: /app/data/performance-highlight-exports
+      AFROLETE_PERFORMANCE_MATCH_REPORT_DIR: /app/data/performance-match-reports
     volumes:
       - afrolete-performance-videos:/app/data/performance-videos
       - afrolete-performance-highlight-exports:/app/data/performance-highlight-exports
+      - afrolete-performance-match-reports:/app/data/performance-match-reports
     depends_on:
       backend:
         condition: service_healthy
@@ -111,6 +115,7 @@ services:
       AFROLETE_SEED_DEMO: "0"
       AFROLETE_PERFORMANCE_VIDEO_FILE_DIR: /app/data/performance-videos
       AFROLETE_PERFORMANCE_HIGHLIGHT_EXPORT_DIR: /app/data/performance-highlight-exports
+      AFROLETE_PERFORMANCE_MATCH_REPORT_DIR: /app/data/performance-match-reports
       AFROLETE_PERFORMANCE_POSE_WORKER_API_BASE_URL: http://backend:8000
       AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_SUB: kc-owner-1
       AFROLETE_PERFORMANCE_POSE_WORKER_LOCAL_AUTH_EMAIL: owner@example.com
@@ -118,6 +123,7 @@ services:
     volumes:
       - afrolete-performance-videos:/app/data/performance-videos
       - afrolete-performance-highlight-exports:/app/data/performance-highlight-exports
+      - afrolete-performance-match-reports:/app/data/performance-match-reports
     depends_on:
       backend:
         condition: service_healthy
@@ -132,3 +138,4 @@ volumes:
   afrolete-postgres:
   afrolete-performance-videos:
   afrolete-performance-highlight-exports:
+  afrolete-performance-match-reports:

@@ -57,6 +57,7 @@ from app.models.performance import (
     PerformanceHardwareSyncRun,
     PerformanceHighlightReel,
     PerformanceHighlightReelExport,
+    PerformanceMatchAnalysisReport,
     PerformanceMatchPitchCalibration,
     PerformanceMatchTrackingIdentityReview,
     PerformanceMatchTrackingRun,
@@ -98,6 +99,7 @@ from app.schemas.performance import (
     PerformanceHighlightReelCreate,
     PerformanceHighlightReelExportCreate,
     PerformanceIngestionCreate,
+    PerformanceMatchAnalysisReportCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
     PerformanceModelExtractionBenchmarkRunCreate,
@@ -1025,6 +1027,146 @@ async def list_match_tracking_identity_reviews(
             )
         ).all()
     )
+
+
+async def create_performance_match_analysis_report(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    tracking_run_id: UUID,
+    payload: PerformanceMatchAnalysisReportCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> PerformanceMatchAnalysisReport:
+    run = await get_match_tracking_run(db, tracking_run_id)
+    if run.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, run.organization_id)
+    video_asset = await get_opposition_scouting_video_asset(db, run.video_asset_id)
+    tracking = await match_tracking_run_read(db, run)
+    selected_settings = settings or get_settings()
+    artifact = build_match_analysis_report_artifact(
+        tracking,
+        video_asset,
+        audience=payload.audience,
+        report_scope=payload.report_scope,
+        title=payload.title,
+        include_player_cards=payload.include_player_cards,
+        include_tactical_shape=payload.include_tactical_shape,
+        notes=payload.notes,
+    )
+    report_id = uuid4()
+    content = bytes(artifact["content"])
+    checksum = hashlib.sha256(content).hexdigest()
+    key = match_analysis_report_object_key(run.organization_id, run.id, report_id, str(artifact["filename"]))
+    stored = put_object(
+        selected_settings,
+        local_root=selected_settings.performance_match_report_dir,
+        local_url_prefix=selected_settings.performance_match_report_url_prefix,
+        key=key,
+        content=content,
+        content_type=str(artifact["content_type"]),
+    )
+    report = PerformanceMatchAnalysisReport(
+        id=report_id,
+        organization_id=run.organization_id,
+        tracking_run_id=run.id,
+        video_asset_id=run.video_asset_id,
+        created_by_person_id=identity.person_id,
+        title=str(artifact["title"]),
+        audience=payload.audience.strip().lower(),
+        report_scope=payload.report_scope.strip().lower(),
+        status="generated",
+        model_policy=str(artifact["model_policy"]),
+        summary_json=json.dumps(artifact["summary"], default=str),
+        player_cards_json=json.dumps(artifact["player_cards"], default=str),
+        team_shape_json=json.dumps(artifact["team_shape"], default=str),
+        recommendations_json=json.dumps(artifact["recommendations"], default=str),
+        artifact_format="markdown",
+        content_type=str(artifact["content_type"]),
+        storage_url=stored.url,
+        storage_path=stored.path,
+        checksum=checksum,
+        size_bytes=len(content),
+        generated_at=datetime.now(UTC),
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    return report
+
+
+async def list_performance_match_analysis_reports(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    tracking_run_id: UUID | None = None,
+) -> list[PerformanceMatchAnalysisReport]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceMatchAnalysisReport).where(
+        PerformanceMatchAnalysisReport.organization_id == organization_id
+    )
+    if tracking_run_id is not None:
+        statement = statement.where(PerformanceMatchAnalysisReport.tracking_run_id == tracking_run_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(PerformanceMatchAnalysisReport.generated_at.desc()).limit(50)
+            )
+        ).all()
+    )
+
+
+async def downloadable_performance_match_analysis_report(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    report_id: UUID,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    report = await get_performance_match_analysis_report(db, report_id)
+    await ensure_manage_performance(authz, identity, report.organization_id)
+    selected_settings = settings or get_settings()
+    content = get_object(
+        selected_settings,
+        local_root=selected_settings.performance_match_report_dir,
+        key=performance_match_analysis_report_object_key(report, selected_settings),
+    )
+    checksum = hashlib.sha256(content).hexdigest()
+    if checksum != report.checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Match report checksum mismatch")
+    return {
+        "content": content,
+        "content_type": report.content_type,
+        "filename": match_analysis_report_download_filename(report),
+        "checksum": checksum,
+    }
+
+
+def match_analysis_report_read(report: PerformanceMatchAnalysisReport) -> dict[str, object]:
+    return {
+        "id": report.id,
+        "organization_id": report.organization_id,
+        "tracking_run_id": report.tracking_run_id,
+        "video_asset_id": report.video_asset_id,
+        "created_by_person_id": report.created_by_person_id,
+        "title": report.title,
+        "audience": report.audience,
+        "report_scope": report.report_scope,
+        "status": report.status,
+        "model_policy": report.model_policy,
+        "summary": decode_json_dict(report.summary_json),
+        "player_cards": decode_json_list(report.player_cards_json),
+        "team_shape": decode_json_list(report.team_shape_json),
+        "recommendations": decode_string_list(report.recommendations_json),
+        "artifact_format": report.artifact_format,
+        "content_type": report.content_type,
+        "storage_url": report.storage_url,
+        "checksum": report.checksum,
+        "size_bytes": report.size_bytes,
+        "generated_at": report.generated_at,
+        "created_at": report.created_at,
+    }
 
 
 async def create_performance_highlight_reel(
@@ -7747,6 +7889,231 @@ def performance_highlight_reel_export_object_key(
         )
 
 
+def match_analysis_report_object_key(
+    organization_id: UUID,
+    tracking_run_id: UUID,
+    report_id: UUID,
+    filename: str,
+) -> str:
+    return (
+        Path(str(organization_id))
+        / "match-reports"
+        / str(tracking_run_id)
+        / f"{report_id}-{safe_highlight_export_filename(filename)}"
+    ).as_posix()
+
+
+def performance_match_analysis_report_object_key(
+    report: PerformanceMatchAnalysisReport,
+    settings: Settings,
+) -> str:
+    if report.storage_path.startswith("s3://"):
+        prefix = f"s3://{settings.object_storage_bucket}/"
+        if report.storage_path.startswith(prefix):
+            return report.storage_path[len(prefix):]
+    local_root = Path(settings.performance_match_report_dir)
+    storage_path = Path(report.storage_path)
+    try:
+        return storage_path.relative_to(local_root).as_posix()
+    except ValueError:
+        return match_analysis_report_object_key(
+            report.organization_id,
+            report.tracking_run_id,
+            report.id,
+            match_analysis_report_download_filename(report),
+        )
+
+
+def match_analysis_report_download_filename(report: PerformanceMatchAnalysisReport) -> str:
+    return f"{safe_highlight_export_filename(report.title)}-{report.id}.md"
+
+
+def build_match_analysis_report_artifact(
+    tracking: dict[str, object],
+    video_asset: OppositionScoutingVideoAsset,
+    *,
+    audience: str,
+    report_scope: str,
+    title: str | None,
+    include_player_cards: bool,
+    include_tactical_shape: bool,
+    notes: str | None,
+) -> dict[str, object]:
+    player_metrics = [item for item in tracking.get("player_metrics", []) if isinstance(item, dict)]
+    player_cards = sorted(
+        [
+            {
+                "track_id": str(metric.get("track_id") or "unknown"),
+                "player_label": metric.get("player_label"),
+                "team_label": metric.get("team_label"),
+                "jersey_number": metric.get("jersey_number"),
+                "distance_m": round(float(metric.get("distance_m") or 0.0), 2),
+                "high_speed_distance_m": round(float(metric.get("high_speed_distance_m") or 0.0), 2),
+                "max_speed_mps": round(float(metric.get("max_speed_mps") or 0.0), 3),
+                "sprint_count": int(metric.get("sprint_count") or 0),
+                "work_rate_m_per_min": round(float(metric.get("work_rate_m_per_min") or 0.0), 2),
+                "dominant_zone": metric.get("dominant_zone") or "unknown",
+                "tracking_quality_score": round(float(metric.get("tracking_quality_score") or 0.0), 3),
+                "coaching_flags": [str(flag) for flag in (metric.get("coaching_flags") or [])],
+            }
+            for metric in player_metrics
+        ],
+        key=lambda card: (
+            float(card["high_speed_distance_m"]),
+            float(card["distance_m"]),
+            float(card["max_speed_mps"]),
+        ),
+        reverse=True,
+    )[:8] if include_player_cards else []
+    team_shape = [
+        item for item in tracking.get("team_shape_metrics", []) if isinstance(item, dict)
+    ] if include_tactical_shape else []
+    summary = {
+        "video_asset_id": str(video_asset.id),
+        "filename": video_asset.filename,
+        "opponent_name": video_asset.opponent_name,
+        "sport": video_asset.sport,
+        "tracking_run_id": str(tracking.get("id")),
+        "status": tracking.get("status"),
+        "source_provider": tracking.get("source_provider"),
+        "readiness_level": tracking.get("readiness_level"),
+        "sample_count": int(tracking.get("sample_count") or 0),
+        "player_count": int(tracking.get("player_count") or 0),
+        "total_distance_m": round(float(tracking.get("total_distance_m") or 0.0), 2),
+        "high_speed_distance_m": round(float(tracking.get("high_speed_distance_m") or 0.0), 2),
+        "max_speed_mps": round(float(tracking.get("max_speed_mps") or 0.0), 3),
+        "sprint_count": int(tracking.get("sprint_count") or 0),
+        "tracking_quality_score": round(float(tracking.get("tracking_quality_score") or 0.0), 3),
+        "identity_continuity_score": round(float(tracking.get("identity_continuity_score") or 0.0), 3),
+        "calibration_quality_score": round(float(tracking.get("calibration_quality_score") or 0.0), 3),
+    }
+    recommendations = match_analysis_report_recommendations(tracking, player_cards, team_shape)
+    report_title = title.strip() if title and title.strip() else f"{video_asset.opponent_name} match analysis"
+    content = match_analysis_report_markdown(
+        title=report_title,
+        audience=audience,
+        report_scope=report_scope,
+        summary=summary,
+        recommendations=recommendations,
+        player_cards=player_cards,
+        team_shape=team_shape,
+        quality_warnings=[str(item) for item in (tracking.get("quality_warnings") or [])],
+        notes=notes,
+    ).encode()
+    return {
+        "title": report_title,
+        "filename": f"{safe_highlight_export_filename(report_title)}.md",
+        "content_type": "text/markdown; charset=utf-8",
+        "content": content,
+        "model_policy": "afrolete-match-analysis-report-v1",
+        "summary": summary,
+        "player_cards": player_cards,
+        "team_shape": team_shape,
+        "recommendations": recommendations,
+    }
+
+
+def match_analysis_report_recommendations(
+    tracking: dict[str, object],
+    player_cards: list[dict[str, object]],
+    team_shape: list[dict[str, object]],
+) -> list[str]:
+    recommendations: list[str] = []
+    recommendations.extend(str(item) for item in (tracking.get("coaching_guidance") or []) if str(item))
+    recommendations.extend(str(item) for item in (tracking.get("tactical_guidance") or []) if str(item))
+    for warning in tracking.get("quality_warnings") or []:
+        recommendations.append(f"Data quality: {warning}")
+    if player_cards:
+        top_load = player_cards[0]
+        recommendations.append(
+            "Review recovery and substitution plans for "
+            f"{top_load.get('player_label') or top_load.get('track_id')} after "
+            f"{round(float(top_load.get('high_speed_distance_m') or 0))}m high-speed work."
+        )
+    stretched = [
+        shape for shape in team_shape
+        if str(shape.get("shape_hint") or "") in {"stretched_shape", "vertical_stagger", "wide_flat_line"}
+    ]
+    if stretched:
+        recommendations.append("Use video review to connect tactical shape changes with pressing and recovery cues.")
+    if not recommendations:
+        recommendations.append("Capture a calibrated tracking run before issuing individualized player guidance.")
+    return list(dict.fromkeys(recommendations))[:12]
+
+
+def match_analysis_report_markdown(
+    *,
+    title: str,
+    audience: str,
+    report_scope: str,
+    summary: dict[str, object],
+    recommendations: list[str],
+    player_cards: list[dict[str, object]],
+    team_shape: list[dict[str, object]],
+    quality_warnings: list[str],
+    notes: str | None,
+) -> str:
+    lines = [
+        f"# {title}",
+        "",
+        f"Audience: {audience.strip().lower()}",
+        f"Scope: {report_scope.strip().lower()}",
+        f"Video: {summary['filename']}",
+        f"Opponent: {summary['opponent_name']}",
+        f"Readiness: {str(summary['readiness_level']).replace('_', ' ')}",
+        "",
+        "## Match Load Summary",
+        f"- Players tracked: {summary['player_count']}",
+        f"- Samples processed: {summary['sample_count']}",
+        f"- Total distance: {summary['total_distance_m']}m",
+        f"- High-speed distance: {summary['high_speed_distance_m']}m",
+        f"- Max speed: {summary['max_speed_mps']} m/s",
+        f"- Sprint count: {summary['sprint_count']}",
+        f"- Tracking quality: {round(float(summary['tracking_quality_score']) * 100)}%",
+        f"- Identity continuity: {round(float(summary['identity_continuity_score']) * 100)}%",
+        "",
+        "## Coaching Guidance",
+    ]
+    lines.extend(f"- {item}" for item in recommendations)
+    lines.extend(["", "## Player Metrics"])
+    if player_cards:
+        for card in player_cards:
+            lines.extend(
+                [
+                    f"### {card.get('player_label') or card.get('track_id')}",
+                    f"- Team: {card.get('team_label') or 'unassigned'}"
+                    + (f" | Jersey: {card.get('jersey_number')}" if card.get("jersey_number") else ""),
+                    f"- Distance: {card['distance_m']}m | High-speed: {card['high_speed_distance_m']}m",
+                    f"- Max speed: {card['max_speed_mps']} m/s | Sprints: {card['sprint_count']}",
+                    f"- Work rate: {card['work_rate_m_per_min']} m/min | Dominant zone: {str(card['dominant_zone']).replace('_', ' ')}",
+                    f"- Guidance: {(card.get('coaching_flags') or ['Review video context before coaching.'])[0]}",
+                ]
+            )
+    else:
+        lines.append("- Player cards were not included in this report.")
+    lines.extend(["", "## Tactical Shape"])
+    if team_shape:
+        for shape in team_shape:
+            lines.append(
+                "- "
+                f"{shape.get('team_label', 'Team')}: {str(shape.get('shape_hint', 'shape')).replace('_', ' ')}; "
+                f"width {shape.get('average_width_percent', 0)}%, "
+                f"depth {shape.get('average_depth_percent', 0)}%, "
+                f"compactness {shape.get('average_compactness_score', 0)}."
+            )
+    else:
+        lines.append("- Tactical shape was not included in this report.")
+    lines.extend(["", "## Data Quality"])
+    if quality_warnings:
+        lines.extend(f"- {warning}" for warning in quality_warnings)
+    else:
+        lines.append("- Tracking quality is adequate for coach review.")
+    if notes:
+        lines.extend(["", "## Coach Notes", notes.strip()])
+    lines.extend(["", f"Generated: {datetime.now(UTC).isoformat()}"])
+    return "\n".join(lines)
+
+
 def match_pitch_calibration_read(calibration: PerformanceMatchPitchCalibration) -> dict[str, object]:
     return {
         "id": calibration.id,
@@ -8936,6 +9303,16 @@ async def get_match_tracking_run(db: AsyncSession, tracking_run_id: UUID) -> Per
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match tracking run not found")
     return run
+
+
+async def get_performance_match_analysis_report(
+    db: AsyncSession,
+    report_id: UUID,
+) -> PerformanceMatchAnalysisReport:
+    report = await db.get(PerformanceMatchAnalysisReport, report_id)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match analysis report not found")
+    return report
 
 
 def cleaned_optional_text(value: str | None, *, fallback: str | None = None) -> str | None:
