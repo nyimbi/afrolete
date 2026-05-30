@@ -334,6 +334,62 @@ class OppositionScoutingReport(IdMixin, TimestampMixin, Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class PerformanceMatchTrackingRun(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_match_tracking_runs"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    source_provider: Mapped[str] = mapped_column(String(80), default="manual_tracking", nullable=False, index=True)
+    model_policy: Mapped[str] = mapped_column(String(180), default="afrolete-match-tracking-v1", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="completed", nullable=False, index=True)
+    pitch_length_m: Mapped[float] = mapped_column(Float, default=105.0, nullable=False)
+    pitch_width_m: Mapped[float] = mapped_column(Float, default=68.0, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    player_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_distance_m: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    max_speed_mps: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    high_speed_distance_m: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    sprint_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    summary_json: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class PerformanceMatchTrackingSample(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_match_tracking_samples"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    tracking_run_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_match_tracking_runs.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    track_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    team_label: Mapped[str | None] = mapped_column(String(120), index=True)
+    player_label: Mapped[str | None] = mapped_column(String(180), index=True)
+    jersey_number: Mapped[str | None] = mapped_column(String(20), index=True)
+    frame_index: Mapped[int | None] = mapped_column(Integer, index=True)
+    timestamp_seconds: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    x_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    y_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    x_meters: Mapped[float] = mapped_column(Float, nullable=False)
+    y_meters: Mapped[float] = mapped_column(Float, nullable=False)
+    speed_mps: Mapped[float | None] = mapped_column(Float)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(80), default="tracking_sample", nullable=False, index=True)
+
+
 class PerformanceMovementReferenceProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_movement_reference_profiles"
     __table_args__ = (

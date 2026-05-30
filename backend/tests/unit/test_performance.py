@@ -2939,6 +2939,68 @@ def test_opposition_scouting_video_generates_tactical_report(client, identity_he
     assert reports.json()[0]["id"] == report["id"]
 
 
+def test_match_video_tracking_computes_player_distances_and_speed_metrics(client, identity_headers) -> None:
+    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    upload_response = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Tracking City",
+            "sport": "football",
+            "filename": "tracking-city.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(b"match tracking video").decode(),
+            "clip_label": "Full match tracking",
+            "match_context": "11v11 football match with GPS-like tracking samples.",
+            "analysis_focus": "player locations, total distance, speed zones, heatmap",
+        },
+    )
+    assert upload_response.status_code == 201
+    video_asset = upload_response.json()
+
+    tracking_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/tracking-runs",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "source_provider": "provider_tracking_import",
+            "pitch_length_m": 105,
+            "pitch_width_m": 68,
+            "replace_existing": True,
+            "samples": [
+                {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 0, "x_meters": 0, "y_meters": 30},
+                {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 1, "x_meters": 10, "y_meters": 30},
+                {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 2, "x_meters": 20, "y_meters": 30},
+                {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 0, "x_meters": 0, "y_meters": 0},
+                {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 1, "x_meters": 3, "y_meters": 4},
+                {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 2, "x_meters": 6, "y_meters": 8},
+            ],
+        },
+    )
+    assert tracking_response.status_code == 201
+    tracking = tracking_response.json()
+    assert tracking["model_policy"] == "afrolete-match-tracking-import-v1"
+    assert tracking["sample_count"] == 6
+    assert tracking["player_count"] == 2
+    assert tracking["total_distance_m"] == 30.0
+    assert tracking["max_speed_mps"] == 10.0
+    assert tracking["high_speed_distance_m"] == 20.0
+    assert tracking["sprint_count"] == 1
+    striker = next(metric for metric in tracking["player_metrics"] if metric["track_id"] == "home-9")
+    assert striker["distance_m"] == 20.0
+    assert striker["sprint_count"] == 1
+    assert striker["dominant_zone"] == "defensive_central"
+
+    runs = client.get(
+        f"/api/v1/performance/scouting/tracking-runs?organization_id={organization['id']}&video_asset_id={video_asset['id']}",
+        headers=identity_headers,
+    )
+    assert runs.status_code == 200
+    assert runs.json()[0]["id"] == tracking["id"]
+
+
 def test_performance_video_upload_pose_gait_analysis_and_annotations(
     client,
     identity_headers,

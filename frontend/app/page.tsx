@@ -369,6 +369,7 @@ import type {
   PerformanceModelExtractionBenchmarkRunRead,
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
+  PerformanceMatchTrackingRunRead,
   PerformanceMovementReferenceProfileRead,
   PerformanceObservationRead,
   PerformancePoseGaitAnalysisRead,
@@ -1660,6 +1661,10 @@ export default function HomePage() {
     useState<OppositionScoutingVideoAssetRead | null>(null);
   const [oppositionScoutingReport, setOppositionScoutingReport] =
     useState<OppositionScoutingReportRead | null>(null);
+  const [performanceMatchTrackingRuns, setPerformanceMatchTrackingRuns] =
+    useState<PerformanceMatchTrackingRunRead[]>([]);
+  const [performanceMatchTrackingRun, setPerformanceMatchTrackingRun] =
+    useState<PerformanceMatchTrackingRunRead | null>(null);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -3651,7 +3656,7 @@ export default function HomePage() {
     if (teamId) {
       params.set("team_id", teamId);
     }
-    const [videoData, reportData] = await Promise.all([
+    const [videoData, reportData, trackingData] = await Promise.all([
       apiRequest<OppositionScoutingVideoAssetRead[]>(
         `/performance/scouting/videos?${params.toString()}`,
         { identity }
@@ -3659,15 +3664,23 @@ export default function HomePage() {
       apiRequest<OppositionScoutingReportRead[]>(
         `/performance/scouting/reports?${params.toString()}`,
         { identity }
+      ),
+      apiRequest<PerformanceMatchTrackingRunRead[]>(
+        `/performance/scouting/tracking-runs?${params.toString()}`,
+        { identity }
       )
     ]);
     setOppositionScoutingVideos(videoData);
     setOppositionScoutingReports(reportData);
+    setPerformanceMatchTrackingRuns(trackingData);
     setOppositionScoutingVideo((current) =>
       current && videoData.some((video) => video.id === current.id) ? current : videoData[0] ?? null
     );
     setOppositionScoutingReport((current) =>
       current && reportData.some((report) => report.id === current.id) ? current : reportData[0] ?? null
+    );
+    setPerformanceMatchTrackingRun((current) =>
+      current && trackingData.some((run) => run.id === current.id) ? current : trackingData[0] ?? null
     );
   }, [identity]);
 
@@ -4740,6 +4753,8 @@ export default function HomePage() {
       setOppositionScoutingReports([]);
       setOppositionScoutingVideo(null);
       setOppositionScoutingReport(null);
+      setPerformanceMatchTrackingRuns([]);
+      setPerformanceMatchTrackingRun(null);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
@@ -9752,6 +9767,77 @@ export default function HomePage() {
             : current
         );
         addLog(`${report.opponent_name} scout report generated`, "good");
+      }
+    );
+  };
+
+  const trackOppositionMatchVideo = () => {
+    if (!selectedOrganizationId || !oppositionScoutingVideo) {
+      addLog("Upload or select an opponent match video before tracking players", "bad");
+      return;
+    }
+    const samples = [
+      ["home-9", "Home", "Striker", "9", 0, 8, 34],
+      ["home-9", "Home", "Striker", "9", 1, 18, 34],
+      ["home-9", "Home", "Striker", "9", 2, 29, 35],
+      ["home-9", "Home", "Striker", "9", 3, 42, 36],
+      ["away-6", "Opponent", "Midfielder", "6", 0, 50, 28],
+      ["away-6", "Opponent", "Midfielder", "6", 1, 55, 31],
+      ["away-6", "Opponent", "Midfielder", "6", 2, 61, 34],
+      ["away-6", "Opponent", "Midfielder", "6", 3, 67, 37],
+      ["away-2", "Opponent", "Fullback", "2", 0, 75, 8],
+      ["away-2", "Opponent", "Fullback", "2", 1, 78, 14],
+      ["away-2", "Opponent", "Fullback", "2", 2, 82, 21],
+      ["away-2", "Opponent", "Fullback", "2", 3, 88, 29]
+    ].map(([trackId, teamLabel, playerLabel, jerseyNumber, timestamp, xMeters, yMeters], index) => ({
+      track_id: trackId,
+      team_label: teamLabel,
+      player_label: playerLabel,
+      jersey_number: jerseyNumber,
+      frame_index: index * 25,
+      timestamp_seconds: timestamp,
+      x_meters: xMeters,
+      y_meters: yMeters,
+      confidence: 0.92,
+      source: "console_match_tracking_demo"
+    }));
+    runAction(
+      "track-opposition-match-video",
+      () =>
+        apiRequest<PerformanceMatchTrackingRunRead>(
+          `/performance/scouting/videos/${oppositionScoutingVideo.id}/tracking-runs`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              source_provider: "console_tracking_import",
+              pitch_length_m: 105,
+              pitch_width_m: 68,
+              replace_existing: true,
+              samples
+            }
+          }
+        ),
+      (run) => {
+        setPerformanceMatchTrackingRun(run);
+        setPerformanceMatchTrackingRuns((current) => [
+          run,
+          ...current.filter((item) => item.id !== run.id)
+        ]);
+        setOppositionScoutingVideos((current) =>
+          current.map((video) =>
+            video.id === run.video_asset_id
+              ? { ...video, status: "tracked", analyzed_at: run.completed_at }
+              : video
+          )
+        );
+        setOppositionScoutingVideo((current) =>
+          current && current.id === run.video_asset_id
+            ? { ...current, status: "tracked", analyzed_at: run.completed_at }
+            : current
+        );
+        addLog(`Tracked ${run.player_count} players for ${Math.round(run.total_distance_m)}m`, "good");
       }
     );
   };
@@ -23745,6 +23831,7 @@ export default function HomePage() {
                 <button type="button" onClick={annotatePerformanceVideo} disabled={busyAction !== null}>Annotate</button>
                 <button type="button" onClick={uploadOppositionScoutingVideo} disabled={busyAction !== null}>Scout video</button>
                 <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Scout report</button>
+                <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
                 <button type="button" onClick={runPerformanceForecastValidation} disabled={busyAction !== null}>Forecast QA</button>
@@ -24297,6 +24384,7 @@ export default function HomePage() {
                 <div className="event-toolbar">
                   <button type="button" onClick={uploadOppositionScoutingVideo} disabled={busyAction !== null}>Upload scout video</button>
                   <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Generate report</button>
+                  <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
                 </div>
               </div>
               <div className="mini-grid">
@@ -24319,6 +24407,15 @@ export default function HomePage() {
                   <strong>{selectedTeam?.name ?? "Organization-wide"}</strong>
                   <p>{selectedCompetition?.name ?? selectedEvent?.title ?? "Team, competition, and event context are attached when selected."}</p>
                 </article>
+                <article className="mini-card">
+                  <span className="muted">Tracking</span>
+                  <strong>{performanceMatchTrackingRun?.player_count ?? 0} players</strong>
+                  <p>
+                    {performanceMatchTrackingRun
+                      ? `${Math.round(performanceMatchTrackingRun.total_distance_m)}m total · max ${performanceMatchTrackingRun.max_speed_mps.toFixed(1)} m/s`
+                      : "Track the match to calculate locations, distance, high-speed work, and heatmaps."}
+                  </p>
+                </article>
               </div>
               {oppositionScoutingVideo ? (
                 <div className="task-list">
@@ -24330,8 +24427,41 @@ export default function HomePage() {
                         <small>{video.analysis_focus ?? "Tactical scout video"}</small>
                       </div>
                       <span>
-                        <button type="button" onClick={() => setOppositionScoutingVideo(video)} disabled={busyAction !== null}>Select</button>
+                        <button type="button" onClick={() => {
+                          setOppositionScoutingVideo(video);
+                          setPerformanceMatchTrackingRun(
+                            performanceMatchTrackingRuns.find((run) => run.video_asset_id === video.id) ?? null
+                          );
+                        }} disabled={busyAction !== null}>Select</button>
                       </span>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+              {performanceMatchTrackingRun ? (
+                <div className="task-list">
+                  <article className="task-card">
+                    <div>
+                      <strong>{performanceMatchTrackingRun.model_policy}</strong>
+                      <span>
+                        {performanceMatchTrackingRun.sample_count} samples · {performanceMatchTrackingRun.player_count} players ·{" "}
+                        {Math.round(performanceMatchTrackingRun.high_speed_distance_m)}m high-speed
+                      </span>
+                      <small>
+                        {performanceMatchTrackingRun.source_provider.replaceAll("_", " ")} · pitch {performanceMatchTrackingRun.pitch_length_m}m x {performanceMatchTrackingRun.pitch_width_m}m
+                      </small>
+                    </div>
+                  </article>
+                  {performanceMatchTrackingRun.player_metrics.slice(0, 6).map((metric) => (
+                    <article key={metric.track_id} className="task-card">
+                      <div>
+                        <strong>{metric.player_label ?? metric.track_id} · {metric.team_label ?? "unassigned"}</strong>
+                        <span>
+                          {Math.round(metric.distance_m)}m · max {metric.max_speed_mps.toFixed(1)} m/s ·{" "}
+                          {Math.round(metric.high_speed_distance_m)}m high-speed · {metric.sprint_count} sprint(s)
+                        </span>
+                        <small>{metric.dominant_zone.replaceAll("_", " ")} · {metric.sample_count} samples</small>
+                      </div>
                     </article>
                   ))}
                 </div>

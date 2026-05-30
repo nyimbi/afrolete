@@ -50,6 +50,8 @@ from app.models.performance import (
     OppositionScoutingVideoAsset,
     PerformanceAchievementAward,
     PerformanceGoal,
+    PerformanceMatchTrackingRun,
+    PerformanceMatchTrackingSample,
     PerformanceMetricDefinition,
     PerformanceForecastValidationRun,
     PerformanceMovementReferenceProfile,
@@ -85,6 +87,8 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
     PerformanceModelExtractionBenchmarkRunCreate,
+    PerformanceMatchTrackingRunCreate,
+    PerformanceMatchTrackingSampleCreate,
     PerformanceMovementReferenceProfileCreate,
     PerformanceObservationCreate,
     PerformanceObservationReviewCreate,
@@ -695,6 +699,145 @@ async def list_opposition_scouting_reports(
             )
         ).all()
     )
+
+
+async def create_match_tracking_run(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    video_asset_id: UUID,
+    payload: PerformanceMatchTrackingRunCreate,
+    authz: AuthorizationService,
+    settings: Settings | None = None,
+) -> dict[str, object]:
+    video_asset = await get_opposition_scouting_video_asset(db, video_asset_id)
+    if video_asset.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    selected_settings = settings or get_settings()
+    sample_payloads = list(payload.samples)
+    source_provider = payload.source_provider.strip().lower()
+    model_policy = "afrolete-match-tracking-import-v1"
+    warnings: list[str] = []
+    if payload.auto_track and not sample_payloads:
+        content = get_object(
+            selected_settings,
+            local_root=selected_settings.performance_video_file_dir,
+            key=opposition_scouting_video_object_key(video_asset, selected_settings),
+        )
+        if hashlib.sha256(content).hexdigest() != video_asset.checksum:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Stored video checksum mismatch")
+        extracted = extract_match_tracking_samples_from_video_content(
+            content,
+            pitch_length_m=payload.pitch_length_m,
+            pitch_width_m=payload.pitch_width_m,
+            max_frames=payload.max_frames,
+            sample_every_seconds=payload.sample_every_seconds,
+            min_detection_confidence=payload.min_detection_confidence,
+        )
+        sample_payloads = list(extracted["samples"])
+        source_provider = str(extracted["source_provider"])
+        model_policy = str(extracted["model_policy"])
+        warnings = list(extracted["warnings"])
+    if not sample_payloads:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Tracking run requires samples or auto_track=true",
+        )
+    if payload.replace_existing:
+        existing_runs = list(
+            (
+                await db.scalars(
+                    select(PerformanceMatchTrackingRun).where(
+                        PerformanceMatchTrackingRun.video_asset_id == video_asset.id
+                    )
+                )
+            ).all()
+        )
+        if existing_runs:
+            run_ids = [run.id for run in existing_runs]
+            await db.execute(
+                delete(PerformanceMatchTrackingSample).where(
+                    PerformanceMatchTrackingSample.tracking_run_id.in_(run_ids)
+                )
+            )
+            await db.execute(delete(PerformanceMatchTrackingRun).where(PerformanceMatchTrackingRun.id.in_(run_ids)))
+    now = datetime.now(UTC)
+    normalized_samples = [
+        normalize_match_tracking_sample(item, payload.pitch_length_m, payload.pitch_width_m)
+        for item in sample_payloads
+    ]
+    summary = summarize_match_tracking_samples(normalized_samples)
+    if warnings:
+        summary["warnings"] = warnings
+    run = PerformanceMatchTrackingRun(
+        organization_id=video_asset.organization_id,
+        video_asset_id=video_asset.id,
+        team_id=video_asset.team_id,
+        event_id=video_asset.event_id,
+        created_by_person_id=identity.person_id,
+        source_provider=source_provider,
+        model_policy=model_policy,
+        status="completed",
+        pitch_length_m=payload.pitch_length_m,
+        pitch_width_m=payload.pitch_width_m,
+        sample_count=len(normalized_samples),
+        player_count=len(summary["player_metrics"]),
+        total_distance_m=float(summary["total_distance_m"]),
+        max_speed_mps=float(summary["max_speed_mps"]),
+        high_speed_distance_m=float(summary["high_speed_distance_m"]),
+        sprint_count=int(summary["sprint_count"]),
+        summary_json=json.dumps(summary, default=str),
+        started_at=now,
+        completed_at=now,
+    )
+    db.add(run)
+    await db.flush()
+    db.add_all(
+        [
+            PerformanceMatchTrackingSample(
+                organization_id=video_asset.organization_id,
+                tracking_run_id=run.id,
+                video_asset_id=video_asset.id,
+                track_id=str(item["track_id"]),
+                person_id=item.get("person_id"),
+                team_label=item.get("team_label"),
+                player_label=item.get("player_label"),
+                jersey_number=item.get("jersey_number"),
+                frame_index=item.get("frame_index"),
+                timestamp_seconds=float(item["timestamp_seconds"]),
+                x_percent=float(item["x_percent"]),
+                y_percent=float(item["y_percent"]),
+                x_meters=float(item["x_meters"]),
+                y_meters=float(item["y_meters"]),
+                speed_mps=item.get("speed_mps"),
+                confidence=item.get("confidence"),
+                source=str(item.get("source") or "tracking_sample"),
+            )
+            for item in normalized_samples
+        ]
+    )
+    video_asset.status = "tracked"
+    video_asset.analyzed_at = now
+    await db.commit()
+    await db.refresh(run)
+    return await match_tracking_run_read(db, run)
+
+
+async def list_match_tracking_runs(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    video_asset_id: UUID | None = None,
+) -> list[dict[str, object]]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceMatchTrackingRun).where(
+        PerformanceMatchTrackingRun.organization_id == organization_id
+    )
+    if video_asset_id is not None:
+        statement = statement.where(PerformanceMatchTrackingRun.video_asset_id == video_asset_id)
+    runs = list((await db.scalars(statement.order_by(PerformanceMatchTrackingRun.created_at.desc()).limit(25))).all())
+    return [await match_tracking_run_read(db, run) for run in runs]
 
 
 async def downloadable_performance_video_asset(
@@ -6794,6 +6937,285 @@ def performance_video_object_key(video_asset: PerformanceVideoAsset, settings: S
             / str(video_asset.athlete_profile_id)
             / Path(video_asset.storage_path).name
         ).as_posix()
+
+
+def opposition_scouting_video_object_key(video_asset: OppositionScoutingVideoAsset, settings: Settings) -> str:
+    if video_asset.storage_path.startswith("s3://"):
+        prefix = f"s3://{settings.object_storage_bucket}/"
+        if video_asset.storage_path.startswith(prefix):
+            return video_asset.storage_path[len(prefix):]
+    local_root = Path(settings.performance_video_file_dir)
+    storage_path = Path(video_asset.storage_path)
+    try:
+        return storage_path.relative_to(local_root).as_posix()
+    except ValueError:
+        return (Path(str(video_asset.organization_id)) / "scouting" / Path(video_asset.storage_path).name).as_posix()
+
+
+def normalize_match_tracking_sample(
+    sample: PerformanceMatchTrackingSampleCreate | dict[str, object],
+    pitch_length_m: float,
+    pitch_width_m: float,
+) -> dict[str, object]:
+    raw = sample.model_dump() if hasattr(sample, "model_dump") else dict(sample)
+    x_meters = raw.get("x_meters")
+    y_meters = raw.get("y_meters")
+    x_percent = raw.get("x_percent")
+    y_percent = raw.get("y_percent")
+    if x_meters is None and x_percent is not None:
+        x_meters = float(x_percent) / 100 * pitch_length_m
+    if y_meters is None and y_percent is not None:
+        y_meters = float(y_percent) / 100 * pitch_width_m
+    if x_percent is None and x_meters is not None:
+        x_percent = float(x_meters) / pitch_length_m * 100
+    if y_percent is None and y_meters is not None:
+        y_percent = float(y_meters) / pitch_width_m * 100
+    return {
+        **raw,
+        "x_meters": max(0.0, min(float(x_meters or 0), pitch_length_m)),
+        "y_meters": max(0.0, min(float(y_meters or 0), pitch_width_m)),
+        "x_percent": max(0.0, min(float(x_percent or 0), 100.0)),
+        "y_percent": max(0.0, min(float(y_percent or 0), 100.0)),
+    }
+
+
+def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[str, object]:
+    by_track: dict[str, list[dict[str, object]]] = {}
+    for sample in samples:
+        by_track.setdefault(str(sample["track_id"]), []).append(sample)
+    player_metrics: list[dict[str, object]] = []
+    total_distance = 0.0
+    total_high_speed_distance = 0.0
+    total_sprints = 0
+    overall_max_speed = 0.0
+    for track_id, rows in sorted(by_track.items()):
+        ordered = sorted(rows, key=lambda row: (float(row["timestamp_seconds"]), int(row.get("frame_index") or 0)))
+        distance = 0.0
+        high_speed_distance = 0.0
+        sprint_count = 0
+        max_speed = 0.0
+        previous_above_sprint = False
+        heatmap: dict[str, int] = {}
+        for index, row in enumerate(ordered):
+            zone = match_tracking_zone(float(row["x_percent"]), float(row["y_percent"]))
+            heatmap[zone] = heatmap.get(zone, 0) + 1
+            if index == 0:
+                if row.get("speed_mps") is not None:
+                    max_speed = max(max_speed, float(row["speed_mps"]))
+                continue
+            previous = ordered[index - 1]
+            dt = max(float(row["timestamp_seconds"]) - float(previous["timestamp_seconds"]), 0.001)
+            segment_distance = math.dist(
+                (float(previous["x_meters"]), float(previous["y_meters"])),
+                (float(row["x_meters"]), float(row["y_meters"])),
+            )
+            speed = float(row["speed_mps"]) if row.get("speed_mps") is not None else segment_distance / dt
+            distance += segment_distance
+            max_speed = max(max_speed, speed)
+            if speed >= 5.5:
+                high_speed_distance += segment_distance
+            above_sprint = speed >= 7.0
+            if above_sprint and not previous_above_sprint:
+                sprint_count += 1
+            previous_above_sprint = above_sprint
+        duration = max(float(ordered[-1]["timestamp_seconds"]) - float(ordered[0]["timestamp_seconds"]), 0.0)
+        dominant_zone = max(heatmap.items(), key=lambda item: item[1])[0] if heatmap else "unknown"
+        player_metrics.append(
+            {
+                "track_id": track_id,
+                "player_label": ordered[-1].get("player_label"),
+                "team_label": ordered[-1].get("team_label"),
+                "jersey_number": ordered[-1].get("jersey_number"),
+                "sample_count": len(ordered),
+                "duration_seconds": round(duration, 3),
+                "distance_m": round(distance, 2),
+                "average_speed_mps": round(distance / duration, 3) if duration > 0 else 0.0,
+                "max_speed_mps": round(max_speed, 3),
+                "high_speed_distance_m": round(high_speed_distance, 2),
+                "sprint_count": sprint_count,
+                "dominant_zone": dominant_zone,
+                "heatmap": heatmap,
+            }
+        )
+        total_distance += distance
+        total_high_speed_distance += high_speed_distance
+        total_sprints += sprint_count
+        overall_max_speed = max(overall_max_speed, max_speed)
+    return {
+        "sample_count": len(samples),
+        "player_count": len(player_metrics),
+        "total_distance_m": round(total_distance, 2),
+        "max_speed_mps": round(overall_max_speed, 3),
+        "high_speed_distance_m": round(total_high_speed_distance, 2),
+        "sprint_count": total_sprints,
+        "player_metrics": player_metrics,
+    }
+
+
+def match_tracking_zone(x_percent: float, y_percent: float) -> str:
+    third = "defensive" if x_percent < 33.33 else "middle" if x_percent < 66.66 else "attacking"
+    channel = "left" if y_percent < 33.33 else "central" if y_percent < 66.66 else "right"
+    return f"{third}_{channel}"
+
+
+async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackingRun) -> dict[str, object]:
+    samples = list(
+        (
+            await db.scalars(
+                select(PerformanceMatchTrackingSample)
+                .where(PerformanceMatchTrackingSample.tracking_run_id == run.id)
+                .order_by(
+                    PerformanceMatchTrackingSample.timestamp_seconds,
+                    PerformanceMatchTrackingSample.track_id,
+                )
+                .limit(500)
+            )
+        ).all()
+    )
+    try:
+        summary = json.loads(run.summary_json)
+    except json.JSONDecodeError:
+        summary = {}
+    return {
+        "id": run.id,
+        "organization_id": run.organization_id,
+        "video_asset_id": run.video_asset_id,
+        "team_id": run.team_id,
+        "event_id": run.event_id,
+        "created_by_person_id": run.created_by_person_id,
+        "source_provider": run.source_provider,
+        "model_policy": run.model_policy,
+        "status": run.status,
+        "pitch_length_m": run.pitch_length_m,
+        "pitch_width_m": run.pitch_width_m,
+        "sample_count": run.sample_count,
+        "player_count": run.player_count,
+        "total_distance_m": run.total_distance_m,
+        "max_speed_mps": run.max_speed_mps,
+        "high_speed_distance_m": run.high_speed_distance_m,
+        "sprint_count": run.sprint_count,
+        "player_metrics": summary.get("player_metrics", []),
+        "samples": [match_tracking_sample_read(sample) for sample in samples],
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+    }
+
+
+def match_tracking_sample_read(sample: PerformanceMatchTrackingSample) -> dict[str, object]:
+    return {
+        "id": sample.id,
+        "organization_id": sample.organization_id,
+        "tracking_run_id": sample.tracking_run_id,
+        "video_asset_id": sample.video_asset_id,
+        "track_id": sample.track_id,
+        "person_id": sample.person_id,
+        "team_label": sample.team_label,
+        "player_label": sample.player_label,
+        "jersey_number": sample.jersey_number,
+        "frame_index": sample.frame_index,
+        "timestamp_seconds": sample.timestamp_seconds,
+        "x_percent": sample.x_percent,
+        "y_percent": sample.y_percent,
+        "x_meters": sample.x_meters,
+        "y_meters": sample.y_meters,
+        "speed_mps": sample.speed_mps,
+        "confidence": sample.confidence,
+        "source": sample.source,
+    }
+
+
+def extract_match_tracking_samples_from_video_content(
+    content: bytes,
+    *,
+    pitch_length_m: float,
+    pitch_width_m: float,
+    max_frames: int,
+    sample_every_seconds: float,
+    min_detection_confidence: float,
+) -> dict[str, object]:
+    try:
+        import cv2
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenCV match-tracking worker dependencies are not installed",
+        ) from exc
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as handle:
+        handle.write(content)
+        handle.flush()
+        capture = cv2.VideoCapture(handle.name)
+        if not capture.isOpened():
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Video could not be decoded")
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 25.0)
+        width = float(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 1.0)
+        height = float(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1.0)
+        step = max(int(fps * sample_every_seconds), 1)
+        subtractor = cv2.createBackgroundSubtractorMOG2(history=120, varThreshold=36, detectShadows=False)
+        tracks: dict[str, tuple[float, float]] = {}
+        samples: list[dict[str, object]] = []
+        decoded_frames = 0
+        processed_frames = 0
+        frame_index = 0
+        while processed_frames < max_frames:
+            ok, frame = capture.read()
+            if not ok:
+                break
+            decoded_frames += 1
+            if frame_index % step != 0:
+                frame_index += 1
+                continue
+            mask = subtractor.apply(frame)
+            mask = cv2.medianBlur(mask, 5)
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            detections: list[tuple[float, float, float]] = []
+            frame_area = max(width * height, 1.0)
+            for contour in contours:
+                area = float(cv2.contourArea(contour))
+                confidence = min(area / (frame_area * 0.015), 1.0)
+                if confidence < min_detection_confidence or area < frame_area * 0.0003:
+                    continue
+                x, y, w, h = cv2.boundingRect(contour)
+                detections.append((x + w / 2, y + h, confidence))
+            for detection in detections[:22]:
+                track_id = nearest_match_track_id(tracks, detection[0], detection[1])
+                tracks[track_id] = (detection[0], detection[1])
+                x_percent = detection[0] / width * 100
+                y_percent = detection[1] / height * 100
+                samples.append(
+                    {
+                        "track_id": track_id,
+                        "team_label": None,
+                        "player_label": f"Track {track_id}",
+                        "jersey_number": None,
+                        "frame_index": frame_index,
+                        "timestamp_seconds": frame_index / fps,
+                        "x_percent": x_percent,
+                        "y_percent": y_percent,
+                        "x_meters": x_percent / 100 * pitch_length_m,
+                        "y_meters": y_percent / 100 * pitch_width_m,
+                        "confidence": detection[2],
+                        "source": "opencv_motion_tracker",
+                    }
+                )
+            processed_frames += 1
+            frame_index += 1
+    return {
+        "samples": samples,
+        "decoded_frame_count": decoded_frames,
+        "processed_frame_count": processed_frames,
+        "source_provider": "opencv_motion_tracker",
+        "model_policy": "opencv-background-subtraction-match-tracker-v1",
+        "warnings": ["No pitch homography calibration applied; coordinates are frame-normalized estimates."],
+    }
+
+
+def nearest_match_track_id(tracks: dict[str, tuple[float, float]], x: float, y: float) -> str:
+    if not tracks:
+        return "1"
+    nearest_id = min(tracks, key=lambda track_id: math.dist(tracks[track_id], (x, y)))
+    if math.dist(tracks[nearest_id], (x, y)) <= 80:
+        return nearest_id
+    return str(len(tracks) + 1)
 
 
 def decode_annotation_tags(value: str | None) -> list[str]:

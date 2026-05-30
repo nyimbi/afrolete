@@ -46,6 +46,8 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkRunRead,
     PerformanceMetricTrendRead,
     PerformanceMetricTrendSeriesRead,
+    PerformanceMatchTrackingRunCreate,
+    PerformanceMatchTrackingRunRead,
     PerformanceMovementReferenceProfileCreate,
     PerformanceMovementReferenceProfileRead,
     PerformanceObservationCreate,
@@ -95,6 +97,7 @@ from app.services.performance import (
     create_assessment,
     create_athlete_pathway_projection,
     create_metric_definition,
+    create_match_tracking_run,
     create_movement_reference_profile,
     create_observation,
     create_opposition_scouting_report,
@@ -117,6 +120,7 @@ from app.services.performance import (
     list_performance_awards,
     list_performance_goals,
     list_metric_definitions,
+    list_match_tracking_runs,
     list_movement_reference_profiles,
     list_my_player_performance,
     list_observations,
@@ -790,6 +794,43 @@ async def create_opposition_scouting_report_route(
     return to_opposition_scouting_report_read(
         await create_opposition_scouting_report(db, identity, video_asset_id, payload, authz)
     )
+
+
+@router.post(
+    "/scouting/videos/{video_asset_id}/tracking-runs",
+    response_model=PerformanceMatchTrackingRunRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_match_tracking_run_route(
+    video_asset_id: UUID,
+    payload: PerformanceMatchTrackingRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchTrackingRunRead:
+    return PerformanceMatchTrackingRunRead(
+        **await create_match_tracking_run(db, identity, video_asset_id, payload, authz)
+    )
+
+
+@router.get("/scouting/tracking-runs", response_model=list[PerformanceMatchTrackingRunRead])
+async def list_match_tracking_runs_route(
+    organization_id: UUID = Query(),
+    video_asset_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMatchTrackingRunRead]:
+    return [
+        PerformanceMatchTrackingRunRead(**run)
+        for run in await list_match_tracking_runs(
+            db,
+            identity,
+            organization_id,
+            authz,
+            video_asset_id=video_asset_id,
+        )
+    ]
 
 
 @router.get("/scouting/reports", response_model=list[OppositionScoutingReportRead])

@@ -496,6 +496,105 @@ class PerformancePoseGaitAnalysisRead(BaseModel):
     coaching: PerformanceVideoCoachingRead | None
 
 
+class PerformanceMatchTrackingSampleCreate(BaseModel):
+    track_id: str = Field(min_length=1, max_length=120)
+    person_id: UUID | None = None
+    team_label: str | None = Field(default=None, max_length=120)
+    player_label: str | None = Field(default=None, max_length=180)
+    jersey_number: str | None = Field(default=None, max_length=20)
+    frame_index: int | None = Field(default=None, ge=0)
+    timestamp_seconds: float = Field(ge=0)
+    x_percent: float | None = Field(default=None, ge=0, le=100)
+    y_percent: float | None = Field(default=None, ge=0, le=100)
+    x_meters: float | None = Field(default=None, ge=0, le=130)
+    y_meters: float | None = Field(default=None, ge=0, le=90)
+    speed_mps: float | None = Field(default=None, ge=0, le=15)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    source: str = Field(default="tracking_sample", min_length=2, max_length=80)
+
+    @model_validator(mode="after")
+    def has_position(self) -> "PerformanceMatchTrackingSampleCreate":
+        has_percent = self.x_percent is not None and self.y_percent is not None
+        has_meters = self.x_meters is not None and self.y_meters is not None
+        if not has_percent and not has_meters:
+            raise ValueError("Provide either percent coordinates or pitch-meter coordinates")
+        return self
+
+
+class PerformanceMatchTrackingRunCreate(BaseModel):
+    organization_id: UUID
+    source_provider: str = Field(default="manual_tracking", min_length=2, max_length=80)
+    pitch_length_m: float = Field(default=105.0, ge=80, le=130)
+    pitch_width_m: float = Field(default=68.0, ge=45, le=90)
+    replace_existing: bool = False
+    auto_track: bool = False
+    max_frames: int = Field(default=120, ge=1, le=2000)
+    sample_every_seconds: float = Field(default=0.5, ge=0.04, le=10)
+    min_detection_confidence: float = Field(default=0.35, ge=0, le=1)
+    samples: list[PerformanceMatchTrackingSampleCreate] = Field(default_factory=list, max_length=5000)
+
+
+class PerformanceMatchTrackingSampleRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    tracking_run_id: UUID
+    video_asset_id: UUID
+    track_id: str
+    person_id: UUID | None
+    team_label: str | None
+    player_label: str | None
+    jersey_number: str | None
+    frame_index: int | None
+    timestamp_seconds: float
+    x_percent: float
+    y_percent: float
+    x_meters: float
+    y_meters: float
+    speed_mps: float | None
+    confidence: float | None
+    source: str
+
+
+class PerformanceMatchTrackingPlayerMetricRead(BaseModel):
+    track_id: str
+    player_label: str | None
+    team_label: str | None
+    jersey_number: str | None
+    sample_count: int
+    duration_seconds: float
+    distance_m: float
+    average_speed_mps: float
+    max_speed_mps: float
+    high_speed_distance_m: float
+    sprint_count: int
+    dominant_zone: str
+    heatmap: dict[str, int]
+
+
+class PerformanceMatchTrackingRunRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    team_id: UUID | None
+    event_id: UUID | None
+    created_by_person_id: UUID | None
+    source_provider: str
+    model_policy: str
+    status: str
+    pitch_length_m: float
+    pitch_width_m: float
+    sample_count: int
+    player_count: int
+    total_distance_m: float
+    max_speed_mps: float
+    high_speed_distance_m: float
+    sprint_count: int
+    player_metrics: list[PerformanceMatchTrackingPlayerMetricRead]
+    samples: list[PerformanceMatchTrackingSampleRead]
+    started_at: datetime
+    completed_at: datetime | None
+
+
 class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
     case_id: str = Field(min_length=2, max_length=120)
     metric_code: str = Field(min_length=2, max_length=80)

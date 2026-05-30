@@ -6841,6 +6841,67 @@ export type OppositionScoutingReportRead = {
   generated_at: string;
 };
 
+export type PerformanceMatchTrackingSampleRead = {
+  id: UUID;
+  organization_id: UUID;
+  tracking_run_id: UUID;
+  video_asset_id: UUID;
+  track_id: string;
+  person_id: UUID | null;
+  team_label: string | null;
+  player_label: string | null;
+  jersey_number: string | null;
+  frame_index: number | null;
+  timestamp_seconds: number;
+  x_percent: number;
+  y_percent: number;
+  x_meters: number;
+  y_meters: number;
+  speed_mps: number | null;
+  confidence: number | null;
+  source: string;
+};
+
+export type PerformanceMatchTrackingPlayerMetricRead = {
+  track_id: string;
+  player_label: string | null;
+  team_label: string | null;
+  jersey_number: string | null;
+  sample_count: number;
+  duration_seconds: number;
+  distance_m: number;
+  average_speed_mps: number;
+  max_speed_mps: number;
+  high_speed_distance_m: number;
+  sprint_count: number;
+  dominant_zone: string;
+  heatmap: Record<string, number>;
+};
+
+export type PerformanceMatchTrackingRunRead = {
+  id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  team_id: UUID | null;
+  event_id: UUID | null;
+  created_by_person_id: UUID | null;
+  source_provider: string;
+  model_policy: string;
+  status: string;
+  pitch_length_m: number;
+  pitch_width_m: number;
+  sample_count: number;
+  player_count: number;
+  total_distance_m: number;
+  max_speed_mps: number;
+  high_speed_distance_m: number;
+  sprint_count: number;
+  player_metrics: PerformanceMatchTrackingPlayerMetricRead[];
+  samples: PerformanceMatchTrackingSampleRead[];
+  started_at: string;
+  completed_at: string | null;
+};
+
 export type PerformanceVideoAnnotationRead = {
   id: UUID;
   organization_id: UUID;

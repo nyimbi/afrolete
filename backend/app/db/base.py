@@ -185,6 +185,8 @@ from app.models.performance import (  # noqa: F401,E402
     OppositionScoutingVideoAsset,
     PerformanceAchievementAward,
     PerformanceGoal,
+    PerformanceMatchTrackingRun,
+    PerformanceMatchTrackingSample,
     PerformanceMetricDefinition,
     PerformanceForecastValidationRun,
     PerformanceMovementReferenceProfile,
