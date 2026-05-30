@@ -354,6 +354,8 @@ import type {
   CoachEducationCatalogRead,
   CoachEducationDashboardRead,
   CoachEducationEnrollmentRead,
+  CoachVoiceCommandSessionRead,
+  CoachVoiceCommandShortcutRead,
   ProductExperienceCatalogRead,
   ProductExperienceDashboardRead,
   ProductHelpSearchRead,
@@ -2019,6 +2021,10 @@ export default function HomePage() {
   const [voiceCoachProfiles, setVoiceCoachProfiles] = useState<VoiceCoachProfileRead[]>([]);
   const [voiceCoachingSessions, setVoiceCoachingSessions] = useState<VoiceCoachingSessionRead[]>([]);
   const [voiceMetricQuery, setVoiceMetricQuery] = useState<VoiceMetricQueryRead | null>(null);
+  const [coachVoiceCommandSessions, setCoachVoiceCommandSessions] =
+    useState<CoachVoiceCommandSessionRead[]>([]);
+  const [coachVoiceCommandShortcuts, setCoachVoiceCommandShortcuts] =
+    useState<CoachVoiceCommandShortcutRead[]>([]);
   const [volunteerProfiles, setVolunteerProfiles] = useState<VolunteerProfileRead[]>([]);
   const [volunteerOpportunities, setVolunteerOpportunities] = useState<VolunteerOpportunityRead[]>([]);
   const [volunteerAssignments, setVolunteerAssignments] = useState<VolunteerAssignmentRead[]>([]);
@@ -2855,6 +2861,16 @@ export default function HomePage() {
     speed_mps: 7.4,
     context_note: "Acceleration block before small-sided game.",
     metric_query: "How far have I run?"
+  });
+  const [coachVoiceCommandForm, setCoachVoiceCommandForm] = useState({
+    session_label: "City FC match voice desk",
+    context_type: "match",
+    input_device: "sideline_headset",
+    listening_mode: "push_to_talk",
+    transcript: "Goal for Emma in minute 62",
+    shortcut_phrase: "time for fresh legs",
+    shortcut_actions: "check_fatigue,suggest_substitution,alert_assistant_coach",
+    fatigue_threshold: 70
   });
   const [volunteerForm, setVolunteerForm] = useState({
     display_name: "Maria Volunteer",
@@ -4351,7 +4367,9 @@ export default function HomePage() {
       experienceDashboard,
       tourProgress,
       voiceProfiles,
-      voiceSessions
+      voiceSessions,
+      coachVoiceSessions,
+      coachVoiceShortcuts
     ] = await Promise.all([
       apiRequest<TrainingDrillRead[]>(`/training/drills?organization_id=${organizationId}`),
       apiRequest<TrainingPlanRead[]>(`/training/plans?organization_id=${organizationId}${teamQuery}`),
@@ -4387,6 +4405,14 @@ export default function HomePage() {
       apiRequest<VoiceCoachingSessionRead[]>(
         `/voice-coaching/sessions?organization_id=${organizationId}&limit=8`,
         { identity }
+      ),
+      apiRequest<CoachVoiceCommandSessionRead[]>(
+        `/voice-commands/sessions?organization_id=${organizationId}&limit=8`,
+        { identity }
+      ),
+      apiRequest<CoachVoiceCommandShortcutRead[]>(
+        `/voice-commands/shortcuts?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setTrainingDrills(drills);
@@ -4401,6 +4427,8 @@ export default function HomePage() {
     setProductTourProgress(tourProgress);
     setVoiceCoachProfiles(voiceProfiles);
     setVoiceCoachingSessions(voiceSessions);
+    setCoachVoiceCommandSessions(coachVoiceSessions);
+    setCoachVoiceCommandShortcuts(coachVoiceShortcuts);
     setSelectedTrainingPlanId((current) =>
       plans.some((plan) => plan.id === current) ? current : plans[0]?.id ?? ""
     );
@@ -5333,6 +5361,8 @@ export default function HomePage() {
       setVoiceCoachProfiles([]);
       setVoiceCoachingSessions([]);
       setVoiceMetricQuery(null);
+      setCoachVoiceCommandSessions([]);
+      setCoachVoiceCommandShortcuts([]);
       setVolunteerProfiles([]);
       setVolunteerOpportunities([]);
       setVolunteerAssignments([]);
@@ -12940,6 +12970,118 @@ export default function HomePage() {
     );
   };
 
+  const startCoachVoiceCommandSession = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "start-coach-voice-command-session",
+      () =>
+        apiRequest<CoachVoiceCommandSessionRead>("/voice-commands/sessions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            team_id: selectedTeamId || undefined,
+            event_id: selectedEventId || undefined,
+            session_label: coachVoiceCommandForm.session_label,
+            context_type: coachVoiceCommandForm.context_type,
+            input_device: coachVoiceCommandForm.input_device,
+            listening_mode: coachVoiceCommandForm.listening_mode,
+            consent_recorded: true
+          }
+        }),
+      (session) => {
+        setCoachVoiceCommandSessions((current) => [
+          session,
+          ...current.filter((item) => item.id !== session.id)
+        ]);
+        addLog(`${session.session_label} voice command session started`, "good");
+      }
+    );
+  };
+
+  const processCoachVoiceCommand = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const session = coachVoiceCommandSessions[0];
+    if (!session) {
+      addLog("Start a coach voice command session first", "bad");
+      return;
+    }
+    runAction(
+      "process-coach-voice-command",
+      () =>
+        apiRequest<CoachVoiceCommandSessionRead["commands"][number]>(
+          `/voice-commands/sessions/${session.id}/commands`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              transcript: coachVoiceCommandForm.transcript,
+              source_device: coachVoiceCommandForm.input_device,
+              latency_ms: 280,
+              context: { match_minute: 62 }
+            }
+          }
+        ),
+      (command) => {
+        setCoachVoiceCommandSessions((current) =>
+          current.map((item) =>
+            item.id === session.id
+              ? {
+                  ...item,
+                  command_count: item.command_count + 1,
+                  last_command_at: command.processed_at,
+                  commands: [command, ...item.commands.filter((existing) => existing.id !== command.id)]
+                }
+              : item
+          )
+        );
+        addLog(
+          `${command.intent.replaceAll("_", " ")} command ${command.command_status.replaceAll("_", " ")}`,
+          command.safety_flags.length ? "bad" : "good"
+        );
+      }
+    );
+  };
+
+  const createCoachVoiceShortcut = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-coach-voice-shortcut",
+      () =>
+        apiRequest<CoachVoiceCommandShortcutRead>("/voice-commands/shortcuts", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            phrase: coachVoiceCommandForm.shortcut_phrase,
+            intent: "custom_command",
+            action_sequence: coachVoiceCommandForm.shortcut_actions
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean),
+            parameters: { fatigue_threshold: coachVoiceCommandForm.fatigue_threshold },
+            trained_sample_count: 5
+          }
+        }),
+      (shortcut) => {
+        setCoachVoiceCommandShortcuts((current) => [
+          shortcut,
+          ...current.filter((item) => item.id !== shortcut.id)
+        ]);
+        addLog(`${shortcut.phrase} voice shortcut ready`, "good");
+      }
+    );
+  };
+
   const createTrainingSession = () => {
     if (!selectedOrganizationId || !selectedTeamId) {
       addLog("Select an organization and team first", "bad");
@@ -19822,6 +19964,120 @@ export default function HomePage() {
                     <strong>{session.activity_type.replaceAll("_", " ")} · {session.intensity}/100</strong>
                     <span>{session.delivered_count} delivered · {session.suppressed_count} suppressed · {session.stage.replaceAll("_", " ")}</span>
                     <small>{session.cues[0]?.message ?? session.debrief}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Coach voice commands</p>
+                <h2>Hands-free match operations</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={startCoachVoiceCommandSession} disabled={busyAction !== null}>Session</button>
+                <button type="button" onClick={processCoachVoiceCommand} disabled={busyAction !== null}>Process</button>
+                <button type="button" onClick={createCoachVoiceShortcut} disabled={busyAction !== null}>Shortcut</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{coachVoiceCommandSessions[0]?.command_count ?? 0}</strong>
+              <span>{coachVoiceCommandSessions[0]?.status ?? "no active command session"}</span>
+              <small>
+                {coachVoiceCommandSessions[0]?.commands[0]?.response_text ??
+                  "Capture match-day transcripts, classify intent, prepare official-log changes, flag safety-sensitive commands, and keep raw audio out of storage."}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Label
+                <input value={coachVoiceCommandForm.session_label} onChange={(event) => setCoachVoiceCommandForm({ ...coachVoiceCommandForm, session_label: event.target.value })} />
+              </label>
+              <label>
+                Context
+                <select value={coachVoiceCommandForm.context_type} onChange={(event) => setCoachVoiceCommandForm({ ...coachVoiceCommandForm, context_type: event.target.value })}>
+                  <option value="match">Match</option>
+                  <option value="training">Training</option>
+                  <option value="operations">Operations</option>
+                  <option value="emergency">Emergency</option>
+                </select>
+              </label>
+              <label>
+                Device
+                <input value={coachVoiceCommandForm.input_device} onChange={(event) => setCoachVoiceCommandForm({ ...coachVoiceCommandForm, input_device: event.target.value })} />
+              </label>
+              <label>
+                Mode
+                <select value={coachVoiceCommandForm.listening_mode} onChange={(event) => setCoachVoiceCommandForm({ ...coachVoiceCommandForm, listening_mode: event.target.value })}>
+                  <option value="push_to_talk">Push to talk</option>
+                  <option value="always_on">Always on</option>
+                  <option value="manual_transcript">Manual transcript</option>
+                </select>
+              </label>
+              <label className="wide-field">
+                Transcript
+                <input value={coachVoiceCommandForm.transcript} onChange={(event) => setCoachVoiceCommandForm({ ...coachVoiceCommandForm, transcript: event.target.value })} />
+              </label>
+              <label>
+                Shortcut phrase
+                <input value={coachVoiceCommandForm.shortcut_phrase} onChange={(event) => setCoachVoiceCommandForm({ ...coachVoiceCommandForm, shortcut_phrase: event.target.value })} />
+              </label>
+              <label>
+                Fatigue threshold
+                <input type="number" min="0" max="100" value={coachVoiceCommandForm.fatigue_threshold} onChange={(event) => setCoachVoiceCommandForm({ ...coachVoiceCommandForm, fatigue_threshold: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Shortcut actions
+                <input value={coachVoiceCommandForm.shortcut_actions} onChange={(event) => setCoachVoiceCommandForm({ ...coachVoiceCommandForm, shortcut_actions: event.target.value })} />
+              </label>
+            </div>
+            <div className="mini-grid">
+              <article className="mini-card">
+                <span className="muted">Privacy</span>
+                <strong>{coachVoiceCommandSessions[0]?.raw_audio_retention_policy.replaceAll("_", " ") ?? "transcript only"}</strong>
+                <p>Consent and raw-audio retention policy are stored on every command session.</p>
+              </article>
+              <article className="mini-card">
+                <span className="muted">Shortcuts</span>
+                <strong>{coachVoiceCommandShortcuts.length}</strong>
+                <p>{coachVoiceCommandShortcuts[0]?.phrase ?? "Create custom coach phrases for repeated sideline actions."}</p>
+              </article>
+              <article className="mini-card">
+                <span className="muted">Review</span>
+                <strong>{coachVoiceCommandSessions[0]?.commands.filter((command) => command.requires_confirmation).length ?? 0}</strong>
+                <p>Official records, substitutions, injuries, and safety commands require review.</p>
+              </article>
+            </div>
+            <div className="task-list">
+              {coachVoiceCommandSessions.slice(0, 3).map((session) => (
+                <article key={session.id} className="task-card">
+                  <div>
+                    <strong>{session.session_label} · {session.context_type}</strong>
+                    <span>{session.command_count} command(s) · {session.input_device.replaceAll("_", " ")} · {session.listening_mode.replaceAll("_", " ")}</span>
+                    <small>{session.raw_audio_retention_policy.replaceAll("_", " ")} · {session.model_policy}</small>
+                  </div>
+                </article>
+              ))}
+              {coachVoiceCommandSessions[0]?.commands.slice(0, 5).map((command) => (
+                <article key={command.id} className="task-card">
+                  <div>
+                    <strong>{command.intent.replaceAll("_", " ")} · {Math.round(command.confidence * 100)}%</strong>
+                    <span>{command.response_text}</span>
+                    <small>
+                      {command.command_status.replaceAll("_", " ")} · {String(command.action_result.action ?? command.permission_scope).replaceAll("_", " ")}
+                      {command.safety_flags[0] ? ` · ${command.safety_flags[0].replaceAll("_", " ")}` : ""}
+                    </small>
+                  </div>
+                </article>
+              ))}
+              {coachVoiceCommandShortcuts.slice(0, 3).map((shortcut) => (
+                <article key={shortcut.id} className="task-card">
+                  <div>
+                    <strong>{shortcut.phrase}</strong>
+                    <span>{shortcut.action_sequence.join(" -> ") || shortcut.intent.replaceAll("_", " ")}</span>
+                    <small>{shortcut.trained_sample_count} sample(s) · sensitivity {Math.round(shortcut.sensitivity * 100)}%</small>
                   </div>
                 </article>
               ))}

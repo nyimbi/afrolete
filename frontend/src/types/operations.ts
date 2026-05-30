@@ -8561,6 +8561,66 @@ export type VoiceMetricQueryRead = {
   model_policy: string;
 };
 
+export type CoachVoiceCommandRead = {
+  id: UUID;
+  organization_id: UUID;
+  session_id: UUID;
+  issued_by_person_id: UUID | null;
+  transcript: string;
+  normalized_transcript: string;
+  intent: string;
+  confidence: number;
+  command_status: string;
+  response_text: string;
+  entities: Record<string, unknown>;
+  action_result: Record<string, unknown>;
+  safety_flags: string[];
+  permission_scope: string;
+  requires_confirmation: boolean;
+  confirmed_at: string | null;
+  source_device: string | null;
+  latency_ms: number | null;
+  model_policy: string;
+  processed_at: string;
+};
+
+export type CoachVoiceCommandSessionRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID | null;
+  team_id: UUID | null;
+  event_id: UUID | null;
+  session_label: string;
+  context_type: string;
+  input_device: string;
+  language: string;
+  listening_mode: string;
+  consent_recorded: boolean;
+  raw_audio_retention_policy: string;
+  command_count: number;
+  status: string;
+  model_policy: string;
+  started_at: string;
+  last_command_at: string | null;
+  commands: CoachVoiceCommandRead[];
+};
+
+export type CoachVoiceCommandShortcutRead = {
+  id: UUID;
+  organization_id: UUID;
+  created_by_person_id: UUID | null;
+  phrase: string;
+  intent: string;
+  action_sequence: string[];
+  parameters: Record<string, unknown>;
+  notification_policy: string;
+  auto_log: boolean;
+  trained_sample_count: number;
+  sensitivity: number;
+  status: string;
+  created_at: string;
+};
+
 export type TrainingDrillRead = {
   id: UUID;
   organization_id: UUID;

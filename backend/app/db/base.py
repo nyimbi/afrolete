@@ -248,5 +248,10 @@ from app.models.voice_coaching import (  # noqa: F401,E402
     VoiceCoachingCue,
     VoiceCoachingSession,
 )
+from app.models.voice_commands import (  # noqa: F401,E402
+    CoachVoiceCommand,
+    CoachVoiceCommandSession,
+    CoachVoiceCommandShortcut,
+)
 
 __all__ = ["Base"]

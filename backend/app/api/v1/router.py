@@ -23,6 +23,7 @@ from app.api.v1.routes import teams
 from app.api.v1.routes import training
 from app.api.v1.routes import volunteers
 from app.api.v1.routes import voice_coaching
+from app.api.v1.routes import voice_commands
 
 api_router = APIRouter()
 api_router.include_router(platform.router, tags=["platform"])
@@ -48,3 +49,4 @@ api_router.include_router(teams.router)
 api_router.include_router(training.router)
 api_router.include_router(volunteers.router)
 api_router.include_router(voice_coaching.router)
+api_router.include_router(voice_commands.router)
