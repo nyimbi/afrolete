@@ -1374,6 +1374,36 @@ class PerformanceHighlightReelShareRead(BaseModel):
     published_at: datetime
 
 
+class PerformanceSharedHighlightReelFeedbackCreate(BaseModel):
+    organization_id: UUID
+    status: str = Field(default="acknowledged", pattern="^(acknowledged|needs_help|inspired|confused|completed)$")
+    rating: int | None = Field(default=None, ge=1, le=5)
+    response_text: str | None = Field(default=None, max_length=2000)
+    priority_focus: str | None = Field(default=None, max_length=120)
+    requested_follow_up: bool = False
+    clip_time_seconds: float | None = Field(default=None, ge=0, le=86400)
+
+
+class PerformanceSharedHighlightReelFeedbackRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    highlight_reel_id: UUID
+    highlight_reel_export_id: UUID | None
+    share_audit_id: UUID
+    message_id: UUID
+    message_recipient_id: UUID
+    person_id: UUID
+    status: str
+    rating: int | None
+    response_text: str | None
+    priority_focus: str | None
+    requested_follow_up: bool
+    clip_time_seconds: float | None
+    submitted_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
 class PerformanceSharedHighlightReelRead(BaseModel):
     organization_id: UUID
     highlight_reel_id: UUID
@@ -1403,6 +1433,7 @@ class PerformanceSharedHighlightReelRead(BaseModel):
     delivery_status: MessageDeliveryStatus
     delivered_at: datetime | None
     read_at: datetime | None
+    feedback: PerformanceSharedHighlightReelFeedbackRead | None = None
     published_at: datetime
     created_at: datetime
 
@@ -1417,6 +1448,12 @@ class PerformanceHighlightReelRecipientEngagementRead(BaseModel):
     read_at: datetime | None
     download_count: int = 0
     last_downloaded_at: datetime | None = None
+    feedback_status: str | None = None
+    feedback_rating: int | None = None
+    feedback_requested_follow_up: bool = False
+    feedback_priority_focus: str | None = None
+    feedback_response_preview: str | None = None
+    feedback_submitted_at: datetime | None = None
 
 
 class PerformanceHighlightReelEngagementRead(BaseModel):
@@ -1440,6 +1477,9 @@ class PerformanceHighlightReelEngagementRead(BaseModel):
     download_count: int = 0
     unique_download_count: int = 0
     download_rate_percent: float = 0.0
+    feedback_count: int = 0
+    follow_up_request_count: int = 0
+    average_feedback_rating: float | None = None
     last_engagement_at: datetime | None = None
     recipients: list[PerformanceHighlightReelRecipientEngagementRead]
     published_at: datetime

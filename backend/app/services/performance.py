@@ -64,6 +64,7 @@ from app.models.performance import (
     PerformanceHighlightReel,
     PerformanceHighlightReelDownloadAudit,
     PerformanceHighlightReelExport,
+    PerformanceHighlightReelFeedback,
     PerformanceHighlightReelShareAudit,
     PerformanceMatchAnalysisReport,
     PerformanceMatchMoment,
@@ -114,6 +115,7 @@ from app.schemas.performance import (
     PerformanceHighlightReelReminderRunCreate,
     PerformanceHighlightReelReminderRunRead,
     PerformanceHighlightReelShareCreate,
+    PerformanceSharedHighlightReelFeedbackCreate,
     PerformanceIngestionCreate,
     PerformanceModelExtractionBulkReviewCreate,
     PerformanceMatchAnalysisReportCreate,
@@ -3462,12 +3464,31 @@ async def list_performance_highlight_reel_engagement(
         recipient_id: {"download_count": int(count or 0), "last_downloaded_at": last_downloaded_at}
         for recipient_id, count, last_downloaded_at in download_rows
     }
+    feedback_rows: list[PerformanceHighlightReelFeedback] = []
+    if recipient_ids:
+        feedback_rows = list(
+            (
+                await db.scalars(
+                    select(PerformanceHighlightReelFeedback).where(
+                        PerformanceHighlightReelFeedback.message_recipient_id.in_(recipient_ids)
+                    )
+                )
+            ).all()
+        )
+    feedback_by_recipient = {
+        feedback.message_recipient_id: feedback
+        for feedback in feedback_rows
+    }
     recipients_by_message: dict[UUID, list[dict[str, object]]] = {}
     for recipient, person in recipient_rows:
         download_stats = downloads_by_recipient.get(
             recipient.id,
             {"download_count": 0, "last_downloaded_at": None},
         )
+        feedback = feedback_by_recipient.get(recipient.id)
+        feedback_response_preview = feedback.response_text if feedback and feedback.response_text else None
+        if feedback_response_preview and len(feedback_response_preview) > 180:
+            feedback_response_preview = f"{feedback_response_preview[:177]}..."
         recipients_by_message.setdefault(recipient.message_id, []).append(
             {
                 "recipient_id": recipient.id,
@@ -3479,6 +3500,12 @@ async def list_performance_highlight_reel_engagement(
                 "read_at": recipient.read_at,
                 "download_count": download_stats["download_count"],
                 "last_downloaded_at": download_stats["last_downloaded_at"],
+                "feedback_status": feedback.status if feedback is not None else None,
+                "feedback_rating": feedback.rating if feedback is not None else None,
+                "feedback_requested_follow_up": feedback.requested_follow_up if feedback is not None else False,
+                "feedback_priority_focus": feedback.priority_focus if feedback is not None else None,
+                "feedback_response_preview": feedback_response_preview,
+                "feedback_submitted_at": feedback.submitted_at if feedback is not None else None,
             }
         )
     counts = await delivery_counts_for_messages(db, message_ids)
@@ -3489,10 +3516,21 @@ async def list_performance_highlight_reel_engagement(
         recipient_count = max(audit.recipient_count, len(recipients), 1)
         download_count = sum(int(recipient.get("download_count") or 0) for recipient in recipients)
         unique_download_count = sum(1 for recipient in recipients if int(recipient.get("download_count") or 0) > 0)
+        feedback_count = sum(1 for recipient in recipients if recipient.get("feedback_status"))
+        follow_up_request_count = sum(1 for recipient in recipients if recipient.get("feedback_requested_follow_up"))
+        feedback_ratings = [
+            int(recipient["feedback_rating"])
+            for recipient in recipients
+            if recipient.get("feedback_rating") is not None
+        ]
         engagement_times = [
             value
             for recipient in recipients
-            for value in (recipient.get("read_at"), recipient.get("last_downloaded_at"))
+            for value in (
+                recipient.get("read_at"),
+                recipient.get("last_downloaded_at"),
+                recipient.get("feedback_submitted_at"),
+            )
             if isinstance(value, datetime)
         ]
         rows.append(
@@ -3517,6 +3555,13 @@ async def list_performance_highlight_reel_engagement(
                 "download_count": download_count,
                 "unique_download_count": unique_download_count,
                 "download_rate_percent": round(unique_download_count / recipient_count * 100, 2),
+                "feedback_count": feedback_count,
+                "follow_up_request_count": follow_up_request_count,
+                "average_feedback_rating": (
+                    round(sum(feedback_ratings) / len(feedback_ratings), 2)
+                    if feedback_ratings
+                    else None
+                ),
                 "last_engagement_at": max(engagement_times) if engagement_times else None,
                 "recipients": recipients,
                 "published_at": audit.published_at,
@@ -4030,12 +4075,35 @@ def highlight_reel_share_audit_read(
     }
 
 
+def highlight_reel_feedback_read(feedback: PerformanceHighlightReelFeedback) -> dict[str, object]:
+    return {
+        "id": feedback.id,
+        "organization_id": feedback.organization_id,
+        "highlight_reel_id": feedback.highlight_reel_id,
+        "highlight_reel_export_id": feedback.highlight_reel_export_id,
+        "share_audit_id": feedback.share_audit_id,
+        "message_id": feedback.message_id,
+        "message_recipient_id": feedback.message_recipient_id,
+        "person_id": feedback.person_id,
+        "status": feedback.status,
+        "rating": feedback.rating,
+        "response_text": feedback.response_text,
+        "priority_focus": feedback.priority_focus,
+        "requested_follow_up": feedback.requested_follow_up,
+        "clip_time_seconds": feedback.clip_time_seconds,
+        "submitted_at": feedback.submitted_at,
+        "created_at": feedback.created_at,
+        "updated_at": feedback.updated_at,
+    }
+
+
 def shared_highlight_reel_read(
     audit: PerformanceHighlightReelShareAudit,
     reel: PerformanceHighlightReel,
     export: PerformanceHighlightReelExport | None,
     recipient: MessageRecipient,
     message: CommunicationMessage,
+    feedback: PerformanceHighlightReelFeedback | None = None,
 ) -> dict[str, object]:
     preview = message.body.strip().replace("\r\n", "\n").replace("\r", "\n")
     if len(preview) > 260:
@@ -4071,6 +4139,7 @@ def shared_highlight_reel_read(
         "delivery_status": recipient.delivery_status,
         "delivered_at": recipient.delivered_at,
         "read_at": recipient.read_at,
+        "feedback": highlight_reel_feedback_read(feedback) if feedback is not None else None,
         "published_at": audit.published_at,
         "created_at": audit.created_at,
     }
@@ -4093,6 +4162,7 @@ async def list_my_shared_highlight_reels(
                 PerformanceHighlightReelExport,
                 MessageRecipient,
                 CommunicationMessage,
+                PerformanceHighlightReelFeedback,
             )
             .join(PerformanceHighlightReel, PerformanceHighlightReel.id == PerformanceHighlightReelShareAudit.highlight_reel_id)
             .outerjoin(
@@ -4101,6 +4171,10 @@ async def list_my_shared_highlight_reels(
             )
             .join(CommunicationMessage, CommunicationMessage.id == PerformanceHighlightReelShareAudit.message_id)
             .join(MessageRecipient, MessageRecipient.message_id == PerformanceHighlightReelShareAudit.message_id)
+            .outerjoin(
+                PerformanceHighlightReelFeedback,
+                PerformanceHighlightReelFeedback.message_recipient_id == MessageRecipient.id,
+            )
             .where(PerformanceHighlightReelShareAudit.organization_id == organization_id)
             .where(MessageRecipient.person_id == identity.person_id)
             .order_by(
@@ -4111,9 +4185,82 @@ async def list_my_shared_highlight_reels(
         )
     ).all()
     return [
-        shared_highlight_reel_read(audit, reel, export, recipient, message)
-        for audit, reel, export, recipient, message in rows
+        shared_highlight_reel_read(audit, reel, export, recipient, message, feedback)
+        for audit, reel, export, recipient, message, feedback in rows
     ]
+
+
+async def submit_my_shared_highlight_reel_feedback(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    recipient_id: UUID,
+    payload: PerformanceSharedHighlightReelFeedbackCreate,
+) -> PerformanceHighlightReelFeedback:
+    row = (
+        await db.execute(
+            select(
+                PerformanceHighlightReelShareAudit,
+                PerformanceHighlightReel,
+                PerformanceHighlightReelExport,
+                MessageRecipient,
+                PerformanceHighlightReelFeedback,
+            )
+            .join(PerformanceHighlightReel, PerformanceHighlightReel.id == PerformanceHighlightReelShareAudit.highlight_reel_id)
+            .outerjoin(
+                PerformanceHighlightReelExport,
+                PerformanceHighlightReelExport.id == PerformanceHighlightReelShareAudit.highlight_reel_export_id,
+            )
+            .join(MessageRecipient, MessageRecipient.message_id == PerformanceHighlightReelShareAudit.message_id)
+            .outerjoin(
+                PerformanceHighlightReelFeedback,
+                PerformanceHighlightReelFeedback.message_recipient_id == MessageRecipient.id,
+            )
+            .where(MessageRecipient.id == recipient_id)
+            .where(MessageRecipient.person_id == identity.person_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shared highlight reel not found")
+    audit, reel, export, recipient, feedback = row
+    if payload.organization_id != audit.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+
+    now = datetime.now(UTC)
+    response_text = payload.response_text.strip() if payload.response_text else None
+    priority_focus = payload.priority_focus.strip().lower().replace(" ", "_") if payload.priority_focus else None
+    if feedback is None:
+        feedback = PerformanceHighlightReelFeedback(
+            organization_id=audit.organization_id,
+            highlight_reel_id=reel.id,
+            highlight_reel_export_id=export.id if export is not None else None,
+            share_audit_id=audit.id,
+            message_id=audit.message_id,
+            message_recipient_id=recipient.id,
+            person_id=identity.person_id,
+            status=payload.status.strip().lower(),
+            rating=payload.rating,
+            response_text=response_text,
+            priority_focus=priority_focus,
+            requested_follow_up=payload.requested_follow_up,
+            clip_time_seconds=payload.clip_time_seconds,
+            submitted_at=now,
+        )
+        db.add(feedback)
+    else:
+        feedback.status = payload.status.strip().lower()
+        feedback.rating = payload.rating
+        feedback.response_text = response_text
+        feedback.priority_focus = priority_focus
+        feedback.requested_follow_up = payload.requested_follow_up
+        feedback.clip_time_seconds = payload.clip_time_seconds
+        feedback.submitted_at = now
+
+    if recipient.delivery_status != MessageDeliveryStatus.READ:
+        recipient.delivery_status = MessageDeliveryStatus.READ
+        recipient.read_at = now
+    await db.commit()
+    await db.refresh(feedback)
+    return feedback
 
 
 async def render_performance_highlight_reel_export(

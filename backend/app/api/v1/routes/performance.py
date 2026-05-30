@@ -50,6 +50,8 @@ from app.schemas.performance import (
     PerformanceHighlightReelShareAuditRead,
     PerformanceHighlightReelShareCreate,
     PerformanceHighlightReelShareRead,
+    PerformanceSharedHighlightReelFeedbackCreate,
+    PerformanceSharedHighlightReelFeedbackRead,
     PerformanceSharedHighlightReelRead,
     PerformanceInjuryRiskAlertRead,
     PerformanceInjuryRiskAlertRunRead,
@@ -209,6 +211,7 @@ from app.services.performance import (
     match_tracking_identity_review_read,
     highlight_reel_read,
     highlight_reel_export_read,
+    highlight_reel_feedback_read,
     list_movement_reference_profiles,
     list_my_player_performance,
     list_observations,
@@ -246,6 +249,7 @@ from app.services.performance import (
     reprocess_match_tracking_provider_ingest_event,
     review_match_tracking_player_guidance,
     start_wearable_provider_oauth,
+    submit_my_shared_highlight_reel_feedback,
     review_assessment,
     review_observation,
     send_performance_injury_risk_alert,
@@ -884,6 +888,24 @@ async def list_my_shared_highlight_reels_route(
         PerformanceSharedHighlightReelRead(**item)
         for item in await list_my_shared_highlight_reels(db, identity, organization_id, limit=limit)
     ]
+
+
+@router.post(
+    "/my-highlight-reels/{recipient_id}/feedback",
+    response_model=PerformanceSharedHighlightReelFeedbackRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_my_shared_highlight_reel_feedback_route(
+    recipient_id: UUID,
+    payload: PerformanceSharedHighlightReelFeedbackCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> PerformanceSharedHighlightReelFeedbackRead:
+    return PerformanceSharedHighlightReelFeedbackRead(
+        **highlight_reel_feedback_read(
+            await submit_my_shared_highlight_reel_feedback(db, identity, recipient_id, payload)
+        )
+    )
 
 
 @router.get("/my-highlight-reels/{recipient_id}/content")

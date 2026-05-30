@@ -385,6 +385,7 @@ import type {
   PerformanceHighlightReelReminderRunRead,
   PerformanceHighlightReelShareAuditRead,
   PerformanceHighlightReelShareRead,
+  PerformanceSharedHighlightReelFeedbackRead,
   PerformanceSharedHighlightReelRead,
   PerformanceInjuryRiskAlertRead,
   PerformanceInjuryRiskAlertRunRead,
@@ -11646,6 +11647,54 @@ export default function HomePage() {
       },
       (download) => {
         addLog(`${download.title} opened from player reel inbox (${download.size} bytes, ${download.checksum.slice(0, 8)})`, "good");
+        void loadOppositionScouting(selectedOrganizationId ?? reel.organization_id, selectedTeam?.id);
+      }
+    );
+  };
+
+  const submitMyPerformanceHighlightReelFeedback = (
+    reel: PerformanceSharedHighlightReelRead,
+    status: "acknowledged" | "needs_help" | "inspired" | "confused" | "completed",
+    requestedFollowUp = false
+  ) => {
+    const responseText = requestedFollowUp
+      ? "I reviewed this reel and would like coach follow-up."
+      : status === "completed"
+        ? "I reviewed the clips and completed the follow-up."
+        : "I reviewed this highlight reel.";
+    runAction(
+      `my-highlight-reel-feedback-${reel.recipient_id}-${status}`,
+      () =>
+        apiRequest<PerformanceSharedHighlightReelFeedbackRead>(
+          `/performance/my-highlight-reels/${reel.recipient_id}/feedback`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: reel.organization_id,
+              status,
+              rating: requestedFollowUp ? 3 : 5,
+              response_text: responseText,
+              priority_focus: requestedFollowUp ? "coach_review" : "self_review",
+              requested_follow_up: requestedFollowUp,
+              clip_time_seconds: reel.clips[0]?.start_seconds ?? null
+            }
+          }
+        ),
+      (feedback) => {
+        setMyPerformanceHighlightReels((current) =>
+          current.map((item) =>
+            item.recipient_id === reel.recipient_id
+              ? { ...item, feedback, delivery_status: "read", read_at: feedback.submitted_at }
+              : item
+          )
+        );
+        addLog(
+          requestedFollowUp
+            ? `${reel.title} flagged for coach follow-up`
+            : `${reel.title} feedback recorded`,
+          requestedFollowUp ? "neutral" : "good"
+        );
         void loadOppositionScouting(selectedOrganizationId ?? reel.organization_id, selectedTeam?.id);
       }
     );
@@ -28568,6 +28617,11 @@ export default function HomePage() {
                           {reel.message_subject} ·{" "}
                           {reel.read_at ? `opened ${new Date(reel.read_at).toLocaleString()}` : "not opened yet"}
                         </small>
+                        <small>
+                          {reel.feedback
+                            ? `${reel.feedback.status.replaceAll("_", " ")}${reel.feedback.rating ? ` · ${reel.feedback.rating}/5` : ""}${reel.feedback.requested_follow_up ? " · coach follow-up requested" : ""}`
+                            : "waiting for player acknowledgement"}
+                        </small>
                       </div>
                       <span>
                         <button
@@ -28576,6 +28630,20 @@ export default function HomePage() {
                           disabled={busyAction !== null || !reel.download_path}
                         >
                           Open
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => submitMyPerformanceHighlightReelFeedback(reel, "acknowledged")}
+                          disabled={busyAction !== null}
+                        >
+                          Ack
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => submitMyPerformanceHighlightReelFeedback(reel, "needs_help", true)}
+                          disabled={busyAction !== null}
+                        >
+                          Help
                         </button>
                       </span>
                     </article>
@@ -28606,10 +28674,13 @@ export default function HomePage() {
                         <strong>{engagement.title} engagement</strong>
                         <span>
                           {engagement.read_count}/{engagement.recipient_count} read ·{" "}
-                          {engagement.unique_download_count} unique download(s) · {engagement.download_rate_percent.toFixed(0)}%
+                          {engagement.unique_download_count} unique download(s) · {engagement.download_rate_percent.toFixed(0)}% ·{" "}
+                          {engagement.feedback_count} feedback
                         </span>
                         <small>
                           {engagement.share_policy.replaceAll("_", " ")} ·{" "}
+                          {engagement.follow_up_request_count} follow-up request(s) ·{" "}
+                          {engagement.average_feedback_rating ? `${engagement.average_feedback_rating}/5 avg rating · ` : ""}
                           {engagement.last_engagement_at
                             ? `last ${new Date(engagement.last_engagement_at).toLocaleString()}`
                             : "no recipient engagement yet"}
@@ -28618,6 +28689,9 @@ export default function HomePage() {
                           <small key={recipient.recipient_id}>
                             {recipient.person_name} · {recipient.delivery_status.replaceAll("_", " ")} ·{" "}
                             {recipient.download_count} download(s)
+                            {recipient.feedback_status
+                              ? ` · ${recipient.feedback_status.replaceAll("_", " ")}${recipient.feedback_requested_follow_up ? " · wants follow-up" : ""}`
+                              : ""}
                           </small>
                         ))}
                       </div>

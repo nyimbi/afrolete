@@ -5330,6 +5330,33 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     )
     assert shared_after_download.status_code == 200
     assert shared_after_download.json()[0]["delivery_status"] == "read"
+    feedback_response = client.post(
+        f"/api/v1/performance/my-highlight-reels/{recipient_rows[0]['id']}/feedback",
+        headers=player_headers,
+        json={
+            "organization_id": organization["id"],
+            "status": "needs_help",
+            "rating": 4,
+            "response_text": "I reviewed the scout reel and want coach follow-up on the transition clip.",
+            "priority_focus": "transition timing",
+            "requested_follow_up": True,
+            "clip_time_seconds": shared[0]["clips"][0]["start_seconds"],
+        },
+    )
+    assert feedback_response.status_code == 201
+    feedback = feedback_response.json()
+    assert feedback["message_recipient_id"] == recipient_rows[0]["id"]
+    assert feedback["status"] == "needs_help"
+    assert feedback["rating"] == 4
+    assert feedback["priority_focus"] == "transition_timing"
+    assert feedback["requested_follow_up"] is True
+    shared_after_feedback = client.get(
+        f"/api/v1/performance/my-highlight-reels?organization_id={organization['id']}",
+        headers=player_headers,
+    )
+    assert shared_after_feedback.status_code == 200
+    assert shared_after_feedback.json()[0]["feedback"]["id"] == feedback["id"]
+    assert shared_after_feedback.json()[0]["feedback"]["status"] == "needs_help"
     reminder_after_download_response = client.post(
         f"/api/v1/performance/scouting/highlight-reel-shares/{share['audit']['id']}/reminders",
         headers=identity_headers,
@@ -5358,8 +5385,15 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert engagement[0]["download_count"] == 1
     assert engagement[0]["unique_download_count"] == 1
     assert engagement[0]["download_rate_percent"] == 100
+    assert engagement[0]["feedback_count"] == 1
+    assert engagement[0]["follow_up_request_count"] == 1
+    assert engagement[0]["average_feedback_rating"] == 4
     assert engagement[0]["recipients"][0]["person_id"] == member["subject_id"]
     assert engagement[0]["recipients"][0]["download_count"] == 1
+    assert engagement[0]["recipients"][0]["feedback_status"] == "needs_help"
+    assert engagement[0]["recipients"][0]["feedback_rating"] == 4
+    assert engagement[0]["recipients"][0]["feedback_requested_follow_up"] is True
+    assert "coach follow-up" in engagement[0]["recipients"][0]["feedback_response_preview"]
     share_audits = client.get(
         f"/api/v1/performance/scouting/highlight-reel-shares?organization_id={organization['id']}&highlight_reel_id={reel['id']}",
         headers=identity_headers,

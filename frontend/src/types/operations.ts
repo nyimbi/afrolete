@@ -7677,6 +7677,36 @@ export type PerformanceHighlightReelShareRead = {
   published_at: string;
 };
 
+export type PerformanceSharedHighlightReelFeedbackCreate = {
+  organization_id: UUID;
+  status?: "acknowledged" | "needs_help" | "inspired" | "confused" | "completed";
+  rating?: number | null;
+  response_text?: string | null;
+  priority_focus?: string | null;
+  requested_follow_up?: boolean;
+  clip_time_seconds?: number | null;
+};
+
+export type PerformanceSharedHighlightReelFeedbackRead = {
+  id: UUID;
+  organization_id: UUID;
+  highlight_reel_id: UUID;
+  highlight_reel_export_id: UUID | null;
+  share_audit_id: UUID;
+  message_id: UUID;
+  message_recipient_id: UUID;
+  person_id: UUID;
+  status: string;
+  rating: number | null;
+  response_text: string | null;
+  priority_focus: string | null;
+  requested_follow_up: boolean;
+  clip_time_seconds: number | null;
+  submitted_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type PerformanceSharedHighlightReelRead = {
   organization_id: UUID;
   highlight_reel_id: UUID;
@@ -7706,6 +7736,7 @@ export type PerformanceSharedHighlightReelRead = {
   delivery_status: MessageDeliveryStatus;
   delivered_at: string | null;
   read_at: string | null;
+  feedback: PerformanceSharedHighlightReelFeedbackRead | null;
   published_at: string;
   created_at: string;
 };
@@ -7720,6 +7751,12 @@ export type PerformanceHighlightReelRecipientEngagementRead = {
   read_at: string | null;
   download_count: number;
   last_downloaded_at: string | null;
+  feedback_status: string | null;
+  feedback_rating: number | null;
+  feedback_requested_follow_up: boolean;
+  feedback_priority_focus: string | null;
+  feedback_response_preview: string | null;
+  feedback_submitted_at: string | null;
 };
 
 export type PerformanceHighlightReelEngagementRead = {
@@ -7743,6 +7780,9 @@ export type PerformanceHighlightReelEngagementRead = {
   download_count: number;
   unique_download_count: number;
   download_rate_percent: number;
+  feedback_count: number;
+  follow_up_request_count: number;
+  average_feedback_rating: number | null;
   last_engagement_at: string | null;
   recipients: PerformanceHighlightReelRecipientEngagementRead[];
   published_at: string;
