@@ -378,6 +378,7 @@ import type {
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchAnalysisReportRead,
+  PerformanceMatchPlayerGuidancePublishAuditRead,
   PerformanceMatchPlayerGuidancePublishRead,
   PerformanceMatchPlayerGuidanceReviewRead,
   PerformanceMatchPitchCalibrationRead,
@@ -1857,6 +1858,8 @@ export default function HomePage() {
     useState<PerformanceMatchPlayerGuidanceReviewRead | null>(null);
   const [performanceMatchPlayerGuidancePublish, setPerformanceMatchPlayerGuidancePublish] =
     useState<PerformanceMatchPlayerGuidancePublishRead | null>(null);
+  const [performanceMatchPlayerGuidancePublishes, setPerformanceMatchPlayerGuidancePublishes] =
+    useState<PerformanceMatchPlayerGuidancePublishAuditRead[]>([]);
   const [performanceMatchPitchCalibrations, setPerformanceMatchPitchCalibrations] =
     useState<PerformanceMatchPitchCalibrationRead[]>([]);
   const [performanceMatchPitchCalibration, setPerformanceMatchPitchCalibration] =
@@ -1889,7 +1892,29 @@ export default function HomePage() {
     setPerformanceMatchPlayerGuidancePublish((current) =>
       current?.tracking_run_id === performanceMatchTrackingRun?.id ? current : null
     );
-  }, [performanceMatchTrackingRun?.id]);
+    if (!performanceMatchTrackingRun?.id) {
+      setPerformanceMatchPlayerGuidancePublishes([]);
+      return;
+    }
+    let cancelled = false;
+    apiRequest<PerformanceMatchPlayerGuidancePublishAuditRead[]>(
+      `/performance/scouting/tracking-runs/${performanceMatchTrackingRun.id}/player-guidance-publishes`,
+      { identity }
+    )
+      .then((audits) => {
+        if (!cancelled) {
+          setPerformanceMatchPlayerGuidancePublishes(audits);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPerformanceMatchPlayerGuidancePublishes([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [performanceMatchTrackingRun?.id, identity.email, identity.name, identity.sub]);
 
   const [selectedMovementReferenceProfileId, setSelectedMovementReferenceProfileId] = useState("");
   const [selectedPerformanceVideoFile, setSelectedPerformanceVideoFile] = useState<File | null>(null);
@@ -5112,6 +5137,7 @@ export default function HomePage() {
       setPerformanceMatchAnalysisReport(null);
       setPerformanceMatchPlayerGuidanceReview(null);
       setPerformanceMatchPlayerGuidancePublish(null);
+      setPerformanceMatchPlayerGuidancePublishes([]);
       setPerformanceMatchPitchCalibrations([]);
       setPerformanceMatchPitchCalibration(null);
       setPerformanceHighlightReels([]);
@@ -10612,6 +10638,10 @@ export default function HomePage() {
         ),
       (published) => {
         setPerformanceMatchPlayerGuidancePublish(published);
+        setPerformanceMatchPlayerGuidancePublishes((current) => [
+          ...published.audits,
+          ...current.filter((audit) => !published.audits.some((created) => created.id === audit.id))
+        ]);
         addLog(
           `${published.message_count} player guidance message(s) sent to ${published.recipient_count} recipient(s)`,
           "good"
@@ -25937,11 +25967,15 @@ export default function HomePage() {
                 </article>
                 <article className="mini-card">
                   <span className="muted">Published cards</span>
-                  <strong>{performanceMatchPlayerGuidancePublish?.message_count ?? 0} message(s)</strong>
+                  <strong>
+                    {performanceMatchPlayerGuidancePublish?.message_count ?? performanceMatchPlayerGuidancePublishes.length} message(s)
+                  </strong>
                   <p>
                     {performanceMatchPlayerGuidancePublish
                       ? `${performanceMatchPlayerGuidancePublish.recipient_count} inbox recipient(s) · ${performanceMatchPlayerGuidancePublish.skipped_track_count} skipped`
-                      : "Publish reviewed guidance as private player/guardian inbox messages."}
+                      : performanceMatchPlayerGuidancePublishes[0]
+                        ? `${performanceMatchPlayerGuidancePublishes.reduce((total, audit) => total + audit.recipient_count, 0)} audited recipient(s) · latest ${new Date(performanceMatchPlayerGuidancePublishes[0].published_at).toLocaleDateString()}`
+                        : "Publish reviewed guidance as private player/guardian inbox messages."}
                   </p>
                 </article>
               </div>
@@ -26138,6 +26172,19 @@ export default function HomePage() {
                       </div>
                     </article>
                   ) : null}
+                  {performanceMatchPlayerGuidancePublishes.slice(0, 4).map((audit) => (
+                    <article key={audit.id} className="task-card">
+                      <div>
+                        <strong>{audit.player_label} · {audit.status}</strong>
+                        <span>
+                          {audit.recipient_count} recipient(s) · read {audit.read_count} · delivered {audit.delivered_count} · failed {audit.failed_count}
+                        </span>
+                        <small>
+                          {audit.channel.replaceAll("_", " ")} · track {audit.track_id} · {new Date(audit.published_at).toLocaleString()}
+                        </small>
+                      </div>
+                    </article>
+                  ))}
                   {performanceMatchPlayerGuidanceReview?.player_guidance.slice(0, 4).map((guidance, index) => (
                     <article key={`player-guidance-${index}-${String(guidance.track_id ?? "track")}`} className="task-card">
                       <div>

@@ -7300,6 +7300,29 @@ export type PerformanceMatchPlayerGuidancePublishMessageRead = {
   channel: CommunicationChannel;
 };
 
+export type PerformanceMatchPlayerGuidancePublishAuditRead = {
+  id: UUID;
+  organization_id: UUID;
+  tracking_run_id: UUID;
+  video_asset_id: UUID;
+  message_id: UUID;
+  player_person_id: UUID;
+  track_id: string;
+  player_label: string;
+  channel: CommunicationChannel;
+  recipient_count: number;
+  queued_count: number;
+  sent_count: number;
+  delivered_count: number;
+  read_count: number;
+  failed_count: number;
+  suppressed_count: number;
+  published_by_person_id: UUID | null;
+  status: string;
+  published_at: string;
+  created_at: string;
+};
+
 export type PerformanceMatchPlayerGuidancePublishRead = {
   tracking_run_id: UUID;
   organization_id: UUID;
@@ -7313,6 +7336,7 @@ export type PerformanceMatchPlayerGuidancePublishRead = {
   skipped_tracks: string[];
   required_actions: string[];
   messages: PerformanceMatchPlayerGuidancePublishMessageRead[];
+  audits: PerformanceMatchPlayerGuidancePublishAuditRead[];
   published_at: string;
 };
 

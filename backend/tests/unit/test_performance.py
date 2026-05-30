@@ -3738,6 +3738,10 @@ def test_publishable_match_guidance_sends_private_player_messages(client, identi
     assert published["recipient_count"] == 1
     assert published["messages"][0]["player_person_id"] == member["subject_id"]
     assert published["messages"][0]["track_id"] == "home-9"
+    assert published["audits"][0]["message_id"] == published["messages"][0]["message_id"]
+    assert published["audits"][0]["track_id"] == "home-9"
+    assert published["audits"][0]["recipient_count"] == 1
+    assert published["audits"][0]["queued_count"] == 1
 
     recipients = client.get(
         f"/api/v1/communications/messages/{published['messages'][0]['message_id']}/recipients",
@@ -3750,6 +3754,28 @@ def test_publishable_match_guidance_sends_private_player_messages(client, identi
         headers=identity_headers,
     ).json()
     assert any(message["subject"].startswith("Coach-reviewed match guidance") for message in messages)
+
+    publish_audits = client.get(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/player-guidance-publishes",
+        headers=identity_headers,
+    )
+    assert publish_audits.status_code == 200
+    assert publish_audits.json()[0]["message_id"] == published["messages"][0]["message_id"]
+    assert publish_audits.json()[0]["player_person_id"] == member["subject_id"]
+    assert publish_audits.json()[0]["queued_count"] == 1
+
+    read_response = client.patch(
+        f"/api/v1/communications/recipients/{recipients.json()[0]['id']}",
+        headers=identity_headers,
+        json={"delivery_status": "read"},
+    )
+    assert read_response.status_code == 200
+    updated_audits = client.get(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/player-guidance-publishes",
+        headers=identity_headers,
+    ).json()
+    assert updated_audits[0]["read_count"] == 1
+    assert updated_audits[0]["queued_count"] == 0
 
 
 def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(client, identity_headers) -> None:

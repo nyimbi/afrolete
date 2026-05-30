@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, GUID, IdMixin, TimestampMixin, enum_type
 from app.models.enums import MetricCategory, MetricSource, MetricVerificationStatus
+from app.models.enums import CommunicationChannel
 
 
 class PerformanceMetricDefinition(IdMixin, TimestampMixin, Base):
@@ -586,6 +587,40 @@ class PerformanceMatchAnalysisReport(IdMixin, TimestampMixin, Base):
     checksum: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class PerformanceMatchPlayerGuidancePublishAudit(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_match_player_guidance_publish_audits"
+    __table_args__ = (
+        UniqueConstraint(
+            "tracking_run_id",
+            "message_id",
+            name="uq_performance_match_player_guidance_publish_audits_message",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    tracking_run_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_match_tracking_runs.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    message_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("communication_messages.id"), nullable=False, index=True
+    )
+    player_person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), nullable=False, index=True)
+    track_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    player_label: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    channel: Mapped[CommunicationChannel] = mapped_column(
+        enum_type(CommunicationChannel), nullable=False, index=True
+    )
+    recipient_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    published_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="published", nullable=False, index=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
 class PerformanceHighlightReel(IdMixin, TimestampMixin, Base):

@@ -32,6 +32,7 @@ from app.models.enums import (
     CommunicationChannel,
     CommunicationMessageType,
     CommunicationScopeType,
+    MessageDeliveryStatus,
     AssociationLevel,
     MemberSubjectType,
     MembershipRole,
@@ -63,6 +64,7 @@ from app.models.performance import (
     PerformanceHighlightReel,
     PerformanceHighlightReelExport,
     PerformanceMatchAnalysisReport,
+    PerformanceMatchPlayerGuidancePublishAudit,
     PerformanceMatchPitchCalibration,
     PerformanceMatchTrackingIdentityReview,
     PerformanceMatchTrackingProviderIngestEvent,
@@ -1893,6 +1895,7 @@ async def publish_match_tracking_player_guidance(
     }
     skipped_tracks: list[str] = []
     messages: list[dict[str, object]] = []
+    published_at = datetime.now(UTC)
     for track_id, guidance in sorted(guidance_by_track.items()):
         player_person_id = player_person_by_track.get(track_id)
         if player_person_id is None:
@@ -1922,6 +1925,22 @@ async def publish_match_tracking_player_guidance(
             body=body,
             created_by_person_id=identity.person_id,
         )
+        db.add(
+            PerformanceMatchPlayerGuidancePublishAudit(
+                organization_id=run.organization_id,
+                tracking_run_id=run.id,
+                video_asset_id=run.video_asset_id,
+                message_id=message.id,
+                player_person_id=player_person_id,
+                track_id=track_id,
+                player_label=player_label,
+                channel=payload.channel,
+                recipient_count=len(recipient_ids),
+                published_by_person_id=identity.person_id,
+                status="published",
+                published_at=published_at,
+            )
+        )
         messages.append(
             {
                 "message_id": message.id,
@@ -1938,6 +1957,18 @@ async def publish_match_tracking_player_guidance(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="No confirmed player tracks are available for guidance publishing",
         )
+    await db.commit()
+    created_message_ids = {message["message_id"] for message in messages}
+    audits = [
+        audit
+        for audit in await list_match_tracking_player_guidance_publishes(
+            db,
+            identity,
+            tracking_run_id,
+            authz,
+        )
+        if audit["message_id"] in created_message_ids
+    ]
     return {
         "tracking_run_id": run.id,
         "organization_id": run.organization_id,
@@ -1951,7 +1982,99 @@ async def publish_match_tracking_player_guidance(
         "skipped_tracks": skipped_tracks,
         "required_actions": review["required_actions"],
         "messages": messages,
-        "published_at": datetime.now(UTC),
+        "audits": audits,
+        "published_at": published_at,
+    }
+
+
+async def list_match_tracking_player_guidance_publishes(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    tracking_run_id: UUID,
+    authz: AuthorizationService,
+) -> list[dict[str, object]]:
+    run = await get_match_tracking_run(db, tracking_run_id)
+    await ensure_manage_performance(authz, identity, run.organization_id)
+    audits = list(
+        (
+            await db.scalars(
+                select(PerformanceMatchPlayerGuidancePublishAudit)
+                .where(PerformanceMatchPlayerGuidancePublishAudit.tracking_run_id == run.id)
+                .order_by(
+                    PerformanceMatchPlayerGuidancePublishAudit.published_at.desc(),
+                    PerformanceMatchPlayerGuidancePublishAudit.created_at.desc(),
+                )
+                .limit(200)
+            )
+        ).all()
+    )
+    if not audits:
+        return []
+    message_ids = [audit.message_id for audit in audits]
+    recipient_rows = (
+        await db.execute(
+            select(MessageRecipient.message_id, MessageRecipient.delivery_status).where(
+                MessageRecipient.message_id.in_(message_ids)
+            )
+        )
+    ).all()
+    counts_by_message: dict[UUID, dict[str, int]] = {
+        audit.message_id: {
+            "queued_count": 0,
+            "sent_count": 0,
+            "delivered_count": 0,
+            "read_count": 0,
+            "failed_count": 0,
+            "suppressed_count": 0,
+        }
+        for audit in audits
+    }
+    status_count_keys = {
+        MessageDeliveryStatus.QUEUED.value: "queued_count",
+        MessageDeliveryStatus.SENT.value: "sent_count",
+        MessageDeliveryStatus.DELIVERED.value: "delivered_count",
+        MessageDeliveryStatus.READ.value: "read_count",
+        MessageDeliveryStatus.FAILED.value: "failed_count",
+        MessageDeliveryStatus.SUPPRESSED.value: "suppressed_count",
+    }
+    for message_id, delivery_status in recipient_rows:
+        key = status_count_keys.get(str(delivery_status))
+        if key is None and hasattr(delivery_status, "value"):
+            key = status_count_keys.get(str(delivery_status.value))
+        if key is not None:
+            counts_by_message.setdefault(message_id, {}).setdefault(key, 0)
+            counts_by_message[message_id][key] += 1
+    return [
+        match_player_guidance_publish_audit_read(audit, counts_by_message.get(audit.message_id, {}))
+        for audit in audits
+    ]
+
+
+def match_player_guidance_publish_audit_read(
+    audit: PerformanceMatchPlayerGuidancePublishAudit,
+    delivery_counts: dict[str, int],
+) -> dict[str, object]:
+    return {
+        "id": audit.id,
+        "organization_id": audit.organization_id,
+        "tracking_run_id": audit.tracking_run_id,
+        "video_asset_id": audit.video_asset_id,
+        "message_id": audit.message_id,
+        "player_person_id": audit.player_person_id,
+        "track_id": audit.track_id,
+        "player_label": audit.player_label,
+        "channel": audit.channel,
+        "recipient_count": audit.recipient_count,
+        "queued_count": delivery_counts.get("queued_count", 0),
+        "sent_count": delivery_counts.get("sent_count", 0),
+        "delivered_count": delivery_counts.get("delivered_count", 0),
+        "read_count": delivery_counts.get("read_count", 0),
+        "failed_count": delivery_counts.get("failed_count", 0),
+        "suppressed_count": delivery_counts.get("suppressed_count", 0),
+        "published_by_person_id": audit.published_by_person_id,
+        "status": audit.status,
+        "published_at": audit.published_at,
+        "created_at": audit.created_at,
     }
 
 

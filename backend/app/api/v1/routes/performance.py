@@ -62,6 +62,7 @@ from app.schemas.performance import (
     PerformanceMetricTrendSeriesRead,
     PerformanceMatchAnalysisReportCreate,
     PerformanceMatchAnalysisReportRead,
+    PerformanceMatchPlayerGuidancePublishAuditRead,
     PerformanceMatchPlayerGuidancePublishCreate,
     PerformanceMatchPlayerGuidancePublishRead,
     PerformanceMatchPlayerGuidanceReviewRead,
@@ -169,6 +170,7 @@ from app.services.performance import (
     list_performance_highlight_reel_exports,
     list_metric_definitions,
     list_match_tracking_identity_reviews,
+    list_match_tracking_player_guidance_publishes,
     list_match_tracking_provider_ingest_events,
     list_match_tracking_runs,
     list_match_pitch_calibrations,
@@ -1174,6 +1176,27 @@ async def review_match_tracking_player_guidance_route(
     return PerformanceMatchPlayerGuidanceReviewRead(
         **await review_match_tracking_player_guidance(db, identity, tracking_run_id, authz)
     )
+
+
+@router.get(
+    "/scouting/tracking-runs/{tracking_run_id}/player-guidance-publishes",
+    response_model=list[PerformanceMatchPlayerGuidancePublishAuditRead],
+)
+async def list_match_tracking_player_guidance_publishes_route(
+    tracking_run_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMatchPlayerGuidancePublishAuditRead]:
+    return [
+        PerformanceMatchPlayerGuidancePublishAuditRead(**audit)
+        for audit in await list_match_tracking_player_guidance_publishes(
+            db,
+            identity,
+            tracking_run_id,
+            authz,
+        )
+    ]
 
 
 @router.post(

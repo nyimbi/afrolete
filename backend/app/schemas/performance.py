@@ -960,6 +960,29 @@ class PerformanceMatchPlayerGuidancePublishMessageRead(BaseModel):
     channel: CommunicationChannel
 
 
+class PerformanceMatchPlayerGuidancePublishAuditRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    tracking_run_id: UUID
+    video_asset_id: UUID
+    message_id: UUID
+    player_person_id: UUID
+    track_id: str
+    player_label: str
+    channel: CommunicationChannel
+    recipient_count: int
+    queued_count: int = 0
+    sent_count: int = 0
+    delivered_count: int = 0
+    read_count: int = 0
+    failed_count: int = 0
+    suppressed_count: int = 0
+    published_by_person_id: UUID | None
+    status: str
+    published_at: datetime
+    created_at: datetime
+
+
 class PerformanceMatchPlayerGuidancePublishRead(BaseModel):
     tracking_run_id: UUID
     organization_id: UUID
@@ -973,6 +996,7 @@ class PerformanceMatchPlayerGuidancePublishRead(BaseModel):
     skipped_tracks: list[str]
     required_actions: list[str]
     messages: list[PerformanceMatchPlayerGuidancePublishMessageRead]
+    audits: list[PerformanceMatchPlayerGuidancePublishAuditRead] = Field(default_factory=list)
     published_at: datetime
 
 
