@@ -15390,6 +15390,8 @@ def build_highlight_reel_export_artifact(
     notes: str | None,
 ) -> dict[str, object]:
     reel_payload = highlight_reel_read(reel)
+    clips = [clip for clip in reel_payload["clips"] if isinstance(clip, dict)]
+    curation_summary = highlight_reel_curation_summary(clips)
     base_manifest: dict[str, object] = {
         "render_policy": "afrolete-highlight-export-v1",
         "export_format": export_format,
@@ -15406,7 +15408,8 @@ def build_highlight_reel_export_artifact(
             "match_context": video_asset.match_context,
         },
         "reel": reel_payload,
-        "clips": reel_payload["clips"],
+        "clips": clips,
+        "curation_summary": curation_summary,
         "distribution": reel_payload["distribution"],
         "branding": reel_payload["branding"] if include_branding else None,
         "operator_notes": notes,
@@ -15436,8 +15439,10 @@ def build_highlight_reel_export_artifact(
                 "overlay_note": clip.get("coaching_note"),
                 "tags": clip.get("tags"),
                 "source_moment_id": clip.get("source_moment_id"),
+                "source_moment_status": clip.get("source_moment_status"),
                 "moment_score": clip.get("moment_score"),
                 "moment_category": clip.get("moment_category"),
+                "review_overlay": highlight_clip_review_overlay(clip),
             }
             for index, clip in enumerate(base_manifest["clips"], start=1)
             if isinstance(clip, dict)
@@ -15466,6 +15471,7 @@ def build_highlight_reel_export_artifact(
         f"Audience: {reel.audience}",
         f"Purpose: {reel.purpose}",
         f"Delivery: {delivery_channel.strip().lower()}",
+        f"Curation: {curation_summary['summary_label']}",
         "",
         "## Clip Captions",
     ]
@@ -15477,6 +15483,7 @@ def build_highlight_reel_export_artifact(
                 "",
                 f"{index}. {clip.get('title')}",
                 f"   - Window: {clip.get('start_seconds')}s-{clip.get('end_seconds')}s",
+                f"   - Curation: {highlight_clip_review_overlay(clip)}",
                 f"   - Moment score: {clip.get('moment_score') or 'n/a'}",
                 f"   - Evidence: {clip.get('evidence')}",
                 f"   - Coach note: {clip.get('coaching_note')}",
@@ -15495,6 +15502,53 @@ def build_highlight_reel_export_artifact(
         "message": "Caption pack is ready for social, family, scout, or coach distribution review.",
         "manifest": manifest,
     }
+
+
+def highlight_reel_curation_summary(clips: list[dict[str, object]]) -> dict[str, object]:
+    status_counts: dict[str, int] = {}
+    moment_clip_count = 0
+    curated_clip_count = 0
+    for clip in clips:
+        status_value = str(clip.get("source_moment_status") or "").strip().lower()
+        if not status_value:
+            continue
+        moment_clip_count += 1
+        status_counts[status_value] = status_counts.get(status_value, 0) + 1
+        if status_value in {"featured", "approved"}:
+            curated_clip_count += 1
+    return {
+        "selection_policy": "featured_first_approved_next_rejected_excluded",
+        "summary_label": (
+            f"{curated_clip_count} coach-curated moment clip(s), "
+            f"{status_counts.get('featured', 0)} featured, "
+            f"{status_counts.get('approved', 0)} approved, rejected clips excluded"
+        ),
+        "moment_clip_count": moment_clip_count,
+        "curated_clip_count": curated_clip_count,
+        "featured_clip_count": status_counts.get("featured", 0),
+        "approved_clip_count": status_counts.get("approved", 0),
+        "detected_clip_count": status_counts.get("detected", 0),
+        "needs_review_clip_count": status_counts.get("needs_review", 0),
+        "status_counts": status_counts,
+        "rejected_moments_excluded": True,
+    }
+
+
+def highlight_clip_review_overlay(clip: dict[str, object]) -> str:
+    status_value = str(clip.get("source_moment_status") or "").strip().lower()
+    if status_value == "featured":
+        return "Coach-featured moment; lead review/export with this clip."
+    if status_value == "approved":
+        return "Coach-approved moment; cleared for reel use."
+    if status_value == "needs_review":
+        return "Moment still needs coach review before external distribution."
+    if status_value == "detected":
+        return "AI-detected moment; no explicit coach approval yet."
+    if status_value:
+        return f"{status_value.replace('_', ' ').title()} moment."
+    if clip.get("source_moment_id"):
+        return "Moment-backed clip with no review status recorded."
+    return "Tracking/scouting clip selected outside the moment review queue."
 
 
 def render_highlight_reel_mp4_artifact(

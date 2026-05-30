@@ -5371,6 +5371,13 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert len(timeline["checksum"]) == 64
     assert timeline["manifest"]["reel"]["id"] == reel["id"]
     assert timeline["manifest"]["source_video"]["id"] == video_asset["id"]
+    assert timeline["manifest"]["curation_summary"]["featured_clip_count"] >= 1
+    assert timeline["manifest"]["curation_summary"]["rejected_moments_excluded"] is True
+    assert any(
+        clip.get("source_moment_status") == "featured"
+        for clip in timeline["manifest"]["clips"]
+        if isinstance(clip, dict)
+    )
 
     edl_response = client.post(
         f"/api/v1/performance/scouting/highlight-reels/{reel['id']}/exports",
@@ -5387,6 +5394,31 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert edl["status"] == "needs_renderer"
     assert edl["manifest"]["renderer_status"] == "needs_renderer"
     assert len(edl["manifest"]["edit_decisions"]) == reel["clip_count"]
+    assert any(
+        decision.get("source_moment_status") == "featured"
+        and "Coach-featured" in str(decision.get("review_overlay"))
+        for decision in edl["manifest"]["edit_decisions"]
+    )
+
+    captions_response = client.post(
+        f"/api/v1/performance/scouting/highlight-reels/{reel['id']}/exports",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "export_format": "social_caption_pack",
+            "delivery_channel": "scout_packet",
+        },
+    )
+    assert captions_response.status_code == 201
+    captions = captions_response.json()
+    assert captions["manifest"]["curation_summary"]["featured_clip_count"] >= 1
+    captions_download = client.get(
+        f"/api/v1/performance/scouting/highlight-reel-exports/{captions['id']}/content",
+        headers=identity_headers,
+    )
+    assert captions_download.status_code == 200
+    assert "Curation:" in captions_download.text
+    assert "Coach-featured moment" in captions_download.text
 
     monkeypatch.setattr(performance_service.shutil, "which", lambda path: path)
 
@@ -5422,7 +5454,7 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
         headers=identity_headers,
     )
     assert exports.status_code == 200
-    assert {artifact["id"] for artifact in exports.json()} == {timeline["id"], edl["id"], rendered["id"]}
+    assert {artifact["id"] for artifact in exports.json()} == {timeline["id"], edl["id"], captions["id"], rendered["id"]}
 
     download_response = client.get(
         f"/api/v1/performance/scouting/highlight-reel-exports/{timeline['id']}/content",
