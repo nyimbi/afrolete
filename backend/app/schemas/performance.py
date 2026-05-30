@@ -2418,6 +2418,7 @@ class PerformanceMatchTrainingFollowupRead(BaseModel):
     period_end: date
     item_count: int
     training_prescriptions: list[dict[str, Any]]
+    reused_existing: bool = False
     agent_task_id: UUID | None = None
     agent_task_status: str | None = None
     agent_task_title: str | None = None

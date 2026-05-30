@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.agent import Agent
+from app.models.agent import Agent, AgentTask
 from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.enums import (
     AgentKind,
@@ -7818,6 +7818,27 @@ async def create_match_tracking_training_followup(
         selected_prescriptions = prescriptions[: payload.max_items]
     if not selected_prescriptions:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No training prescriptions available")
+    followup_key = match_training_followup_key(
+        tracking_run_id=run.id,
+        period_start=payload.period_start,
+        period_end=payload.period_end,
+        prescriptions=selected_prescriptions,
+    )
+    existing_plan = await find_match_training_followup_plan(
+        db,
+        organization_id=payload.organization_id,
+        team_id=run.team_id,
+        followup_key=followup_key,
+    )
+    if existing_plan is not None:
+        return await match_training_followup_readback(
+            db,
+            organization_id=payload.organization_id,
+            tracking_run=run,
+            plan=existing_plan,
+            prescriptions=selected_prescriptions,
+            reused_existing=True,
+        )
     focus_area = str(selected_prescriptions[0].get("focus_area") or "match_training_followup")
     title = f"{video_asset.opponent_name} team training follow-up"
     plan = TrainingPlan(
@@ -7833,7 +7854,8 @@ async def create_match_tracking_training_followup(
         ai_generated=True,
         source_summary=(
             f"Generated from match tracking run {run.id} against {video_asset.opponent_name}; "
-            f"{len(selected_prescriptions)} training prescription(s) selected."
+            f"{len(selected_prescriptions)} training prescription(s) selected. "
+            f"match_followup_key:{followup_key}"
         ),
         load_guidance=match_training_followup_load_guidance(summary, selected_prescriptions),
         recovery_protocol="Apply readiness and soreness checks before increasing high-speed, pressing, or restart intensity.",
@@ -7920,6 +7942,113 @@ async def create_match_tracking_training_followup(
         "period_end": plan.period_end,
         "item_count": len(items),
         "training_prescriptions": selected_prescriptions,
+        "reused_existing": False,
+        "agent_task_id": agent_task.id if agent_task else None,
+        "agent_task_status": agent_task.status.value if agent_task else None,
+        "agent_task_title": agent_task.title if agent_task else None,
+    }
+
+
+def match_training_followup_key(
+    *,
+    tracking_run_id: UUID,
+    period_start: date,
+    period_end: date,
+    prescriptions: list[dict[str, object]],
+) -> str:
+    prescription_keys = sorted(
+        {
+            "|".join(
+                [
+                    str(item.get("focus_area") or "match_followup").strip().lower(),
+                    str(item.get("title") or item.get("drill_recommendation") or "").strip().lower(),
+                ]
+            )
+            for item in prescriptions
+        }
+    )
+    focus_key = ",".join(prescription_keys) or "none"
+    raw = (
+        f"tracking:{tracking_run_id};"
+        f"start:{period_start.isoformat()};"
+        f"end:{period_end.isoformat()};"
+        f"prescriptions:{focus_key}"
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+async def find_match_training_followup_plan(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    team_id: UUID | None,
+    followup_key: str,
+) -> TrainingPlan | None:
+    statement = (
+        select(TrainingPlan)
+        .where(TrainingPlan.organization_id == organization_id)
+        .where(TrainingPlan.ai_generated.is_(True))
+        .where(TrainingPlan.source_summary.contains(f"match_followup_key:{followup_key}"))
+        .order_by(TrainingPlan.created_at.desc())
+        .limit(1)
+    )
+    if team_id is None:
+        statement = statement.where(TrainingPlan.team_id.is_(None))
+    else:
+        statement = statement.where(TrainingPlan.team_id == team_id)
+    return await db.scalar(statement)
+
+
+async def match_training_followup_readback(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    tracking_run: PerformanceMatchTrackingRun,
+    plan: TrainingPlan,
+    prescriptions: list[dict[str, object]],
+    reused_existing: bool,
+) -> dict[str, object]:
+    items = list(
+        (
+            await db.scalars(
+                select(TrainingPlanItem)
+                .where(TrainingPlanItem.plan_id == plan.id)
+                .order_by(TrainingPlanItem.sequence, TrainingPlanItem.created_at)
+            )
+        ).all()
+    )
+    session_plans = list(
+        (
+            await db.scalars(
+                select(TrainingSessionPlan)
+                .where(TrainingSessionPlan.plan_id == plan.id)
+                .order_by(TrainingSessionPlan.scheduled_for, TrainingSessionPlan.created_at)
+            )
+        ).all()
+    )
+    agent_task = await db.scalar(
+        select(AgentTask)
+        .where(AgentTask.organization_id == organization_id)
+        .where(AgentTask.task_type == "team_match_training_followup_review")
+        .where(AgentTask.input_ref.contains(f"plan:{plan.id}"))
+        .order_by(AgentTask.created_at.desc())
+        .limit(1)
+    )
+    return {
+        "organization_id": organization_id,
+        "tracking_run_id": tracking_run.id,
+        "video_asset_id": tracking_run.video_asset_id,
+        "team_id": tracking_run.team_id,
+        "plan_id": plan.id,
+        "item_ids": [item.id for item in items],
+        "session_plan_ids": [session_plan.id for session_plan in session_plans],
+        "title": plan.title,
+        "focus_area": plan.focus_area,
+        "period_start": plan.period_start,
+        "period_end": plan.period_end,
+        "item_count": len(items),
+        "training_prescriptions": prescriptions,
+        "reused_existing": reused_existing,
         "agent_task_id": agent_task.id if agent_task else None,
         "agent_task_status": agent_task.status.value if agent_task else None,
         "agent_task_title": agent_task.title if agent_task else None,

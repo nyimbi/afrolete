@@ -3755,21 +3755,23 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert "## Training Prescription" in report_text
     assert "## Data Quality" in report_text
 
+    team_followup_payload = {
+        "organization_id": organization["id"],
+        "period_start": "2026-06-01",
+        "period_end": "2026-06-07",
+        "max_items": 3,
+        "selected_focus_areas": ["set_piece_restarts", "load_recovery_and_substitution"],
+    }
     team_followup_response = client.post(
         f"/api/v1/performance/scouting/tracking-runs/{revised_tracking['id']}/training-followup",
         headers=identity_headers,
-        json={
-            "organization_id": organization["id"],
-            "period_start": "2026-06-01",
-            "period_end": "2026-06-07",
-            "max_items": 3,
-            "selected_focus_areas": ["set_piece_restarts", "load_recovery_and_substitution"],
-        },
+        json=team_followup_payload,
     )
     assert team_followup_response.status_code == 201
     team_followup = team_followup_response.json()
     assert team_followup["tracking_run_id"] == revised_tracking["id"]
     assert team_followup["team_id"] == team["id"]
+    assert team_followup["reused_existing"] is False
     assert team_followup["item_count"] >= 1
     assert len(team_followup["session_plan_ids"]) == team_followup["item_count"]
     assert team_followup["training_prescriptions"][0]["drill_recommendation"]
@@ -3805,6 +3807,31 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     agent_task = next(task for task in agent_tasks_response.json() if task["id"] == team_followup["agent_task_id"])
     assert agent_task["task_type"] == "team_match_training_followup_review"
     assert f"tracking:{revised_tracking['id']}" in agent_task["input_ref"]
+    duplicate_followup_response = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{revised_tracking['id']}/training-followup",
+        headers=identity_headers,
+        json=team_followup_payload,
+    )
+    assert duplicate_followup_response.status_code == 201
+    duplicate_followup = duplicate_followup_response.json()
+    assert duplicate_followup["reused_existing"] is True
+    assert duplicate_followup["plan_id"] == team_followup["plan_id"]
+    assert set(duplicate_followup["item_ids"]) == set(team_followup["item_ids"])
+    assert set(duplicate_followup["session_plan_ids"]) == set(team_followup["session_plan_ids"])
+    assert duplicate_followup["agent_task_id"] == team_followup["agent_task_id"]
+    dedupe_plan_response = client.get(
+        f"/api/v1/training/plans?organization_id={organization['id']}&team_id={team['id']}",
+        headers=identity_headers,
+    )
+    assert dedupe_plan_response.status_code == 200
+    matching_team_followups = [
+        plan
+        for plan in dedupe_plan_response.json()
+        if plan["title"] == team_followup["title"]
+        and plan["period_start"] == team_followup_payload["period_start"]
+        and plan["period_end"] == team_followup_payload["period_end"]
+    ]
+    assert len(matching_team_followups) == 1
 
     guidance_review_response = client.get(
         f"/api/v1/performance/scouting/tracking-runs/{revised_tracking['id']}/player-guidance-review",

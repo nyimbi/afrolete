@@ -8616,6 +8616,7 @@ export type PerformanceMatchTrainingFollowupRead = {
   period_end: string;
   item_count: number;
   training_prescriptions: Record<string, unknown>[];
+  reused_existing: boolean;
   agent_task_id: UUID | null;
   agent_task_status: string | null;
   agent_task_title: string | null;

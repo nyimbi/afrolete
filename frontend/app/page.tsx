@@ -10916,7 +10916,12 @@ export default function HomePage() {
       (followup) => {
         setPerformanceMatchTrainingFollowup(followup);
         setSelectedTrainingPlanId(followup.plan_id);
-        addLog(`${followup.item_count} match prescription block(s) added to training`, "good");
+        addLog(
+          followup.reused_existing
+            ? `Opened existing match follow-up with ${followup.session_plan_ids.length} session(s)`
+            : `${followup.item_count} match prescription block(s) added to training`,
+          "good"
+        );
         void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
         void loadTrainingPlanItems(followup.plan_id);
       }
@@ -28086,7 +28091,10 @@ export default function HomePage() {
                       <div>
                         <strong>{performanceMatchTrainingFollowup.title}</strong>
                         <span>
-                          {performanceMatchTrainingFollowup.item_count} block(s) · {performanceMatchTrainingFollowup.session_plan_ids.length} session(s) · {performanceMatchTrainingFollowup.agent_task_status ?? "agent queued"}
+                          {performanceMatchTrainingFollowup.reused_existing ? "existing block" : "new block"} ·{" "}
+                          {performanceMatchTrainingFollowup.item_count} prescription(s) ·{" "}
+                          {performanceMatchTrainingFollowup.session_plan_ids.length} session(s) ·{" "}
+                          {performanceMatchTrainingFollowup.agent_task_status ?? "agent queued"}
                         </span>
                         <small>
                           Plan {performanceMatchTrainingFollowup.plan_id} · {performanceMatchTrainingFollowup.period_start} to {performanceMatchTrainingFollowup.period_end}
