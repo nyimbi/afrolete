@@ -11544,6 +11544,7 @@ def build_match_analysis_report_artifact(
     pass_type_metrics = [item for item in tracking.get("pass_type_metrics", []) if isinstance(item, dict)]
     defensive_action_events = [item for item in tracking.get("defensive_action_events", []) if isinstance(item, dict)]
     set_piece_events = [item for item in tracking.get("set_piece_events", []) if isinstance(item, dict)]
+    training_prescriptions = [item for item in tracking.get("training_prescriptions", []) if isinstance(item, dict)]
     chance_creation_metrics = (
         tracking.get("chance_creation_metrics") if isinstance(tracking.get("chance_creation_metrics"), dict) else {}
     )
@@ -11581,6 +11582,8 @@ def build_match_analysis_report_artifact(
         "expected_goals": round(float(ball_tracking_metrics.get("expected_goals") or 0.0), 3),
         "set_piece_count": int(set_piece_metrics.get("set_piece_count") or 0),
         "set_piece_highest_danger_score": round(float(set_piece_metrics.get("highest_danger_score") or 0.0), 3),
+        "training_prescription_count": len(training_prescriptions),
+        "top_training_focus": training_prescriptions[0].get("focus_area") if training_prescriptions else None,
     }
     recommendations = match_analysis_report_recommendations(tracking, player_cards, team_shape, team_phase)
     report_title = title.strip() if title and title.strip() else f"{video_asset.opponent_name} match analysis"
@@ -11601,6 +11604,7 @@ def build_match_analysis_report_artifact(
         pass_type_metrics=pass_type_metrics,
         defensive_action_events=defensive_action_events,
         set_piece_events=set_piece_events,
+        training_prescriptions=training_prescriptions,
         chance_creation_metrics=chance_creation_metrics,
         set_piece_metrics=set_piece_metrics,
         ball_tracking_metrics=ball_tracking_metrics,
@@ -11617,6 +11621,7 @@ def build_match_analysis_report_artifact(
         "player_cards": player_cards,
         "team_shape": team_shape,
         "set_piece_events": set_piece_events,
+        "training_prescriptions": training_prescriptions,
         "recommendations": recommendations,
     }
 
@@ -11673,6 +11678,14 @@ def match_analysis_report_recommendations(
         recommendations.append("Review restart clips for delivery quality, marking assignments, second-ball reactions, and transition protection.")
     if float(set_piece_metrics.get("highest_danger_score") or 0.0) >= 0.70:
         recommendations.append("Prioritize high-danger set pieces in the team walkthrough before the next match.")
+    training_prescriptions = [
+        item for item in tracking.get("training_prescriptions", []) if isinstance(item, dict)
+    ]
+    if training_prescriptions:
+        recommendations.append(
+            "Convert this match review into the top training prescription: "
+            f"{str(training_prescriptions[0].get('title') or 'team follow-up').strip()}."
+        )
     if not recommendations:
         recommendations.append("Capture a calibrated tracking run before issuing individualized player guidance.")
     return list(dict.fromkeys(recommendations))[:12]
@@ -11696,6 +11709,7 @@ def match_analysis_report_markdown(
     pass_type_metrics: list[dict[str, object]],
     defensive_action_events: list[dict[str, object]],
     set_piece_events: list[dict[str, object]],
+    training_prescriptions: list[dict[str, object]],
     chance_creation_metrics: dict[str, object],
     set_piece_metrics: dict[str, object],
     ball_tracking_metrics: dict[str, object],
@@ -11726,12 +11740,28 @@ def match_analysis_report_markdown(
         f"- Expected goals: {summary['expected_goals']}",
         f"- Set pieces/restarts: {summary['set_piece_count']}",
         f"- Highest restart danger: {summary['set_piece_highest_danger_score']}",
+        f"- Training prescriptions: {summary['training_prescription_count']}",
         f"- Tracking quality: {round(float(summary['tracking_quality_score']) * 100)}%",
         f"- Identity continuity: {round(float(summary['identity_continuity_score']) * 100)}%",
         "",
         "## Coaching Guidance",
     ]
     lines.extend(f"- {item}" for item in recommendations)
+    lines.extend(["", "## Training Prescription"])
+    if training_prescriptions:
+        for prescription in training_prescriptions[:6]:
+            lines.extend(
+                [
+                    f"### {prescription.get('title') or 'Training follow-up'}",
+                    f"- Priority: {prescription.get('priority', 'review')} | Focus: {str(prescription.get('focus_area') or 'team').replace('_', ' ')}",
+                    f"- Session design: {prescription.get('session_design')}",
+                    f"- Drill: {prescription.get('drill_recommendation')}",
+                    f"- Evidence: {prescription.get('evidence')}",
+                    f"- Coach cue: {prescription.get('coaching_cue')}",
+                ]
+            )
+    else:
+        lines.append("- No training prescription was generated from this tracking run.")
     lines.extend(["", "## Player Metrics"])
     if player_cards:
         for card in player_cards:
@@ -12243,6 +12273,13 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         pressure_events=football_context["pressure_events"],
         ball_action_events=ball_context["ball_action_events"],
     )
+    training_prescriptions = derive_match_training_prescriptions(
+        player_metrics=player_metrics,
+        team_phase_metrics=football_context["team_phase_metrics"],
+        ball_tracking_metrics=ball_context["ball_tracking_metrics"],
+        set_piece_metrics=ball_context["set_piece_metrics"],
+        tactical_role_metrics=role_context["tactical_role_metrics"],
+    )
     return {
         "sample_count": len(samples),
         "player_count": len(player_metrics),
@@ -12271,6 +12308,7 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         "chance_creation_metrics": ball_context["chance_creation_metrics"],
         "set_piece_events": ball_context["set_piece_events"],
         "set_piece_metrics": ball_context["set_piece_metrics"],
+        "training_prescriptions": training_prescriptions,
         "tactical_role_metrics": role_context["tactical_role_metrics"],
     }
 
@@ -13704,6 +13742,199 @@ def match_tracking_player_coaching_flags(
     return flags
 
 
+def derive_match_training_prescriptions(
+    *,
+    player_metrics: list[dict[str, object]],
+    team_phase_metrics: list[dict[str, object]],
+    ball_tracking_metrics: dict[str, object],
+    set_piece_metrics: dict[str, object],
+    tactical_role_metrics: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    prescriptions: list[dict[str, object]] = []
+    seen_focus: set[str] = set()
+
+    def add_prescription(
+        *,
+        focus_area: str,
+        title: str,
+        priority_score: float,
+        owner_scope: str,
+        session_design: str,
+        drill_recommendation: str,
+        evidence: str,
+        coaching_cue: str,
+        intensity: str = "moderate",
+        linked_metric: str | None = None,
+    ) -> None:
+        if focus_area in seen_focus:
+            return
+        seen_focus.add(focus_area)
+        priority = "urgent" if priority_score >= 0.78 else "high" if priority_score >= 0.60 else "normal"
+        prescriptions.append(
+            {
+                "focus_area": focus_area,
+                "title": title,
+                "priority": priority,
+                "priority_score": round(max(0.0, min(priority_score, 0.99)), 3),
+                "owner_scope": owner_scope,
+                "intensity": intensity,
+                "session_design": session_design,
+                "drill_recommendation": drill_recommendation,
+                "evidence": evidence,
+                "coaching_cue": coaching_cue,
+                "linked_metric": linked_metric,
+                "review_required": True,
+            }
+        )
+
+    fatigue_candidates = sorted(
+        player_metrics,
+        key=lambda metric: (
+            float(metric.get("fatigue_risk_score") or 0.0),
+            float(metric.get("high_speed_distance_m") or 0.0),
+            int(metric.get("sprint_count") or 0),
+        ),
+        reverse=True,
+    )
+    if fatigue_candidates:
+        top = fatigue_candidates[0]
+        top_label = match_tracking_metric_label(top)
+        fatigue_score = float(top.get("fatigue_risk_score") or 0.0)
+        high_speed = float(top.get("high_speed_distance_m") or 0.0)
+        sprint_count = int(top.get("sprint_count") or 0)
+        load_band = str(top.get("load_band") or "unknown")
+        if fatigue_score >= 0.45 or high_speed > 0 or sprint_count > 0 or load_band in {"moderate", "high", "extreme"}:
+            add_prescription(
+                focus_area="load_recovery_and_substitution",
+                title="Load recovery and substitution review",
+                priority_score=max(fatigue_score, min(high_speed / 450, 0.75), min(sprint_count / 10, 0.8)),
+                owner_scope="coach_and_performance",
+                intensity="low" if fatigue_score >= 0.62 else "moderate",
+                session_design="Start the next session with readiness checks, mobility, deceleration review, and limited high-speed exposure.",
+                drill_recommendation="Pair 4 x 20m controlled accelerations with 20m deceleration gates and two-minute walk recoveries.",
+                evidence=(
+                    f"{top_label} carried {load_band.replace('_', ' ')} load, "
+                    f"{round(fatigue_score * 100)}% fatigue risk, {round(high_speed)}m high-speed work, "
+                    f"and {sprint_count} sprint(s)."
+                ),
+                coaching_cue="Protect recovery first, then add speed exposure only if readiness and soreness checks are green.",
+                linked_metric="fatigue_risk_score",
+            )
+
+    pressure_total = sum(int(phase.get("pressure_event_count") or 0) for phase in team_phase_metrics)
+    if pressure_total > 0:
+        add_prescription(
+            focus_area="pressing_shape_and_cover",
+            title="Pressing triggers with cover behind the first line",
+            priority_score=min(0.48 + pressure_total / 20, 0.88),
+            owner_scope="team_unit",
+            intensity="high",
+            session_design="Run short pressing waves, then pause each regain/loss to check cover shadows and second-ball spacing.",
+            drill_recommendation="Use 4v4+3 directional pressing waves with a five-second counter-press rule after every turnover.",
+            evidence=f"{pressure_total} pressure event(s) were detected from nearest-opponent tracking context.",
+            coaching_cue="Do not praise pressure unless the nearest support and escape-route block are visible on video.",
+            linked_metric="pressure_event_count",
+        )
+
+    pass_attempts = int(ball_tracking_metrics.get("pass_attempt_count") or 0)
+    pass_accuracy = float(ball_tracking_metrics.get("pass_accuracy_percent") or 0.0)
+    turnovers = int(ball_tracking_metrics.get("turnover_count") or 0)
+    if turnovers > 0 or (pass_attempts >= 3 and pass_accuracy < 72.0):
+        add_prescription(
+            focus_area="buildout_scanning_and_support",
+            title="Build-out scanning and support angles",
+            priority_score=min(0.52 + turnovers / 8 + max(0.0, 72.0 - pass_accuracy) / 100, 0.90),
+            owner_scope="unit",
+            session_design="Recreate turnover clips as restart-to-possession patterns with mandatory shoulder checks before receiving.",
+            drill_recommendation="Run rondo-to-target sequences where each receiver scans twice and names the next support option.",
+            evidence=f"{turnovers} turnover(s) and {pass_accuracy:.0f}% pass accuracy from {pass_attempts} pass attempt(s).",
+            coaching_cue="Coach first touch direction and third-player support before increasing tempo.",
+            linked_metric="turnover_count",
+        )
+
+    shots = int(ball_tracking_metrics.get("shot_count") or 0)
+    expected_goals = float(ball_tracking_metrics.get("expected_goals") or 0.0)
+    key_passes = int(ball_tracking_metrics.get("key_pass_count") or 0)
+    if shots > 0 or key_passes > 0:
+        add_prescription(
+            focus_area="final_action_quality",
+            title="Final-action quality and shot selection",
+            priority_score=min(0.50 + shots / 10 + expected_goals / 2 + key_passes / 12, 0.86),
+            owner_scope="attacking_unit",
+            intensity="moderate",
+            session_design="Replay each chance, then train the same entry with one required cutback, one shot, and one recycle option.",
+            drill_recommendation="Use 6v5 final-third waves with a shot clock and a bonus point for high-value cutbacks.",
+            evidence=f"{shots} shot(s), {expected_goals:.2f} xG, and {key_passes} key pass(es) were detected.",
+            coaching_cue="Separate poor execution from poor shot selection before changing the player role.",
+            linked_metric="expected_goals",
+        )
+
+    set_piece_count = int(set_piece_metrics.get("set_piece_count") or 0)
+    set_piece_danger = float(set_piece_metrics.get("highest_danger_score") or 0.0)
+    if set_piece_count > 0:
+        add_prescription(
+            focus_area="set_piece_restarts",
+            title="Set-piece and restart rehearsal",
+            priority_score=max(0.50 + set_piece_count / 12, set_piece_danger),
+            owner_scope="team_unit",
+            intensity="moderate",
+            session_design="Walk through the top restart patterns, then run live second-ball and transition-protection reps.",
+            drill_recommendation="Run corner/free-kick/goal-kick sequences with assigned blockers, first contact, and second-ball roles.",
+            evidence=(
+                f"{set_piece_count} restart(s), {set_piece_metrics.get('turnover_after_restart_count', 0)} turnover(s), "
+                f"and {set_piece_danger:.2f} highest danger score."
+            ),
+            coaching_cue="Every restart rep needs a delivery target, second-ball player, and counter-press cover.",
+            linked_metric="set_piece_count",
+        )
+
+    role_counts = [
+        item for item in tactical_role_metrics if int(item.get("player_count") or 0) > 0
+    ]
+    if role_counts:
+        top_role = str(role_counts[0].get("inferred_role") or "role")
+        add_prescription(
+            focus_area="role_specific_unit_work",
+            title="Role-specific unit coaching",
+            priority_score=min(0.44 + int(role_counts[0].get("player_count") or 0) / 8, 0.72),
+            owner_scope="position_group",
+            intensity="moderate",
+            session_design="Split the squad by inferred role and connect each group to one video clip plus one field pattern.",
+            drill_recommendation="Use position-group pattern play with role-specific success criteria and a quick video debrief.",
+            evidence=(
+                f"{role_counts[0].get('player_count')} player(s) clustered as "
+                f"{top_role.replace('_', ' ')} from tracking evidence."
+            ),
+            coaching_cue="Treat inferred roles as review prompts until the coach confirms identities and tactical assignments.",
+            linked_metric="tactical_role_metrics",
+        )
+
+    if not prescriptions:
+        add_prescription(
+            focus_area="video_review_quality_gate",
+            title="Video review quality gate",
+            priority_score=0.35,
+            owner_scope="coach",
+            intensity="low",
+            session_design="Confirm identities, calibration, and match context before prescribing a high-load follow-up session.",
+            drill_recommendation="Run a coach-led video tagging session and mark one strength, one risk, and one training action.",
+            evidence="Tracking evidence is not yet strong enough for a specific training prescription.",
+            coaching_cue="Improve footage, calibration, or provider tracking before making player-specific training decisions.",
+            linked_metric="tracking_quality_score",
+        )
+
+    prescriptions.sort(
+        key=lambda item: (
+            float(item.get("priority_score") or 0.0),
+            str(item.get("focus_area") or ""),
+        ),
+        reverse=True,
+    )
+    for index, prescription in enumerate(prescriptions[:8], start=1):
+        prescription["rank"] = index
+    return prescriptions[:8]
+
+
 def enrich_match_tracking_summary(
     summary: dict[str, object],
     *,
@@ -14824,6 +15055,7 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "chance_creation_metrics": summary.get("chance_creation_metrics", {}),
         "set_piece_events": summary.get("set_piece_events", []),
         "set_piece_metrics": summary.get("set_piece_metrics", {}),
+        "training_prescriptions": summary.get("training_prescriptions", []),
         "formation_snapshots": summary.get("formation_snapshots", []),
         "tactical_role_metrics": summary.get("tactical_role_metrics", []),
         "player_metrics": summary.get("player_metrics", []),

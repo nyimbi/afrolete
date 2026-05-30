@@ -3629,6 +3629,13 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert tracking["action_recognition_metrics"]["average_confidence"] > 0
     assert any(snapshot["team_label"] == "Home" for snapshot in tracking["formation_snapshots"])
     assert tracking["tactical_role_metrics"]
+    assert tracking["training_prescriptions"]
+    assert {item["focus_area"] for item in tracking["training_prescriptions"]} & {
+        "load_recovery_and_substitution",
+        "set_piece_restarts",
+        "pressing_shape_and_cover",
+    }
+    assert tracking["training_prescriptions"][0]["drill_recommendation"]
     assert any("Home" in guidance for guidance in tracking["tactical_guidance"])
 
     calibrations = client.get(
@@ -3708,6 +3715,7 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert report["summary"]["turnover_count"] == 2
     assert report["summary"]["set_piece_count"] >= 1
     assert report["summary"]["set_piece_highest_danger_score"] > 0
+    assert report["summary"]["training_prescription_count"] >= 1
     assert report["player_cards"][0]["player_label"] == "Confirmed Forward"
     assert report["player_cards"][0]["inferred_role"] != "unknown"
     assert report["player_cards"][0]["role_evidence"]
@@ -3744,6 +3752,7 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert "## Team Phase And Pressure" in report_text
     assert "## Possession And Ball Actions" in report_text
     assert "## Set Pieces And Restarts" in report_text
+    assert "## Training Prescription" in report_text
     assert "## Data Quality" in report_text
 
     guidance_review_response = client.get(
@@ -4230,6 +4239,7 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     assert exported["summary"]["player_metrics"]
     assert exported["summary"]["tactical_role_metrics"]
     assert "set_piece_metrics" in exported["summary"]
+    assert exported["summary"]["training_prescriptions"]
 
     report_response = client.post(
         f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/analysis-reports",

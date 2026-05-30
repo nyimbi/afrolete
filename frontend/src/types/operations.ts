@@ -7166,6 +7166,7 @@ export type PerformanceMatchTrackingRunRead = {
   chance_creation_metrics: Record<string, unknown>;
   set_piece_events: Record<string, unknown>[];
   set_piece_metrics: Record<string, unknown>;
+  training_prescriptions: Record<string, unknown>[];
   formation_snapshots: Record<string, unknown>[];
   tactical_role_metrics: Record<string, unknown>[];
   player_metrics: PerformanceMatchTrackingPlayerMetricRead[];

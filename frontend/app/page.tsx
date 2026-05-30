@@ -27364,6 +27364,15 @@ export default function HomePage() {
                   </p>
                 </article>
                 <article className="mini-card">
+                  <span className="muted">Training prescription</span>
+                  <strong>{performanceMatchTrackingRun?.training_prescriptions.length ?? 0} action(s)</strong>
+                  <p>
+                    {performanceMatchTrackingRun?.training_prescriptions[0]
+                      ? `${String(performanceMatchTrackingRun.training_prescriptions[0].priority ?? "review")} · ${String(performanceMatchTrackingRun.training_prescriptions[0].focus_area ?? "team").replaceAll("_", " ")}`
+                      : "Match evidence becomes coach-ready drills, session design, and priority follow-ups after tracking."}
+                  </p>
+                </article>
+                <article className="mini-card">
                   <span className="muted">Chance quality</span>
                   <strong>{Number(performanceMatchTrackingRun?.ball_tracking_metrics.shot_count ?? 0)} shot(s)</strong>
                   <p>
@@ -28017,6 +28026,20 @@ export default function HomePage() {
                         <small>
                           {Number(event.timestamp_seconds ?? 0).toFixed(1)}s · {String(event.coaching_cue ?? event.evidence ?? "Review delivery and transition coverage.")}
                         </small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceMatchTrackingRun.training_prescriptions.slice(0, 5).map((prescription, index) => (
+                    <article key={`training-prescription-${index}`} className="task-card">
+                      <div>
+                        <strong>
+                          {String(prescription.title ?? "Training prescription")} · {String(prescription.priority ?? "review")}
+                        </strong>
+                        <span>
+                          {String(prescription.focus_area ?? "team").replaceAll("_", " ")} · {String(prescription.intensity ?? "moderate")} intensity
+                        </span>
+                        <small>{String(prescription.drill_recommendation ?? prescription.session_design ?? "Review match evidence before prescribing.")}</small>
+                        <small>{String(prescription.evidence ?? prescription.coaching_cue ?? "Evidence will appear after tracking.")}</small>
                       </div>
                     </article>
                   ))}
