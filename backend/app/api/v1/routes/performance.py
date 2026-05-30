@@ -38,6 +38,8 @@ from app.schemas.performance import (
     PerformanceHardwareKitRead,
     PerformanceHardwareSyncRunCreate,
     PerformanceHardwareSyncRunRead,
+    PerformanceHighlightReelCreate,
+    PerformanceHighlightReelRead,
     PerformanceInjuryRiskAlertRead,
     PerformanceInjuryRiskAlertRunRead,
     PerformanceInjuryRiskRead,
@@ -114,6 +116,7 @@ from app.services.performance import (
     create_performance_video_pose_samples,
     create_performance_goal,
     create_performance_hardware_kit,
+    create_performance_highlight_reel,
     create_performance_model_extraction_benchmark_dataset,
     create_player_self_assessment,
     create_wearable_provider_connection,
@@ -132,10 +135,12 @@ from app.services.performance import (
     list_performance_hardware_devices,
     list_performance_hardware_kits,
     list_performance_hardware_sync_runs,
+    list_performance_highlight_reels,
     list_metric_definitions,
     list_match_tracking_runs,
     list_match_pitch_calibrations,
     match_pitch_calibration_read,
+    highlight_reel_read,
     list_movement_reference_profiles,
     list_my_player_performance,
     list_observations,
@@ -926,6 +931,45 @@ async def list_match_tracking_runs_route(
     return [
         PerformanceMatchTrackingRunRead(**run)
         for run in await list_match_tracking_runs(
+            db,
+            identity,
+            organization_id,
+            authz,
+            video_asset_id=video_asset_id,
+        )
+    ]
+
+
+@router.post(
+    "/scouting/videos/{video_asset_id}/highlight-reels",
+    response_model=PerformanceHighlightReelRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_performance_highlight_reel_route(
+    video_asset_id: UUID,
+    payload: PerformanceHighlightReelCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceHighlightReelRead:
+    return PerformanceHighlightReelRead(
+        **highlight_reel_read(
+            await create_performance_highlight_reel(db, identity, video_asset_id, payload, authz)
+        )
+    )
+
+
+@router.get("/scouting/highlight-reels", response_model=list[PerformanceHighlightReelRead])
+async def list_performance_highlight_reels_route(
+    organization_id: UUID = Query(),
+    video_asset_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceHighlightReelRead]:
+    return [
+        PerformanceHighlightReelRead(**highlight_reel_read(reel))
+        for reel in await list_performance_highlight_reels(
             db,
             identity,
             organization_id,

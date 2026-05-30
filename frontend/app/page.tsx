@@ -363,6 +363,7 @@ import type {
   PerformanceHardwareDeviceRead,
   PerformanceHardwareKitRead,
   PerformanceHardwareSyncRunRead,
+  PerformanceHighlightReelRead,
   PerformanceInjuryRiskAlertRead,
   PerformanceInjuryRiskAlertRunRead,
   PerformanceInjuryRiskRead,
@@ -1677,6 +1678,8 @@ export default function HomePage() {
   const [performanceHardwareDevices, setPerformanceHardwareDevices] = useState<PerformanceHardwareDeviceRead[]>([]);
   const [performanceHardwareSyncRun, setPerformanceHardwareSyncRun] =
     useState<PerformanceHardwareSyncRunRead | null>(null);
+  const [performanceHighlightReels, setPerformanceHighlightReels] = useState<PerformanceHighlightReelRead[]>([]);
+  const [performanceHighlightReel, setPerformanceHighlightReel] = useState<PerformanceHighlightReelRead | null>(null);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -2355,6 +2358,13 @@ export default function HomePage() {
     recommended_camera_count: 2,
     recommended_gps_unit_count: 24,
     battery_percent: 88
+  });
+  const [highlightReelForm, setHighlightReelForm] = useState({
+    audience: "scout",
+    purpose: "recruiting",
+    target_duration_seconds: 90,
+    channels: "coach_review,scout_packet,parent_share",
+    tags: "speed,pressing,transition"
   });
   const [poseGaitEvidenceText, setPoseGaitEvidenceText] = useState(
     "Torso lean angle 18 degrees with late torso collapse. Front knee drive 64 degrees. Ground contact time 138 ms. Arm swing symmetry 6.5 with cross-body movement. Stride frequency 4.1 Hz."
@@ -3682,7 +3692,15 @@ export default function HomePage() {
     if (teamId) {
       params.set("team_id", teamId);
     }
-    const [videoData, reportData, trackingData, calibrationData, hardwareKitData, hardwareDeviceData] = await Promise.all([
+    const [
+      videoData,
+      reportData,
+      trackingData,
+      calibrationData,
+      hardwareKitData,
+      hardwareDeviceData,
+      highlightReelData
+    ] = await Promise.all([
       apiRequest<OppositionScoutingVideoAssetRead[]>(
         `/performance/scouting/videos?${params.toString()}`,
         { identity }
@@ -3706,6 +3724,10 @@ export default function HomePage() {
       apiRequest<PerformanceHardwareDeviceRead[]>(
         `/performance/hardware-devices?organization_id=${organizationId}`,
         { identity }
+      ),
+      apiRequest<PerformanceHighlightReelRead[]>(
+        `/performance/scouting/highlight-reels?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setOppositionScoutingVideos(videoData);
@@ -3714,6 +3736,7 @@ export default function HomePage() {
     setPerformanceMatchPitchCalibrations(calibrationData);
     setPerformanceHardwareKits(hardwareKitData);
     setPerformanceHardwareDevices(hardwareDeviceData);
+    setPerformanceHighlightReels(highlightReelData);
     setOppositionScoutingVideo((current) =>
       current && videoData.some((video) => video.id === current.id) ? current : videoData[0] ?? null
     );
@@ -3727,6 +3750,9 @@ export default function HomePage() {
       current && calibrationData.some((calibration) => calibration.id === current.id)
         ? current
         : calibrationData[0] ?? null
+    );
+    setPerformanceHighlightReel((current) =>
+      current && highlightReelData.some((reel) => reel.id === current.id) ? current : highlightReelData[0] ?? null
     );
   }, [identity]);
 
@@ -4803,6 +4829,8 @@ export default function HomePage() {
       setPerformanceMatchTrackingRun(null);
       setPerformanceMatchPitchCalibrations([]);
       setPerformanceMatchPitchCalibration(null);
+      setPerformanceHighlightReels([]);
+      setPerformanceHighlightReel(null);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
@@ -10072,6 +10100,54 @@ export default function HomePage() {
           ]);
         }
         addLog(`${device.device_label} sync ${syncRun.status}: ${syncRun.sample_count} tracking sample(s)`, "good");
+      }
+    );
+  };
+
+  const createPerformanceHighlightReel = () => {
+    if (!selectedOrganizationId || !oppositionScoutingVideo) {
+      addLog("Select a match video before generating highlights", "bad");
+      return;
+    }
+    runAction(
+      "create-performance-highlight-reel",
+      () =>
+        apiRequest<PerformanceHighlightReelRead>(
+          `/performance/scouting/videos/${oppositionScoutingVideo.id}/highlight-reels`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              tracking_run_id: performanceMatchTrackingRun?.video_asset_id === oppositionScoutingVideo.id
+                ? performanceMatchTrackingRun.id
+                : null,
+              audience: highlightReelForm.audience,
+              purpose: highlightReelForm.purpose,
+              target_duration_seconds: highlightReelForm.target_duration_seconds,
+              channels: highlightReelForm.channels.split(",").map((item) => item.trim()).filter(Boolean),
+              tags: highlightReelForm.tags.split(",").map((item) => item.trim()).filter(Boolean),
+              branding: {
+                organization_id: selectedOrganizationId,
+                team: selectedTeam?.name ?? "AfroLete team"
+              }
+            }
+          }
+        ),
+      (reel) => {
+        setPerformanceHighlightReel(reel);
+        setPerformanceHighlightReels((current) => [
+          reel,
+          ...current.filter((item) => item.id !== reel.id)
+        ]);
+        setOppositionScoutingVideos((current) =>
+          current.map((video) =>
+            video.id === reel.video_asset_id
+              ? { ...video, status: "highlighted", analyzed_at: reel.generated_at }
+              : video
+          )
+        );
+        addLog(`${reel.title} generated with ${reel.clip_count} clip(s)`, "good");
       }
     );
   };
@@ -24070,6 +24146,7 @@ export default function HomePage() {
                 <button type="button" onClick={createPerformanceHardwareKit} disabled={busyAction !== null}>Kit</button>
                 <button type="button" onClick={provisionPerformanceHardwareDevice} disabled={busyAction !== null}>Device</button>
                 <button type="button" onClick={syncPerformanceHardwareDevice} disabled={busyAction !== null}>Hardware sync</button>
+                <button type="button" onClick={createPerformanceHighlightReel} disabled={busyAction !== null}>Highlights</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
                 <button type="button" onClick={runPerformanceForecastValidation} disabled={busyAction !== null}>Forecast QA</button>
@@ -24264,6 +24341,28 @@ export default function HomePage() {
               <label className="wide-field">
                 Device secret path
                 <input value={performanceHardwareForm.api_key_secret_path} onChange={(event) => setPerformanceHardwareForm({ ...performanceHardwareForm, api_key_secret_path: event.target.value })} />
+              </label>
+              <label>
+                Highlight audience
+                <select value={highlightReelForm.audience} onChange={(event) => setHighlightReelForm({ ...highlightReelForm, audience: event.target.value })}>
+                  <option value="coach">Coach</option>
+                  <option value="player">Player</option>
+                  <option value="parent">Parent</option>
+                  <option value="scout">Scout</option>
+                  <option value="fan">Fan</option>
+                </select>
+              </label>
+              <label>
+                Highlight purpose
+                <input value={highlightReelForm.purpose} onChange={(event) => setHighlightReelForm({ ...highlightReelForm, purpose: event.target.value })} />
+              </label>
+              <label>
+                Reel seconds
+                <input type="number" min={15} max={600} value={highlightReelForm.target_duration_seconds} onChange={(event) => setHighlightReelForm({ ...highlightReelForm, target_duration_seconds: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Highlight channels
+                <input value={highlightReelForm.channels} onChange={(event) => setHighlightReelForm({ ...highlightReelForm, channels: event.target.value })} />
               </label>
               <label className="wide-field">
                 Pose/gait evidence
@@ -24713,7 +24812,16 @@ export default function HomePage() {
                       ? `${performanceHardwareSyncRun.sample_count} synced samples · ${performanceHardwareSyncRun.status}`
                       : performanceHardwareKits[0]
                         ? `${performanceHardwareKits[0].provider} ${performanceHardwareKits[0].kit_type} kit · ${performanceHardwareKits[0].recommended_gps_unit_count} GPS`
-                        : "Create camera/GPS kits and sync device samples into match tracking."}
+                      : "Create camera/GPS kits and sync device samples into match tracking."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Highlights</span>
+                  <strong>{performanceHighlightReel?.clip_count ?? 0} clip(s)</strong>
+                  <p>
+                    {performanceHighlightReel
+                      ? `${Math.round(performanceHighlightReel.duration_seconds)}s · ${performanceHighlightReel.audience} · ${performanceHighlightReel.purpose}`
+                      : "Generate AI-selected reels for coaches, players, families, scouts, and fans."}
                   </p>
                 </article>
               </div>
@@ -24734,6 +24842,9 @@ export default function HomePage() {
                           );
                           setPerformanceMatchPitchCalibration(
                             performanceMatchPitchCalibrations.find((calibration) => calibration.video_asset_id === video.id) ?? null
+                          );
+                          setPerformanceHighlightReel(
+                            performanceHighlightReels.find((reel) => reel.video_asset_id === video.id) ?? null
                           );
                         }} disabled={busyAction !== null}>Select</button>
                       </span>
@@ -24827,6 +24938,48 @@ export default function HomePage() {
                           {device.last_seen_at ? `last seen ${new Date(device.last_seen_at).toLocaleString()}` : "not synced yet"}
                         </small>
                       </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+              {(performanceHighlightReel || performanceHighlightReels.length) ? (
+                <div className="task-list">
+                  {performanceHighlightReel ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>{performanceHighlightReel.title} · {performanceHighlightReel.status}</strong>
+                        <span>
+                          {performanceHighlightReel.clip_count} clip(s) · {Math.round(performanceHighlightReel.duration_seconds)}s ·{" "}
+                          {Array.isArray(performanceHighlightReel.distribution.channels)
+                            ? performanceHighlightReel.distribution.channels.join(", ")
+                            : performanceHighlightReel.audience}
+                        </span>
+                        <small>{String(performanceHighlightReel.distribution.caption ?? performanceHighlightReel.model_policy)}</small>
+                      </div>
+                    </article>
+                  ) : null}
+                  {performanceHighlightReel?.clips.slice(0, 6).map((clip, index) => (
+                    <article key={`${clip.title}-${index}`} className="task-card">
+                      <div>
+                        <strong>{clip.title} · {clip.category.replaceAll("_", " ")}</strong>
+                        <span>
+                          {clip.start_seconds}s-{clip.end_seconds}s · {Math.round(clip.confidence * 100)}% confidence
+                          {clip.player_label ? ` · ${clip.player_label}${clip.jersey_number ? ` #${clip.jersey_number}` : ""}` : ""}
+                        </span>
+                        <small>{clip.coaching_note}</small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceHighlightReels.slice(0, 3).map((reel) => (
+                    <article key={reel.id} className="task-card">
+                      <div>
+                        <strong>{reel.title}</strong>
+                        <span>{reel.audience} · {reel.clip_count} clip(s) · {Math.round(reel.duration_seconds)}s</span>
+                        <small>{reel.tags.join(", ")}</small>
+                      </div>
+                      <span>
+                        <button type="button" onClick={() => setPerformanceHighlightReel(reel)} disabled={busyAction !== null}>Open</button>
+                      </span>
                     </article>
                   ))}
                 </div>

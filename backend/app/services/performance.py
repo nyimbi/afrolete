@@ -53,6 +53,7 @@ from app.models.performance import (
     PerformanceHardwareDevice,
     PerformanceHardwareKit,
     PerformanceHardwareSyncRun,
+    PerformanceHighlightReel,
     PerformanceMatchPitchCalibration,
     PerformanceMatchTrackingRun,
     PerformanceMatchTrackingSample,
@@ -90,6 +91,7 @@ from app.schemas.performance import (
     PerformanceHardwareDeviceCreate,
     PerformanceHardwareKitCreate,
     PerformanceHardwareSyncRunCreate,
+    PerformanceHighlightReelCreate,
     PerformanceIngestionCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
@@ -923,6 +925,92 @@ async def list_match_tracking_runs(
         statement = statement.where(PerformanceMatchTrackingRun.video_asset_id == video_asset_id)
     runs = list((await db.scalars(statement.order_by(PerformanceMatchTrackingRun.created_at.desc()).limit(25))).all())
     return [await match_tracking_run_read(db, run) for run in runs]
+
+
+async def create_performance_highlight_reel(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    video_asset_id: UUID,
+    payload: PerformanceHighlightReelCreate,
+    authz: AuthorizationService,
+) -> PerformanceHighlightReel:
+    video_asset = await get_opposition_scouting_video_asset(db, video_asset_id)
+    if video_asset.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    tracking_run = (
+        await db.get(PerformanceMatchTrackingRun, payload.tracking_run_id)
+        if payload.tracking_run_id is not None
+        else await latest_match_tracking_run(db, video_asset.id)
+    )
+    if tracking_run is not None and (
+        tracking_run.organization_id != video_asset.organization_id or tracking_run.video_asset_id != video_asset.id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match tracking run not found")
+    if payload.athlete_profile_id is not None:
+        athlete_profile = await get_athlete_profile(db, payload.athlete_profile_id, video_asset.organization_id)
+        athlete_profile_id = athlete_profile.id
+    else:
+        athlete_profile_id = None
+    report = await latest_opposition_scouting_report(db, video_asset.id)
+    clips = await generate_highlight_clips_from_match(
+        db,
+        video_asset,
+        tracking_run,
+        report,
+        target_duration_seconds=payload.target_duration_seconds,
+        audience=payload.audience,
+    )
+    tags = sorted(
+        {
+            *[tag.strip().lower() for tag in payload.tags if tag.strip()],
+            payload.audience.strip().lower(),
+            payload.purpose.strip().lower(),
+            video_asset.sport.strip().lower(),
+            "automated_highlights",
+        }
+    )
+    distribution = highlight_reel_distribution(payload.channels, payload.audience, clips)
+    now = datetime.now(UTC)
+    reel = PerformanceHighlightReel(
+        organization_id=video_asset.organization_id,
+        video_asset_id=video_asset.id,
+        tracking_run_id=tracking_run.id if tracking_run is not None else None,
+        athlete_profile_id=athlete_profile_id,
+        created_by_person_id=identity.person_id,
+        title=payload.title or f"{video_asset.opponent_name} {payload.audience.title()} Highlight Reel",
+        audience=payload.audience.strip().lower(),
+        purpose=payload.purpose.strip().lower(),
+        model_policy="afrolete-tracking-highlight-reel-v1" if tracking_run is not None else "afrolete-scouting-highlight-reel-v1",
+        status="generated",
+        clip_count=len(clips),
+        duration_seconds=round(sum(float(clip["duration_seconds"]) for clip in clips), 2),
+        clips_json=json.dumps(clips, default=str),
+        tags_json=encode_string_list(tags),
+        distribution_json=json.dumps(distribution, default=str),
+        branding_json=json.dumps(payload.branding, default=str) if payload.branding else None,
+        generated_at=now,
+    )
+    db.add(reel)
+    video_asset.status = "highlighted"
+    video_asset.analyzed_at = now
+    await db.commit()
+    await db.refresh(reel)
+    return reel
+
+
+async def list_performance_highlight_reels(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    video_asset_id: UUID | None = None,
+) -> list[PerformanceHighlightReel]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceHighlightReel).where(PerformanceHighlightReel.organization_id == organization_id)
+    if video_asset_id is not None:
+        statement = statement.where(PerformanceHighlightReel.video_asset_id == video_asset_id)
+    return list((await db.scalars(statement.order_by(PerformanceHighlightReel.generated_at.desc()).limit(25))).all())
 
 
 async def downloadable_performance_video_asset(
@@ -7749,6 +7837,275 @@ def match_tracking_metric_label(metric: object) -> str:
     label = item.get("player_label") or item.get("track_id") or "tracked player"
     jersey = item.get("jersey_number")
     return f"{label} #{jersey}" if jersey else str(label)
+
+
+async def latest_match_tracking_run(db: AsyncSession, video_asset_id: UUID) -> PerformanceMatchTrackingRun | None:
+    return (
+        await db.scalars(
+            select(PerformanceMatchTrackingRun)
+            .where(PerformanceMatchTrackingRun.video_asset_id == video_asset_id)
+            .order_by(PerformanceMatchTrackingRun.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+
+
+async def latest_opposition_scouting_report(db: AsyncSession, video_asset_id: UUID) -> OppositionScoutingReport | None:
+    return (
+        await db.scalars(
+            select(OppositionScoutingReport)
+            .where(OppositionScoutingReport.video_asset_id == video_asset_id)
+            .order_by(OppositionScoutingReport.generated_at.desc())
+            .limit(1)
+        )
+    ).first()
+
+
+async def generate_highlight_clips_from_match(
+    db: AsyncSession,
+    video_asset: OppositionScoutingVideoAsset,
+    tracking_run: PerformanceMatchTrackingRun | None,
+    report: OppositionScoutingReport | None,
+    *,
+    target_duration_seconds: float,
+    audience: str,
+) -> list[dict[str, object]]:
+    clips: list[dict[str, object]] = []
+    if tracking_run is not None:
+        tracking = await match_tracking_run_read(db, tracking_run)
+        player_metrics = list(tracking.get("player_metrics") or [])
+        clips.extend(highlight_clips_from_player_metrics(player_metrics, target_duration_seconds, audience))
+        guidance = list(tracking.get("coaching_guidance") or [])
+        if guidance and len(clips) < 8:
+            clips.append(
+                highlight_clip(
+                    title="Coach guidance sequence",
+                    start_seconds=0,
+                    duration_seconds=min(18.0, target_duration_seconds / 4),
+                    category="coach_guidance",
+                    confidence=float(tracking.get("tracking_quality_score") or 0.65),
+                    evidence=str(guidance[0]),
+                    coaching_note="Use this sequence as the opening review clip before player-specific moments.",
+                    tags=["coach_guidance", "tracking"],
+                )
+            )
+    if report is not None:
+        clips.extend(highlight_clips_from_scouting_report(report, len(clips), target_duration_seconds))
+    if not clips:
+        clips.append(
+            highlight_clip(
+                title=f"{video_asset.opponent_name} context clip",
+                start_seconds=0,
+                duration_seconds=min(30.0, target_duration_seconds),
+                category="context",
+                confidence=0.55,
+                evidence=video_asset.analysis_focus or video_asset.match_context or "Uploaded match footage is ready for review.",
+                coaching_note="Start with a manual review pass because no tracking run or scouting report is available yet.",
+                tags=["context", video_asset.sport],
+            )
+        )
+    return trim_highlight_clips(clips, target_duration_seconds)
+
+
+def highlight_clips_from_player_metrics(
+    player_metrics: list[object],
+    target_duration_seconds: float,
+    audience: str,
+) -> list[dict[str, object]]:
+    metrics = [metric for metric in player_metrics if isinstance(metric, dict)]
+    clips: list[dict[str, object]] = []
+    for index, metric in enumerate(
+        sorted(metrics, key=lambda item: float(item.get("high_speed_distance_m") or 0.0), reverse=True)[:3]
+    ):
+        if float(metric.get("high_speed_distance_m") or 0.0) <= 0:
+            continue
+        clips.append(
+            highlight_clip(
+                title=f"{match_tracking_metric_label(metric)} high-speed run",
+                start_seconds=index * 18,
+                duration_seconds=14,
+                category="high_speed_run",
+                confidence=float(metric.get("tracking_quality_score") or 0.65),
+                evidence=(
+                    f"{metric.get('high_speed_distance_m')}m high-speed work, "
+                    f"max {metric.get('max_speed_mps')} m/s."
+                ),
+                coaching_note="Show acceleration, body shape, and recovery after the run.",
+                tags=["speed", "player_load", audience],
+                player_label=str(metric.get("player_label") or metric.get("track_id") or ""),
+                team_label=metric.get("team_label"),
+                jersey_number=metric.get("jersey_number"),
+            )
+        )
+    for index, metric in enumerate(
+        sorted(metrics, key=lambda item: int(item.get("sprint_count") or 0), reverse=True)[:2]
+    ):
+        if int(metric.get("sprint_count") or 0) <= 0:
+            continue
+        clips.append(
+            highlight_clip(
+                title=f"{match_tracking_metric_label(metric)} repeated sprint",
+                start_seconds=54 + index * 18,
+                duration_seconds=16,
+                category="repeated_sprint",
+                confidence=float(metric.get("tracking_quality_score") or 0.65),
+                evidence=f"{metric.get('sprint_count')} sprint action(s) in the tracked segment.",
+                coaching_note="Pair this with substitution and recovery planning.",
+                tags=["sprint", "fatigue", audience],
+                player_label=str(metric.get("player_label") or metric.get("track_id") or ""),
+                team_label=metric.get("team_label"),
+                jersey_number=metric.get("jersey_number"),
+            )
+        )
+    if target_duration_seconds >= 60:
+        for index, metric in enumerate(
+            sorted(metrics, key=lambda item: float(item.get("work_rate_m_per_min") or 0.0), reverse=True)[:2]
+        ):
+            if float(metric.get("work_rate_m_per_min") or 0.0) <= 0:
+                continue
+            clips.append(
+                highlight_clip(
+                    title=f"{match_tracking_metric_label(metric)} work-rate sequence",
+                    start_seconds=90 + index * 18,
+                    duration_seconds=15,
+                    category="work_rate",
+                    confidence=float(metric.get("tracking_quality_score") or 0.65),
+                    evidence=f"{metric.get('work_rate_m_per_min')} m/min work rate in the tracked window.",
+                    coaching_note="Use this clip to compare role load against tactical expectation.",
+                    tags=["work_rate", "tactical_role", audience],
+                    player_label=str(metric.get("player_label") or metric.get("track_id") or ""),
+                    team_label=metric.get("team_label"),
+                    jersey_number=metric.get("jersey_number"),
+                )
+            )
+    return clips
+
+
+def highlight_clips_from_scouting_report(
+    report: OppositionScoutingReport,
+    existing_count: int,
+    target_duration_seconds: float,
+) -> list[dict[str, object]]:
+    if existing_count >= 8 or target_duration_seconds < 45:
+        return []
+    findings: list[dict[str, str]] = []
+    for raw in [report.weaknesses_json, report.threats_json, report.recommendations_json, report.set_pieces_json]:
+        findings.extend(decode_scouting_findings(raw))
+    clips: list[dict[str, object]] = []
+    for index, finding in enumerate(findings[: max(0, 8 - existing_count)]):
+        clips.append(
+            highlight_clip(
+                title=finding.get("title") or f"Scouting highlight {index + 1}",
+                start_seconds=126 + index * 16,
+                duration_seconds=14,
+                category=finding.get("category") or "scouting",
+                confidence=report.confidence,
+                evidence=finding.get("evidence") or report.tactical_summary,
+                coaching_note=finding.get("recommendation") or "Review this pattern with the match-plan group.",
+                tags=["scouting", str(finding.get("severity") or "medium"), report.formation_detected or "shape"],
+            )
+        )
+    return clips
+
+
+def highlight_clip(
+    *,
+    title: str,
+    start_seconds: float,
+    duration_seconds: float,
+    category: str,
+    confidence: float,
+    evidence: str,
+    coaching_note: str,
+    tags: list[str],
+    player_label: str | None = None,
+    team_label: object | None = None,
+    jersey_number: object | None = None,
+) -> dict[str, object]:
+    return {
+        "title": title[:180],
+        "start_seconds": round(max(start_seconds, 0.0), 2),
+        "end_seconds": round(max(start_seconds, 0.0) + max(duration_seconds, 1.0), 2),
+        "duration_seconds": round(max(duration_seconds, 1.0), 2),
+        "category": category,
+        "player_label": player_label or None,
+        "team_label": str(team_label) if team_label else None,
+        "jersey_number": str(jersey_number) if jersey_number else None,
+        "confidence": round(max(0.0, min(confidence, 1.0)), 3),
+        "evidence": evidence,
+        "coaching_note": coaching_note,
+        "tags": sorted({tag.strip().lower() for tag in tags if tag and tag.strip()}),
+    }
+
+
+def trim_highlight_clips(clips: list[dict[str, object]], target_duration_seconds: float) -> list[dict[str, object]]:
+    selected: list[dict[str, object]] = []
+    total = 0.0
+    for clip in sorted(clips, key=lambda item: float(item.get("confidence") or 0.0), reverse=True):
+        duration = float(clip["duration_seconds"])
+        if selected and total + duration > target_duration_seconds:
+            continue
+        selected.append(clip)
+        total += duration
+        if len(selected) >= 10 or total >= target_duration_seconds:
+            break
+    return sorted(selected, key=lambda item: float(item["start_seconds"]))
+
+
+def highlight_reel_distribution(channels: list[str], audience: str, clips: list[dict[str, object]]) -> dict[str, object]:
+    channel_values = [channel.strip().lower() for channel in channels if channel.strip()] or ["coach_review"]
+    return {
+        "channels": channel_values,
+        "audience": audience.strip().lower(),
+        "clip_count": len(clips),
+        "share_policy": "guardian_approval_required" if audience in {"parent", "family", "scout"} else "team_internal",
+        "export_formats": ["timeline_json", "mp4_edit_decision_list", "social_caption_pack"],
+        "caption": f"{len(clips)} AI-selected highlight moments for {audience.strip().lower()} review.",
+    }
+
+
+def highlight_reel_read(reel: PerformanceHighlightReel) -> dict[str, object]:
+    return {
+        "id": reel.id,
+        "organization_id": reel.organization_id,
+        "video_asset_id": reel.video_asset_id,
+        "tracking_run_id": reel.tracking_run_id,
+        "athlete_profile_id": reel.athlete_profile_id,
+        "created_by_person_id": reel.created_by_person_id,
+        "title": reel.title,
+        "audience": reel.audience,
+        "purpose": reel.purpose,
+        "model_policy": reel.model_policy,
+        "status": reel.status,
+        "clip_count": reel.clip_count,
+        "duration_seconds": reel.duration_seconds,
+        "clips": decode_json_list(reel.clips_json),
+        "tags": decode_string_list(reel.tags_json),
+        "distribution": decode_json_dict(reel.distribution_json),
+        "branding": decode_json_dict(reel.branding_json) if reel.branding_json else None,
+        "generated_at": reel.generated_at,
+        "created_at": reel.created_at,
+    }
+
+
+def decode_json_list(value: str | None) -> list[dict[str, object]]:
+    if not value:
+        return []
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+
+
+def decode_json_dict(value: str | None) -> dict[str, object]:
+    if not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackingRun) -> dict[str, object]:

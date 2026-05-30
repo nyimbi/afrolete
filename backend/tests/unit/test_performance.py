@@ -3037,6 +3037,93 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert runs.json()[0]["id"] == tracking["id"]
 
 
+def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, identity_headers) -> None:
+    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    upload_response = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Highlight City",
+            "sport": "football",
+            "filename": "highlight-city.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(b"highlight match video").decode(),
+            "clip_label": "Highlight feed",
+            "match_context": "Pressing opponent with late fatigue and weak-side space.",
+            "analysis_focus": "automated highlights, pressing, sprint actions, tactical threats",
+        },
+    )
+    assert upload_response.status_code == 201
+    video_asset = upload_response.json()
+
+    report_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/reports",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "observed_formation": "4-3-3",
+            "match_context": "Opponent tires late and leaves space behind the fullbacks.",
+            "analysis_focus": "pressing triggers, transition defense, set pieces",
+            "evidence_text": "High press, weak-side fullback space, late-game fatigue after 70 minutes.",
+        },
+    )
+    assert report_response.status_code == 201
+
+    tracking_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/tracking-runs",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "source_provider": "provider_tracking_import",
+            "replace_existing": True,
+            "samples": [
+                {"track_id": "home-7", "team_label": "Home", "player_label": "Winger", "jersey_number": "7", "timestamp_seconds": 0, "x_meters": 10, "y_meters": 20},
+                {"track_id": "home-7", "team_label": "Home", "player_label": "Winger", "jersey_number": "7", "timestamp_seconds": 1, "x_meters": 20, "y_meters": 20},
+                {"track_id": "home-7", "team_label": "Home", "player_label": "Winger", "jersey_number": "7", "timestamp_seconds": 2, "x_meters": 31, "y_meters": 21},
+                {"track_id": "away-10", "team_label": "Opponent", "player_label": "Playmaker", "jersey_number": "10", "timestamp_seconds": 0, "x_meters": 60, "y_meters": 40},
+                {"track_id": "away-10", "team_label": "Opponent", "player_label": "Playmaker", "jersey_number": "10", "timestamp_seconds": 1, "x_meters": 56, "y_meters": 37},
+                {"track_id": "away-10", "team_label": "Opponent", "player_label": "Playmaker", "jersey_number": "10", "timestamp_seconds": 2, "x_meters": 52, "y_meters": 34},
+            ],
+        },
+    )
+    assert tracking_response.status_code == 201
+    tracking = tracking_response.json()
+
+    reel_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/highlight-reels",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "tracking_run_id": tracking["id"],
+            "audience": "scout",
+            "purpose": "recruiting",
+            "target_duration_seconds": 75,
+            "channels": ["coach_review", "scout_packet"],
+            "tags": ["wide-play", "transition"],
+            "branding": {"club": "AfroLete Demo"},
+        },
+    )
+    assert reel_response.status_code == 201
+    reel = reel_response.json()
+    assert reel["status"] == "generated"
+    assert reel["clip_count"] >= 3
+    assert reel["duration_seconds"] <= 75
+    assert reel["distribution"]["share_policy"] == "guardian_approval_required"
+    assert "scout_packet" in reel["distribution"]["channels"]
+    assert any(clip["category"] == "high_speed_run" for clip in reel["clips"])
+    assert any("scouting" in clip["tags"] for clip in reel["clips"])
+
+    reels = client.get(
+        f"/api/v1/performance/scouting/highlight-reels?organization_id={organization['id']}&video_asset_id={video_asset['id']}",
+        headers=identity_headers,
+    )
+    assert reels.status_code == 200
+    assert reels.json()[0]["id"] == reel["id"]
+
+
 def test_performance_hardware_kit_device_sync_creates_tracking_run(client, identity_headers) -> None:
     organization, team, _, _ = create_rostered_athlete(client, identity_headers)
     video_response = client.post(

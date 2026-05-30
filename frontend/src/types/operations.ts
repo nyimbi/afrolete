@@ -7001,6 +7001,43 @@ export type PerformanceHardwareSyncRunRead = {
   tracking_run: PerformanceMatchTrackingRunRead | null;
 };
 
+export type PerformanceHighlightClipRead = {
+  title: string;
+  start_seconds: number;
+  end_seconds: number;
+  duration_seconds: number;
+  category: string;
+  player_label: string | null;
+  team_label: string | null;
+  jersey_number: string | null;
+  confidence: number;
+  evidence: string;
+  coaching_note: string;
+  tags: string[];
+};
+
+export type PerformanceHighlightReelRead = {
+  id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  tracking_run_id: UUID | null;
+  athlete_profile_id: UUID | null;
+  created_by_person_id: UUID | null;
+  title: string;
+  audience: string;
+  purpose: string;
+  model_policy: string;
+  status: string;
+  clip_count: number;
+  duration_seconds: number;
+  clips: PerformanceHighlightClipRead[];
+  tags: string[];
+  distribution: Record<string, unknown>;
+  branding: Record<string, unknown> | null;
+  generated_at: string;
+  created_at: string;
+};
+
 export type PerformanceVideoAnnotationRead = {
   id: UUID;
   organization_id: UUID;

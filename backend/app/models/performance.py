@@ -496,6 +496,34 @@ class PerformanceMatchTrackingSample(IdMixin, TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(80), default="tracking_sample", nullable=False, index=True)
 
 
+class PerformanceHighlightReel(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_highlight_reels"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    tracking_run_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("performance_match_tracking_runs.id"), index=True
+    )
+    athlete_profile_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("athlete_profiles.id"), index=True)
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    audience: Mapped[str] = mapped_column(String(80), default="coach", nullable=False, index=True)
+    purpose: Mapped[str] = mapped_column(String(120), default="match_review", nullable=False, index=True)
+    model_policy: Mapped[str] = mapped_column(String(180), default="afrolete-highlight-reel-v1", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="generated", nullable=False, index=True)
+    clip_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    clips_json: Mapped[str] = mapped_column(Text, nullable=False)
+    tags_json: Mapped[str] = mapped_column(Text, nullable=False)
+    distribution_json: Mapped[str] = mapped_column(Text, nullable=False)
+    branding_json: Mapped[str | None] = mapped_column(Text)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class PerformanceMovementReferenceProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_movement_reference_profiles"
     __table_args__ = (

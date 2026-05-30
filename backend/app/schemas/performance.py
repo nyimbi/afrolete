@@ -757,6 +757,56 @@ class PerformanceHardwareSyncRunRead(BaseModel):
     tracking_run: PerformanceMatchTrackingRunRead | None = None
 
 
+class PerformanceHighlightReelCreate(BaseModel):
+    organization_id: UUID
+    tracking_run_id: UUID | None = None
+    athlete_profile_id: UUID | None = None
+    audience: str = Field(default="coach", min_length=2, max_length=80)
+    purpose: str = Field(default="match_review", min_length=2, max_length=120)
+    title: str | None = Field(default=None, max_length=180)
+    target_duration_seconds: float = Field(default=90, ge=15, le=600)
+    channels: list[str] = Field(default_factory=lambda: ["coach_review"], max_length=12)
+    branding: dict[str, Any] = Field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list, max_length=30)
+
+
+class PerformanceHighlightClipRead(BaseModel):
+    title: str
+    start_seconds: float
+    end_seconds: float
+    duration_seconds: float
+    category: str
+    player_label: str | None = None
+    team_label: str | None = None
+    jersey_number: str | None = None
+    confidence: float
+    evidence: str
+    coaching_note: str
+    tags: list[str] = Field(default_factory=list)
+
+
+class PerformanceHighlightReelRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    tracking_run_id: UUID | None
+    athlete_profile_id: UUID | None
+    created_by_person_id: UUID | None
+    title: str
+    audience: str
+    purpose: str
+    model_policy: str
+    status: str
+    clip_count: int
+    duration_seconds: float
+    clips: list[PerformanceHighlightClipRead]
+    tags: list[str]
+    distribution: dict[str, Any]
+    branding: dict[str, Any] | None = None
+    generated_at: datetime
+    created_at: datetime
+
+
 class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
     case_id: str = Field(min_length=2, max_length=120)
     metric_code: str = Field(min_length=2, max_length=80)
