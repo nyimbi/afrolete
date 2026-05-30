@@ -119,6 +119,7 @@ from app.schemas.performance import (
     PerformanceMatchAnalysisReportCreate,
     PerformanceMatchMomentDetectionCreate,
     PerformanceMatchPlayerGuidancePublishCreate,
+    PerformanceMatchTrainingFollowupCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
     PerformanceModelExtractionBenchmarkRunCreate,
@@ -7785,6 +7786,148 @@ async def create_player_match_training_followup(
     }
 
 
+async def create_match_tracking_training_followup(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    tracking_run_id: UUID,
+    payload: PerformanceMatchTrainingFollowupCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    run = await get_match_tracking_run(db, tracking_run_id)
+    if run.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, run.organization_id)
+    video_asset = await get_opposition_scouting_video_asset(db, run.video_asset_id)
+    summary = decode_match_tracking_summary(run.summary_json)
+    prescriptions = [item for item in summary.get("training_prescriptions", []) if isinstance(item, dict)]
+    if not prescriptions:
+        prescriptions = derive_match_training_prescriptions(
+            player_metrics=[item for item in summary.get("player_metrics", []) if isinstance(item, dict)],
+            team_phase_metrics=[item for item in summary.get("team_phase_metrics", []) if isinstance(item, dict)],
+            ball_tracking_metrics=summary.get("ball_tracking_metrics") if isinstance(summary.get("ball_tracking_metrics"), dict) else {},
+            set_piece_metrics=summary.get("set_piece_metrics") if isinstance(summary.get("set_piece_metrics"), dict) else {},
+            tactical_role_metrics=[item for item in summary.get("tactical_role_metrics", []) if isinstance(item, dict)],
+        )
+    selected_focus_areas = {value.strip().lower() for value in payload.selected_focus_areas if value.strip()}
+    selected_prescriptions = [
+        item
+        for item in prescriptions
+        if not selected_focus_areas or str(item.get("focus_area") or "").lower() in selected_focus_areas
+    ][: payload.max_items]
+    if not selected_prescriptions:
+        selected_prescriptions = prescriptions[: payload.max_items]
+    if not selected_prescriptions:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No training prescriptions available")
+    focus_area = str(selected_prescriptions[0].get("focus_area") or "match_training_followup")
+    title = f"{video_asset.opponent_name} team training follow-up"
+    plan = TrainingPlan(
+        organization_id=payload.organization_id,
+        team_id=run.team_id,
+        athlete_profile_id=None,
+        created_by_person_id=identity.person_id,
+        title=title[:240],
+        focus_area=focus_area.replace("_", " ")[:160],
+        period_start=payload.period_start,
+        period_end=payload.period_end,
+        status=TrainingPlanStatus.DRAFT,
+        ai_generated=True,
+        source_summary=(
+            f"Generated from match tracking run {run.id} against {video_asset.opponent_name}; "
+            f"{len(selected_prescriptions)} training prescription(s) selected."
+        ),
+        load_guidance=match_training_followup_load_guidance(summary, selected_prescriptions),
+        recovery_protocol="Apply readiness and soreness checks before increasing high-speed, pressing, or restart intensity.",
+        progress_checkpoints="Review match clips, complete prescribed field blocks, then record session feedback and readiness deltas.",
+    )
+    db.add(plan)
+    await db.flush()
+    items: list[TrainingPlanItem] = []
+    for index, prescription in enumerate(selected_prescriptions, start=1):
+        item = TrainingPlanItem(
+            plan_id=plan.id,
+            drill_id=None,
+            sequence=index,
+            day_label=f"Prescription {index}",
+            title=str(prescription.get("title") or prescription.get("focus_area") or "Match follow-up")[:180],
+            focus_area=str(prescription.get("focus_area") or "match_followup").replace("_", " ")[:120],
+            duration_minutes=match_training_prescription_duration(str(prescription.get("priority") or "normal")),
+            intensity=match_training_prescription_intensity(
+                str(prescription.get("priority") or "normal"),
+                str(prescription.get("intensity") or "moderate"),
+            ),
+            notes=(
+                f"Session design: {prescription.get('session_design')}\n"
+                f"Drill: {prescription.get('drill_recommendation')}\n"
+                f"Evidence: {prescription.get('evidence')}\n"
+                f"Coach cue: {prescription.get('coaching_cue')}"
+            ),
+        )
+        db.add(item)
+        items.append(item)
+    await db.commit()
+    await db.refresh(plan)
+    for item in items:
+        await db.refresh(item)
+    agent_task = await queue_match_training_followup_agent_review(
+        db,
+        identity,
+        organization_id=payload.organization_id,
+        team_id=run.team_id,
+        plan_id=plan.id,
+        tracking_run_id=run.id,
+        focus_area=plan.focus_area,
+        item_count=len(items),
+    )
+    return {
+        "organization_id": payload.organization_id,
+        "tracking_run_id": run.id,
+        "video_asset_id": run.video_asset_id,
+        "team_id": run.team_id,
+        "plan_id": plan.id,
+        "item_ids": [item.id for item in items],
+        "title": plan.title,
+        "focus_area": plan.focus_area,
+        "period_start": plan.period_start,
+        "period_end": plan.period_end,
+        "item_count": len(items),
+        "training_prescriptions": selected_prescriptions,
+        "agent_task_id": agent_task.id if agent_task else None,
+        "agent_task_status": agent_task.status.value if agent_task else None,
+        "agent_task_title": agent_task.title if agent_task else None,
+    }
+
+
+def match_training_followup_load_guidance(
+    summary: dict[str, object],
+    prescriptions: list[dict[str, object]],
+) -> str:
+    focus = ", ".join(str(item.get("focus_area") or "match").replace("_", " ") for item in prescriptions[:4])
+    return (
+        f"Match-derived block from {summary.get('total_distance_m', 0)}m team distance, "
+        f"{summary.get('high_speed_distance_m', 0)}m high-speed work, "
+        f"{summary.get('sprint_count', 0)} sprint(s), and focus areas: {focus}."
+    )
+
+
+def match_training_prescription_duration(priority: str) -> int:
+    normalized = priority.lower()
+    if normalized == "urgent":
+        return 45
+    if normalized == "high":
+        return 36
+    return 24
+
+
+def match_training_prescription_intensity(priority: str, intensity: str) -> int:
+    if intensity.lower() == "low":
+        return 4
+    if priority.lower() == "urgent":
+        return 8
+    if priority.lower() == "high" or intensity.lower() == "high":
+        return 7
+    return 6
+
+
 async def player_match_guidance_publish_audit(
     db: AsyncSession,
     *,
@@ -7863,6 +8006,64 @@ async def queue_player_match_followup_agent_review(
             organization_id=organization_id,
             task_type="player_match_training_followup_review",
             title=f"Review player match follow-up: {focus_area}"[:240],
+            input_ref=input_ref[:500],
+        ),
+        None,
+        enforce_manage_organization=False,
+    )
+
+
+async def queue_match_training_followup_agent_review(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    *,
+    organization_id: UUID,
+    team_id: UUID | None,
+    plan_id: UUID,
+    tracking_run_id: UUID,
+    focus_area: str,
+    item_count: int,
+):
+    agent = await db.scalar(
+        select(Agent)
+        .where(
+            Agent.organization_id == organization_id,
+            Agent.kind == AgentKind.COACHING,
+            Agent.name == "Training Strategy Agent",
+        )
+        .order_by(Agent.created_at)
+        .limit(1)
+    )
+    if agent is None:
+        agent = Agent(
+            organization_id=organization_id,
+            name="Training Strategy Agent",
+            kind=AgentKind.COACHING,
+            purpose=(
+                "Review team training plans, match-derived prescriptions, athlete readiness, "
+                "and feedback loops so coaches can adjust the next block safely."
+            ),
+            status="active",
+            model_policy="human_review_required",
+        )
+        db.add(agent)
+        await db.flush()
+    input_ref = (
+        f"team-match-followup:{organization_id};"
+        f"team:{team_id or 'none'};"
+        f"plan:{plan_id};"
+        f"tracking:{tracking_run_id};"
+        f"focus:{focus_area};"
+        f"items:{item_count}"
+    )
+    return await queue_agent_task(
+        db,
+        identity,
+        agent.id,
+        AgentTaskCreate(
+            organization_id=organization_id,
+            task_type="team_match_training_followup_review",
+            title=f"Review team match training follow-up: {focus_area}"[:240],
             input_ref=input_ref[:500],
         ),
         None,

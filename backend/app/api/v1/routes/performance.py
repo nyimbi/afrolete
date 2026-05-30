@@ -77,6 +77,8 @@ from app.schemas.performance import (
     PerformanceMatchPlayerGuidancePublishCreate,
     PerformanceMatchPlayerGuidancePublishRead,
     PerformanceMatchPlayerGuidanceReviewRead,
+    PerformanceMatchTrainingFollowupCreate,
+    PerformanceMatchTrainingFollowupRead,
     PerformanceMatchTrackingIdentityReviewCreate,
     PerformanceMatchTrackingIdentityReviewRead,
     PerformanceMatchTrackingIdentityReviewResultRead,
@@ -151,6 +153,7 @@ from app.services.performance import (
     create_performance_multi_camera_analysis,
     create_performance_match_moments,
     create_performance_match_analysis_report,
+    create_match_tracking_training_followup,
     create_movement_reference_profile,
     create_observation,
     create_opposition_scouting_report,
@@ -1270,6 +1273,23 @@ async def publish_match_tracking_player_guidance_route(
 ) -> PerformanceMatchPlayerGuidancePublishRead:
     return PerformanceMatchPlayerGuidancePublishRead(
         **await publish_match_tracking_player_guidance(db, identity, tracking_run_id, payload, authz)
+    )
+
+
+@router.post(
+    "/scouting/tracking-runs/{tracking_run_id}/training-followup",
+    response_model=PerformanceMatchTrainingFollowupRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_match_tracking_training_followup_route(
+    tracking_run_id: UUID,
+    payload: PerformanceMatchTrainingFollowupCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchTrainingFollowupRead:
+    return PerformanceMatchTrainingFollowupRead(
+        **await create_match_tracking_training_followup(db, identity, tracking_run_id, payload, authz)
     )
 
 

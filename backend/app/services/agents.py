@@ -3715,6 +3715,9 @@ def execute_with_deterministic_planner(
     if task.task_type == "player_match_training_followup_review":
         task.review_notes = deterministic_player_match_followup_notes(agent, task, model_name)
         return
+    if task.task_type == "team_match_training_followup_review":
+        task.review_notes = deterministic_team_match_followup_notes(agent, task, model_name)
+        return
     task.review_notes = (
         f"{agent.name} prepared a deterministic draft using {model_name}. "
         f"Task: {task.title}. Input: {task.input_ref or 'none'}. "
@@ -3854,6 +3857,28 @@ def deterministic_player_match_followup_notes(agent: Agent, task: AgentTask, mod
             "- Adjust sprint, pressing, recovery, and technical-load prescriptions for readiness and soreness.",
             "- Ask the player to complete a self-assessment after the follow-up block.",
             "Human review: coaches must approve material load changes and any medical or availability decisions.",
+        ]
+    )
+
+
+def deterministic_team_match_followup_notes(agent: Agent, task: AgentTask, model_name: str) -> str:
+    context = parse_agent_input_ref(task.input_ref)
+    plan = context.get("plan", "unknown")
+    team = context.get("team", "unknown")
+    tracking = context.get("tracking", "unknown")
+    focus = context.get("focus", "match follow-up")
+    items = context.get("items", "0")
+    return "\n".join(
+        [
+            f"{agent.name} prepared a deterministic team match follow-up review using {model_name}.",
+            f"Training plan {plan} for team {team} is linked to tracking run {tracking}.",
+            f"Primary focus: {focus}; generated prescription items: {items}.",
+            "Recommended coach actions:",
+            "- Confirm match-video tracking quality and tactical context before increasing team load.",
+            "- Fit the prescription items around the current microcycle, next fixture, and athlete readiness profile.",
+            "- Keep high-speed, pressing, and restart work bounded by soreness and recovery evidence.",
+            "- Record session feedback so the next Training Strategy Agent review can compare prescription to outcome.",
+            "Human review: coaches must approve team load changes, player availability decisions, and medical escalations.",
         ]
     )
 

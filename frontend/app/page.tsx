@@ -400,6 +400,7 @@ import type {
   PerformanceMatchPlayerGuidancePublishAuditRead,
   PerformanceMatchPlayerGuidancePublishRead,
   PerformanceMatchPlayerGuidanceReviewRead,
+  PerformanceMatchTrainingFollowupRead,
   PerformanceMatchPitchCalibrationRead,
   PerformanceMultiCameraAnalysisCreate,
   PerformanceMultiCameraAnalysisRead,
@@ -1882,6 +1883,8 @@ export default function HomePage() {
     useState<PerformanceMatchPlayerGuidanceReviewRead | null>(null);
   const [performanceMatchPlayerGuidancePublish, setPerformanceMatchPlayerGuidancePublish] =
     useState<PerformanceMatchPlayerGuidancePublishRead | null>(null);
+  const [performanceMatchTrainingFollowup, setPerformanceMatchTrainingFollowup] =
+    useState<PerformanceMatchTrainingFollowupRead | null>(null);
   const [performanceMatchPlayerGuidancePublishes, setPerformanceMatchPlayerGuidancePublishes] =
     useState<PerformanceMatchPlayerGuidancePublishAuditRead[]>([]);
   const [performanceMatchPitchCalibrations, setPerformanceMatchPitchCalibrations] =
@@ -5351,6 +5354,7 @@ export default function HomePage() {
       setPerformanceMatchMoments([]);
       setPerformanceMatchPlayerGuidanceReview(null);
       setPerformanceMatchPlayerGuidancePublish(null);
+      setPerformanceMatchTrainingFollowup(null);
       setPerformanceMatchPlayerGuidancePublishes([]);
       setPerformanceMatchPitchCalibrations([]);
       setPerformanceMatchPitchCalibration(null);
@@ -10883,6 +10887,38 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== report.id)
         ]);
         addLog(`${report.title} ready for download`, "good");
+      }
+    );
+  };
+
+  const createPerformanceMatchTrainingFollowup = () => {
+    if (!selectedOrganizationId || !performanceMatchTrackingRun) {
+      addLog("Track a match before creating a training follow-up", "bad");
+      return;
+    }
+    runAction(
+      `create-match-training-followup-${performanceMatchTrackingRun.id}`,
+      () =>
+        apiRequest<PerformanceMatchTrainingFollowupRead>(
+          `/performance/scouting/tracking-runs/${performanceMatchTrackingRun.id}/training-followup`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              period_start: trainingPlanForm.period_start,
+              period_end: trainingPlanForm.period_end,
+              max_items: 5,
+              selected_focus_areas: []
+            }
+          }
+        ),
+      (followup) => {
+        setPerformanceMatchTrainingFollowup(followup);
+        setSelectedTrainingPlanId(followup.plan_id);
+        addLog(`${followup.item_count} match prescription block(s) added to training`, "good");
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+        void loadTrainingPlanItems(followup.plan_id);
       }
     );
   };
@@ -27255,6 +27291,7 @@ export default function HomePage() {
                   <button type="button" onClick={detectPerformanceMatchMoments} disabled={busyAction !== null}>Moments</button>
                   <button type="button" onClick={createPerformanceMultiCameraAnalysis} disabled={busyAction !== null}>Multi-cam</button>
                   <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Player guidance</button>
+                  <button type="button" onClick={createPerformanceMatchTrainingFollowup} disabled={busyAction !== null}>Training follow-up</button>
                   <button type="button" onClick={reviewPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Review share</button>
                   <button type="button" onClick={publishPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Publish</button>
                   <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>Export reel</button>
@@ -27772,6 +27809,7 @@ export default function HomePage() {
                     </div>
                     <span>
                       <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Generate</button>
+                      <button type="button" onClick={createPerformanceMatchTrainingFollowup} disabled={busyAction !== null}>Train</button>
                       <button type="button" onClick={reviewPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Review</button>
                       <button type="button" onClick={publishPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Publish</button>
                       {performanceMatchAnalysisReport?.tracking_run_id === performanceMatchTrackingRun.id ? (
@@ -28043,6 +28081,19 @@ export default function HomePage() {
                       </div>
                     </article>
                   ))}
+                  {performanceMatchTrainingFollowup?.tracking_run_id === performanceMatchTrackingRun.id ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>{performanceMatchTrainingFollowup.title}</strong>
+                        <span>
+                          {performanceMatchTrainingFollowup.item_count} block(s) · {performanceMatchTrainingFollowup.focus_area} · {performanceMatchTrainingFollowup.agent_task_status ?? "agent queued"}
+                        </span>
+                        <small>
+                          Plan {performanceMatchTrainingFollowup.plan_id} · {performanceMatchTrainingFollowup.period_start} to {performanceMatchTrainingFollowup.period_end}
+                        </small>
+                      </div>
+                    </article>
+                  ) : null}
                   {performanceMatchTrackingRun.ball_action_events.slice(0, 5).map((event, index) => (
                     <article key={`ball-action-${index}`} className="task-card">
                       <div>

@@ -2390,6 +2390,38 @@ class PlayerMatchTrainingFollowupRead(BaseModel):
     agent_task_title: str | None = None
 
 
+class PerformanceMatchTrainingFollowupCreate(BaseModel):
+    organization_id: UUID
+    period_start: date
+    period_end: date
+    max_items: int = Field(default=5, ge=1, le=8)
+    selected_focus_areas: list[str] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def valid_period(self) -> "PerformanceMatchTrainingFollowupCreate":
+        if self.period_end < self.period_start:
+            raise ValueError("period_end must be on or after period_start")
+        return self
+
+
+class PerformanceMatchTrainingFollowupRead(BaseModel):
+    organization_id: UUID
+    tracking_run_id: UUID
+    video_asset_id: UUID
+    team_id: UUID | None = None
+    plan_id: UUID
+    item_ids: list[UUID]
+    title: str
+    focus_area: str
+    period_start: date
+    period_end: date
+    item_count: int
+    training_prescriptions: list[dict[str, Any]]
+    agent_task_id: UUID | None = None
+    agent_task_status: str | None = None
+    agent_task_title: str | None = None
+
+
 class PlayerMatchGuidanceRead(BaseModel):
     tracking_run_id: UUID
     video_asset_id: UUID

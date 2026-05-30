@@ -8602,6 +8602,24 @@ export type PlayerMatchTrainingFollowupRead = {
   agent_task_title: string | null;
 };
 
+export type PerformanceMatchTrainingFollowupRead = {
+  organization_id: UUID;
+  tracking_run_id: UUID;
+  video_asset_id: UUID;
+  team_id: UUID | null;
+  plan_id: UUID;
+  item_ids: UUID[];
+  title: string;
+  focus_area: string;
+  period_start: string;
+  period_end: string;
+  item_count: number;
+  training_prescriptions: Record<string, unknown>[];
+  agent_task_id: UUID | null;
+  agent_task_status: string | null;
+  agent_task_title: string | null;
+};
+
 export type PlayerPerformanceProfileRead = {
   organization_id: UUID;
   athlete_profile_id: UUID;

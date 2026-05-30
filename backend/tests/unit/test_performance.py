@@ -3755,6 +3755,43 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert "## Training Prescription" in report_text
     assert "## Data Quality" in report_text
 
+    team_followup_response = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{revised_tracking['id']}/training-followup",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-07",
+            "max_items": 3,
+            "selected_focus_areas": ["set_piece_restarts", "load_recovery_and_substitution"],
+        },
+    )
+    assert team_followup_response.status_code == 201
+    team_followup = team_followup_response.json()
+    assert team_followup["tracking_run_id"] == revised_tracking["id"]
+    assert team_followup["team_id"] == team["id"]
+    assert team_followup["item_count"] >= 1
+    assert team_followup["training_prescriptions"][0]["drill_recommendation"]
+    assert team_followup["agent_task_id"] is not None
+    plan_response = client.get(
+        f"/api/v1/training/plans?organization_id={organization['id']}&team_id={team['id']}",
+        headers=identity_headers,
+    )
+    assert plan_response.status_code == 200
+    assert any(plan["id"] == team_followup["plan_id"] and plan["ai_generated"] is True for plan in plan_response.json())
+    items_response = client.get(f"/api/v1/training/plans/{team_followup['plan_id']}/items", headers=identity_headers)
+    assert items_response.status_code == 200
+    assert len(items_response.json()) == team_followup["item_count"]
+    assert "Session design:" in items_response.json()[0]["notes"]
+    agent_tasks_response = client.get(
+        f"/api/v1/agents/tasks?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert agent_tasks_response.status_code == 200
+    agent_task = next(task for task in agent_tasks_response.json() if task["id"] == team_followup["agent_task_id"])
+    assert agent_task["task_type"] == "team_match_training_followup_review"
+    assert f"tracking:{revised_tracking['id']}" in agent_task["input_ref"]
+
     guidance_review_response = client.get(
         f"/api/v1/performance/scouting/tracking-runs/{revised_tracking['id']}/player-guidance-review",
         headers=identity_headers,
