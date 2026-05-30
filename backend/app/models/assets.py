@@ -485,6 +485,23 @@ class FacilityAccessCommand(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class FacilityAccessLockdown(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_access_lockdowns"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    mode: Mapped[str] = mapped_column(String(40), default="lockdown", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    command_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    issued_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class FacilityUtilityMeter(IdMixin, TimestampMixin, Base):
     __tablename__ = "facility_utility_meters"
     __table_args__ = (UniqueConstraint("organization_id", "meter_id"),)

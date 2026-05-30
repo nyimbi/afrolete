@@ -34,6 +34,7 @@ from app.models.assets import (
     FacilityAccessCredential,
     FacilityAccessDevice,
     FacilityAccessEvent,
+    FacilityAccessLockdown,
     FacilityBooking,
     FacilityBookingRule,
     FacilityBookingWaitlistEntry,
@@ -124,6 +125,11 @@ from app.schemas.assets import (
     FacilityAccessEventRead,
     FacilityAccessGatewayScanCreate,
     FacilityAccessGatewayScanRead,
+    FacilityAccessLockdownCreate,
+    FacilityAccessLockdownDashboardRead,
+    FacilityAccessLockdownRead,
+    FacilityAccessLockdownResultRead,
+    FacilityAccessLockdownUpdate,
     FacilityAccessScanCreate,
     FacilityHireCheckoutSettlementCreate,
     FacilityHireCheckoutSettlementRead,
@@ -1842,6 +1848,143 @@ async def record_facility_access_device_health(
     )
 
 
+async def activate_facility_access_lockdown(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityAccessLockdownCreate,
+    authz: AuthorizationService,
+) -> FacilityAccessLockdownResultRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    issued_at = datetime.now(UTC)
+    devices = list(
+        (
+            await db.scalars(
+                select(FacilityAccessDevice)
+                .where(FacilityAccessDevice.organization_id == payload.organization_id)
+                .where(FacilityAccessDevice.facility_id == payload.facility_id)
+                .where(FacilityAccessDevice.status == "active")
+                .order_by(FacilityAccessDevice.location, FacilityAccessDevice.name)
+            )
+        ).all()
+    )
+    if not devices:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No active facility access devices are provisioned for this facility",
+        )
+    lockdown = FacilityAccessLockdown(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        mode=payload.mode,
+        status="active" if payload.mode == "lockdown" else "resolved",
+        reason=payload.reason,
+        command_count=len(devices),
+        activated_at=issued_at,
+        resolved_at=issued_at if payload.mode == "unlock_all" else None,
+        issued_by_person_id=identity.person_id,
+        notes=payload.notes,
+    )
+    db.add(lockdown)
+    await db.flush()
+    commands = [
+        facility_access_lockdown_command(lockdown, device, payload.command_valid_seconds, issued_at)
+        for device in devices
+    ]
+    for command in commands:
+        db.add(command)
+    await db.commit()
+    await db.refresh(lockdown)
+    for command in commands:
+        await db.refresh(command)
+    return FacilityAccessLockdownResultRead(
+        lockdown=facility_access_lockdown_read(lockdown),
+        commands=[facility_access_command_read(command) for command in commands],
+        devices_targeted=len(devices),
+        recommendation=facility_access_lockdown_recommendation(lockdown, len(devices)),
+    )
+
+
+async def list_facility_access_lockdowns(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+) -> list[FacilityAccessLockdownRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(FacilityAccessLockdown).where(FacilityAccessLockdown.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(FacilityAccessLockdown.facility_id == facility_id)
+    rows = await db.scalars(statement.order_by(FacilityAccessLockdown.activated_at.desc()).limit(25))
+    return [facility_access_lockdown_read(row) for row in rows.all()]
+
+
+async def update_facility_access_lockdown(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    lockdown_id: UUID,
+    payload: FacilityAccessLockdownUpdate,
+    authz: AuthorizationService,
+) -> FacilityAccessLockdownRead:
+    lockdown = await get_facility_access_lockdown(db, lockdown_id)
+    await ensure_manage_assets(authz, identity, lockdown.organization_id)
+    lockdown.status = payload.status
+    if payload.status in {"resolved", "cancelled"}:
+        lockdown.resolved_at = datetime.now(UTC)
+    elif payload.status == "active":
+        lockdown.resolved_at = None
+    if payload.notes:
+        lockdown.notes = append_note(lockdown.notes, payload.notes)
+    await db.commit()
+    await db.refresh(lockdown)
+    return facility_access_lockdown_read(lockdown)
+
+
+async def facility_access_lockdown_dashboard(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> FacilityAccessLockdownDashboardRead:
+    await get_organization(db, organization_id)
+    since = datetime.now(UTC) - timedelta(hours=24)
+    lockdown_statement = select(FacilityAccessLockdown).where(FacilityAccessLockdown.organization_id == organization_id)
+    device_statement = select(FacilityAccessDevice).where(
+        FacilityAccessDevice.organization_id == organization_id,
+        FacilityAccessDevice.status == "active",
+    )
+    command_statement = select(FacilityAccessCommand).where(FacilityAccessCommand.organization_id == organization_id)
+    if facility_id is not None:
+        lockdown_statement = lockdown_statement.where(FacilityAccessLockdown.facility_id == facility_id)
+        device_statement = device_statement.where(FacilityAccessDevice.facility_id == facility_id)
+        command_statement = command_statement.where(FacilityAccessCommand.facility_id == facility_id)
+    lockdowns = list(
+        (await db.scalars(lockdown_statement.order_by(FacilityAccessLockdown.activated_at.desc()).limit(25))).all()
+    )
+    devices = list((await db.scalars(device_statement)).all())
+    commands = list(
+        (
+            await db.scalars(
+                command_statement
+                .where(FacilityAccessCommand.command_type.in_(["lockdown", "unlock_all"]))
+                .order_by(FacilityAccessCommand.issued_at.desc())
+                .limit(25)
+            )
+        ).all()
+    )
+    return FacilityAccessLockdownDashboardRead(
+        organization_id=organization_id,
+        facility_id=facility_id,
+        active_lockdown_count=len([item for item in lockdowns if item.status == "active"]),
+        active_device_count=len(devices),
+        command_count_last_24h=len([command for command in commands if normalize_datetime(command.issued_at) >= since]),
+        recent_lockdowns=[facility_access_lockdown_read(item) for item in lockdowns[:10]],
+        recent_commands=[facility_access_command_read(command) for command in commands[:10]],
+        recommendation=facility_access_lockdown_dashboard_recommendation(lockdowns, devices),
+    )
+
+
 async def provision_facility_utility_meter(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3524,6 +3667,16 @@ async def get_facility_access_device_by_device_id(
     return device
 
 
+async def get_facility_access_lockdown(
+    db: AsyncSession,
+    lockdown_id: UUID,
+) -> FacilityAccessLockdown:
+    lockdown = await db.get(FacilityAccessLockdown, lockdown_id)
+    if lockdown is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility access lockdown not found")
+    return lockdown
+
+
 async def get_facility_utility_meter(
     db: AsyncSession,
     meter_pk: UUID,
@@ -4105,6 +4258,22 @@ def facility_access_command_read(command: FacilityAccessCommand) -> FacilityAcce
     )
 
 
+def facility_access_lockdown_read(lockdown: FacilityAccessLockdown) -> FacilityAccessLockdownRead:
+    return FacilityAccessLockdownRead(
+        id=lockdown.id,
+        organization_id=lockdown.organization_id,
+        facility_id=lockdown.facility_id,
+        mode=lockdown.mode,
+        status=lockdown.status,
+        reason=lockdown.reason,
+        command_count=lockdown.command_count,
+        activated_at=lockdown.activated_at,
+        resolved_at=lockdown.resolved_at,
+        issued_by_person_id=lockdown.issued_by_person_id,
+        notes=lockdown.notes,
+    )
+
+
 def facility_access_window(
     payload: FacilityAccessCredentialCreate,
     booking: FacilityBooking | None,
@@ -4248,6 +4417,58 @@ def facility_access_device_health_recommendation(device: FacilityAccessDevice) -
     if device.network_status and device.network_status not in {"online", "good", "connected"}:
         return "Network status needs attention before relying on unattended entry."
     return "Device is ready for controlled access windows."
+
+
+def facility_access_lockdown_command(
+    lockdown: FacilityAccessLockdown,
+    device: FacilityAccessDevice,
+    valid_seconds: int,
+    issued_at: datetime,
+) -> FacilityAccessCommand:
+    command_type = lockdown.mode
+    valid_until = issued_at + timedelta(seconds=valid_seconds)
+    payload = {
+        "command_type": command_type,
+        "device_id": device.device_id,
+        "facility_id": str(device.facility_id),
+        "lockdown_id": str(lockdown.id),
+        "reason": lockdown.reason,
+        "issued_at": issued_at.isoformat(),
+        "valid_until": valid_until.isoformat(),
+        "nonce": token_urlsafe(12),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    signature = facility_access_command_signature(device.api_key_hash, encoded)
+    return FacilityAccessCommand(
+        organization_id=device.organization_id,
+        facility_id=device.facility_id,
+        access_device_id=device.id,
+        command_type=command_type,
+        command_payload=encoded,
+        command_signature=signature,
+        status="issued",
+        issued_at=issued_at,
+        valid_until=valid_until,
+        requested_by_person_id=lockdown.issued_by_person_id,
+        notes=lockdown.reason,
+    )
+
+
+def facility_access_lockdown_recommendation(lockdown: FacilityAccessLockdown, device_count: int) -> str:
+    if lockdown.mode == "lockdown":
+        return f"Lockdown command issued to {device_count} active device(s); verify staff have started emergency response."
+    return f"Unlock-all command issued to {device_count} active device(s); confirm all entrances are staffed before reopening."
+
+
+def facility_access_lockdown_dashboard_recommendation(
+    lockdowns: list[FacilityAccessLockdown],
+    devices: list[FacilityAccessDevice],
+) -> str:
+    if any(lockdown.status == "active" for lockdown in lockdowns):
+        return "Active lockdown in effect; keep emergency communications and staffed manual override ready."
+    if not devices:
+        return "No active access-control devices are available for remote lockdown."
+    return "Remote lockdown coverage is ready; test commands during scheduled safety drills."
 
 
 async def persist_facility_utility_reading(

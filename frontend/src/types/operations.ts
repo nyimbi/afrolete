@@ -2878,6 +2878,38 @@ export type FacilityAccessDeviceHealthRead = {
   recommendation: string;
 };
 
+export type FacilityAccessLockdownRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  mode: "lockdown" | "unlock_all";
+  status: "active" | "resolved" | "cancelled";
+  reason: string;
+  command_count: number;
+  activated_at: string;
+  resolved_at: string | null;
+  issued_by_person_id: UUID | null;
+  notes: string | null;
+};
+
+export type FacilityAccessLockdownResultRead = {
+  lockdown: FacilityAccessLockdownRead;
+  commands: FacilityAccessCommandRead[];
+  devices_targeted: number;
+  recommendation: string;
+};
+
+export type FacilityAccessLockdownDashboardRead = {
+  organization_id: UUID;
+  facility_id: UUID | null;
+  active_lockdown_count: number;
+  active_device_count: number;
+  command_count_last_24h: number;
+  recent_lockdowns: FacilityAccessLockdownRead[];
+  recent_commands: FacilityAccessCommandRead[];
+  recommendation: string;
+};
+
 export type FacilityUtilityMeterRead = {
   id: UUID;
   organization_id: UUID;

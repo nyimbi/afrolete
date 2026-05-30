@@ -243,6 +243,9 @@ import type {
   FacilityAccessDeviceRead,
   FacilityAccessEventRead,
   FacilityAccessGatewayScanRead,
+  FacilityAccessLockdownDashboardRead,
+  FacilityAccessLockdownRead,
+  FacilityAccessLockdownResultRead,
   FacilityUtilityAlertRead,
   FacilityUtilityDashboardRead,
   FacilityUtilityMeterProvisionRead,
@@ -1816,6 +1819,11 @@ export default function HomePage() {
   const [facilityAccessGatewayScan, setFacilityAccessGatewayScan] = useState<FacilityAccessGatewayScanRead | null>(null);
   const [facilityAccessDeviceHealth, setFacilityAccessDeviceHealth] = useState<FacilityAccessDeviceHealthRead | null>(null);
   const [facilityAccessCommands, setFacilityAccessCommands] = useState<FacilityAccessCommandRead[]>([]);
+  const [facilityAccessLockdowns, setFacilityAccessLockdowns] = useState<FacilityAccessLockdownRead[]>([]);
+  const [facilityAccessLockdownDashboard, setFacilityAccessLockdownDashboard] =
+    useState<FacilityAccessLockdownDashboardRead | null>(null);
+  const [facilityAccessLockdownResult, setFacilityAccessLockdownResult] =
+    useState<FacilityAccessLockdownResultRead | null>(null);
   const [facilityUtilityMeters, setFacilityUtilityMeters] = useState<FacilityUtilityMeterRead[]>([]);
   const [facilityUtilityDashboard, setFacilityUtilityDashboard] = useState<FacilityUtilityDashboardRead | null>(null);
   const [facilityUtilityProvision, setFacilityUtilityProvision] = useState<FacilityUtilityMeterProvisionRead | null>(null);
@@ -2720,7 +2728,8 @@ export default function HomePage() {
     api_key: "local-access-device-key-0001",
     battery_percent: 64,
     firmware_version: "1.2.3",
-    network_status: "online"
+    network_status: "online",
+    lockdown_reason: "Security drill in progress"
   });
   const [facilityUtilityForm, setFacilityUtilityForm] = useState({
     meter_id: "main-field-power",
@@ -4027,6 +4036,8 @@ export default function HomePage() {
       accessDashboardData,
       accessDeviceData,
       accessCommandData,
+      accessLockdownData,
+      accessLockdownDashboardData,
       utilityMeterData,
       utilityDashboardData,
       bookingData,
@@ -4060,6 +4071,12 @@ export default function HomePage() {
       apiRequest<FacilityAccessCommandRead[]>(`/assets/access-commands?organization_id=${organizationId}${facilityQuery}`, {
         identity
       }),
+      apiRequest<FacilityAccessLockdownRead[]>(`/assets/access-lockdowns?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
+      apiRequest<FacilityAccessLockdownDashboardRead>(
+        `/assets/access-lockdown-dashboard?organization_id=${organizationId}${facilityQuery}`
+      ),
       apiRequest<FacilityUtilityMeterRead[]>(`/assets/utility-meters?organization_id=${organizationId}${facilityQuery}`, {
         identity
       }),
@@ -4115,6 +4132,8 @@ export default function HomePage() {
     setFacilityAccessDashboard(accessDashboardData);
     setFacilityAccessDevices(accessDeviceData);
     setFacilityAccessCommands(accessCommandData);
+    setFacilityAccessLockdowns(accessLockdownData);
+    setFacilityAccessLockdownDashboard(accessLockdownDashboardData);
     setFacilityUtilityMeters(utilityMeterData);
     setFacilityUtilityDashboard(utilityDashboardData);
     setFacilityBookings(bookingData);
@@ -13483,6 +13502,65 @@ export default function HomePage() {
     );
   };
 
+  const activateFacilityLockdown = (mode: FacilityAccessLockdownRead["mode"] = "lockdown") => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before issuing lockdown commands", "bad");
+      return;
+    }
+    runAction(
+      `facility-access-${mode}`,
+      () =>
+        apiRequest<FacilityAccessLockdownResultRead>("/assets/access-lockdowns", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            mode,
+            reason: mode === "lockdown" ? facilityAccessForm.lockdown_reason : "Resume normal operations",
+            command_valid_seconds: 300,
+            notes: "Issued from operations access console."
+          }
+        }),
+      (result) => {
+        setFacilityAccessLockdownResult(result);
+        setFacilityAccessLockdowns((current) => [
+          result.lockdown,
+          ...current.filter((item) => item.id !== result.lockdown.id)
+        ]);
+        setFacilityAccessCommands((current) => [
+          ...result.commands,
+          ...current.filter((item) => !result.commands.some((command) => command.id === item.id))
+        ]);
+        addLog(`${result.lockdown.mode} issued to ${result.devices_targeted} device(s)`, result.lockdown.mode === "lockdown" ? "bad" : "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const resolveFacilityLockdown = (lockdown: FacilityAccessLockdownRead) => {
+    runAction(
+      `resolve-lockdown-${lockdown.id}`,
+      () =>
+        apiRequest<FacilityAccessLockdownRead>(`/assets/access-lockdowns/${lockdown.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: lockdown.status === "active" ? "resolved" : "active",
+            notes: lockdown.status === "active" ? "Resolved from operations console." : "Reopened from operations console."
+          }
+        }),
+      (updated) => {
+        setFacilityAccessLockdowns((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.mode} ${updated.status}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
   const provisionFacilityUtilityMeter = () => {
     if (!selectedOrganizationId || !selectedFacilityId) {
       addLog("Select a facility before provisioning a utility meter", "bad");
@@ -18964,6 +19042,8 @@ export default function HomePage() {
                 <button type="button" onClick={provisionFacilityAccessDevice} disabled={busyAction !== null}>Device</button>
                 <button type="button" onClick={() => gatewayScanFacilityAccessDevice()} disabled={busyAction !== null}>Gateway</button>
                 <button type="button" onClick={reportFacilityAccessDeviceHealth} disabled={busyAction !== null}>Health</button>
+                <button type="button" onClick={() => activateFacilityLockdown("lockdown")} disabled={busyAction !== null}>Lockdown</button>
+                <button type="button" onClick={() => activateFacilityLockdown("unlock_all")} disabled={busyAction !== null}>Unlock</button>
                 <button type="button" onClick={provisionFacilityUtilityMeter} disabled={busyAction !== null}>Meter</button>
                 <button type="button" onClick={recordFacilityUtilityReading} disabled={busyAction !== null}>Utility</button>
                 <button type="button" onClick={gatewayFacilityUtilityReading} disabled={busyAction !== null}>Ingest</button>
@@ -19010,6 +19090,16 @@ export default function HomePage() {
                 <span className="muted">Signed commands</span>
                 <strong>{facilityAccessCommands.length}</strong>
                 <span className="muted">{facilityAccessCommands[0]?.command_type ?? "none"}</span>
+              </div>
+              <div>
+                <span className="muted">Lockdowns</span>
+                <strong>{facilityAccessLockdownDashboard?.active_lockdown_count ?? 0}</strong>
+                <span className="muted">{facilityAccessLockdownDashboard?.active_device_count ?? 0} devices ready</span>
+              </div>
+              <div>
+                <span className="muted">Safety commands</span>
+                <strong>{facilityAccessLockdownDashboard?.command_count_last_24h ?? 0}</strong>
+                <span className="muted">{facilityAccessLockdownDashboard?.recommendation ?? "No lockdown state"}</span>
               </div>
               <div>
                 <span className="muted">Utility meters</span>
@@ -19200,6 +19290,10 @@ export default function HomePage() {
                 Network
                 <input value={facilityAccessForm.network_status} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, network_status: event.target.value })} />
               </label>
+              <label className="wide-field">
+                Lockdown reason
+                <input value={facilityAccessForm.lockdown_reason} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, lockdown_reason: event.target.value })} />
+              </label>
             </div>
             <div className="form-grid">
               <label>
@@ -19378,6 +19472,36 @@ export default function HomePage() {
                   <div>
                     <strong>{command.command_type} command</strong>
                     <span>{command.status} · valid until {new Date(command.valid_until).toLocaleString()}</span>
+                    <span>{command.command_signature.slice(0, 36)}</span>
+                  </div>
+                </article>
+              ))}
+              {facilityAccessLockdownResult ? (
+                <article className={`task-card ${facilityAccessLockdownResult.lockdown.mode === "unlock_all" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{facilityAccessLockdownResult.lockdown.mode} · {facilityAccessLockdownResult.devices_targeted} devices</strong>
+                    <span>{facilityAccessLockdownResult.lockdown.reason}</span>
+                    <span>{facilityAccessLockdownResult.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {facilityAccessLockdowns.slice(0, 3).map((lockdown) => (
+                <article key={lockdown.id} className={`task-card ${lockdown.status === "active" ? "" : "selected"}`}>
+                  <div>
+                    <strong>{lockdown.mode} · {lockdown.status}</strong>
+                    <span>{lockdown.reason} · {lockdown.command_count} commands</span>
+                    <span>{new Date(lockdown.activated_at).toLocaleString()} · resolved {lockdown.resolved_at ? new Date(lockdown.resolved_at).toLocaleString() : "not yet"}</span>
+                  </div>
+                  <button type="button" onClick={() => resolveFacilityLockdown(lockdown)}>
+                    {lockdown.status === "active" ? "Resolve" : "Reopen"}
+                  </button>
+                </article>
+              ))}
+              {facilityAccessLockdownDashboard?.recent_commands.slice(0, 2).map((command) => (
+                <article key={command.id} className="task-card">
+                  <div>
+                    <strong>Safety {command.command_type}</strong>
+                    <span>{command.status} · {new Date(command.issued_at).toLocaleString()}</span>
                     <span>{command.command_signature.slice(0, 36)}</span>
                   </div>
                 </article>

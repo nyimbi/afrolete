@@ -1223,6 +1223,92 @@ def test_facility_utility_monitoring_gateway_alerts_and_dashboard(client, identi
     assert resolved.json()["resolved_at"] is not None
 
 
+def test_facility_access_lockdown_fans_out_signed_commands(client, identity_headers) -> None:
+    organization, _, _, _ = create_assets_context(client, identity_headers, "Lockdown Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Clubhouse Security",
+            "facility_type": "clubhouse",
+            "capacity": 120,
+        },
+    ).json()
+    for device_id, key in [
+        ("north-door-controller", "north-lockdown-key-0001"),
+        ("south-door-controller", "south-lockdown-key-0001"),
+    ]:
+        response = client.post(
+            "/api/v1/assets/access-devices",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "facility_id": facility["id"],
+                "device_id": device_id,
+                "name": device_id.replace("-", " ").title(),
+                "location": device_id.split("-")[0].title(),
+                "api_key": key,
+            },
+        )
+        assert response.status_code == 201
+
+    lockdown_response = client.post(
+        "/api/v1/assets/access-lockdowns",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "mode": "lockdown",
+            "reason": "Security drill in progress",
+            "command_valid_seconds": 120,
+        },
+    )
+    assert lockdown_response.status_code == 201
+    lockdown = lockdown_response.json()
+    assert lockdown["devices_targeted"] == 2
+    assert lockdown["lockdown"]["status"] == "active"
+    assert lockdown["lockdown"]["command_count"] == 2
+    assert {command["command_type"] for command in lockdown["commands"]} == {"lockdown"}
+    first_command = lockdown["commands"][0]
+    payload = json.loads(first_command["command_payload"])
+    assert payload["lockdown_id"] == lockdown["lockdown"]["id"]
+    assert payload["reason"] == "Security drill in progress"
+
+    dashboard = client.get(
+        f"/api/v1/assets/access-lockdown-dashboard?organization_id={organization['id']}&facility_id={facility['id']}"
+    )
+    assert dashboard.status_code == 200
+    summary = dashboard.json()
+    assert summary["active_lockdown_count"] == 1
+    assert summary["active_device_count"] == 2
+    assert summary["command_count_last_24h"] == 2
+    assert "Active lockdown" in summary["recommendation"]
+
+    resolved = client.patch(
+        f"/api/v1/assets/access-lockdowns/{lockdown['lockdown']['id']}",
+        headers=identity_headers,
+        json={"status": "resolved", "notes": "Drill completed."},
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "resolved"
+    assert resolved.json()["resolved_at"] is not None
+
+    unlock = client.post(
+        "/api/v1/assets/access-lockdowns",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "mode": "unlock_all",
+            "reason": "Resume normal operations",
+        },
+    )
+    assert unlock.status_code == 201
+    assert unlock.json()["lockdown"]["status"] == "resolved"
+    assert {command["command_type"] for command in unlock.json()["commands"]} == {"unlock_all"}
+
+
 def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
     plan = client.post(

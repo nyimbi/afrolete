@@ -30,6 +30,7 @@ from app.models.assets import (  # noqa: F401,E402
     FacilityAccessCredential,
     FacilityAccessDevice,
     FacilityAccessEvent,
+    FacilityAccessLockdown,
     FacilityBooking,
     FacilityBookingRule,
     FacilityBookingWaitlistEntry,

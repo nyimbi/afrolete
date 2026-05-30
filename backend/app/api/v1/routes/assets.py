@@ -56,6 +56,11 @@ from app.schemas.assets import (
     FacilityAccessEventRead,
     FacilityAccessGatewayScanCreate,
     FacilityAccessGatewayScanRead,
+    FacilityAccessLockdownCreate,
+    FacilityAccessLockdownDashboardRead,
+    FacilityAccessLockdownRead,
+    FacilityAccessLockdownResultRead,
+    FacilityAccessLockdownUpdate,
     FacilityAccessScanCreate,
     FacilityAvailabilityRead,
     FacilityBookingCheckoutRead,
@@ -110,6 +115,7 @@ from app.schemas.assets import (
 from app.schemas.safeguarding import SafeguardingIncidentRead
 from app.services.assets import (
     activate_emergency_action_plan,
+    activate_facility_access_lockdown,
     asset_accounting_export,
     asset_summary,
     checkout_equipment,
@@ -133,6 +139,7 @@ from app.services.assets import (
     equipment_lease_quote,
     ensure_manage_assets,
     facility_access_dashboard,
+    facility_access_lockdown_dashboard,
     facility_availability,
     facility_maintenance_dashboard,
     facility_utility_dashboard,
@@ -154,6 +161,7 @@ from app.services.assets import (
     list_facility_access_credentials,
     list_facility_access_commands,
     list_facility_access_devices,
+    list_facility_access_lockdowns,
     list_facility_bookings,
     list_facility_lease_agreements,
     list_facility_maintenance_schedules,
@@ -178,6 +186,7 @@ from app.services.assets import (
     sync_supplier_invoice,
     settle_facility_hire_checkout,
     update_facility_access_credential,
+    update_facility_access_lockdown,
     update_facility_booking_status,
     update_facility_lease_agreement,
     update_facility_maintenance_schedule,
@@ -1241,6 +1250,47 @@ async def record_facility_access_device_health_route(
     db: AsyncSession = Depends(get_db),
 ) -> FacilityAccessDeviceHealthRead:
     return await record_facility_access_device_health(db, organization_id, device_id, x_afrolete_access_key, payload)
+
+
+@router.post("/access-lockdowns", response_model=FacilityAccessLockdownResultRead, status_code=status.HTTP_201_CREATED)
+async def activate_facility_access_lockdown_route(
+    payload: FacilityAccessLockdownCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityAccessLockdownResultRead:
+    return await activate_facility_access_lockdown(db, identity, payload, authz)
+
+
+@router.get("/access-lockdowns", response_model=list[FacilityAccessLockdownRead])
+async def list_facility_access_lockdowns_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[FacilityAccessLockdownRead]:
+    return await list_facility_access_lockdowns(db, identity, organization_id, authz, facility_id=facility_id)
+
+
+@router.patch("/access-lockdowns/{lockdown_id}", response_model=FacilityAccessLockdownRead)
+async def update_facility_access_lockdown_route(
+    lockdown_id: UUID,
+    payload: FacilityAccessLockdownUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityAccessLockdownRead:
+    return await update_facility_access_lockdown(db, identity, lockdown_id, payload, authz)
+
+
+@router.get("/access-lockdown-dashboard", response_model=FacilityAccessLockdownDashboardRead)
+async def facility_access_lockdown_dashboard_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityAccessLockdownDashboardRead:
+    return await facility_access_lockdown_dashboard(db, organization_id, facility_id=facility_id)
 
 
 @router.post("/utility-meters", response_model=FacilityUtilityMeterProvisionRead, status_code=status.HTTP_201_CREATED)

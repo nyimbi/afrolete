@@ -996,6 +996,52 @@ class FacilityAccessDeviceHealthRead(BaseModel):
     recommendation: str
 
 
+class FacilityAccessLockdownCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    mode: str = Field(default="lockdown", pattern="^(lockdown|unlock_all)$")
+    reason: str = Field(min_length=2, max_length=500)
+    command_valid_seconds: int = Field(default=300, ge=10, le=3600)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityAccessLockdownUpdate(BaseModel):
+    status: str = Field(pattern="^(active|resolved|cancelled)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityAccessLockdownRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    mode: str
+    status: str
+    reason: str
+    command_count: int
+    activated_at: datetime
+    resolved_at: datetime | None
+    issued_by_person_id: UUID | None
+    notes: str | None
+
+
+class FacilityAccessLockdownResultRead(BaseModel):
+    lockdown: FacilityAccessLockdownRead
+    commands: list[FacilityAccessCommandRead]
+    devices_targeted: int
+    recommendation: str
+
+
+class FacilityAccessLockdownDashboardRead(BaseModel):
+    organization_id: UUID
+    facility_id: UUID | None
+    active_lockdown_count: int
+    active_device_count: int
+    command_count_last_24h: int
+    recent_lockdowns: list[FacilityAccessLockdownRead]
+    recent_commands: list[FacilityAccessCommandRead]
+    recommendation: str
+
+
 class FacilityUtilityMeterCreate(BaseModel):
     organization_id: UUID
     facility_id: UUID
