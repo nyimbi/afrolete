@@ -50,10 +50,14 @@ from app.schemas.performance import (
     PerformanceForecastScenarioRead,
     PerformanceForecastWhatIfRead,
     PerformanceMetricBenchmarkRead,
+    PerformanceModelExtractionBulkReviewCreate,
+    PerformanceModelExtractionBulkReviewRead,
     PerformanceModelExtractionBenchmarkDatasetCreate,
     PerformanceModelExtractionBenchmarkDatasetRead,
     PerformanceModelExtractionBenchmarkRunCreate,
     PerformanceModelExtractionBenchmarkRunRead,
+    PerformanceModelExtractionReviewQueueItemRead,
+    PerformanceModelExtractionReviewQueueRead,
     PerformanceMetricTrendRead,
     PerformanceMetricTrendSeriesRead,
     PerformanceMatchAnalysisReportCreate,
@@ -111,6 +115,7 @@ from app.services.performance import (
     assessment_review_queue_summary,
     analyze_video_for_coaching,
     analyze_pose_gait_for_video,
+    bulk_review_performance_model_extraction_queue,
     create_assessment,
     create_athlete_pathway_projection,
     create_metric_definition,
@@ -171,6 +176,7 @@ from app.services.performance import (
     performance_forecast_what_if_scenarios,
     performance_injury_risk,
     performance_metric_benchmarks,
+    performance_model_extraction_review_queue,
     run_performance_model_extraction_benchmark,
     performance_cohort_comparisons,
     performance_metric_trend_series,
@@ -244,6 +250,53 @@ def to_observation_read(observation) -> PerformanceObservationRead:
         confidence=observation.confidence,
         verification_status=observation.verification_status,
         notes=observation.notes,
+    )
+
+
+def to_model_extraction_review_queue_item_read(item: dict[str, object]) -> PerformanceModelExtractionReviewQueueItemRead:
+    return PerformanceModelExtractionReviewQueueItemRead(
+        observation=to_observation_read(item["observation"]),
+        metric_code=item["metric_code"],
+        metric_name=item["metric_name"],
+        metric_category=item["metric_category"],
+        unit=item["unit"],
+        model_assisted=item["model_assisted"],
+        model_policy=item["model_policy"],
+        evidence_ref=item["evidence_ref"],
+        review_priority=item["review_priority"],
+        confidence_label=item["confidence_label"],
+        recommended_action=item["recommended_action"],
+        review_reason=item["review_reason"],
+        flags=item["flags"],
+        age_hours=item["age_hours"],
+    )
+
+
+def to_model_extraction_review_queue_read(payload: dict[str, object]) -> PerformanceModelExtractionReviewQueueRead:
+    return PerformanceModelExtractionReviewQueueRead(
+        organization_id=payload["organization_id"],
+        athlete_profile_id=payload["athlete_profile_id"],
+        pending_count=payload["pending_count"],
+        model_assisted_count=payload["model_assisted_count"],
+        high_priority_count=payload["high_priority_count"],
+        average_confidence=payload["average_confidence"],
+        recommendations=payload["recommendations"],
+        items=[
+            to_model_extraction_review_queue_item_read(item)
+            for item in payload["items"]
+        ],
+    )
+
+
+def to_model_extraction_bulk_review_read(payload: dict[str, object]) -> PerformanceModelExtractionBulkReviewRead:
+    return PerformanceModelExtractionBulkReviewRead(
+        organization_id=payload["organization_id"],
+        reviewed_count=payload["reviewed_count"],
+        skipped_count=payload["skipped_count"],
+        verification_status=payload["verification_status"],
+        summary=payload["summary"],
+        recommendations=payload["recommendations"],
+        observations=[to_observation_read(observation) for observation in payload["observations"]],
     )
 
 
@@ -824,6 +877,45 @@ async def ingest_performance_evidence_route(
         model_confidence=result["model_confidence"],
         model_summary=result["model_summary"],
         model_evaluation=result["model_evaluation"],
+    )
+
+
+@router.get(
+    "/model-extraction/review-queue",
+    response_model=PerformanceModelExtractionReviewQueueRead,
+)
+async def performance_model_extraction_review_queue_route(
+    organization_id: UUID = Query(),
+    athlete_profile_id: UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceModelExtractionReviewQueueRead:
+    return to_model_extraction_review_queue_read(
+        await performance_model_extraction_review_queue(
+            db,
+            identity,
+            organization_id,
+            authz,
+            athlete_profile_id=athlete_profile_id,
+            limit=limit,
+        )
+    )
+
+
+@router.post(
+    "/model-extraction/review-queue/bulk-review",
+    response_model=PerformanceModelExtractionBulkReviewRead,
+)
+async def bulk_review_performance_model_extraction_queue_route(
+    payload: PerformanceModelExtractionBulkReviewCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceModelExtractionBulkReviewRead:
+    return to_model_extraction_bulk_review_read(
+        await bulk_review_performance_model_extraction_queue(db, identity, payload, authz)
     )
 
 

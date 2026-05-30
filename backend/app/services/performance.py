@@ -99,6 +99,7 @@ from app.schemas.performance import (
     PerformanceHighlightReelCreate,
     PerformanceHighlightReelExportCreate,
     PerformanceIngestionCreate,
+    PerformanceModelExtractionBulkReviewCreate,
     PerformanceMatchAnalysisReportCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
@@ -307,6 +308,12 @@ async def ingest_performance_evidence(
     value = float(parsed["value"])
     confidence = float(parsed["confidence"])
     parser_warnings = list(parsed["warnings"])
+    model_note = (
+        f"Model: {model_assist['model_policy']} "
+        f"({float(model_assist['confidence']):.2f}, {'applied' if model_applied else 'evaluated'}). "
+        if model_assist
+        else ""
+    )
     observation = AthletePerformanceObservation(
         organization_id=payload.organization_id,
         athlete_profile_id=athlete_profile.id,
@@ -322,6 +329,7 @@ async def ingest_performance_evidence(
         notes=(
             f"Ingested from {payload.source.value} evidence {payload.evidence_ref}. "
             f"Metric: {metric.name}. Parser: {parsed['method']}. "
+            f"{model_note}"
             f"{'Warnings: ' + '; '.join(parser_warnings) + '. ' if parser_warnings else ''}"
             "Review before promoting to verified."
         ),
@@ -1732,6 +1740,242 @@ async def list_performance_model_extraction_benchmark_datasets(
         ).all()
     )
     return [await performance_model_benchmark_dataset_read(db, dataset.id) for dataset in datasets]
+
+
+async def performance_model_extraction_review_queue(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    *,
+    athlete_profile_id: UUID | None = None,
+    limit: int = 50,
+) -> dict[str, object]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    if athlete_profile_id is not None:
+        await get_athlete_profile(db, athlete_profile_id, organization_id)
+    statement = (
+        select(AthletePerformanceObservation, PerformanceMetricDefinition)
+        .join(
+            PerformanceMetricDefinition,
+            AthletePerformanceObservation.metric_definition_id == PerformanceMetricDefinition.id,
+        )
+        .where(AthletePerformanceObservation.organization_id == organization_id)
+        .where(AthletePerformanceObservation.verification_status == MetricVerificationStatus.PENDING_REVIEW)
+        .order_by(
+            AthletePerformanceObservation.confidence.asc().nullsfirst(),
+            AthletePerformanceObservation.observed_at.desc(),
+            AthletePerformanceObservation.created_at.desc(),
+        )
+        .limit(limit)
+    )
+    if athlete_profile_id is not None:
+        statement = statement.where(AthletePerformanceObservation.athlete_profile_id == athlete_profile_id)
+    rows = list((await db.execute(statement)).all())
+    items = [
+        performance_model_extraction_review_item(observation, metric)
+        for observation, metric in rows
+        if observation.source in MODEL_ASSIST_SOURCES or performance_observation_model_assisted(observation)
+    ]
+    confidences = [
+        float(item["observation"].confidence)
+        for item in items
+        if item["observation"].confidence is not None
+    ]
+    model_assisted_count = sum(1 for item in items if item["model_assisted"])
+    high_priority_count = sum(1 for item in items if item["review_priority"] == "high")
+    recommendations = performance_model_extraction_queue_recommendations(items)
+    return {
+        "organization_id": organization_id,
+        "athlete_profile_id": athlete_profile_id,
+        "pending_count": len(items),
+        "model_assisted_count": model_assisted_count,
+        "high_priority_count": high_priority_count,
+        "average_confidence": round(sum(confidences) / len(confidences), 4) if confidences else None,
+        "recommendations": recommendations,
+        "items": items,
+    }
+
+
+async def bulk_review_performance_model_extraction_queue(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: PerformanceModelExtractionBulkReviewCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    requested_ids = {str(observation_id) for observation_id in payload.observation_ids}
+    if requested_ids:
+        await ensure_manage_performance(authz, identity, payload.organization_id)
+        if payload.athlete_profile_id is not None:
+            await get_athlete_profile(db, payload.athlete_profile_id, payload.organization_id)
+        statement = (
+            select(AthletePerformanceObservation, PerformanceMetricDefinition)
+            .join(
+                PerformanceMetricDefinition,
+                AthletePerformanceObservation.metric_definition_id == PerformanceMetricDefinition.id,
+            )
+            .where(AthletePerformanceObservation.organization_id == payload.organization_id)
+            .where(AthletePerformanceObservation.verification_status == MetricVerificationStatus.PENDING_REVIEW)
+            .where(AthletePerformanceObservation.id.in_(payload.observation_ids))
+        )
+        if payload.athlete_profile_id is not None:
+            statement = statement.where(AthletePerformanceObservation.athlete_profile_id == payload.athlete_profile_id)
+        items = [
+            performance_model_extraction_review_item(observation, metric)
+            for observation, metric in list((await db.execute(statement)).all())
+        ]
+    else:
+        queue = await performance_model_extraction_review_queue(
+            db,
+            identity,
+            payload.organization_id,
+            authz,
+            athlete_profile_id=payload.athlete_profile_id,
+            limit=payload.max_items,
+        )
+        items = list(queue["items"])
+    reviewed: list[AthletePerformanceObservation] = []
+    skipped_count = 0
+    for item in items:
+        observation = item["observation"]
+        if payload.only_model_assisted and not item["model_assisted"]:
+            skipped_count += 1
+            continue
+        if observation.confidence is not None and observation.confidence < payload.min_confidence:
+            skipped_count += 1
+            continue
+        observation.verification_status = payload.verification_status
+        review_note = payload.notes or "Bulk reviewed through the model-extraction review queue."
+        observation.notes = (
+            f"{observation.notes or ''} Review decision: {payload.verification_status.value}. "
+            f"{review_note}"
+        ).strip()[:2000]
+        db.add(observation)
+        reviewed.append(observation)
+        if not requested_ids and len(reviewed) >= payload.max_items:
+            break
+    if reviewed:
+        await db.commit()
+        for observation in reviewed:
+            await db.refresh(observation)
+    recommendations = [
+        "Keep low-confidence or non-model-assisted evidence in the queue for individual coach correction."
+        if skipped_count
+        else "Reviewed observations are ready for downstream summaries, benchmarks, and player guidance."
+    ]
+    return {
+        "organization_id": payload.organization_id,
+        "reviewed_count": len(reviewed),
+        "skipped_count": skipped_count,
+        "verification_status": payload.verification_status,
+        "summary": (
+            f"{len(reviewed)} model-extraction observation(s) marked "
+            f"{payload.verification_status.value}; {skipped_count} skipped by policy."
+        ),
+        "recommendations": recommendations,
+        "observations": reviewed,
+    }
+
+
+def performance_model_extraction_review_item(
+    observation: AthletePerformanceObservation,
+    metric: PerformanceMetricDefinition,
+) -> dict[str, object]:
+    confidence = observation.confidence if observation.confidence is not None else 0.0
+    model_assisted = performance_observation_model_assisted(observation)
+    flags: list[str] = []
+    if confidence < 0.75:
+        flags.append("low_confidence")
+    if metric.category in {MetricCategory.WELLNESS, MetricCategory.PHYSICAL}:
+        flags.append("player_safety_relevant")
+    if model_assisted:
+        flags.append("model_assisted")
+    if observation.source in {MetricSource.AUDIO_NARRATION, MetricSource.AGENT_EXTRACTED}:
+        flags.append("narrative_source")
+    priority = "high" if "low_confidence" in flags or "player_safety_relevant" in flags else "standard"
+    if confidence >= 0.88 and model_assisted and priority == "standard":
+        recommended_action = "verify"
+    elif confidence < 0.65:
+        recommended_action = "correct_or_reject"
+    else:
+        recommended_action = "coach_review"
+    observed_at = observation.observed_at
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=UTC)
+    age_hours = max((datetime.now(UTC) - observed_at).total_seconds() / 3600, 0.0)
+    return {
+        "observation": observation,
+        "metric_code": metric.code,
+        "metric_name": metric.name,
+        "metric_category": metric.category,
+        "unit": metric.unit,
+        "model_assisted": model_assisted,
+        "model_policy": performance_observation_model_policy(observation),
+        "evidence_ref": performance_observation_evidence_ref(observation),
+        "review_priority": priority,
+        "confidence_label": performance_confidence_label(confidence),
+        "recommended_action": recommended_action,
+        "review_reason": performance_model_extraction_review_reason(observation, metric, confidence, model_assisted),
+        "flags": flags,
+        "age_hours": round(age_hours, 2),
+    }
+
+
+def performance_observation_model_assisted(observation: AthletePerformanceObservation) -> bool:
+    notes = observation.notes or ""
+    return "model_assisted_extraction" in notes or "model_webhook_extraction" in notes or "Model:" in notes
+
+
+def performance_observation_model_policy(observation: AthletePerformanceObservation) -> str | None:
+    notes = observation.notes or ""
+    match = re.search(r"Model:\s*([^(.]+)", notes)
+    if match:
+        return match.group(1).strip()
+    return get_settings().performance_model_extraction_model if performance_observation_model_assisted(observation) else None
+
+
+def performance_observation_evidence_ref(observation: AthletePerformanceObservation) -> str | None:
+    notes = observation.notes or ""
+    match = re.search(r"evidence\s+([^.\s]+)", notes)
+    return match.group(1).strip() if match else None
+
+
+def performance_confidence_label(confidence: float) -> str:
+    if confidence >= 0.88:
+        return "high"
+    if confidence >= 0.72:
+        return "medium"
+    return "low"
+
+
+def performance_model_extraction_review_reason(
+    observation: AthletePerformanceObservation,
+    metric: PerformanceMetricDefinition,
+    confidence: float,
+    model_assisted: bool,
+) -> str:
+    source = observation.source.value.replace("_", " ")
+    method = "model-assisted" if model_assisted else "parser-derived"
+    return (
+        f"{metric.name} from {source} is {method} evidence at "
+        f"{round(confidence * 100)}% confidence and remains pending human verification."
+    )
+
+
+def performance_model_extraction_queue_recommendations(items: list[dict[str, object]]) -> list[str]:
+    if not items:
+        return ["No model-extraction observations are waiting for review."]
+    recommendations = [
+        "Review high-priority safety or low-confidence observations before using them in player guidance.",
+    ]
+    high_confidence = sum(
+        1
+        for item in items
+        if item["model_assisted"] and item["confidence_label"] == "high"
+    )
+    if high_confidence:
+        recommendations.append(f"{high_confidence} high-confidence model-assisted observation(s) are candidates for bulk verification.")
+    return recommendations
 
 
 async def run_performance_forecast_validation(

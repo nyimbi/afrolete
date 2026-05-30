@@ -370,8 +370,10 @@ import type {
   PerformanceInjuryRiskRead,
   PerformanceIngestionRead,
   PerformanceMetricBenchmarkRead,
+  PerformanceModelExtractionBulkReviewRead,
   PerformanceModelExtractionBenchmarkDatasetRead,
   PerformanceModelExtractionBenchmarkRunRead,
+  PerformanceModelExtractionReviewQueueRead,
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchAnalysisReportRead,
@@ -1870,6 +1872,10 @@ export default function HomePage() {
     useState<PerformanceModelExtractionBenchmarkRunRead | null>(null);
   const [performanceModelBenchmarkDatasets, setPerformanceModelBenchmarkDatasets] =
     useState<PerformanceModelExtractionBenchmarkDatasetRead[]>([]);
+  const [performanceModelReviewQueue, setPerformanceModelReviewQueue] =
+    useState<PerformanceModelExtractionReviewQueueRead | null>(null);
+  const [performanceModelBulkReview, setPerformanceModelBulkReview] =
+    useState<PerformanceModelExtractionBulkReviewRead | null>(null);
   const [performanceWebhookIngest, setPerformanceWebhookIngest] = useState<PerformanceWearableWebhookRead | null>(null);
   const [wearableConnections, setWearableConnections] = useState<PerformanceWearableConnectionRead[]>([]);
   const [wearableSyncRun, setWearableSyncRun] = useState<PerformanceWearableSyncRunRead | null>(null);
@@ -3852,6 +3858,18 @@ export default function HomePage() {
     setPerformanceModelBenchmarkDatasets(data);
   }, [identity]);
 
+  const loadPerformanceModelReviewQueue = useCallback(async (organizationId: string, athleteProfileId?: string) => {
+    const params = new URLSearchParams({ organization_id: organizationId, limit: "50" });
+    if (athleteProfileId) {
+      params.set("athlete_profile_id", athleteProfileId);
+    }
+    const data = await apiRequest<PerformanceModelExtractionReviewQueueRead>(
+      `/performance/model-extraction/review-queue?${params.toString()}`,
+      { identity }
+    );
+    setPerformanceModelReviewQueue(data);
+  }, [identity]);
+
   const loadMovementReferenceProfiles = useCallback(async (organizationId: string, sport: string) => {
     const params = new URLSearchParams({
       organization_id: organizationId,
@@ -4010,7 +4028,8 @@ export default function HomePage() {
         injuryRiskData,
         goalData,
         awardData,
-        wearableConnectionData
+        wearableConnectionData,
+        modelReviewQueueData
       ] = await Promise.all([
         apiRequest<PerformanceObservationRead[]>(
           `/performance/athletes/${athleteProfileId}/observations?organization_id=${organizationId}`
@@ -4059,6 +4078,10 @@ export default function HomePage() {
         apiRequest<PerformanceWearableConnectionRead[]>(
           `/performance/wearable-connections?organization_id=${organizationId}&athlete_profile_id=${athleteProfileId}`,
           { identity }
+        ),
+        apiRequest<PerformanceModelExtractionReviewQueueRead>(
+          `/performance/model-extraction/review-queue?organization_id=${organizationId}&athlete_profile_id=${athleteProfileId}`,
+          { identity }
         )
       ]);
       setObservations(observationData);
@@ -4078,6 +4101,7 @@ export default function HomePage() {
       setPerformanceGoals(goalData);
       setPerformanceAwards(awardData);
       setWearableConnections(wearableConnectionData);
+      setPerformanceModelReviewQueue(modelReviewQueueData);
       setSelectedObservationId((current) =>
         observationData.some((observation) => observation.id === current)
           ? current
@@ -5350,6 +5374,7 @@ export default function HomePage() {
       await loadAgentTasks(selectedOrganizationId);
       await loadMetricDefinitions(selectedOrganizationId);
       await loadPerformanceBenchmarkDatasets(selectedOrganizationId);
+      await loadPerformanceModelReviewQueue(selectedOrganizationId);
       await loadOppositionScouting(selectedOrganizationId);
       await loadTraining(selectedOrganizationId);
       await loadVolunteers(selectedOrganizationId);
@@ -5382,6 +5407,7 @@ export default function HomePage() {
     loadAgentTasks,
     loadMetricDefinitions,
     loadPerformanceBenchmarkDatasets,
+    loadPerformanceModelReviewQueue,
     loadOppositionScouting,
     loadTraining,
     loadVolunteers,
@@ -11326,6 +11352,49 @@ export default function HomePage() {
         ]);
         addLog(`Observation verified: ${observation.value}`, "good");
         void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const bulkReviewModelExtractionQueue = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before reviewing AI extraction evidence", "bad");
+      return;
+    }
+    const observationIds = performanceModelReviewQueue?.items
+      .filter((item) => item.model_assisted && item.confidence_label !== "low")
+      .slice(0, 25)
+      .map((item) => item.observation.id) ?? [];
+    runAction(
+      "bulk-review-model-extraction",
+      () =>
+        apiRequest<PerformanceModelExtractionBulkReviewRead>(
+          "/performance/model-extraction/review-queue/bulk-review",
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              ...(selectedAthlete?.athleteProfileId ? { athlete_profile_id: selectedAthlete.athleteProfileId } : {}),
+              observation_ids: observationIds,
+              verification_status: "verified",
+              min_confidence: 0.72,
+              only_model_assisted: true,
+              notes: "Operator bulk-verified model-assisted evidence after queue review."
+            }
+          }
+        ),
+      (review) => {
+        setPerformanceModelBulkReview(review);
+        setObservations((current) => [
+          ...review.observations,
+          ...current.filter((item) => !review.observations.some((observation) => observation.id === item.id))
+        ]);
+        addLog(review.summary, review.reviewed_count ? "good" : "neutral");
+        void loadPerformanceModelReviewQueue(selectedOrganizationId, selectedAthlete?.athleteProfileId);
+        if (selectedAthlete?.athleteProfileId) {
+          void loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId);
+        }
       }
     );
   };
@@ -24649,6 +24718,7 @@ export default function HomePage() {
                 <button type="button" onClick={createPerformanceHighlightReel} disabled={busyAction !== null}>Highlights</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
+                <button type="button" onClick={bulkReviewModelExtractionQueue} disabled={busyAction !== null}>AI review</button>
                 <button type="button" onClick={runPerformanceForecastValidation} disabled={busyAction !== null}>Forecast QA</button>
                 <button type="button" onClick={sendPerformanceForecastValidationAlert} disabled={busyAction !== null}>Drift alert</button>
                 <button type="button" onClick={ingestPerformanceWearableWebhook} disabled={busyAction !== null}>Webhook</button>
@@ -26146,6 +26216,56 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {performanceModelReviewQueue ? (
+                <article className="task-card">
+                  <div>
+                    <strong>AI extraction review · {performanceModelReviewQueue.pending_count} pending</strong>
+                    <span>
+                      {performanceModelReviewQueue.model_assisted_count} model-assisted ·{" "}
+                      {performanceModelReviewQueue.high_priority_count} high priority ·{" "}
+                      {performanceModelReviewQueue.average_confidence === null
+                        ? "no confidence yet"
+                        : `${Math.round(performanceModelReviewQueue.average_confidence * 100)}% average confidence`}
+                    </span>
+                    <small>{performanceModelReviewQueue.recommendations[0]}</small>
+                  </div>
+                  <span>
+                    <button type="button" onClick={bulkReviewModelExtractionQueue} disabled={busyAction !== null}>Verify queue</button>
+                  </span>
+                </article>
+              ) : null}
+              {performanceModelBulkReview ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Bulk review · {performanceModelBulkReview.reviewed_count} reviewed</strong>
+                    <span>
+                      {performanceModelBulkReview.verification_status.replaceAll("_", " ")} ·{" "}
+                      {performanceModelBulkReview.skipped_count} skipped
+                    </span>
+                    <small>{performanceModelBulkReview.summary}</small>
+                  </div>
+                </article>
+              ) : null}
+              {performanceModelReviewQueue?.items.slice(0, 5).map((item) => (
+                <button
+                  type="button"
+                  key={`model-review-${item.observation.id}`}
+                  className={`task-card ${item.observation.id === selectedObservationId ? "selected" : ""}`}
+                  onClick={() => setSelectedObservationId(item.observation.id)}
+                >
+                  <div>
+                    <strong>{item.metric_name} · {item.recommended_action.replaceAll("_", " ")}</strong>
+                    <span>
+                      {item.observation.value}{item.unit ? ` ${item.unit}` : ""} ·{" "}
+                      {item.confidence_label} confidence · {item.review_priority} priority
+                    </span>
+                    <small>
+                      {item.model_policy ?? item.observation.source} · {item.evidence_ref ?? "evidence ref unavailable"}
+                    </small>
+                    <small>{item.review_reason}</small>
+                  </div>
+                </button>
+              ))}
               {performanceVideoCoaching ? (
                 <article className="task-card">
                   <div>

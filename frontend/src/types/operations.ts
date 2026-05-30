@@ -6543,6 +6543,44 @@ export type PerformanceModelExtractionBenchmarkCaseRead = {
   summary: string;
 };
 
+export type PerformanceModelExtractionReviewQueueItemRead = {
+  observation: PerformanceObservationRead;
+  metric_code: string;
+  metric_name: string;
+  metric_category: MetricCategory;
+  unit: string | null;
+  model_assisted: boolean;
+  model_policy: string | null;
+  evidence_ref: string | null;
+  review_priority: string;
+  confidence_label: string;
+  recommended_action: string;
+  review_reason: string;
+  flags: string[];
+  age_hours: number;
+};
+
+export type PerformanceModelExtractionReviewQueueRead = {
+  organization_id: UUID;
+  athlete_profile_id: UUID | null;
+  pending_count: number;
+  model_assisted_count: number;
+  high_priority_count: number;
+  average_confidence: number | null;
+  recommendations: string[];
+  items: PerformanceModelExtractionReviewQueueItemRead[];
+};
+
+export type PerformanceModelExtractionBulkReviewRead = {
+  organization_id: UUID;
+  reviewed_count: number;
+  skipped_count: number;
+  verification_status: MetricVerificationStatus;
+  summary: string;
+  recommendations: string[];
+  observations: PerformanceObservationRead[];
+};
+
 export type PerformanceModelExtractionBenchmarkDatasetCaseRead = {
   id: UUID;
   dataset_id: UUID;

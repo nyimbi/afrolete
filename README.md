@@ -225,6 +225,12 @@ returns concrete correction cues. Future computer-vision providers can replace
 or enrich the deterministic extractor without changing the human-review
 contract.
 
+Performance ingestion also supports model-assisted extraction from coach audio,
+video narratives, and agent evidence. Those observations remain pending until a
+human reviews them, and the operations console now includes a dedicated AI
+extraction review queue with priority, confidence, evidence, safety flags, and
+bulk verification for high-confidence model-assisted records.
+
 Video review now includes stored performance clips, slow-motion playback rates,
 timestamped human annotations, provider-neutral pose/keypoint sample ingestion,
 and a MediaPipe/OpenCV worker that decodes stored clips, samples frames,

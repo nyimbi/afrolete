@@ -2107,6 +2107,87 @@ def test_performance_ingestion_uses_model_assist_for_narrative_number_words(clie
     assert "Model-assisted extraction requires human review before verification." in ingestion["parser_warnings"]
 
 
+def test_model_extraction_review_queue_bulk_verifies_model_assisted_observations(
+    client, identity_headers
+) -> None:
+    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    metric = client.post(
+        "/api/v1/performance/metrics",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sport": "football",
+            "code": "sleep_minutes",
+            "name": "Sleep Minutes",
+            "category": "wellness",
+            "unit": "minutes",
+            "min_value": 0,
+            "max_value": 900,
+        },
+    ).json()
+    ingestion_response = client.post(
+        "/api/v1/performance/ingest",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "metric_definition_id": metric["id"],
+            "source": "audio_narration",
+            "evidence_ref": "audio://coach-notes/recovery-queue",
+            "evidence_text": "Coach note: sleep duration was seven hours after travel.",
+        },
+    )
+    assert ingestion_response.status_code == 201
+    observation_id = ingestion_response.json()["observation"]["id"]
+
+    queue_response = client.get(
+        (
+            "/api/v1/performance/model-extraction/review-queue"
+            f"?organization_id={organization['id']}&athlete_profile_id={roster['athlete_profile_id']}"
+        ),
+        headers=identity_headers,
+    )
+    assert queue_response.status_code == 200
+    queue = queue_response.json()
+    assert queue["pending_count"] == 1
+    assert queue["model_assisted_count"] == 1
+    assert queue["high_priority_count"] == 1
+    assert queue["items"][0]["observation"]["id"] == observation_id
+    assert queue["items"][0]["metric_code"] == "sleep_minutes"
+    assert queue["items"][0]["model_policy"] == "afrolete-performance-extractor-v1"
+    assert queue["items"][0]["evidence_ref"] == "audio://coach-notes/recovery-queue"
+    assert "player_safety_relevant" in queue["items"][0]["flags"]
+
+    bulk_response = client.post(
+        "/api/v1/performance/model-extraction/review-queue/bulk-review",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "observation_ids": [observation_id],
+            "verification_status": "verified",
+            "min_confidence": 0.7,
+            "notes": "Coach checked the source audio and accepted the extracted sleep value.",
+        },
+    )
+    assert bulk_response.status_code == 200
+    bulk = bulk_response.json()
+    assert bulk["reviewed_count"] == 1
+    assert bulk["skipped_count"] == 0
+    assert bulk["observations"][0]["verification_status"] == "verified"
+    assert "Coach checked" in bulk["observations"][0]["notes"]
+
+    empty_queue_response = client.get(
+        (
+            "/api/v1/performance/model-extraction/review-queue"
+            f"?organization_id={organization['id']}&athlete_profile_id={roster['athlete_profile_id']}"
+        ),
+        headers=identity_headers,
+    )
+    assert empty_queue_response.status_code == 200
+    assert empty_queue_response.json()["pending_count"] == 0
+
+
 def test_performance_model_extraction_benchmark_reports_accuracy(client, identity_headers) -> None:
     organization, _, _, _ = create_rostered_athlete(client, identity_headers)
 

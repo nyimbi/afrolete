@@ -105,6 +105,55 @@ class PerformanceIngestionRead(BaseModel):
     model_evaluation: dict[str, str]
 
 
+class PerformanceModelExtractionReviewQueueItemRead(BaseModel):
+    observation: PerformanceObservationRead
+    metric_code: str
+    metric_name: str
+    metric_category: MetricCategory
+    unit: str | None
+    model_assisted: bool
+    model_policy: str | None
+    evidence_ref: str | None
+    review_priority: str
+    confidence_label: str
+    recommended_action: str
+    review_reason: str
+    flags: list[str]
+    age_hours: float
+
+
+class PerformanceModelExtractionReviewQueueRead(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID | None
+    pending_count: int
+    model_assisted_count: int
+    high_priority_count: int
+    average_confidence: float | None
+    recommendations: list[str]
+    items: list[PerformanceModelExtractionReviewQueueItemRead]
+
+
+class PerformanceModelExtractionBulkReviewCreate(BaseModel):
+    organization_id: UUID
+    athlete_profile_id: UUID | None = None
+    observation_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    verification_status: MetricVerificationStatus = MetricVerificationStatus.VERIFIED
+    max_items: int = Field(default=25, ge=1, le=100)
+    min_confidence: float = Field(default=0.0, ge=0, le=1)
+    only_model_assisted: bool = True
+    notes: str | None = Field(default=None, max_length=1200)
+
+
+class PerformanceModelExtractionBulkReviewRead(BaseModel):
+    organization_id: UUID
+    reviewed_count: int
+    skipped_count: int
+    verification_status: MetricVerificationStatus
+    summary: str
+    recommendations: list[str]
+    observations: list[PerformanceObservationRead]
+
+
 class PerformanceVideoCoachingCreate(BaseModel):
     organization_id: UUID
     event_id: UUID | None = None
