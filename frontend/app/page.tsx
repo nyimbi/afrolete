@@ -10963,6 +10963,45 @@ export default function HomePage() {
     );
   };
 
+  const reviewPerformanceMatchMoment = (
+    moment: PerformanceMatchMomentRead,
+    statusValue: "approved" | "featured" | "rejected" | "needs_review"
+  ) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before reviewing match moments", "bad");
+      return;
+    }
+    runAction(
+      `review-match-moment-${moment.id}-${statusValue}`,
+      () =>
+        apiRequest<PerformanceMatchMomentRead>(
+          `/performance/scouting/match-moments/${moment.id}/review`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              status: statusValue,
+              review_notes:
+                statusValue === "featured"
+                  ? "Coach marked this moment as feature-ready."
+                  : statusValue === "approved"
+                    ? "Coach approved this moment for player review."
+                    : statusValue === "rejected"
+                      ? "Coach rejected this moment from the review queue."
+                      : "Coach kept this moment in review."
+            }
+          }
+        ),
+      (updated) => {
+        setPerformanceMatchMoments((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item))
+        );
+        addLog(`${updated.title} marked ${updated.status.replaceAll("_", " ")}`, updated.status === "rejected" ? "neutral" : "good");
+      }
+    );
+  };
+
   const reviewPerformanceMatchPlayerGuidance = () => {
     if (!performanceMatchTrackingRun) {
       addLog("Track a match before reviewing player guidance readiness", "bad");
@@ -27805,6 +27844,11 @@ export default function HomePage() {
                           </span>
                           <small>{moment.coaching_note}</small>
                         </div>
+                        <span>
+                          <button type="button" onClick={() => reviewPerformanceMatchMoment(moment, "approved")} disabled={busyAction !== null}>Approve</button>
+                          <button type="button" onClick={() => reviewPerformanceMatchMoment(moment, "featured")} disabled={busyAction !== null}>Feature</button>
+                          <button type="button" onClick={() => reviewPerformanceMatchMoment(moment, "rejected")} disabled={busyAction !== null}>Reject</button>
+                        </span>
                       </article>
                     ))}
                   <article className="task-card">

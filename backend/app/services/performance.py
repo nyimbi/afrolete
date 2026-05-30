@@ -118,6 +118,7 @@ from app.schemas.performance import (
     PerformanceModelExtractionBulkReviewCreate,
     PerformanceMatchAnalysisReportCreate,
     PerformanceMatchMomentDetectionCreate,
+    PerformanceMatchMomentReviewCreate,
     PerformanceMatchPlayerGuidancePublishCreate,
     PerformanceMatchTrainingFollowupCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
@@ -2380,6 +2381,47 @@ async def list_performance_match_moments(
             )
         ).all()
     )
+
+
+async def review_performance_match_moment(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    moment_id: UUID,
+    payload: PerformanceMatchMomentReviewCreate,
+    authz: AuthorizationService,
+) -> PerformanceMatchMoment:
+    moment = await db.get(PerformanceMatchMoment, moment_id)
+    if moment is None or moment.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match moment not found")
+    await ensure_manage_performance(authz, identity, moment.organization_id)
+    status_value = payload.status.strip().lower()
+    if status_value not in {"detected", "needs_review", "approved", "featured", "rejected"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported match moment status")
+    review_notes = (payload.review_notes or "").strip()
+    moment.status = status_value
+    if review_notes:
+        base_note = moment.coaching_note.strip()
+        moment.coaching_note = f"{base_note}\nCoach review: {review_notes}"[:2000]
+    source_event = decode_json_dict(moment.source_event_json)
+    source_event["coach_review"] = {
+        "status": status_value,
+        "review_notes": review_notes or None,
+        "reviewed_by_person_id": str(identity.person_id) if identity.person_id is not None else None,
+        "reviewed_at": datetime.now(UTC).isoformat(),
+    }
+    moment.source_event_json = json.dumps(source_event, default=str)
+    tags = set(decode_string_list(moment.tags_json))
+    tags.update({"coach_reviewed", f"status_{status_value}"})
+    if status_value in {"approved", "featured"}:
+        tags.add("coach_approved")
+    if status_value == "featured":
+        tags.add("featured")
+    if status_value == "rejected":
+        tags.add("rejected")
+    moment.tags_json = encode_string_list(sorted(tags))
+    await db.commit()
+    await db.refresh(moment)
+    return moment
 
 
 def performance_match_moment_read(moment: PerformanceMatchMoment) -> dict[str, object]:

@@ -7454,6 +7454,12 @@ export type PerformanceMatchMomentDetectionCreate = {
   replace_existing?: boolean;
 };
 
+export type PerformanceMatchMomentReviewCreate = {
+  organization_id: UUID;
+  status: "detected" | "needs_review" | "approved" | "featured" | "rejected";
+  review_notes?: string | null;
+};
+
 export type PerformanceMatchMomentRead = {
   id: UUID;
   organization_id: UUID;

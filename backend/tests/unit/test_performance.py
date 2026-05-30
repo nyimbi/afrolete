@@ -4617,6 +4617,21 @@ def test_match_moment_detection_scores_tracking_actions_for_review(client, ident
     )
     assert listed.status_code == 200
     assert listed.json()[0]["id"] == moments[0]["id"]
+    reviewed_response = client.patch(
+        f"/api/v1/performance/scouting/match-moments/{guidance_moment['id']}/review",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "status": "featured",
+            "review_notes": "Use this clip in the player review queue.",
+        },
+    )
+    assert reviewed_response.status_code == 200
+    reviewed = reviewed_response.json()
+    assert reviewed["status"] == "featured"
+    assert "coach_approved" in reviewed["tags"]
+    assert "Coach review:" in reviewed["coaching_note"]
+    assert reviewed["source_event"]["coach_review"]["status"] == "featured"
 
 
 def test_match_tracking_provider_webhook_is_signed_and_replay_safe(

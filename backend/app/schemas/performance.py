@@ -1078,6 +1078,12 @@ class PerformanceMatchMomentDetectionCreate(BaseModel):
     replace_existing: bool = True
 
 
+class PerformanceMatchMomentReviewCreate(BaseModel):
+    organization_id: UUID
+    status: str = Field(pattern="^(detected|needs_review|approved|featured|rejected)$")
+    review_notes: str | None = Field(default=None, max_length=2000)
+
+
 class PerformanceMatchMomentRead(BaseModel):
     id: UUID
     organization_id: UUID

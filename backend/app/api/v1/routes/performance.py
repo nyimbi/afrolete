@@ -73,6 +73,7 @@ from app.schemas.performance import (
     PerformanceMatchAnalysisReportRead,
     PerformanceMatchMomentDetectionCreate,
     PerformanceMatchMomentRead,
+    PerformanceMatchMomentReviewCreate,
     PerformanceMatchPlayerGuidancePublishAuditRead,
     PerformanceMatchPlayerGuidancePublishCreate,
     PerformanceMatchPlayerGuidancePublishRead,
@@ -202,6 +203,7 @@ from app.services.performance import (
     match_pitch_calibration_read,
     match_analysis_report_read,
     performance_match_moment_read,
+    review_performance_match_moment,
     multi_camera_analysis_read,
     match_tracking_provider_ingest_event_read,
     match_tracking_identity_review_read,
@@ -1536,6 +1538,21 @@ async def list_performance_match_moments_route(
             video_asset_id=video_asset_id,
         )
     ]
+
+
+@router.patch("/scouting/match-moments/{moment_id}/review", response_model=PerformanceMatchMomentRead)
+async def review_performance_match_moment_route(
+    moment_id: UUID,
+    payload: PerformanceMatchMomentReviewCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchMomentRead:
+    return PerformanceMatchMomentRead(
+        **performance_match_moment_read(
+            await review_performance_match_moment(db, identity, moment_id, payload, authz)
+        )
+    )
 
 
 @router.post(

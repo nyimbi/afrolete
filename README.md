@@ -345,7 +345,8 @@ clip-window labels so athletes and coaches can connect each drill to the
 specific match moment that triggered it, and those review windows also appear
 in published player guidance messages and player-pack exports. AI moment
 detection promotes those player-guidance windows into durable review moments
-that feed highlight and reel workflows. The same match analysis pipeline
+that feed highlight and reel workflows, with coach approval, featured, and
+rejection controls in the operations console. The same match analysis pipeline
 now
 accepts external tracker frame packages from YOLO/ByteTrack-compatible cameras,
 GPS/video providers, or analyst tooling through a provider-neutral import API,
