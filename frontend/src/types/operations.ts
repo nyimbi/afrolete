@@ -7432,6 +7432,49 @@ export type PerformanceMatchPlayerGuidancePublishRead = {
   published_at: string;
 };
 
+export type PerformanceMatchMomentDetectionCreate = {
+  organization_id: UUID;
+  min_score?: number;
+  max_moments?: number;
+  audience?: string;
+  replace_existing?: boolean;
+};
+
+export type PerformanceMatchMomentRead = {
+  id: UUID;
+  organization_id: UUID;
+  tracking_run_id: UUID;
+  video_asset_id: UUID;
+  created_by_person_id: UUID | null;
+  action_type: string;
+  moment_category: string;
+  title: string;
+  start_seconds: number;
+  end_seconds: number;
+  duration_seconds: number;
+  moment_score: number;
+  technical_quality: number;
+  tactical_importance: number;
+  emotional_impact: number;
+  rarity_difficulty: number;
+  game_context: number;
+  confidence: number;
+  primary_track_id: string | null;
+  secondary_track_id: string | null;
+  team_label: string | null;
+  player_label: string | null;
+  jersey_number: string | null;
+  zone: string | null;
+  evidence: string;
+  coaching_note: string;
+  tags: string[];
+  source_event: Record<string, unknown>;
+  status: string;
+  model_policy: string;
+  detected_at: string;
+  created_at: string;
+};
+
 export type PerformanceHardwareKitRead = {
   id: UUID;
   organization_id: UUID;

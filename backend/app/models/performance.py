@@ -653,6 +653,47 @@ class PerformanceMatchPlayerGuidancePublishAudit(IdMixin, TimestampMixin, Base):
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class PerformanceMatchMoment(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_match_moments"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    tracking_run_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_match_tracking_runs.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    action_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    moment_category: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    start_seconds: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    end_seconds: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    moment_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False, index=True)
+    technical_quality: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    tactical_importance: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    emotional_impact: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    rarity_difficulty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    game_context: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    primary_track_id: Mapped[str | None] = mapped_column(String(120), index=True)
+    secondary_track_id: Mapped[str | None] = mapped_column(String(120), index=True)
+    team_label: Mapped[str | None] = mapped_column(String(120), index=True)
+    player_label: Mapped[str | None] = mapped_column(String(180), index=True)
+    jersey_number: Mapped[str | None] = mapped_column(String(20), index=True)
+    zone: Mapped[str | None] = mapped_column(String(80), index=True)
+    evidence: Mapped[str] = mapped_column(Text, nullable=False)
+    coaching_note: Mapped[str] = mapped_column(Text, nullable=False)
+    tags_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    source_event_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="detected", nullable=False, index=True)
+    model_policy: Mapped[str] = mapped_column(String(180), default="afrolete-match-moment-detector-v1", nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class PerformanceHighlightReel(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_highlight_reels"
 

@@ -1050,6 +1050,49 @@ class PerformanceMatchPlayerGuidancePublishRead(BaseModel):
     published_at: datetime
 
 
+class PerformanceMatchMomentDetectionCreate(BaseModel):
+    organization_id: UUID
+    min_score: float = Field(default=55.0, ge=0, le=100)
+    max_moments: int = Field(default=20, ge=1, le=100)
+    audience: str = Field(default="coach", min_length=2, max_length=80)
+    replace_existing: bool = True
+
+
+class PerformanceMatchMomentRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    tracking_run_id: UUID
+    video_asset_id: UUID
+    created_by_person_id: UUID | None
+    action_type: str
+    moment_category: str
+    title: str
+    start_seconds: float
+    end_seconds: float
+    duration_seconds: float
+    moment_score: float
+    technical_quality: float
+    tactical_importance: float
+    emotional_impact: float
+    rarity_difficulty: float
+    game_context: float
+    confidence: float
+    primary_track_id: str | None
+    secondary_track_id: str | None
+    team_label: str | None
+    player_label: str | None
+    jersey_number: str | None
+    zone: str | None
+    evidence: str
+    coaching_note: str
+    tags: list[str]
+    source_event: dict[str, Any]
+    status: str
+    model_policy: str
+    detected_at: datetime
+    created_at: datetime
+
+
 class PerformanceHardwareKitCreate(BaseModel):
     organization_id: UUID
     name: str = Field(min_length=2, max_length=180)

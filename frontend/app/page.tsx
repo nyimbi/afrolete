@@ -391,6 +391,7 @@ import type {
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchAnalysisReportRead,
+  PerformanceMatchMomentRead,
   PerformanceMatchPlayerGuidancePublishAuditRead,
   PerformanceMatchPlayerGuidancePublishRead,
   PerformanceMatchPlayerGuidanceReviewRead,
@@ -1870,6 +1871,8 @@ export default function HomePage() {
     useState<PerformanceMatchAnalysisReportRead[]>([]);
   const [performanceMatchAnalysisReport, setPerformanceMatchAnalysisReport] =
     useState<PerformanceMatchAnalysisReportRead | null>(null);
+  const [performanceMatchMoments, setPerformanceMatchMoments] =
+    useState<PerformanceMatchMomentRead[]>([]);
   const [performanceMatchPlayerGuidanceReview, setPerformanceMatchPlayerGuidanceReview] =
     useState<PerformanceMatchPlayerGuidanceReviewRead | null>(null);
   const [performanceMatchPlayerGuidancePublish, setPerformanceMatchPlayerGuidancePublish] =
@@ -4059,6 +4062,7 @@ export default function HomePage() {
       trackingProviderIngestData,
       trackingIdentityReviewData,
       matchAnalysisReportData,
+      matchMomentData,
       calibrationData,
       multiCameraData,
       hardwareKitData,
@@ -4088,6 +4092,10 @@ export default function HomePage() {
       ),
       apiRequest<PerformanceMatchAnalysisReportRead[]>(
         `/performance/scouting/match-analysis-reports?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<PerformanceMatchMomentRead[]>(
+        `/performance/scouting/match-moments?organization_id=${organizationId}`,
         { identity }
       ),
       apiRequest<PerformanceMatchPitchCalibrationRead[]>(
@@ -4121,6 +4129,7 @@ export default function HomePage() {
     setPerformanceMatchTrackingProviderIngests(trackingProviderIngestData);
     setPerformanceMatchTrackingIdentityReviews(trackingIdentityReviewData);
     setPerformanceMatchAnalysisReports(matchAnalysisReportData);
+    setPerformanceMatchMoments(matchMomentData);
     setPerformanceMatchPitchCalibrations(calibrationData);
     setPerformanceMultiCameraAnalyses(multiCameraData);
     setPerformanceHardwareKits(hardwareKitData);
@@ -5312,6 +5321,7 @@ export default function HomePage() {
       setPerformanceMatchTrackingIdentityReviews([]);
       setPerformanceMatchAnalysisReports([]);
       setPerformanceMatchAnalysisReport(null);
+      setPerformanceMatchMoments([]);
       setPerformanceMatchPlayerGuidanceReview(null);
       setPerformanceMatchPlayerGuidancePublish(null);
       setPerformanceMatchPlayerGuidancePublishes([]);
@@ -10841,6 +10851,41 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== report.id)
         ]);
         addLog(`${report.title} ready for download`, "good");
+      }
+    );
+  };
+
+  const detectPerformanceMatchMoments = () => {
+    if (!selectedOrganizationId || !performanceMatchTrackingRun) {
+      addLog("Track a match before detecting AI moments", "bad");
+      return;
+    }
+    runAction(
+      `detect-match-moments-${performanceMatchTrackingRun.id}`,
+      () =>
+        apiRequest<PerformanceMatchMomentRead[]>(
+          `/performance/scouting/tracking-runs/${performanceMatchTrackingRun.id}/moments`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              min_score: 55,
+              max_moments: 20,
+              audience: "coach",
+              replace_existing: true
+            }
+          }
+        ),
+      (moments) => {
+        setPerformanceMatchMoments((current) => [
+          ...moments,
+          ...current.filter(
+            (item) => !moments.some((moment) => moment.id === item.id)
+              && item.tracking_run_id !== performanceMatchTrackingRun.id
+          )
+        ]);
+        addLog(`${moments.length} AI match moment(s) detected for coach review`, moments.length ? "good" : "neutral");
       }
     );
   };
@@ -26400,6 +26445,7 @@ export default function HomePage() {
                 <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Scout report</button>
                 <button type="button" onClick={calibrateOppositionMatchVideo} disabled={busyAction !== null}>Calibrate</button>
                 <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
+                <button type="button" onClick={detectPerformanceMatchMoments} disabled={busyAction !== null}>Moments</button>
                 <button type="button" onClick={createPerformanceMultiCameraAnalysis} disabled={busyAction !== null}>Multi-cam</button>
                 <button type="button" onClick={createPerformanceHardwareKit} disabled={busyAction !== null}>Kit</button>
                 <button type="button" onClick={provisionPerformanceHardwareDevice} disabled={busyAction !== null}>Device</button>
@@ -27048,6 +27094,7 @@ export default function HomePage() {
                   <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
                   <button type="button" onClick={importProviderMatchTracking} disabled={busyAction !== null}>Import tracker</button>
                   <button type="button" onClick={autoTrackOppositionMatchVideo} disabled={busyAction !== null}>Auto-track video</button>
+                  <button type="button" onClick={detectPerformanceMatchMoments} disabled={busyAction !== null}>Moments</button>
                   <button type="button" onClick={createPerformanceMultiCameraAnalysis} disabled={busyAction !== null}>Multi-cam</button>
                   <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Player guidance</button>
                   <button type="button" onClick={reviewPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Review share</button>
@@ -27164,6 +27211,19 @@ export default function HomePage() {
                     {performanceMatchTrackingRun?.recognized_action_events[0]
                       ? `${Number(performanceMatchTrackingRun.action_recognition_metrics.high_confidence_count ?? 0)} high-confidence · ${Math.round(Number(performanceMatchTrackingRun.action_recognition_metrics.average_confidence ?? 0) * 100)}% avg`
                       : "Passes, shots, pressure, defensive wins, sprints, carries, and off-ball runs appear after tracking."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">AI moments</span>
+                  <strong>
+                    {performanceMatchTrackingRun
+                      ? performanceMatchMoments.filter((moment) => moment.tracking_run_id === performanceMatchTrackingRun.id).length
+                      : performanceMatchMoments.length} moment(s)
+                  </strong>
+                  <p>
+                    {performanceMatchMoments[0]
+                      ? `${Math.round(performanceMatchMoments[0].moment_score)} top score · ${performanceMatchMoments[0].moment_category.replaceAll("_", " ")}`
+                      : "Score recognized actions into coachable, shareable, and highlight-ready match moments."}
                   </p>
                 </article>
                 <article className="mini-card">
@@ -27433,6 +27493,50 @@ export default function HomePage() {
                       </div>
                     </article>
                   ))}
+                  {performanceMatchMoments.filter((moment) => moment.tracking_run_id === performanceMatchTrackingRun.id).length ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>AI moment detector</strong>
+                        <span>
+                          {performanceMatchMoments.filter((moment) => moment.tracking_run_id === performanceMatchTrackingRun.id).length} scored moment(s) ·{" "}
+                          top {Math.round(performanceMatchMoments.filter((moment) => moment.tracking_run_id === performanceMatchTrackingRun.id)[0]?.moment_score ?? 0)}
+                        </span>
+                        <small>Moment scores combine technical quality, tactical importance, impact, rarity, and match context.</small>
+                      </div>
+                      <span>
+                        <button type="button" onClick={detectPerformanceMatchMoments} disabled={busyAction !== null}>Refresh</button>
+                      </span>
+                    </article>
+                  ) : (
+                    <article className="task-card">
+                      <div>
+                        <strong>AI moment detector</strong>
+                        <span>Score recognized actions into teaching and highlight moments.</span>
+                        <small>Create durable moments before building player-specific reels or social clips.</small>
+                      </div>
+                      <span>
+                        <button type="button" onClick={detectPerformanceMatchMoments} disabled={busyAction !== null}>Detect</button>
+                      </span>
+                    </article>
+                  )}
+                  {performanceMatchMoments
+                    .filter((moment) => moment.tracking_run_id === performanceMatchTrackingRun.id)
+                    .slice(0, 6)
+                    .map((moment) => (
+                      <article key={moment.id} className="task-card">
+                        <div>
+                          <strong>
+                            {moment.title} · {Math.round(moment.moment_score)}
+                          </strong>
+                          <span>
+                            {moment.moment_category.replaceAll("_", " ")} · {moment.action_type.replaceAll("_", " ")} ·{" "}
+                            {moment.start_seconds.toFixed(1)}s-{moment.end_seconds.toFixed(1)}s
+                            {moment.player_label ? ` · ${moment.player_label}${moment.jersey_number ? ` #${moment.jersey_number}` : ""}` : ""}
+                          </span>
+                          <small>{moment.coaching_note}</small>
+                        </div>
+                      </article>
+                    ))}
                   <article className="task-card">
                     <div>
                       <strong>Shareable player guidance</strong>

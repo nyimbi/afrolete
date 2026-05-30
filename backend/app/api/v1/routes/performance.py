@@ -62,6 +62,8 @@ from app.schemas.performance import (
     PerformanceMetricTrendSeriesRead,
     PerformanceMatchAnalysisReportCreate,
     PerformanceMatchAnalysisReportRead,
+    PerformanceMatchMomentDetectionCreate,
+    PerformanceMatchMomentRead,
     PerformanceMatchPlayerGuidancePublishAuditRead,
     PerformanceMatchPlayerGuidancePublishCreate,
     PerformanceMatchPlayerGuidancePublishRead,
@@ -138,6 +140,7 @@ from app.services.performance import (
     create_match_tracking_run,
     create_match_pitch_calibration,
     create_performance_multi_camera_analysis,
+    create_performance_match_moments,
     create_performance_match_analysis_report,
     create_movement_reference_profile,
     create_observation,
@@ -179,8 +182,10 @@ from app.services.performance import (
     list_match_pitch_calibrations,
     list_performance_multi_camera_analyses,
     list_performance_match_analysis_reports,
+    list_performance_match_moments,
     match_pitch_calibration_read,
     match_analysis_report_read,
+    performance_match_moment_read,
     multi_camera_analysis_read,
     match_tracking_provider_ingest_event_read,
     match_tracking_identity_review_read,
@@ -1424,6 +1429,46 @@ async def download_performance_match_analysis_report_route(
             "X-Afrolete-Match-Report-Checksum": str(artifact["checksum"]),
         },
     )
+
+
+@router.post(
+    "/scouting/tracking-runs/{tracking_run_id}/moments",
+    response_model=list[PerformanceMatchMomentRead],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_performance_match_moments_route(
+    tracking_run_id: UUID,
+    payload: PerformanceMatchMomentDetectionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMatchMomentRead]:
+    return [
+        PerformanceMatchMomentRead(**performance_match_moment_read(moment))
+        for moment in await create_performance_match_moments(db, identity, tracking_run_id, payload, authz)
+    ]
+
+
+@router.get("/scouting/match-moments", response_model=list[PerformanceMatchMomentRead])
+async def list_performance_match_moments_route(
+    organization_id: UUID = Query(),
+    tracking_run_id: UUID | None = Query(default=None),
+    video_asset_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMatchMomentRead]:
+    return [
+        PerformanceMatchMomentRead(**performance_match_moment_read(moment))
+        for moment in await list_performance_match_moments(
+            db,
+            identity,
+            organization_id,
+            authz,
+            tracking_run_id=tracking_run_id,
+            video_asset_id=video_asset_id,
+        )
+    ]
 
 
 @router.post(

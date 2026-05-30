@@ -64,6 +64,7 @@ from app.models.performance import (
     PerformanceHighlightReel,
     PerformanceHighlightReelExport,
     PerformanceMatchAnalysisReport,
+    PerformanceMatchMoment,
     PerformanceMatchPlayerGuidancePublishAudit,
     PerformanceMatchPitchCalibration,
     PerformanceMatchTrackingIdentityReview,
@@ -110,6 +111,7 @@ from app.schemas.performance import (
     PerformanceIngestionCreate,
     PerformanceModelExtractionBulkReviewCreate,
     PerformanceMatchAnalysisReportCreate,
+    PerformanceMatchMomentDetectionCreate,
     PerformanceMatchPlayerGuidancePublishCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
@@ -2148,6 +2150,311 @@ async def review_match_tracking_player_guidance(
         "quality_warnings": quality_warnings,
         "generated_at": datetime.now(UTC),
     }
+
+
+async def create_performance_match_moments(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    tracking_run_id: UUID,
+    payload: PerformanceMatchMomentDetectionCreate,
+    authz: AuthorizationService,
+) -> list[PerformanceMatchMoment]:
+    run = await get_match_tracking_run(db, tracking_run_id)
+    if run.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, run.organization_id)
+    tracking = await match_tracking_run_read(db, run)
+    moment_payloads = build_match_moment_payloads(
+        tracking,
+        min_score=payload.min_score,
+        max_moments=payload.max_moments,
+        audience=payload.audience,
+    )
+    if payload.replace_existing:
+        await db.execute(delete(PerformanceMatchMoment).where(PerformanceMatchMoment.tracking_run_id == run.id))
+    now = datetime.now(UTC)
+    moments = [
+        PerformanceMatchMoment(
+            organization_id=run.organization_id,
+            tracking_run_id=run.id,
+            video_asset_id=run.video_asset_id,
+            created_by_person_id=identity.person_id,
+            action_type=str(moment["action_type"]),
+            moment_category=str(moment["moment_category"]),
+            title=str(moment["title"]),
+            start_seconds=float(moment["start_seconds"]),
+            end_seconds=float(moment["end_seconds"]),
+            duration_seconds=float(moment["duration_seconds"]),
+            moment_score=float(moment["moment_score"]),
+            technical_quality=float(moment["technical_quality"]),
+            tactical_importance=float(moment["tactical_importance"]),
+            emotional_impact=float(moment["emotional_impact"]),
+            rarity_difficulty=float(moment["rarity_difficulty"]),
+            game_context=float(moment["game_context"]),
+            confidence=float(moment["confidence"]),
+            primary_track_id=cleaned_optional_text(moment.get("primary_track_id")),
+            secondary_track_id=cleaned_optional_text(moment.get("secondary_track_id")),
+            team_label=cleaned_optional_text(moment.get("team_label")),
+            player_label=cleaned_optional_text(moment.get("player_label")),
+            jersey_number=cleaned_optional_text(moment.get("jersey_number")),
+            zone=cleaned_optional_text(moment.get("zone")),
+            evidence=str(moment["evidence"]),
+            coaching_note=str(moment["coaching_note"]),
+            tags_json=encode_string_list([str(tag) for tag in moment.get("tags", [])]),
+            source_event_json=json.dumps(moment.get("source_event", {}), default=str),
+            status="detected",
+            model_policy="afrolete-match-moment-detector-v1",
+            detected_at=now,
+        )
+        for moment in moment_payloads
+    ]
+    db.add_all(moments)
+    await db.commit()
+    for moment in moments:
+        await db.refresh(moment)
+    return moments
+
+
+async def list_performance_match_moments(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    tracking_run_id: UUID | None = None,
+    video_asset_id: UUID | None = None,
+) -> list[PerformanceMatchMoment]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceMatchMoment).where(PerformanceMatchMoment.organization_id == organization_id)
+    if tracking_run_id is not None:
+        statement = statement.where(PerformanceMatchMoment.tracking_run_id == tracking_run_id)
+    if video_asset_id is not None:
+        statement = statement.where(PerformanceMatchMoment.video_asset_id == video_asset_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    PerformanceMatchMoment.moment_score.desc(),
+                    PerformanceMatchMoment.start_seconds.asc(),
+                ).limit(100)
+            )
+        ).all()
+    )
+
+
+def performance_match_moment_read(moment: PerformanceMatchMoment) -> dict[str, object]:
+    return {
+        "id": moment.id,
+        "organization_id": moment.organization_id,
+        "tracking_run_id": moment.tracking_run_id,
+        "video_asset_id": moment.video_asset_id,
+        "created_by_person_id": moment.created_by_person_id,
+        "action_type": moment.action_type,
+        "moment_category": moment.moment_category,
+        "title": moment.title,
+        "start_seconds": moment.start_seconds,
+        "end_seconds": moment.end_seconds,
+        "duration_seconds": moment.duration_seconds,
+        "moment_score": moment.moment_score,
+        "technical_quality": moment.technical_quality,
+        "tactical_importance": moment.tactical_importance,
+        "emotional_impact": moment.emotional_impact,
+        "rarity_difficulty": moment.rarity_difficulty,
+        "game_context": moment.game_context,
+        "confidence": moment.confidence,
+        "primary_track_id": moment.primary_track_id,
+        "secondary_track_id": moment.secondary_track_id,
+        "team_label": moment.team_label,
+        "player_label": moment.player_label,
+        "jersey_number": moment.jersey_number,
+        "zone": moment.zone,
+        "evidence": moment.evidence,
+        "coaching_note": moment.coaching_note,
+        "tags": decode_string_list(moment.tags_json),
+        "source_event": decode_json_dict(moment.source_event_json),
+        "status": moment.status,
+        "model_policy": moment.model_policy,
+        "detected_at": moment.detected_at,
+        "created_at": moment.created_at,
+    }
+
+
+def build_match_moment_payloads(
+    tracking: dict[str, object],
+    *,
+    min_score: float,
+    max_moments: int,
+    audience: str,
+) -> list[dict[str, object]]:
+    player_metrics = [metric for metric in tracking.get("player_metrics", []) if isinstance(metric, dict)]
+    metric_by_track = {str(metric.get("track_id")): metric for metric in player_metrics}
+    events = [event for event in tracking.get("recognized_action_events", []) if isinstance(event, dict)]
+    moments = [
+        match_moment_from_action_event(event, metric_by_track, index=index, audience=audience)
+        for index, event in enumerate(events)
+    ]
+    for index, metric in enumerate(
+        sorted(player_metrics, key=lambda item: float(item.get("high_speed_distance_m") or 0.0), reverse=True)[:8]
+    ):
+        if float(metric.get("high_speed_distance_m") or 0.0) <= 0:
+            continue
+        moments.append(match_moment_from_player_metric(metric, index=index, audience=audience))
+    filtered = [moment for moment in moments if float(moment["moment_score"]) >= min_score]
+    filtered.sort(
+        key=lambda moment: (
+            float(moment["moment_score"]),
+            float(moment["confidence"]),
+            -float(moment["start_seconds"]),
+        ),
+        reverse=True,
+    )
+    return filtered[:max_moments]
+
+
+def match_moment_from_action_event(
+    event: dict[str, object],
+    metric_by_track: dict[str, dict[str, object]],
+    *,
+    index: int,
+    audience: str,
+) -> dict[str, object]:
+    action_type = str(event.get("action_type") or "tracking_action")
+    primary_track_id = cleaned_optional_text(event.get("primary_track_id"))
+    metric = metric_by_track.get(str(primary_track_id)) if primary_track_id else None
+    timestamp = event.get("timestamp_seconds")
+    start_seconds = max(float(timestamp) - 4.0, 0.0) if timestamp is not None else float(index * 12)
+    duration = match_moment_duration(action_type)
+    components = match_moment_score_components(action_type, float(event.get("confidence") or 0.65), metric)
+    score = weighted_match_moment_score(components)
+    player_label = event.get("player_label") or (metric or {}).get("player_label")
+    jersey_number = event.get("jersey_number") or (metric or {}).get("jersey_number")
+    tags = ["ai_moment", "tracking_action", action_type, audience]
+    if event.get("team_label"):
+        tags.append(str(event["team_label"]))
+    return {
+        "action_type": action_type,
+        "moment_category": match_moment_category(score),
+        "title": str(event.get("title") or action_type.replace("_", " ").title())[:180],
+        "start_seconds": round(start_seconds, 2),
+        "end_seconds": round(start_seconds + duration, 2),
+        "duration_seconds": duration,
+        "moment_score": score,
+        **components,
+        "confidence": round(float(event.get("confidence") or 0.65), 3),
+        "primary_track_id": primary_track_id,
+        "secondary_track_id": cleaned_optional_text(event.get("secondary_track_id")),
+        "team_label": cleaned_optional_text(event.get("team_label")),
+        "player_label": cleaned_optional_text(player_label),
+        "jersey_number": cleaned_optional_text(jersey_number),
+        "zone": cleaned_optional_text(event.get("zone")),
+        "evidence": str(event.get("evidence") or "Tracking-derived action evidence.")[:2000],
+        "coaching_note": str(event.get("coaching_cue") or "Review the moment with the player.")[:2000],
+        "tags": sorted({tag.strip().lower() for tag in tags if tag and tag.strip()}),
+        "source_event": event,
+    }
+
+
+def match_moment_from_player_metric(
+    metric: dict[str, object],
+    *,
+    index: int,
+    audience: str,
+) -> dict[str, object]:
+    confidence = float(metric.get("tracking_quality_score") or 0.65)
+    components = match_moment_score_components("high_speed_run", confidence, metric)
+    score = weighted_match_moment_score(components)
+    start_seconds = float(90 + index * 14)
+    label = match_tracking_metric_label(metric)
+    source_event = {
+        "action_type": "high_speed_load",
+        "track_id": metric.get("track_id"),
+        "high_speed_distance_m": metric.get("high_speed_distance_m"),
+        "max_speed_mps": metric.get("max_speed_mps"),
+        "sprint_count": metric.get("sprint_count"),
+    }
+    return {
+        "action_type": "high_speed_load",
+        "moment_category": match_moment_category(score),
+        "title": f"{label} high-speed load moment"[:180],
+        "start_seconds": round(start_seconds, 2),
+        "end_seconds": round(start_seconds + 12, 2),
+        "duration_seconds": 12.0,
+        "moment_score": score,
+        **components,
+        "confidence": round(confidence, 3),
+        "primary_track_id": cleaned_optional_text(metric.get("track_id")),
+        "secondary_track_id": None,
+        "team_label": cleaned_optional_text(metric.get("team_label")),
+        "player_label": cleaned_optional_text(metric.get("player_label")),
+        "jersey_number": cleaned_optional_text(metric.get("jersey_number")),
+        "zone": cleaned_optional_text(metric.get("dominant_zone")),
+        "evidence": (
+            f"{metric.get('high_speed_distance_m', 0)}m high-speed distance, "
+            f"{metric.get('sprint_count', 0)} sprint(s), max {metric.get('max_speed_mps', 0)} m/s."
+        ),
+        "coaching_note": "Use this as a player-load teaching moment for sprint timing and recovery.",
+        "tags": sorted({"ai_moment", "player_load", "high_speed", audience.strip().lower()}),
+        "source_event": source_event,
+    }
+
+
+def match_moment_score_components(
+    action_type: str,
+    confidence: float,
+    metric: dict[str, object] | None,
+) -> dict[str, float]:
+    base = max(35.0, min(confidence * 100.0, 96.0))
+    action_bonus = {
+        "shot_attempt": (14, 18, 12, 12, 16),
+        "pass_completion": (10, 12, 5, 6, 9),
+        "through_ball": (13, 15, 7, 10, 12),
+        "cross": (12, 14, 8, 9, 12),
+        "interception": (11, 16, 9, 9, 13),
+        "tackle": (10, 15, 10, 8, 12),
+        "pressure": (8, 14, 6, 6, 10),
+        "high_speed_run": (12, 11, 9, 13, 10),
+        "high_speed_load": (11, 10, 8, 12, 9),
+        "off_ball_run": (10, 14, 6, 9, 11),
+        "territorial_advance": (11, 13, 7, 9, 10),
+        "ball_carry": (13, 14, 9, 12, 12),
+    }.get(action_type, (8, 10, 6, 6, 8))
+    sprint_bonus = min(float((metric or {}).get("sprint_count") or 0) * 2.0, 8.0)
+    speed_bonus = min(float((metric or {}).get("max_speed_mps") or 0.0), 10.0)
+    return {
+        "technical_quality": round(min(base + action_bonus[0] + speed_bonus * 0.4, 100.0), 2),
+        "tactical_importance": round(min(base + action_bonus[1], 100.0), 2),
+        "emotional_impact": round(min(base + action_bonus[2] + sprint_bonus, 100.0), 2),
+        "rarity_difficulty": round(min(base + action_bonus[3] + speed_bonus * 0.5, 100.0), 2),
+        "game_context": round(min(base + action_bonus[4], 100.0), 2),
+    }
+
+
+def weighted_match_moment_score(components: dict[str, float]) -> float:
+    return round(
+        components["technical_quality"] * 0.25
+        + components["tactical_importance"] * 0.20
+        + components["emotional_impact"] * 0.15
+        + components["rarity_difficulty"] * 0.20
+        + components["game_context"] * 0.20,
+        2,
+    )
+
+
+def match_moment_category(score: float) -> str:
+    if score >= 85:
+        return "game_changing"
+    if score >= 75:
+        return "skill_demonstration"
+    if score >= 65:
+        return "development_moment"
+    return "team_building"
+
+
+def match_moment_duration(action_type: str) -> float:
+    if action_type in {"shot_attempt", "ball_carry", "high_speed_run", "high_speed_load"}:
+        return 12.0
+    if action_type in {"pass_completion", "interception", "tackle", "pressure"}:
+        return 10.0
+    return 14.0
 
 
 def match_player_guidance_card(card: dict[str, object], *, publishable: bool) -> dict[str, object]:

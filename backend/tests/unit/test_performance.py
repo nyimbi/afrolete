@@ -4364,6 +4364,107 @@ def test_multi_camera_match_analysis_fuses_tracked_camera_angles(client, identit
     assert analyses.json()[0]["id"] == analysis["id"]
 
 
+def test_match_moment_detection_scores_tracking_actions_for_review(client, identity_headers) -> None:
+    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    upload_response = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Moment FC",
+            "sport": "football",
+            "filename": "moment-fc.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(b"moment detection match video").decode(),
+            "clip_label": "Moment detection feed",
+            "match_context": "Provider-tracked match clip for AI moment scoring.",
+            "analysis_focus": "passes, turnovers, pressure and high-speed moment detection",
+        },
+    )
+    assert upload_response.status_code == 201
+    video_asset = upload_response.json()
+
+    tracking_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/tracking-provider-imports",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "source_provider": "moment_bytetrack_provider",
+            "model_policy": "moment-bytetrack-provider-import-v1",
+            "replace_existing": True,
+            "frames": [
+                {
+                    "timestamp_seconds": 0,
+                    "frame_index": 0,
+                    "detections": [
+                        {"track_id": "home-9", "team_label": "Home", "player_label": "Forward", "jersey_number": "9", "foot_x_percent": 10, "foot_y_percent": 52, "confidence": 0.95},
+                        {"track_id": "home-10", "team_label": "Home", "player_label": "Creator", "jersey_number": "10", "foot_x_percent": 28, "foot_y_percent": 54, "confidence": 0.94},
+                        {"track_id": "away-4", "team_label": "Opponent", "player_label": "Center back", "jersey_number": "4", "foot_x_percent": 58, "foot_y_percent": 55, "confidence": 0.92},
+                        {"track_id": "ball", "object_type": "ball", "x_percent": 12, "y_percent": 52, "confidence": 0.88},
+                    ],
+                },
+                {
+                    "timestamp_seconds": 1,
+                    "frame_index": 25,
+                    "detections": [
+                        {"track_id": "home-9", "team_label": "Home", "player_label": "Forward", "jersey_number": "9", "foot_x_percent": 30, "foot_y_percent": 52, "confidence": 0.96},
+                        {"track_id": "home-10", "team_label": "Home", "player_label": "Creator", "jersey_number": "10", "foot_x_percent": 42, "foot_y_percent": 53, "confidence": 0.95},
+                        {"track_id": "away-4", "team_label": "Opponent", "player_label": "Center back", "jersey_number": "4", "foot_x_percent": 62, "foot_y_percent": 55, "confidence": 0.92},
+                        {"track_id": "ball", "object_type": "ball", "x_percent": 43, "y_percent": 53, "confidence": 0.9},
+                    ],
+                },
+                {
+                    "timestamp_seconds": 2,
+                    "frame_index": 50,
+                    "detections": [
+                        {"track_id": "home-9", "team_label": "Home", "player_label": "Forward", "jersey_number": "9", "foot_x_percent": 52, "foot_y_percent": 50, "confidence": 0.95},
+                        {"track_id": "home-10", "team_label": "Home", "player_label": "Creator", "jersey_number": "10", "foot_x_percent": 57, "foot_y_percent": 50, "confidence": 0.94},
+                        {"track_id": "away-4", "team_label": "Opponent", "player_label": "Center back", "jersey_number": "4", "foot_x_percent": 61, "foot_y_percent": 51, "confidence": 0.93},
+                        {"track_id": "ball", "object_type": "ball", "x_percent": 60, "y_percent": 50, "confidence": 0.91},
+                    ],
+                },
+            ],
+        },
+    )
+    assert tracking_response.status_code == 201
+    tracking = tracking_response.json()
+    assert tracking["recognized_action_events"]
+
+    moments_response = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/moments",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "min_score": 55,
+            "max_moments": 10,
+            "audience": "coach",
+            "replace_existing": True,
+        },
+    )
+    assert moments_response.status_code == 201
+    moments = moments_response.json()
+    assert len(moments) >= 2
+    assert moments[0]["model_policy"] == "afrolete-match-moment-detector-v1"
+    assert moments[0]["moment_score"] >= moments[-1]["moment_score"]
+    assert {moment["moment_category"] for moment in moments} <= {
+        "game_changing",
+        "skill_demonstration",
+        "development_moment",
+        "team_building",
+    }
+    assert any(moment["action_type"] in {"pass_completion", "tackle", "interception"} for moment in moments)
+    assert all(moment["end_seconds"] > moment["start_seconds"] for moment in moments)
+    assert any("ai_moment" in moment["tags"] for moment in moments)
+
+    listed = client.get(
+        f"/api/v1/performance/scouting/match-moments?organization_id={organization['id']}&tracking_run_id={tracking['id']}",
+        headers=identity_headers,
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == moments[0]["id"]
+
+
 def test_match_tracking_provider_webhook_is_signed_and_replay_safe(
     client,
     identity_headers,
