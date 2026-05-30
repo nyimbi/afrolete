@@ -120,7 +120,7 @@ def test_performance_achievements_create_in_app_notification(client, identity_he
 
 
 def test_player_can_load_own_performance_profile(client, identity_headers) -> None:
-    organization, _, _, roster = create_rostered_athlete(client, identity_headers)
+    organization, team, member, roster = create_rostered_athlete(client, identity_headers)
     metric = client.post(
         "/api/v1/performance/metrics",
         headers=identity_headers,
@@ -218,6 +218,90 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert profile["benchmarks"][0]["metric_name"] == "Pace"
     assert len(profile["cohort_comparisons"]) == 4
     assert profile["cohort_comparisons"][0]["cohort_scope"] == "tenant"
+    assert profile["match_guidance"] == []
+
+    video = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Player Guidance FC",
+            "sport": "football",
+            "filename": "player-guidance-fc.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(b"player match tracking video").decode(),
+            "clip_label": "Player guidance match",
+            "match_context": "Coach-reviewed tracking for player portal guidance.",
+            "analysis_focus": "player-facing match load guidance",
+        },
+    ).json()
+    tracking = client.post(
+        f"/api/v1/performance/scouting/videos/{video['id']}/tracking-runs",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "source_provider": "coach_reviewed_tracking",
+            "samples": [
+                {
+                    "track_id": "home-9",
+                    "person_id": member["subject_id"],
+                    "team_label": "Home",
+                    "player_label": "Performance Athlete",
+                    "jersey_number": "9",
+                    "timestamp_seconds": 0,
+                    "x_percent": 10,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "home-9",
+                    "person_id": member["subject_id"],
+                    "team_label": "Home",
+                    "player_label": "Performance Athlete",
+                    "jersey_number": "9",
+                    "timestamp_seconds": 1,
+                    "x_percent": 19,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "home-9",
+                    "person_id": member["subject_id"],
+                    "team_label": "Home",
+                    "player_label": "Performance Athlete",
+                    "jersey_number": "9",
+                    "timestamp_seconds": 2,
+                    "x_percent": 28,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "away-4",
+                    "team_label": "Away",
+                    "player_label": "Defender",
+                    "timestamp_seconds": 1,
+                    "x_percent": 18,
+                    "y_percent": 51,
+                },
+            ],
+        },
+    )
+    assert tracking.status_code == 201
+
+    guided_profile_response = client.get(
+        f"/api/v1/performance/my-profiles?organization_id={organization['id']}",
+        headers=player_headers,
+    )
+    assert guided_profile_response.status_code == 200
+    match_guidance = guided_profile_response.json()[0]["match_guidance"]
+    assert len(match_guidance) == 1
+    assert match_guidance[0]["tracking_run_id"] == tracking.json()["id"]
+    assert match_guidance[0]["opponent_name"] == "Player Guidance FC"
+    assert match_guidance[0]["team_label"] == "Home"
+    assert match_guidance[0]["jersey_number"] == "9"
+    assert match_guidance[0]["distance_m"] > 0
+    assert match_guidance[0]["max_speed_mps"] > 0
+    assert match_guidance[0]["pressure_applied_count"] >= 1
+    assert any("high-speed" in item or "High peak speed" in item for item in match_guidance[0]["player_guidance"])
+    assert any("Home phase" in item for item in match_guidance[0]["tactical_context"])
 
     touch_metric = client.post(
         "/api/v1/performance/metrics",

@@ -7967,6 +7967,35 @@ export type PerformanceAssessmentReviewEscalationRunRead = {
   dry_run: boolean;
 };
 
+export type PlayerMatchGuidanceRead = {
+  tracking_run_id: UUID;
+  video_asset_id: UUID;
+  opponent_name: string;
+  match_label: string | null;
+  tracked_at: string;
+  track_id: string;
+  team_label: string | null;
+  player_label: string | null;
+  jersey_number: string | null;
+  readiness_level: string;
+  tracking_quality_score: number;
+  distance_m: number;
+  high_speed_distance_m: number;
+  max_speed_mps: number;
+  sprint_count: number;
+  work_rate_m_per_min: number;
+  dominant_zone: string;
+  pressure_applied_count: number;
+  off_ball_run_count: number;
+  pass_accuracy_percent: number;
+  shot_count: number;
+  expected_goals: number;
+  coaching_flags: string[];
+  player_guidance: string[];
+  tactical_context: string[];
+  quality_warnings: string[];
+};
+
 export type PlayerPerformanceProfileRead = {
   organization_id: UUID;
   athlete_profile_id: UUID;
@@ -7991,6 +8020,7 @@ export type PlayerPerformanceProfileRead = {
   injury_risk: PerformanceInjuryRiskRead;
   benchmarks: PerformanceMetricBenchmarkRead[];
   cohort_comparisons: PerformanceCohortComparisonRead[];
+  match_guidance: PlayerMatchGuidanceRead[];
 };
 
 export type TrainingDrillRead = {

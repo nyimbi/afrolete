@@ -1840,6 +1840,35 @@ class PerformanceAssessmentReviewEscalationRunRead(BaseModel):
     dry_run: bool = False
 
 
+class PlayerMatchGuidanceRead(BaseModel):
+    tracking_run_id: UUID
+    video_asset_id: UUID
+    opponent_name: str
+    match_label: str | None
+    tracked_at: datetime
+    track_id: str
+    team_label: str | None
+    player_label: str | None
+    jersey_number: str | None
+    readiness_level: str
+    tracking_quality_score: float
+    distance_m: float
+    high_speed_distance_m: float
+    max_speed_mps: float
+    sprint_count: int
+    work_rate_m_per_min: float
+    dominant_zone: str
+    pressure_applied_count: int = 0
+    off_ball_run_count: int = 0
+    pass_accuracy_percent: float = 0.0
+    shot_count: int = 0
+    expected_goals: float = 0.0
+    coaching_flags: list[str] = Field(default_factory=list)
+    player_guidance: list[str] = Field(default_factory=list)
+    tactical_context: list[str] = Field(default_factory=list)
+    quality_warnings: list[str] = Field(default_factory=list)
+
+
 class PlayerPerformanceProfileRead(BaseModel):
     organization_id: UUID
     athlete_profile_id: UUID
@@ -1864,3 +1893,4 @@ class PlayerPerformanceProfileRead(BaseModel):
     injury_risk: PerformanceInjuryRiskRead
     benchmarks: list[PerformanceMetricBenchmarkRead]
     cohort_comparisons: list[PerformanceCohortComparisonRead]
+    match_guidance: list[PlayerMatchGuidanceRead] = Field(default_factory=list)

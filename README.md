@@ -329,8 +329,9 @@ extract OpenCV player motion tracks, estimate team labels from jersey-color
 clusters, add a best-effort ball contour track, and create tracking runs that
 feed distance, speed, heatmaps, estimated possession, pass/turnover cues,
 pass-type accuracy, defensive ball-win labels, pass networks, shot/xG estimates,
-tactical shape, highlights, and coach/player reports. Manual pitch calibration
-now prefers an OpenCV perspective homography
+tactical shape, highlights, coach/player reports, and player-portal match
+guidance cards for coach-confirmed tracks. Manual pitch calibration now prefers
+an OpenCV perspective homography
 from field control points, with residual/error metadata and a linear fallback,
 so trapezoid broadcast camera views produce more trustworthy pitch-meter
 coordinates for distance and speed estimates. The tracking summary also

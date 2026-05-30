@@ -105,6 +105,7 @@ from app.schemas.performance import (
     PerformanceWearableWebhookRegistrationCreate,
     PerformanceWearableWebhookRegistrationRead,
     PerformanceWearableWebhookRead,
+    PlayerMatchGuidanceRead,
     PlayerSelfAssessmentCreate,
     PlayerPerformanceProfileRead,
 )
@@ -809,6 +810,10 @@ async def list_my_player_performance_route(
             cohort_comparisons=[
                 PerformanceCohortComparisonRead(**comparison)
                 for comparison in profile["cohort_comparisons"]
+            ],
+            match_guidance=[
+                PlayerMatchGuidanceRead(**guidance)
+                for guidance in profile["match_guidance"]
             ],
         )
         for profile in profiles

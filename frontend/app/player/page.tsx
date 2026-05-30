@@ -831,6 +831,102 @@ export default function PlayerPerformancePage() {
 
             <PlayerPerformanceVisuals profile={selectedProfile} />
 
+            <section className="player-visual-grid">
+              {selectedProfile.match_guidance.slice(0, 4).map((guidance) => (
+                <article className="player-chart-card" key={`${guidance.tracking_run_id}-${guidance.track_id}`}>
+                  <div>
+                    <span>Match guidance</span>
+                    <strong>{guidance.match_label ?? guidance.opponent_name}</strong>
+                    <small>
+                      {guidance.team_label ?? "Unassigned"} · {guidance.player_label ?? guidance.track_id}
+                      {guidance.jersey_number ? ` · #${guidance.jersey_number}` : ""}
+                    </small>
+                    <small>
+                      {Math.round(guidance.tracking_quality_score * 100)}% quality · {guidance.readiness_level.replaceAll("_", " ")}
+                    </small>
+                  </div>
+                  <div className="chart-bars">
+                    <div className="chart-bar-row">
+                      <span>Distance</span>
+                      <div className="chart-track">
+                        <div
+                          className="chart-fill"
+                          style={{
+                            width: `${boundedPercent((guidance.distance_m / 12000) * 100)}%`,
+                            backgroundColor: "var(--teal)"
+                          }}
+                        />
+                      </div>
+                      <strong>{Math.round(guidance.distance_m)}m</strong>
+                    </div>
+                    <div className="chart-bar-row">
+                      <span>High speed</span>
+                      <div className="chart-track">
+                        <div
+                          className="chart-fill"
+                          style={{
+                            width: `${boundedPercent((guidance.high_speed_distance_m / 1200) * 100)}%`,
+                            backgroundColor: "var(--amber)"
+                          }}
+                        />
+                      </div>
+                      <strong>{Math.round(guidance.high_speed_distance_m)}m</strong>
+                    </div>
+                    <div className="chart-bar-row">
+                      <span>Top speed</span>
+                      <div className="chart-track">
+                        <div
+                          className="chart-fill"
+                          style={{
+                            width: `${boundedPercent((guidance.max_speed_mps / 11) * 100)}%`,
+                            backgroundColor: "var(--blue)"
+                          }}
+                        />
+                      </div>
+                      <strong>{guidance.max_speed_mps.toFixed(1)} m/s</strong>
+                    </div>
+                    <div className="chart-bar-row">
+                      <span>Work rate</span>
+                      <div className="chart-track">
+                        <div
+                          className="chart-fill"
+                          style={{
+                            width: `${boundedPercent((guidance.work_rate_m_per_min / 180) * 100)}%`,
+                            backgroundColor: "var(--violet)"
+                          }}
+                        />
+                      </div>
+                      <strong>{guidance.work_rate_m_per_min.toFixed(0)} m/min</strong>
+                    </div>
+                  </div>
+                  {guidance.player_guidance.slice(0, 3).map((item, index) => (
+                    <small key={`${guidance.track_id}-guidance-${index}`}>{item}</small>
+                  ))}
+                  {guidance.tactical_context.slice(0, 2).map((item, index) => (
+                    <small key={`${guidance.track_id}-context-${index}`}>{item}</small>
+                  ))}
+                </article>
+              ))}
+              {selectedProfile.match_guidance.length === 0 ? (
+                <article className="player-chart-card">
+                  <div>
+                    <span>Match guidance</span>
+                    <strong>No confirmed tracks</strong>
+                    <small>Coach-confirmed match tracks will appear here after video analysis.</small>
+                  </div>
+                  <div className="chart-bars">
+                    <div className="chart-bar-row">
+                      <span>Distance</span>
+                      <div className="chart-track">
+                        <div className="chart-fill" style={{ width: "4%", backgroundColor: "var(--quiet)" }} />
+                      </div>
+                      <strong>n/a</strong>
+                    </div>
+                  </div>
+                </article>
+              ) : null}
+            </section>
+
             <form className="player-self-check" onSubmit={submitSelfAssessment}>
               <div>
                 <h2>Self-Assessment</h2>

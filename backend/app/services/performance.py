@@ -4932,6 +4932,7 @@ async def list_my_player_performance(
             cohort_scope=benchmark_cohort_scope,
         )
         cohort_comparisons = await performance_cohort_comparisons(db, organization_id, profile.id)
+        match_guidance = await player_match_guidance_for_profile(db, organization_id, profile)
         results.append(
             {
                 "organization_id": organization_id,
@@ -4957,9 +4958,170 @@ async def list_my_player_performance(
                 "injury_risk": injury_risk,
                 "benchmarks": benchmarks,
                 "cohort_comparisons": cohort_comparisons,
+                "match_guidance": match_guidance,
             }
         )
     return results
+
+
+async def player_match_guidance_for_profile(
+    db: AsyncSession,
+    organization_id: UUID,
+    profile: AthleteProfile,
+    limit: int = 5,
+) -> list[dict[str, object]]:
+    samples = list(
+        (
+            await db.scalars(
+                select(PerformanceMatchTrackingSample)
+                .where(PerformanceMatchTrackingSample.organization_id == organization_id)
+                .where(PerformanceMatchTrackingSample.person_id == profile.person_id)
+                .order_by(PerformanceMatchTrackingSample.created_at.desc())
+                .limit(300)
+            )
+        ).all()
+    )
+    seen: set[tuple[UUID, str]] = set()
+    guidance: list[dict[str, object]] = []
+    for sample in samples:
+        key = (sample.tracking_run_id, sample.track_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        run = await db.get(PerformanceMatchTrackingRun, sample.tracking_run_id)
+        if run is None or run.organization_id != organization_id:
+            continue
+        video_asset = await db.get(OppositionScoutingVideoAsset, run.video_asset_id)
+        if video_asset is None:
+            continue
+        summary = decode_match_tracking_summary(run.summary_json)
+        metric = next(
+            (
+                item
+                for item in summary.get("player_metrics", [])
+                if isinstance(item, dict) and str(item.get("track_id")) == sample.track_id
+            ),
+            None,
+        )
+        if metric is None:
+            continue
+        guidance.append(
+            build_player_match_guidance(
+                run=run,
+                video_asset=video_asset,
+                sample=sample,
+                metric=metric,
+                summary=summary,
+            )
+        )
+        if len(guidance) >= limit:
+            break
+    return guidance
+
+
+def decode_match_tracking_summary(value: str | None) -> dict[str, object]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def build_player_match_guidance(
+    *,
+    run: PerformanceMatchTrackingRun,
+    video_asset: OppositionScoutingVideoAsset,
+    sample: PerformanceMatchTrackingSample,
+    metric: dict[str, object],
+    summary: dict[str, object],
+) -> dict[str, object]:
+    team_label = str(metric.get("team_label") or sample.team_label or "").strip() or None
+    track_id = str(metric.get("track_id") or sample.track_id)
+    coaching_flags = [str(flag) for flag in metric.get("coaching_flags", []) if str(flag)]
+    player_guidance = list(coaching_flags[:3])
+    high_speed_distance = float(metric.get("high_speed_distance_m") or 0.0)
+    sprint_count = int(metric.get("sprint_count") or 0)
+    pass_attempts = int(metric.get("pass_attempt_count") or 0)
+    pass_accuracy = float(metric.get("pass_accuracy_percent") or 0.0)
+    pressure_count = int(metric.get("pressure_applied_count") or 0)
+    off_ball_runs = int(metric.get("off_ball_run_count") or 0)
+    tracking_quality = float(metric.get("tracking_quality_score") or summary.get("tracking_quality_score") or 0.0)
+    if high_speed_distance > 0:
+        player_guidance.append(
+            f"Review your high-speed actions: {round(high_speed_distance)}m high-speed work and {sprint_count} sprint trigger(s)."
+        )
+    if pass_attempts > 0:
+        player_guidance.append(
+            f"Passing review: {pass_accuracy:.0f}% completion across {pass_attempts} tracked attempt(s)."
+        )
+    if pressure_count > 0:
+        player_guidance.append(f"Pressing review: {pressure_count} pressure action(s) were detected near opponents.")
+    if off_ball_runs > 0:
+        player_guidance.append(f"Off-ball movement: {off_ball_runs} run(s) created separation or territory.")
+    if tracking_quality < 0.65:
+        player_guidance.append("Confirm this track identity with your coach before using the load numbers.")
+    if not player_guidance:
+        player_guidance.append("Use the replay with your coach to connect the movement data to match decisions.")
+
+    tactical_context: list[str] = []
+    for phase in summary.get("team_phase_metrics", []):
+        if isinstance(phase, dict) and str(phase.get("team_label") or "") == team_label:
+            tactical_context.append(
+                f"{team_label} phase: {str(phase.get('phase_hint') or 'match phase').replace('_', ' ')}."
+            )
+            break
+    for estimate in summary.get("possession_estimates", []):
+        if isinstance(estimate, dict) and str(estimate.get("team_label") or "") == team_label:
+            tactical_context.append(
+                f"{team_label} possession estimate: {float(estimate.get('possession_percent') or 0):.0f}%."
+            )
+            break
+    event_count = sum(
+        1
+        for event in summary.get("recognized_action_events", [])
+        if isinstance(event, dict)
+        and track_id
+        in {
+            str(event.get("track_id") or ""),
+            str(event.get("from_track_id") or ""),
+            str(event.get("to_track_id") or ""),
+            str(event.get("presser_track_id") or ""),
+            str(event.get("receiver_track_id") or ""),
+        }
+    )
+    if event_count:
+        tactical_context.append(f"{event_count} recognized action cue(s) are linked to this track.")
+
+    return {
+        "tracking_run_id": run.id,
+        "video_asset_id": video_asset.id,
+        "opponent_name": video_asset.opponent_name,
+        "match_label": video_asset.clip_label,
+        "tracked_at": run.completed_at or run.created_at,
+        "track_id": track_id,
+        "team_label": team_label,
+        "player_label": metric.get("player_label") or sample.player_label,
+        "jersey_number": metric.get("jersey_number") or sample.jersey_number,
+        "readiness_level": str(summary.get("readiness_level") or "review_required"),
+        "tracking_quality_score": round(tracking_quality, 3),
+        "distance_m": round(float(metric.get("distance_m") or 0.0), 2),
+        "high_speed_distance_m": round(high_speed_distance, 2),
+        "max_speed_mps": round(float(metric.get("max_speed_mps") or 0.0), 3),
+        "sprint_count": sprint_count,
+        "work_rate_m_per_min": round(float(metric.get("work_rate_m_per_min") or 0.0), 2),
+        "dominant_zone": str(metric.get("dominant_zone") or "unknown"),
+        "pressure_applied_count": pressure_count,
+        "off_ball_run_count": off_ball_runs,
+        "pass_accuracy_percent": round(pass_accuracy, 2),
+        "shot_count": int(metric.get("shot_count") or 0),
+        "expected_goals": round(float(metric.get("expected_goals") or 0.0), 3),
+        "coaching_flags": coaching_flags,
+        "player_guidance": player_guidance[:6],
+        "tactical_context": tactical_context[:4],
+        "quality_warnings": [str(item) for item in summary.get("quality_warnings", []) if str(item)][:4],
+    }
 
 
 async def evaluate_performance_achievements(
