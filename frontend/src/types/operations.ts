@@ -7087,6 +7087,10 @@ export type PerformanceMatchTrackingPlayerMetricRead = {
   sprint_count: number;
   explosive_effort_count: number;
   recovery_ratio: number;
+  load_band: string;
+  fatigue_risk_score: number;
+  substitution_window: string | null;
+  recovery_recommendation: string | null;
   pressure_applied_count: number;
   pressure_received_count: number;
   average_nearest_opponent_m: number | null;

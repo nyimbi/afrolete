@@ -3588,6 +3588,10 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert striker["distance_m"] == 20.0
     assert striker["sprint_count"] == 1
     assert striker["work_rate_m_per_min"] == 600.0
+    assert striker["load_band"] == "moderate"
+    assert striker["fatigue_risk_score"] >= 0.58
+    assert "substitute" in striker["substitution_window"].lower()
+    assert "recovery" in striker["recovery_recommendation"].lower()
     assert striker["off_ball_run_count"] >= 1
     assert striker["territorial_advance_count"] >= 1
     assert striker["tracking_quality_score"] > 0.5
@@ -3693,6 +3697,8 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert report["summary"]["turnover_count"] == 2
     assert report["player_cards"][0]["player_label"] == "Confirmed Forward"
     assert report["player_cards"][0]["high_speed_distance_m"] == 20.0
+    assert report["player_cards"][0]["fatigue_risk_score"] >= 0.58
+    assert "substitute" in report["player_cards"][0]["substitution_window"].lower()
     assert any(shape["team_label"] == "Home" for shape in report["team_shape"])
     assert any("high-speed load" in recommendation for recommendation in report["recommendations"])
     assert len(report["checksum"]) == 64
@@ -3715,6 +3721,8 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     report_text = download_response.text
     assert "# Tracking City player guidance" in report_text
     assert "Confirmed Forward" in report_text
+    assert "Fatigue risk" in report_text
+    assert "Substitution" in report_text
     assert "## Tactical Shape" in report_text
     assert "## Team Phase And Pressure" in report_text
     assert "## Possession And Ball Actions" in report_text
@@ -3729,6 +3737,8 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert guidance_review["guidance_status"] == "coach_review_required"
     assert guidance_review["player_card_count"] == len(guidance_review["player_cards"])
     assert guidance_review["player_guidance"][0]["player_label"] == "Confirmed Forward"
+    assert "fatigue risk" in guidance_review["player_guidance"][0]["load_summary"]
+    assert "recovery" in guidance_review["player_guidance"][0]["evidence"].lower()
     assert any("longer sample window" in action for action in guidance_review["required_actions"])
     assert any("draft-only" in note for note in guidance_review["review_notes"])
     assert guidance_review["coach_guidance"]
@@ -4160,6 +4170,10 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     forward = next(metric for metric in tracking["player_metrics"] if metric["track_id"] == "home-9")
     assert forward["player_label"] == "Forward"
     assert forward["distance_m"] > 20
+    assert forward["load_band"] in {"moderate", "high", "extreme"}
+    assert forward["fatigue_risk_score"] > 0
+    assert forward["substitution_window"]
+    assert forward["recovery_recommendation"]
 
     sample_export = client.get(
         f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/export?export_format=samples_csv",
@@ -4180,6 +4194,7 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     assert metrics_export.status_code == 200
     metric_rows = list(csv.DictReader(io.StringIO(metrics_export.text)))
     assert any(row["track_id"] == "home-9" and row["distance_m"] for row in metric_rows)
+    assert any(row["track_id"] == "home-9" and row["fatigue_risk_score"] for row in metric_rows)
 
     json_export = client.get(
         f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/export?export_format=analysis_json",

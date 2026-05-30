@@ -28062,6 +28062,11 @@ export default function HomePage() {
                           {metric.coaching_flags[0] ?? `${metric.sample_count} samples`}
                         </small>
                         <small>
+                          {metric.load_band.replaceAll("_", " ")} load · fatigue {Math.round(metric.fatigue_risk_score * 100)}% ·{" "}
+                          {metric.substitution_window ?? "substitution review pending"}
+                        </small>
+                        <small>{metric.recovery_recommendation ?? "Recovery recommendation pending coach review."}</small>
+                        <small>
                           pressure +{metric.pressure_applied_count ?? 0}/-{metric.pressure_received_count ?? 0} ·{" "}
                           off-ball {metric.off_ball_run_count ?? 0} · advances {metric.territorial_advance_count ?? 0}
                           {metric.average_nearest_opponent_m ? ` · nearest opponent ${metric.average_nearest_opponent_m.toFixed(1)}m` : ""}

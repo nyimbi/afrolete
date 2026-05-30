@@ -737,6 +737,10 @@ class PerformanceMatchTrackingPlayerMetricRead(BaseModel):
     sprint_count: int
     explosive_effort_count: int = 0
     recovery_ratio: float = 0.0
+    load_band: str = "unknown"
+    fatigue_risk_score: float = 0.0
+    substitution_window: str | None = None
+    recovery_recommendation: str | None = None
     pressure_applied_count: int = 0
     pressure_received_count: int = 0
     average_nearest_opponent_m: float | None = None

@@ -1342,6 +1342,10 @@ async def downloadable_match_tracking_run_export(
                 "average_speed_mps",
                 "work_rate_m_per_min",
                 "sprint_count",
+                "load_band",
+                "fatigue_risk_score",
+                "substitution_window",
+                "recovery_recommendation",
                 "pressure_applied_count",
                 "pressure_received_count",
                 "pass_completed_count",
@@ -2473,6 +2477,10 @@ def match_player_guidance_card(card: dict[str, object], *, publishable: bool) ->
     sprints = int(card.get("sprint_count") or 0)
     pressure = int(card.get("pressure_applied_count") or 0)
     received_pressure = int(card.get("pressure_received_count") or 0)
+    load_band = str(card.get("load_band") or "unknown").replace("_", " ")
+    fatigue_risk_score = round(float(card.get("fatigue_risk_score") or 0.0) * 100)
+    substitution_window = str(card.get("substitution_window") or "").strip()
+    recovery_recommendation = str(card.get("recovery_recommendation") or "").strip()
     actions = [
         str(flag)
         for flag in (card.get("coaching_flags") or [])
@@ -2480,7 +2488,9 @@ def match_player_guidance_card(card: dict[str, object], *, publishable: bool) ->
     ]
     if not actions:
         actions = ["Review match clips with the player and agree one training focus."]
-    if high_speed >= 40 or sprints >= 3:
+    if fatigue_risk_score >= 62 and substitution_window:
+        next_action = substitution_window
+    elif high_speed >= 40 or sprints >= 3:
         next_action = "Schedule recovery and sprint-mechanics review before the next high-load session."
     elif pressure or received_pressure:
         next_action = "Review scanning, first touch, and support angles in the pressure clips."
@@ -2495,13 +2505,16 @@ def match_player_guidance_card(card: dict[str, object], *, publishable: bool) ->
         "jersey_number": card.get("jersey_number"),
         "publishable": publishable,
         "headline": f"{label}: {distance}m total, {high_speed}m high-speed, max {max_speed} m/s.",
-        "load_summary": f"{sprints} sprint(s), {card.get('work_rate_m_per_min', 0)} m/min work rate.",
+        "load_summary": (
+            f"{sprints} sprint(s), {card.get('work_rate_m_per_min', 0)} m/min work rate, "
+            f"{load_band} load, fatigue risk {fatigue_risk_score}%."
+        ),
         "tactical_summary": (
             f"{pressure} pressure action(s), {received_pressure} pressure received, "
             f"dominant zone {str(card.get('dominant_zone') or 'unknown').replace('_', ' ')}."
         ),
         "recommended_next_action": next_action,
-        "evidence": actions[0],
+        "evidence": recovery_recommendation or actions[0],
         "caution": None if publishable else "Coach review required before sharing this guidance with the player.",
     }
 
@@ -11468,6 +11481,10 @@ def build_match_analysis_report_artifact(
                 "max_speed_mps": round(float(metric.get("max_speed_mps") or 0.0), 3),
                 "sprint_count": int(metric.get("sprint_count") or 0),
                 "work_rate_m_per_min": round(float(metric.get("work_rate_m_per_min") or 0.0), 2),
+                "load_band": metric.get("load_band") or "unknown",
+                "fatigue_risk_score": round(float(metric.get("fatigue_risk_score") or 0.0), 3),
+                "substitution_window": metric.get("substitution_window"),
+                "recovery_recommendation": metric.get("recovery_recommendation"),
                 "pressure_applied_count": int(metric.get("pressure_applied_count") or 0),
                 "pressure_received_count": int(metric.get("pressure_received_count") or 0),
                 "off_ball_run_count": int(metric.get("off_ball_run_count") or 0),
@@ -11598,6 +11615,15 @@ def match_analysis_report_recommendations(
             f"{top_load.get('player_label') or top_load.get('track_id')} after "
             f"{round(float(top_load.get('high_speed_distance_m') or 0))}m high-speed work."
         )
+    fatigue_cards = [
+        card
+        for card in player_cards
+        if float(card.get("fatigue_risk_score") or 0.0) >= 0.62
+        or str(card.get("load_band") or "") in {"high", "extreme"}
+    ]
+    if fatigue_cards:
+        names = ", ".join(str(card.get("player_label") or card.get("track_id")) for card in fatigue_cards[:4])
+        recommendations.append(f"Prioritize substitution and recovery review for {names}; tracking load flags elevated fatigue risk.")
     stretched = [
         shape for shape in team_shape
         if str(shape.get("shape_hint") or "") in {"stretched_shape", "vertical_stagger", "wide_flat_line"}
@@ -11683,6 +11709,9 @@ def match_analysis_report_markdown(
                     + (f" | Jersey: {card.get('jersey_number')}" if card.get("jersey_number") else ""),
                     f"- Distance: {card['distance_m']}m | High-speed: {card['high_speed_distance_m']}m",
                     f"- Max speed: {card['max_speed_mps']} m/s | Sprints: {card['sprint_count']}",
+                    f"- Load: {str(card.get('load_band') or 'unknown').replace('_', ' ')} | Fatigue risk: {round(float(card.get('fatigue_risk_score') or 0) * 100)}%",
+                    f"- Substitution: {card.get('substitution_window') or 'Review in context.'}",
+                    f"- Recovery: {card.get('recovery_recommendation') or 'Use normal recovery plan.'}",
                     f"- Pressure: +{card['pressure_applied_count']} applied / {card['pressure_received_count']} received | Off-ball runs: {card['off_ball_run_count']}",
                     f"- Ball actions: {card['pass_completed_count']}/{card['pass_attempt_count']} pass(es), {card['pass_accuracy_percent']}% accuracy, {card['pass_received_count']} received, {card['turnover_involved_count']} turnover involvement(s), {card['interception_count']} interception(s), {card['tackle_count']} tackle(s), {card['ball_carry_m']}m carried",
                     f"- Chance creation: {card['shot_count']} shot(s), {card['shot_on_target_count']} on target, {card['expected_goals']} xG, {card['key_pass_count']} key pass(es)",
@@ -12058,6 +12087,33 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
             confidence_score=confidence_score,
             max_speed_mps=max_speed,
         )
+        load_band = match_tracking_player_load_band(
+            distance_m=distance,
+            high_speed_distance_m=high_speed_distance,
+            sprint_count=sprint_count,
+            work_rate_m_per_min=work_rate,
+        )
+        fatigue_risk_score = match_tracking_player_fatigue_risk_score(
+            duration_seconds=duration,
+            distance_m=distance,
+            high_speed_distance_m=high_speed_distance,
+            sprint_count=sprint_count,
+            recovery_ratio=recovery_ratio,
+            max_speed_mps=max_speed,
+            tracking_quality_score=tracking_quality,
+        )
+        substitution_window = match_tracking_substitution_window(
+            fatigue_risk_score=fatigue_risk_score,
+            load_band=load_band,
+            duration_seconds=duration,
+            sprint_count=sprint_count,
+        )
+        recovery_recommendation = match_tracking_recovery_recommendation(
+            load_band=load_band,
+            fatigue_risk_score=fatigue_risk_score,
+            high_speed_distance_m=high_speed_distance,
+            recovery_ratio=recovery_ratio,
+        )
         continuity_scores.append(continuity_score)
         confidence_scores.append(confidence_score)
         player_metrics.append(
@@ -12076,6 +12132,10 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
                 "sprint_count": sprint_count,
                 "explosive_effort_count": explosive_effort_count,
                 "recovery_ratio": round(recovery_ratio, 3),
+                "load_band": load_band,
+                "fatigue_risk_score": fatigue_risk_score,
+                "substitution_window": substitution_window,
+                "recovery_recommendation": recovery_recommendation,
                 "pressure_applied_count": 0,
                 "pressure_received_count": 0,
                 "average_nearest_opponent_m": None,
@@ -12103,6 +12163,8 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
                     high_speed_distance_m=high_speed_distance,
                     sprint_count=sprint_count,
                     recovery_ratio=recovery_ratio,
+                    load_band=load_band,
+                    fatigue_risk_score=fatigue_risk_score,
                     tracking_quality_score=tracking_quality,
                 ),
                 "dominant_zone": dominant_zone,
@@ -13120,6 +13182,84 @@ def match_tracking_player_quality_score(
     return max(0.0, min(score, 1.0))
 
 
+def match_tracking_player_load_band(
+    *,
+    distance_m: float,
+    high_speed_distance_m: float,
+    sprint_count: int,
+    work_rate_m_per_min: float,
+) -> str:
+    if distance_m >= 9500 or high_speed_distance_m >= 900 or sprint_count >= 18:
+        return "extreme"
+    if distance_m >= 6500 or high_speed_distance_m >= 450 or sprint_count >= 10:
+        return "high"
+    if distance_m >= 3000 or high_speed_distance_m >= 150 or sprint_count >= 4 or work_rate_m_per_min >= 85:
+        return "moderate"
+    if distance_m > 0 or work_rate_m_per_min > 0:
+        return "low"
+    return "unknown"
+
+
+def match_tracking_player_fatigue_risk_score(
+    *,
+    duration_seconds: float,
+    distance_m: float,
+    high_speed_distance_m: float,
+    sprint_count: int,
+    recovery_ratio: float,
+    max_speed_mps: float,
+    tracking_quality_score: float,
+) -> float:
+    duration_minutes = max(duration_seconds / 60, 1.0)
+    work_rate = distance_m / duration_minutes
+    high_speed_share = high_speed_distance_m / distance_m if distance_m > 0 else 0.0
+    score = (
+        min(work_rate / 130, 1.0) * 0.28
+        + min(high_speed_share / 0.35, 1.0) * 0.22
+        + min(sprint_count / max(duration_minutes / 8, 1.0) / 3, 1.0) * 0.20
+        + max(0.0, min((0.22 - recovery_ratio) / 0.22, 1.0)) * 0.18
+        + min(max_speed_mps / 9.5, 1.0) * 0.08
+        + max(0.0, min((0.65 - tracking_quality_score) / 0.65, 1.0)) * 0.04
+    )
+    return round(max(0.0, min(score, 1.0)), 3)
+
+
+def match_tracking_substitution_window(
+    *,
+    fatigue_risk_score: float,
+    load_band: str,
+    duration_seconds: float,
+    sprint_count: int,
+) -> str:
+    if fatigue_risk_score >= 0.78 or load_band == "extreme":
+        return "Immediate coach check; consider substitution at the next stoppage."
+    if fatigue_risk_score >= 0.58 or (load_band == "high" and sprint_count >= 10):
+        return "Monitor for the next 5-10 minutes and prepare a substitute."
+    if fatigue_risk_score >= 0.45 or load_band == "moderate":
+        return "Review at the next planned rotation or half-time check."
+    if duration_seconds < 600:
+        return "Capture a longer window before making substitution decisions."
+    return "No substitution pressure from tracking load alone."
+
+
+def match_tracking_recovery_recommendation(
+    *,
+    load_band: str,
+    fatigue_risk_score: float,
+    high_speed_distance_m: float,
+    recovery_ratio: float,
+) -> str:
+    if load_band == "extreme" or fatigue_risk_score >= 0.78:
+        return "Prioritize cooldown, hamstring/calf screening, hydration, and next-day recovery monitoring."
+    if load_band == "high" or high_speed_distance_m >= 450:
+        return "Pair recovery work with sprint-mechanics and deceleration review before the next high-load session."
+    if recovery_ratio < 0.12 and high_speed_distance_m > 0:
+        return "Add low-intensity recovery intervals and review repeated-effort spacing."
+    if load_band == "moderate":
+        return "Use normal recovery plus targeted video review of the highest-load clips."
+    return "Normal recovery plan; keep the card as context for the next training load decision."
+
+
 def match_tracking_player_coaching_flags(
     *,
     sample_count: int,
@@ -13129,6 +13269,8 @@ def match_tracking_player_coaching_flags(
     high_speed_distance_m: float,
     sprint_count: int,
     recovery_ratio: float,
+    load_band: str,
+    fatigue_risk_score: float,
     tracking_quality_score: float,
 ) -> list[str]:
     flags: list[str] = []
@@ -13142,6 +13284,10 @@ def match_tracking_player_coaching_flags(
         flags.append("High repeated-sprint demand: plan recovery and substitution windows.")
     if distance_m > 0 and recovery_ratio < 0.12 and high_speed_distance_m > 0:
         flags.append("Limited low-speed recovery between efforts.")
+    if load_band in {"high", "extreme"}:
+        flags.append(f"{load_band.title()} match load: check recovery status before assigning the next intense session.")
+    if fatigue_risk_score >= 0.65:
+        flags.append("Fatigue-risk signal is elevated; review substitution timing and post-match recovery.")
     if not flags:
         flags.append("Tracking profile is stable enough for coach review.")
     return flags
@@ -13253,6 +13399,11 @@ def match_tracking_coaching_guidance(summary: dict[str, object], *, readiness_le
         key=lambda item: float(item.get("work_rate_m_per_min") or 0.0) if isinstance(item, dict) else 0.0,
         reverse=True,
     )[:3]
+    fatigue_leaders = sorted(
+        [item for item in metrics if isinstance(item, dict)],
+        key=lambda item: float(item.get("fatigue_risk_score") or 0.0),
+        reverse=True,
+    )[:3]
     if high_speed_leaders and isinstance(high_speed_leaders[0], dict):
         if float(high_speed_leaders[0].get("high_speed_distance_m") or 0.0) > 0:
             names = ", ".join(match_tracking_metric_label(item) for item in high_speed_leaders)
@@ -13267,6 +13418,9 @@ def match_tracking_coaching_guidance(summary: dict[str, object], *, readiness_le
         if float(work_rate_leaders[0].get("work_rate_m_per_min") or 0.0) > 0:
             names = ", ".join(match_tracking_metric_label(item) for item in work_rate_leaders)
             guidance.append(f"Use work-rate leaders {names} as the first review queue for tactical role load.")
+    if fatigue_leaders and float(fatigue_leaders[0].get("fatigue_risk_score") or 0.0) >= 0.62:
+        names = ", ".join(match_tracking_metric_label(item) for item in fatigue_leaders)
+        guidance.append(f"Review substitution and recovery timing for {names}; fatigue-risk tracking signals are elevated.")
     low_quality = [
         match_tracking_metric_label(item)
         for item in metrics
