@@ -7952,6 +7952,11 @@ def build_match_analysis_report_artifact(
                 "max_speed_mps": round(float(metric.get("max_speed_mps") or 0.0), 3),
                 "sprint_count": int(metric.get("sprint_count") or 0),
                 "work_rate_m_per_min": round(float(metric.get("work_rate_m_per_min") or 0.0), 2),
+                "pressure_applied_count": int(metric.get("pressure_applied_count") or 0),
+                "pressure_received_count": int(metric.get("pressure_received_count") or 0),
+                "off_ball_run_count": int(metric.get("off_ball_run_count") or 0),
+                "territorial_advance_count": int(metric.get("territorial_advance_count") or 0),
+                "average_nearest_opponent_m": metric.get("average_nearest_opponent_m"),
                 "dominant_zone": metric.get("dominant_zone") or "unknown",
                 "tracking_quality_score": round(float(metric.get("tracking_quality_score") or 0.0), 3),
                 "coaching_flags": [str(flag) for flag in (metric.get("coaching_flags") or [])],
@@ -7968,6 +7973,8 @@ def build_match_analysis_report_artifact(
     team_shape = [
         item for item in tracking.get("team_shape_metrics", []) if isinstance(item, dict)
     ] if include_tactical_shape else []
+    team_phase = [item for item in tracking.get("team_phase_metrics", []) if isinstance(item, dict)]
+    pressure_events = [item for item in tracking.get("pressure_events", []) if isinstance(item, dict)]
     summary = {
         "video_asset_id": str(video_asset.id),
         "filename": video_asset.filename,
@@ -7986,8 +7993,9 @@ def build_match_analysis_report_artifact(
         "tracking_quality_score": round(float(tracking.get("tracking_quality_score") or 0.0), 3),
         "identity_continuity_score": round(float(tracking.get("identity_continuity_score") or 0.0), 3),
         "calibration_quality_score": round(float(tracking.get("calibration_quality_score") or 0.0), 3),
+        "pressure_event_count": len(pressure_events),
     }
-    recommendations = match_analysis_report_recommendations(tracking, player_cards, team_shape)
+    recommendations = match_analysis_report_recommendations(tracking, player_cards, team_shape, team_phase)
     report_title = title.strip() if title and title.strip() else f"{video_asset.opponent_name} match analysis"
     content = match_analysis_report_markdown(
         title=report_title,
@@ -7997,6 +8005,8 @@ def build_match_analysis_report_artifact(
         recommendations=recommendations,
         player_cards=player_cards,
         team_shape=team_shape,
+        team_phase=team_phase,
+        pressure_events=pressure_events,
         quality_warnings=[str(item) for item in (tracking.get("quality_warnings") or [])],
         notes=notes,
     ).encode()
@@ -8017,6 +8027,7 @@ def match_analysis_report_recommendations(
     tracking: dict[str, object],
     player_cards: list[dict[str, object]],
     team_shape: list[dict[str, object]],
+    team_phase: list[dict[str, object]],
 ) -> list[str]:
     recommendations: list[str] = []
     recommendations.extend(str(item) for item in (tracking.get("coaching_guidance") or []) if str(item))
@@ -8036,6 +8047,9 @@ def match_analysis_report_recommendations(
     ]
     if stretched:
         recommendations.append("Use video review to connect tactical shape changes with pressing and recovery cues.")
+    active_press = [phase for phase in team_phase if str(phase.get("phase_hint") or "") == "active_pressing"]
+    if active_press:
+        recommendations.append("Review whether pressure events were backed by cover shadows and second-ball support.")
     if not recommendations:
         recommendations.append("Capture a calibrated tracking run before issuing individualized player guidance.")
     return list(dict.fromkeys(recommendations))[:12]
@@ -8050,6 +8064,8 @@ def match_analysis_report_markdown(
     recommendations: list[str],
     player_cards: list[dict[str, object]],
     team_shape: list[dict[str, object]],
+    team_phase: list[dict[str, object]],
+    pressure_events: list[dict[str, object]],
     quality_warnings: list[str],
     notes: str | None,
 ) -> str:
@@ -8069,6 +8085,7 @@ def match_analysis_report_markdown(
         f"- High-speed distance: {summary['high_speed_distance_m']}m",
         f"- Max speed: {summary['max_speed_mps']} m/s",
         f"- Sprint count: {summary['sprint_count']}",
+        f"- Pressure events: {summary['pressure_event_count']}",
         f"- Tracking quality: {round(float(summary['tracking_quality_score']) * 100)}%",
         f"- Identity continuity: {round(float(summary['identity_continuity_score']) * 100)}%",
         "",
@@ -8085,6 +8102,7 @@ def match_analysis_report_markdown(
                     + (f" | Jersey: {card.get('jersey_number')}" if card.get("jersey_number") else ""),
                     f"- Distance: {card['distance_m']}m | High-speed: {card['high_speed_distance_m']}m",
                     f"- Max speed: {card['max_speed_mps']} m/s | Sprints: {card['sprint_count']}",
+                    f"- Pressure: +{card['pressure_applied_count']} applied / {card['pressure_received_count']} received | Off-ball runs: {card['off_ball_run_count']}",
                     f"- Work rate: {card['work_rate_m_per_min']} m/min | Dominant zone: {str(card['dominant_zone']).replace('_', ' ')}",
                     f"- Guidance: {(card.get('coaching_flags') or ['Review video context before coaching.'])[0]}",
                 ]
@@ -8103,6 +8121,20 @@ def match_analysis_report_markdown(
             )
     else:
         lines.append("- Tactical shape was not included in this report.")
+    lines.extend(["", "## Team Phase And Pressure"])
+    if team_phase:
+        for phase in team_phase:
+            lines.append(
+                "- "
+                f"{phase.get('team_label', 'Team')}: {str(phase.get('phase_hint', 'phase')).replace('_', ' ')}; "
+                f"{phase.get('pressure_event_count', 0)} pressure event(s), "
+                f"{phase.get('off_ball_run_count', 0)} off-ball run(s), "
+                f"{phase.get('territorial_advance_count', 0)} territorial advance(s)."
+            )
+    else:
+        lines.append("- Team phase metrics were not available.")
+    if pressure_events:
+        lines.append(f"- First pressure cue: {pressure_events[0].get('presser_track_id')} closed {pressure_events[0].get('receiver_track_id')} at {pressure_events[0].get('distance_m')}m.")
     lines.extend(["", "## Data Quality"])
     if quality_warnings:
         lines.extend(f"- {warning}" for warning in quality_warnings)
@@ -8330,6 +8362,11 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
                 "sprint_count": sprint_count,
                 "explosive_effort_count": explosive_effort_count,
                 "recovery_ratio": round(recovery_ratio, 3),
+                "pressure_applied_count": 0,
+                "pressure_received_count": 0,
+                "average_nearest_opponent_m": None,
+                "off_ball_run_count": 0,
+                "territorial_advance_count": 0,
                 "tracking_quality_score": round(tracking_quality, 3),
                 "coaching_flags": match_tracking_player_coaching_flags(
                     sample_count=len(ordered),
@@ -8352,6 +8389,7 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
     identity_continuity_score = sum(continuity_scores) / len(continuity_scores) if continuity_scores else 0.0
     average_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
     team_shape = derive_match_team_shape(samples)
+    football_context = derive_match_football_context(samples, player_metrics)
     return {
         "sample_count": len(samples),
         "player_count": len(player_metrics),
@@ -8365,6 +8403,9 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         "player_metrics": player_metrics,
         "team_shape_metrics": team_shape["team_shape_metrics"],
         "formation_snapshots": team_shape["formation_snapshots"],
+        "team_phase_metrics": football_context["team_phase_metrics"],
+        "pressure_events": football_context["pressure_events"],
+        "match_phase_snapshots": football_context["match_phase_snapshots"],
     }
 
 
@@ -8443,6 +8484,209 @@ def derive_match_team_shape(samples: list[dict[str, object]]) -> dict[str, list[
         "team_shape_metrics": team_shape_metrics,
         "formation_snapshots": formation_snapshots,
     }
+
+
+def derive_match_football_context(
+    samples: list[dict[str, object]],
+    player_metrics: list[dict[str, object]],
+) -> dict[str, list[dict[str, object]]]:
+    metric_by_track = {str(metric["track_id"]): metric for metric in player_metrics}
+    nearest_distances: dict[str, list[float]] = {track_id: [] for track_id in metric_by_track}
+    pressure_events: list[dict[str, object]] = []
+    match_phase_snapshots: list[dict[str, object]] = []
+    team_totals: dict[str, dict[str, float | int | set[str]]] = {}
+    previous_by_track: dict[str, dict[str, object]] = {}
+    by_timestamp: dict[float, list[dict[str, object]]] = {}
+    for sample in samples:
+        by_timestamp.setdefault(round(float(sample["timestamp_seconds"]), 2), []).append(sample)
+    for timestamp, rows in sorted(by_timestamp.items()):
+        team_rows: dict[str, list[dict[str, object]]] = {}
+        for row in rows:
+            team_label = str(row.get("team_label") or "unassigned").strip() or "unassigned"
+            team_rows.setdefault(team_label, []).append(row)
+            totals = team_totals.setdefault(
+                team_label,
+                {
+                    "sample_count": 0,
+                    "track_ids": set(),
+                    "attacking_samples": 0,
+                    "middle_samples": 0,
+                    "defensive_samples": 0,
+                    "high_press_samples": 0,
+                    "deep_block_samples": 0,
+                    "pressure_events": 0,
+                    "off_ball_runs": 0,
+                    "territorial_advances": 0,
+                    "nearest_opponent_distance_total": 0.0,
+                    "nearest_opponent_distance_count": 0,
+                },
+            )
+            totals["sample_count"] = int(totals["sample_count"]) + 1
+            cast_track_ids = totals["track_ids"]
+            if isinstance(cast_track_ids, set):
+                cast_track_ids.add(str(row.get("track_id") or "unknown"))
+            x_percent = float(row["x_percent"])
+            if x_percent >= 66.66:
+                totals["attacking_samples"] = int(totals["attacking_samples"]) + 1
+            elif x_percent <= 33.33:
+                totals["defensive_samples"] = int(totals["defensive_samples"]) + 1
+            else:
+                totals["middle_samples"] = int(totals["middle_samples"]) + 1
+        for row in rows:
+            team_label = str(row.get("team_label") or "unassigned").strip() or "unassigned"
+            opponents = [
+                opponent
+                for opponent_team, opponent_rows in team_rows.items()
+                if opponent_team != team_label
+                for opponent in opponent_rows
+            ]
+            if not opponents:
+                continue
+            nearest = min(
+                opponents,
+                key=lambda opponent: math.dist(
+                    (float(row["x_meters"]), float(row["y_meters"])),
+                    (float(opponent["x_meters"]), float(opponent["y_meters"])),
+                ),
+            )
+            nearest_distance = math.dist(
+                (float(row["x_meters"]), float(row["y_meters"])),
+                (float(nearest["x_meters"]), float(nearest["y_meters"])),
+            )
+            track_id = str(row.get("track_id") or "unknown")
+            nearest_distances.setdefault(track_id, []).append(nearest_distance)
+            totals = team_totals[team_label]
+            totals["nearest_opponent_distance_total"] = float(totals["nearest_opponent_distance_total"]) + nearest_distance
+            totals["nearest_opponent_distance_count"] = int(totals["nearest_opponent_distance_count"]) + 1
+            if nearest_distance <= 8.0:
+                if float(row["x_percent"]) >= float(nearest["x_percent"]):
+                    presser, receiver = row, nearest
+                    pressing_team = team_label
+                    pressured_team = str(nearest.get("team_label") or "unassigned")
+                else:
+                    presser, receiver = nearest, row
+                    pressing_team = str(nearest.get("team_label") or "unassigned")
+                    pressured_team = team_label
+                presser_id = str(presser.get("track_id") or "unknown")
+                receiver_id = str(receiver.get("track_id") or "unknown")
+                if presser_id in metric_by_track:
+                    metric_by_track[presser_id]["pressure_applied_count"] = (
+                        int(metric_by_track[presser_id].get("pressure_applied_count") or 0) + 1
+                    )
+                if receiver_id in metric_by_track:
+                    metric_by_track[receiver_id]["pressure_received_count"] = (
+                        int(metric_by_track[receiver_id].get("pressure_received_count") or 0) + 1
+                    )
+                team_totals.setdefault(pressing_team, {}).setdefault("pressure_events", 0)
+                team_totals[pressing_team]["pressure_events"] = int(team_totals[pressing_team]["pressure_events"]) + 1
+                if len(pressure_events) < 60:
+                    pressure_events.append(
+                        {
+                            "timestamp_seconds": timestamp,
+                            "pressing_team_label": pressing_team,
+                            "pressured_team_label": pressured_team,
+                            "presser_track_id": presser_id,
+                            "receiver_track_id": receiver_id,
+                            "distance_m": round(nearest_distance, 2),
+                            "zone": match_tracking_zone(float(receiver["x_percent"]), float(receiver["y_percent"])),
+                            "intensity": "high" if nearest_distance <= 4.0 else "moderate",
+                        }
+                    )
+            previous = previous_by_track.get(track_id)
+            if previous is not None:
+                dt = max(float(row["timestamp_seconds"]) - float(previous["timestamp_seconds"]), 0.001)
+                dx_percent = float(row["x_percent"]) - float(previous["x_percent"])
+                speed_mps = math.dist(
+                    (float(previous["x_meters"]), float(previous["y_meters"])),
+                    (float(row["x_meters"]), float(row["y_meters"])),
+                ) / dt
+                if dx_percent >= 8.0 and speed_mps >= 4.0:
+                    if track_id in metric_by_track:
+                        metric_by_track[track_id]["territorial_advance_count"] = (
+                            int(metric_by_track[track_id].get("territorial_advance_count") or 0) + 1
+                        )
+                    totals["territorial_advances"] = int(totals["territorial_advances"]) + 1
+                if speed_mps >= 5.0 and nearest_distance > 10.0:
+                    if track_id in metric_by_track:
+                        metric_by_track[track_id]["off_ball_run_count"] = (
+                            int(metric_by_track[track_id].get("off_ball_run_count") or 0) + 1
+                        )
+                    totals["off_ball_runs"] = int(totals["off_ball_runs"]) + 1
+            previous_by_track[track_id] = row
+        if len(match_phase_snapshots) < 36:
+            match_phase_snapshots.append(match_phase_snapshot(timestamp, team_rows))
+    for track_id, distances in nearest_distances.items():
+        if distances and track_id in metric_by_track:
+            metric_by_track[track_id]["average_nearest_opponent_m"] = round(sum(distances) / len(distances), 2)
+    team_phase_metrics: list[dict[str, object]] = []
+    for team_label, totals in sorted(team_totals.items()):
+        sample_count = max(int(totals.get("sample_count") or 0), 1)
+        track_ids = totals.get("track_ids")
+        nearest_count = int(totals.get("nearest_opponent_distance_count") or 0)
+        team_phase_metrics.append(
+            {
+                "team_label": team_label,
+                "track_count": len(track_ids) if isinstance(track_ids, set) else 0,
+                "sample_count": sample_count,
+                "attacking_third_percent": round(int(totals.get("attacking_samples") or 0) / sample_count * 100, 2),
+                "middle_third_percent": round(int(totals.get("middle_samples") or 0) / sample_count * 100, 2),
+                "defensive_third_percent": round(int(totals.get("defensive_samples") or 0) / sample_count * 100, 2),
+                "pressure_event_count": int(totals.get("pressure_events") or 0),
+                "off_ball_run_count": int(totals.get("off_ball_runs") or 0),
+                "territorial_advance_count": int(totals.get("territorial_advances") or 0),
+                "average_nearest_opponent_m": (
+                    round(float(totals.get("nearest_opponent_distance_total") or 0.0) / nearest_count, 2)
+                    if nearest_count
+                    else None
+                ),
+                "phase_hint": match_team_phase_hint(totals, sample_count),
+            }
+        )
+    return {
+        "team_phase_metrics": team_phase_metrics,
+        "pressure_events": pressure_events,
+        "match_phase_snapshots": match_phase_snapshots,
+    }
+
+
+def match_phase_snapshot(timestamp: float, team_rows: dict[str, list[dict[str, object]]]) -> dict[str, object]:
+    teams: list[dict[str, object]] = []
+    for team_label, rows in sorted(team_rows.items()):
+        x_values = [float(row["x_percent"]) for row in rows]
+        teams.append(
+            {
+                "team_label": team_label,
+                "player_count": len(rows),
+                "centroid_x_percent": round(sum(x_values) / len(x_values), 2) if x_values else 0.0,
+                "territory": (
+                    "attacking"
+                    if x_values and sum(x_values) / len(x_values) >= 60
+                    else "defensive"
+                    if x_values and sum(x_values) / len(x_values) <= 40
+                    else "middle"
+                ),
+            }
+        )
+    return {"timestamp_seconds": timestamp, "teams": teams}
+
+
+def match_team_phase_hint(totals: dict[str, float | int | set[str]], sample_count: int) -> str:
+    attacking = int(totals.get("attacking_samples") or 0) / sample_count
+    defensive = int(totals.get("defensive_samples") or 0) / sample_count
+    pressure = int(totals.get("pressure_events") or 0)
+    advances = int(totals.get("territorial_advances") or 0)
+    off_ball = int(totals.get("off_ball_runs") or 0)
+    if pressure >= max(sample_count * 0.25, 2):
+        return "active_pressing"
+    if attacking >= 0.45:
+        return "territorial_dominance"
+    if defensive >= 0.55:
+        return "deep_defensive_phase"
+    if advances >= 2:
+        return "direct_progression"
+    if off_ball >= 2:
+        return "off_ball_running_phase"
+    return "balanced_phase"
 
 
 def match_team_shape_hint(
@@ -8649,12 +8893,29 @@ def match_tracking_coaching_guidance(summary: dict[str, object], *, readiness_le
     ][:4]
     if low_quality:
         guidance.append(f"Manually review identities for {', '.join(low_quality)} before publishing player reports.")
+    pressure_leaders = sorted(
+        [item for item in metrics if isinstance(item, dict)],
+        key=lambda item: int(item.get("pressure_received_count") or 0),
+        reverse=True,
+    )[:3]
+    if pressure_leaders and int(pressure_leaders[0].get("pressure_received_count") or 0) > 0:
+        names = ", ".join(match_tracking_metric_label(item) for item in pressure_leaders)
+        guidance.append(f"Review first touch and scanning clips for {names}; they received the most close pressure.")
+    runners = sorted(
+        [item for item in metrics if isinstance(item, dict)],
+        key=lambda item: int(item.get("off_ball_run_count") or 0),
+        reverse=True,
+    )[:3]
+    if runners and int(runners[0].get("off_ball_run_count") or 0) > 0:
+        names = ", ".join(match_tracking_metric_label(item) for item in runners)
+        guidance.append(f"Use off-ball runs by {names} to review timing, passing lanes, and support angles.")
     return guidance or ["Tracking profile is stable enough for coach review."]
 
 
 def match_tracking_tactical_guidance(summary: dict[str, object]) -> list[str]:
     shapes = [shape for shape in list(summary.get("team_shape_metrics") or []) if isinstance(shape, dict)]
-    if not shapes:
+    phases = [phase for phase in list(summary.get("team_phase_metrics") or []) if isinstance(phase, dict)]
+    if not shapes and not phases:
         return ["Capture simultaneous player positions to derive team shape and formation guidance."]
     guidance: list[str] = []
     for shape in shapes[:4]:
@@ -8678,6 +8939,20 @@ def match_tracking_tactical_guidance(summary: dict[str, object]) -> list[str]:
             guidance.append(
                 f"{team} shape is compact around x={round(centroid_x)}%, width={round(width)}%, depth={round(depth)}%."
             )
+    for phase in phases[:4]:
+        team = str(phase.get("team_label") or "team")
+        hint = str(phase.get("phase_hint") or "")
+        pressure_count = int(phase.get("pressure_event_count") or 0)
+        off_ball = int(phase.get("off_ball_run_count") or 0)
+        attacking = float(phase.get("attacking_third_percent") or 0.0)
+        if hint == "active_pressing":
+            guidance.append(f"{team} created {pressure_count} pressure event(s); review press cover and second-ball shape.")
+        elif hint == "territorial_dominance":
+            guidance.append(f"{team} spent {round(attacking)}% of samples in the attacking third; review chance creation quality.")
+        elif hint == "deep_defensive_phase":
+            guidance.append(f"{team} spent extended time deep; rehearse outlet runs and first pass after regain.")
+        elif hint == "off_ball_running_phase":
+            guidance.append(f"{team} generated {off_ball} off-ball run(s); check whether pass timing matched movement.")
     return guidance
 
 
@@ -9445,6 +9720,9 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "coaching_guidance": summary.get("coaching_guidance", []),
         "tactical_guidance": summary.get("tactical_guidance", []),
         "team_shape_metrics": summary.get("team_shape_metrics", []),
+        "team_phase_metrics": summary.get("team_phase_metrics", []),
+        "pressure_events": summary.get("pressure_events", []),
+        "match_phase_snapshots": summary.get("match_phase_snapshots", []),
         "formation_snapshots": summary.get("formation_snapshots", []),
         "player_metrics": summary.get("player_metrics", []),
         "samples": [match_tracking_sample_read(sample) for sample in samples],

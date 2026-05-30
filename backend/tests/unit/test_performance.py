@@ -3021,6 +3021,8 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert striker["distance_m"] == 20.0
     assert striker["sprint_count"] == 1
     assert striker["work_rate_m_per_min"] == 600.0
+    assert striker["off_ball_run_count"] >= 1
+    assert striker["territorial_advance_count"] >= 1
     assert striker["tracking_quality_score"] > 0.5
     assert any("High peak speed" in flag for flag in striker["coaching_flags"])
     assert striker["dominant_zone"] == "defensive_central"
@@ -3028,6 +3030,11 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert home_shape["track_count"] == 2
     assert home_shape["average_width_percent"] == 40.0
     assert home_shape["shape_hint"] == "deep_block_shape"
+    home_phase = next(phase for phase in tracking["team_phase_metrics"] if phase["team_label"] == "Home")
+    assert home_phase["defensive_third_percent"] > 0
+    assert home_phase["territorial_advance_count"] >= 1
+    assert tracking["pressure_events"]
+    assert tracking["pressure_events"][0]["distance_m"] <= 8.0
     assert any(snapshot["team_label"] == "Home" for snapshot in tracking["formation_snapshots"])
     assert any("Home" in guidance for guidance in tracking["tactical_guidance"])
 
@@ -3103,6 +3110,7 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert report["model_policy"] == "afrolete-match-analysis-report-v1"
     assert report["summary"]["total_distance_m"] == 30.0
     assert report["summary"]["player_count"] == 3
+    assert report["summary"]["pressure_event_count"] >= 1
     assert report["player_cards"][0]["player_label"] == "Confirmed Forward"
     assert report["player_cards"][0]["high_speed_distance_m"] == 20.0
     assert any(shape["team_label"] == "Home" for shape in report["team_shape"])
@@ -3128,6 +3136,7 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert "# Tracking City player guidance" in report_text
     assert "Confirmed Forward" in report_text
     assert "## Tactical Shape" in report_text
+    assert "## Team Phase And Pressure" in report_text
     assert "## Data Quality" in report_text
 
 

@@ -25137,7 +25137,16 @@ export default function HomePage() {
                   <p>
                     {performanceMatchTrackingRun
                       ? `${performanceMatchTrackingRun.readiness_level.replaceAll("_", " ")} · identity ${Math.round(performanceMatchTrackingRun.identity_continuity_score * 100)}%`
-                      : "Quality scoring separates demo tracking from coach-ready metrics."}
+                    : "Quality scoring separates demo tracking from coach-ready metrics."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Pressure map</span>
+                  <strong>{performanceMatchTrackingRun?.pressure_events.length ?? 0} event(s)</strong>
+                  <p>
+                    {performanceMatchTrackingRun?.team_phase_metrics[0]
+                      ? `${String(performanceMatchTrackingRun.team_phase_metrics[0].team_label ?? "Team")} · ${String(performanceMatchTrackingRun.team_phase_metrics[0].phase_hint ?? "phase").replaceAll("_", " ")}`
+                      : "Pressure, off-ball runs, and territorial phase metrics appear after tracking."}
                   </p>
                 </article>
                 <article className="mini-card">
@@ -25326,6 +25335,32 @@ export default function HomePage() {
                       </div>
                     </article>
                   ))}
+                  {performanceMatchTrackingRun.team_phase_metrics.slice(0, 4).map((phase, index) => (
+                    <article key={`team-phase-${String(phase.team_label ?? index)}`} className="task-card">
+                      <div>
+                        <strong>{String(phase.team_label ?? "Team")} · {String(phase.phase_hint ?? "phase").replaceAll("_", " ")}</strong>
+                        <span>
+                          {Number(phase.pressure_event_count ?? 0)} pressures · {Number(phase.off_ball_run_count ?? 0)} off-ball run(s) ·{" "}
+                          {Number(phase.territorial_advance_count ?? 0)} territorial advances
+                        </span>
+                        <small>
+                          attacking {Math.round(Number(phase.attacking_third_percent ?? 0))}% · middle {Math.round(Number(phase.middle_third_percent ?? 0))}% · defensive {Math.round(Number(phase.defensive_third_percent ?? 0))}%
+                          {phase.average_nearest_opponent_m ? ` · nearest opponent ${Number(phase.average_nearest_opponent_m).toFixed(1)}m` : ""}
+                        </small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceMatchTrackingRun.pressure_events.slice(0, 4).map((event, index) => (
+                    <article key={`pressure-event-${index}`} className="task-card">
+                      <div>
+                        <strong>{String(event.pressing_team_label ?? "Team")} pressure · {String(event.intensity ?? "moderate")}</strong>
+                        <span>
+                          {String(event.presser_track_id ?? "presser")} closed {String(event.receiver_track_id ?? "receiver")} at {Number(event.distance_m ?? 0).toFixed(1)}m
+                        </span>
+                        <small>{Number(event.timestamp_seconds ?? 0).toFixed(1)}s · {String(event.zone ?? "unknown").replaceAll("_", " ")}</small>
+                      </div>
+                    </article>
+                  ))}
                   {performanceMatchTrackingRun.player_metrics.slice(0, 6).map((metric) => (
                     <article key={metric.track_id} className="task-card">
                       <div>
@@ -25337,6 +25372,11 @@ export default function HomePage() {
                         <small>
                           {metric.dominant_zone.replaceAll("_", " ")} · quality {Math.round(metric.tracking_quality_score * 100)}% ·{" "}
                           {metric.coaching_flags[0] ?? `${metric.sample_count} samples`}
+                        </small>
+                        <small>
+                          pressure +{metric.pressure_applied_count ?? 0}/-{metric.pressure_received_count ?? 0} ·{" "}
+                          off-ball {metric.off_ball_run_count ?? 0} · advances {metric.territorial_advance_count ?? 0}
+                          {metric.average_nearest_opponent_m ? ` · nearest opponent ${metric.average_nearest_opponent_m.toFixed(1)}m` : ""}
                         </small>
                       </div>
                       <span>

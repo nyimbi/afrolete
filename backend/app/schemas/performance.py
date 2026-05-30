@@ -607,6 +607,11 @@ class PerformanceMatchTrackingPlayerMetricRead(BaseModel):
     sprint_count: int
     explosive_effort_count: int = 0
     recovery_ratio: float = 0.0
+    pressure_applied_count: int = 0
+    pressure_received_count: int = 0
+    average_nearest_opponent_m: float | None = None
+    off_ball_run_count: int = 0
+    territorial_advance_count: int = 0
     tracking_quality_score: float = 0.0
     coaching_flags: list[str] = Field(default_factory=list)
     dominant_zone: str
@@ -640,6 +645,9 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     coaching_guidance: list[str] = Field(default_factory=list)
     tactical_guidance: list[str] = Field(default_factory=list)
     team_shape_metrics: list[dict[str, Any]] = Field(default_factory=list)
+    team_phase_metrics: list[dict[str, Any]] = Field(default_factory=list)
+    pressure_events: list[dict[str, Any]] = Field(default_factory=list)
+    match_phase_snapshots: list[dict[str, Any]] = Field(default_factory=list)
     formation_snapshots: list[dict[str, Any]] = Field(default_factory=list)
     player_metrics: list[PerformanceMatchTrackingPlayerMetricRead]
     samples: list[PerformanceMatchTrackingSampleRead]

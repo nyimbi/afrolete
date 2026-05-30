@@ -6903,6 +6903,11 @@ export type PerformanceMatchTrackingPlayerMetricRead = {
   sprint_count: number;
   explosive_effort_count: number;
   recovery_ratio: number;
+  pressure_applied_count: number;
+  pressure_received_count: number;
+  average_nearest_opponent_m: number | null;
+  off_ball_run_count: number;
+  territorial_advance_count: number;
   tracking_quality_score: number;
   coaching_flags: string[];
   dominant_zone: string;
@@ -6936,6 +6941,9 @@ export type PerformanceMatchTrackingRunRead = {
   coaching_guidance: string[];
   tactical_guidance: string[];
   team_shape_metrics: Record<string, unknown>[];
+  team_phase_metrics: Record<string, unknown>[];
+  pressure_events: Record<string, unknown>[];
+  match_phase_snapshots: Record<string, unknown>[];
   formation_snapshots: Record<string, unknown>[];
   player_metrics: PerformanceMatchTrackingPlayerMetricRead[];
   samples: PerformanceMatchTrackingSampleRead[];
