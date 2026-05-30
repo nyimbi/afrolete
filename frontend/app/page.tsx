@@ -10142,6 +10142,22 @@ export default function HomePage() {
         }),
       (task) => {
         setAgentTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
+        if (performanceMatchTrackingRun?.analysis_agent_task_id === task.id) {
+          setPerformanceMatchTrackingRun((current) => current
+            ? {
+                ...current,
+                analysis_agent_task_status: task.status,
+                analysis_agent_task_review_notes: task.review_notes
+              }
+            : current);
+          setPerformanceMatchTrackingRuns((current) => current.map((run) => run.analysis_agent_task_id === task.id
+            ? {
+                ...run,
+                analysis_agent_task_status: task.status,
+                analysis_agent_task_review_notes: task.review_notes
+              }
+            : run));
+        }
         addLog(`Agent output is ${task.status}`, task.status === "failed" ? "bad" : "good");
         if (selectedOrganizationId) {
           void loadAgentTasks(selectedOrganizationId, selectedAgentId || undefined);
@@ -27910,10 +27926,22 @@ export default function HomePage() {
                       <small>
                         {performanceMatchTrackingRun.source_provider.replaceAll("_", " ")} · {performanceMatchTrackingRun.readiness_level.replaceAll("_", " ")} · pitch {performanceMatchTrackingRun.pitch_length_m}m x {performanceMatchTrackingRun.pitch_width_m}m
                         {performanceMatchTrackingRun.calibration ? ` · calibrated ${Math.round(performanceMatchTrackingRun.calibration.quality_score * 100)}%` : " · uncalibrated"}
-                        {performanceMatchTrackingRun.analysis_agent_task_id ? ` · AI review ${performanceMatchTrackingRun.analysis_agent_task_id.slice(0, 8)}` : ""}
+                        {performanceMatchTrackingRun.analysis_agent_task_id ? ` · AI review ${performanceMatchTrackingRun.analysis_agent_task_status ?? performanceMatchTrackingRun.analysis_agent_task_id.slice(0, 8)}` : ""}
                       </small>
+                      {performanceMatchTrackingRun.analysis_agent_task_review_notes ? (
+                        <small>{performanceMatchTrackingRun.analysis_agent_task_review_notes.split("\n")[0]}</small>
+                      ) : null}
                     </div>
                     <span>
+                      {performanceMatchTrackingRun.analysis_agent_task_id ? (
+                        <button
+                          type="button"
+                          onClick={() => executeAgentTask(performanceMatchTrackingRun.analysis_agent_task_id as string)}
+                          disabled={busyAction !== null}
+                        >
+                          AI review
+                        </button>
+                      ) : null}
                       <button type="button" onClick={autoTrackOppositionMatchVideo} disabled={busyAction !== null}>Auto-track</button>
                     </span>
                   </article>

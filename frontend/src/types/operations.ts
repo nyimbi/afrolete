@@ -7142,6 +7142,8 @@ export type PerformanceMatchTrackingRunRead = {
   high_speed_distance_m: number;
   sprint_count: number;
   analysis_agent_task_id: UUID | null;
+  analysis_agent_task_status: AgentTaskStatus | null;
+  analysis_agent_task_review_notes: string | null;
   tracking_quality_score: number;
   identity_continuity_score: number;
   calibration_quality_score: number;

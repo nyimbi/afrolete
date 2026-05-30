@@ -3594,6 +3594,24 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert agent_task["task_type"] == "match_tracking_run_analysis_review"
     assert f"tracking:{tracking['id']}" in agent_task["input_ref"]
     assert "readiness:coach_ready" in agent_task["input_ref"]
+    executed_task_response = client.post(
+        f"/api/v1/agents/tasks/{tracking['analysis_agent_task_id']}/execute",
+        headers=identity_headers,
+    )
+    assert executed_task_response.status_code == 200
+    executed_task = executed_task_response.json()
+    assert executed_task["status"] == "waiting_for_review"
+    assert "pitch calibration" in executed_task["review_notes"]
+    tracking_runs_response = client.get(
+        f"/api/v1/performance/scouting/tracking-runs?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert tracking_runs_response.status_code == 200
+    tracking_after_ai_review = next(
+        run for run in tracking_runs_response.json() if run["id"] == tracking["id"]
+    )
+    assert tracking_after_ai_review["analysis_agent_task_status"] == "waiting_for_review"
+    assert "pitch calibration" in tracking_after_ai_review["analysis_agent_task_review_notes"]
     assert tracking["tracking_quality_score"] >= 0.8
     assert tracking["identity_continuity_score"] == 1.0
     assert tracking["readiness_level"] == "coach_ready"

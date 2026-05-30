@@ -16161,6 +16161,11 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
     except json.JSONDecodeError:
         summary = {}
     calibration = await db.get(PerformanceMatchPitchCalibration, run.calibration_id) if run.calibration_id else None
+    analysis_agent_task = (
+        await db.get(AgentTask, run.analysis_agent_task_id)
+        if run.analysis_agent_task_id is not None
+        else None
+    )
     return {
         "id": run.id,
         "organization_id": run.organization_id,
@@ -16181,6 +16186,10 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "high_speed_distance_m": run.high_speed_distance_m,
         "sprint_count": run.sprint_count,
         "analysis_agent_task_id": run.analysis_agent_task_id,
+        "analysis_agent_task_status": analysis_agent_task.status if analysis_agent_task is not None else None,
+        "analysis_agent_task_review_notes": (
+            analysis_agent_task.review_notes if analysis_agent_task is not None else None
+        ),
         "tracking_quality_score": summary.get("tracking_quality_score", 0.0),
         "identity_continuity_score": summary.get("identity_continuity_score", 0.0),
         "calibration_quality_score": summary.get("calibration_quality_score", 0.0),

@@ -792,6 +792,8 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     high_speed_distance_m: float
     sprint_count: int
     analysis_agent_task_id: UUID | None = None
+    analysis_agent_task_status: str | None = None
+    analysis_agent_task_review_notes: str | None = None
     tracking_quality_score: float = 0.0
     identity_continuity_score: float = 0.0
     calibration_quality_score: float = 0.0
