@@ -3009,9 +3009,17 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert tracking["max_speed_mps"] == 10.0
     assert tracking["high_speed_distance_m"] == 20.0
     assert tracking["sprint_count"] == 1
+    assert tracking["tracking_quality_score"] >= 0.8
+    assert tracking["identity_continuity_score"] == 1.0
+    assert tracking["readiness_level"] == "coach_ready"
+    assert any("coach review" in warning for warning in tracking["quality_warnings"])
+    assert any("high-speed load" in guidance for guidance in tracking["coaching_guidance"])
     striker = next(metric for metric in tracking["player_metrics"] if metric["track_id"] == "home-9")
     assert striker["distance_m"] == 20.0
     assert striker["sprint_count"] == 1
+    assert striker["work_rate_m_per_min"] == 600.0
+    assert striker["tracking_quality_score"] > 0.5
+    assert any("High peak speed" in flag for flag in striker["coaching_flags"])
     assert striker["dominant_zone"] == "defensive_central"
 
     calibrations = client.get(

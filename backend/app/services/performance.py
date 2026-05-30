@@ -841,6 +841,12 @@ async def create_match_tracking_run(
     if calibration is not None:
         summary["calibration_id"] = str(calibration.id)
         summary["calibration_quality_score"] = calibration.quality_score
+    summary = enrich_match_tracking_summary(
+        summary,
+        calibration=calibration,
+        source_provider=source_provider,
+        model_policy=model_policy,
+    )
     run = PerformanceMatchTrackingRun(
         organization_id=video_asset.organization_id,
         video_asset_id=video_asset.id,
@@ -7173,17 +7179,28 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
     total_high_speed_distance = 0.0
     total_sprints = 0
     overall_max_speed = 0.0
+    continuity_scores: list[float] = []
+    confidence_scores: list[float] = []
+    speed_spike_count = 0
     for track_id, rows in sorted(by_track.items()):
         ordered = sorted(rows, key=lambda row: (float(row["timestamp_seconds"]), int(row.get("frame_index") or 0)))
         distance = 0.0
+        low_speed_distance = 0.0
         high_speed_distance = 0.0
         sprint_count = 0
+        explosive_effort_count = 0
         max_speed = 0.0
+        continuity_hits = 0
+        segment_count = 0
+        previous_speed: float | None = None
         previous_above_sprint = False
+        track_confidences: list[float] = []
         heatmap: dict[str, int] = {}
         for index, row in enumerate(ordered):
             zone = match_tracking_zone(float(row["x_percent"]), float(row["y_percent"]))
             heatmap[zone] = heatmap.get(zone, 0) + 1
+            if row.get("confidence") is not None:
+                track_confidences.append(float(row["confidence"]))
             if index == 0:
                 if row.get("speed_mps") is not None:
                     max_speed = max(max_speed, float(row["speed_mps"]))
@@ -7196,7 +7213,19 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
             )
             speed = float(row["speed_mps"]) if row.get("speed_mps") is not None else segment_distance / dt
             distance += segment_distance
+            segment_count += 1
+            if dt <= 1.5:
+                continuity_hits += 1
+            if previous_speed is not None:
+                acceleration = (speed - previous_speed) / dt
+                if acceleration >= 2.5:
+                    explosive_effort_count += 1
+                if speed >= 12.5 or abs(acceleration) >= 6.0:
+                    speed_spike_count += 1
+            previous_speed = speed
             max_speed = max(max_speed, speed)
+            if speed < 2.0:
+                low_speed_distance += segment_distance
             if speed >= 5.5:
                 high_speed_distance += segment_distance
             above_sprint = speed >= 7.0
@@ -7205,6 +7234,19 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
             previous_above_sprint = above_sprint
         duration = max(float(ordered[-1]["timestamp_seconds"]) - float(ordered[0]["timestamp_seconds"]), 0.0)
         dominant_zone = max(heatmap.items(), key=lambda item: item[1])[0] if heatmap else "unknown"
+        continuity_score = continuity_hits / segment_count if segment_count else 0.0
+        confidence_score = sum(track_confidences) / len(track_confidences) if track_confidences else 0.65
+        work_rate = distance / (duration / 60) if duration > 0 else 0.0
+        recovery_ratio = low_speed_distance / distance if distance > 0 else 0.0
+        tracking_quality = match_tracking_player_quality_score(
+            sample_count=len(ordered),
+            duration_seconds=duration,
+            continuity_score=continuity_score,
+            confidence_score=confidence_score,
+            max_speed_mps=max_speed,
+        )
+        continuity_scores.append(continuity_score)
+        confidence_scores.append(confidence_score)
         player_metrics.append(
             {
                 "track_id": track_id,
@@ -7216,8 +7258,22 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
                 "distance_m": round(distance, 2),
                 "average_speed_mps": round(distance / duration, 3) if duration > 0 else 0.0,
                 "max_speed_mps": round(max_speed, 3),
+                "work_rate_m_per_min": round(work_rate, 2),
                 "high_speed_distance_m": round(high_speed_distance, 2),
                 "sprint_count": sprint_count,
+                "explosive_effort_count": explosive_effort_count,
+                "recovery_ratio": round(recovery_ratio, 3),
+                "tracking_quality_score": round(tracking_quality, 3),
+                "coaching_flags": match_tracking_player_coaching_flags(
+                    sample_count=len(ordered),
+                    duration_seconds=duration,
+                    distance_m=distance,
+                    max_speed_mps=max_speed,
+                    high_speed_distance_m=high_speed_distance,
+                    sprint_count=sprint_count,
+                    recovery_ratio=recovery_ratio,
+                    tracking_quality_score=tracking_quality,
+                ),
                 "dominant_zone": dominant_zone,
                 "heatmap": heatmap,
             }
@@ -7226,6 +7282,8 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         total_high_speed_distance += high_speed_distance
         total_sprints += sprint_count
         overall_max_speed = max(overall_max_speed, max_speed)
+    identity_continuity_score = sum(continuity_scores) / len(continuity_scores) if continuity_scores else 0.0
+    average_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
     return {
         "sample_count": len(samples),
         "player_count": len(player_metrics),
@@ -7233,6 +7291,9 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         "max_speed_mps": round(overall_max_speed, 3),
         "high_speed_distance_m": round(total_high_speed_distance, 2),
         "sprint_count": total_sprints,
+        "identity_continuity_score": round(identity_continuity_score, 3),
+        "average_detection_confidence": round(average_confidence, 3),
+        "speed_spike_count": speed_spike_count,
         "player_metrics": player_metrics,
     }
 
@@ -7241,6 +7302,188 @@ def match_tracking_zone(x_percent: float, y_percent: float) -> str:
     third = "defensive" if x_percent < 33.33 else "middle" if x_percent < 66.66 else "attacking"
     channel = "left" if y_percent < 33.33 else "central" if y_percent < 66.66 else "right"
     return f"{third}_{channel}"
+
+
+def match_tracking_player_quality_score(
+    *,
+    sample_count: int,
+    duration_seconds: float,
+    continuity_score: float,
+    confidence_score: float,
+    max_speed_mps: float,
+) -> float:
+    sample_score = min(sample_count / 12, 1.0)
+    duration_score = min(duration_seconds / 30, 1.0)
+    plausible_speed_score = 1.0 if max_speed_mps <= 11.5 else 0.55
+    score = (
+        sample_score * 0.25
+        + duration_score * 0.15
+        + continuity_score * 0.25
+        + confidence_score * 0.25
+        + plausible_speed_score * 0.10
+    )
+    return max(0.0, min(score, 1.0))
+
+
+def match_tracking_player_coaching_flags(
+    *,
+    sample_count: int,
+    duration_seconds: float,
+    distance_m: float,
+    max_speed_mps: float,
+    high_speed_distance_m: float,
+    sprint_count: int,
+    recovery_ratio: float,
+    tracking_quality_score: float,
+) -> list[str]:
+    flags: list[str] = []
+    if tracking_quality_score < 0.55:
+        flags.append("Review tracking identity before using this player's load numbers.")
+    if sample_count < 6 or duration_seconds < 10:
+        flags.append("Capture a longer segment for reliable match-load comparison.")
+    if max_speed_mps >= 8.5:
+        flags.append("High peak speed: inspect sprint mechanics and deceleration posture.")
+    if sprint_count >= 3 or high_speed_distance_m >= max(distance_m * 0.35, 40.0):
+        flags.append("High repeated-sprint demand: plan recovery and substitution windows.")
+    if distance_m > 0 and recovery_ratio < 0.12 and high_speed_distance_m > 0:
+        flags.append("Limited low-speed recovery between efforts.")
+    if not flags:
+        flags.append("Tracking profile is stable enough for coach review.")
+    return flags
+
+
+def enrich_match_tracking_summary(
+    summary: dict[str, object],
+    *,
+    calibration: PerformanceMatchPitchCalibration | None,
+    source_provider: str,
+    model_policy: str,
+) -> dict[str, object]:
+    calibration_quality = calibration.quality_score if calibration is not None else 0.0
+    identity_continuity = float(summary.get("identity_continuity_score") or 0.0)
+    detection_confidence = float(summary.get("average_detection_confidence") or 0.0)
+    player_count = int(summary.get("player_count") or 0)
+    sample_count = int(summary.get("sample_count") or 0)
+    speed_spikes = int(summary.get("speed_spike_count") or 0)
+    provider_bonus = 0.15 if "import" in source_provider or "provider" in source_provider else 0.0
+    tracking_quality = max(
+        0.0,
+        min(
+            1.0,
+            identity_continuity * 0.28
+            + detection_confidence * 0.18
+            + calibration_quality * 0.24
+            + min(sample_count / max(player_count * 12, 12), 1.0) * 0.15
+            + min(player_count / 22, 1.0) * 0.10
+            + provider_bonus,
+        ),
+    )
+    if speed_spikes:
+        tracking_quality = max(0.0, tracking_quality - min(speed_spikes * 0.04, 0.2))
+    readiness_level = "coach_ready"
+    if tracking_quality < 0.55:
+        readiness_level = "demo_only"
+    elif tracking_quality < 0.72:
+        readiness_level = "coach_review_required"
+    elif calibration is None:
+        readiness_level = "calibration_required"
+    quality_warnings = match_tracking_quality_warnings(
+        calibration=calibration,
+        model_policy=model_policy,
+        readiness_level=readiness_level,
+        identity_continuity=identity_continuity,
+        player_count=player_count,
+        speed_spike_count=speed_spikes,
+    )
+    coaching_guidance = match_tracking_coaching_guidance(summary, readiness_level=readiness_level)
+    return {
+        **summary,
+        "tracking_quality_score": round(tracking_quality, 3),
+        "calibration_quality_score": round(calibration_quality, 3),
+        "readiness_level": readiness_level,
+        "quality_warnings": quality_warnings,
+        "coaching_guidance": coaching_guidance,
+    }
+
+
+def match_tracking_quality_warnings(
+    *,
+    calibration: PerformanceMatchPitchCalibration | None,
+    model_policy: str,
+    readiness_level: str,
+    identity_continuity: float,
+    player_count: int,
+    speed_spike_count: int,
+) -> list[str]:
+    warnings: list[str] = []
+    if calibration is None:
+        warnings.append("No pitch calibration is attached; distance and speed are frame-normalized estimates.")
+    elif calibration.quality_score < 0.75:
+        warnings.append("Pitch calibration quality is low; review control points before trusting distance metrics.")
+    if "opencv-background-subtraction" in model_policy:
+        warnings.append("Automatic tracking uses motion segmentation and should be reviewed before coach decisions.")
+    if identity_continuity < 0.65:
+        warnings.append("Track continuity is weak; occlusions or camera cuts may have changed player identities.")
+    if player_count < 10:
+        warnings.append("Fewer than ten players were tracked; treat team-level load as partial footage.")
+    if speed_spike_count:
+        warnings.append("Implausible speed or acceleration spikes were detected and reduce analytics confidence.")
+    if readiness_level == "coach_ready":
+        warnings.append("Tracking quality is sufficient for coach review, subject to normal video context checks.")
+    return warnings
+
+
+def match_tracking_coaching_guidance(summary: dict[str, object], *, readiness_level: str) -> list[str]:
+    metrics = list(summary.get("player_metrics") or [])
+    guidance: list[str] = []
+    if readiness_level != "coach_ready":
+        guidance.append("Use this run to guide video review first; confirm identities before making selection decisions.")
+    if not metrics:
+        return guidance or ["No player metrics are available yet."]
+    high_speed_leaders = sorted(
+        metrics,
+        key=lambda item: float(item.get("high_speed_distance_m") or 0.0) if isinstance(item, dict) else 0.0,
+        reverse=True,
+    )[:3]
+    sprint_leaders = sorted(
+        metrics,
+        key=lambda item: int(item.get("sprint_count") or 0) if isinstance(item, dict) else 0,
+        reverse=True,
+    )[:3]
+    work_rate_leaders = sorted(
+        metrics,
+        key=lambda item: float(item.get("work_rate_m_per_min") or 0.0) if isinstance(item, dict) else 0.0,
+        reverse=True,
+    )[:3]
+    if high_speed_leaders and isinstance(high_speed_leaders[0], dict):
+        if float(high_speed_leaders[0].get("high_speed_distance_m") or 0.0) > 0:
+            names = ", ".join(match_tracking_metric_label(item) for item in high_speed_leaders)
+            guidance.append(
+                f"Review high-speed load for {names}; pair sprint exposure with recovery and hamstring monitoring."
+            )
+    if sprint_leaders and isinstance(sprint_leaders[0], dict):
+        if int(sprint_leaders[0].get("sprint_count") or 0) > 0:
+            names = ", ".join(match_tracking_metric_label(item) for item in sprint_leaders)
+            guidance.append(f"Inspect repeated-sprint sequences for {names}; check pressing triggers and substitution timing.")
+    if work_rate_leaders and isinstance(work_rate_leaders[0], dict):
+        if float(work_rate_leaders[0].get("work_rate_m_per_min") or 0.0) > 0:
+            names = ", ".join(match_tracking_metric_label(item) for item in work_rate_leaders)
+            guidance.append(f"Use work-rate leaders {names} as the first review queue for tactical role load.")
+    low_quality = [
+        match_tracking_metric_label(item)
+        for item in metrics
+        if isinstance(item, dict) and float(item.get("tracking_quality_score") or 0.0) < 0.55
+    ][:4]
+    if low_quality:
+        guidance.append(f"Manually review identities for {', '.join(low_quality)} before publishing player reports.")
+    return guidance or ["Tracking profile is stable enough for coach review."]
+
+
+def match_tracking_metric_label(metric: object) -> str:
+    item = metric if isinstance(metric, dict) else {}
+    label = item.get("player_label") or item.get("track_id") or "tracked player"
+    jersey = item.get("jersey_number")
+    return f"{label} #{jersey}" if jersey else str(label)
 
 
 async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackingRun) -> dict[str, object]:
@@ -7281,6 +7524,12 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "max_speed_mps": run.max_speed_mps,
         "high_speed_distance_m": run.high_speed_distance_m,
         "sprint_count": run.sprint_count,
+        "tracking_quality_score": summary.get("tracking_quality_score", 0.0),
+        "identity_continuity_score": summary.get("identity_continuity_score", 0.0),
+        "calibration_quality_score": summary.get("calibration_quality_score", 0.0),
+        "readiness_level": summary.get("readiness_level", "unknown"),
+        "quality_warnings": summary.get("quality_warnings", []),
+        "coaching_guidance": summary.get("coaching_guidance", []),
         "player_metrics": summary.get("player_metrics", []),
         "samples": [match_tracking_sample_read(sample) for sample in samples],
         "calibration": match_pitch_calibration_read(calibration) if calibration is not None else None,

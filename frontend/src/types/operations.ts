@@ -6898,8 +6898,13 @@ export type PerformanceMatchTrackingPlayerMetricRead = {
   distance_m: number;
   average_speed_mps: number;
   max_speed_mps: number;
+  work_rate_m_per_min: number;
   high_speed_distance_m: number;
   sprint_count: number;
+  explosive_effort_count: number;
+  recovery_ratio: number;
+  tracking_quality_score: number;
+  coaching_flags: string[];
   dominant_zone: string;
   heatmap: Record<string, number>;
 };
@@ -6908,6 +6913,7 @@ export type PerformanceMatchTrackingRunRead = {
   id: UUID;
   organization_id: UUID;
   video_asset_id: UUID;
+  calibration_id: UUID | null;
   team_id: UUID | null;
   event_id: UUID | null;
   created_by_person_id: UUID | null;
@@ -6922,6 +6928,12 @@ export type PerformanceMatchTrackingRunRead = {
   max_speed_mps: number;
   high_speed_distance_m: number;
   sprint_count: number;
+  tracking_quality_score: number;
+  identity_continuity_score: number;
+  calibration_quality_score: number;
+  readiness_level: string;
+  quality_warnings: string[];
+  coaching_guidance: string[];
   player_metrics: PerformanceMatchTrackingPlayerMetricRead[];
   samples: PerformanceMatchTrackingSampleRead[];
   calibration: PerformanceMatchPitchCalibrationRead | null;

@@ -24478,6 +24478,15 @@ export default function HomePage() {
                   </p>
                 </article>
                 <article className="mini-card">
+                  <span className="muted">Video confidence</span>
+                  <strong>{performanceMatchTrackingRun ? `${Math.round(performanceMatchTrackingRun.tracking_quality_score * 100)}%` : "pending"}</strong>
+                  <p>
+                    {performanceMatchTrackingRun
+                      ? `${performanceMatchTrackingRun.readiness_level.replaceAll("_", " ")} · identity ${Math.round(performanceMatchTrackingRun.identity_continuity_score * 100)}%`
+                      : "Quality scoring separates demo tracking from coach-ready metrics."}
+                  </p>
+                </article>
+                <article className="mini-card">
                   <span className="muted">Calibration</span>
                   <strong>{performanceMatchPitchCalibration ? `${Math.round(performanceMatchPitchCalibration.quality_score * 100)}%` : "none"}</strong>
                   <p>
@@ -24521,20 +24530,41 @@ export default function HomePage() {
                         {Math.round(performanceMatchTrackingRun.high_speed_distance_m)}m high-speed
                       </span>
                       <small>
-                        {performanceMatchTrackingRun.source_provider.replaceAll("_", " ")} · pitch {performanceMatchTrackingRun.pitch_length_m}m x {performanceMatchTrackingRun.pitch_width_m}m
+                        {performanceMatchTrackingRun.source_provider.replaceAll("_", " ")} · {performanceMatchTrackingRun.readiness_level.replaceAll("_", " ")} · pitch {performanceMatchTrackingRun.pitch_length_m}m x {performanceMatchTrackingRun.pitch_width_m}m
                         {performanceMatchTrackingRun.calibration ? ` · calibrated ${Math.round(performanceMatchTrackingRun.calibration.quality_score * 100)}%` : " · uncalibrated"}
                       </small>
                     </div>
                   </article>
+                  {performanceMatchTrackingRun.coaching_guidance.slice(0, 4).map((guidance, index) => (
+                    <article key={`tracking-guidance-${index}`} className="task-card">
+                      <div>
+                        <strong>Coach guidance</strong>
+                        <span>{guidance}</span>
+                        <small>Tracking quality {Math.round(performanceMatchTrackingRun.tracking_quality_score * 100)}% · continuity {Math.round(performanceMatchTrackingRun.identity_continuity_score * 100)}%</small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceMatchTrackingRun.quality_warnings.slice(0, 4).map((warning, index) => (
+                    <article key={`tracking-warning-${index}`} className="task-card">
+                      <div>
+                        <strong>Review note</strong>
+                        <span>{warning}</span>
+                        <small>{performanceMatchTrackingRun.model_policy}</small>
+                      </div>
+                    </article>
+                  ))}
                   {performanceMatchTrackingRun.player_metrics.slice(0, 6).map((metric) => (
                     <article key={metric.track_id} className="task-card">
                       <div>
                         <strong>{metric.player_label ?? metric.track_id} · {metric.team_label ?? "unassigned"}</strong>
                         <span>
                           {Math.round(metric.distance_m)}m · max {metric.max_speed_mps.toFixed(1)} m/s ·{" "}
-                          {Math.round(metric.high_speed_distance_m)}m high-speed · {metric.sprint_count} sprint(s)
+                          {Math.round(metric.high_speed_distance_m)}m high-speed · {metric.sprint_count} sprint(s) · {Math.round(metric.work_rate_m_per_min)} m/min
                         </span>
-                        <small>{metric.dominant_zone.replaceAll("_", " ")} · {metric.sample_count} samples</small>
+                        <small>
+                          {metric.dominant_zone.replaceAll("_", " ")} · quality {Math.round(metric.tracking_quality_score * 100)}% ·{" "}
+                          {metric.coaching_flags[0] ?? `${metric.sample_count} samples`}
+                        </small>
                       </div>
                     </article>
                   ))}

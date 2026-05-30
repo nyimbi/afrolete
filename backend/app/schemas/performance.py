@@ -602,8 +602,13 @@ class PerformanceMatchTrackingPlayerMetricRead(BaseModel):
     distance_m: float
     average_speed_mps: float
     max_speed_mps: float
+    work_rate_m_per_min: float = 0.0
     high_speed_distance_m: float
     sprint_count: int
+    explosive_effort_count: int = 0
+    recovery_ratio: float = 0.0
+    tracking_quality_score: float = 0.0
+    coaching_flags: list[str] = Field(default_factory=list)
     dominant_zone: str
     heatmap: dict[str, int]
 
@@ -627,6 +632,12 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     max_speed_mps: float
     high_speed_distance_m: float
     sprint_count: int
+    tracking_quality_score: float = 0.0
+    identity_continuity_score: float = 0.0
+    calibration_quality_score: float = 0.0
+    readiness_level: str = "unknown"
+    quality_warnings: list[str] = Field(default_factory=list)
+    coaching_guidance: list[str] = Field(default_factory=list)
     player_metrics: list[PerformanceMatchTrackingPlayerMetricRead]
     samples: list[PerformanceMatchTrackingSampleRead]
     calibration: PerformanceMatchPitchCalibrationRead | None = None
