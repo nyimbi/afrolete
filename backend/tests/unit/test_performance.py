@@ -3914,6 +3914,23 @@ def test_match_tracking_provider_webhook_is_signed_and_replay_safe(
     )
     assert runs.status_code == 200
     assert len(runs.json()) == 1
+
+    audit_response = client.get(
+        f"/api/v1/performance/scouting/tracking-provider-ingests?organization_id={organization['id']}"
+        f"&video_asset_id={video_asset['id']}",
+        headers=identity_headers,
+    )
+    assert audit_response.status_code == 200
+    audit_rows = audit_response.json()
+    assert len(audit_rows) == 1
+    assert audit_rows[0]["source_provider"] == "camera_bytetrack"
+    assert audit_rows[0]["external_event_id"] == payload["external_event_id"]
+    assert audit_rows[0]["tracking_run_id"] == ingest["tracking_run_id"]
+    assert audit_rows[0]["signature_required"] is True
+    assert audit_rows[0]["signature_validated"] is True
+    assert audit_rows[0]["sample_count"] == 4
+    assert audit_rows[0]["player_count"] == 1
+    assert audit_rows[0]["payload_hash"]
     performance_service.get_settings.cache_clear()
 
 

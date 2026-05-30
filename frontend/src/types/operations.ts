@@ -7173,6 +7173,25 @@ export type PerformanceMatchTrackingProviderImportCreate = {
   quality_warnings?: string[];
 };
 
+export type PerformanceMatchTrackingProviderIngestEventRead = {
+  id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  tracking_run_id: UUID | null;
+  team_id: UUID | null;
+  event_id: UUID | null;
+  source_provider: string;
+  external_event_id: string;
+  payload_hash: string;
+  received_at: string;
+  signature_required: boolean;
+  signature_validated: boolean;
+  sample_count: number;
+  player_count: number;
+  status: string;
+  created_at: string;
+};
+
 export type PerformanceMatchTrackingIdentityReviewRead = {
   id: UUID;
   organization_id: UUID;

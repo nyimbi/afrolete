@@ -821,6 +821,25 @@ class PerformanceMatchTrackingProviderWebhookRead(BaseModel):
     tracking_run: PerformanceMatchTrackingRunRead | None = None
 
 
+class PerformanceMatchTrackingProviderIngestEventRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    tracking_run_id: UUID | None
+    team_id: UUID | None
+    event_id: UUID | None
+    source_provider: str
+    external_event_id: str
+    payload_hash: str
+    received_at: datetime
+    signature_required: bool
+    signature_validated: bool
+    sample_count: int
+    player_count: int
+    status: str
+    created_at: datetime
+
+
 class PerformanceMatchTrackingIdentityReviewCreate(BaseModel):
     track_id: str = Field(min_length=1, max_length=120)
     person_id: UUID | None = None

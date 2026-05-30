@@ -65,6 +65,7 @@ from app.schemas.performance import (
     PerformanceMatchTrackingIdentityReviewCreate,
     PerformanceMatchTrackingIdentityReviewRead,
     PerformanceMatchTrackingIdentityReviewResultRead,
+    PerformanceMatchTrackingProviderIngestEventRead,
     PerformanceMatchTrackingProviderImportCreate,
     PerformanceMatchTrackingProviderWebhookCreate,
     PerformanceMatchTrackingProviderWebhookRead,
@@ -163,11 +164,13 @@ from app.services.performance import (
     list_performance_highlight_reel_exports,
     list_metric_definitions,
     list_match_tracking_identity_reviews,
+    list_match_tracking_provider_ingest_events,
     list_match_tracking_runs,
     list_match_pitch_calibrations,
     list_performance_match_analysis_reports,
     match_pitch_calibration_read,
     match_analysis_report_read,
+    match_tracking_provider_ingest_event_read,
     match_tracking_identity_review_read,
     highlight_reel_read,
     highlight_reel_export_read,
@@ -1146,6 +1149,31 @@ async def list_match_tracking_runs_route(
             organization_id,
             authz,
             video_asset_id=video_asset_id,
+        )
+    ]
+
+
+@router.get(
+    "/scouting/tracking-provider-ingests",
+    response_model=list[PerformanceMatchTrackingProviderIngestEventRead],
+)
+async def list_match_tracking_provider_ingest_events_route(
+    organization_id: UUID = Query(),
+    video_asset_id: UUID | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=100),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMatchTrackingProviderIngestEventRead]:
+    return [
+        PerformanceMatchTrackingProviderIngestEventRead(**match_tracking_provider_ingest_event_read(ingest_event))
+        for ingest_event in await list_match_tracking_provider_ingest_events(
+            db,
+            identity,
+            organization_id,
+            authz,
+            video_asset_id=video_asset_id,
+            limit=limit,
         )
     ]
 

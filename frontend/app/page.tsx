@@ -379,6 +379,7 @@ import type {
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchAnalysisReportRead,
   PerformanceMatchPitchCalibrationRead,
+  PerformanceMatchTrackingProviderIngestEventRead,
   PerformanceMatchTrackingProviderImportCreate,
   PerformanceMatchTrackingRunCreate,
   PerformanceMatchTrackingIdentityReviewRead,
@@ -1841,6 +1842,8 @@ export default function HomePage() {
     useState<PerformanceMatchTrackingRunRead[]>([]);
   const [performanceMatchTrackingRun, setPerformanceMatchTrackingRun] =
     useState<PerformanceMatchTrackingRunRead | null>(null);
+  const [performanceMatchTrackingProviderIngests, setPerformanceMatchTrackingProviderIngests] =
+    useState<PerformanceMatchTrackingProviderIngestEventRead[]>([]);
   const [performanceMatchTrackingIdentityReviews, setPerformanceMatchTrackingIdentityReviews] =
     useState<PerformanceMatchTrackingIdentityReviewRead[]>([]);
   const [performanceMatchAnalysisReports, setPerformanceMatchAnalysisReports] =
@@ -3910,6 +3913,7 @@ export default function HomePage() {
       videoData,
       reportData,
       trackingData,
+      trackingProviderIngestData,
       trackingIdentityReviewData,
       matchAnalysisReportData,
       calibrationData,
@@ -3928,6 +3932,10 @@ export default function HomePage() {
       ),
       apiRequest<PerformanceMatchTrackingRunRead[]>(
         `/performance/scouting/tracking-runs?${params.toString()}`,
+        { identity }
+      ),
+      apiRequest<PerformanceMatchTrackingProviderIngestEventRead[]>(
+        `/performance/scouting/tracking-provider-ingests?${params.toString()}`,
         { identity }
       ),
       apiRequest<PerformanceMatchTrackingIdentityReviewRead[]>(
@@ -3962,6 +3970,7 @@ export default function HomePage() {
     setOppositionScoutingVideos(videoData);
     setOppositionScoutingReports(reportData);
     setPerformanceMatchTrackingRuns(trackingData);
+    setPerformanceMatchTrackingProviderIngests(trackingProviderIngestData);
     setPerformanceMatchTrackingIdentityReviews(trackingIdentityReviewData);
     setPerformanceMatchAnalysisReports(matchAnalysisReportData);
     setPerformanceMatchPitchCalibrations(calibrationData);
@@ -5080,6 +5089,7 @@ export default function HomePage() {
       setOppositionScoutingReport(null);
       setPerformanceMatchTrackingRuns([]);
       setPerformanceMatchTrackingRun(null);
+      setPerformanceMatchTrackingProviderIngests([]);
       setPerformanceMatchTrackingIdentityReviews([]);
       setPerformanceMatchAnalysisReports([]);
       setPerformanceMatchAnalysisReport(null);
@@ -18713,6 +18723,10 @@ export default function HomePage() {
   const consentUrl = consentRequest?.one_time_token
     ? `${window.location.origin}/consent/${consentRequest.one_time_token}`
     : "";
+  const visibleMatchTrackingProviderIngests = performanceMatchTrackingProviderIngests.filter(
+    (ingest) => !oppositionScoutingVideo || ingest.video_asset_id === oppositionScoutingVideo.id
+  );
+  const latestMatchTrackingProviderIngest = visibleMatchTrackingProviderIngests[0] ?? null;
 
   return (
     <main className="app-shell">
@@ -25650,6 +25664,17 @@ export default function HomePage() {
                   </p>
                 </article>
                 <article className="mini-card">
+                  <span className="muted">Provider callbacks</span>
+                  <strong>{visibleMatchTrackingProviderIngests.length} ingest(s)</strong>
+                  <p>
+                    {latestMatchTrackingProviderIngest
+                      ? `${latestMatchTrackingProviderIngest.source_provider.replaceAll("_", " ")} · ${
+                          latestMatchTrackingProviderIngest.signature_validated ? "signed" : "unsigned/local"
+                        }`
+                      : "Signed provider callback audits appear here for camera, GPS/video, and tracker retries."}
+                  </p>
+                </article>
+                <article className="mini-card">
                   <span className="muted">Video confidence</span>
                   <strong>{performanceMatchTrackingRun ? `${Math.round(performanceMatchTrackingRun.tracking_quality_score * 100)}%` : "pending"}</strong>
                   <p>
@@ -25761,6 +25786,45 @@ export default function HomePage() {
                             performanceMatchAnalysisReports.find((report) => report.video_asset_id === video.id) ?? null
                           );
                         }} disabled={busyAction !== null}>Select</button>
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+              {visibleMatchTrackingProviderIngests.length ? (
+                <div className="task-list">
+                  {visibleMatchTrackingProviderIngests.slice(0, 5).map((ingest) => (
+                    <article key={ingest.id} className="task-card">
+                      <div>
+                        <strong>{ingest.source_provider.replaceAll("_", " ")} · {ingest.status}</strong>
+                        <span>
+                          {ingest.sample_count} samples · {ingest.player_count} players ·{" "}
+                          {ingest.signature_required
+                            ? ingest.signature_validated
+                              ? "signature validated"
+                              : "signature failed"
+                            : "signature not required"}
+                        </span>
+                        <small>
+                          {ingest.external_event_id} · {new Date(ingest.received_at).toLocaleString()} ·{" "}
+                          {ingest.payload_hash.slice(0, 10)}
+                        </small>
+                      </div>
+                      <span>
+                        {ingest.tracking_run_id ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const run = performanceMatchTrackingRuns.find((item) => item.id === ingest.tracking_run_id);
+                              if (run) {
+                                setPerformanceMatchTrackingRun(run);
+                              }
+                            }}
+                            disabled={busyAction !== null}
+                          >
+                            Open run
+                          </button>
+                        ) : null}
                       </span>
                     </article>
                   ))}

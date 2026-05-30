@@ -1191,6 +1191,33 @@ async def list_match_tracking_runs(
     return [await match_tracking_run_read(db, run) for run in runs]
 
 
+async def list_match_tracking_provider_ingest_events(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    *,
+    video_asset_id: UUID | None = None,
+    limit: int = 25,
+) -> list[PerformanceMatchTrackingProviderIngestEvent]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceMatchTrackingProviderIngestEvent).where(
+        PerformanceMatchTrackingProviderIngestEvent.organization_id == organization_id
+    )
+    if video_asset_id is not None:
+        statement = statement.where(PerformanceMatchTrackingProviderIngestEvent.video_asset_id == video_asset_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    PerformanceMatchTrackingProviderIngestEvent.received_at.desc(),
+                    PerformanceMatchTrackingProviderIngestEvent.created_at.desc(),
+                ).limit(limit)
+            )
+        ).all()
+    )
+
+
 async def create_match_tracking_identity_review(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3802,6 +3829,29 @@ def wearable_webhook_result(
         "observation_ids": observation_ids,
         "payload_hash": ingest_event.payload_hash,
         "received_at": ingest_event.received_at,
+    }
+
+
+def match_tracking_provider_ingest_event_read(
+    ingest_event: PerformanceMatchTrackingProviderIngestEvent,
+) -> dict[str, object]:
+    return {
+        "id": ingest_event.id,
+        "organization_id": ingest_event.organization_id,
+        "video_asset_id": ingest_event.video_asset_id,
+        "tracking_run_id": ingest_event.tracking_run_id,
+        "team_id": ingest_event.team_id,
+        "event_id": ingest_event.event_id,
+        "source_provider": ingest_event.provider,
+        "external_event_id": ingest_event.external_event_id,
+        "payload_hash": ingest_event.payload_hash,
+        "received_at": ingest_event.received_at,
+        "signature_required": ingest_event.signature_required,
+        "signature_validated": ingest_event.signature_validated,
+        "sample_count": ingest_event.sample_count,
+        "player_count": ingest_event.player_count,
+        "status": ingest_event.status,
+        "created_at": ingest_event.created_at,
     }
 
 
