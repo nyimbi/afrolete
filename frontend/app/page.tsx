@@ -350,6 +350,10 @@ import type {
   CommercialInvoiceProviderCheckoutRead,
   CommercialSettlementPayoutRead,
   CommercialSettlementPayoutCallbackRead,
+  CoachEducationActivityRead,
+  CoachEducationCatalogRead,
+  CoachEducationDashboardRead,
+  CoachEducationEnrollmentRead,
   OppositionScoutingReportRead,
   OppositionScoutingVideoAssetRead,
   PerformanceAchievementAwardRead,
@@ -1996,6 +2000,10 @@ export default function HomePage() {
   const [trainingAvailability, setTrainingAvailability] = useState<TrainingAvailabilityRead | null>(null);
   const [generatedTrainingPlan, setGeneratedTrainingPlan] = useState<GeneratedTrainingPlanRead | null>(null);
   const [trainingCommandCenter, setTrainingCommandCenter] = useState<TrainingCommandCenterRead | null>(null);
+  const [coachEducationCatalog, setCoachEducationCatalog] = useState<CoachEducationCatalogRead | null>(null);
+  const [coachEducationDashboard, setCoachEducationDashboard] = useState<CoachEducationDashboardRead | null>(null);
+  const [coachEducationEnrollments, setCoachEducationEnrollments] = useState<CoachEducationEnrollmentRead[]>([]);
+  const [coachEducationActivity, setCoachEducationActivity] = useState<CoachEducationActivityRead | null>(null);
   const [volunteerProfiles, setVolunteerProfiles] = useState<VolunteerProfileRead[]>([]);
   const [volunteerOpportunities, setVolunteerOpportunities] = useState<VolunteerOpportunityRead[]>([]);
   const [volunteerAssignments, setVolunteerAssignments] = useState<VolunteerAssignmentRead[]>([]);
@@ -2282,6 +2290,7 @@ export default function HomePage() {
   const [selectedObservationId, setSelectedObservationId] = useState("");
   const [selectedTrainingPlanId, setSelectedTrainingPlanId] = useState("");
   const [selectedTrainingSessionId, setSelectedTrainingSessionId] = useState("");
+  const [selectedCoachEducationEnrollmentId, setSelectedCoachEducationEnrollmentId] = useState("");
   const [selectedVolunteerProfileId, setSelectedVolunteerProfileId] = useState("");
   const [selectedVolunteerOpportunityId, setSelectedVolunteerOpportunityId] = useState("");
   const [selectedVolunteerAssignmentId, setSelectedVolunteerAssignmentId] = useState("");
@@ -2797,6 +2806,15 @@ export default function HomePage() {
     completed: true,
     feedback: "Felt strong after warm-up; slight tightness near the end.",
     coach_notes: "Keep next session technical if soreness rises tomorrow."
+  });
+  const [coachEducationForm, setCoachEducationForm] = useState({
+    program_key: "foundation_coach",
+    role: "head_coach",
+    skill_level: "intermediate",
+    learning_style: "hands_on",
+    module_key: "platform_basics",
+    score_percent: 92,
+    evidence_ref: "coach-lab://platform-basics"
   });
   const [volunteerForm, setVolunteerForm] = useState({
     display_name: "Maria Volunteer",
@@ -3517,6 +3535,10 @@ export default function HomePage() {
   const selectedTrainingSession = useMemo(
     () => trainingSessions.find((sessionPlan) => sessionPlan.id === selectedTrainingSessionId) ?? null,
     [trainingSessions, selectedTrainingSessionId]
+  );
+  const selectedCoachEducationEnrollment = useMemo(
+    () => coachEducationEnrollments.find((enrollment) => enrollment.id === selectedCoachEducationEnrollmentId) ?? null,
+    [coachEducationEnrollments, selectedCoachEducationEnrollmentId]
   );
   const selectedVolunteerProfile = useMemo(
     () => volunteerProfiles.find((profile) => profile.id === selectedVolunteerProfileId) ?? null,
@@ -4273,7 +4295,7 @@ export default function HomePage() {
 
   const loadTraining = useCallback(async (organizationId: string, teamId?: string) => {
     const teamQuery = teamId ? `&team_id=${teamId}` : "";
-    const [drills, plans, sessions, commandCenter] = await Promise.all([
+    const [drills, plans, sessions, commandCenter, coachCatalog, coachDashboard, coachEnrollments] = await Promise.all([
       apiRequest<TrainingDrillRead[]>(`/training/drills?organization_id=${organizationId}`),
       apiRequest<TrainingPlanRead[]>(`/training/plans?organization_id=${organizationId}${teamQuery}`),
       apiRequest<TrainingSessionPlanRead[]>(
@@ -4282,17 +4304,32 @@ export default function HomePage() {
       apiRequest<TrainingCommandCenterRead>(
         `/training/command-center?organization_id=${organizationId}${teamQuery}`,
         { identity }
+      ),
+      apiRequest<CoachEducationCatalogRead>("/coach-education/catalog", { identity }),
+      apiRequest<CoachEducationDashboardRead>(
+        `/coach-education/dashboard?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<CoachEducationEnrollmentRead[]>(
+        `/coach-education/enrollments?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setTrainingDrills(drills);
     setTrainingPlans(plans);
     setTrainingSessions(sessions);
     setTrainingCommandCenter(commandCenter);
+    setCoachEducationCatalog(coachCatalog);
+    setCoachEducationDashboard(coachDashboard);
+    setCoachEducationEnrollments(coachEnrollments);
     setSelectedTrainingPlanId((current) =>
       plans.some((plan) => plan.id === current) ? current : plans[0]?.id ?? ""
     );
     setSelectedTrainingSessionId((current) =>
       sessions.some((sessionPlan) => sessionPlan.id === current) ? current : sessions[0]?.id ?? ""
+    );
+    setSelectedCoachEducationEnrollmentId((current) =>
+      coachEnrollments.some((enrollment) => enrollment.id === current) ? current : coachEnrollments[0]?.id ?? ""
     );
   }, [identity]);
 
@@ -5201,6 +5238,11 @@ export default function HomePage() {
       setTrainingAvailability(null);
       setGeneratedTrainingPlan(null);
       setTrainingCommandCenter(null);
+      setCoachEducationCatalog(null);
+      setCoachEducationDashboard(null);
+      setCoachEducationEnrollments([]);
+      setCoachEducationActivity(null);
+      setSelectedCoachEducationEnrollmentId("");
       setVolunteerProfiles([]);
       setVolunteerOpportunities([]);
       setVolunteerAssignments([]);
@@ -12543,6 +12585,84 @@ export default function HomePage() {
           ...current.filter((planItem) => planItem.id !== item.id)
         ]);
         addLog(`${item.title} added to the weekly structure`, "good");
+      }
+    );
+  };
+
+  const enrollCoachEducation = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "enroll-coach-education",
+      () =>
+        apiRequest<CoachEducationEnrollmentRead>("/coach-education/enrollments", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            program_key: coachEducationForm.program_key,
+            role: coachEducationForm.role,
+            skill_level: coachEducationForm.skill_level,
+            learning_style: coachEducationForm.learning_style
+          }
+        }),
+      (enrollment) => {
+        setCoachEducationEnrollments((current) => [
+          enrollment,
+          ...current.filter((item) => item.id !== enrollment.id)
+        ]);
+        setSelectedCoachEducationEnrollmentId(enrollment.id);
+        setCoachEducationForm((current) => ({
+          ...current,
+          module_key: enrollment.next_module?.key ?? current.module_key,
+          evidence_ref: `coach-lab://${enrollment.next_module?.key ?? current.module_key}`
+        }));
+        addLog(`${enrollment.person_name} enrolled in ${enrollment.program_title}`, "good");
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const completeCoachEducationModule = () => {
+    if (!selectedOrganizationId || !selectedCoachEducationEnrollmentId) {
+      addLog("Enroll or select a coach education path first", "bad");
+      return;
+    }
+    const moduleKey = selectedCoachEducationEnrollment?.next_module?.key ?? coachEducationForm.module_key;
+    runAction(
+      "complete-coach-education-module",
+      () =>
+        apiRequest<CoachEducationActivityRead>(
+          `/coach-education/enrollments/${selectedCoachEducationEnrollmentId}/activities`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              module_key: moduleKey,
+              evidence_ref: coachEducationForm.evidence_ref || `coach-lab://${moduleKey}`,
+              score_percent: coachEducationForm.score_percent
+            }
+          }
+        ),
+      (activity) => {
+        setCoachEducationActivity(activity);
+        setCoachEducationEnrollments((current) => [
+          activity.enrollment,
+          ...current.filter((item) => item.id !== activity.enrollment.id)
+        ]);
+        setSelectedCoachEducationEnrollmentId(activity.enrollment.id);
+        setCoachEducationForm((current) => ({
+          ...current,
+          module_key: activity.enrollment.next_module?.key ?? current.module_key,
+          evidence_ref: `coach-lab://${activity.enrollment.next_module?.key ?? current.module_key}`
+        }));
+        addLog(
+          `${activity.title} complete · +${activity.xp_awarded} XP`,
+          activity.enrollment.status === "certified" ? "good" : "neutral"
+        );
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
       }
     );
   };
@@ -21046,6 +21166,129 @@ export default function HomePage() {
                     {entry.status !== "converted" && entry.status !== "cancelled" ? (
                       <button type="button" onClick={() => updateFacilityWaitlist(entry, "declined")}>Decline</button>
                     ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Coach academy</p>
+                <h2>Certification and learning</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={enrollCoachEducation} disabled={busyAction !== null}>Enroll</button>
+                <button type="button" onClick={completeCoachEducationModule} disabled={busyAction !== null}>Complete</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{coachEducationDashboard?.total_xp ?? 0}</strong>
+              <span>{coachEducationDashboard?.certified_count ?? 0} certified coach(es)</span>
+              <small>
+                {coachEducationDashboard
+                  ? `${coachEducationDashboard.active_enrollment_count} active path(s) · ${coachEducationDashboard.average_xp} average XP`
+                  : "Enroll coaches in guided product and coaching certification paths."}
+              </small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Program
+                <select value={coachEducationForm.program_key} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, program_key: event.target.value })}>
+                  {(coachEducationCatalog?.programs ?? [
+                    { key: "foundation_coach", title: "Foundation Coach" },
+                    { key: "performance_analyst", title: "Performance Analyst" },
+                    { key: "tactical_strategist", title: "Tactical Strategist" }
+                  ]).map((program) => (
+                    <option key={program.key} value={program.key}>{program.title}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Coach role
+                <input value={coachEducationForm.role} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, role: event.target.value })} />
+              </label>
+              <label>
+                Skill level
+                <select value={coachEducationForm.skill_level} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, skill_level: event.target.value })}>
+                  <option value="beginner">Beginner</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
+                </select>
+              </label>
+              <label>
+                Learning style
+                <select value={coachEducationForm.learning_style} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, learning_style: event.target.value })}>
+                  <option value="hands_on">Hands-on</option>
+                  <option value="visual">Visual</option>
+                  <option value="reading">Reading</option>
+                  <option value="peer_learning">Peer learning</option>
+                </select>
+              </label>
+              <label>
+                Module
+                <input value={selectedCoachEducationEnrollment?.next_module?.key ?? coachEducationForm.module_key} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, module_key: event.target.value })} />
+              </label>
+              <label>
+                Score
+                <input type="number" min="0" max="100" value={coachEducationForm.score_percent} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, score_percent: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Evidence
+                <input value={coachEducationForm.evidence_ref} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, evidence_ref: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {coachEducationActivity ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{coachEducationActivity.title} · +{coachEducationActivity.xp_awarded} XP</strong>
+                    <span>{coachEducationActivity.enrollment.person_name} · {coachEducationActivity.enrollment.status}</span>
+                    <small>{coachEducationActivity.evidence_ref ?? "Coach education activity recorded"}</small>
+                  </div>
+                </article>
+              ) : null}
+              {coachEducationDashboard?.recommended_next_actions.slice(0, 3).map((action) => (
+                <article key={action} className="task-card">
+                  <div>
+                    <strong>Next action</strong>
+                    <span>{action}</span>
+                  </div>
+                </article>
+              ))}
+              {coachEducationEnrollments.slice(0, 5).map((enrollment) => (
+                <button
+                  type="button"
+                  key={enrollment.id}
+                  className={`task-card ${enrollment.id === selectedCoachEducationEnrollmentId ? "selected" : ""}`}
+                  onClick={() => setSelectedCoachEducationEnrollmentId(enrollment.id)}
+                >
+                  <div>
+                    <strong>{enrollment.person_name} · {enrollment.program_title}</strong>
+                    <span>{enrollment.progress_percent}% · {enrollment.xp_points} XP · {enrollment.status}</span>
+                    <small>
+                      {enrollment.next_module
+                        ? `${enrollment.next_module.title}: ${enrollment.next_module.practice_task}`
+                        : enrollment.badges.join(", ") || "Certification path complete"}
+                    </small>
+                  </div>
+                </button>
+              ))}
+              {coachEducationDashboard?.leaderboard.slice(0, 3).map((leader) => (
+                <article key={String(leader.person_id)} className="task-card">
+                  <div>
+                    <strong>#{String(leader.rank)} {String(leader.person_name)}</strong>
+                    <span>{String(leader.program_title)} · {String(leader.xp_points)} XP</span>
+                    <small>{Array.isArray(leader.badges) ? leader.badges.map(String).join(", ") : "Coach leaderboard"}</small>
+                  </div>
+                </article>
+              ))}
+              {coachEducationDashboard?.daily_challenges.slice(0, 3).map((challenge) => (
+                <article key={challenge.key} className="task-card">
+                  <div>
+                    <strong>{challenge.title} · {challenge.xp} XP</strong>
+                    <span>{challenge.action}</span>
                   </div>
                 </article>
               ))}

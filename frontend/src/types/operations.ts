@@ -8333,6 +8333,88 @@ export type PlayerPerformanceProfileRead = {
   match_guidance: PlayerMatchGuidanceRead[];
 };
 
+export type CoachEducationModuleRead = {
+  key: string;
+  title: string;
+  duration_minutes: number;
+  format: string;
+  objective: string;
+  practice_task: string;
+  xp: number;
+};
+
+export type CoachEducationProgramRead = {
+  key: string;
+  title: string;
+  level: number;
+  certification_badge: string;
+  specialization: string | null;
+  modules: CoachEducationModuleRead[];
+};
+
+export type CoachEducationChallengeRead = {
+  key: string;
+  title: string;
+  xp: number;
+  cadence: string;
+  action: string;
+};
+
+export type CoachEducationCatalogRead = {
+  programs: CoachEducationProgramRead[];
+  daily_challenges: CoachEducationChallengeRead[];
+};
+
+export type CoachEducationEnrollmentRead = {
+  id: UUID;
+  organization_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  program_key: string;
+  program_title: string;
+  level: number;
+  role: string;
+  skill_level: string;
+  learning_style: string;
+  xp_points: number;
+  current_module_key: string | null;
+  completed_modules: string[];
+  badges: string[];
+  status: string;
+  certification_expires_on: string | null;
+  progress_percent: number;
+  next_module: CoachEducationModuleRead | null;
+  last_activity_at: string | null;
+  created_at: string;
+};
+
+export type CoachEducationActivityRead = {
+  id: UUID;
+  organization_id: UUID;
+  enrollment_id: UUID;
+  person_id: UUID;
+  activity_type: string;
+  module_key: string;
+  title: string;
+  xp_awarded: number;
+  evidence_ref: string | null;
+  score_percent: number | null;
+  completed_at: string;
+  enrollment: CoachEducationEnrollmentRead;
+};
+
+export type CoachEducationDashboardRead = {
+  organization_id: UUID;
+  active_enrollment_count: number;
+  certified_count: number;
+  average_xp: number;
+  total_xp: number;
+  leaderboard: Array<Record<string, unknown>>;
+  daily_challenges: CoachEducationChallengeRead[];
+  recommended_next_actions: string[];
+  enrollments: CoachEducationEnrollmentRead[];
+};
+
 export type TrainingDrillRead = {
   id: UUID;
   organization_id: UUID;

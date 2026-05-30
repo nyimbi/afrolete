@@ -108,6 +108,10 @@ from app.models.community import (  # noqa: F401,E402
     SupporterProfile,
     SupporterReward,
 )
+from app.models.coach_education import (  # noqa: F401,E402
+    CoachEducationActivity,
+    CoachEducationEnrollment,
+)
 from app.models.developer import (  # noqa: F401,E402
     DeveloperApiKey,
     DeveloperApplication,
