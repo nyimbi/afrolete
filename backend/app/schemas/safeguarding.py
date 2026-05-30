@@ -216,6 +216,7 @@ class FamilyMatchGuidanceRead(BaseModel):
     tracking_run_id: UUID
     video_asset_id: UUID
     guidance_message_id: UUID
+    guidance_recipient_id: UUID
     guidance_published_at: datetime
     guidance_delivery_status: str
     guidance_recipient_count: int

@@ -370,6 +370,13 @@ export default function FamilyPortalPage() {
             : item
         )
       );
+      setMatchGuidance((current) =>
+        current.map((guidance) =>
+          guidance.guidance_recipient_id === recipient.id
+            ? { ...guidance, guidance_delivery_status: recipient.delivery_status }
+            : guidance
+        )
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Read update failed");
     } finally {
@@ -856,6 +863,13 @@ export default function FamilyPortalPage() {
                       {String(firstAction.drill_recommendation ?? "Coach review")}
                     </small>
                   ) : null}
+                  <button
+                    type="button"
+                    onClick={() => markRead(guidance.guidance_recipient_id)}
+                    disabled={busy || guidance.guidance_delivery_status === "read"}
+                  >
+                    Mark reviewed
+                  </button>
                 </article>
               );
             })}

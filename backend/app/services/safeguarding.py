@@ -5783,6 +5783,7 @@ async def list_my_family_match_guidance(
                 athlete_person_id=audit.player_person_id,
                 athlete_name=athlete_name,
                 relationship=relationship,
+                guidance_recipient_id=recipient.id,
                 **card,
             )
         )

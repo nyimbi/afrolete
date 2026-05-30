@@ -592,6 +592,7 @@ def test_family_portal_shows_only_guardian_copied_match_guidance(client, identit
     assert guidance[0]["relationship"] == guardian["relationship"]
     assert guidance[0]["tracking_run_id"] == tracking["id"]
     assert guidance[0]["guidance_message_id"] == published["messages"][0]["message_id"]
+    assert guidance[0]["guidance_recipient_id"]
     assert guidance[0]["guidance_delivery_status"] == "queued"
     assert guidance[0]["guidance_recipient_count"] == 2
     assert guidance[0]["opponent_name"] == "Guardian Shared FC"
@@ -599,6 +600,19 @@ def test_family_portal_shows_only_guardian_copied_match_guidance(client, identit
     assert guidance[0]["distance_m"] > 0
     assert guidance[0]["player_guidance"]
     assert guidance[0]["action_plan"]
+
+    read_response = client.post(
+        f"/api/v1/communications/inbox/{guidance[0]['guidance_recipient_id']}/read",
+        headers=guardian_headers,
+    )
+    assert read_response.status_code == 200
+    assert read_response.json()["delivery_status"] == "read"
+    family_after_read_response = client.get(
+        f"/api/v1/safeguarding/my-family/match-guidance?organization_id={organization['id']}",
+        headers=guardian_headers,
+    )
+    assert family_after_read_response.status_code == 200
+    assert family_after_read_response.json()[0]["guidance_delivery_status"] == "read"
 
     unrelated_response = client.get(
         f"/api/v1/safeguarding/my-family/match-guidance?organization_id={organization['id']}",
